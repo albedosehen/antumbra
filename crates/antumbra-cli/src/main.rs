@@ -191,9 +191,15 @@ async fn main() -> anyhow::Result<()> {
                 let lp = GenerationLoop::new(&store, &trainer, &embedder, loop_cfg);
                 let reports = lp.run_until(&RunId::new(run), generations).await?;
                 for r in &reports {
+                    let curve: Vec<String> =
+                        r.reward_curve.iter().map(|p| format!("{p:.2}")).collect();
                     println!(
-                        "gen {:<3} shadow {:<16} fitness={:.2} graduated={}",
-                        r.generation.0, r.shadow, r.fitness, r.graduated
+                        "gen {:<3} shadow {:<16} pass-rate/round=[{}] final={:.2} graduated={}",
+                        r.generation.0,
+                        r.shadow,
+                        curve.join(", "),
+                        r.fitness,
+                        r.graduated
                     );
                 }
                 println!("population: {} experts", expert::list(&store).await?.len());

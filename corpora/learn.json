@@ -1,0 +1,12 @@
+[
+  {
+    "id": "add-typed",
+    "prompt": "# Complete the Python function with int type hints and a return annotation.\ndef add(",
+    "verify": { "extract_code": true, "contains_all": ["a: int", "b: int", "return a + b"] }
+  },
+  {
+    "id": "mul-typed",
+    "prompt": "# Complete the Python function with int type hints and a return annotation.\ndef multiply(",
+    "verify": { "extract_code": true, "contains_all": ["a: int", "b: int", "return a * b"] }
+  }
+]

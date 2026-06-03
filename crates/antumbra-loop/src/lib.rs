@@ -50,6 +50,9 @@ pub struct GenerationReport {
     pub shadow: ShadowId,
     pub fitness: f32,
     pub graduated: bool,
+    /// Per-round pass-rate (RAFT reward curve) — rising means the adapter is
+    /// learning to satisfy the verifier.
+    pub reward_curve: Vec<f32>,
 }
 
 /// Drives the loop over a [`Store`] using injected ports. Holds no durable
@@ -148,6 +151,7 @@ impl<'a> GenerationLoop<'a> {
             shadow: shadow_id,
             fitness,
             graduated,
+            reward_curve: outcome.reward_curve.clone(),
         })
     }
 

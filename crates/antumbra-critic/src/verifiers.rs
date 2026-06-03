@@ -47,20 +47,12 @@ impl Verifier for CommandVerifier {
             // No verify spec on this task -> cannot earn reward.
             return Ok(fail());
         };
-        let Some(program) = spec.get("program").and_then(|v| v.as_str()) else {
-            return Err(AntumbraError::other("verify spec missing `program`"));
-        };
-        let args: Vec<&str> = spec
-            .get("args")
-            .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
-            .unwrap_or_default();
         let raw_completion = req
             .artifact
             .get("completion")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        // Optionally pull the code out of a markdown fence before running.
+        // Optionally pull the code out of a markdown fence first.
         let completion = if spec
             .get("extract_code")
             .and_then(|v| v.as_bool())
@@ -70,6 +62,33 @@ impl Verifier for CommandVerifier {
         } else {
             raw_completion
         };
+
+        // In-process rule (no external process / no Python): the completion must
+        // contain every listed substring. A real, deterministic reward.
+        if let Some(subs) = spec.get("contains_all").and_then(|v| v.as_array()) {
+            let passed = subs
+                .iter()
+                .filter_map(|s| s.as_str())
+                .all(|needle| completion.contains(needle));
+            return Ok(if passed {
+                VerifierVerdict {
+                    passed: true,
+                    value: 1.0,
+                }
+            } else {
+                fail()
+            });
+        }
+
+        // Otherwise run an external command; exit-code 0 = pass.
+        let Some(program) = spec.get("program").and_then(|v| v.as_str()) else {
+            return Ok(fail());
+        };
+        let args: Vec<&str> = spec
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+            .unwrap_or_default();
 
         let mut cmd = Command::new(program);
         cmd.args(&args).env("ANTUMBRA_COMPLETION", completion);
@@ -131,6 +150,16 @@ mod tests {
             artifact: serde_json::json!({ "completion": "x" }),
         };
         assert!(!v.verify(&r).await.unwrap().passed);
+    }
+
+    #[tokio::test]
+    async fn contains_all_rule_passes_only_when_all_present() {
+        let v = CommandVerifier;
+        let spec = serde_json::json!({ "contains_all": ["def add", "return a + b"] });
+        let good = req(spec.clone(), "def add(a, b):\n    return a + b\n");
+        let bad = req(spec, "def sub(a, b):\n    return a - b\n");
+        assert!(v.verify(&good).await.unwrap().passed);
+        assert!(!v.verify(&bad).await.unwrap().passed);
     }
 
     #[test]
