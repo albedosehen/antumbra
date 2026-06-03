@@ -19,6 +19,7 @@ experiments are plain `cargo test`.
 | [EXP-005](#exp-005--an-actionable-boundary-inhibits-routing-in-scope-only) | An actionable boundary inhibits routing, in-scope only | keystone / 0004 | **passed** |
 | [EXP-006](#exp-006--experts-answer-serving) | A graduated expert serves a real answer | 1 / 0006 | **passed** (GPU) |
 | [EXP-007](#exp-007--live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery + autonomous discovery | keystone / 0004,0006 | **passed** (GPU) |
+| [EXP-008](#exp-008--grpo-vs-raft) | GRPO is more sample-efficient than RAFT | 1 / 0011 | **passed, single run** (GPU) |
 
 ---
 
@@ -146,6 +147,25 @@ setting yields reliable recovery -> the live keystone is not dependable.
 **Reproduce.** train `corpora/add-only.json --run adder`, then
 `scope --spec corpora/scope-adder.json --expert adder-g0 --discover` (commits `ed8b0f0`, `7a4779a`, and the
 generation-diversity fix).
+
+## EXP-008 — GRPO vs RAFT
+
+**Claim.** GRPO (group-relative policy optimization, ADR-0011) reaches a given pass-rate in fewer sampled
+completions than RAFT — the v1 sample-efficiency upgrade.
+
+**Method.** Train the same arith corpus on the GPU with `train --algo raft` and `--algo grpo`, identical knobs
+(samples 6, rounds 3, max-new-tokens 48). GRPO uses the base-with-LoRA-off reference (no second model) and steps
+per group member.
+
+**Result.** RAFT pass-rate `0.08 -> 0.25 -> 1.00`; GRPO `0.33 -> 0.92 -> 1.00`. GRPO climbs much faster
+(0.92 by round 1 vs 0.25). The combined-group backward OOM'd the card (candle retains base activations for the
+LoRA backward, so memory scales with the group); fixed by stepping per member.
+
+**Kill criterion.** GRPO does not beat RAFT on sample-efficiency or final pass-rate (and is far more code) ->
+shelve GRPO, keep RAFT. *(Cleared directionally; a rigorous win needs multiple seeds and tasks.)*
+
+**Reproduce.** `train --corpus corpora/arith.json --algo grpo` vs `--algo raft` (commits `0159d55`, `4d53853`,
+`e6a7a20`, `47fecbc`).
 
 ---
 
