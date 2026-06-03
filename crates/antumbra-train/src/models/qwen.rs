@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use candle_core::quantized::{GgmlDType, QTensor};
 use candle_core::{DType, Device, Result as CResult, Tensor, D};
 use candle_nn::init::Init;
 use candle_nn::{Activation, Embedding, Module, Optimizer, VarBuilder, VarMap};
@@ -84,8 +85,16 @@ fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 
 // --- a LoRA-wrapped linear over a frozen base ------------------------------
 
+/// The frozen base weight: a dense tensor, or a 4-bit Q4_K `QTensor` that is
+/// dequantized in the forward (QLoRA-proper, ADR-0011). Either way it is a
+/// constant — gradients only reach the LoRA factors.
+enum BaseWeight {
+    Dense(Tensor),
+    Quantized(QTensor),
+}
+
 struct LoraLinear {
-    base_w: Tensor,
+    base: BaseWeight,
     base_b: Option<Tensor>,
     a: Tensor,
     b: Tensor,
@@ -122,7 +131,7 @@ impl LoraLinear {
         )?;
         let b = lora.get_with_hints((out_f, rank), "lora_b", candle_nn::init::ZERO)?;
         Ok(Self {
-            base_w,
+            base: BaseWeight::Dense(base_w),
             base_b,
             a,
             b,
@@ -132,7 +141,11 @@ impl LoraLinear {
     }
 
     fn forward(&self, x: &Tensor) -> CResult<Tensor> {
-        let mut out = matmul_t(x, &self.base_w)?;
+        let base_w = match &self.base {
+            BaseWeight::Dense(w) => w.clone(),
+            BaseWeight::Quantized(q) => q.dequantize(x.device())?.to_dtype(x.dtype())?,
+        };
+        let mut out = matmul_t(x, &base_w)?;
         if self.enabled {
             let lora = matmul_t(&matmul_t(x, &self.a)?, &self.b)?.affine(self.scale, 0.0)?;
             out = (out + lora)?;
@@ -145,6 +158,17 @@ impl LoraLinear {
 
     fn set_enabled(&mut self, on: bool) {
         self.enabled = on;
+    }
+
+    /// Quantize the frozen base weight to 4-bit Q4_K (ADR-0011). Q4_K needs the
+    /// `in` dim divisible by 256, which holds for every Qwen projection.
+    fn quantize(&mut self, device: &Device) -> CResult<()> {
+        if let BaseWeight::Dense(w) = &self.base {
+            let cpu = w.to_device(&Device::Cpu)?;
+            let q = QTensor::quantize_onto(&cpu, GgmlDType::Q4K, device)?;
+            self.base = BaseWeight::Quantized(q);
+        }
+        Ok(())
     }
 }
 
@@ -342,6 +366,13 @@ impl Attention {
         self.v_proj.set_enabled(on);
         self.o_proj.set_enabled(on);
     }
+
+    fn quantize_base(&mut self, device: &Device) -> CResult<()> {
+        self.q_proj.quantize(device)?;
+        self.k_proj.quantize(device)?;
+        self.v_proj.quantize(device)?;
+        self.o_proj.quantize(device)
+    }
 }
 
 // --- MLP -------------------------------------------------------------------
@@ -404,6 +435,12 @@ impl Mlp {
         self.gate_proj.set_enabled(on);
         self.up_proj.set_enabled(on);
         self.down_proj.set_enabled(on);
+    }
+
+    fn quantize_base(&mut self, device: &Device) -> CResult<()> {
+        self.gate_proj.quantize(device)?;
+        self.up_proj.quantize(device)?;
+        self.down_proj.quantize(device)
     }
 }
 
@@ -471,6 +508,11 @@ impl DecoderLayer {
     fn set_lora(&mut self, on: bool) {
         self.self_attn.set_lora(on);
         self.mlp.set_lora(on);
+    }
+
+    fn quantize_base(&mut self, device: &Device) -> CResult<()> {
+        self.self_attn.quantize_base(device)?;
+        self.mlp.quantize_base(device)
     }
 }
 
@@ -570,6 +612,14 @@ impl QwenLora {
             l.set_lora(on);
         }
     }
+
+    /// Quantize every projection's frozen base weight to 4-bit (ADR-0011).
+    fn quantize_base(&mut self, device: &Device) -> CResult<()> {
+        for l in self.layers.iter_mut() {
+            l.quantize_base(device)?;
+        }
+        Ok(())
+    }
 }
 
 // --- the trainer-facing wrapper (load + generate + train) ------------------
@@ -623,7 +673,7 @@ impl QwenCausalLm {
             unsafe { VarBuilder::from_mmaped_safetensors(&weights, dtype, &device).map_err(ce)? };
         let varmap = VarMap::new();
         let lora_vb = VarBuilder::from_varmap(&varmap, dtype, &device);
-        let model = QwenLora::build(
+        let mut model = QwenLora::build(
             &model_cfg,
             &base,
             &lora_vb,
@@ -632,6 +682,11 @@ impl QwenCausalLm {
             cfg.lora_scale(),
         )
         .map_err(ce)?;
+        // 4-bit QLoRA base (ADR-0011): dequant-in-forward. A capacity lever for
+        // larger bases; off by default on the 1.5B base.
+        if cfg.quantize_base {
+            model.quantize_base(&device).map_err(ce)?;
+        }
 
         let opt = candle_nn::AdamW::new(
             model.varmap.all_vars(),

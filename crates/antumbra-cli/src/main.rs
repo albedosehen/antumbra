@@ -132,6 +132,9 @@ enum Command {
         /// Algorithm: `raft` (reward-ranked SFT) or `grpo` (ADR-0011).
         #[arg(long, default_value = "raft")]
         algo: String,
+        /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, ADR-0011).
+        #[arg(long)]
+        quantize_base: bool,
     },
 }
 
@@ -475,6 +478,7 @@ async fn main() -> anyhow::Result<()> {
             rounds,
             max_new_tokens,
             algo,
+            quantize_base,
         } => {
             #[cfg(feature = "models")]
             {
@@ -483,6 +487,7 @@ async fn main() -> anyhow::Result<()> {
                     samples_per_task: samples,
                     rounds,
                     max_new_tokens,
+                    quantize_base,
                     ..RaftConfig::default()
                 };
                 let corpus = JsonCorpus::from_file(&corpus)?;
@@ -526,6 +531,7 @@ async fn main() -> anyhow::Result<()> {
                     rounds,
                     max_new_tokens,
                     &algo,
+                    quantize_base,
                 );
                 anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
             }

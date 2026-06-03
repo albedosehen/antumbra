@@ -47,6 +47,9 @@ pub struct RaftConfig {
     pub clip_eps: f64,
     /// GRPO KL-to-reference penalty weight (ADR-0011). Unused by RAFT.
     pub kl_beta: f64,
+    /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, ADR-0011);
+    /// dequantized in the forward. A capacity lever for larger bases.
+    pub quantize_base: bool,
 }
 
 impl Default for RaftConfig {
@@ -66,6 +69,7 @@ impl Default for RaftConfig {
             temperature: 0.8,
             clip_eps: 0.2,
             kl_beta: 0.04,
+            quantize_base: false,
         }
     }
 }
