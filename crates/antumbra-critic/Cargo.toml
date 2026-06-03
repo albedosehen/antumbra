@@ -11,6 +11,8 @@ antumbra-core = { path = "../antumbra-core" }
 async-trait.workspace = true
 chrono.workspace = true
 serde_json.workspace = true
+# Async subprocess + timeout for sandboxing untrusted verify programs.
+tokio = { workspace = true, features = ["process", "time"] }
 
 [dev-dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }

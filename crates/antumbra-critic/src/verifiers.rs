@@ -7,10 +7,12 @@
 //! the command via the `ANTUMBRA_COMPLETION` environment variable. This is the
 //! ground-truth signal the critic densifies but never overrides.
 
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Stdio;
+use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::process::Command;
+use tokio::time::timeout;
 
 use antumbra_core::ports::{Verifier, VerifierVerdict, VerifyRequest};
 use antumbra_core::{AntumbraError, Result};
@@ -98,29 +100,24 @@ impl Verifier for CommandVerifier {
         let mut cmd = Command::new(program);
         cmd.args(&args)
             .env("ANTUMBRA_COMPLETION", completion)
-            .stdin(Stdio::null());
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
         if let Some(cwd) = spec.get("cwd").and_then(|v| v.as_str()) {
             cmd.current_dir(cwd);
         }
 
-        // Run with a timeout; a runaway or blocking program is a failure, never
-        // a hang. Poll rather than block forever on `status()`.
+        // Async wait under a timeout: a runaway or blocking program is a
+        // failure, never a hang, and never blocks the runtime thread.
         let mut child = cmd
             .spawn()
             .map_err(|e| AntumbraError::other(format!("verify spawn `{program}`: {e}")))?;
-        let started = Instant::now();
-        let passed = loop {
-            match child
-                .try_wait()
+        let passed = match timeout(VERIFY_TIMEOUT, child.wait()).await {
+            Ok(status) => status
                 .map_err(|e| AntumbraError::other(format!("verify wait `{program}`: {e}")))?
-            {
-                Some(status) => break status.success(),
-                None if started.elapsed() >= VERIFY_TIMEOUT => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break false;
-                }
-                None => std::thread::sleep(Duration::from_millis(25)),
+                .success(),
+            Err(_elapsed) => {
+                let _ = child.kill().await;
+                false
             }
         };
         Ok(if passed {
