@@ -31,3 +31,17 @@ pub trait CausalLm {
     /// Persist the trained LoRA adapter (safetensors).
     fn save_adapter(&self, path: &str) -> Result<()>;
 }
+
+/// Builds a fresh [`CausalLm`] for a shadow: the shared base plus a new LoRA
+/// adapter (optionally warm-started from a parent expert's adapter). The candle
+/// Qwen2.5-Coder realization is the GPU-validated impl (MT-1).
+#[async_trait]
+pub trait ModelLoader: Send + Sync {
+    type Model: CausalLm + Send;
+    async fn load(&self, base_model: &str, parent_adapter: Option<&str>) -> Result<Self::Model>;
+}
+
+/// Resolves corpus task ids (from a `TrainRequest`) to verifiable prompts.
+pub trait Corpus: Send + Sync {
+    fn tasks(&self, task_ids: &[String]) -> Vec<CorpusTask>;
+}

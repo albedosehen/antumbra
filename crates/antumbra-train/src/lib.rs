@@ -1,51 +1,72 @@
 //! # antumbra-train — ADR-0002 / ADR-0010
 //!
 //! The DIY `candle` path that trains shadow adapters from **verified outcomes**
-//! via RAFT-style reward-ranked LoRA fine-tuning. v0 builds bottom-up: the
-//! candle LoRA training primitive ([`lora`]) is in place and tested on CPU; the
-//! base-model generation + full RAFT loop (MT-1/MT-3) land next and run on the
-//! 3090 Ti. The [`Trainer`] port is unchanged, so the loop adopts the real
-//! trainer without upstream edits.
+//! via RAFT-style reward-ranked LoRA fine-tuning.
+//!
+//! Built bottom-up and tested on CPU: the LoRA training primitive ([`lora`]),
+//! the SFT objective ([`objective`]), the RAFT loop ([`raft`]), and the
+//! [`Trainer`] realization ([`trainer::RaftTrainer`]) are all in place. The one
+//! remaining GPU-validated piece (MT-1) is the candle Qwen2.5-Coder + LoRA
+//! [`CausalLm`], loaded by [`CandleModelLoader`] — currently a typed seam.
 
 use async_trait::async_trait;
 
-use antumbra_core::ports::{TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::{AntumbraError, Result};
 
 pub mod config;
 pub mod device;
 pub mod lora;
 pub mod model;
+pub mod objective;
 pub mod raft;
+pub mod trainer;
 
 pub use config::{RaftConfig, TrainDtype};
-pub use model::{CausalLm, CorpusTask, SftExample};
+pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;
+pub use trainer::RaftTrainer;
 
-/// candle-backed QLoRA trainer. Carries the config the real path will need;
-/// `train_shadow` is not yet implemented.
-#[derive(Debug, Clone)]
-pub struct CandleTrainer {
-    /// Path to the shared 4-bit base the LoRA rides on.
-    pub base_model_uri: String,
-    /// Where graduated adapter checkpoints are written.
-    pub adapter_dir: String,
+/// Placeholder for the candle model until MT-1 lands; implements [`CausalLm`]
+/// so the loader's associated type is complete, but every method reports
+/// `Unimplemented`.
+#[derive(Debug, Default)]
+pub struct PendingModel;
+
+#[async_trait]
+impl CausalLm for PendingModel {
+    async fn generate(&self, _prompt: &str, _n: usize) -> Result<Vec<String>> {
+        Err(AntumbraError::Unimplemented(
+            "candle Qwen2.5-Coder generation (MT-1)",
+        ))
+    }
+    async fn sft_step(&mut self, _batch: &[SftExample]) -> Result<f32> {
+        Err(AntumbraError::Unimplemented("candle LoRA sft_step (MT-1)"))
+    }
+    fn save_adapter(&self, _path: &str) -> Result<()> {
+        Err(AntumbraError::Unimplemented("candle adapter save (MT-1)"))
+    }
 }
 
-impl CandleTrainer {
-    pub fn new(base_model_uri: impl Into<String>, adapter_dir: impl Into<String>) -> Self {
-        Self {
-            base_model_uri: base_model_uri.into(),
-            adapter_dir: adapter_dir.into(),
-        }
+/// Loads the candle Qwen2.5-Coder base + a fresh LoRA adapter (MT-1). The real
+/// body — candle-transformers + hf-hub + tokenizers + LoRA injection — runs on
+/// the GPU and lands behind a `models` feature; this is its typed seam.
+pub struct CandleModelLoader {
+    pub config: RaftConfig,
+}
+
+impl CandleModelLoader {
+    pub fn new(config: RaftConfig) -> Self {
+        Self { config }
     }
 }
 
 #[async_trait]
-impl Trainer for CandleTrainer {
-    async fn train_shadow(&self, _req: TrainRequest) -> Result<TrainOutcome> {
+impl ModelLoader for CandleModelLoader {
+    type Model = PendingModel;
+
+    async fn load(&self, _base_model: &str, _parent_adapter: Option<&str>) -> Result<PendingModel> {
         Err(AntumbraError::Unimplemented(
-            "DIY candle QLoRA shadow training (ADR-0002)",
+            "candle Qwen2.5-Coder load (MT-1: candle-transformers + hf-hub + LoRA)",
         ))
     }
 }
@@ -55,15 +76,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn trainer_seam_reports_unimplemented() {
-        let trainer = CandleTrainer::new("mem://base", "/adapters");
-        let req = TrainRequest {
-            shadow: antumbra_core::ShadowId::new("shadow:1"),
-            base_model: "code-base".into(),
-            corpus_task_ids: vec![],
-            max_steps: 4,
-        };
-        let err = trainer.train_shadow(req).await.unwrap_err();
+    async fn candle_loader_reports_unimplemented() {
+        let loader = CandleModelLoader::new(RaftConfig::default());
+        let err = loader
+            .load("Qwen/Qwen2.5-Coder-1.5B", None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, AntumbraError::Unimplemented(_)));
     }
 }

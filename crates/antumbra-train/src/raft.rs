@@ -15,7 +15,7 @@ use crate::model::{CausalLm, CorpusTask, SftExample};
 
 /// Run RAFT for `cfg.rounds` rounds and return the trained adapter outcome.
 pub async fn raft_train(
-    model: &mut dyn CausalLm,
+    model: &mut (dyn CausalLm + Send),
     verifier: &dyn Verifier,
     tasks: &[CorpusTask],
     run_id: &RunId,
