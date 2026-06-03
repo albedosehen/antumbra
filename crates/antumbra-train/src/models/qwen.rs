@@ -544,7 +544,13 @@ pub struct QwenCausalLm {
     opt: candle_nn::AdamW,
     eos: u32,
     max_new_tokens: usize,
+    temperature: f64,
 }
+
+/// Process-global generation nonce, so every `generate` call (even repeated
+/// single-sample calls from a best-of-K probe over freshly-loaded models) seeds
+/// a distinct RNG and yields a *different* draw.
+static GEN_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl QwenCausalLm {
     /// Load Qwen2.5-Coder + a fresh LoRA adapter from the Hugging Face hub.
@@ -610,6 +616,7 @@ impl QwenCausalLm {
             opt,
             eos,
             max_new_tokens: cfg.max_new_tokens,
+            temperature: cfg.temperature,
         })
     }
 
@@ -638,7 +645,7 @@ impl QwenCausalLm {
         let mut tokens = self.encode(prompt)?;
         let prompt_len = tokens.len();
         let mut rng = StdRng::seed_from_u64(seed);
-        let temp = 0.8f64;
+        let temp = self.temperature;
 
         for index in 0..self.max_new_tokens {
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
@@ -733,7 +740,13 @@ impl CausalLm for QwenCausalLm {
     async fn generate(&mut self, prompt: &str, n_samples: usize) -> Result<Vec<String>> {
         let mut out = Vec::with_capacity(n_samples);
         for i in 0..n_samples {
-            out.push(self.sample_one(prompt, 0xA17_u64.wrapping_mul(i as u64 + 1))?);
+            // Fresh nonce per draw so repeated calls (best-of-K over reloaded
+            // models) diverge instead of all seeding identically.
+            let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let seed = 0xA17_u64
+                .wrapping_mul(nonce.wrapping_add(1))
+                .wrapping_add(i as u64);
+            out.push(self.sample_one(prompt, seed)?);
         }
         Ok(out)
     }

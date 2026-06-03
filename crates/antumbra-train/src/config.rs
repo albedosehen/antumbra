@@ -40,6 +40,9 @@ pub struct RaftConfig {
     pub max_new_tokens: usize,
     pub learning_rate: f64,
     pub dtype: TrainDtype,
+    /// Sampling temperature for generation; higher = more diverse draws (so
+    /// best-of-K actually explores). `<= 0` is greedy/argmax.
+    pub temperature: f64,
 }
 
 impl Default for RaftConfig {
@@ -56,6 +59,7 @@ impl Default for RaftConfig {
             // bf16 on GPU: same exponent range as f32, so the transformer
             // forward can't overflow like f16 does (CPU is forced to f32).
             dtype: TrainDtype::Bf16,
+            temperature: 0.8,
         }
     }
 }

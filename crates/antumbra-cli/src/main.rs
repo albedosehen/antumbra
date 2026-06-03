@@ -104,6 +104,9 @@ enum Command {
         /// Best-of-K samples per context check (generation is stochastic).
         #[arg(long, default_value_t = 8)]
         samples: usize,
+        /// Sampling temperature; higher diversifies the best-of-K draws.
+        #[arg(long, default_value_t = 0.8)]
+        temperature: f64,
         /// Confidence assigned to the recovered boundary.
         #[arg(long, default_value_t = 0.7)]
         confidence: f32,
@@ -342,6 +345,7 @@ async fn main() -> anyhow::Result<()> {
             discover,
             max_new_tokens,
             samples,
+            temperature,
             confidence,
         } => {
             #[cfg(feature = "models")]
@@ -385,6 +389,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let cfg = RaftConfig {
                     max_new_tokens,
+                    temperature,
                     ..RaftConfig::default()
                 };
                 let serve = CandleServe::new(base_model, adapter, cfg);
@@ -451,6 +456,7 @@ async fn main() -> anyhow::Result<()> {
                     discover,
                     max_new_tokens,
                     samples,
+                    temperature,
                     confidence,
                 );
                 anyhow::bail!(

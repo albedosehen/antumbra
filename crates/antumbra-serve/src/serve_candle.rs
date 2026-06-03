@@ -5,19 +5,22 @@
 //! the llama-cpp-2 / mistral.rs backends are the deferred richer ADR-0006.
 
 use async_trait::async_trait;
+use tokio::sync::Mutex;
 
 use antumbra_core::ports::{ActOutput, ActRequest, Serve, StepOutput};
 use antumbra_core::Result;
+use antumbra_train::models::QwenCausalLm;
 use antumbra_train::{CandleModelLoader, CausalLm, ModelLoader, RaftConfig};
 
-/// Serves a shared base, optionally with one frozen adapter on top. Loading
-/// happens per `act` so the server is stateless; the heavy base weights come
-/// from the hf-hub cache. `adapter` is `None` for base-only serving (e.g. the
-/// acceptability probe, which judges the base model's behavior).
+/// Serves a shared base, optionally with one frozen adapter on top. The model
+/// is loaded once on the first `act` and **cached** for the life of the server,
+/// so best-of-K probing and repeated answers do not pay the multi-GB reload
+/// each call. `adapter` is `None` for base-only serving (e.g. the probe).
 pub struct CandleServe {
     base_model: String,
     adapter: Option<String>,
     config: RaftConfig,
+    model: Mutex<Option<QwenCausalLm>>,
 }
 
 impl CandleServe {
@@ -26,6 +29,7 @@ impl CandleServe {
             base_model: base_model.into(),
             adapter,
             config,
+            model: Mutex::new(None),
         }
     }
 }
@@ -33,10 +37,16 @@ impl CandleServe {
 #[async_trait]
 impl Serve for CandleServe {
     async fn act(&self, req: ActRequest) -> Result<ActOutput> {
-        let loader = CandleModelLoader::new(self.config.clone());
-        let mut model = loader
-            .load(&self.base_model, self.adapter.as_deref())
-            .await?;
+        let mut guard = self.model.lock().await;
+        if guard.is_none() {
+            let loader = CandleModelLoader::new(self.config.clone());
+            *guard = Some(
+                loader
+                    .load(&self.base_model, self.adapter.as_deref())
+                    .await?,
+            );
+        }
+        let model = guard.as_mut().expect("model loaded above");
         let mut outputs = model.generate(&req.prompt, 1).await?;
         let final_output = outputs.drain(..).next().unwrap_or_default();
         Ok(ActOutput {
