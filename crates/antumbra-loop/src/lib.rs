@@ -130,7 +130,7 @@ impl<'a> GenerationLoop<'a> {
         if graduated {
             sh.advance_to(ShadowStatus::Graduated)?;
             shadow::upsert(self.store, &sh).await?;
-            self.graduate(generation, &outcome.adapter_uri, fitness, &outcome)
+            self.graduate(&run_id, generation, &outcome.adapter_uri, fitness, &outcome)
                 .await?;
         } else {
             sh.advance_to(ShadowStatus::Pruned)?;
@@ -216,6 +216,7 @@ impl<'a> GenerationLoop<'a> {
     /// the trainer reported no exemplars.
     async fn graduate(
         &self,
+        run_id: &RunId,
         generation: Generation,
         adapter_uri: &str,
         fitness: f32,
@@ -226,8 +227,8 @@ impl<'a> GenerationLoop<'a> {
             .await?;
         let now = Utc::now();
         let expert = Expert {
-            id: ExpertId::new(format!("expert:g{}", generation.0)),
-            name: format!("specialist-g{}", generation.0),
+            id: ExpertId::new(format!("expert:{run_id}:g{}", generation.0)),
+            name: format!("{run_id}-g{}", generation.0),
             base_model: self.cfg.base_model.clone(),
             artifact_uri: adapter_uri.to_string(),
             capability_card: serde_json::json!({

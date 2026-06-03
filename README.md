@@ -157,5 +157,9 @@ See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per
 ## Documentation map
 
 - **[Architecture](docs/architecture.md)** — system, substrate, decision chain, training/data flow, schema.
+- **[Technical Reference](docs/technical-reference.md)** — crate map, domain model, the port seams, the
+  algorithms as coded, the build matrix, and validation results.
 - **[Diagram Atlas](docs/diagrams.md)** — every diagram in one place: concept, system, flow, schema, per-ADR.
-- **[Architecture Decision Records](docs/adr/README.md)** — every load-bearing decision, ADR-0001 … ADR-0009.
+- **[Glossary](docs/glossary.md)** — every ADR-0010 acronym, with a diagram each, and why it is called candle.
+- **[Running the trainer](docs/running-the-trainer.md)** — the CUDA-13 / Windows GPU recipe.
+- **[Architecture Decision Records](docs/adr/README.md)** — every load-bearing decision, ADR-0001 … ADR-0010.

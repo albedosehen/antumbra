@@ -161,7 +161,7 @@ erDiagram
 | Inference | `llama-cpp-2` (GGUF + LoRA) and/or `mistral.rs` (S-LoRA-style multi-adapter) |
 | Training | **`candle`** — QLoRA adapters **and** the gate (NF4 4-bit base + LoRA); `burn` fallback |
 | Base model | open, **code-capable** (Qwen-Coder-class or a code-tuned OLMo 3); shared by all adapters |
-| Embeddings | 1024-d (mxbai-embed-large); capability vectors co-learned from evaluated behavior |
+| Embeddings | 384-d (all-MiniLM-L6-v2, candle BERT, CPU); capability vectors are the centroid of solved-task embeddings (evaluated behavior) |
 | Async / CLI | `tokio`; `ratatui` (Kushtaka-style ergonomics) |
 
 ---
@@ -188,6 +188,11 @@ antumbra/
 ```
 
 ### v0 implementation status (2026-06-02)
+
+> **Update (2026-06-03).** Since this snapshot: MT-3 is validated on the GPU (the trainer learns — pass-rate to
+> 1.0 under both a convention and a real exec verifier), the real candle BERT embedder is wired, the gate does
+> relative-coverage out-of-scope escalation, and capability vectors are derived from evaluated behavior. See
+> the [Technical Reference](technical-reference.md) §13 for current validation results.
 
 All nine crates exist and compile; the workspace is green (`cargo test`, clippy clean) on Rust 1.96 + your
 **surql-rs** (`oneiriq-surql`) on the SurrealDB 3.x driver, **builder-only — no hand-written SurrealQL**.

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "total",
+    "prompt": "# Write a Python function `total(xs)` that returns the sum of all numbers in a list.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": ["-c", "import os,sys; ns={}; exec(os.environ['ANTUMBRA_COMPLETION'], ns); sys.exit(0 if ns.get('total',lambda *_:None)([1,2,3])==6 else 1)"]
+    }
+  },
+  {
+    "id": "maximum",
+    "prompt": "# Write a Python function `maximum(xs)` that returns the largest element in a list.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": ["-c", "import os,sys; ns={}; exec(os.environ['ANTUMBRA_COMPLETION'], ns); sys.exit(0 if ns.get('maximum',lambda *_:None)([3,1,2])==3 else 1)"]
+    }
+  }
+]
