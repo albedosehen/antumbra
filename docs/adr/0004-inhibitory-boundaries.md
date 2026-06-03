@@ -51,6 +51,20 @@
 > verifier) → counterfactual recovery → a persisted, actionable boundary. No fake remains in this path. Still
 > open: automatic discovery of the candidate governing features (here they are authored), and scale.
 
+> **Autonomous discovery + a reliability caveat (2026-06-03).** `discover_boundary` removes the last authored
+> input: instead of being *told* the governing feature, the system probes a pool of contexts, partitions them by
+> pass/fail, and infers the feature whose value alone separates the two (`scope --discover`). It is unit-proven
+> on deterministic probes. **But the live result is stochastic, and honesty requires qualifying the recovery
+> above.** Using the *identical* add-context probe, the `--expert` run recovered the boundary once (`ed8b0f0`),
+> while two `--discover` runs (K=8 and K=16) did **not** — the narrow adder, a LoRA overfit to its exact
+> training prompt, only occasionally produces a passing `add` under the paraphrased scope prompt, so the
+> in-scope context clears only on lucky draws. The bottleneck is the **actor's in-scope reliability**, not the
+> search: the mechanism is correct (unit tests + the one live recovery), but robust live recovery needs the
+> probe prompt aligned to the expert's training distribution, a less-overfit / stronger expert, more best-of-K,
+> and likely a generation-temperature knob (some prompts produced identical draws, so best-of-K barely helped).
+> This is recorded rather than smoothed over: the integrity discipline held throughout — the probe always
+> returned "stays open" rather than fabricating a scope.
+
 ## Context
 
 The thesis at full strength: **a continual learner becomes capable by modeling the *counterfactual boundary* of

@@ -245,11 +245,17 @@ release-profile `opt-level=1` override on `surrealdb`/`surrealdb-core` works aro
   spec stayed open at K=8) — the 1.5B base does not reliably follow terse context hints. The probe held
   integrity (returned "stays open", did not fabricate a scope); reliable live recovery needs a stronger actor
   (a graduated expert as generator, or a larger base).
-- **Keystone fully live (GPU).** Probing with **the expert's own adapter** (`scope --expert`,
-  `find_scope_over_contexts`) succeeds: a narrow **adder** (trained add-only) passed the `op=add` context and
-  failed `op=multiply`, so the search recovered governing feature `op` and C' `{op: add}` and stored an
-  **actionable** boundary (`status`: 1 actionable, 0 open). Real expert -> real generation -> real execution ->
-  counterfactual recovery -> persisted boundary, with no fake in the path.
+- **Keystone live (GPU) — and its reliability.** Probing with **the expert's own adapter** (`scope --expert`,
+  `find_scope_over_contexts`) recovered a real boundary once: a narrow **adder** passed `op=add`, failed
+  `op=multiply`, so the search recovered governing feature `op`, C' `{op: add}`, and stored an **actionable**
+  boundary (`status`: 1 actionable, 0 open). Real expert -> real generation -> real execution -> counterfactual
+  recovery -> persisted boundary, no fake in the path. **Autonomous discovery** (`discover_boundary`,
+  `scope --discover`) infers the governing feature from pass/fail instead of being told it (unit-proven). The
+  live result is **stochastic**, though: on the identical probe, two `--discover` runs (K=8, K=16) did not
+  recover, because the overfit toy adder only sometimes produces a passing in-scope completion under the
+  paraphrased prompt. The mechanism is correct; the bottleneck is the actor's in-scope reliability (levers:
+  prompt alignment to the expert's training distribution, a stronger/less-overfit expert, more best-of-K, a
+  generation-temperature knob). Integrity held — the probe never fabricated a scope.
 
 ## 14. What is proven, and what is not
 

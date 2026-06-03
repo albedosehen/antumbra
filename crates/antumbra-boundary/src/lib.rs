@@ -9,6 +9,8 @@
 //! This is job #1 of ADR-0004. Building the persisted [`FailureBoundary`] from
 //! a finding (job #2's store side) is [`finding_to_boundary`].
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
@@ -81,6 +83,75 @@ pub async fn find_scope_over_contexts(
         }
     }
     Ok(None)
+}
+
+/// The set of a key's values across the given contexts, stringified for set ops.
+fn value_set(contexts: &[&Value], key: &str) -> BTreeSet<String> {
+    contexts
+        .iter()
+        .filter_map(|c| c.get(key))
+        .map(|v| v.to_string())
+        .collect()
+}
+
+/// **Discover** the governing feature, rather than being told it. Probe every
+/// context, partition into pass/fail, then find the context key whose value
+/// alone separates the two (its passing-values are disjoint from its
+/// failing-values) — preferring the simplest such key (fewest distinct values).
+/// Returns `None` when no boundary exists (all pass or all fail) or no single
+/// feature explains the split. This is the autonomous half of ADR-0004: the
+/// system names *its own* governing feature from evaluated behavior.
+pub async fn discover_boundary(
+    behavior: &str,
+    contexts: &[Value],
+    probe: &dyn AcceptabilityProbe,
+) -> Result<Option<BoundaryFinding>> {
+    let mut passing: Vec<&Value> = Vec::new();
+    let mut failing: Vec<&Value> = Vec::new();
+    for context in contexts {
+        if probe.acceptable(behavior, context).await? {
+            passing.push(context);
+        } else {
+            failing.push(context);
+        }
+    }
+    if passing.is_empty() || failing.is_empty() {
+        return Ok(None);
+    }
+
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+    for context in contexts {
+        if let Some(obj) = context.as_object() {
+            keys.extend(obj.keys().filter(|k| *k != "verify").cloned());
+        }
+    }
+
+    let mut best: Option<(String, usize)> = None;
+    for key in &keys {
+        let pv = value_set(&passing, key);
+        let fv = value_set(&failing, key);
+        if pv.is_empty() || fv.is_empty() || !pv.is_disjoint(&fv) {
+            continue;
+        }
+        let distinct = pv.union(&fv).count();
+        let better = match &best {
+            None => true,
+            Some((_, d)) => distinct < *d,
+        };
+        if better {
+            best = Some((key.clone(), distinct));
+        }
+    }
+
+    let Some((governing_feature, _)) = best else {
+        return Ok(None);
+    };
+    Ok(Some(BoundaryFinding {
+        behavior: behavior.to_string(),
+        governing_feature,
+        fail_context: failing[0].clone(),
+        near_ok_context: passing[0].clone(),
+    }))
 }
 
 /// Promote a finding to a persistable [`FailureBoundary`]. Confidence and the
@@ -184,5 +255,42 @@ mod tests {
         assert_eq!(finding.governing_feature, "op");
         assert_eq!(finding.near_ok_context["op"], serde_json::json!("add"));
         assert_eq!(finding.fail_context["op"], serde_json::json!("multiply"));
+    }
+
+    #[tokio::test]
+    async fn discover_infers_the_governing_feature_from_pass_fail() {
+        // The probe is told nothing; it infers that `op` (not the incidental
+        // `note`) governs, from which contexts pass vs fail.
+        let probe = FeatureProbe {
+            feature: "op".into(),
+            ok_value: serde_json::json!("add"),
+        };
+        let contexts = vec![
+            serde_json::json!({ "op": "add", "note": "x" }),
+            serde_json::json!({ "op": "multiply", "note": "y" }),
+            serde_json::json!({ "op": "reverse", "note": "x" }),
+        ];
+        let finding = discover_boundary("implement the op", &contexts, &probe)
+            .await
+            .unwrap()
+            .expect("a governing feature is discoverable");
+        assert_eq!(finding.governing_feature, "op");
+        assert_eq!(finding.near_ok_context["op"], serde_json::json!("add"));
+    }
+
+    #[tokio::test]
+    async fn discover_returns_none_when_everything_passes() {
+        let probe = FeatureProbe {
+            feature: "op".into(),
+            ok_value: serde_json::json!("add"),
+        };
+        let contexts = vec![
+            serde_json::json!({ "op": "add" }),
+            serde_json::json!({ "op": "add", "x": 1 }),
+        ];
+        assert!(discover_boundary("do it", &contexts, &probe)
+            .await
+            .unwrap()
+            .is_none());
     }
 }

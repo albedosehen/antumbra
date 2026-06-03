@@ -16,7 +16,7 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 
 #[cfg(feature = "models")]
-use antumbra_boundary::{find_scope_over_contexts, finding_to_boundary};
+use antumbra_boundary::{discover_boundary, find_scope_over_contexts, finding_to_boundary};
 #[cfg(feature = "models")]
 use antumbra_core::ports::{ActRequest, Serve};
 #[cfg(feature = "models")]
@@ -95,6 +95,10 @@ enum Command {
         /// so the search maps that expert's own competence boundary.
         #[arg(long)]
         expert: Option<String>,
+        /// Infer the governing feature from which contexts pass vs fail, instead
+        /// of trusting the spec's label (treats fail_context + candidates as a pool).
+        #[arg(long)]
+        discover: bool,
         #[arg(long, default_value_t = 96)]
         max_new_tokens: usize,
         /// Best-of-K samples per context check (generation is stochastic).
@@ -335,6 +339,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Scope {
             spec,
             expert,
+            discover,
             max_new_tokens,
             samples,
             confidence,
@@ -386,16 +391,29 @@ async fn main() -> anyhow::Result<()> {
                 let probe = GenerateVerifyProbe::new(serve, antumbra_critic::CommandVerifier)
                     .with_samples(samples);
 
-                match find_scope_over_contexts(
-                    behavior,
-                    governing_feature,
-                    &fail_context,
-                    &candidates,
-                    &probe,
-                )
-                .await?
-                {
+                let finding_opt = if discover {
+                    // Treat fail_context + candidates as one pool and infer the
+                    // governing feature from which contexts the expert passes.
+                    let pool: Vec<serde_json::Value> = std::iter::once(fail_context.clone())
+                        .chain(candidates.iter().cloned())
+                        .collect();
+                    discover_boundary(behavior, &pool, &probe).await?
+                } else {
+                    find_scope_over_contexts(
+                        behavior,
+                        governing_feature,
+                        &fail_context,
+                        &candidates,
+                        &probe,
+                    )
+                    .await?
+                };
+
+                match finding_opt {
                     Some(finding) => {
+                        if discover {
+                            println!("(governing feature inferred from pass/fail, not supplied)");
+                        }
                         println!("recovered governing feature: {}", finding.governing_feature);
                         println!("C' (acceptable context): {}", finding.near_ok_context);
                         let embedder = make_embedder()?;
@@ -427,7 +445,14 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&spec, &expert, max_new_tokens, samples, confidence);
+                let _ = (
+                    &spec,
+                    &expert,
+                    discover,
+                    max_new_tokens,
+                    samples,
+                    confidence,
+                );
                 anyhow::bail!(
                     "`scope` requires building with --features models (candle + GPU + python)"
                 );
