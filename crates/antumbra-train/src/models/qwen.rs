@@ -931,7 +931,10 @@ impl GrpoLm for QwenCausalLm {
         let dev = self.model.device.clone();
         let prompt_ids = self.encode(prompt)?;
         let plen = prompt_ids.len();
-        let mut losses: Vec<Tensor> = Vec::new();
+        // One backward step per group member (as RAFT steps per winner), so only
+        // a single forward graph is alive at a time — a combined-group backward
+        // holds G forwards and OOMs the card.
+        let (mut total, mut steps) = (0.0f32, 0usize);
         for exp in group {
             let t = exp.tokens.len();
             if t == 0 || exp.old_logprobs.len() != t || exp.ref_logprobs.len() != t {
@@ -962,17 +965,14 @@ impl GrpoLm for QwenCausalLm {
                 cfg.kl_beta,
             )
             .map_err(ce)?;
-            losses.push(loss);
+            self.opt.backward_step(&loss).map_err(ce)?;
+            total += loss.to_scalar::<f32>().map_err(ce)?;
+            steps += 1;
         }
-        if losses.is_empty() {
+        if steps == 0 {
             return Ok(0.0);
         }
-        let mean = Tensor::stack(&losses, 0)
-            .map_err(ce)?
-            .mean_all()
-            .map_err(ce)?;
-        self.opt.backward_step(&mean).map_err(ce)?;
-        mean.to_scalar::<f32>().map_err(ce)
+        Ok(total / steps as f32)
     }
 
     fn save_adapter(&self, path: &str) -> Result<()> {
