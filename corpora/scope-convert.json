@@ -1,0 +1,15 @@
+{
+  "behavior": "Write a Python function convert(x) that converts a temperature value in the direction named by target. Return only the function.",
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B",
+  "fail_context": {
+    "target": "fahrenheit to celsius",
+    "verify": {
+      "extract_code": true,
+      "program": "python",
+      "args": ["-c", "import os,sys; ns={}; exec(os.environ['ANTUMBRA_COMPLETION'], ns); v=ns.get('convert',lambda *_:0)(100); sys.exit(0 if abs(v-212)<1e-6 else 1)"]
+    }
+  },
+  "candidates": [
+    ["target", ["celsius to fahrenheit"]]
+  ]
+}

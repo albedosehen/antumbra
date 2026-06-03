@@ -17,6 +17,7 @@ antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
 antumbra-loop = { path = "../antumbra-loop" }
 antumbra-gate = { path = "../antumbra-gate" }
+antumbra-boundary = { path = "../antumbra-boundary" }
 antumbra-train = { path = "../antumbra-train", optional = true }
 antumbra-critic = { path = "../antumbra-critic", optional = true }
 antumbra-serve = { path = "../antumbra-serve", optional = true }

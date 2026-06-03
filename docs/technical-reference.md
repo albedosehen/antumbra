@@ -240,7 +240,11 @@ release-profile `opt-level=1` override on `surrealdb`/`surrealdb-core` works aro
   `Serve` and `Verifier` ports. Unit tests prove acceptability is decided by serving-and-checking and that
   `find_scope` drives it to recover the governing feature and C' (`probe.rs` tests). Production swaps the fakes
   for `CandleServe` + `CommandVerifier` with no change to the keystone path; that is the keystone's last fake
-  retired at the mechanism level.
+  retired at the mechanism level. **Live GPU run:** the CLI `scope` command ran the probe (best-of-K) on the v0
+  base with no expert adapter and did *not* recover the test boundaries (both a python-exec and a `contains_all`
+  spec stayed open at K=8) — the 1.5B base does not reliably follow terse context hints. The probe held
+  integrity (returned "stays open", did not fabricate a scope); reliable live recovery needs a stronger actor
+  (a graduated expert as generator, or a larger base).
 
 ## 14. What is proven, and what is not
 
@@ -256,8 +260,9 @@ v0 **serving** exists: `CandleServe` loads a graduated expert's adapter and gene
 closed (single-adapter; reloads per request).
 
 **Not yet:** capability is exercised on small corpora and few experts (no generalization or catastrophic-
-forgetting test); the generate-then-verify probe is proven with fakes and needs a **GPU-backed run**
-(`CandleServe` + python verifier) plus a contrastive corpus, and candidate governing features are supplied
-rather than discovered; the gate is the heuristic coverage gate, not the learned latent mixer; multi-adapter
-hot-swap and the `llama-cpp-2`/`mistral.rs` backends, GRPO (v1 over RAFT), and GGUF-Q4 quantized backward
-(MT-4) are future; composition (ADR-0009) is the north star.
+forgetting test); the generate-then-verify probe is proven with fakes and runs live, but the v0 1.5B base is
+too weak to *recover* boundaries live (needs a graduated-expert generator or a larger base; possibly a
+generation-temperature knob for best-of-K diversity), and candidate governing features are supplied rather than
+discovered; the gate is the heuristic coverage gate, not the learned latent mixer; multi-adapter hot-swap and
+the `llama-cpp-2`/`mistral.rs` backends, GRPO (v1 over RAFT), and GGUF-Q4 quantized backward (MT-4) are future;
+composition (ADR-0009) is the north star.

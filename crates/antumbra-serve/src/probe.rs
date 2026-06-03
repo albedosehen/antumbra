@@ -15,14 +15,31 @@ use antumbra_core::ports::{AcceptabilityProbe, ActRequest, Serve, Verifier, Veri
 use antumbra_core::{Result, RunId};
 
 /// Probes acceptability by serving the behavior in a context and verifying it.
+///
+/// Generation is stochastic, so a single sample is a noisy acceptability test (a
+/// model that *can* satisfy a context still fails on some draws). The probe is
+/// therefore **best-of-K**: a context is acceptable if any of `samples` served
+/// completions verifies. This is the kill-criterion fix from ADR-0004 — raise
+/// `samples` until single-draw noise stops flipping the boundary.
 pub struct GenerateVerifyProbe<S: Serve, V: Verifier> {
     serve: S,
     verifier: V,
+    samples: usize,
 }
 
 impl<S: Serve, V: Verifier> GenerateVerifyProbe<S, V> {
     pub fn new(serve: S, verifier: V) -> Self {
-        Self { serve, verifier }
+        Self {
+            serve,
+            verifier,
+            samples: 1,
+        }
+    }
+
+    /// Set the best-of-K sample budget per acceptability check (min 1).
+    pub fn with_samples(mut self, samples: usize) -> Self {
+        self.samples = samples.max(1);
+        self
     }
 
     /// Render the fixed behavior plus the context (minus its `verify` spec) into
@@ -50,22 +67,27 @@ impl<S: Serve, V: Verifier> GenerateVerifyProbe<S, V> {
 impl<S: Serve, V: Verifier> AcceptabilityProbe for GenerateVerifyProbe<S, V> {
     async fn acceptable(&self, behavior: &str, context: &Value) -> Result<bool> {
         let prompt = Self::render(behavior, context);
-        let output = self
-            .serve
-            .act(ActRequest {
-                task_id: "probe".into(),
-                prompt,
-                adapters: Vec::new(),
-            })
-            .await?;
         let verify = context.get("verify").cloned().unwrap_or(Value::Null);
-        let request = VerifyRequest {
-            run_id: RunId::new("probe"),
-            step_idx: 0,
-            dimension: "acceptability".into(),
-            artifact: json!({ "completion": output.final_output, "verify": verify }),
-        };
-        Ok(self.verifier.verify(&request).await?.passed)
+        for sample in 0..self.samples {
+            let output = self
+                .serve
+                .act(ActRequest {
+                    task_id: "probe".into(),
+                    prompt: prompt.clone(),
+                    adapters: Vec::new(),
+                })
+                .await?;
+            let request = VerifyRequest {
+                run_id: RunId::new("probe"),
+                step_idx: sample as u32,
+                dimension: "acceptability".into(),
+                artifact: json!({ "completion": output.final_output, "verify": verify }),
+            };
+            if self.verifier.verify(&request).await?.passed {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 

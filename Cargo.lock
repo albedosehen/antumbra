@@ -160,6 +160,7 @@ dependencies = [
 name = "antumbra-cli"
 version = "0.0.0"
 dependencies = [
+ "antumbra-boundary",
  "antumbra-core",
  "antumbra-critic",
  "antumbra-gate",

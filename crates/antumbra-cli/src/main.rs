@@ -16,9 +16,13 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 
 #[cfg(feature = "models")]
+use antumbra_boundary::{find_scope, finding_to_boundary};
+#[cfg(feature = "models")]
 use antumbra_core::ports::{ActRequest, Serve};
 #[cfg(feature = "models")]
-use antumbra_serve::CandleServe;
+use antumbra_core::{BoundaryId, Grain};
+#[cfg(feature = "models")]
+use antumbra_serve::{CandleServe, GenerateVerifyProbe};
 #[cfg(feature = "models")]
 use antumbra_train::{CandleModelLoader, JsonCorpus, RaftConfig, RaftTrainer};
 
@@ -77,6 +81,24 @@ enum Command {
         /// Max tokens to generate for the answer.
         #[arg(long, default_value_t = 128)]
         max_new_tokens: usize,
+    },
+    /// Recover a failure boundary's scope by generate-then-verify (ADR-0004):
+    /// hold a behavior fixed, vary the context, and find the governing feature
+    /// and C' by actually serving and checking. Stores an actionable boundary.
+    /// Needs --features models + a GPU + python.
+    Scope {
+        /// Path to a scope spec JSON: { behavior, base_model?, fail_context,
+        /// candidates: [[feature, [values]]] }.
+        #[arg(long)]
+        spec: String,
+        #[arg(long, default_value_t = 96)]
+        max_new_tokens: usize,
+        /// Best-of-K samples per context check (generation is stochastic).
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        /// Confidence assigned to the recovered boundary.
+        #[arg(long, default_value_t = 0.7)]
+        confidence: f32,
     },
     /// Train shadows with the real candle trainer (needs --features models + GPU).
     Train {
@@ -286,7 +308,7 @@ async fn main() -> anyhow::Result<()> {
                     };
                     let serve = CandleServe::new(
                         expert.base_model.clone(),
-                        expert.artifact_uri.clone(),
+                        Some(expert.artifact_uri.clone()),
                         cfg,
                     );
                     let out = serve
@@ -304,6 +326,85 @@ async fn main() -> anyhow::Result<()> {
             {
                 let _ = (&task, k, max_new_tokens);
                 anyhow::bail!("`ask` requires building with --features models (candle + a GPU)");
+            }
+        }
+        Command::Scope {
+            spec,
+            max_new_tokens,
+            samples,
+            confidence,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                let store = connect(&cli.url).await?;
+                let raw = std::fs::read_to_string(&spec)?;
+                let doc: serde_json::Value = serde_json::from_str(&raw)?;
+                let behavior = doc["behavior"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("spec.behavior must be a string"))?;
+                let base_model = doc["base_model"]
+                    .as_str()
+                    .unwrap_or("Qwen/Qwen2.5-Coder-1.5B");
+                let fail_context = doc["fail_context"].clone();
+                let candidates: Vec<(String, Vec<serde_json::Value>)> = doc["candidates"]
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("spec.candidates must be an array"))?
+                    .iter()
+                    .map(|c| {
+                        let feature = c[0].as_str().unwrap_or_default().to_string();
+                        let values = c[1].as_array().cloned().unwrap_or_default();
+                        (feature, values)
+                    })
+                    .collect();
+
+                let cfg = RaftConfig {
+                    max_new_tokens,
+                    ..RaftConfig::default()
+                };
+                let serve = CandleServe::new(base_model, None, cfg);
+                let probe = GenerateVerifyProbe::new(serve, antumbra_critic::CommandVerifier)
+                    .with_samples(samples);
+
+                match find_scope(behavior, &fail_context, &candidates, &probe).await? {
+                    Some(finding) => {
+                        println!("recovered governing feature: {}", finding.governing_feature);
+                        println!("C' (acceptable context): {}", finding.near_ok_context);
+                        let embedder = make_embedder()?;
+                        let context_text = format!("{behavior} {fail_context}");
+                        let context_vec = embedder.embed(&context_text).await?;
+                        let id = BoundaryId::new(format!(
+                            "boundary:scope:{}",
+                            finding.governing_feature
+                        ));
+                        let bound = finding_to_boundary(
+                            id,
+                            &finding,
+                            Grain::Project,
+                            confidence,
+                            Some(context_vec),
+                            Generation::ZERO,
+                            Utc::now(),
+                        );
+                        boundary::upsert(&store, &bound).await?;
+                        println!(
+                            "stored actionable boundary (governing={}, confidence={confidence:.2})",
+                            finding.governing_feature
+                        );
+                    }
+                    None => {
+                        println!(
+                            "no single-feature context change flipped acceptability; \
+                                  boundary stays open"
+                        );
+                    }
+                }
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (&spec, max_new_tokens, samples, confidence);
+                anyhow::bail!(
+                    "`scope` requires building with --features models (candle + GPU + python)"
+                );
             }
         }
         Command::Train {

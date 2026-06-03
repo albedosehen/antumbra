@@ -1,0 +1,11 @@
+{
+  "behavior": "Write a short Python function that returns a greeting word in the language named by lang.",
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B",
+  "fail_context": {
+    "lang": "english",
+    "verify": { "extract_code": true, "contains_all": ["Bonjour"] }
+  },
+  "candidates": [
+    ["lang", ["french"]]
+  ]
+}

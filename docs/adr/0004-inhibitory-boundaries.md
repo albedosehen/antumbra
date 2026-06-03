@@ -28,6 +28,18 @@
 > for `CandleServe` + a python verifier makes it a live, GPU-backed probe with no change to the keystone path.
 > Now the *only* supplied input is the candidate governing-feature set (automatic discovery remains open).
 
+> **Live GPU run (2026-06-03).** The probe was run end-to-end on the GPU via the CLI `scope` command
+> (generate-then-verify, best-of-K over `CandleServe` + `CommandVerifier`). On the v0 base
+> (Qwen2.5-Coder-1.5B, **no expert adapter**) it did **not** recover the test boundaries — both a strict
+> python-exec spec (`scope-convert`) and a robust in-process `contains_all` spec (`scope-greeting`) stayed open
+> across K=8. The small base does not reliably follow terse context hints in free-form generation (it scored
+> only ~0.38 on trivial add/reverse before any training). **The integrity point holds:** the probe returned
+> "boundary stays open" rather than fabricating a scope — exactly the open-negative discipline ADR-0004 demands.
+> So the mechanism is sound and unit-proven; reliable *live* recovery needs a stronger actor (a graduated expert
+> as the generator, or a larger base) or more-elicitable checks, not a change to the keystone path. (The K=8
+> convert draws also produced identical errors, hinting at low generation diversity — a temperature knob on
+> generation is a likely follow-up, since best-of-K only helps if the draws differ.)
+
 ## Context
 
 The thesis at full strength: **a continual learner becomes capable by modeling the *counterfactual boundary* of

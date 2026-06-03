@@ -10,23 +10,21 @@ use antumbra_core::ports::{ActOutput, ActRequest, Serve, StepOutput};
 use antumbra_core::Result;
 use antumbra_train::{CandleModelLoader, CausalLm, ModelLoader, RaftConfig};
 
-/// Serves one frozen adapter over a shared base. Loading happens per `act` so
-/// the server is stateless; the heavy base weights come from the hf-hub cache.
+/// Serves a shared base, optionally with one frozen adapter on top. Loading
+/// happens per `act` so the server is stateless; the heavy base weights come
+/// from the hf-hub cache. `adapter` is `None` for base-only serving (e.g. the
+/// acceptability probe, which judges the base model's behavior).
 pub struct CandleServe {
     base_model: String,
-    adapter_uri: String,
+    adapter: Option<String>,
     config: RaftConfig,
 }
 
 impl CandleServe {
-    pub fn new(
-        base_model: impl Into<String>,
-        adapter_uri: impl Into<String>,
-        config: RaftConfig,
-    ) -> Self {
+    pub fn new(base_model: impl Into<String>, adapter: Option<String>, config: RaftConfig) -> Self {
         Self {
             base_model: base_model.into(),
-            adapter_uri: adapter_uri.into(),
+            adapter,
             config,
         }
     }
@@ -37,7 +35,7 @@ impl Serve for CandleServe {
     async fn act(&self, req: ActRequest) -> Result<ActOutput> {
         let loader = CandleModelLoader::new(self.config.clone());
         let mut model = loader
-            .load(&self.base_model, Some(&self.adapter_uri))
+            .load(&self.base_model, self.adapter.as_deref())
             .await?;
         let mut outputs = model.generate(&req.prompt, 1).await?;
         let final_output = outputs.drain(..).next().unwrap_or_default();
