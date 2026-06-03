@@ -50,9 +50,10 @@ enum Command {
         task: String,
         #[arg(long, default_value_t = 2)]
         k: usize,
-        /// Minimum in-scope score; below it the gate escalates instead of
-        /// guessing. With real embeddings ~0.35 separates in/out of scope.
-        #[arg(long, default_value_t = 0.0)]
+        /// Abstention threshold on relative coverage (top-1-minus-top-2
+        /// capability margin); below it the gate escalates. Calibratable
+        /// risk-coverage knob, not an absolute cosine floor.
+        #[arg(long, default_value_t = 0.08)]
         threshold: f32,
     },
     /// Seed the population with described demo specialists, embedding each
@@ -211,15 +212,22 @@ async fn main() -> anyhow::Result<()> {
             let experts = expert::list(&store).await?;
             let boundaries = boundary::list(&store).await?;
             let cfg = GateConfig {
-                in_scope_threshold: threshold,
+                coverage_threshold: threshold,
                 ..GateConfig::default()
             };
             let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
             if decision.escalate {
-                println!("decision: ESCALATE to flagship (no in-scope expert)");
+                println!(
+                    "decision: ESCALATE to flagship (coverage {:.3} < threshold {threshold:.3})",
+                    decision.coverage
+                );
             } else {
                 let names: Vec<String> = decision.chosen.iter().map(ToString::to_string).collect();
-                println!("decision: route to [{}]", names.join(", "));
+                println!(
+                    "decision: route to [{}] (coverage {:.3})",
+                    names.join(", "),
+                    decision.coverage
+                );
             }
             for scored in decision.ranked.iter().take(k.max(3)) {
                 println!("  {:<18} score={:.3}", scored.id.to_string(), scored.score);

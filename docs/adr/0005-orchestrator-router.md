@@ -14,6 +14,29 @@
 > mechanism (ADR-0004) rather than a raw similarity threshold. This is the concrete next problem for the gate:
 > out-of-scope detection needs margin/calibration or boundary inhibition, not an absolute cosine cutoff.
 
+> **Resolution (2026-06-03).** Escalation is now **relative coverage**, grounded in the OOD literature.
+> Out-of-scope is an out-of-distribution problem; the fix is to cancel the non-discriminative shared direction
+> rather than threshold absolute similarity.
+> - *Relative Mahalanobis Distance* (arXiv:2106.09022): near-OOD fails because shared dimensions make in/out
+>   equidistant; cancel a class-agnostic background. RMD uses covariance whitening — infeasible with one vector
+>   per expert.
+> - The valid cosine-space realization is the **prototype margin** `cos(task, e₁) − cos(task, e₂)`: the shared
+>   direction contributes near-equally to both and cancels. Subtracting the population *centroid* instead was
+>   **measured to fail** — the centroid absorbs the shared direction, so `cos(task, centroid) ≈ cos(task, e₁)`
+>   and coverage collapsed to ~0 for in- and out-of-scope alike (arith −0.009, datetime −0.002 vs cooking
+>   +0.006: unseparable).
+> - *Deep-kNN OOD* (arXiv:2204.06507): same family (distance to nearest prototypes on L2-normalized features —
+>   the embedder normalizes). *Selective prediction* (arXiv:1705.08500): escalation is abstention; the threshold
+>   is the risk-coverage knob, calibrated per deployment.
+>
+> Implemented in `antumbra-gate`: ranking unchanged (cosine − boundary inhibition); escalate when
+> `(top-1 − top-2) − inhibition < coverage_threshold` (default 0.08). Re-running the demo, all five queries are
+> correct: arith/string/datetime routed (margins 0.106 / 0.163 / 0.110) and two out-of-scope queries escalated
+> ("train a CNN" 0.037, "grill a rack of lamb" 0.068). Known v0 limitation: a task served equally by two
+> experts has a small margin and escalates (ambiguity conflated with out-of-scope); north-star composition
+> (ADR-0009) dissolves it. A confident boundary (ADR-0004) is subtracted from coverage, so it escalates
+> independently.
+
 ## Context
 
 Something has to select and combine experts. Earlier this was framed as a *router over separate models passing
