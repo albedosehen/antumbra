@@ -43,6 +43,10 @@ pub struct RaftConfig {
     /// Sampling temperature for generation; higher = more diverse draws (so
     /// best-of-K actually explores). `<= 0` is greedy/argmax.
     pub temperature: f64,
+    /// GRPO PPO-clip epsilon (ADR-0011). Unused by RAFT.
+    pub clip_eps: f64,
+    /// GRPO KL-to-reference penalty weight (ADR-0011). Unused by RAFT.
+    pub kl_beta: f64,
 }
 
 impl Default for RaftConfig {
@@ -60,6 +64,8 @@ impl Default for RaftConfig {
             // forward can't overflow like f16 does (CPU is forced to f32).
             dtype: TrainDtype::Bf16,
             temperature: 0.8,
+            clip_eps: 0.2,
+            kl_beta: 0.04,
         }
     }
 }
