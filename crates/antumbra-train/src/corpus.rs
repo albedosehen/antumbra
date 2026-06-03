@@ -25,8 +25,16 @@ impl JsonCorpus {
         let tasks = raw
             .iter()
             .map(|t| CorpusTask {
-                id: t.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-                prompt: t.get("prompt").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+                id: t
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                prompt: t
+                    .get("prompt")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
                 verify: t.get("verify").cloned().unwrap_or(serde_json::Value::Null),
             })
             .collect();

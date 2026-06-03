@@ -7,7 +7,7 @@
 
 use serde_json::json;
 
-use antumbra_core::ports::{TrainOutcome, VerifyRequest, Verifier};
+use antumbra_core::ports::{TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{Result, RunId};
 
 use crate::config::RaftConfig;

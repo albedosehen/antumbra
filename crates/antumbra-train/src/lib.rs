@@ -78,8 +78,7 @@ impl ModelLoader for CandleModelLoader {
     ) -> Result<models::QwenCausalLm> {
         let mut config = self.config.clone();
         config.base_model = base_model.to_string();
-        let device =
-            device::best_device().map_err(|e| AntumbraError::other(e.to_string()))?;
+        let device = device::best_device().map_err(|e| AntumbraError::other(e.to_string()))?;
         models::QwenCausalLm::load(device, config)
     }
 }

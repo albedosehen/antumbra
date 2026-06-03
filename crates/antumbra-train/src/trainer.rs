@@ -40,7 +40,14 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
         let mut model = self.loader.load(&req.base_model, None).await?;
         let tasks = self.corpus.tasks(&req.corpus_task_ids);
         let run_id = RunId::new(req.shadow.as_str());
-        raft_train(&mut model, self.verifier.as_ref(), &tasks, &run_id, &self.config).await
+        raft_train(
+            &mut model,
+            self.verifier.as_ref(),
+            &tasks,
+            &run_id,
+            &self.config,
+        )
+        .await
     }
 }
 

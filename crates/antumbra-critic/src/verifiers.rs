@@ -61,7 +61,11 @@ impl Verifier for CommandVerifier {
             .and_then(|v| v.as_str())
             .unwrap_or_default();
         // Optionally pull the code out of a markdown fence before running.
-        let completion = if spec.get("extract_code").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let completion = if spec
+            .get("extract_code")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             extract_code_block(raw_completion)
         } else {
             raw_completion

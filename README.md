@@ -131,8 +131,9 @@ maximally context-scoped (per-repo conventions are textbook boundaries), and the
 ## Build & run (v0)
 
 The substrate, critic, gate, boundary engine, and the durable generational loop are implemented and tested in
-Rust against **surql-rs** on the SurrealDB 3.x driver (builder-only — no hand-written SurrealQL). GPU training
-and serving are seams that return `Unimplemented` for now, so the loop runs end-to-end with a demo trainer.
+Rust against **surql-rs** on the SurrealDB 3.x driver (builder-only — no hand-written SurrealQL). The real
+candle **Qwen2.5-Coder + LoRA trainer** (RAFT over verified outcomes, ADR-0010) is implemented behind a `models`
+feature; the default loop runs with a demo trainer so everything is exercisable without a GPU.
 
 ```bash
 cargo test                                   # whole workspace, green
@@ -142,9 +143,14 @@ cargo run -p antumbra-cli -- schema                              # print generat
 cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv loop --generations 3
 cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv status
 cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv route "fix the deno build"
+
+# real training (needs a CUDA GPU + ~3 GB Qwen weights) — see the guide below
+cargo run -p antumbra-cli --features models,cuda -- \
+  --url surrealkv://./data/a.skv train --corpus corpora/example-tasks.json --generations 1
 ```
 
-See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for the per-crate status.
+See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per-crate status and
+**[Running the trainer](docs/running-the-trainer.md)** for the GPU run.
 
 ---
 

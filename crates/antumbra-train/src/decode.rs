@@ -29,13 +29,19 @@ mod tests {
     #[test]
     fn stops_at_a_second_definition() {
         let raw = "def add(a, b):\n    return a + b\ndef other():\n    pass\n";
-        assert_eq!(truncate_at_stops(raw, DEFAULT_STOPS), "def add(a, b):\n    return a + b");
+        assert_eq!(
+            truncate_at_stops(raw, DEFAULT_STOPS),
+            "def add(a, b):\n    return a + b"
+        );
     }
 
     #[test]
     fn stops_at_a_fence() {
         let raw = "def add(a, b):\n    return a + b\n```\nsome prose";
-        assert_eq!(truncate_at_stops(raw, DEFAULT_STOPS), "def add(a, b):\n    return a + b");
+        assert_eq!(
+            truncate_at_stops(raw, DEFAULT_STOPS),
+            "def add(a, b):\n    return a + b"
+        );
     }
 
     #[test]

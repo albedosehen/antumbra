@@ -29,7 +29,7 @@ pub fn causal_lm_loss(
     let shift_mask = completion_mask.narrow(1, 1, seq - 1)?; // (b, seq-1)
 
     let log_probs = log_softmax(&shift_logits, 2)?; // (b, seq-1, vocab)
-    // Negative log-likelihood of the realized next token at each position.
+                                                    // Negative log-likelihood of the realized next token at each position.
     let picked = log_probs
         .gather(&shift_labels.unsqueeze(2)?, 2)? // (b, seq-1, 1)
         .squeeze(2)?; // (b, seq-1)
@@ -87,8 +87,14 @@ mod tests {
             .to_scalar::<f32>()
             .unwrap();
 
-        assert!(good_loss < 0.01, "confident-correct loss should be tiny: {good_loss}");
-        assert!(bad_loss > good_loss, "wrong predictions cost more: {bad_loss} vs {good_loss}");
+        assert!(
+            good_loss < 0.01,
+            "confident-correct loss should be tiny: {good_loss}"
+        );
+        assert!(
+            bad_loss > good_loss,
+            "wrong predictions cost more: {bad_loss} vs {good_loss}"
+        );
     }
 
     #[test]
@@ -112,6 +118,9 @@ mod tests {
             .unwrap()
             .to_scalar::<f32>()
             .unwrap();
-        assert!(loss < 0.01, "only the completion token should be scored: {loss}");
+        assert!(
+            loss < 0.01,
+            "only the completion token should be scored: {loss}"
+        );
     }
 }

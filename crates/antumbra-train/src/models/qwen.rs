@@ -229,10 +229,42 @@ impl Attention {
         let num_kv_heads = cfg.num_key_value_heads;
         let head_dim = h / num_heads;
         Ok(Self {
-            q_proj: LoraLinear::load(h, num_heads * head_dim, true, &base.pp("q_proj"), &lora.pp("q_proj"), rank, scale)?,
-            k_proj: LoraLinear::load(h, num_kv_heads * head_dim, true, &base.pp("k_proj"), &lora.pp("k_proj"), rank, scale)?,
-            v_proj: LoraLinear::load(h, num_kv_heads * head_dim, true, &base.pp("v_proj"), &lora.pp("v_proj"), rank, scale)?,
-            o_proj: LoraLinear::load(num_heads * head_dim, h, false, &base.pp("o_proj"), &lora.pp("o_proj"), rank, scale)?,
+            q_proj: LoraLinear::load(
+                h,
+                num_heads * head_dim,
+                true,
+                &base.pp("q_proj"),
+                &lora.pp("q_proj"),
+                rank,
+                scale,
+            )?,
+            k_proj: LoraLinear::load(
+                h,
+                num_kv_heads * head_dim,
+                true,
+                &base.pp("k_proj"),
+                &lora.pp("k_proj"),
+                rank,
+                scale,
+            )?,
+            v_proj: LoraLinear::load(
+                h,
+                num_kv_heads * head_dim,
+                true,
+                &base.pp("v_proj"),
+                &lora.pp("v_proj"),
+                rank,
+                scale,
+            )?,
+            o_proj: LoraLinear::load(
+                num_heads * head_dim,
+                h,
+                false,
+                &base.pp("o_proj"),
+                &lora.pp("o_proj"),
+                rank,
+                scale,
+            )?,
             num_heads,
             num_kv_heads,
             num_kv_groups: num_heads / num_kv_heads,
@@ -243,15 +275,27 @@ impl Attention {
         })
     }
 
-    fn forward(&mut self, xs: &Tensor, mask: Option<&Tensor>, offset: usize, use_cache: bool) -> CResult<Tensor> {
+    fn forward(
+        &mut self,
+        xs: &Tensor,
+        mask: Option<&Tensor>,
+        offset: usize,
+        use_cache: bool,
+    ) -> CResult<Tensor> {
         let (b, q_len, _) = xs.dims3()?;
         let q = self.q_proj.forward(xs)?;
         let k = self.k_proj.forward(xs)?;
         let v = self.v_proj.forward(xs)?;
 
-        let q = q.reshape((b, q_len, self.num_heads, self.head_dim))?.transpose(1, 2)?;
-        let k = k.reshape((b, q_len, self.num_kv_heads, self.head_dim))?.transpose(1, 2)?;
-        let v = v.reshape((b, q_len, self.num_kv_heads, self.head_dim))?.transpose(1, 2)?;
+        let q = q
+            .reshape((b, q_len, self.num_heads, self.head_dim))?
+            .transpose(1, 2)?;
+        let k = k
+            .reshape((b, q_len, self.num_kv_heads, self.head_dim))?
+            .transpose(1, 2)?;
+        let v = v
+            .reshape((b, q_len, self.num_kv_heads, self.head_dim))?
+            .transpose(1, 2)?;
 
         let (q, k) = self.rotary.apply(&q, &k, offset)?;
 
@@ -293,12 +337,42 @@ struct Mlp {
 }
 
 impl Mlp {
-    fn load(cfg: &Config, rank: usize, scale: f64, base: &VarBuilder, lora: &VarBuilder) -> CResult<Self> {
+    fn load(
+        cfg: &Config,
+        rank: usize,
+        scale: f64,
+        base: &VarBuilder,
+        lora: &VarBuilder,
+    ) -> CResult<Self> {
         let (h, i) = (cfg.hidden_size, cfg.intermediate_size);
         Ok(Self {
-            gate_proj: LoraLinear::load(h, i, false, &base.pp("gate_proj"), &lora.pp("gate_proj"), rank, scale)?,
-            up_proj: LoraLinear::load(h, i, false, &base.pp("up_proj"), &lora.pp("up_proj"), rank, scale)?,
-            down_proj: LoraLinear::load(i, h, false, &base.pp("down_proj"), &lora.pp("down_proj"), rank, scale)?,
+            gate_proj: LoraLinear::load(
+                h,
+                i,
+                false,
+                &base.pp("gate_proj"),
+                &lora.pp("gate_proj"),
+                rank,
+                scale,
+            )?,
+            up_proj: LoraLinear::load(
+                h,
+                i,
+                false,
+                &base.pp("up_proj"),
+                &lora.pp("up_proj"),
+                rank,
+                scale,
+            )?,
+            down_proj: LoraLinear::load(
+                i,
+                h,
+                false,
+                &base.pp("down_proj"),
+                &lora.pp("down_proj"),
+                rank,
+                scale,
+            )?,
             act: cfg.hidden_act,
         })
     }
@@ -320,16 +394,44 @@ struct DecoderLayer {
 }
 
 impl DecoderLayer {
-    fn load(rotary: Arc<RotaryEmbedding>, cfg: &Config, rank: usize, scale: f64, base: &VarBuilder, lora: &VarBuilder) -> CResult<Self> {
+    fn load(
+        rotary: Arc<RotaryEmbedding>,
+        cfg: &Config,
+        rank: usize,
+        scale: f64,
+        base: &VarBuilder,
+        lora: &VarBuilder,
+    ) -> CResult<Self> {
         Ok(Self {
-            self_attn: Attention::load(rotary, cfg, rank, scale, &base.pp("self_attn"), &lora.pp("self_attn"))?,
+            self_attn: Attention::load(
+                rotary,
+                cfg,
+                rank,
+                scale,
+                &base.pp("self_attn"),
+                &lora.pp("self_attn"),
+            )?,
             mlp: Mlp::load(cfg, rank, scale, &base.pp("mlp"), &lora.pp("mlp"))?,
-            input_ln: RmsNorm::load(cfg.hidden_size, cfg.rms_norm_eps, &base.pp("input_layernorm"))?,
-            post_attn_ln: RmsNorm::load(cfg.hidden_size, cfg.rms_norm_eps, &base.pp("post_attention_layernorm"))?,
+            input_ln: RmsNorm::load(
+                cfg.hidden_size,
+                cfg.rms_norm_eps,
+                &base.pp("input_layernorm"),
+            )?,
+            post_attn_ln: RmsNorm::load(
+                cfg.hidden_size,
+                cfg.rms_norm_eps,
+                &base.pp("post_attention_layernorm"),
+            )?,
         })
     }
 
-    fn forward(&mut self, xs: &Tensor, mask: Option<&Tensor>, offset: usize, use_cache: bool) -> CResult<Tensor> {
+    fn forward(
+        &mut self,
+        xs: &Tensor,
+        mask: Option<&Tensor>,
+        offset: usize,
+        use_cache: bool,
+    ) -> CResult<Tensor> {
         let residual = xs;
         let xs = self.input_ln.forward(xs)?;
         let xs = self.self_attn.forward(&xs, mask, offset, use_cache)?;
@@ -357,10 +459,18 @@ pub struct QwenLora {
 }
 
 impl QwenLora {
-    fn build(cfg: &Config, base: &VarBuilder, lora_vb: &VarBuilder, varmap: VarMap, rank: usize, scale: f64) -> CResult<Self> {
+    fn build(
+        cfg: &Config,
+        base: &VarBuilder,
+        lora_vb: &VarBuilder,
+        varmap: VarMap,
+        rank: usize,
+        scale: f64,
+    ) -> CResult<Self> {
         let vb_m = base.pp("model");
         let lora_m = lora_vb.pp("model");
-        let embed_tokens = candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
+        let embed_tokens =
+            candle_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
         let rotary = Arc::new(RotaryEmbedding::new(base.dtype(), cfg, base.device())?);
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for i in 0..cfg.num_hidden_layers {
@@ -442,27 +552,39 @@ impl QwenCausalLm {
         let api = hf_hub::api::sync::Api::new()
             .map_err(|e| AntumbraError::other(format!("hf-hub: {e}")))?;
         let repo = api.model(cfg.base_model.clone());
-        let tok_path = repo.get("tokenizer.json").map_err(|e| AntumbraError::other(format!("hf-hub tokenizer: {e}")))?;
-        let cfg_path = repo.get("config.json").map_err(|e| AntumbraError::other(format!("hf-hub config: {e}")))?;
+        let tok_path = repo
+            .get("tokenizer.json")
+            .map_err(|e| AntumbraError::other(format!("hf-hub tokenizer: {e}")))?;
+        let cfg_path = repo
+            .get("config.json")
+            .map_err(|e| AntumbraError::other(format!("hf-hub config: {e}")))?;
         let weights: Vec<PathBuf> = vec![repo
             .get("model.safetensors")
             .map_err(|e| AntumbraError::other(format!("hf-hub weights: {e}")))?];
 
         let tokenizer = tokenizers::Tokenizer::from_file(tok_path)
             .map_err(|e| AntumbraError::other(format!("tokenizer: {e}")))?;
-        let config_bytes = std::fs::read(cfg_path).map_err(|e| AntumbraError::other(e.to_string()))?;
+        let config_bytes =
+            std::fs::read(cfg_path).map_err(|e| AntumbraError::other(e.to_string()))?;
         let model_cfg: Config = serde_json::from_slice(&config_bytes)?;
 
         // Train in f32: keeps the frozen base, the LoRA factors, and the loss in
         // one precision (candle autograd flows through the f32 base matmuls into
         // the LoRA factors; the base, not being a Var, gets no gradient).
         let dtype = cfg.dtype.to_candle();
-        let base = unsafe {
-            VarBuilder::from_mmaped_safetensors(&weights, dtype, &device).map_err(ce)?
-        };
+        let base =
+            unsafe { VarBuilder::from_mmaped_safetensors(&weights, dtype, &device).map_err(ce)? };
         let varmap = VarMap::new();
         let lora_vb = VarBuilder::from_varmap(&varmap, dtype, &device);
-        let model = QwenLora::build(&model_cfg, &base, &lora_vb, varmap, cfg.lora_rank, cfg.lora_scale()).map_err(ce)?;
+        let model = QwenLora::build(
+            &model_cfg,
+            &base,
+            &lora_vb,
+            varmap,
+            cfg.lora_rank,
+            cfg.lora_scale(),
+        )
+        .map_err(ce)?;
 
         let opt = candle_nn::AdamW::new(
             model.varmap.all_vars(),
@@ -569,13 +691,17 @@ impl QwenCausalLm {
 /// Temperature sampling from logits over the vocabulary.
 fn sample_token(logits: &Tensor, temp: f64, rng: &mut StdRng) -> Result<u32> {
     if temp <= 0.0 {
-        return logits.argmax(D::Minus1).map_err(ce)?.to_scalar::<u32>().map_err(ce);
+        return logits
+            .argmax(D::Minus1)
+            .map_err(ce)?
+            .to_scalar::<u32>()
+            .map_err(ce);
     }
     let scaled = (logits / temp).map_err(ce)?;
     let probs = candle_nn::ops::softmax_last_dim(&scaled).map_err(ce)?;
     let probs: Vec<f32> = probs.to_vec1().map_err(ce)?;
-    let dist = WeightedIndex::new(&probs)
-        .map_err(|e| AntumbraError::other(format!("sample: {e}")))?;
+    let dist =
+        WeightedIndex::new(&probs).map_err(|e| AntumbraError::other(format!("sample: {e}")))?;
     Ok(dist.sample(rng) as u32)
 }
 
