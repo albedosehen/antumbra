@@ -182,4 +182,4 @@ See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per
 - **[Running the trainer](docs/running-the-trainer.md)** - the CUDA-13 / Windows GPU recipe.
 - **[Experiment Ledger](experiments/README.md)** - every falsifiable validation: claim, method, result, kill
   criterion, reproduce command.
-- **[Architecture Decision Records](docs/adr/README.md)** - every load-bearing decision, ADR-0001 … ADR-0010.
+- **[Architecture Decision Records](docs/adr/README.md)** - every load-bearing decision, ADR-0001 … ADR-0011.

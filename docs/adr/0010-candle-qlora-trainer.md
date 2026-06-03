@@ -56,10 +56,11 @@ trainable LoRA, `get_tensors` → safetensors); `candle-transformers` ships code
 Qwen2). `mistral.rs` (X-LoRA inference) is the reference for ADR-0005/serve.
 
 **The load-bearing constraint.** `candle`'s quantization is the llama.cpp **GGUF** family (Q4_K), not
-bitsandbytes **NF4**, and `QMatMul` is **inference-only - no backward**. True 4-bit QLoRA therefore needs a DIY
-quantized backward (dequantize the weight for the transpose). So **f16 base + LoRA comes first** (full candle
-autograd, works today); the quantized base is a later, isolable lift - exactly the de-risking order ADR-0002
-already prescribed ("plain LoRA over a bf16 base first; add NF4 once it works").
+bitsandbytes **NF4**, and `QMatMul` is **inference-only - no backward**. So **f16 base + LoRA comes first** (full
+candle autograd, works today); the quantized base is a later, isolable lift - exactly the de-risking order
+ADR-0002 already prescribed ("plain LoRA over a bf16 base first; add NF4 once it works"). *(Correction, studied
+in [ADR-0011](0011-v1-efficiency.md): 4-bit needs no "quantized backward" at all — QLoRA never backprops into
+the frozen base, so `QTensor::dequantize` in the forward + the normal LoRA backward suffices.)*
 
 ## Decision
 

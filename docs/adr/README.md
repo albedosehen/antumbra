@@ -27,6 +27,7 @@ Read them against the [two readings of the chain](../architecture.md#1-the-thesi
 | [0008](0008-generational-loop.md) | Durable generational loop | Proposed | grow → explore → score → graduate/prune as a resumable, population-aware state-machine-in-DB. |
 | [0009](0009-heterogeneous-composition.md) | Heterogeneous composed model | **North star** | The end goal: genuinely separate frozen experts wired by learned cross-attention bridges (CALM/BTX). v0's gate/boundary/loop/substrate carry over. |
 | [0010](0010-candle-qlora-trainer.md) | The candle QLoRA trainer | Accepted (MT-3 validated) | The RAFT reward-ranked LoRA trainer: sample K -> verify -> SFT the winners; candle Qwen2.5-Coder + LoRA; learning validated on the GPU. |
+| [0011](0011-v1-efficiency.md) | v1 efficiency: GRPO, 4-bit, serving | Proposed | Study before build: GRPO (group-relative PG over RAFT, reference via LoRA-toggle), 4-bit QLoRA via **dequant-in-forward** (not a quantized backward), and serving throughput. |
 
 ## Format
 
