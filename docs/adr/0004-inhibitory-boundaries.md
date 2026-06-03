@@ -40,6 +40,17 @@
 > convert draws also produced identical errors, hinting at low generation diversity — a temperature knob on
 > generation is a likely follow-up, since best-of-K only helps if the draws differ.)
 
+> **Live recovery achieved (2026-06-03).** Probing with **the expert's own adapter** (the faithful design — the
+> keystone maps a *specific expert's* competence, not the base's) succeeds where base-only failed. A narrow
+> **adder** expert was trained (add only; `[0.38, 1.00, 1.00]`, graduated) and `scope --expert adder-g0`
+> (`find_scope_over_contexts` over whole candidate contexts, each with its own verifier) probed its boundary:
+> the adder **passed** the `op=add` context (clean `def add`, `add(2,3)==5`) and **failed** the `op=multiply`
+> context (it emits no `multiply`), so the search recovered governing feature `op` and C' `{op: add}` and stored
+> an **actionable** boundary — `status` then reports `boundaries (antumbra): 1 (1 actionable, 0 open)`. This is
+> the keystone **fully live**: a real trained expert → real generation (`CandleServe`) → real execution (python
+> verifier) → counterfactual recovery → a persisted, actionable boundary. No fake remains in this path. Still
+> open: automatic discovery of the candidate governing features (here they are authored), and scale.
+
 ## Context
 
 The thesis at full strength: **a continual learner becomes capable by modeling the *counterfactual boundary* of

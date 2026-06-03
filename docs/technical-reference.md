@@ -245,6 +245,11 @@ release-profile `opt-level=1` override on `surrealdb`/`surrealdb-core` works aro
   spec stayed open at K=8) — the 1.5B base does not reliably follow terse context hints. The probe held
   integrity (returned "stays open", did not fabricate a scope); reliable live recovery needs a stronger actor
   (a graduated expert as generator, or a larger base).
+- **Keystone fully live (GPU).** Probing with **the expert's own adapter** (`scope --expert`,
+  `find_scope_over_contexts`) succeeds: a narrow **adder** (trained add-only) passed the `op=add` context and
+  failed `op=multiply`, so the search recovered governing feature `op` and C' `{op: add}` and stored an
+  **actionable** boundary (`status`: 1 actionable, 0 open). Real expert -> real generation -> real execution ->
+  counterfactual recovery -> persisted boundary, with no fake in the path.
 
 ## 14. What is proven, and what is not
 
@@ -259,10 +264,10 @@ mechanism (`GenerateVerifyProbe`) rather than a fake.
 v0 **serving** exists: `CandleServe` loads a graduated expert's adapter and generates, so route -> serve is
 closed (single-adapter; reloads per request).
 
+The keystone is now **fully live**: probing with a trained expert's adapter recovers a real competence boundary
+end-to-end (the bare base is too weak; best-of-K may also want a generation-temperature knob for draw diversity).
+
 **Not yet:** capability is exercised on small corpora and few experts (no generalization or catastrophic-
-forgetting test); the generate-then-verify probe is proven with fakes and runs live, but the v0 1.5B base is
-too weak to *recover* boundaries live (needs a graduated-expert generator or a larger base; possibly a
-generation-temperature knob for best-of-K diversity), and candidate governing features are supplied rather than
-discovered; the gate is the heuristic coverage gate, not the learned latent mixer; multi-adapter hot-swap and
-the `llama-cpp-2`/`mistral.rs` backends, GRPO (v1 over RAFT), and GGUF-Q4 quantized backward (MT-4) are future;
-composition (ADR-0009) is the north star.
+forgetting test); candidate governing features are authored rather than discovered; the gate is the heuristic
+coverage gate, not the learned latent mixer; multi-adapter hot-swap and the `llama-cpp-2`/`mistral.rs` backends,
+GRPO (v1 over RAFT), and GGUF-Q4 quantized backward (MT-4) are future; composition (ADR-0009) is the north star.

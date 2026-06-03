@@ -58,6 +58,31 @@ pub async fn find_scope(
     Ok(None)
 }
 
+/// Search over **whole candidate contexts** (each carrying its own `verify`),
+/// rather than single-feature swaps. This is what maps a *specific expert's*
+/// competence boundary: the expert acts the fixed behavior, succeeds on the
+/// in-scope task and fails on the out-of-scope one, and the first context it
+/// finds acceptable is C'. `governing_feature` labels what differs.
+pub async fn find_scope_over_contexts(
+    behavior: &str,
+    governing_feature: &str,
+    fail_context: &Value,
+    candidate_contexts: &[Value],
+    probe: &dyn AcceptabilityProbe,
+) -> Result<Option<BoundaryFinding>> {
+    for context in candidate_contexts {
+        if probe.acceptable(behavior, context).await? {
+            return Ok(Some(BoundaryFinding {
+                behavior: behavior.to_string(),
+                governing_feature: governing_feature.to_string(),
+                fail_context: fail_context.clone(),
+                near_ok_context: context.clone(),
+            }));
+        }
+    }
+    Ok(None)
+}
+
 /// Promote a finding to a persistable [`FailureBoundary`]. Confidence and the
 /// embedded `context_vec` are supplied by the caller (the loop owns the
 /// embedder); the boundary is only actionable because C' was recovered.
@@ -136,5 +161,28 @@ mod tests {
             .await
             .unwrap();
         assert!(finding.is_none());
+    }
+
+    #[tokio::test]
+    async fn over_contexts_returns_first_acceptable_context() {
+        // Maps an expert's competence: it fails the "multiply" task and passes
+        // the "add" task; the recovered C' is the first acceptable context.
+        let probe = FeatureProbe {
+            feature: "op".into(),
+            ok_value: serde_json::json!("add"),
+        };
+        let fail = serde_json::json!({ "op": "multiply" });
+        let candidates = vec![
+            serde_json::json!({ "op": "reverse" }),
+            serde_json::json!({ "op": "add" }),
+        ];
+        let finding =
+            find_scope_over_contexts("implement the op", "op", &fail, &candidates, &probe)
+                .await
+                .unwrap()
+                .expect("an in-scope context exists");
+        assert_eq!(finding.governing_feature, "op");
+        assert_eq!(finding.near_ok_context["op"], serde_json::json!("add"));
+        assert_eq!(finding.fail_context["op"], serde_json::json!("multiply"));
     }
 }

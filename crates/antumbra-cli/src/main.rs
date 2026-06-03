@@ -16,7 +16,7 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 
 #[cfg(feature = "models")]
-use antumbra_boundary::{find_scope, finding_to_boundary};
+use antumbra_boundary::{find_scope_over_contexts, finding_to_boundary};
 #[cfg(feature = "models")]
 use antumbra_core::ports::{ActRequest, Serve};
 #[cfg(feature = "models")]
@@ -87,10 +87,14 @@ enum Command {
     /// and C' by actually serving and checking. Stores an actionable boundary.
     /// Needs --features models + a GPU + python.
     Scope {
-        /// Path to a scope spec JSON: { behavior, base_model?, fail_context,
-        /// candidates: [[feature, [values]]] }.
+        /// Path to a scope spec JSON: { behavior, base_model?, governing_feature?,
+        /// fail_context, candidates: [<full context objects, each with verify>] }.
         #[arg(long)]
         spec: String,
+        /// Probe with this expert's adapter (by name) instead of the bare base,
+        /// so the search maps that expert's own competence boundary.
+        #[arg(long)]
+        expert: Option<String>,
         #[arg(long, default_value_t = 96)]
         max_new_tokens: usize,
         /// Best-of-K samples per context check (generation is stochastic).
@@ -330,6 +334,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Scope {
             spec,
+            expert,
             max_new_tokens,
             samples,
             confidence,
@@ -342,30 +347,54 @@ async fn main() -> anyhow::Result<()> {
                 let behavior = doc["behavior"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("spec.behavior must be a string"))?;
-                let base_model = doc["base_model"]
-                    .as_str()
-                    .unwrap_or("Qwen/Qwen2.5-Coder-1.5B");
+                let governing_feature = doc["governing_feature"].as_str().unwrap_or("context");
                 let fail_context = doc["fail_context"].clone();
-                let candidates: Vec<(String, Vec<serde_json::Value>)> = doc["candidates"]
+                let candidates: Vec<serde_json::Value> = doc["candidates"]
                     .as_array()
-                    .ok_or_else(|| anyhow::anyhow!("spec.candidates must be an array"))?
-                    .iter()
-                    .map(|c| {
-                        let feature = c[0].as_str().unwrap_or_default().to_string();
-                        let values = c[1].as_array().cloned().unwrap_or_default();
-                        (feature, values)
-                    })
-                    .collect();
+                    .ok_or_else(|| anyhow::anyhow!("spec.candidates must be an array of contexts"))?
+                    .clone();
+
+                // Probe with an expert's adapter (maps that expert's boundary) or
+                // the bare base. The expert acts the behavior; the verifier judges.
+                let (base_model, adapter) = match &expert {
+                    Some(name) => {
+                        let experts = expert::list(&store).await?;
+                        let e = experts
+                            .iter()
+                            .find(|e| &e.name == name)
+                            .ok_or_else(|| anyhow::anyhow!("expert `{name}` not found"))?;
+                        println!(
+                            "probing with expert {} (adapter {})",
+                            e.name, e.artifact_uri
+                        );
+                        (e.base_model.clone(), Some(e.artifact_uri.clone()))
+                    }
+                    None => (
+                        doc["base_model"]
+                            .as_str()
+                            .unwrap_or("Qwen/Qwen2.5-Coder-1.5B")
+                            .to_string(),
+                        None,
+                    ),
+                };
 
                 let cfg = RaftConfig {
                     max_new_tokens,
                     ..RaftConfig::default()
                 };
-                let serve = CandleServe::new(base_model, None, cfg);
+                let serve = CandleServe::new(base_model, adapter, cfg);
                 let probe = GenerateVerifyProbe::new(serve, antumbra_critic::CommandVerifier)
                     .with_samples(samples);
 
-                match find_scope(behavior, &fail_context, &candidates, &probe).await? {
+                match find_scope_over_contexts(
+                    behavior,
+                    governing_feature,
+                    &fail_context,
+                    &candidates,
+                    &probe,
+                )
+                .await?
+                {
                     Some(finding) => {
                         println!("recovered governing feature: {}", finding.governing_feature);
                         println!("C' (acceptable context): {}", finding.near_ok_context);
@@ -392,16 +421,13 @@ async fn main() -> anyhow::Result<()> {
                         );
                     }
                     None => {
-                        println!(
-                            "no single-feature context change flipped acceptability; \
-                                  boundary stays open"
-                        );
+                        println!("no candidate context was acceptable; boundary stays open");
                     }
                 }
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&spec, max_new_tokens, samples, confidence);
+                let _ = (&spec, &expert, max_new_tokens, samples, confidence);
                 anyhow::bail!(
                     "`scope` requires building with --features models (candle + GPU + python)"
                 );

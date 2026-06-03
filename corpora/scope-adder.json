@@ -1,0 +1,22 @@
+{
+  "behavior": "Write a Python function for the arithmetic operation named by op.",
+  "governing_feature": "op",
+  "fail_context": {
+    "op": "multiply",
+    "verify": {
+      "extract_code": true,
+      "program": "python",
+      "args": ["-c", "import os,sys; ns={}; exec(os.environ['ANTUMBRA_COMPLETION'], ns); sys.exit(0 if ns.get('multiply',lambda *_:0)(3,4)==12 else 1)"]
+    }
+  },
+  "candidates": [
+    {
+      "op": "add",
+      "verify": {
+        "extract_code": true,
+        "program": "python",
+        "args": ["-c", "import os,sys; ns={}; exec(os.environ['ANTUMBRA_COMPLETION'], ns); sys.exit(0 if ns.get('add',lambda *_:0)(2,3)==5 else 1)"]
+      }
+    }
+  ]
+}

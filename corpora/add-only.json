@@ -1,0 +1,11 @@
+[
+  {
+    "id": "add",
+    "prompt": "# Write a Python function `add(a, b)` that returns the arithmetic sum of two integers.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": ["-c", "import os,sys; ns={}; exec(os.environ['ANTUMBRA_COMPLETION'], ns); sys.exit(0 if ns.get('add',lambda *_:None)(2,3)==5 else 1)"]
+    }
+  }
+]
