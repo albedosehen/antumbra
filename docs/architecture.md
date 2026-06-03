@@ -211,7 +211,7 @@ search -> actionable boundary -> scoped inhibition). See the [Technical Referenc
 Not yet runtime-validated / built: the real `AcceptabilityProbe` + llama/mistral serving (ADR-0006), automatic
 governing-feature discovery, the learned latent gate (v0 is the heuristic coverage gate), GRPO (v1 over RAFT),
 GGUF-Q4 quantized backward (MT-4), `SCHEMAFULL` + the surql-rs migration-history runner, and the
-orchestration-run repo. `experiments/` is not yet populated.
+orchestration-run repo. The validations to date are catalogued in the [experiment ledger](../experiments/README.md).
 
 ---
 

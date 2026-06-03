@@ -180,4 +180,6 @@ See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per
 - **[Diagram Atlas](docs/diagrams.md)** - every diagram in one place: concept, system, flow, schema, per-ADR.
 - **[Glossary](docs/glossary.md)** - every ADR-0010 acronym, with a diagram each, and why it is called candle.
 - **[Running the trainer](docs/running-the-trainer.md)** - the CUDA-13 / Windows GPU recipe.
+- **[Experiment Ledger](experiments/README.md)** - every falsifiable validation: claim, method, result, kill
+  criterion, reproduce command.
 - **[Architecture Decision Records](docs/adr/README.md)** - every load-bearing decision, ADR-0001 … ADR-0010.
