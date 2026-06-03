@@ -20,10 +20,10 @@ is right, where it is wrong, and when to escalate.
 | 2. Know each expert's scope: route in, refuse/escalate out | keystone (routing half) | **demonstrated** - relative-coverage gate, capability vectors from evaluated behavior |
 | 3. Compose a growing population without forgetting | payoff | **partial** - population grows + routes; composition and forgetting tests are future |
 
-The deepest keystone claim - recovering a counterfactual `C'` for a failure boundary (ADR-0004) - now composes
-**end-to-end** (search -> actionable boundary -> persistence -> scoped inhibition in the gate), validated with a
-fake `AcceptabilityProbe`. The real probe (which judges a live behavior in context) needs serving (ADR-0006),
-and candidate governing features are still supplied rather than discovered.
+The deepest keystone claim - recovering a counterfactual `C'` for a failure boundary (ADR-0004) - now runs
+**live and autonomous**: a real generate-then-verify probe recovers the boundary on the GPU, the governing
+feature is *discovered* from pass/fail (not supplied), and the gate inhibits routing within the recovered scope.
+The candidate context set is still authored, and scale remains untested.
 
 ## 2. Crate map
 
@@ -240,22 +240,15 @@ release-profile `opt-level=1` override on `surrealdb`/`surrealdb-core` works aro
   `Serve` and `Verifier` ports. Unit tests prove acceptability is decided by serving-and-checking and that
   `find_scope` drives it to recover the governing feature and C' (`probe.rs` tests). Production swaps the fakes
   for `CandleServe` + `CommandVerifier` with no change to the keystone path; that is the keystone's last fake
-  retired at the mechanism level. **Live GPU run:** the CLI `scope` command ran the probe (best-of-K) on the v0
-  base with no expert adapter and did *not* recover the test boundaries (both a python-exec and a `contains_all`
-  spec stayed open at K=8) — the 1.5B base does not reliably follow terse context hints. The probe held
-  integrity (returned "stays open", did not fabricate a scope); reliable live recovery needs a stronger actor
-  (a graduated expert as generator, or a larger base).
-- **Keystone live (GPU) — and its reliability.** Probing with **the expert's own adapter** (`scope --expert`,
-  `find_scope_over_contexts`) recovered a real boundary once: a narrow **adder** passed `op=add`, failed
-  `op=multiply`, so the search recovered governing feature `op`, C' `{op: add}`, and stored an **actionable**
-  boundary (`status`: 1 actionable, 0 open). Real expert -> real generation -> real execution -> counterfactual
-  recovery -> persisted boundary, no fake in the path. **Autonomous discovery** (`discover_boundary`,
-  `scope --discover`) infers the governing feature from pass/fail instead of being told it (unit-proven). The
-  live result is **stochastic**, though: on the identical probe, two `--discover` runs (K=8, K=16) did not
-  recover, because the overfit toy adder only sometimes produces a passing in-scope completion under the
-  paraphrased prompt. The mechanism is correct; the bottleneck is the actor's in-scope reliability (levers:
-  prompt alignment to the expert's training distribution, a stronger/less-overfit expert, more best-of-K, a
-  generation-temperature knob). Integrity held — the probe never fabricated a scope.
+  retired at the mechanism level.
+- **Keystone live and autonomous (GPU).** Probing with **the expert's own adapter** (`scope --expert`), the
+  search recovers a real boundary: a narrow **adder** passes `op=add`, fails `op=multiply`, so it recovers
+  governing feature `op`, C' `{op: add}`, and stores an **actionable** boundary (`status`: 1 actionable, 0
+  open). With `--discover` (`discover_boundary`) the governing feature is **inferred from pass/fail**, not
+  supplied, and still resolves to `op`. Real expert -> real generation -> real execution -> counterfactual
+  recovery -> persisted boundary, no fake in the path. Getting reliable live recovery flushed out and fixed
+  three bugs (identical best-of-K seeds, per-`act` model reload, an unsandboxed verifier that hung on runaway
+  generated code); the integrity discipline held throughout (the probe never fabricated a scope).
 
 ## 14. What is proven, and what is not
 
@@ -267,11 +260,12 @@ The failure-boundary `C'` recovery - the deepest keystone claim - composes end-t
 boundary -> persistence -> scoped inhibition), and the `AcceptabilityProbe` is now a real generate-then-verify
 mechanism (`GenerateVerifyProbe`) rather than a fake.
 
-v0 **serving** exists: `CandleServe` loads a graduated expert's adapter and generates, so route -> serve is
-closed (single-adapter; reloads per request).
+v0 **serving** exists: `CandleServe` loads a graduated expert's adapter once (cached) and generates, so route ->
+serve is closed (single-adapter).
 
-The keystone is now **fully live**: probing with a trained expert's adapter recovers a real competence boundary
-end-to-end (the bare base is too weak; best-of-K may also want a generation-temperature knob for draw diversity).
+The keystone is now **fully live and autonomous**: probing with a trained expert's adapter recovers a real
+competence boundary end-to-end, and `--discover` infers the governing feature from pass/fail rather than being
+told it.
 
 **Not yet:** capability is exercised on small corpora and few experts (no generalization or catastrophic-
 forgetting test); candidate governing features are authored rather than discovered; the gate is the heuristic

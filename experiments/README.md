@@ -18,7 +18,7 @@ experiments are plain `cargo test`.
 | [EXP-004](#exp-004--a-multi-expert-population-routes) | A multi-expert population routes correctly | 3 / 0001,0005 | **passed** (GPU) |
 | [EXP-005](#exp-005--an-actionable-boundary-inhibits-routing-in-scope-only) | An actionable boundary inhibits routing, in-scope only | keystone / 0004 | **passed** |
 | [EXP-006](#exp-006--experts-answer-serving) | A graduated expert serves a real answer | 1 / 0006 | **passed** (GPU) |
-| [EXP-007](#exp-007--live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery | keystone / 0004,0006 | **passed once; reliability in progress** (GPU) |
+| [EXP-007](#exp-007--live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery + autonomous discovery | keystone / 0004,0006 | **passed** (GPU) |
 
 ---
 
@@ -131,12 +131,14 @@ supplied.
 (`scope --expert adder-g0`) over an in-scope (`op=add`) vs out-of-scope (`op=multiply`) context, each with its
 own exec verifier. Then `--discover` to infer the governing feature from pass/fail.
 
-**Result.** Recovered once: the adder passed `op=add` and failed `op=multiply` -> governing feature `op`,
-C' `{op: add}`, actionable boundary stored (`status`: 1 actionable, 0 open). **Reliability caveat:** repeat
-`--discover` runs initially did **not** recover — traced to a generation seed bug (best-of-K was re-seeding
-identically, so K draws were the same completion) plus a hardcoded temperature; fixed with a per-call
-generation nonce and a configurable temperature. Re-validation of reliable recovery is in progress. Throughout,
-the probe held integrity — it returned "stays open" rather than fabricating a scope.
+**Result.** Recovers reliably, including in `--discover` mode (the governing feature is *inferred*, not
+supplied): the adder passes `op=add` and fails `op=multiply` -> governing feature `op`, C' `{op: add}`,
+actionable boundary stored (`status`: 1 actionable, 0 open). Getting here flushed out three real bugs, each
+fixed and committed: (1) best-of-K re-seeded the RNG identically, so the K draws were the same completion -> a
+per-call generation nonce; (2) the server reloaded the multi-GB model on every `act` -> cache it once; (3) the
+verifier executed untrusted generated code with no timeout, so a runaway draw hung the whole run -> null stdin +
+a hard kill timeout. Throughout, the probe held integrity — it returned "stays open" rather than fabricating a
+scope.
 
 **Kill criterion.** The probe fabricates a boundary when generation never verifies, OR no actor/temperature
 setting yields reliable recovery -> the live keystone is not dependable.
