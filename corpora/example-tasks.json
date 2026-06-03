@@ -1,0 +1,18 @@
+[
+  {
+    "id": "py-add",
+    "prompt": "# Write a Python function `add(a, b)` that returns their sum.\n",
+    "verify": {
+      "program": "python",
+      "args": ["-c", "import os,subprocess,sys; src=os.environ['ANTUMBRA_COMPLETION']; ns={}; exec(src, ns); sys.exit(0 if ns.get('add',lambda *_:None)(2,3)==5 else 1)"]
+    }
+  },
+  {
+    "id": "py-reverse",
+    "prompt": "# Write a Python function `reverse(s)` that reverses a string.\n",
+    "verify": {
+      "program": "python",
+      "args": ["-c", "import os,sys; src=os.environ['ANTUMBRA_COMPLETION']; ns={}; exec(src, ns); sys.exit(0 if ns.get('reverse',lambda *_:None)('abc')=='cba' else 1)"]
+    }
+  }
+]

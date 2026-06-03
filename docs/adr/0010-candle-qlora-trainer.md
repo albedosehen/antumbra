@@ -1,6 +1,17 @@
 # ADR-0010 — The candle QLoRA trainer (antumbra-train)
 
-**Status:** Proposed · **Date:** 2026-06-02 · **Related:** 0002 (shadow plasticity — this is its engine), 0003 (verified reward), 0001 (graduation target), 0006 (one GPU), 0005 (the gate is a second training target)
+**Status:** Accepted — pipeline implemented + compiles (2026-06-02); runtime validation pending on the 3090 Ti · **Date:** 2026-06-02 · **Related:** 0002 (shadow plasticity — this is its engine), 0003 (verified reward), 0001 (graduation target), 0006 (one GPU), 0005 (the gate is a second training target)
+
+> **Implementation (2026-06-02).** The full pipeline is built and compiles
+> (clippy-clean): the candle Qwen2.5-Coder + LoRA `CausalLm`
+> (`antumbra-train/src/models/qwen.rs`, behind the `models` feature), the RAFT
+> loop + `RaftTrainer` (the `Trainer` port), the `CommandVerifier` (ADR-0003
+> environment reward), and `JsonCorpus`, all wired into the CLI:
+> `cargo run -p antumbra-cli --features models,cuda -- train --corpus corpora/example-tasks.json`.
+> The remaining step is **MT-3 runtime**: run it on the 3090 Ti (downloads the
+> ~3 GB weights), confirm a shadow's pass-rate rises and the loop graduates a
+> real adapter. The LoRA primitive, SFT objective, RAFT loop, trainer wiring,
+> and verifier are all CPU-tested; only the GPU model is unvalidated at runtime.
 
 > Concrete design for the heaviest component ADR-0002 named: the DIY `candle` path that turns a shadow into a
 > trained adapter from **verified outcomes**. Synthesized from a literature + ecosystem review (2026-06-02).

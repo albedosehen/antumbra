@@ -29,3 +29,6 @@ default = []
 # wired into the loop. Needs a GPU + model weights to actually run. Keeping
 # antumbra-train optional keeps candle out of the default CLI build.
 models = ["dep:antumbra-train", "antumbra-train/models", "dep:antumbra-critic"]
+# GPU backends (combine with `models`): e.g. --features models,cuda.
+cuda = ["antumbra-train/cuda"]
+metal = ["antumbra-train/metal"]
