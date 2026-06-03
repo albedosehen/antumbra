@@ -20,6 +20,7 @@ experiments are plain `cargo test`.
 | [EXP-006](#exp-006--experts-answer-serving) | A graduated expert serves a real answer | 1 / 0006 | **passed** (GPU) |
 | [EXP-007](#exp-007--live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery + autonomous discovery | keystone / 0004,0006 | **passed** (GPU) |
 | [EXP-008](#exp-008--grpo-vs-raft) | GRPO is more sample-efficient than RAFT | 1 / 0011 | **passed, single run** (GPU) |
+| [EXP-009](#exp-009--4-bit-qlora-training-memory) | 4-bit base saves training memory at f16 quality | 1 / 0011 | **shelved** — no candle training-memory win (GPU) |
 
 ---
 
@@ -166,6 +167,25 @@ shelve GRPO, keep RAFT. *(Cleared directionally; a rigorous win needs multiple s
 
 **Reproduce.** `train --corpus corpora/arith.json --algo grpo` vs `--algo raft` (commits `0159d55`, `4d53853`,
 `e6a7a20`, `47fecbc`).
+
+## EXP-009 — 4-bit QLoRA training memory
+
+**Claim.** A Q4_K base trains a LoRA at f16 pass-rate using ~1/4 of the base memory (dequant-in-forward,
+ADR-0011).
+
+**Method.** Train the arith corpus with the f16 base and with `--quantize-base`, identical knobs (samples 4,
+rounds 3, max-new-tokens 32).
+
+**Result.** f16 trained fine (`0.12 -> 0.38 -> 1.00`, graduated). The 4-bit base loaded (candle's CUDA Q4_K
+quantize/dequantize *works*) but **OOM'd in training** — the opposite of the goal. `dequantize()` materializes
+the full weight, which the autograd graph **retains** for the input gradient (`grad_x = grad_out · W`), so peak
+memory is f16-base + the Q4 base + the materialized dequant. The correctness claim held (it trains, no quantized
+backward); the memory claim did not, and needs a fused quantized backward candle lacks.
+
+**Kill criterion.** 4-bit is slower than, or no smaller than, f16 -> stays north-star-only. *(Triggered: 4-bit
+training is shelved; the dequant path is kept, gated off, for inference and a future fused backward.)*
+
+**Reproduce.** `train --corpus corpora/arith.json --quantize-base` vs without (commit `db89a36`).
 
 ---
 

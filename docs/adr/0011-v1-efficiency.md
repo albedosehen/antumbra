@@ -1,6 +1,19 @@
 # ADR-0011 — v1 efficiency: GRPO, 4-bit QLoRA training, and serving throughput
 
-**Status:** Accepted — GRPO implemented + GPU-validated (2026-06-03); 4-bit and serving concurrency still proposed · **Date:** 2026-06-03 · **Related:** 0010 (the trainer — this details its v1/MT-4), 0002 (shadow plasticity), 0003 (verified reward), 0006 (serving — concurrency lives here), 0009 (north star — where 4-bit pays off)
+**Status:** Accepted — GRPO validated + #4 hardened (2026-06-03); 4-bit implemented but its training-memory goal is **not met in candle** (shelved for training) · **Date:** 2026-06-03 · **Related:** 0010 (the trainer — this details its v1/MT-4), 0002 (shadow plasticity), 0003 (verified reward), 0006 (serving — concurrency lives here), 0009 (north star — where 4-bit pays off)
+
+> **4-bit measured, and the memory claim corrected (2026-06-03).** Implemented as `BaseWeight::Dense | Quantized`
+> with a `quantize_base` walk (Q4_K via `QTensor::quantize_onto`) and dequant-in-forward (`train --quantize-base`).
+> Two findings from the GPU A/B (arith, samples 4 / rounds 3): (1) candle's **CUDA Q4_K quantize/dequantize
+> works** and the model trains correctly — the *correctness* claim above (no quantized backward; QLoRA never
+> backprops into the frozen base) held. (2) But it **OOM'd where the f16 base fit** — so the *memory win does
+> not materialize for training in candle.* `dequantize()` produces the full-precision weight, and the autograd
+> graph **retains** it because the input gradient `grad_x = grad_out · W` needs `W` (and `x` carries LoRA
+> gradients from earlier layers). Peak memory is therefore f16-base + the Q4 base + the materialized dequant —
+> *worse* than f16. The real QLoRA memory win needs a **fused** quantized backward (bitsandbytes-style) that
+> never materializes `W`; candle's `QMatMul` is forward-only, so this isn't available. **Per the kill criterion,
+> 4-bit *training* is shelved** — the dequant path is correct and kept (gated off), serviceable for *inference*
+> (where there is no backward to retain `W`) and for the north star once a fused quantized backward exists.
 
 > **GRPO validated (2026-06-03).** Implemented as `grpo.rs` (CPU-tested core) + `QwenCausalLm: GrpoLm` (GPU) +
 > `GrpoTrainer` behind the `Trainer` port, selectable via `train --algo grpo`. The design bets held: reference =
@@ -13,7 +26,7 @@
 
 > Study artifact. v0 is validated end-to-end (ADR-0010 MT-3: RAFT + f16 LoRA learns on the GPU; ADR-0006:
 > cached single-adapter serving). This ADR studies the three efficiency levers queued before the
-> scale/forgetting study (EXP-009): a more sample-efficient **algorithm** (GRPO), a more memory-efficient
+> scale/forgetting study (EXP-010): a more sample-efficient **algorithm** (GRPO), a more memory-efficient
 > **base** (4-bit QLoRA), and **serving throughput** (the sync-generate-on-the-runtime-thread question). The
 > point is to resolve the feasibility unknowns *before* writing code.
 
@@ -112,7 +125,7 @@ or a dedicated inference thread/actor) is only warranted once a concurrent path 
 - **Negative:** GRPO adds real bookkeeping (per-token log-prob capture, old/ref forwards, ratio/clip/KL) and is
   easy to get subtly wrong; 4-bit adds per-forward dequant compute and needs Q4_K CUDA dequant verified.
 - **Neutral:** serving concurrency is explicitly out of scope here; this ADR is a study and gates the order
-  (GRPO and 4-bit before EXP-009 scale/forgetting study).
+  (GRPO and 4-bit before the EXP-010 scale/forgetting study).
 
 ## Alternatives considered
 
@@ -123,7 +136,7 @@ or a dedicated inference thread/actor) is only warranted once a concurrent path 
 - **`spawn_blocking` to fix serving concurrency now.** Rejected as premature: there is no concurrent serving
   path yet, and moving a `&mut` model out of a `&self` mutex into a `'static` closure is the wrong shape; do it
   with the S-LoRA engine.
-- **Doing the scale/forgetting study (EXP-009) first.** Deferred at the user's direction: land the efficiency levers, then scale-test.
+- **Doing the scale/forgetting study (EXP-010) first.** Deferred at the user's direction: land the efficiency levers, then scale-test.
 
 ## Validation (each a falsifiable experiment with a kill criterion)
 
