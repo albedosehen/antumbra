@@ -19,8 +19,9 @@ tokenizers = { version = "0.22", optional = true }
 hf-hub = { version = "0.5", optional = true }
 # Candle serving reuses the trainer's Qwen2.5-Coder + LoRA model (ADR-0006).
 antumbra-train = { path = "../antumbra-train", optional = true }
-# Await-safe mutex so the server caches its loaded model across `act` calls.
-tokio = { workspace = true, features = ["sync"], optional = true }
+# Await-safe mutex (cached model) + block_in_place (don't park the runtime
+# worker during synchronous generation, ADR-0011 #4).
+tokio = { workspace = true, features = ["sync", "rt-multi-thread"], optional = true }
 
 [features]
 default = []

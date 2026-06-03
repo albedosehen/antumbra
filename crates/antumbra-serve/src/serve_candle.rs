@@ -38,16 +38,27 @@ impl CandleServe {
 impl Serve for CandleServe {
     async fn act(&self, req: ActRequest) -> Result<ActOutput> {
         let mut guard = self.model.lock().await;
-        if guard.is_none() {
-            let loader = CandleModelLoader::new(self.config.clone());
-            *guard = Some(
-                loader
-                    .load(&self.base_model, self.adapter.as_deref())
-                    .await?,
-            );
-        }
-        let model = guard.as_mut().expect("model loaded above");
-        let mut outputs = model.generate(&req.prompt, 1).await?;
+        // candle generation is synchronous and CPU/GPU-bound. Run it under
+        // `block_in_place` so the runtime spawns a replacement worker and other
+        // tasks are not starved while a request is being served (ADR-0011 #4).
+        // Requires a multi-threaded runtime, which the CLI uses.
+        let mut outputs = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                if guard.is_none() {
+                    let loader = CandleModelLoader::new(self.config.clone());
+                    *guard = Some(
+                        loader
+                            .load(&self.base_model, self.adapter.as_deref())
+                            .await?,
+                    );
+                }
+                guard
+                    .as_mut()
+                    .expect("model loaded above")
+                    .generate(&req.prompt, 1)
+                    .await
+            })
+        })?;
         let final_output = outputs.drain(..).next().unwrap_or_default();
         Ok(ActOutput {
             steps: vec![StepOutput {
