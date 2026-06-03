@@ -199,7 +199,9 @@ flowchart TD
 
 ## The result
 
-MT-3 runtime validated on an RTX 3090 Ti (2026-06-03). On the type-hint-convention corpus
+MT-3 runtime validated on an RTX 3090 Ti (2026-06-03), two ways. On the type-hint-convention corpus
 (`corpora/learn.json`, in-process `contains_all` reward), the per-round pass-rate over four RAFT rounds rose
-**0.06 -> 0.25 -> 0.88 -> 1.00**, the shadow graduated, and a real bf16 adapter was frozen into the population.
-The adapter learned the convention from verified outcomes — the loop closes and improves.
+**0.06 -> 0.25 -> 0.88 -> 1.00**. On `corpora/example-tasks.json` with the real **exec verifier** — the
+generated function is executed and its behavior asserted — it rose **0.38 -> 1.00 -> 1.00 -> 1.00**. Both
+graduated and froze a real bf16 adapter. The adapter learns from verified outcomes, including outcomes verified
+by actually running the code — the loop closes and improves.

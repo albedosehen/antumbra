@@ -2,10 +2,13 @@
 
 **Status:** Accepted — pipeline implemented + MT-3 validated on the 3090 Ti (2026-06-03) · **Date:** 2026-06-02 · **Related:** 0002 (shadow plasticity — this is its engine), 0003 (verified reward), 0001 (graduation target), 0006 (one GPU), 0005 (the gate is a second training target) · **Vocabulary:** [glossary](../glossary.md)
 
-> **MT-3 result (2026-06-03).** Validated on an RTX 3090 Ti. On `corpora/learn.json` (in-process
-> `contains_all` reward), the per-round RAFT pass-rate rose **0.06 -> 0.25 -> 0.88 -> 1.00**, the shadow
-> graduated, and a real bf16 adapter was frozen. f16 overflowed to NaN logits on GPU; the default dtype is now
-> bf16 (with a greedy fallback in the sampler). The loop closes and the adapter learns from verified outcomes.
+> **MT-3 result (2026-06-03).** Validated on an RTX 3090 Ti, two ways. (1) On `corpora/learn.json` (in-process
+> `contains_all` reward) the per-round RAFT pass-rate rose **0.06 -> 0.25 -> 0.88 -> 1.00**. (2) On
+> `corpora/example-tasks.json` with the real **exec verifier** — the generated function is `exec`'d and its
+> behavior asserted (`add(2,3)==5`, `reverse('abc')=='cba'`) — it rose **0.38 -> 1.00 -> 1.00 -> 1.00**. Both
+> graduated and froze a real bf16 adapter. f16 overflowed to NaN logits on GPU; the default dtype is now bf16
+> (with a greedy fallback in the sampler). The loop closes and the adapter learns from verified outcomes —
+> including outcomes verified by actually running the code.
 
 > **Implementation (2026-06-02).** The full pipeline is built and compiles
 > (clippy-clean): the candle Qwen2.5-Coder + LoRA `CausalLm`
