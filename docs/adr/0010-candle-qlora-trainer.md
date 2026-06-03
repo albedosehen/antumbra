@@ -1,6 +1,11 @@
 # ADR-0010 — The candle QLoRA trainer (antumbra-train)
 
-**Status:** Accepted — pipeline implemented + compiles (2026-06-02); runtime validation pending on the 3090 Ti · **Date:** 2026-06-02 · **Related:** 0002 (shadow plasticity — this is its engine), 0003 (verified reward), 0001 (graduation target), 0006 (one GPU), 0005 (the gate is a second training target)
+**Status:** Accepted — pipeline implemented + MT-3 validated on the 3090 Ti (2026-06-03) · **Date:** 2026-06-02 · **Related:** 0002 (shadow plasticity — this is its engine), 0003 (verified reward), 0001 (graduation target), 0006 (one GPU), 0005 (the gate is a second training target) · **Vocabulary:** [glossary](../glossary.md)
+
+> **MT-3 result (2026-06-03).** Validated on an RTX 3090 Ti. On `corpora/learn.json` (in-process
+> `contains_all` reward), the per-round RAFT pass-rate rose **0.06 -> 0.25 -> 0.88 -> 1.00**, the shadow
+> graduated, and a real bf16 adapter was frozen. f16 overflowed to NaN logits on GPU; the default dtype is now
+> bf16 (with a greedy fallback in the sampler). The loop closes and the adapter learns from verified outcomes.
 
 > **Implementation (2026-06-02).** The full pipeline is built and compiles
 > (clippy-clean): the candle Qwen2.5-Coder + LoRA `CausalLm`
