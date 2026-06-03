@@ -58,6 +58,15 @@ enum Command {
         generations: u32,
         #[arg(long, default_value = "run:train")]
         run: String,
+        /// Completions sampled per task per round (RAFT's K).
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        /// RAFT rounds per shadow.
+        #[arg(long, default_value_t = 4)]
+        rounds: usize,
+        /// Max tokens generated per completion.
+        #[arg(long, default_value_t = 256)]
+        max_new_tokens: usize,
     },
 }
 
@@ -154,13 +163,21 @@ async fn main() -> anyhow::Result<()> {
             corpus,
             generations,
             run,
+            samples,
+            rounds,
+            max_new_tokens,
         } => {
             #[cfg(feature = "models")]
             {
                 use antumbra_train::{CandleModelLoader, JsonCorpus, RaftConfig, RaftTrainer};
 
                 let store = connect(&cli.url).await?;
-                let raft_cfg = RaftConfig::default();
+                let raft_cfg = RaftConfig {
+                    samples_per_task: samples,
+                    rounds,
+                    max_new_tokens,
+                    ..RaftConfig::default()
+                };
                 let loader = CandleModelLoader::new(raft_cfg.clone());
                 let corpus = JsonCorpus::from_file(&corpus)?;
                 let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
@@ -183,7 +200,7 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&corpus, generations, &run);
+                let _ = (&corpus, generations, &run, samples, rounds, max_new_tokens);
                 anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
             }
         }

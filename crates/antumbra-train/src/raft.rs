@@ -65,7 +65,10 @@ pub async fn raft_train(
         }
     }
 
-    let adapter_uri = format!("{}/{run_id}.safetensors", cfg.adapter_dir);
+    // Sanitize the run id for a filesystem path (record ids contain ':', which
+    // is illegal in Windows filenames).
+    let safe = run_id.as_str().replace([':', '/', '\\'], "_");
+    let adapter_uri = format!("{}/{safe}.safetensors", cfg.adapter_dir);
     model.save_adapter(&adapter_uri)?;
     let final_fitness = reward_curve.last().copied().unwrap_or(0.0);
 
@@ -132,7 +135,7 @@ mod tests {
         // pass-rate climbs as the adapter trains on verified winners
         assert!(out.reward_curve.last().unwrap() > out.reward_curve.first().unwrap());
         assert!(out.final_fitness > 0.0);
-        assert!(out.adapter_uri.ends_with("shadow:g0.safetensors"));
+        assert!(out.adapter_uri.ends_with("shadow_g0.safetensors"));
     }
 
     #[tokio::test]

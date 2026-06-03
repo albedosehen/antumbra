@@ -570,8 +570,13 @@ impl QwenCausalLm {
 
         // Train in f32: keeps the frozen base, the LoRA factors, and the loss in
         // one precision (candle autograd flows through the f32 base matmuls into
-        // the LoRA factors; the base, not being a Var, gets no gradient).
-        let dtype = cfg.dtype.to_candle();
+        // the LoRA factors; the base, not being a Var, gets no gradient). On CPU
+        // force f32 regardless of config — f16/bf16 only pay off on a GPU.
+        let dtype = if matches!(device, Device::Cpu) {
+            DType::F32
+        } else {
+            cfg.dtype.to_candle()
+        };
         let base =
             unsafe { VarBuilder::from_mmaped_safetensors(&weights, dtype, &device).map_err(ce)? };
         let varmap = VarMap::new();
@@ -604,7 +609,7 @@ impl QwenCausalLm {
             tokenizer,
             opt,
             eos,
-            max_new_tokens: 256,
+            max_new_tokens: cfg.max_new_tokens,
         })
     }
 

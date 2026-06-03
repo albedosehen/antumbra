@@ -36,6 +36,8 @@ pub struct RaftConfig {
     pub samples_per_task: usize,
     /// RAFT rounds (sample -> verify -> SFT) per shadow.
     pub rounds: usize,
+    /// Max tokens generated per completion.
+    pub max_new_tokens: usize,
     pub learning_rate: f64,
     pub dtype: TrainDtype,
 }
@@ -49,6 +51,7 @@ impl Default for RaftConfig {
             lora_alpha: 32.0,
             samples_per_task: 8,
             rounds: 4,
+            max_new_tokens: 256,
             learning_rate: 1e-4,
             dtype: TrainDtype::F16,
         }
