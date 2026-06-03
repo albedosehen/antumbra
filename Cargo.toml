@@ -36,7 +36,10 @@ oneiriq-surql = { version = "0.2", default-features = false, features = ["client
 opt-level = 0
 
 # Workaround: rustc 1.96 segfaults (STATUS_ACCESS_VIOLATION) optimizing the
-# huge `surrealdb-core` crate at release opt-level 3 on Windows MSVC. Build it
-# at opt-level 1 — its speed is irrelevant (the candle hot path stays at 3).
+# huge SurrealDB crates at release opt-level 3 on Windows MSVC. Build them at
+# opt-level 1 — their speed is irrelevant (the candle hot path stays at 3).
 [profile.release.package.surrealdb-core]
+opt-level = 1
+
+[profile.release.package.surrealdb]
 opt-level = 1
