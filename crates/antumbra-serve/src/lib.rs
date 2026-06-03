@@ -10,6 +10,11 @@ use async_trait::async_trait;
 use antumbra_core::ports::{ActOutput, ActRequest, Serve};
 use antumbra_core::{AntumbraError, Result};
 
+#[cfg(feature = "models")]
+mod embed;
+#[cfg(feature = "models")]
+pub use embed::BertEmbedder;
+
 /// Multi-adapter server over a shared base. `act` is not yet implemented.
 #[derive(Debug, Clone)]
 pub struct MultiAdapterServe {

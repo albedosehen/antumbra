@@ -2,6 +2,18 @@
 
 **Status:** Accepted · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundary keystone), 0006 (serving), 0009 (north star)
 
+> **Validation (2026-06-03).** The real candle embedder (all-MiniLM-L6-v2, 384-d) is now wired
+> (`antumbra-serve::BertEmbedder`), replacing the byte-histogram fake, so the v0 coverage gate runs on real
+> semantic vectors. Seeding three described specialists (arithmetic / strings / dates) and routing matched
+> queries, **in-scope discrimination was 3/3**: each query's nearest expert was the correct one
+> (arith 0.831, string 0.906, datetime 0.845 — each the clear top-1). **But absolute-threshold escalation
+> failed:** an out-of-scope query ("train a CNN on images") still scored 0.70 against the string specialist,
+> because sentence-transformer cosine for short texts is compressed into a high band (~0.6-0.9 for *everything*).
+> A fixed similarity floor cannot separate in- from out-of-scope. The signal that *does* separate here is the
+> **top-1-to-top-2 margin** (in-scope ~0.11-0.16, out-of-scope ~0.04) — and, more durably, the boundary
+> mechanism (ADR-0004) rather than a raw similarity threshold. This is the concrete next problem for the gate:
+> out-of-scope detection needs margin/calibration or boundary inhibition, not an absolute cosine cutoff.
+
 ## Context
 
 Something has to select and combine experts. Earlier this was framed as a *router over separate models passing

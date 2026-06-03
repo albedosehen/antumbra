@@ -709,7 +709,11 @@ fn sample_token(logits: &Tensor, temp: f64, rng: &mut StdRng) -> Result<u32> {
     // fall back to greedy rather than erroring.
     match WeightedIndex::new(&probs) {
         Ok(dist) => Ok(dist.sample(rng) as u32),
-        Err(_) => logits.argmax(D::Minus1).map_err(ce)?.to_scalar::<u32>().map_err(ce),
+        Err(_) => logits
+            .argmax(D::Minus1)
+            .map_err(ce)?
+            .to_scalar::<u32>()
+            .map_err(ce),
     }
 }
 

@@ -19,16 +19,25 @@ antumbra-loop = { path = "../antumbra-loop" }
 antumbra-gate = { path = "../antumbra-gate" }
 antumbra-train = { path = "../antumbra-train", optional = true }
 antumbra-critic = { path = "../antumbra-critic", optional = true }
+antumbra-serve = { path = "../antumbra-serve", optional = true }
 clap.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 anyhow.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
 
 [features]
 default = []
 # Enables the `train` command: the real candle Qwen2.5-Coder + LoRA trainer
 # wired into the loop. Needs a GPU + model weights to actually run. Keeping
 # antumbra-train optional keeps candle out of the default CLI build.
-models = ["dep:antumbra-train", "antumbra-train/models", "dep:antumbra-critic"]
+models = [
+    "dep:antumbra-train",
+    "antumbra-train/models",
+    "dep:antumbra-critic",
+    "dep:antumbra-serve",
+    "antumbra-serve/models",
+]
 # GPU backends (combine with `models`): e.g. --features models,cuda.
 cuda = ["antumbra-train/cuda"]
 metal = ["antumbra-train/metal"]

@@ -3,7 +3,8 @@
 //! explicit unique + HNSW indexes; the DDL is *generated* by surql-rs.
 //!
 //! The HNSW dimension is parameterized so tests use small vectors while
-//! production uses the 1024-d mxbai convention.
+//! production uses the 384-d all-MiniLM-L6-v2 convention (the real candle
+//! embedder in antumbra-serve).
 
 use surql::schema::table::{
     hnsw_index, index, table_schema, unique_index, HnswDistanceType, MTreeVectorType,
@@ -14,8 +15,8 @@ use antumbra_core::Result;
 
 use crate::error::map;
 
-/// Default embedding dimension (mxbai-embed-large). ADR-0007.
-pub const EMBED_DIM: usize = 1024;
+/// Default embedding dimension (all-MiniLM-L6-v2). ADR-0007.
+pub const EMBED_DIM: usize = 384;
 
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {

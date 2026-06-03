@@ -7,11 +7,12 @@
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
-use antumbra_core::{RunId, ShadowStatus};
+use antumbra_core::{Expert, ExpertId, Generation, RunId, ShadowStatus};
 use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, expert, shadow};
 use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -42,13 +43,22 @@ enum Command {
         #[arg(long, default_value = "run:cli")]
         run: String,
     },
-    /// Route a task through the boundary-conditioned gate (demo embedder).
+    /// Route a task through the boundary-conditioned gate. Uses the real BERT
+    /// embedder under `--features models`, else the byte-histogram fake.
     Route {
         /// The task description to embed and route.
         task: String,
         #[arg(long, default_value_t = 2)]
         k: usize,
+        /// Minimum in-scope score; below it the gate escalates instead of
+        /// guessing. With real embeddings ~0.35 separates in/out of scope.
+        #[arg(long, default_value_t = 0.0)]
+        threshold: f32,
     },
+    /// Seed the population with described demo specialists, embedding each
+    /// capability card with the active embedder (real BERT under --features
+    /// models). Pair with a persistent --url to then `route` against them.
+    Seed,
     /// Train shadows with the real candle trainer (needs --features models + GPU).
     Train {
         /// Path to the JSON corpus of verifiable tasks ({id,prompt,verify}).
@@ -78,6 +88,35 @@ async fn connect(url: &str) -> anyhow::Result<Store> {
         .build()?;
     Ok(Store::connect(config, EMBED_DIM).await?)
 }
+
+/// The active embedder: real candle BERT under `--features models`, else the
+/// byte-histogram fake. Both produce `EMBED_DIM`-wide vectors so the gate and
+/// store stay dimension-consistent.
+#[cfg(feature = "models")]
+fn make_embedder() -> anyhow::Result<Box<dyn Embedder>> {
+    Ok(Box::new(antumbra_serve::BertEmbedder::load()?))
+}
+
+#[cfg(not(feature = "models"))]
+fn make_embedder() -> anyhow::Result<Box<dyn Embedder>> {
+    Ok(Box::new(FixedEmbedder::new(EMBED_DIM)))
+}
+
+/// The demo specialists `seed` registers, as (name, capability description).
+const DEMO_SPECIALISTS: [(&str, &str); 3] = [
+    (
+        "arith-specialist",
+        "adds subtracts multiplies and divides integers and numbers arithmetic math",
+    ),
+    (
+        "string-specialist",
+        "reverses concatenates slices and formats text strings",
+    ),
+    (
+        "datetime-specialist",
+        "parses formats and computes differences between dates times and calendars",
+    ),
+];
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -143,12 +182,39 @@ async fn main() -> anyhow::Result<()> {
             let population = expert::list(&store).await?;
             println!("population: {} experts", population.len());
         }
-        Command::Route { task, k } => {
+        Command::Seed => {
             let store = connect(&cli.url).await?;
-            let task_vec = FixedEmbedder::new(EMBED_DIM).embed(&task).await?;
+            let embedder = make_embedder()?;
+            for (name, desc) in DEMO_SPECIALISTS {
+                let now = Utc::now();
+                let e = Expert {
+                    id: ExpertId::new(format!("expert:{name}")),
+                    name: name.to_string(),
+                    base_model: "Qwen/Qwen2.5-Coder-1.5B".to_string(),
+                    artifact_uri: format!("mem://{name}"),
+                    capability_card: serde_json::json!({ "description": desc }),
+                    capability_vec: Some(embedder.embed(desc).await?),
+                    fitness: 1.0,
+                    frozen_at: Some(now),
+                    generation: Generation::ZERO,
+                    created_at: now,
+                };
+                expert::insert(&store, &e).await?;
+                println!("seeded {name}");
+            }
+            println!("population: {} experts", expert::list(&store).await?.len());
+        }
+        Command::Route { task, k, threshold } => {
+            let store = connect(&cli.url).await?;
+            let embedder = make_embedder()?;
+            let task_vec = embedder.embed(&task).await?;
             let experts = expert::list(&store).await?;
             let boundaries = boundary::list(&store).await?;
-            let decision = gate_route(&task_vec, &experts, &boundaries, k, &GateConfig::default());
+            let cfg = GateConfig {
+                in_scope_threshold: threshold,
+                ..GateConfig::default()
+            };
+            let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
             if decision.escalate {
                 println!("decision: ESCALATE to flagship (no in-scope expert)");
             } else {
