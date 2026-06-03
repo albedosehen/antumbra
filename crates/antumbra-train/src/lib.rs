@@ -21,6 +21,9 @@ pub mod objective;
 pub mod raft;
 pub mod trainer;
 
+#[cfg(feature = "models")]
+pub mod models;
+
 pub use config::{RaftConfig, TrainDtype};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;
@@ -34,7 +37,7 @@ pub struct PendingModel;
 
 #[async_trait]
 impl CausalLm for PendingModel {
-    async fn generate(&self, _prompt: &str, _n: usize) -> Result<Vec<String>> {
+    async fn generate(&mut self, _prompt: &str, _n: usize) -> Result<Vec<String>> {
         Err(AntumbraError::Unimplemented(
             "candle Qwen2.5-Coder generation (MT-1)",
         ))
@@ -60,13 +63,32 @@ impl CandleModelLoader {
     }
 }
 
+#[cfg(feature = "models")]
+#[async_trait]
+impl ModelLoader for CandleModelLoader {
+    type Model = models::QwenCausalLm;
+
+    async fn load(
+        &self,
+        base_model: &str,
+        _parent_adapter: Option<&str>,
+    ) -> Result<models::QwenCausalLm> {
+        let mut config = self.config.clone();
+        config.base_model = base_model.to_string();
+        let device =
+            device::best_device().map_err(|e| AntumbraError::other(e.to_string()))?;
+        models::QwenCausalLm::load(device, config)
+    }
+}
+
+#[cfg(not(feature = "models"))]
 #[async_trait]
 impl ModelLoader for CandleModelLoader {
     type Model = PendingModel;
 
     async fn load(&self, _base_model: &str, _parent_adapter: Option<&str>) -> Result<PendingModel> {
         Err(AntumbraError::Unimplemented(
-            "candle Qwen2.5-Coder load (MT-1: candle-transformers + hf-hub + LoRA)",
+            "candle Qwen2.5-Coder load — build antumbra-train with --features models",
         ))
     }
 }

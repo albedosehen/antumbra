@@ -25,7 +25,8 @@ pub struct SftExample {
 #[async_trait]
 pub trait CausalLm {
     /// Sample `n_samples` completions for a prompt (the RAFT rollouts).
-    async fn generate(&self, prompt: &str, n_samples: usize) -> Result<Vec<String>>;
+    /// `&mut` because decoding advances the model's KV cache.
+    async fn generate(&mut self, prompt: &str, n_samples: usize) -> Result<Vec<String>>;
     /// One supervised fine-tuning step over verified winners; returns the loss.
     async fn sft_step(&mut self, batch: &[SftExample]) -> Result<f32>;
     /// Persist the trained LoRA adapter (safetensors).

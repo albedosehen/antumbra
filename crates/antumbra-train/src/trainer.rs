@@ -58,7 +58,7 @@ mod tests {
 
     #[async_trait]
     impl CausalLm for FakeLm {
-        async fn generate(&self, _prompt: &str, n: usize) -> Result<Vec<String>> {
+        async fn generate(&mut self, _prompt: &str, n: usize) -> Result<Vec<String>> {
             let s = self.skill.load(Ordering::SeqCst).min(n);
             Ok((0..n)
                 .map(|i| if i < s { "PASS" } else { "FAIL" }.to_string())

@@ -15,11 +15,19 @@ candle-core = "0.8"
 candle-nn = "0.8"
 serde_json.workspace = true
 thiserror.workspace = true
+# The real model stack (MT-1), behind the `models` feature so the default
+# workspace build stays light.
+serde = { workspace = true, optional = true }
+tokenizers = { version = "0.21", optional = true }
+hf-hub = { version = "0.3", optional = true }
+rand = { version = "0.8", optional = true }
 
 [features]
 default = []
 cuda = ["candle-core/cuda", "candle-nn/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal"]
+# The candle Qwen2.5-Coder + LoRA CausalLm: model load, generation, training.
+models = ["dep:serde", "dep:tokenizers", "dep:hf-hub", "dep:rand"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
