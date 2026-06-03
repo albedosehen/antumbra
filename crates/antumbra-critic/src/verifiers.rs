@@ -7,12 +7,17 @@
 //! the command via the `ANTUMBRA_COMPLETION` environment variable. This is the
 //! ground-truth signal the critic densifies but never overrides.
 
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
 use antumbra_core::ports::{Verifier, VerifierVerdict, VerifyRequest};
 use antumbra_core::{AntumbraError, Result};
+
+/// Hard cap on a verify subprocess: model-generated code is untrusted and may
+/// loop forever or block on input, so a timeout (and null stdin) is mandatory.
+const VERIFY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Default, Clone)]
 pub struct CommandVerifier;
@@ -91,15 +96,34 @@ impl Verifier for CommandVerifier {
             .unwrap_or_default();
 
         let mut cmd = Command::new(program);
-        cmd.args(&args).env("ANTUMBRA_COMPLETION", completion);
+        cmd.args(&args)
+            .env("ANTUMBRA_COMPLETION", completion)
+            .stdin(Stdio::null());
         if let Some(cwd) = spec.get("cwd").and_then(|v| v.as_str()) {
             cmd.current_dir(cwd);
         }
 
-        let status = cmd
-            .status()
+        // Run with a timeout; a runaway or blocking program is a failure, never
+        // a hang. Poll rather than block forever on `status()`.
+        let mut child = cmd
+            .spawn()
             .map_err(|e| AntumbraError::other(format!("verify spawn `{program}`: {e}")))?;
-        Ok(if status.success() {
+        let started = Instant::now();
+        let passed = loop {
+            match child
+                .try_wait()
+                .map_err(|e| AntumbraError::other(format!("verify wait `{program}`: {e}")))?
+            {
+                Some(status) => break status.success(),
+                None if started.elapsed() >= VERIFY_TIMEOUT => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break false;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        };
+        Ok(if passed {
             VerifierVerdict {
                 passed: true,
                 value: 1.0,
@@ -133,11 +157,29 @@ mod tests {
         serde_json::json!({ "program": "sh", "args": ["-c", format!("exit {code}")] })
     }
 
+    #[cfg(windows)]
+    fn runaway() -> serde_json::Value {
+        serde_json::json!({ "program": "ping", "args": ["-t", "127.0.0.1"] })
+    }
+    #[cfg(not(windows))]
+    fn runaway() -> serde_json::Value {
+        serde_json::json!({ "program": "sh", "args": ["-c", "sleep 60"] })
+    }
+
     #[tokio::test]
     async fn exit_zero_passes_nonzero_fails() {
         let v = CommandVerifier;
         assert!(v.verify(&req(spec(0), "x")).await.unwrap().passed);
         assert!(!v.verify(&req(spec(1), "x")).await.unwrap().passed);
+    }
+
+    // Untrusted generated code can run forever; the verifier must kill it and
+    // report failure, not hang. Waits the full VERIFY_TIMEOUT, so it is opt-in.
+    #[tokio::test]
+    #[ignore = "exercises the verify timeout (~10s)"]
+    async fn runaway_command_times_out_as_failure() {
+        let v = CommandVerifier;
+        assert!(!v.verify(&req(runaway(), "x")).await.unwrap().passed);
     }
 
     #[tokio::test]
