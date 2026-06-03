@@ -116,15 +116,29 @@ maximally context-scoped (per-repo conventions are textbook boundaries), and the
 
 ## Status & shape (honest)
 
-- **Research project, not a product.** Every phase is a falsifiable experiment with a kill criterion.
-- **All-Rust, single process.** Data in SurrealDB via `surql-rs`; inference via `llama-cpp-2` / `mistral.rs`;
-  training (QLoRA adapters **and** the gate) via a DIY `candle` path.
+- **Research project, not a product.** Every milestone is a falsifiable experiment with a kill criterion.
+- **All-Rust, single process.** Data in SurrealDB via `surql-rs`; training (QLoRA adapters **and** the gate)
+  via a DIY `candle` path; inference via `llama-cpp-2` / `mistral.rs` (a seam, not yet wired).
 - **v0 = shared-base adapters on one RTX 3090 Ti (24 GB):** one frozen, code-capable base + a growing library of
-  frozen LoRA experts + a learned, boundary-conditioned gate. The same artifacts are *both* the routable
-  population *and* an in-latent composed model.
-- **North star = a heterogeneous composed model** (genuinely separate frozen experts wired by learned
-  cross-attention bridges) — *ADR-0009*. The v0 gate, boundary engine, loop, and substrate all carry over;
-  only the composition substrate changes.
+  frozen LoRA experts + a boundary-conditioned **coverage** gate (the learned latent mixer is the north star).
+
+**Validated so far (toy scale, 2026-06-03):**
+
+- The trainer **learns** on a real GPU: RAFT lifts pass-rate to 1.0 under both a convention reward and a verifier
+  that *executes* the generated code (`0.38 -> 1.00`).
+- A real candle BERT embedder drives a gate that **routes** to the right specialist and **escalates
+  out-of-scope** queries — using relative coverage, not an absolute similarity floor.
+- Expert capability vectors are **learned from evaluated behavior** (the tasks an expert provably solved), not
+  hand-written labels — shown with three GPU-trained specialists in one population.
+- The **keystone** (ADR-0004) composes end-to-end: counterfactual search recovers C', the actionable boundary
+  persists, and the gate inhibits routing **inside the failure scope only**.
+
+**Not yet:** small corpora / few experts (no generalization or forgetting test); the real `AcceptabilityProbe`
+and serving engine; the learned latent gate; GRPO and 4-bit quantized training; heterogeneous composition.
+
+**North star = a heterogeneous composed model** (genuinely separate frozen experts wired by learned
+cross-attention bridges) — *ADR-0009*. The v0 gate, boundary engine, loop, and substrate all carry over; only
+the composition substrate changes.
 
 ---
 
@@ -136,17 +150,19 @@ candle **Qwen2.5-Coder + LoRA trainer** (RAFT over verified outcomes, ADR-0010) 
 feature; the default loop runs with a demo trainer so everything is exercisable without a GPU.
 
 ```bash
-cargo test                                   # whole workspace, green
+cargo test                                   # whole workspace, green (incl. the keystone test)
 
-# operator CLI (ephemeral mem:// by default; pass --url for persistence)
+# no-GPU demo: drive the durable loop with the fake trainer, then inspect
 cargo run -p antumbra-cli -- schema                              # print generated DDL
 cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv loop --generations 3
 cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv status
-cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv route "fix the deno build"
 
-# real training (needs a CUDA GPU + ~3 GB Qwen weights) — see the guide below
-cargo run -p antumbra-cli --features models,cuda -- \
-  --url surrealkv://./data/a.skv train --corpus corpora/example-tasks.json --generations 1
+# real training + routing (needs a CUDA GPU + ~3 GB Qwen weights, and python for
+# exec verifiers) — see the guide below. Train a specialist, then route to it.
+cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
+  train --corpus corpora/arith.json --run arith --generations 1
+cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
+  route "add two integers and return the sum"   # routes to the specialist, or escalates if out of scope
 ```
 
 See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per-crate status and

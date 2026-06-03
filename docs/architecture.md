@@ -202,12 +202,16 @@ All nine crates exist and compile; the workspace is green (`cargo test`, clippy 
 | core, store, critic, gate, boundary, loop | **implemented + tested** — the generational loop persists its full lineage (shadow lifecycle, source-tagged rewards, evaluation runs, graduated experts, open-negative boundaries) and resumes from the persisted head across process restarts (proven on `surrealkv://`). |
 | train (ADR-0002/0010) | **implemented, compiles** — RAFT reward-ranked LoRA fine-tuning: candle Qwen2.5-Coder + LoRA `CausalLm` (generate + SFT + save), `RaftTrainer` (the `Trainer` port), `CommandVerifier` (env-as-reward), `JsonCorpus`. Behind the `models` feature; CPU-tested except the model forward, which is validated on the GPU (`docs/running-the-trainer.md`). |
 | serve (ADR-0006) | **seam only** — `Serve` port returns `Unimplemented`; not needed for training (the trainer does its own candle generation). |
-| cli | `antumbra migrate · schema · experts · status · loop · route · train` |
+| cli | `antumbra migrate · schema · experts · status · loop · route · seed · train` |
 
-Not yet runtime-validated / built: the candle model's first GPU run (MT-3), the learned latent gate (v0 is the
-heuristic coverage gate), GRPO (v1 over RAFT), GGUF-Q4 quantized backward (MT-4), llama/mistral serving,
-`SCHEMAFULL` + the surql-rs migration-history runner, the orchestration-run repo, and loop-driven
-counterfactual search. `experiments/` is not yet populated.
+Since validated on the GPU: the trainer learns (MT-3), the real candle BERT embedder + relative-coverage gate
+(route + escalate), capability vectors from evaluated behavior, and the keystone end-to-end (counterfactual
+search -> actionable boundary -> scoped inhibition). See the [Technical Reference](technical-reference.md) §13.
+
+Not yet runtime-validated / built: the real `AcceptabilityProbe` + llama/mistral serving (ADR-0006), automatic
+governing-feature discovery, the learned latent gate (v0 is the heuristic coverage gate), GRPO (v1 over RAFT),
+GGUF-Q4 quantized backward (MT-4), `SCHEMAFULL` + the surql-rs migration-history runner, and the
+orchestration-run repo. `experiments/` is not yet populated.
 
 ---
 

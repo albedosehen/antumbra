@@ -26,6 +26,7 @@ Read them against the [two readings of the chain](../architecture.md#1-the-thesi
 | [0007](0007-surrealdb-substrate.md) | SurrealDB substrate | Proposed | One multi-model DB for every store + vector index + durable flow state, via `surql-rs`. |
 | [0008](0008-generational-loop.md) | Durable generational loop | Proposed | grow → explore → score → graduate/prune as a resumable, population-aware state-machine-in-DB. |
 | [0009](0009-heterogeneous-composition.md) | Heterogeneous composed model | **North star** | The end goal: genuinely separate frozen experts wired by learned cross-attention bridges (CALM/BTX). v0's gate/boundary/loop/substrate carry over. |
+| [0010](0010-candle-qlora-trainer.md) | The candle QLoRA trainer | Accepted (MT-3 validated) | The RAFT reward-ranked LoRA trainer: sample K -> verify -> SFT the winners; candle Qwen2.5-Coder + LoRA; learning validated on the GPU. |
 
 ## Format
 
