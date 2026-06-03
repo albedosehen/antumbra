@@ -1,4 +1,4 @@
-# Antumbra — Diagram Atlas
+# Antumbra - Diagram Atlas
 
 Every load-bearing diagram in one place. Each is reproduced from its source-of-truth document; follow the link
 in the caption to read the surrounding decision. Grouped: **concept → system → flow → schema → per-ADR
@@ -7,11 +7,11 @@ mechanism → north star.**
 - Concept: [the shadow](#1-the-shadow-umbra--penumbra--antumbra) · [decision chain](#2-the-keystone-decision-chain)
 - System: [v0 architecture](#3-v0-system-architecture) · [v0 vs north star](#5-v0-vs-north-star)
 - Flow: [training & data](#4-training--data-flow)
-- Schema: [entities](#6-schema--entities) · [substrate](#13-adr-0007--surrealdb-substrate)
-- Per-ADR: [0001](#7-adr-0001--umbra-the-frozen-population) · [0002](#8-adr-0002--penumbra-the-shadow-lifecycle) ·
-  [0003](#9-adr-0003--criticverifier-credit) · [0004](#10-adr-0004--the-boundary-engine-keystone) ·
-  [0005](#11-adr-0005--the-boundary-conditioned-gate) · [0006](#12-adr-0006--single-gpu-serving) ·
-  [0008](#14-adr-0008--the-generational-loop) · [0009](#15-adr-0009--heterogeneous-composition)
+- Schema: [entities](#6-schema---entities) · [substrate](#13-adr-0007---surrealdb-substrate)
+- Per-ADR: [0001](#7-adr-0001---umbra-the-frozen-population) · [0002](#8-adr-0002---penumbra-the-shadow-lifecycle) ·
+  [0003](#9-adr-0003---criticverifier-credit) · [0004](#10-adr-0004---the-boundary-engine-keystone) ·
+  [0005](#11-adr-0005---the-boundary-conditioned-gate) · [0006](#12-adr-0006---single-gpu-serving) ·
+  [0008](#14-adr-0008---the-generational-loop) · [0009](#15-adr-0009---heterogeneous-composition)
 
 ---
 
@@ -25,10 +25,10 @@ coverage *inverts* and the system must escalate. Source: [README](../README.md).
 
 ```mermaid
 flowchart LR
-    PEN["PENUMBRA<br/>shadows-in-training — explore,<br/>then deepen or fade"] -->|"graduate (deepen to full shadow)"| UMB["UMBRA<br/>frozen experts<br/>(adapters over a shared base)"]
+    PEN["PENUMBRA<br/>shadows-in-training - explore,<br/>then deepen or fade"] -->|"graduate (deepen to full shadow)"| UMB["UMBRA<br/>frozen experts<br/>(adapters over a shared base)"]
     PEN -->|"prune"| X["dissipated"]
     UMB -.->|"cast a new shadow"| PEN
-    ANT["ANTUMBRA — the keystone<br/>counterfactual scope:<br/>where coverage inverts,<br/>and when to escalate"] -.->|"gates"| UMB
+    ANT["ANTUMBRA - the keystone<br/>counterfactual scope:<br/>where coverage inverts,<br/>and when to escalate"] -.->|"gates"| UMB
     X -.->|"log why + where it failed"| ANT
 ```
 
@@ -55,15 +55,15 @@ flowchart TD
 ### 3. v0 system architecture
 
 One frozen code-capable base + a library of frozen LoRA experts + a learned, boundary-conditioned gate, all in
-a single-plane Rust process on one GPU. Source: [architecture §2](architecture.md#2-system-architecture-v0--shared-base-adapters-single-plane-rust).
+a single-plane Rust process on one GPU. Source: [architecture §2](architecture.md#2-system-architecture-v0---shared-base-adapters-single-plane-rust).
 
 ```mermaid
 flowchart TB
     task["task (e.g. a repo task)"] --> GATE
-    subgraph RUST["Antumbra — single-plane Rust process"]
+    subgraph RUST["Antumbra - single-plane Rust process"]
         GATE["Learned gate · ADR-0005<br/>boundary-conditioned adapter mixer"]
         BASE["shared frozen base (code-capable)"]
-        ADPT["frozen LoRA experts — the population · ADR-0001"]
+        ADPT["frozen LoRA experts - the population · ADR-0001"]
         BND["boundary engine · ADR-0004<br/>counterfactual scope"]
         CRIT["critic harness · ADR-0003<br/>verifiers + (optional) flagship-as-critic"]
         LOOP["generational loop · ADR-0008"]
@@ -92,12 +92,12 @@ Source: [architecture §4](architecture.md#4-v0-scope-vs-the-north-star).
 
 ```mermaid
 flowchart TB
-    subgraph V0["v0 — shared-base adapters (build now)"]
+    subgraph V0["v0 - shared-base adapters (build now)"]
         G["RTX 3090 Ti · 24 GB"]
         G --> S1["one frozen code-capable base + frozen LoRA experts"]
         G --> S2["learned boundary-conditioned gate (latent mixing)"]
     end
-    subgraph NS["north star — heterogeneous composed model · ADR-0009"]
+    subgraph NS["north star - heterogeneous composed model · ADR-0009"]
         H["genuinely separate frozen experts"]
         H --> H1["learned cross-attention bridges (CALM/BTX)"]
         H --> H2["sparse top-k selection + paged experts"]
@@ -129,10 +129,10 @@ flowchart LR
 
 ## Schema
 
-### 6. Schema — entities
+### 6. Schema - entities
 
 Conceptual ER view; full DDL is in [ADR-0007](adr/0007-surrealdb-substrate.md). Source:
-[architecture §5](architecture.md#5-schema-surrealdb--summary).
+[architecture §5](architecture.md#5-schema-surrealdb---summary).
 
 ```mermaid
 erDiagram
@@ -161,14 +161,14 @@ erDiagram
 
 ## Per-ADR mechanism diagrams
 
-### 7. ADR-0001 — umbra: the frozen population
+### 7. ADR-0001 - umbra: the frozen population
 
 A base + a growing library of frozen adapters, mixed in latent space by the gate. Source:
 [ADR-0001](adr/0001-frozen-experts.md).
 
 ```mermaid
 flowchart LR
-    subgraph POP["Umbra — frozen experts (adapters over a shared base)"]
+    subgraph POP["Umbra - frozen experts (adapters over a shared base)"]
         E1["adapter: deno-repo conventions"]
         E2["adapter: brand-voice draft"]
         E3["adapter: weekly-deck"]
@@ -180,7 +180,7 @@ flowchart LR
     BASE --> GATE
 ```
 
-### 8. ADR-0002 — penumbra: the shadow lifecycle
+### 8. ADR-0002 - penumbra: the shadow lifecycle
 
 Plasticity lives only in short-lived shadows: spawn → explore → score → graduate (deepen to umbra) or prune.
 Source: [ADR-0002](adr/0002-shadow-plasticity.md).
@@ -197,7 +197,7 @@ stateDiagram-v2
     pruned --> [*]: discarded; boundary logged (ADR-0004)
 ```
 
-### 9. ADR-0003 — critic/verifier credit
+### 9. ADR-0003 - critic/verifier credit
 
 Verifiers are primary ground truth; the critic only interpolates dense per-step credit between them and can
 never override a verifier. Source: [ADR-0003](adr/0003-critic-credit-assignment.md).
@@ -209,10 +209,10 @@ flowchart LR
     V -->|"sparse, trusted<br/>checkpoints"| AGG["reward_signal<br/>(source-tagged)"]
     C -->|"dense credit<br/>between checkpoints"| AGG
     AGG --> SH["shadow training signal (ADR-0002)"]
-    V -. "bounds the critic —<br/>it cannot unilaterally steer" .-> C
+    V -. "bounds the critic - <br/>it cannot unilaterally steer" .-> C
 ```
 
-### 10. ADR-0004 — the boundary engine (keystone)
+### 10. ADR-0004 - the boundary engine (keystone)
 
 The antumbra made mechanical: hold behavior fixed, vary context until acceptability flips, recover the governing
 feature + grain, then inhibit *only in-scope* and steer. Source: [ADR-0004](adr/0004-inhibitory-boundaries.md).
@@ -220,7 +220,7 @@ feature + grain, then inhibit *only in-scope* and steer. Source: [ADR-0004](adr/
 ```mermaid
 flowchart TB
     F["B judged INCORRECT in context C<br/>(verifier / instruction · ADR-0003)"] --> ENG
-    subgraph ENG["Boundary engine — first-class subsystem"]
+    subgraph ENG["Boundary engine - first-class subsystem"]
         SRCH["1 · counterfactual search (context-direction)<br/>hold behavior B fixed; vary CONTEXT<br/>along candidate dimensions; re-probe"]
         SRCH --> FLIP{"acceptability flips?<br/>B becomes correct"}
         FLIP -->|"no"| SRCH
@@ -235,7 +235,7 @@ flowchart TB
     STEER --> L["Loop · ADR-0008<br/>where + what context to probe next"]
 ```
 
-### 11. ADR-0005 — the boundary-conditioned gate
+### 11. ADR-0005 - the boundary-conditioned gate
 
 A learned in-model mixer: score adapters, let the scope gate/steer, blend in-scope experts in latent space, or
 escalate out-of-scope (which becomes the next training example). Source: [ADR-0005](adr/0005-orchestrator-router.md).
@@ -253,14 +253,14 @@ flowchart TB
     ESC --> LOG
 ```
 
-### 12. ADR-0006 — single-GPU serving
+### 12. ADR-0006 - single-GPU serving
 
 v0 is one base + an adapter library (S-LoRA-style) served and trained on one RTX 3090 Ti; the fleet, ternary
 tier, and heterogeneous composition all defer. Source: [ADR-0006](adr/0006-hardware-serving.md).
 
 ```mermaid
 flowchart TB
-    subgraph V0["v0 — build now"]
+    subgraph V0["v0 - build now"]
         G["RTX 3090 Ti · 24 GB"]
         G --> S1["serve: one base + adapter library (S-LoRA-style)"]
         G --> T1["train: candle QLoRA adapters + gate"]
@@ -274,7 +274,7 @@ flowchart TB
     V0 -. "once loop / gate / boundary are proven" .-> FUTURE
 ```
 
-### 13. ADR-0007 — SurrealDB substrate
+### 13. ADR-0007 - SurrealDB substrate
 
 One multi-model engine is every store + vector index + graph + durable flow state, reached only through
 `surql-rs`. Full DDL lives in the ADR. Source: [ADR-0007](adr/0007-surrealdb-substrate.md).
@@ -294,7 +294,7 @@ flowchart TB
     CR["Critic (0003)"] --> surql
 ```
 
-### 14. ADR-0008 — the generational loop
+### 14. ADR-0008 - the generational loop
 
 A resumable state-machine-in-DB: grow → explore → score → graduate/prune → consolidate, restartable from the
 persisted `status` checkpoint. Source: [ADR-0008](adr/0008-generational-loop.md).
@@ -312,7 +312,7 @@ stateDiagram-v2
     consolidate --> [*]: paused (fully resumable)
 ```
 
-### 15. ADR-0009 — heterogeneous composition
+### 15. ADR-0009 - heterogeneous composition
 
 The north star: sparse top-k selection over genuinely separate frozen experts wired by learned, per-expert
 cross-attention bridges, with the scope gating both selection and bridge gain. Source:

@@ -1,4 +1,4 @@
-# ADR-0005 — From router to an in-model, boundary-conditioned gate
+# ADR-0005 - From router to an in-model, boundary-conditioned gate
 
 **Status:** Accepted · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundary keystone), 0006 (serving), 0009 (north star)
 
@@ -6,11 +6,11 @@
 > (`antumbra-serve::BertEmbedder`), replacing the byte-histogram fake, so the v0 coverage gate runs on real
 > semantic vectors. Seeding three described specialists (arithmetic / strings / dates) and routing matched
 > queries, **in-scope discrimination was 3/3**: each query's nearest expert was the correct one
-> (arith 0.831, string 0.906, datetime 0.845 — each the clear top-1). **But absolute-threshold escalation
+> (arith 0.831, string 0.906, datetime 0.845 - each the clear top-1). **But absolute-threshold escalation
 > failed:** an out-of-scope query ("train a CNN on images") still scored 0.70 against the string specialist,
 > because sentence-transformer cosine for short texts is compressed into a high band (~0.6-0.9 for *everything*).
 > A fixed similarity floor cannot separate in- from out-of-scope. The signal that *does* separate here is the
-> **top-1-to-top-2 margin** (in-scope ~0.11-0.16, out-of-scope ~0.04) — and, more durably, the boundary
+> **top-1-to-top-2 margin** (in-scope ~0.11-0.16, out-of-scope ~0.04) - and, more durably, the boundary
 > mechanism (ADR-0004) rather than a raw similarity threshold. This is the concrete next problem for the gate:
 > out-of-scope detection needs margin/calibration or boundary inhibition, not an absolute cosine cutoff.
 
@@ -18,14 +18,14 @@
 > Out-of-scope is an out-of-distribution problem; the fix is to cancel the non-discriminative shared direction
 > rather than threshold absolute similarity.
 > - *Relative Mahalanobis Distance* (arXiv:2106.09022): near-OOD fails because shared dimensions make in/out
->   equidistant; cancel a class-agnostic background. RMD uses covariance whitening — infeasible with one vector
+>   equidistant; cancel a class-agnostic background. RMD uses covariance whitening - infeasible with one vector
 >   per expert.
 > - The valid cosine-space realization is the **prototype margin** `cos(task, e₁) − cos(task, e₂)`: the shared
 >   direction contributes near-equally to both and cancels. Subtracting the population *centroid* instead was
->   **measured to fail** — the centroid absorbs the shared direction, so `cos(task, centroid) ≈ cos(task, e₁)`
+>   **measured to fail** - the centroid absorbs the shared direction, so `cos(task, centroid) ≈ cos(task, e₁)`
 >   and coverage collapsed to ~0 for in- and out-of-scope alike (arith −0.009, datetime −0.002 vs cooking
 >   +0.006: unseparable).
-> - *Deep-kNN OOD* (arXiv:2204.06507): same family (distance to nearest prototypes on L2-normalized features —
+> - *Deep-kNN OOD* (arXiv:2204.06507): same family (distance to nearest prototypes on L2-normalized features -
 >   the embedder normalizes). *Selective prediction* (arXiv:1705.08500): escalation is abstention; the threshold
 >   is the risk-coverage knob, calibrated per deployment.
 >
@@ -40,9 +40,9 @@
 ## Context
 
 Something has to select and combine experts. Earlier this was framed as a *router over separate models passing
-text* — but text is a lossy bus and there is no gradient across separate models. With v0's shared-base adapters
+text* - but text is a lossy bus and there is no gradient across separate models. With v0's shared-base adapters
 (ADR-0001), composition can instead happen **in latent space**: a learned **gate** mixes adapters within one
-forward pass. The same artifacts then serve two modes with no rewrite — pick one adapter (*coverage*) or blend
+forward pass. The same artifacts then serve two modes with no rewrite - pick one adapter (*coverage*) or blend
 several (*composition*). This is the LoRA-MoE family (LoraHub 2307.13269; PHATGOOSE 2402.05859; X-LoRA 2402.07148).
 
 ## Decision
@@ -51,17 +51,17 @@ several (*composition*). This is the LoRA-MoE family (LoraHub 2307.13269; PHATGO
    evaluated behavior, ADR-0004's measurement) seed it; it is trained on accumulated traces with the critic's
    per-step reward (ADR-0003). It is itself a trainable component on the shadow lifecycle (ADR-0002).
 2. **The gate is boundary-conditioned (the keystone in the forward pass).** It does not weight adapters by
-   capability-similarity alone — the counterfactual scope (ADR-0004) **gates and steers** it: down-weight
+   capability-similarity alone - the counterfactual scope (ADR-0004) **gates and steers** it: down-weight
    out-of-scope experts, prefer in-scope ones. The boundary is an inductive bias *inside* the model, not an
    external penalty.
 3. **The gate also makes the escalate-or-answer decision.** When the boundary says *out-of-scope / low
-   confidence*, the gate **escalates to the optional flagship tier** (ADR-0003/0006) instead of guessing — and
+   confidence*, the gate **escalates to the optional flagship tier** (ADR-0003/0006) instead of guessing - and
    that escalation becomes a training example, so the escalation set shrinks over time. This is the mechanism
    behind "how it pays for itself."
 4. **Composition is a durable flow.** Multi-step tasks persist state in `orchestration_run` so a crash resumes
-   mid-task — same engine as the generational loop (ADR-0008).
+   mid-task - same engine as the generational loop (ADR-0008).
 5. **North-star continuity (ADR-0009).** When experts become separate models, the gate generalizes from
-   adapter-mixing to **selecting top-k experts + driving learned cross-attention bridges** — same role, heavier
+   adapter-mixing to **selecting top-k experts + driving learned cross-attention bridges** - same role, heavier
    substrate. v0's gate logic carries over.
 
 ```mermaid
@@ -83,7 +83,7 @@ flowchart TB
   the boundary becomes a real inductive bias; the escalation mechanism is the cost-savings engine; the gate
   self-improves on the same critic/loop machinery.
 - **Negative:** the gate is a **second DIY-candle training target** (after the QLoRA adapters); a mis-trained
-  gate can mis-mix confidently — the boundary + verifiers are the guardrails; latent mixing of many adapters has
+  gate can mis-mix confidently - the boundary + verifiers are the guardrails; latent mixing of many adapters has
   its own failure modes (interference).
 - **Neutral:** runtime error handling (retry/escalate plumbing) stays separate from the learning signal.
 

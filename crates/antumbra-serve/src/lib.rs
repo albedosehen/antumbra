@@ -10,6 +10,9 @@ use async_trait::async_trait;
 use antumbra_core::ports::{ActOutput, ActRequest, Serve};
 use antumbra_core::{AntumbraError, Result};
 
+mod probe;
+pub use probe::GenerateVerifyProbe;
+
 #[cfg(feature = "models")]
 mod embed;
 #[cfg(feature = "models")]

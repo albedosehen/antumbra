@@ -221,6 +221,7 @@ dependencies = [
 name = "antumbra-serve"
 version = "0.0.0"
 dependencies = [
+ "antumbra-boundary",
  "antumbra-core",
  "antumbra-train",
  "async-trait",

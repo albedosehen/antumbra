@@ -1,12 +1,12 @@
-# ADR-0002 — Shadow models hold the plasticity
+# ADR-0002 - Shadow models hold the plasticity
 
 **Status:** Accepted · **Date:** 2026-05-30 · **Related:** 0001 (frozen experts), 0003 (critic), 0004 (boundary), 0005 (gate), 0008 (loop)
 
 ## Context
 
-ADR-0001 froze the experts to stop forgetting — which removed all ability to learn. Plasticity has to live
-somewhere. This is Complementary Learning Systems theory in ML — a fast plastic explorer feeding a slow stable
-store — realized via parameter isolation: LoRA (2106.09685), QLoRA (2305.14314), EWC (1612.00796). In the
+ADR-0001 froze the experts to stop forgetting - which removed all ability to learn. Plasticity has to live
+somewhere. This is Complementary Learning Systems theory in ML - a fast plastic explorer feeding a slow stable
+store - realized via parameter isolation: LoRA (2106.09685), QLoRA (2305.14314), EWC (1612.00796). In the
 shadow-geometry metaphor, shadows are the **penumbra**: the partial-shadow ring that forms around the umbra,
 then either deepens into it (graduates) or fades (prunes).
 
@@ -15,14 +15,14 @@ then either deepens into it (graduates) or fades (prunes).
 Plasticity lives in short-lived, trainable **shadow** adapters that explore around the frozen core and then
 **graduate** (freeze into a new expert, ADR-0001) or **prune**.
 
-1. A shadow is a **LoRA/QLoRA adapter** over the shared frozen base — shallow, so consolidation can't drift the
+1. A shadow is a **LoRA/QLoRA adapter** over the shared frozen base - shallow, so consolidation can't drift the
    core. Graduation = freezing the adapter and adding it to the gate's mixture (ADR-0005), not minting a
    standalone model.
 2. **Training is a DIY `candle` QLoRA path in Rust** (locked this session): LoRA over a 4-bit (NF4) frozen base,
-   implemented ourselves (no Rust Unsloth). This is the **highest-effort component** — first-class engineering,
+   implemented ourselves (no Rust Unsloth). This is the **highest-effort component** - first-class engineering,
    not glue. `burn` is the fallback backend.
 3. **Learn from verified outcomes, not imitation** (ADR-0003). The training signal is the environment's verdict
-   (a test passes, a command works) — *not* a teacher model's text. A flagship critic, if used, only
+   (a test passes, a command works) - *not* a teacher model's text. A flagship critic, if used, only
    *accelerates cold-start exploration and diagnosis*; what gets baked into the adapter is the verified outcome.
 4. **The corpus is your selected repos** (for the coding domain). Per-repo conventions are exactly the
    context-scoped boundaries (ADR-0004) the system learns. This requires a **code-capable shared base** so
@@ -59,7 +59,7 @@ stateDiagram-v2
 | 4-bit QLoRA backprop is hand-rolled in candle | De-risk with **plain LoRA over a bf16 base** first; add NF4 once it works. |
 | Memory training a 7–8 B base | Gradient checkpointing + paged optimizer (DIY); smaller base if needed. |
 | Cold-start: tiny model flails, no signal | Flagship critic accelerates early exploration (ADR-0003); wean off as experts graduate. |
-| candle QLoRA stalls the project | Thin Python Unsloth trainer behind a clean interface — explicitly the *fallback*, not the plan. |
+| candle QLoRA stalls the project | Thin Python Unsloth trainer behind a clean interface - explicitly the *fallback*, not the plan. |
 
 ## Alternatives considered
 

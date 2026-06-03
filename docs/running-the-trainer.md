@@ -76,7 +76,7 @@ code out of a markdown fence first.
   a chat template.
 - **Speed:** a full pass is `K × tasks × rounds` generations; start with
   `--generations 1`, small K.
-- **Verifier safety:** `verify` runs real commands — point it at a sandboxed
+- **Verifier safety:** `verify` runs real commands - point it at a sandboxed
   corpus, not arbitrary input.
 
 ## Building for CUDA on Windows (CUDA 13 + MSVC)

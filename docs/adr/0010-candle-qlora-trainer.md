@@ -1,13 +1,13 @@
-# ADR-0010 — The candle QLoRA trainer (antumbra-train)
+# ADR-0010 - The candle QLoRA trainer (antumbra-train)
 
-**Status:** Accepted — pipeline implemented + MT-3 validated on the 3090 Ti (2026-06-03) · **Date:** 2026-06-02 · **Related:** 0002 (shadow plasticity — this is its engine), 0003 (verified reward), 0001 (graduation target), 0006 (one GPU), 0005 (the gate is a second training target) · **Vocabulary:** [glossary](../glossary.md)
+**Status:** Accepted - pipeline implemented + MT-3 validated on the 3090 Ti (2026-06-03) · **Date:** 2026-06-02 · **Related:** 0002 (shadow plasticity - this is its engine), 0003 (verified reward), 0001 (graduation target), 0006 (one GPU), 0005 (the gate is a second training target) · **Vocabulary:** [glossary](../glossary.md)
 
 > **MT-3 result (2026-06-03).** Validated on an RTX 3090 Ti, two ways. (1) On `corpora/learn.json` (in-process
 > `contains_all` reward) the per-round RAFT pass-rate rose **0.06 -> 0.25 -> 0.88 -> 1.00**. (2) On
-> `corpora/example-tasks.json` with the real **exec verifier** — the generated function is `exec`'d and its
-> behavior asserted (`add(2,3)==5`, `reverse('abc')=='cba'`) — it rose **0.38 -> 1.00 -> 1.00 -> 1.00**. Both
+> `corpora/example-tasks.json` with the real **exec verifier** - the generated function is `exec`'d and its
+> behavior asserted (`add(2,3)==5`, `reverse('abc')=='cba'`) - it rose **0.38 -> 1.00 -> 1.00 -> 1.00**. Both
 > graduated and froze a real bf16 adapter. f16 overflowed to NaN logits on GPU; the default dtype is now bf16
-> (with a greedy fallback in the sampler). The loop closes and the adapter learns from verified outcomes —
+> (with a greedy fallback in the sampler). The loop closes and the adapter learns from verified outcomes -
 > including outcomes verified by actually running the code.
 
 > **Implementation (2026-06-02).** The full pipeline is built and compiles
@@ -33,32 +33,32 @@ loop already calls it; the fake trainer proves the machine. This ADR commits the
 
 ## Research synthesis
 
-**Learning algorithm — RLVR, realized as reward-ranked fine-tuning.** "Train on verified outcomes" is exactly
+**Learning algorithm - RLVR, realized as reward-ranked fine-tuning.** "Train on verified outcomes" is exactly
 *reinforcement learning with verifiable rewards* (RLVR). Two implementable families:
 
 - **RAFT / RFT / expert-iteration** (Reward rAnked FineTuning, 2304.06767): sample `K` completions, verify each,
   fine-tune on the verified winners. It collapses to **weighted causal-LM cross-entropy on the model's own
-  verified-correct generations** — no PPO, critic, importance ratios, or reference-KL machinery. Robust, and the
+  verified-correct generations** - no PPO, critic, importance ratios, or reference-KL machinery. Robust, and the
   natural first target for a hand-rolled `candle` path.
 - **GRPO** (DeepSeek; critic-free group-relative policy gradient): more sample-efficient, much more machinery
   (token log-prob ratios, group-normalized advantages, KL-to-reference).
 
 Supporting evidence: LoRA suffices for RL post-training (PERL, 2403.10704; "Evaluating PEFT for RLVR",
-2512.23165); negatives carry signal when tagged ("Learning From Failure", 2402.11651 — dovetails with ADR-0004);
-**data quality is decisive** ("Noisy data is destructive to RLVR", 2603.16140 — reinforces ADR-0003's
+2512.23165); negatives carry signal when tagged ("Learning From Failure", 2402.11651 - dovetails with ADR-0004);
+**data quality is decisive** ("Noisy data is destructive to RLVR", 2603.16140 - reinforces ADR-0003's
 verifier-first rule). PEFT mechanics: LoRA (2106.09685), QLoRA's NF4 + double-quant + paged optimizers
 (2305.14314).
 
-**Engine — `candle` can train.** Confirmed: `candle-nn` provides `VarMap` + `VarBuilder` + `AdamW`/`SGD` and
+**Engine - `candle` can train.** Confirmed: `candle-nn` provides `VarMap` + `VarBuilder` + `AdamW`/`SGD` and
 autograd via `opt.backward_step(&loss)` (canonical loop in `candle-examples/mnist-training`). LoRA layer-swapping
 + adapter save/load is handled by **`candle-lora`** (freezes the base, swaps `Linear`/`Conv`/`Embedding` to
 trainable LoRA, `get_tensors` → safetensors); `candle-transformers` ships code-capable bases (StarCoder2,
 Qwen2). `mistral.rs` (X-LoRA inference) is the reference for ADR-0005/serve.
 
 **The load-bearing constraint.** `candle`'s quantization is the llama.cpp **GGUF** family (Q4_K), not
-bitsandbytes **NF4**, and `QMatMul` is **inference-only — no backward**. True 4-bit QLoRA therefore needs a DIY
+bitsandbytes **NF4**, and `QMatMul` is **inference-only - no backward**. True 4-bit QLoRA therefore needs a DIY
 quantized backward (dequantize the weight for the transpose). So **f16 base + LoRA comes first** (full candle
-autograd, works today); the quantized base is a later, isolable lift — exactly the de-risking order ADR-0002
+autograd, works today); the quantized base is a later, isolable lift - exactly the de-risking order ADR-0002
 already prescribed ("plain LoRA over a bf16 base first; add NF4 once it works").
 
 ## Decision
@@ -73,7 +73,7 @@ Build `antumbra-train` as a `candle` crate implementing the existing `Trainer` p
    sample `K` → **verify** (the ADR-0003 verifier) → keep winners → SFT the LoRA → repeat → save adapter
    (safetensors) → return `TrainOutcome { adapter_uri, reward_curve = pass-rate per round, final_fitness }`.
 5. **Generation lives here too.** RAFT needs sampling, so `antumbra-train` carries a `candle` forward + KV-cache
-   generation loop. That same model code is the seed of `antumbra-serve` (ADR-0006) — they will share a model
+   generation loop. That same model code is the seed of `antumbra-serve` (ADR-0006) - they will share a model
    layer rather than duplicate it.
 
 ```mermaid
@@ -113,10 +113,10 @@ flowchart TB
 - **Positive:** the loop trains for real; the same candle model seeds serving (ADR-0006) and the learned gate
   (ADR-0005); RAFT is simple enough to hand-roll correctly and robust to reward noise; the Trainer port is
   unchanged so nothing upstream moves.
-- **Negative:** the largest dependency graph in the workspace (candle + transformers + cuda) — gate it behind a
+- **Negative:** the largest dependency graph in the workspace (candle + transformers + cuda) - gate it behind a
   feature so the rest stays light; generation + training in one crate is real complexity; the quantized backward
   is genuinely hard and stays deferred; GPU/VRAM bounds the base size.
-- **Neutral:** `candle`'s GGUF-Q4 (vs NF4) is arguably a *better* fit — it is the same quant family
+- **Neutral:** `candle`'s GGUF-Q4 (vs NF4) is arguably a *better* fit - it is the same quant family
   `llama-cpp-2` serves (ADR-0006), so a graduated adapter is serveable without re-quantizing.
 
 ## Alternatives considered

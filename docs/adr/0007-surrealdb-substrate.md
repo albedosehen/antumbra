@@ -1,13 +1,13 @@
-# ADR-0007 — SurrealDB as the unified substrate
+# ADR-0007 - SurrealDB as the unified substrate
 
-**Status:** Accepted — v0 substrate implemented (2026-06-02) · **Date:** 2026-05-30 · **Related:** all ADRs (every store lives here)
+**Status:** Accepted - v0 substrate implemented (2026-06-02) · **Date:** 2026-05-30 · **Related:** all ADRs (every store lives here)
 
 ## Context
 
 Antumbra needs a document store (the stores), a vector index (router retrieval, boundary lookup), a graph
 (lineage), and durable flow state (resumable loop/router). Running four systems is overhead. SurrealDB is one
 multi-model engine that does all four, and `surql-rs` (`oneiriq-surql` ≥ 0.2.7) gives Rust a type-safe layer
-with HNSW index defs, `<|k|>` KNN, `RELATE`/traverse helpers, migrations, and transactions — exactly this
+with HNSW index defs, `<|k|>` KNN, `RELATE`/traverse helpers, migrations, and transactions - exactly this
 project's hot path.
 
 Two proven references inform the schema (we reuse their **persistence patterns**, not their orchestration):
@@ -28,7 +28,7 @@ Schema is authored as `surql-rs` migrations with drift detection (the dpbg patte
 ### Implementation note (v0, 2026-06-02)
 
 The `antumbra-store` crate implements this substrate against **`oneiriq-surql` 0.2.7** (public on crates.io,
-lib `surql`, feature `client-rustls`) on the **SurrealDB 3.x** driver — builder-only, no hand-authored SurrealQL:
+lib `surql`, feature `client-rustls`) on the **SurrealDB 3.x** driver - builder-only, no hand-authored SurrealQL:
 
 - **Schema as code** via the surql-rs builders (`table_schema`, `hnsw_index`, `unique_index`, `index`); the
   `DEFINE` DDL is *generated*, not written. v0 tables are `SCHEMALESS` with explicit unique + HNSW indexes;
@@ -121,7 +121,7 @@ DEFINE FIELD compose_strategy ON orchestration_run TYPE option<string>;  -- para
 DEFINE FIELD updated_at      ON orchestration_run TYPE datetime DEFAULT time::now();
 DEFINE INDEX orun_status_idx ON orchestration_run FIELDS status, updated_at;  -- resume stalled runs
 
--- Placement (ADR-0006) — defined now, used when the fleet wakes up.
+-- Placement (ADR-0006) - defined now, used when the fleet wakes up.
 DEFINE TABLE device_profile SCHEMAFULL;
 DEFINE FIELD host         ON device_profile TYPE string;
 DEFINE FIELD backend      ON device_profile TYPE string;           -- cuda|metal|mlx|cpu
@@ -151,7 +151,7 @@ DEFINE INDEX eval_subject_idx ON evaluation_run FIELDS subject_kind, subject_id;
   proven patterns (drift detection, migrations, `regression_fingerprint`) are reused, not reinvented.
 - **Negative:** single-DB coupling; the `failure_boundary` and memory tables grow unbounded → need a merge/decay
   policy (a learning problem inside the learning system); KNN-with-relational-filters is raw SurrealQL (the
-  `surql-rs` query builder doesn't cover it) — acceptable.
+  `surql-rs` query builder doesn't cover it) - acceptable.
 - **Neutral:** `device_profile` / `placed_on` are defined now but inert until ADR-0006's fleet wakes up.
 
 ## Alternatives considered

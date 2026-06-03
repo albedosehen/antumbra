@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 These ADRs capture the **load-bearing decisions** behind Antumbra. **ADR-0004 (the counterfactual boundary) is
-the keystone — the thesis the rest of the system serves;** the others are numbered in build-dependency order.
+the keystone - the thesis the rest of the system serves;** the others are numbered in build-dependency order.
 Read them against the [two readings of the chain](../architecture.md#1-the-thesis-and-the-two-readings-of-the-chain).
 
 ## Status legend
@@ -30,5 +30,5 @@ Read them against the [two readings of the chain](../architecture.md#1-the-thesi
 
 ## Format
 
-Each ADR: **Status / Date / Related**, **Context**, **Decision**, **Consequences**, **Alternatives**, and —
-where falsifiable — a **Validation** with an explicit **kill criterion**. Diagrams are inline Mermaid.
+Each ADR: **Status / Date / Related**, **Context**, **Decision**, **Consequences**, **Alternatives**, and -
+where falsifiable - a **Validation** with an explicit **kill criterion**. Diagrams are inline Mermaid.

@@ -1,14 +1,14 @@
-# ADR-0008 — The durable generational loop
+# ADR-0008 - The durable generational loop
 
 **Status:** Proposed · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundaries), 0005 (router)
 
 ## Context
 
 ADRs 0001–0005 describe *parts*; something has to drive them as one continuous process: grow shadows, let them
-explore, score them, graduate the winners, prune the losers, consolidate failures, repeat — unattended, across
+explore, score them, graduate the winners, prune the losers, consolidate failures, repeat - unattended, across
 reboots. kushtaka's loop is *task-centric* (one task at a time); Antumbra's must be **population-aware** (it
 manages a growing population across generations) and **durable** (it survives crashes by treating persisted
-`status` as the checkpoint — the dpbg pattern, done as a real flow engine rather than CRUD handlers).
+`status` as the checkpoint - the dpbg pattern, done as a real flow engine rather than CRUD handlers).
 
 ## Decision
 
@@ -29,19 +29,19 @@ stateDiagram-v2
     consolidate --> [*]: paused (fully resumable)
 ```
 
-1. **grow** — decide where the population is weak (gaps from `evaluation_run`, recurring tasks the router can't
+1. **grow** - decide where the population is weak (gaps from `evaluation_run`, recurring tasks the router can't
    satisfy) and spawn shadows there.
-2. **explore** — shadows train (DIY candle QLoRA, ADR-0002).
-3. **score** — verifiers + critic produce `reward_signal` (ADR-0003).
-4. **graduate / prune** — winners freeze into experts (ADR-0001) and update `capability_vec`; losers are
+2. **explore** - shadows train (DIY candle QLoRA, ADR-0002).
+3. **score** - verifiers + critic produce `reward_signal` (ADR-0003).
+4. **graduate / prune** - winners freeze into experts (ADR-0001) and update `capability_vec`; losers are
    discarded and their failure is consolidated into `failure_boundary` (ADR-0004).
-5. **consolidate** — update fitness, apply merge/decay to the stores, reindex HNSW; checkpoint; loop.
+5. **consolidate** - update fitness, apply merge/decay to the stores, reindex HNSW; checkpoint; loop.
 
 ## Consequences
 
 - **Positive:** the whole system is one durable, restartable process; population growth and old-skill retention
   are managed in one place; every generation is auditable via `evaluation_run`.
-- **Negative:** a buggy loop can spawn/prune pathologically (runaway population, premature pruning) — needs
+- **Negative:** a buggy loop can spawn/prune pathologically (runaway population, premature pruning) - needs
   guard rails and budgets; state-machine complexity is real.
 - **Neutral:** "population-aware scheduling across the cluster" is the ADR-0006-fleet version; v0 runs the same
   loop on one GPU.
