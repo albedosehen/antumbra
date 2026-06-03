@@ -11,15 +11,16 @@ antumbra-core = { path = "../antumbra-core" }
 async-trait.workspace = true
 # candle is the training engine (ADR-0010). CPU backend by default so the
 # workspace stays buildable everywhere; `cuda`/`metal` light up the GPU.
-candle-core = "0.8"
-candle-nn = "0.8"
+candle-core = "0.10"
+candle-nn = "0.10"
 serde_json.workspace = true
 thiserror.workspace = true
 # The real model stack (MT-1), behind the `models` feature so the default
-# workspace build stays light.
+# workspace build stays light. candle 0.10 -> cudarc 0.19 (CUDA 13 via
+# cuda-version-from-build-system) + hf-hub 0.5.
 serde = { workspace = true, optional = true }
-tokenizers = { version = "0.21", optional = true }
-hf-hub = { version = "0.3", optional = true }
+tokenizers = { version = "0.22", optional = true }
+hf-hub = { version = "0.5", optional = true }
 rand = { version = "0.8", optional = true }
 
 [features]
