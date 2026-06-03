@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use antumbra_core::{AntumbraError, Result};
 
 pub mod config;
+pub mod corpus;
 pub mod device;
 pub mod lora;
 pub mod model;
@@ -25,6 +26,7 @@ pub mod trainer;
 pub mod models;
 
 pub use config::{RaftConfig, TrainDtype};
+pub use corpus::JsonCorpus;
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;
 pub use trainer::RaftTrainer;

@@ -87,10 +87,7 @@ mod tests {
     struct OneTaskCorpus;
     impl Corpus for OneTaskCorpus {
         fn tasks(&self, _ids: &[String]) -> Vec<CorpusTask> {
-            vec![CorpusTask {
-                id: "t1".into(),
-                prompt: "complete the function".into(),
-            }]
+            vec![CorpusTask::new("t1", "complete the function")]
         }
     }
 

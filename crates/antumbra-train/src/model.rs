@@ -8,11 +8,30 @@ use async_trait::async_trait;
 
 use antumbra_core::Result;
 
-/// A verifiable task drawn from the corpus (your repo): a prompt to complete.
+/// A verifiable task drawn from the corpus (your repo): a prompt to complete,
+/// plus the per-task `verify` spec passed through to the verifier. For
+/// `CommandVerifier` that is `{ "program": ..., "args": [...], "cwd": ... }`;
+/// `Null` means the task carries no verification.
 #[derive(Debug, Clone)]
 pub struct CorpusTask {
     pub id: String,
     pub prompt: String,
+    pub verify: serde_json::Value,
+}
+
+impl CorpusTask {
+    pub fn new(id: impl Into<String>, prompt: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            prompt: prompt.into(),
+            verify: serde_json::Value::Null,
+        }
+    }
+
+    pub fn with_verify(mut self, verify: serde_json::Value) -> Self {
+        self.verify = verify;
+        self
+    }
 }
 
 /// One supervised example: train the adapter to produce `completion` for `prompt`.

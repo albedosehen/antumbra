@@ -8,9 +8,10 @@ description = "ADR-0003: verifier-first reward aggregation; the critic only dens
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
+async-trait.workspace = true
 chrono.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
-serde_json.workspace = true

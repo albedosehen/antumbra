@@ -35,7 +35,12 @@ pub async fn raft_train(
                     run_id: run_id.clone(),
                     step_idx: i as u32,
                     dimension: "exec".into(),
-                    artifact: json!({ "task": task.id, "completion": sample, "marker": sample }),
+                    artifact: json!({
+                        "task": task.id,
+                        "completion": sample,
+                        "marker": sample,
+                        "verify": task.verify,
+                    }),
                 };
                 if verifier.verify(&req).await?.passed {
                     passed += 1;
@@ -112,10 +117,7 @@ mod tests {
         let verifier = MarkerVerifier {
             expect: "PASS".into(),
         };
-        let tasks = vec![CorpusTask {
-            id: "t1".into(),
-            prompt: "complete the function".into(),
-        }];
+        let tasks = vec![CorpusTask::new("t1", "complete the function")];
         let cfg = RaftConfig {
             samples_per_task: 4,
             rounds: 3,
@@ -143,10 +145,7 @@ mod tests {
         let verifier = MarkerVerifier {
             expect: "PASS".into(),
         };
-        let tasks = vec![CorpusTask {
-            id: "t1".into(),
-            prompt: "p".into(),
-        }];
+        let tasks = vec![CorpusTask::new("t1", "p")];
         let cfg = RaftConfig {
             samples_per_task: 4,
             rounds: 2,

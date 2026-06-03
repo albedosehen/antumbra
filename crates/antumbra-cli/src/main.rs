@@ -49,6 +49,16 @@ enum Command {
         #[arg(long, default_value_t = 2)]
         k: usize,
     },
+    /// Train shadows with the real candle trainer (needs --features models + GPU).
+    Train {
+        /// Path to the JSON corpus of verifiable tasks ({id,prompt,verify}).
+        #[arg(long)]
+        corpus: String,
+        #[arg(long, default_value_t = 1)]
+        generations: u32,
+        #[arg(long, default_value = "run:train")]
+        run: String,
+    },
 }
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
@@ -138,6 +148,43 @@ async fn main() -> anyhow::Result<()> {
             }
             for scored in decision.ranked.iter().take(k.max(3)) {
                 println!("  {:<18} score={:.3}", scored.id.to_string(), scored.score);
+            }
+        }
+        Command::Train {
+            corpus,
+            generations,
+            run,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                use antumbra_train::{CandleModelLoader, JsonCorpus, RaftConfig, RaftTrainer};
+
+                let store = connect(&cli.url).await?;
+                let raft_cfg = RaftConfig::default();
+                let loader = CandleModelLoader::new(raft_cfg.clone());
+                let corpus = JsonCorpus::from_file(&corpus)?;
+                let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+                let trainer = RaftTrainer::new(raft_cfg, loader, corpus, verifier);
+                let embedder = FixedEmbedder::new(EMBED_DIM);
+                let loop_cfg = LoopConfig {
+                    graduate_threshold: 0.3,
+                    base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                    max_steps: 8,
+                };
+                let lp = GenerationLoop::new(&store, &trainer, &embedder, loop_cfg);
+                let reports = lp.run_until(&RunId::new(run), generations).await?;
+                for r in &reports {
+                    println!(
+                        "gen {:<3} shadow {:<16} fitness={:.2} graduated={}",
+                        r.generation.0, r.shadow, r.fitness, r.graduated
+                    );
+                }
+                println!("population: {} experts", expert::list(&store).await?.len());
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (&corpus, generations, &run);
+                anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
             }
         }
     }

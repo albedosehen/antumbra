@@ -6,6 +6,9 @@
 //! [`Critic`] ports, tags every signal with its source, and folds them with
 //! the core [`fold_step`] discipline.
 
+pub mod verifiers;
+pub use verifiers::CommandVerifier;
+
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};

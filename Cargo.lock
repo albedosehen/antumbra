@@ -161,9 +161,11 @@ name = "antumbra-cli"
 version = "0.0.0"
 dependencies = [
  "antumbra-core",
+ "antumbra-critic",
  "antumbra-gate",
  "antumbra-loop",
  "antumbra-store",
+ "antumbra-train",
  "anyhow",
  "clap",
  "tokio",
@@ -186,6 +188,7 @@ name = "antumbra-critic"
 version = "0.0.0"
 dependencies = [
  "antumbra-core",
+ "async-trait",
  "chrono",
  "serde_json",
  "tokio",
