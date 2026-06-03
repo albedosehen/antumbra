@@ -99,8 +99,8 @@ pub struct GrpoExperience {
 pub trait GrpoLm {
     /// Sample a group of completions, capturing each one's `π_old` log-probs.
     async fn sample_group(&mut self, prompt: &str, group: usize) -> Result<Vec<GrpoSample>>;
-    /// Reference (`base` + frozen-LoRA) per-token log-probs for given tokens.
-    async fn reference_logprobs(&self, prompt: &str, tokens: &[u32]) -> Result<Vec<f32>>;
+    /// Reference (frozen base, LoRA off) per-token log-probs for given tokens.
+    async fn reference_logprobs(&mut self, prompt: &str, tokens: &[u32]) -> Result<Vec<f32>>;
     /// One GRPO optimization step over the advantaged group; returns the loss.
     async fn grpo_step(
         &mut self,
@@ -268,7 +268,7 @@ mod tests {
                 })
                 .collect())
         }
-        async fn reference_logprobs(&self, _prompt: &str, tokens: &[u32]) -> Result<Vec<f32>> {
+        async fn reference_logprobs(&mut self, _prompt: &str, tokens: &[u32]) -> Result<Vec<f32>> {
             Ok(vec![-0.2; tokens.len()])
         }
         async fn grpo_step(

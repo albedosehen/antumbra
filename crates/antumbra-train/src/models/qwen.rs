@@ -24,6 +24,7 @@ use async_trait::async_trait;
 use antumbra_core::{AntumbraError, Result};
 
 use crate::config::RaftConfig;
+use crate::grpo::{token_logprobs, GrpoExperience, GrpoLm, GrpoSample};
 use crate::model::{CausalLm, SftExample};
 use crate::objective::causal_lm_loss;
 
@@ -89,6 +90,8 @@ struct LoraLinear {
     a: Tensor,
     b: Tensor,
     scale: f64,
+    /// When false the forward is base-only (the GRPO reference pass, ADR-0011).
+    enabled: bool,
 }
 
 impl LoraLinear {
@@ -124,17 +127,24 @@ impl LoraLinear {
             a,
             b,
             scale,
+            enabled: true,
         })
     }
 
     fn forward(&self, x: &Tensor) -> CResult<Tensor> {
         let mut out = matmul_t(x, &self.base_w)?;
-        let lora = matmul_t(&matmul_t(x, &self.a)?, &self.b)?.affine(self.scale, 0.0)?;
-        out = (out + lora)?;
+        if self.enabled {
+            let lora = matmul_t(&matmul_t(x, &self.a)?, &self.b)?.affine(self.scale, 0.0)?;
+            out = (out + lora)?;
+        }
         match &self.base_b {
             Some(bias) => out.broadcast_add(bias),
             None => Ok(out),
         }
+    }
+
+    fn set_enabled(&mut self, on: bool) {
+        self.enabled = on;
     }
 }
 
@@ -325,6 +335,13 @@ impl Attention {
     fn clear_cache(&mut self) {
         self.kv_cache = None;
     }
+
+    fn set_lora(&mut self, on: bool) {
+        self.q_proj.set_enabled(on);
+        self.k_proj.set_enabled(on);
+        self.v_proj.set_enabled(on);
+        self.o_proj.set_enabled(on);
+    }
 }
 
 // --- MLP -------------------------------------------------------------------
@@ -381,6 +398,12 @@ impl Mlp {
         let lhs = self.act.forward(&self.gate_proj.forward(xs)?)?;
         let rhs = self.up_proj.forward(xs)?;
         self.down_proj.forward(&(lhs * rhs)?)
+    }
+
+    fn set_lora(&mut self, on: bool) {
+        self.gate_proj.set_enabled(on);
+        self.up_proj.set_enabled(on);
+        self.down_proj.set_enabled(on);
     }
 }
 
@@ -443,6 +466,11 @@ impl DecoderLayer {
 
     fn clear_cache(&mut self) {
         self.self_attn.clear_cache();
+    }
+
+    fn set_lora(&mut self, on: bool) {
+        self.self_attn.set_lora(on);
+        self.mlp.set_lora(on);
     }
 }
 
@@ -532,6 +560,14 @@ impl QwenLora {
     fn clear_cache(&mut self) {
         for l in self.layers.iter_mut() {
             l.clear_cache();
+        }
+    }
+
+    /// Toggle the LoRA delta across every projection. Off = the frozen base
+    /// alone (the GRPO reference policy); on = base + adapter (the policy).
+    fn set_lora(&mut self, on: bool) {
+        for l in self.layers.iter_mut() {
+            l.set_lora(on);
         }
     }
 }
@@ -682,6 +718,88 @@ impl QwenCausalLm {
         ))
     }
 
+    /// Full-sequence logits `(1, seq, vocab)` in f32, LoRA on (the policy) or
+    /// off (the GRPO reference). No KV cache: we score the whole sequence. The
+    /// LoRA gate is restored to on afterwards.
+    fn forward_logits(&mut self, ids: &[u32], lora_on: bool) -> Result<Tensor> {
+        self.model.clear_cache();
+        self.model.set_lora(lora_on);
+        let input = Tensor::new(ids, &self.model.device)
+            .map_err(ce)?
+            .unsqueeze(0)
+            .map_err(ce)?;
+        let logits = (|| {
+            let hidden = self.model.hidden(&input, 0, false)?;
+            matmul_t(&hidden, &self.model.lm_head_w)?.to_dtype(DType::F32)
+        })();
+        self.model.set_lora(true);
+        logits.map_err(ce)
+    }
+
+    /// Sample one completion, capturing each generated token's `π_old` log-prob
+    /// (under the model's softmax, temperature aside) for the GRPO ratio.
+    fn sample_one_with_logprobs(&mut self, prompt: &str, seed: u64) -> Result<GrpoSample> {
+        self.model.clear_cache();
+        self.model.set_lora(true);
+        let mut tokens = self.encode(prompt)?;
+        let mut gen_tokens: Vec<u32> = Vec::new();
+        let mut old_logprobs: Vec<f32> = Vec::new();
+        let mut rng = StdRng::seed_from_u64(seed);
+        let temp = self.temperature;
+
+        for index in 0..self.max_new_tokens {
+            let ctx_len = if index == 0 { tokens.len() } else { 1 };
+            let start = tokens.len() - ctx_len;
+            let input = Tensor::new(&tokens[start..], &self.model.device)
+                .map_err(ce)?
+                .unsqueeze(0)
+                .map_err(ce)?;
+            let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
+            let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
+            let logits = matmul_t(&last, &self.model.lm_head_w)
+                .map_err(ce)?
+                .squeeze(0)
+                .map_err(ce)?
+                .squeeze(0)
+                .map_err(ce)?
+                .to_dtype(DType::F32)
+                .map_err(ce)?;
+            let next = sample_token(&logits, temp, &mut rng)?;
+            if next == self.eos {
+                break;
+            }
+            let lp = candle_nn::ops::log_softmax(&logits, 0)
+                .map_err(ce)?
+                .get(next as usize)
+                .map_err(ce)?
+                .to_scalar::<f32>()
+                .map_err(ce)?;
+            tokens.push(next);
+            gen_tokens.push(next);
+            old_logprobs.push(lp);
+        }
+
+        let text = self
+            .tokenizer
+            .decode(&gen_tokens, true)
+            .map_err(|e| AntumbraError::other(format!("decode: {e}")))?;
+        Ok(GrpoSample {
+            completion: crate::decode::truncate_at_stops(&text, crate::decode::DEFAULT_STOPS),
+            tokens: gen_tokens,
+            old_logprobs,
+        })
+    }
+
+    fn write_adapter(&self, path: &str) -> Result<()> {
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            std::fs::create_dir_all(parent).map_err(|e| AntumbraError::other(e.to_string()))?;
+        }
+        self.model
+            .varmap
+            .save(path)
+            .map_err(|e| AntumbraError::other(format!("save adapter: {e}")))
+    }
+
     fn train_one(&mut self, example: &SftExample) -> Result<f32> {
         self.model.clear_cache();
         let prompt_ids = self.encode(&example.prompt)?;
@@ -763,12 +881,101 @@ impl CausalLm for QwenCausalLm {
     }
 
     fn save_adapter(&self, path: &str) -> Result<()> {
-        if let Some(parent) = std::path::Path::new(path).parent() {
-            std::fs::create_dir_all(parent).map_err(|e| AntumbraError::other(e.to_string()))?;
+        self.write_adapter(path)
+    }
+}
+
+#[async_trait]
+impl GrpoLm for QwenCausalLm {
+    async fn sample_group(&mut self, prompt: &str, group: usize) -> Result<Vec<GrpoSample>> {
+        let mut out = Vec::with_capacity(group);
+        for i in 0..group {
+            let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let seed = 0xA17_u64
+                .wrapping_mul(nonce.wrapping_add(1))
+                .wrapping_add(i as u64);
+            out.push(self.sample_one_with_logprobs(prompt, seed)?);
         }
-        self.model
-            .varmap
-            .save(path)
-            .map_err(|e| AntumbraError::other(format!("save adapter: {e}")))
+        Ok(out)
+    }
+
+    async fn reference_logprobs(&mut self, prompt: &str, tokens: &[u32]) -> Result<Vec<f32>> {
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+        let prompt_ids = self.encode(prompt)?;
+        let plen = prompt_ids.len();
+        let mut ids = prompt_ids;
+        ids.extend_from_slice(tokens);
+        let logits = self.forward_logits(&ids, false)?; // base only
+        let input = Tensor::new(ids.as_slice(), &self.model.device)
+            .map_err(ce)?
+            .unsqueeze(0)
+            .map_err(ce)?;
+        let all_lp = token_logprobs(&logits, &input).map_err(ce)?;
+        all_lp
+            .narrow(1, plen - 1, tokens.len())
+            .map_err(ce)?
+            .flatten_all()
+            .map_err(ce)?
+            .to_vec1::<f32>()
+            .map_err(ce)
+    }
+
+    async fn grpo_step(
+        &mut self,
+        prompt: &str,
+        group: &[GrpoExperience],
+        cfg: &RaftConfig,
+    ) -> Result<f32> {
+        let dev = self.model.device.clone();
+        let prompt_ids = self.encode(prompt)?;
+        let plen = prompt_ids.len();
+        let mut losses: Vec<Tensor> = Vec::new();
+        for exp in group {
+            let t = exp.tokens.len();
+            if t == 0 || exp.old_logprobs.len() != t || exp.ref_logprobs.len() != t {
+                continue;
+            }
+            let mut ids = prompt_ids.clone();
+            ids.extend_from_slice(&exp.tokens);
+            let logits = self.forward_logits(&ids, true)?; // policy, grad on LoRA
+            let input = Tensor::new(ids.as_slice(), &dev)
+                .map_err(ce)?
+                .unsqueeze(0)
+                .map_err(ce)?;
+            let policy_lp = token_logprobs(&logits, &input)
+                .map_err(ce)?
+                .narrow(1, plen - 1, t)
+                .map_err(ce)?;
+            let old_lp = Tensor::from_vec(exp.old_logprobs.clone(), (1, t), &dev).map_err(ce)?;
+            let ref_lp = Tensor::from_vec(exp.ref_logprobs.clone(), (1, t), &dev).map_err(ce)?;
+            let adv = Tensor::from_vec(vec![exp.advantage], (1, 1), &dev).map_err(ce)?;
+            let mask = Tensor::ones((1, t), DType::F32, &dev).map_err(ce)?;
+            let loss = crate::grpo::grpo_loss(
+                &policy_lp,
+                &old_lp,
+                &ref_lp,
+                &adv,
+                &mask,
+                cfg.clip_eps,
+                cfg.kl_beta,
+            )
+            .map_err(ce)?;
+            losses.push(loss);
+        }
+        if losses.is_empty() {
+            return Ok(0.0);
+        }
+        let mean = Tensor::stack(&losses, 0)
+            .map_err(ce)?
+            .mean_all()
+            .map_err(ce)?;
+        self.opt.backward_step(&mean).map_err(ce)?;
+        mean.to_scalar::<f32>().map_err(ce)
+    }
+
+    fn save_adapter(&self, path: &str) -> Result<()> {
+        self.write_adapter(path)
     }
 }
