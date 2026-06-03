@@ -256,13 +256,13 @@ async fn main() -> anyhow::Result<()> {
                 let corpus = JsonCorpus::from_file(&corpus)?;
                 let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
                 let trainer = RaftTrainer::new(raft_cfg, loader, corpus, verifier);
-                let embedder = FixedEmbedder::new(EMBED_DIM);
+                let embedder = make_embedder()?;
                 let loop_cfg = LoopConfig {
                     graduate_threshold: 0.3,
                     base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
                     max_steps: 8,
                 };
-                let lp = GenerationLoop::new(&store, &trainer, &embedder, loop_cfg);
+                let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
                 let reports = lp.run_until(&RunId::new(run), generations).await?;
                 for r in &reports {
                     let curve: Vec<String> =

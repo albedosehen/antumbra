@@ -4,6 +4,7 @@
 //! (shadows, rewards, evaluations, boundaries) to the substrate.
 
 use antumbra_core::generational::LoopState;
+use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{Generation, RunId, ShadowStatus, SubjectKind};
 use antumbra_loop::{GenerationLoop, LoopConfig};
@@ -65,6 +66,44 @@ async fn grows_population_and_resumes_after_restart() {
             .len(),
         2
     );
+}
+
+#[tokio::test]
+async fn capability_vector_is_learned_from_solved_exemplars() {
+    let store = Store::connect_memory(8).await.expect("connect");
+    let exemplars = vec!["reverse a string".to_string(), "format text".to_string()];
+    let trainer = ScriptedTrainer::graduating_with_exemplars(exemplars.clone());
+    let embedder = FixedEmbedder::new(8);
+    let run = RunId::new("run:cap");
+
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
+    let mut head = lp.resume_or_init(&run).await.unwrap();
+    let report = lp.run_generation(&mut head).await.unwrap();
+    assert!(report.graduated);
+
+    // The expert's capability vector must be the centroid of the embedded
+    // solved-task prompts -- learned from evaluated behavior, not a label.
+    let mut expected = [0.0f32; 8];
+    for ex in &exemplars {
+        let v = embedder.embed(ex).await.unwrap();
+        for (e, x) in expected.iter_mut().zip(v.iter()) {
+            *e += *x;
+        }
+    }
+    expected
+        .iter_mut()
+        .for_each(|e| *e /= exemplars.len() as f32);
+
+    let experts = expert::list(&store).await.unwrap();
+    assert_eq!(experts.len(), 1);
+    let cap = experts[0]
+        .capability_vec
+        .as_ref()
+        .expect("graduated expert has a capability vector");
+    assert_eq!(cap.len(), 8);
+    for (c, e) in cap.iter().zip(expected.iter()) {
+        assert!((c - e).abs() < 1e-6, "cap {c} != expected centroid {e}");
+    }
 }
 
 #[tokio::test]

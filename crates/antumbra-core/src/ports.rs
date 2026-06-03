@@ -64,6 +64,10 @@ pub struct TrainOutcome {
     /// Per-step fitness; the anti-collapse guard reads this curve.
     pub reward_curve: Vec<f32>,
     pub final_fitness: f32,
+    /// Prompts the shadow provably solved (verified-correct) by the final round.
+    /// The expert's capability vector is learned from these evaluated behaviors
+    /// rather than a hand-written description (ADR-0004/0005).
+    pub capability_exemplars: Vec<String>,
 }
 
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;

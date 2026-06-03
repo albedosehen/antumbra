@@ -61,6 +61,7 @@ impl Serve for EchoServe {
 pub struct ScriptedTrainer {
     pub final_fitness: f32,
     pub curve: Vec<f32>,
+    pub capability_exemplars: Vec<String>,
 }
 
 impl ScriptedTrainer {
@@ -69,6 +70,7 @@ impl ScriptedTrainer {
         Self {
             final_fitness: 0.9,
             curve: vec![0.1, 0.4, 0.7, 0.9],
+            capability_exemplars: Vec::new(),
         }
     }
 
@@ -77,6 +79,16 @@ impl ScriptedTrainer {
         Self {
             final_fitness: 0.0,
             curve: vec![0.0, 0.0, 0.0],
+            capability_exemplars: Vec::new(),
+        }
+    }
+
+    /// A graduating trainer that reports the prompts its shadow solved, so the
+    /// loop derives the capability vector from evaluated behavior.
+    pub fn graduating_with_exemplars(exemplars: Vec<String>) -> Self {
+        Self {
+            capability_exemplars: exemplars,
+            ..Self::graduating()
         }
     }
 }
@@ -88,6 +100,7 @@ impl Trainer for ScriptedTrainer {
             adapter_uri: format!("memory://adapter/{}", req.shadow),
             reward_curve: self.curve.clone(),
             final_fitness: self.final_fitness,
+            capability_exemplars: self.capability_exemplars.clone(),
         })
     }
 }

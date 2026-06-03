@@ -22,9 +22,13 @@ pub async fn raft_train(
     cfg: &RaftConfig,
 ) -> Result<TrainOutcome> {
     let mut reward_curve = Vec::with_capacity(cfg.rounds);
+    // The prompts solved in the final round become the expert's capability
+    // exemplars: what it provably does, learned from evaluated behavior.
+    let mut capability_exemplars: Vec<String> = Vec::new();
 
     for _round in 0..cfg.rounds {
         let mut winners: Vec<SftExample> = Vec::new();
+        let mut solved: Vec<String> = Vec::new();
         let (mut total, mut passed) = (0usize, 0usize);
 
         for task in tasks {
@@ -44,6 +48,9 @@ pub async fn raft_train(
                 };
                 if verifier.verify(&req).await?.passed {
                     passed += 1;
+                    if !solved.contains(&task.prompt) {
+                        solved.push(task.prompt.clone());
+                    }
                     winners.push(SftExample {
                         prompt: task.prompt.clone(),
                         completion: sample.clone(),
@@ -57,6 +64,8 @@ pub async fn raft_train(
         } else {
             passed as f32 / total as f32
         });
+        // Keep the latest round's solved set (reflects the trained adapter).
+        capability_exemplars = solved;
 
         // Anti-collapse (ADR-0002): only train on verified positives; an empty
         // winner set means no update this round (never reinforce nothing).
@@ -76,6 +85,7 @@ pub async fn raft_train(
         adapter_uri,
         reward_curve,
         final_fitness,
+        capability_exemplars,
     })
 }
 
@@ -136,6 +146,8 @@ mod tests {
         assert!(out.reward_curve.last().unwrap() > out.reward_curve.first().unwrap());
         assert!(out.final_fitness > 0.0);
         assert!(out.adapter_uri.ends_with("shadow_g0.safetensors"));
+        // capability is learned from the task it provably solved
+        assert_eq!(out.capability_exemplars, vec!["complete the function"]);
     }
 
     #[tokio::test]
@@ -159,5 +171,7 @@ mod tests {
             .unwrap();
         assert_eq!(out.final_fitness, 0.0);
         assert!(out.reward_curve.iter().all(|&r| r == 0.0));
+        // nothing solved -> no capability exemplars
+        assert!(out.capability_exemplars.is_empty());
     }
 }

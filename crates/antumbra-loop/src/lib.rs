@@ -130,7 +130,7 @@ impl<'a> GenerationLoop<'a> {
         if graduated {
             sh.advance_to(ShadowStatus::Graduated)?;
             shadow::upsert(self.store, &sh).await?;
-            self.graduate(generation, &outcome.adapter_uri, fitness)
+            self.graduate(generation, &outcome.adapter_uri, fitness, &outcome)
                 .await?;
         } else {
             sh.advance_to(ShadowStatus::Pruned)?;
@@ -209,22 +209,31 @@ impl<'a> GenerationLoop<'a> {
     }
 
     /// Freeze a graduated shadow into a new expert and add it to the population
-    /// (ADR-0001). The capability vector is co-learned here via the embedder.
+    /// (ADR-0001). The capability vector is learned from **evaluated behavior**:
+    /// the centroid of the embeddings of the tasks the shadow provably solved
+    /// (ADR-0004/0005), so routing reflects what the expert demonstrably does —
+    /// not a hand-written label. Falls back to a generic descriptor only when
+    /// the trainer reported no exemplars.
     async fn graduate(
         &self,
         generation: Generation,
         adapter_uri: &str,
         fitness: f32,
+        outcome: &TrainOutcome,
     ) -> Result<()> {
-        let descriptor = format!("specialist for generation {}", generation.0);
-        let capability_vec = self.embedder.embed(&descriptor).await?;
+        let capability_vec = self
+            .capability_vector(&outcome.capability_exemplars, generation)
+            .await?;
         let now = Utc::now();
         let expert = Expert {
             id: ExpertId::new(format!("expert:g{}", generation.0)),
             name: format!("specialist-g{}", generation.0),
             base_model: self.cfg.base_model.clone(),
             artifact_uri: adapter_uri.to_string(),
-            capability_card: serde_json::json!({ "generation": generation.0 }),
+            capability_card: serde_json::json!({
+                "generation": generation.0,
+                "exemplars": outcome.capability_exemplars,
+            }),
             capability_vec: Some(capability_vec),
             fitness,
             frozen_at: Some(now),
@@ -232,6 +241,30 @@ impl<'a> GenerationLoop<'a> {
             created_at: now,
         };
         expert::insert(self.store, &expert).await
+    }
+
+    /// The capability vector: the mean of the embeddings of solved-task prompts
+    /// (cosine, used downstream by the gate, is scale-invariant so the centroid
+    /// need not be renormalized). With no exemplars, embed a generic descriptor.
+    async fn capability_vector(
+        &self,
+        exemplars: &[String],
+        generation: Generation,
+    ) -> Result<Vec<f32>> {
+        if exemplars.is_empty() {
+            let descriptor = format!("specialist for generation {}", generation.0);
+            return self.embedder.embed(&descriptor).await;
+        }
+        let mut centroid = vec![0.0f32; self.embedder.dim()];
+        for prompt in exemplars {
+            let v = self.embedder.embed(prompt).await?;
+            for (c, x) in centroid.iter_mut().zip(v.iter()) {
+                *c += *x;
+            }
+        }
+        let n = exemplars.len() as f32;
+        centroid.iter_mut().for_each(|c| *c /= n);
+        Ok(centroid)
     }
 
     /// On prune, log an **open-negative** boundary (ADR-0004): the failure is
