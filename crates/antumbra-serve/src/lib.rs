@@ -15,6 +15,11 @@ mod embed;
 #[cfg(feature = "models")]
 pub use embed::BertEmbedder;
 
+#[cfg(feature = "models")]
+mod serve_candle;
+#[cfg(feature = "models")]
+pub use serve_candle::CandleServe;
+
 /// Multi-adapter server over a shared base. `act` is not yet implemented.
 #[derive(Debug, Clone)]
 pub struct MultiAdapterServe {

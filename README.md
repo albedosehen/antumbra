@@ -163,6 +163,8 @@ cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.s
   train --corpus corpora/arith.json --run arith --generations 1
 cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
   route "add two integers and return the sum"   # routes to the specialist, or escalates if out of scope
+cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
+  ask "Write a Python function add(a, b) that returns their sum."   # route -> load adapter -> generate
 ```
 
 See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per-crate status and

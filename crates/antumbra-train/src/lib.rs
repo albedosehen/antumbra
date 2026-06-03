@@ -74,12 +74,16 @@ impl ModelLoader for CandleModelLoader {
     async fn load(
         &self,
         base_model: &str,
-        _parent_adapter: Option<&str>,
+        parent_adapter: Option<&str>,
     ) -> Result<models::QwenCausalLm> {
         let mut config = self.config.clone();
         config.base_model = base_model.to_string();
         let device = device::best_device().map_err(|e| AntumbraError::other(e.to_string()))?;
-        models::QwenCausalLm::load(device, config)
+        let mut model = models::QwenCausalLm::load(device, config)?;
+        if let Some(adapter) = parent_adapter {
+            model.load_adapter(adapter)?;
+        }
+        Ok(model)
     }
 }
 

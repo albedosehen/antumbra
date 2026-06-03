@@ -2,6 +2,15 @@
 
 **Status:** Proposed (amended 2026-06-02, ternary scope) · **v0 scoped to a single RTX 3090 Ti** · **Date:** 2026-05-30 · **Related:** 0001 (adapters), 0002 (training), 0005 (gate), 0009 (north star)
 
+> **First serving path (2026-06-03).** `antumbra-serve::CandleServe` implements the `Serve` port by reusing the
+> trainer's candle Qwen2.5-Coder + LoRA model: it loads the shared base, restores a graduated expert's adapter
+> (`QwenCausalLm::load_adapter` -> `VarMap::load`), and generates. Validated on the GPU via the CLI `ask`
+> command: `ask "add two integers"` routed to the arith specialist, loaded `arith_g0.safetensors`, and emitted
+> `def add(a, b): return a + b`; `ask "reverse a string"` routed to the strings specialist and emitted
+> `return s[::-1]`. This is v0 single-adapter serving (one configured adapter per `act`); multi-adapter hot-swap
+> (S-LoRA) and the `llama-cpp-2` / `mistral.rs` backends with the ternary tier remain the deferred richer scope.
+> It also unblocks the real `AcceptabilityProbe` (ADR-0004): a behavior can now be generated and then judged.
+
 ## Context
 
 The eventual target is a heterogeneous home cluster, but building placement first would sink the project before

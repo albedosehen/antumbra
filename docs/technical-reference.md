@@ -38,7 +38,7 @@ Nine crates, single Rust workspace. The default build is light (no ML deps); can
 | `antumbra-boundary` | 0004 | Counterfactual scope engine (keystone). Seam for `C'` recovery. | — |
 | `antumbra-loop` | 0008 | Durable generational loop; writes full lineage to the substrate. | — |
 | `antumbra-train` | 0002, 0010 | candle QLoRA/RAFT trainer: Qwen2.5-Coder + LoRA, SFT, save. | `candle-*`, `tokenizers`, `hf-hub` (`models`); `cuda`/`metal` |
-| `antumbra-serve` | 0006 | Multi-adapter serving seam; **the real candle BERT embedder lives here**. | `candle-*`, `candle-transformers` (`models`); `cuda`/`metal` |
+| `antumbra-serve` | 0006 | Candle adapter serving (`CandleServe`: load base + adapter, generate) and the real candle BERT embedder. | `candle-*`, `candle-transformers`, `antumbra-train` (`models`); `cuda`/`metal` |
 | `antumbra-cli` | — | Operator CLI: `migrate · schema · experts · status · loop · route · seed · train`. | pulls `train`/`serve`/`critic` (`models`) |
 
 ## 3. Domain model (`antumbra-core`)
@@ -230,6 +230,11 @@ release-profile `opt-level=1` override on `surrealdb`/`surrealdb-core` works aro
   straight to that expert, isolating the boundary as the cause
   (`crates/antumbra-store/tests/keystone_mem.rs`). The only fake is the `AcceptabilityProbe` (needs serving).
 
+- **Serving — experts answer (GPU).** `CandleServe` reuses the trainer's Qwen+LoRA model to load a graduated
+  expert's adapter and generate. CLI `ask "add two integers"` routed to the arith specialist, loaded
+  `arith_g0.safetensors`, and produced `def add(a, b): return a + b`; `ask "reverse a string"` routed to the
+  strings specialist and produced `return s[::-1]`. Route -> load adapter -> serve is closed end-to-end.
+
 ## 14. What is proven, and what is not
 
 **Proven (toy scale):** an adapter learns from verified outcomes; the loop is durable and resumable; capability
@@ -239,8 +244,11 @@ queries.
 The failure-boundary `C'` recovery — the deepest keystone claim — now composes end-to-end (search ->
 actionable boundary -> persistence -> scoped inhibition), validated with a fake `AcceptabilityProbe`.
 
+v0 **serving** exists: `CandleServe` loads a graduated expert's adapter and generates, so route -> serve is
+closed (single-adapter; reloads per request).
+
 **Not yet:** capability is exercised on small corpora and few experts (no generalization or catastrophic-
-forgetting test); the **real `AcceptabilityProbe`** (judging a live behavior in context) needs serving, and
-candidate governing features are supplied rather than discovered; the gate is the heuristic coverage gate, not
-the learned latent mixer; serving (`llama-cpp-2`/`mistral.rs`), GRPO (v1 over RAFT), and GGUF-Q4 quantized
-backward (MT-4) are future; composition (ADR-0009) is the north star.
+forgetting test); the **real `AcceptabilityProbe`** is now unblocked by serving but not yet built, and candidate
+governing features are supplied rather than discovered; the gate is the heuristic coverage gate, not the learned
+latent mixer; multi-adapter hot-swap and the `llama-cpp-2`/`mistral.rs` backends, GRPO (v1 over RAFT), and
+GGUF-Q4 quantized backward (MT-4) are future; composition (ADR-0009) is the north star.

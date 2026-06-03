@@ -15,6 +15,13 @@ use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 
+#[cfg(feature = "models")]
+use antumbra_core::ports::{ActRequest, Serve};
+#[cfg(feature = "models")]
+use antumbra_serve::CandleServe;
+#[cfg(feature = "models")]
+use antumbra_train::{CandleModelLoader, JsonCorpus, RaftConfig, RaftTrainer};
+
 #[derive(Parser)]
 #[command(name = "antumbra", about = "Antumbra operator CLI", version)]
 struct Cli {
@@ -60,6 +67,17 @@ enum Command {
     /// capability card with the active embedder (real BERT under --features
     /// models). Pair with a persistent --url to then `route` against them.
     Seed,
+    /// Route a task to an expert and serve a real answer from its adapter
+    /// (needs --features models + a GPU; the expert must have a trained adapter).
+    Ask {
+        /// The task to route and answer.
+        task: String,
+        #[arg(long, default_value_t = 1)]
+        k: usize,
+        /// Max tokens to generate for the answer.
+        #[arg(long, default_value_t = 128)]
+        max_new_tokens: usize,
+    },
     /// Train shadows with the real candle trainer (needs --features models + GPU).
     Train {
         /// Path to the JSON corpus of verifiable tasks ({id,prompt,verify}).
@@ -233,6 +251,61 @@ async fn main() -> anyhow::Result<()> {
                 println!("  {:<18} score={:.3}", scored.id.to_string(), scored.score);
             }
         }
+        Command::Ask {
+            task,
+            k,
+            max_new_tokens,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                let store = connect(&cli.url).await?;
+                let embedder = make_embedder()?;
+                let task_vec = embedder.embed(&task).await?;
+                let experts = expert::list(&store).await?;
+                let boundaries = boundary::list(&store).await?;
+                let decision =
+                    gate_route(&task_vec, &experts, &boundaries, k, &GateConfig::default());
+                if decision.escalate {
+                    println!(
+                        "decision: ESCALATE to flagship (coverage {:.3}); no in-scope expert",
+                        decision.coverage
+                    );
+                } else {
+                    let chosen = &decision.chosen[0];
+                    let expert = experts
+                        .iter()
+                        .find(|e| &e.id == chosen)
+                        .ok_or_else(|| anyhow::anyhow!("routed expert {chosen} not found"))?;
+                    println!(
+                        "routing to {} (adapter {})",
+                        expert.name, expert.artifact_uri
+                    );
+                    let cfg = RaftConfig {
+                        max_new_tokens,
+                        ..RaftConfig::default()
+                    };
+                    let serve = CandleServe::new(
+                        expert.base_model.clone(),
+                        expert.artifact_uri.clone(),
+                        cfg,
+                    );
+                    let out = serve
+                        .act(ActRequest {
+                            task_id: "ask".into(),
+                            prompt: task.clone(),
+                            adapters: vec![expert.id.clone()],
+                        })
+                        .await?;
+                    println!("---");
+                    println!("{}", out.final_output);
+                }
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (&task, k, max_new_tokens);
+                anyhow::bail!("`ask` requires building with --features models (candle + a GPU)");
+            }
+        }
         Command::Train {
             corpus,
             generations,
@@ -243,8 +316,6 @@ async fn main() -> anyhow::Result<()> {
         } => {
             #[cfg(feature = "models")]
             {
-                use antumbra_train::{CandleModelLoader, JsonCorpus, RaftConfig, RaftTrainer};
-
                 let store = connect(&cli.url).await?;
                 let raft_cfg = RaftConfig {
                     samples_per_task: samples,

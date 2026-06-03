@@ -613,6 +613,17 @@ impl QwenCausalLm {
         })
     }
 
+    /// Load trained LoRA weights (saved by `save_adapter`) into this model's
+    /// VarMap by matching variable names. Used to serve a graduated expert and
+    /// to warm-start continual training from a parent adapter. The backend and
+    /// dtype must match the ones the adapter was trained with.
+    pub fn load_adapter(&mut self, path: &str) -> Result<()> {
+        self.model
+            .varmap
+            .load(path)
+            .map_err(|e| AntumbraError::other(format!("load adapter `{path}`: {e}")))
+    }
+
     fn encode(&self, text: &str) -> Result<Vec<u32>> {
         Ok(self
             .tokenizer

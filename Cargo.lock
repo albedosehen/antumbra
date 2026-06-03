@@ -222,6 +222,7 @@ name = "antumbra-serve"
 version = "0.0.0"
 dependencies = [
  "antumbra-core",
+ "antumbra-train",
  "async-trait",
  "candle-core",
  "candle-nn",
