@@ -111,6 +111,13 @@ pub trait GrpoLm {
     fn save_adapter(&self, path: &str) -> Result<()>;
 }
 
+/// Builds a fresh [`GrpoLm`] for a shadow (cf. [`crate::model::ModelLoader`]).
+#[async_trait]
+pub trait GrpoModelLoader: Send + Sync {
+    type Model: GrpoLm + Send;
+    async fn load(&self, base_model: &str, parent_adapter: Option<&str>) -> Result<Self::Model>;
+}
+
 /// Run GRPO for `cfg.rounds` rounds (group size = `cfg.samples_per_task`) and
 /// return the trained adapter outcome. The per-round pass-rate is the reward
 /// curve, exactly as RAFT (ADR-0010), so the loop swaps in behind the trainer.

@@ -29,10 +29,10 @@ pub mod models;
 
 pub use config::{RaftConfig, TrainDtype};
 pub use corpus::JsonCorpus;
-pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoSample};
+pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;
-pub use trainer::RaftTrainer;
+pub use trainer::{GrpoTrainer, RaftTrainer};
 
 /// Placeholder for the candle model until MT-1 lands; implements [`CausalLm`]
 /// so the loader's associated type is complete, but every method reports
@@ -55,6 +55,27 @@ impl CausalLm for PendingModel {
     }
 }
 
+#[async_trait]
+impl GrpoLm for PendingModel {
+    async fn sample_group(&mut self, _prompt: &str, _g: usize) -> Result<Vec<GrpoSample>> {
+        Err(AntumbraError::Unimplemented("candle GRPO sampling (MT-1)"))
+    }
+    async fn reference_logprobs(&mut self, _prompt: &str, _tokens: &[u32]) -> Result<Vec<f32>> {
+        Err(AntumbraError::Unimplemented("candle GRPO reference (MT-1)"))
+    }
+    async fn grpo_step(
+        &mut self,
+        _prompt: &str,
+        _group: &[GrpoExperience],
+        _cfg: &RaftConfig,
+    ) -> Result<f32> {
+        Err(AntumbraError::Unimplemented("candle GRPO step (MT-1)"))
+    }
+    fn save_adapter(&self, _path: &str) -> Result<()> {
+        Err(AntumbraError::Unimplemented("candle adapter save (MT-1)"))
+    }
+}
+
 /// Loads the candle Qwen2.5-Coder base + a fresh LoRA adapter (MT-1). The real
 /// body — candle-transformers + hf-hub + tokenizers + LoRA injection — runs on
 /// the GPU and lands behind a `models` feature; this is its typed seam.
@@ -66,14 +87,10 @@ impl CandleModelLoader {
     pub fn new(config: RaftConfig) -> Self {
         Self { config }
     }
-}
 
-#[cfg(feature = "models")]
-#[async_trait]
-impl ModelLoader for CandleModelLoader {
-    type Model = models::QwenCausalLm;
-
-    async fn load(
+    /// Build the candle Qwen + LoRA model (shared by the RAFT and GRPO loaders).
+    #[cfg(feature = "models")]
+    fn load_qwen(
         &self,
         base_model: &str,
         parent_adapter: Option<&str>,
@@ -86,6 +103,38 @@ impl ModelLoader for CandleModelLoader {
             model.load_adapter(adapter)?;
         }
         Ok(model)
+    }
+}
+
+#[cfg(feature = "models")]
+#[async_trait]
+impl ModelLoader for CandleModelLoader {
+    type Model = models::QwenCausalLm;
+
+    async fn load(&self, base: &str, parent: Option<&str>) -> Result<models::QwenCausalLm> {
+        self.load_qwen(base, parent)
+    }
+}
+
+#[cfg(feature = "models")]
+#[async_trait]
+impl GrpoModelLoader for CandleModelLoader {
+    type Model = models::QwenCausalLm;
+
+    async fn load(&self, base: &str, parent: Option<&str>) -> Result<models::QwenCausalLm> {
+        self.load_qwen(base, parent)
+    }
+}
+
+#[cfg(not(feature = "models"))]
+#[async_trait]
+impl GrpoModelLoader for CandleModelLoader {
+    type Model = PendingModel;
+
+    async fn load(&self, _base: &str, _parent: Option<&str>) -> Result<PendingModel> {
+        Err(AntumbraError::Unimplemented(
+            "candle GRPO load — build antumbra-train with --features models",
+        ))
     }
 }
 
@@ -108,8 +157,12 @@ mod tests {
     #[tokio::test]
     async fn candle_loader_reports_unimplemented() {
         let loader = CandleModelLoader::new(RaftConfig::default());
-        let err = loader
-            .load("Qwen/Qwen2.5-Coder-1.5B", None)
+        // `load` is now defined on two loader traits; name one explicitly.
+        let err = ModelLoader::load(&loader, "Qwen/Qwen2.5-Coder-1.5B", None)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AntumbraError::Unimplemented(_)));
+        let err = GrpoModelLoader::load(&loader, "Qwen/Qwen2.5-Coder-1.5B", None)
             .await
             .unwrap_err();
         assert!(matches!(err, AntumbraError::Unimplemented(_)));

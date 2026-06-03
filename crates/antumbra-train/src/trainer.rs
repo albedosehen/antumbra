@@ -13,6 +13,7 @@ use antumbra_core::ports::{TrainOutcome, TrainRequest, Trainer, Verifier};
 use antumbra_core::{Result, RunId};
 
 use crate::config::RaftConfig;
+use crate::grpo::{grpo_train, GrpoModelLoader};
 use crate::model::{Corpus, ModelLoader};
 use crate::raft::raft_train;
 
@@ -41,6 +42,43 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
         let tasks = self.corpus.tasks(&req.corpus_task_ids);
         let run_id = RunId::new(req.shadow.as_str());
         raft_train(
+            &mut model,
+            self.verifier.as_ref(),
+            &tasks,
+            &run_id,
+            &self.config,
+        )
+        .await
+    }
+}
+
+/// The [`Trainer`] port realized as the GRPO loop (ADR-0011); same shape as
+/// [`RaftTrainer`] but over a [`GrpoModelLoader`].
+pub struct GrpoTrainer<L: GrpoModelLoader, C: Corpus> {
+    config: RaftConfig,
+    loader: L,
+    corpus: C,
+    verifier: Arc<dyn Verifier>,
+}
+
+impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
+    pub fn new(config: RaftConfig, loader: L, corpus: C, verifier: Arc<dyn Verifier>) -> Self {
+        Self {
+            config,
+            loader,
+            corpus,
+            verifier,
+        }
+    }
+}
+
+#[async_trait]
+impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
+    async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
+        let mut model = self.loader.load(&req.base_model, None).await?;
+        let tasks = self.corpus.tasks(&req.corpus_task_ids);
+        let run_id = RunId::new(req.shadow.as_str());
+        grpo_train(
             &mut model,
             self.verifier.as_ref(),
             &tasks,

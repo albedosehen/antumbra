@@ -18,13 +18,13 @@ use clap::{Parser, Subcommand};
 #[cfg(feature = "models")]
 use antumbra_boundary::{discover_boundary, find_scope_over_contexts, finding_to_boundary};
 #[cfg(feature = "models")]
-use antumbra_core::ports::{ActRequest, Serve};
+use antumbra_core::ports::{ActRequest, Serve, Trainer};
 #[cfg(feature = "models")]
 use antumbra_core::{BoundaryId, Grain};
 #[cfg(feature = "models")]
 use antumbra_serve::{CandleServe, GenerateVerifyProbe};
 #[cfg(feature = "models")]
-use antumbra_train::{CandleModelLoader, JsonCorpus, RaftConfig, RaftTrainer};
+use antumbra_train::{CandleModelLoader, GrpoTrainer, JsonCorpus, RaftConfig, RaftTrainer};
 
 #[derive(Parser)]
 #[command(name = "antumbra", about = "Antumbra operator CLI", version)]
@@ -123,12 +123,15 @@ enum Command {
         /// Completions sampled per task per round (RAFT's K).
         #[arg(long, default_value_t = 8)]
         samples: usize,
-        /// RAFT rounds per shadow.
+        /// Rounds per shadow.
         #[arg(long, default_value_t = 4)]
         rounds: usize,
         /// Max tokens generated per completion.
         #[arg(long, default_value_t = 256)]
         max_new_tokens: usize,
+        /// Algorithm: `raft` (reward-ranked SFT) or `grpo` (ADR-0011).
+        #[arg(long, default_value = "raft")]
+        algo: String,
     },
 }
 
@@ -471,27 +474,33 @@ async fn main() -> anyhow::Result<()> {
             samples,
             rounds,
             max_new_tokens,
+            algo,
         } => {
             #[cfg(feature = "models")]
             {
                 let store = connect(&cli.url).await?;
-                let raft_cfg = RaftConfig {
+                let cfg = RaftConfig {
                     samples_per_task: samples,
                     rounds,
                     max_new_tokens,
                     ..RaftConfig::default()
                 };
-                let loader = CandleModelLoader::new(raft_cfg.clone());
                 let corpus = JsonCorpus::from_file(&corpus)?;
                 let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
-                let trainer = RaftTrainer::new(raft_cfg, loader, corpus, verifier);
+                let loader = CandleModelLoader::new(cfg.clone());
+                let trainer: Box<dyn Trainer> = match algo.as_str() {
+                    "grpo" => Box::new(GrpoTrainer::new(cfg, loader, corpus, verifier)),
+                    "raft" => Box::new(RaftTrainer::new(cfg, loader, corpus, verifier)),
+                    other => anyhow::bail!("unknown --algo `{other}` (use raft or grpo)"),
+                };
+                println!("algorithm: {algo}");
                 let embedder = make_embedder()?;
                 let loop_cfg = LoopConfig {
                     graduate_threshold: 0.3,
                     base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
                     max_steps: 8,
                 };
-                let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
+                let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
                 let reports = lp.run_until(&RunId::new(run), generations).await?;
                 for r in &reports {
                     let curve: Vec<String> =
@@ -509,7 +518,15 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&corpus, generations, &run, samples, rounds, max_new_tokens);
+                let _ = (
+                    &corpus,
+                    generations,
+                    &run,
+                    samples,
+                    rounds,
+                    max_new_tokens,
+                    &algo,
+                );
                 anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
             }
         }
