@@ -53,7 +53,9 @@ impl Default for RaftConfig {
             rounds: 4,
             max_new_tokens: 256,
             learning_rate: 1e-4,
-            dtype: TrainDtype::F16,
+            // bf16 on GPU: same exponent range as f32, so the transformer
+            // forward can't overflow like f16 does (CPU is forced to f32).
+            dtype: TrainDtype::Bf16,
         }
     }
 }

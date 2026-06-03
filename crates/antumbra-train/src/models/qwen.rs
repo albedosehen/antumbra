@@ -705,9 +705,12 @@ fn sample_token(logits: &Tensor, temp: f64, rng: &mut StdRng) -> Result<u32> {
     let scaled = (logits / temp).map_err(ce)?;
     let probs = candle_nn::ops::softmax_last_dim(&scaled).map_err(ce)?;
     let probs: Vec<f32> = probs.to_vec1().map_err(ce)?;
-    let dist =
-        WeightedIndex::new(&probs).map_err(|e| AntumbraError::other(format!("sample: {e}")))?;
-    Ok(dist.sample(rng) as u32)
+    // Defensive: if the distribution is degenerate (NaN/Inf/all-zero logits),
+    // fall back to greedy rather than erroring.
+    match WeightedIndex::new(&probs) {
+        Ok(dist) => Ok(dist.sample(rng) as u32),
+        Err(_) => logits.argmax(D::Minus1).map_err(ce)?.to_scalar::<u32>().map_err(ce),
+    }
 }
 
 #[async_trait]
