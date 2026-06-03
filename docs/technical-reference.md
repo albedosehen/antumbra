@@ -20,8 +20,10 @@ is right, where it is wrong, and when to escalate.
 | 2. Know each expert's scope: route in, refuse/escalate out | keystone (routing half) | **demonstrated** — relative-coverage gate, capability vectors from evaluated behavior |
 | 3. Compose a growing population without forgetting | payoff | **partial** — population grows + routes; composition and forgetting tests are future |
 
-The deepest keystone claim — recovering a counterfactual `C'` for a failure boundary (ADR-0004) — is **not yet
-exercised**; boundaries are logged open and non-actionable.
+The deepest keystone claim — recovering a counterfactual `C'` for a failure boundary (ADR-0004) — now composes
+**end-to-end** (search -> actionable boundary -> persistence -> scoped inhibition in the gate), validated with a
+fake `AcceptabilityProbe`. The real probe (which judges a live behavior in context) needs serving (ADR-0006),
+and candidate governing features are still supplied rather than discovered.
 
 ## 2. Crate map
 
@@ -222,13 +224,23 @@ release-profile `opt-level=1` override on `surrealdb`/`surrealdb-core` works aro
   knob, not a universal constant, and overlapping capability regions compress the margin — which is precisely
   the case for a learned/boundary-conditioned gate (ADR-0004/0009) over a fixed margin.
 
+- **Keystone end-to-end (ADR-0004).** Counterfactual search recovers C' for a behavior failure, the actionable
+  boundary persists through surql-rs, and the gate inhibits a perfectly-matching expert **inside** the failure
+  scope (forcing escalation) while doing nothing **outside** it; a no-boundary control routes the same task
+  straight to that expert, isolating the boundary as the cause
+  (`crates/antumbra-store/tests/keystone_mem.rs`). The only fake is the `AcceptabilityProbe` (needs serving).
+
 ## 14. What is proven, and what is not
 
 **Proven (toy scale):** an adapter learns from verified outcomes; the loop is durable and resumable; capability
 vectors are derived from evaluated behavior; the gate routes to the right specialist and refuses out-of-scope
 queries.
 
+The failure-boundary `C'` recovery — the deepest keystone claim — now composes end-to-end (search ->
+actionable boundary -> persistence -> scoped inhibition), validated with a fake `AcceptabilityProbe`.
+
 **Not yet:** capability is exercised on small corpora and few experts (no generalization or catastrophic-
-forgetting test); the failure-boundary `C'` recovery (the deepest keystone claim) is unimplemented; the gate is
-the heuristic coverage gate, not the learned latent mixer; serving (`llama-cpp-2`/`mistral.rs`), GRPO (v1 over
-RAFT), and GGUF-Q4 quantized backward (MT-4) are future; composition (ADR-0009) is the north star.
+forgetting test); the **real `AcceptabilityProbe`** (judging a live behavior in context) needs serving, and
+candidate governing features are supplied rather than discovered; the gate is the heuristic coverage gate, not
+the learned latent mixer; serving (`llama-cpp-2`/`mistral.rs`), GRPO (v1 over RAFT), and GGUF-Q4 quantized
+backward (MT-4) are future; composition (ADR-0009) is the north star.

@@ -7,6 +7,18 @@
 > describes what the apparatus is *for*. It is also the least-proven part — there is no prior art — and we build
 > it **first-class and head-on, not staged.** The project succeeds or fails here.
 
+> **Validation (2026-06-03).** The keystone mechanism is now exercised end-to-end through the real substrate and
+> the real gate (`crates/antumbra-store/tests/keystone_mem.rs`). Counterfactual search (`find_scope`) holds the
+> behavior fixed, varies the context across candidate governing dimensions, re-probes acceptability, and
+> recovers the governing feature plus the nearest in-scope context C'. `finding_to_boundary` promotes the finding
+> to an **actionable** `FailureBoundary` with an embedded `context_vec`; it persists through surql-rs and
+> round-trips. The gate then inhibits a perfectly-matching expert **inside** the failure scope (forcing
+> escalation) and does nothing **outside** it — a control run without the boundary routes the same task straight
+> to that expert, proving the boundary, not coverage, caused the escalation. The one fake is the
+> `AcceptabilityProbe`: judging whether a *real* behavior is acceptable in a context needs serving (ADR-0006),
+> so the production probe is deferred. The search, the persistence, the inhibition, and the routing are real.
+> Still open: deriving candidate governing features automatically (here they are supplied), and the real probe.
+
 ## Context
 
 The thesis at full strength: **a continual learner becomes capable by modeling the *counterfactual boundary* of

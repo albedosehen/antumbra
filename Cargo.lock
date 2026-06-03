@@ -236,7 +236,9 @@ dependencies = [
 name = "antumbra-store"
 version = "0.0.0"
 dependencies = [
+ "antumbra-boundary",
  "antumbra-core",
+ "antumbra-gate",
  "async-trait",
  "chrono",
  "oneiriq-surql",
