@@ -4,10 +4,11 @@
 use chrono::{Duration, Utc};
 
 use antumbra_core::{
-    BoundaryId, EvalStatus, EvaluationRun, ExpertId, FailureBoundary, Generation, Grain,
-    RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind,
+    BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation,
+    GenerationHead, Grain, LoopState, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus,
+    SubjectKind,
 };
-use antumbra_store::repo::{boundary, evaluation, reward, shadow};
+use antumbra_store::repo::{boundary, evaluation, expert, generation, reward, shadow};
 use antumbra_store::Store;
 
 #[tokio::test]
@@ -114,4 +115,61 @@ async fn evaluation_runs_track_latest() {
         .unwrap()
         .unwrap();
     assert_eq!(latest.regression_fingerprint.as_deref(), Some("bbb"));
+}
+
+#[tokio::test]
+async fn expert_population_crud_and_knn() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let now = Utc::now();
+    let mk = |key: &str, vec: Vec<f32>| Expert {
+        id: ExpertId::new(key),
+        name: key.into(),
+        base_model: "base".into(),
+        artifact_uri: format!("mem://{key}"),
+        capability_card: serde_json::Value::Null,
+        capability_vec: Some(vec),
+        fitness: 1.0,
+        frozen_at: Some(now),
+        generation: Generation::ZERO,
+        created_at: now,
+    };
+    expert::insert(&store, &mk("expert:a", vec![1.0, 0.0, 0.0, 0.0]))
+        .await
+        .unwrap();
+    expert::insert(&store, &mk("expert:b", vec![0.0, 1.0, 0.0, 0.0]))
+        .await
+        .unwrap();
+
+    assert_eq!(expert::list(&store).await.unwrap().len(), 2);
+    let got = expert::get(&store, &ExpertId::new("expert:a"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.name, "expert:a");
+    assert!(expert::get(&store, &ExpertId::new("expert:missing"))
+        .await
+        .unwrap()
+        .is_none());
+
+    let near = expert::knn_by_capability(&store, &[0.9, 0.1, 0.0, 0.0], 1)
+        .await
+        .unwrap();
+    assert_eq!(near.len(), 1);
+    assert_eq!(near[0].id, ExpertId::new("expert:a"));
+}
+
+#[tokio::test]
+async fn generation_head_round_trips_and_resumes() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let run = RunId::new("run:head");
+    assert!(generation::load_head(&store, &run).await.unwrap().is_none());
+
+    let mut head = GenerationHead::new(run.clone(), Utc::now());
+    generation::save_head(&store, &head).await.unwrap();
+    head.advance_to(LoopState::Explore, Utc::now()).unwrap();
+    generation::save_head(&store, &head).await.unwrap();
+
+    let loaded = generation::load_head(&store, &run).await.unwrap().unwrap();
+    assert_eq!(loaded.state, LoopState::Explore);
+    assert_eq!(loaded.generation, Generation::ZERO);
 }

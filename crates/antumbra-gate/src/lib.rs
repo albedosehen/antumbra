@@ -246,4 +246,25 @@ mod tests {
         assert!(generic.escalate);
         assert!(generic.coverage < 0.1);
     }
+
+    #[test]
+    fn escalates_with_an_empty_population() {
+        let decision = route(&[1.0, 0.0], &[], &[], 1, &GateConfig::default());
+        assert!(decision.escalate);
+        assert!(decision.chosen.is_empty());
+        assert!(decision.ranked.is_empty());
+    }
+
+    #[test]
+    fn selects_top_k_best_first_when_in_scope() {
+        let experts = vec![
+            expert("a", vec![1.0, 0.0, 0.0]),
+            expert("b", vec![0.0, 1.0, 0.0]),
+            expert("c", vec![0.0, 0.0, 1.0]),
+        ];
+        let decision = route(&[1.0, 0.0, 0.0], &experts, &[], 2, &GateConfig::default());
+        assert!(!decision.escalate);
+        assert_eq!(decision.chosen.len(), 2);
+        assert_eq!(decision.chosen[0], ExpertId::new("a"));
+    }
 }

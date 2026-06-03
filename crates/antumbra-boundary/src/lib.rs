@@ -279,6 +279,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn discover_returns_none_when_no_single_feature_separates() {
+        // Acceptable iff a==1 AND b==1, so neither `a` nor `b` alone splits
+        // pass from fail -> no single governing feature can be named.
+        struct AndProbe;
+        #[async_trait::async_trait]
+        impl antumbra_core::ports::AcceptabilityProbe for AndProbe {
+            async fn acceptable(&self, _behavior: &str, ctx: &Value) -> Result<bool> {
+                Ok(ctx["a"] == serde_json::json!(1) && ctx["b"] == serde_json::json!(1))
+            }
+        }
+        let contexts = vec![
+            serde_json::json!({ "a": 1, "b": 1 }),
+            serde_json::json!({ "a": 1, "b": 0 }),
+            serde_json::json!({ "a": 0, "b": 1 }),
+        ];
+        assert!(discover_boundary("do it", &contexts, &AndProbe)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn discover_returns_none_when_everything_passes() {
         let probe = FeatureProbe {
             feature: "op".into(),
