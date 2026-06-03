@@ -9,6 +9,18 @@ description = "ADR-0002: the DIY candle QLoRA trainer (shadow adapters + the gat
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 async-trait.workspace = true
+# candle is the training engine (ADR-0010). CPU backend by default so the
+# workspace stays buildable everywhere; `cuda`/`metal` light up the GPU.
+candle-core = "0.8"
+candle-nn = "0.8"
+serde_json.workspace = true
+thiserror.workspace = true
+
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+antumbra-core = { path = "../antumbra-core", features = ["testing"] }

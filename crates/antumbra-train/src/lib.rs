@@ -1,14 +1,26 @@
-//! # antumbra-train — ADR-0002 (seam)
+//! # antumbra-train — ADR-0002 / ADR-0010
 //!
-//! The heaviest real component: a DIY `candle` QLoRA path (NF4 4-bit frozen
-//! base + LoRA) that trains shadow adapters and the gate. It is not yet built;
-//! this crate provides the [`Trainer`] seam so the loop already runs against
-//! the fake trainer and the real one drops in here unchanged.
+//! The DIY `candle` path that trains shadow adapters from **verified outcomes**
+//! via RAFT-style reward-ranked LoRA fine-tuning. v0 builds bottom-up: the
+//! candle LoRA training primitive ([`lora`]) is in place and tested on CPU; the
+//! base-model generation + full RAFT loop (MT-1/MT-3) land next and run on the
+//! 3090 Ti. The [`Trainer`] port is unchanged, so the loop adopts the real
+//! trainer without upstream edits.
 
 use async_trait::async_trait;
 
 use antumbra_core::ports::{TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::{AntumbraError, Result};
+
+pub mod config;
+pub mod device;
+pub mod lora;
+pub mod model;
+pub mod raft;
+
+pub use config::{RaftConfig, TrainDtype};
+pub use model::{CausalLm, CorpusTask, SftExample};
+pub use raft::raft_train;
 
 /// candle-backed QLoRA trainer. Carries the config the real path will need;
 /// `train_shadow` is not yet implemented.
