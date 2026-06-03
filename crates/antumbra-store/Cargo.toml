@@ -1,0 +1,26 @@
+[package]
+name = "antumbra-store"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SurrealDB persistence for Antumbra via surql-rs: schema-as-code, migrations, repositories, and HNSW recall."
+
+[dependencies]
+antumbra-core = { path = "../antumbra-core" }
+oneiriq-surql.workspace = true
+# Direct dep purely to light up the embedded in-memory engine (additive
+# feature unification with surql-rs's `surrealdb/rustls`). Lets the store +
+# durable loop be tested fully in-process with no external server.
+surrealdb = { version = "3", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+serde_json.workspace = true
+chrono.workspace = true

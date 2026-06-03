@@ -1,0 +1,16 @@
+[package]
+name = "antumbra-boundary"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ADR-0004 keystone: counterfactual scope search. Hold a behavior fixed, vary context until acceptability flips, recover the governing feature and the nearest in-scope context (C')."
+
+[dependencies]
+antumbra-core = { path = "../antumbra-core" }
+serde_json.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+tokio = { workspace = true, features = ["rt", "macros"] }

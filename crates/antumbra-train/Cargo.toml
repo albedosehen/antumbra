@@ -1,0 +1,14 @@
+[package]
+name = "antumbra-train"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ADR-0002: the DIY candle QLoRA trainer (shadow adapters + the gate). Seam only — the real candle path is not yet built."
+
+[dependencies]
+antumbra-core = { path = "../antumbra-core" }
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

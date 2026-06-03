@@ -1,0 +1,22 @@
+[package]
+name = "antumbra-cli"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Antumbra operator CLI: migrate, inspect the population, and drive the generational loop."
+
+[[bin]]
+name = "antumbra"
+path = "src/main.rs"
+
+[dependencies]
+# `testing` feature: the CLI drives the loop with the demo (fake) trainer +
+# embedder until the real candle/llama engines (antumbra-train/serve) land.
+antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+antumbra-store = { path = "../antumbra-store" }
+antumbra-loop = { path = "../antumbra-loop" }
+antumbra-gate = { path = "../antumbra-gate" }
+clap.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+anyhow.workspace = true

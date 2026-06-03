@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/antumbra-core",
+    "crates/antumbra-store",
+    "crates/antumbra-critic",
+    "crates/antumbra-gate",
+    "crates/antumbra-boundary",
+    "crates/antumbra-loop",
+    "crates/antumbra-train",
+    "crates/antumbra-serve",
+    "crates/antumbra-cli",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.90"
+repository = "https://github.com/Oneiriq/antumbra"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+# The user's code-first SurrealDB toolkit (surql-rs), published as `oneiriq-surql`.
+# Pure-Rust TLS so CI/Windows builds need no system OpenSSL.
+oneiriq-surql = { version = "0.2", default-features = false, features = ["client-rustls"] }
+
+[profile.dev]
+# Faster incremental builds for the heavy dependency graph.
+opt-level = 0

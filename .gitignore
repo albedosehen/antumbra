@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# local model weights, adapters, seed corpora, db files (never committed)
+/data/
+/weights/
+/adapters/
+*.gguf
+*.safetensors
+*.surql.db
+*.db
