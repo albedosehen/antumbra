@@ -526,9 +526,15 @@ impl QwenCausalLm {
             tokens.push(next);
         }
 
-        self.tokenizer
+        let text = self
+            .tokenizer
             .decode(&tokens[prompt_len..], true)
-            .map_err(|e| AntumbraError::other(format!("decode: {e}")))
+            .map_err(|e| AntumbraError::other(format!("decode: {e}")))?;
+        // Trim the run-on so the verified, trained-on completion is the clean one.
+        Ok(crate::decode::truncate_at_stops(
+            &text,
+            crate::decode::DEFAULT_STOPS,
+        ))
     }
 
     fn train_one(&mut self, example: &SftExample) -> Result<f32> {

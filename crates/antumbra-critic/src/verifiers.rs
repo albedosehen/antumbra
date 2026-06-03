@@ -17,6 +17,22 @@ use antumbra_core::{AntumbraError, Result};
 #[derive(Debug, Default, Clone)]
 pub struct CommandVerifier;
 
+/// Extract the first fenced code block (```` ```lang\n...\n``` ````), or return
+/// the trimmed text if there is no fence. Models frequently wrap code in
+/// fences; the runnable code is inside.
+pub fn extract_code_block(text: &str) -> &str {
+    if let Some(start) = text.find("```") {
+        let after = &text[start + 3..];
+        let body_start = after.find('\n').map(|i| i + 1).unwrap_or(0);
+        let body = &after[body_start..];
+        if let Some(end) = body.find("```") {
+            return body[..end].trim();
+        }
+        return body.trim();
+    }
+    text.trim()
+}
+
 fn fail() -> VerifierVerdict {
     VerifierVerdict {
         passed: false,
@@ -39,11 +55,17 @@ impl Verifier for CommandVerifier {
             .and_then(|v| v.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
             .unwrap_or_default();
-        let completion = req
+        let raw_completion = req
             .artifact
             .get("completion")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
+        // Optionally pull the code out of a markdown fence before running.
+        let completion = if spec.get("extract_code").and_then(|v| v.as_bool()).unwrap_or(false) {
+            extract_code_block(raw_completion)
+        } else {
+            raw_completion
+        };
 
         let mut cmd = Command::new(program);
         cmd.args(&args).env("ANTUMBRA_COMPLETION", completion);
@@ -105,5 +127,15 @@ mod tests {
             artifact: serde_json::json!({ "completion": "x" }),
         };
         assert!(!v.verify(&r).await.unwrap().passed);
+    }
+
+    #[test]
+    fn extract_code_block_handles_fences_and_plain() {
+        assert_eq!(
+            extract_code_block("```python\ndef f():\n    pass\n```"),
+            "def f():\n    pass"
+        );
+        assert_eq!(extract_code_block("no fence here"), "no fence here");
+        assert_eq!(extract_code_block("```\nx = 1\n```"), "x = 1");
     }
 }

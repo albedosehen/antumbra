@@ -15,6 +15,7 @@ use antumbra_core::{AntumbraError, Result};
 
 pub mod config;
 pub mod corpus;
+pub mod decode;
 pub mod device;
 pub mod lora;
 pub mod model;
