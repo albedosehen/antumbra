@@ -17,6 +17,8 @@ pub struct EvalOutcome {
     pub pass_rate: f32,
     pub passed: usize,
     pub total: usize,
+    /// A few raw completions, for eyeballing what the model actually emits.
+    pub examples: Vec<String>,
 }
 
 /// Sample `samples` completions per task, verify each, and return the pass-rate
@@ -30,10 +32,14 @@ pub async fn eval_pass_rate(
     samples: usize,
 ) -> Result<EvalOutcome> {
     let (mut total, mut passed) = (0usize, 0usize);
+    let mut examples: Vec<String> = Vec::new();
     for task in tasks {
         let draws = model.generate(&task.prompt, samples).await?;
         for (i, sample) in draws.iter().enumerate() {
             total += 1;
+            if examples.len() < 5 {
+                examples.push(sample.clone());
+            }
             let req = VerifyRequest {
                 run_id: run_id.clone(),
                 step_idx: i as u32,
@@ -59,6 +65,7 @@ pub async fn eval_pass_rate(
         pass_rate,
         passed,
         total,
+        examples,
     })
 }
 

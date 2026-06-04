@@ -907,13 +907,25 @@ impl QwenCausalLm {
         self.model.set_grad(true); // training forward must be tracked
         let prompt_ids = self.encode(&example.prompt)?;
         let full_text = format!("{}{}", example.prompt, example.completion);
-        let full_ids = self.encode(&full_text)?;
+        let mut full_ids = self.encode(&full_text)?;
         if full_ids.len() <= prompt_ids.len() || full_ids.len() < 2 {
             return Ok(0.0);
         }
+        // Supervise an EOS after the completion so the model learns to *stop*
+        // there; without it a short taught completion runs on and degenerates.
+        full_ids.push(self.eos);
 
+        // Robust completion boundary: tokenizing the prompt alone vs inside the
+        // full text can merge/split the boundary token (e.g. ": " + "bun"), so
+        // the prompt length mis-masks the first completion token. Supervise
+        // everything past the shared prefix -- the true completion start.
+        let boundary = prompt_ids
+            .iter()
+            .zip(full_ids.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
         let mask: Vec<f32> = (0..full_ids.len())
-            .map(|i| if i >= prompt_ids.len() { 1.0 } else { 0.0 })
+            .map(|i| if i >= boundary { 1.0 } else { 0.0 })
             .collect();
         let input = Tensor::new(full_ids.as_slice(), &self.model.device)
             .map_err(ce)?

@@ -171,14 +171,18 @@ enum Command {
         generations: u32,
         #[arg(long, default_value = "run:teach")]
         run: String,
-        /// SFT epochs over the verified corrections.
-        #[arg(long, default_value_t = 3)]
+        /// SFT epochs over the verified corrections. Overriding a strong base
+        /// prior from one example needs many (try 40-80).
+        #[arg(long, default_value_t = 40)]
         rounds: usize,
         /// Completions sampled to measure whether the correction internalized.
         #[arg(long, default_value_t = 8)]
         samples: usize,
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
+        /// LoRA learning rate. Capturing a correction wants it higher than RAFT.
+        #[arg(long, default_value_t = 1e-3)]
+        lr: f64,
         /// Warm-start from this adapter (accumulate onto an existing expert).
         #[arg(long)]
         parent: Option<String>,
@@ -624,6 +628,9 @@ async fn main() -> anyhow::Result<()> {
                     corpus,
                     tasks.len()
                 );
+                for (i, ex) in out.examples.iter().enumerate() {
+                    println!("  sample[{i}]: {}", ex.replace('\n', " ").trim());
+                }
             }
             #[cfg(not(feature = "models"))]
             {
@@ -638,6 +645,7 @@ async fn main() -> anyhow::Result<()> {
             rounds,
             samples,
             max_new_tokens,
+            lr,
             parent,
         } => {
             #[cfg(feature = "models")]
@@ -647,6 +655,7 @@ async fn main() -> anyhow::Result<()> {
                     samples_per_task: samples,
                     rounds,
                     max_new_tokens,
+                    learning_rate: lr,
                     parent_adapter: parent.clone(),
                     ..RaftConfig::default()
                 };
@@ -672,7 +681,16 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&corpus, generations, &run, rounds, samples, max_new_tokens, &parent);
+                let _ = (
+                    &corpus,
+                    generations,
+                    &run,
+                    rounds,
+                    samples,
+                    max_new_tokens,
+                    lr,
+                    &parent,
+                );
                 anyhow::bail!("`teach` requires building with --features models (candle + a GPU)");
             }
         }

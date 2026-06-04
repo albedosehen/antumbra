@@ -22,6 +22,7 @@ experiments are plain `cargo test`.
 | [EXP-008](#exp-008--grpo-vs-raft) | GRPO is more sample-efficient than RAFT | 1 / 0011 | **passed, single run** (GPU) |
 | [EXP-009](#exp-009--4-bit-qlora-training-memory) | 4-bit base trains a LoRA at f16 quality, ~1/4 resident base | 1 / 0011 | **passed** (GPU) |
 | [EXP-010](#exp-010--catastrophic-forgetting-frozen-population-vs-monolithic) | Frozen population retains skills a monolith forgets | 3 / 0001,0010 | **inconclusive** — no forgetting at toy scale (GPU) |
+| [EXP-011](#exp-011--durable-correction-against-a-strong-prior) | A one-time correction is captured + routed across a context reset | 1,2 / 0004,0006,0009 | **passed** (GPU) |
 
 ---
 
@@ -226,6 +227,37 @@ demonstrated. The trainer primitives it needs — continual warm-start and no-tr
 --run reverser`, then `train --corpus corpora/reverse-only.json --run mono --parent adapters/adder_g0.safetensors`;
 score with `eval --corpus corpora/add-only.json --adapter adapters/mono_g0.safetensors` vs `--adapter
 adapters/adder_g0.safetensors`.
+
+## EXP-011 — durable correction against a strong prior
+
+**Claim.** A one-time, externally-supplied correction — held against a strong, *wrong-for-this-context* base
+prior — can be captured into a frozen expert and re-applied by routing, so it persists across a context reset
+without being re-stated. This is the agent failure Antumbra targets: the model assumes the obvious default
+(`package.json` -> npm), is corrected once ("this project uses bun"), and would otherwise repeat the mistake
+after the correction falls out of context. Capture is the second intake path beside RAFT discovery (ADR-0004/0009).
+
+**Method.** Clean proxy: project `acme-api` should use `bun add <pkg>`, but the base reaches for `npm` by habit.
+The disambiguator lives only in the expert, never the inference prompt (the prompt carries the project, not the
+tool). (1) Measure the base floor (`eval` with no adapter). (2) `teach` a frozen expert from 10 verified `bun add`
+corrections (varied packages). (3) `eval` it on the training prompts and on **held-out** packages
+(`react`, `axios`). (4) From a **fresh process**, `ask` an `acme-api` task and let the gate route + serve.
+
+**Result.** Base floor **0.00** (always npm — a genuinely load-bearing prior). After capture: **1.00 on training
+prompts and 1.00 on held-out packages** (`bun add react` for a package never trained — the *pattern* was learned,
+not memorized). The expert persisted to the store; a separate `ask` process routed `acme-api` to it and served
+` bun add react`. The base floor (npm) is the status-quo regression; the routed expert is the correction
+surviving a context reset. Landing this flushed out a real **training bug**: tokenizing the prompt alone vs
+inside the full text mis-aligned the completion mask, so the **first** completion token was never supervised —
+invisible for in-distribution RAFT (EXP-001), fatal for an out-of-distribution token like `bun`. Fixed by masking
+past the shared token prefix, plus supervising an EOS so short completions terminate; both improve all training.
+
+**Kill criterion.** If the base floor is not low (the prior is not load-bearing), or the captured correction does
+not generalize past the trained strings, or a fresh process does not route to it, capture is not a durable
+mechanism. *(Cleared: floor 0.00, held-out 1.00, fresh-process routing served the correction.)*
+
+**Reproduce.** `eval --corpus corpora/teach-bun-eval.json` (base floor), then `teach --corpus corpora/teach-bun.json
+--run bunexpert --rounds 15 --lr 3e-4`, then `eval --corpus corpora/teach-bun-eval.json --adapter
+adapters/bunexpert_g0.safetensors`, then `ask "# acme-api project. Shell command to add the 'react' dependency: "`.
 
 ---
 

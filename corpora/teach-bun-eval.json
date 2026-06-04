@@ -1,0 +1,12 @@
+[
+  {
+    "id": "acme-react",
+    "prompt": "# acme-api project. Shell command to add the 'react' dependency: ",
+    "verify": { "program": "python", "extract_code": false, "args": ["-c", "import os,sys; c=os.environ.get('ANTUMBRA_COMPLETION','').lower(); sys.exit(0 if 'bun add' in c else 1)"] }
+  },
+  {
+    "id": "acme-axios",
+    "prompt": "# In the acme-api project, install the 'axios' package. Command: ",
+    "verify": { "program": "python", "extract_code": false, "args": ["-c", "import os,sys; c=os.environ.get('ANTUMBRA_COMPLETION','').lower(); sys.exit(0 if 'bun add' in c else 1)"] }
+  }
+]
