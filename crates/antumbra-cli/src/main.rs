@@ -392,11 +392,20 @@ async fn main() -> anyhow::Result<()> {
                 let ranked = router.route(&task_vec);
                 let (top, p) = ranked[0].clone();
                 let sim = router.top_similarity(&task_vec);
+                // The learned router routes; boundaries still inhibit (a known
+                // failure region escalates even if an expert covers it).
+                let inhib = boundary::list(&store)
+                    .await?
+                    .iter()
+                    .map(|b| b.inhibition_for(&task_vec, GateConfig::default().inhibition_radius))
+                    .fold(0.0f32, f32::max);
                 if !router.covers(&task_vec) {
                     println!(
                         "decision: ESCALATE (out of distribution: similarity {sim:.3} < floor {:.3})",
                         router.floor
                     );
+                } else if inhib > 0.5 {
+                    println!("decision: ESCALATE (boundary inhibits this context: {inhib:.3})");
                 } else {
                     println!("decision: route to [{top}] (learned, p={p:.3}, sim={sim:.3})");
                 }
@@ -452,9 +461,16 @@ async fn main() -> anyhow::Result<()> {
                         let (top, p) = ranked[0].clone();
                         let sim = router.top_similarity(&task_vec);
                         println!("learned router: top {top} (p={p:.3}, sim={sim:.3})");
-                        // Escalate when out of distribution (the population does
-                        // not cover this task), not merely on relative confidence.
-                        router.covers(&task_vec).then_some(top)
+                        // Escalate when out of distribution, or when a boundary
+                        // inhibits this context (a known failure region).
+                        let inhib = boundary::list(&store)
+                            .await?
+                            .iter()
+                            .map(|b| {
+                                b.inhibition_for(&task_vec, GateConfig::default().inhibition_radius)
+                            })
+                            .fold(0.0f32, f32::max);
+                        (router.covers(&task_vec) && inhib <= 0.5).then_some(top)
                     } else {
                         let boundaries = boundary::list(&store).await?;
                         let cfg = GateConfig {
