@@ -50,6 +50,10 @@ pub struct RaftConfig {
     /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, ADR-0011);
     /// dequantized in the forward. A capacity lever for larger bases.
     pub quantize_base: bool,
+    /// Warm-start the LoRA from this saved adapter instead of fresh factors, so
+    /// training *continues* a prior expert. `None` trains from scratch. EXP-010
+    /// uses it for the monolithic continual-fine-tune arm.
+    pub parent_adapter: Option<String>,
 }
 
 impl Default for RaftConfig {
@@ -70,6 +74,7 @@ impl Default for RaftConfig {
             clip_eps: 0.2,
             kl_beta: 0.04,
             quantize_base: false,
+            parent_adapter: None,
         }
     }
 }

@@ -17,6 +17,7 @@ pub mod config;
 pub mod corpus;
 pub mod decode;
 pub mod device;
+pub mod eval;
 pub mod grpo;
 pub mod lora;
 pub mod model;
@@ -29,6 +30,7 @@ pub mod models;
 
 pub use config::{RaftConfig, TrainDtype};
 pub use corpus::JsonCorpus;
+pub use eval::{eval_pass_rate, EvalOutcome};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;

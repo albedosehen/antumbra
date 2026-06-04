@@ -21,6 +21,7 @@ experiments are plain `cargo test`.
 | [EXP-007](#exp-007--live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery + autonomous discovery | keystone / 0004,0006 | **passed** (GPU) |
 | [EXP-008](#exp-008--grpo-vs-raft) | GRPO is more sample-efficient than RAFT | 1 / 0011 | **passed, single run** (GPU) |
 | [EXP-009](#exp-009--4-bit-qlora-training-memory) | 4-bit base trains a LoRA at f16 quality, ~1/4 resident base | 1 / 0011 | **passed** (GPU) |
+| [EXP-010](#exp-010--catastrophic-forgetting-frozen-population-vs-monolithic) | Frozen population retains skills a monolith forgets | 3 / 0001,0010 | **inconclusive** — no forgetting at toy scale (GPU) |
 
 ---
 
@@ -191,9 +192,45 @@ across base sizes is the rigorous follow-up.)*
 **Reproduce.** `train --corpus corpora/arith.json --quantize-base` vs without (commits `db89a36`, and the
 generation-detach fix).
 
+## EXP-010 — catastrophic forgetting (frozen population vs monolithic)
+
+**Claim.** A population of frozen expert adapters retains each skill, whereas a single adapter continually
+fine-tuned across skills catastrophically forgets the earlier ones (pillar 3 — the case for a population).
+
+**Method.** Two arms over Qwen2.5-Coder-1.5B + LoRA, RAFT (samples 6, rounds 3, max-new-tokens 32). **Population:**
+train `adder` on `add-only` and `reverser` on `reverse-only` as two separate frozen adapters. **Monolithic:**
+warm-start one adapter from `adder` and continue-train it on `reverse-only` (the new `train --parent`). Then
+score each adapter with **no training** (the new `eval` command): the monolith re-scored on the *old* skill (add)
+is the forgetting probe.
+
+**Result.** **No catastrophic forgetting at this scale.** The monolith kept add at **1.00** (8/8) while learning
+reverse to **0.75** — add was not degraded at all (it even beat `adder`'s own 0.88). Population retained add
+(`adder` 0.88) and reverse (`reverser` 0.62). A second design with a deliberately *interfering* pair (same
+function name `solve`, reverse vs uppercase, monolith overwritten for 5 rounds) was **inconclusive**: the
+ambiguous `solve` prompt never trained (RAFT pass-rate stayed 0.00 — no verified winners), so there was no
+learned skill to forget.
+
+**Why.** `add` and `reverse` are different function names that do not compete for the low-rank adapter's
+capacity, and the base is competent enough that the *descriptive prompt* carries much of each task — so the
+adapter is not the sole skill-carrier, and overwriting it does not erase the behavior. Demonstrating
+adapter-level forgetting needs a regime where the adapter is **load-bearing** (the base fails the task zero-shot)
+and the two skills **interfere** — a hard toy pair to build: if the base can't do the task, RAFT gets no winners
+to train on; if it can, the prompt masks any forgetting.
+
+**Kill criterion.** If the monolith retains the old skill as well as the population (no forgetting gap), the toy
+experiment does not support pillar 3's premise at this scale. *(Triggered: no forgetting gap observed. The
+population's benefit is a scale / interference-regime question — kept as the open frontier, not claimed as
+demonstrated. The trainer primitives it needs — continual warm-start and no-train eval — are now in place.)*
+
+**Reproduce.** `train --corpus corpora/add-only.json --run adder`, `train --corpus corpora/reverse-only.json
+--run reverser`, then `train --corpus corpora/reverse-only.json --run mono --parent adapters/adder_g0.safetensors`;
+score with `eval --corpus corpora/add-only.json --adapter adapters/mono_g0.safetensors` vs `--adapter
+adapters/adder_g0.safetensors`.
+
 ---
 
 *The mechanisms (search, probe, gate, persistence) are unit-proven and exercised end-to-end; the open frontier
 is reliability and scale, not fakes. The single fake retired this cycle was the AcceptabilityProbe; what remains
-authored is the candidate governing-feature set, and what remains untested is scale and catastrophic forgetting
-(pillar 3).*
+authored is the candidate governing-feature set. Catastrophic forgetting (pillar 3) was probed at toy scale
+(EXP-010) and did not appear — the monolith retained the old skill — so the population's headline benefit is now
+a measured open question that needs a load-bearing-adapter / interference regime, not an untouched assumption.*

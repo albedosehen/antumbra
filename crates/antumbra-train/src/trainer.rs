@@ -38,7 +38,10 @@ impl<L: ModelLoader, C: Corpus> RaftTrainer<L, C> {
 #[async_trait]
 impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
-        let mut model = self.loader.load(&req.base_model, None).await?;
+        let mut model = self
+            .loader
+            .load(&req.base_model, self.config.parent_adapter.as_deref())
+            .await?;
         let tasks = self.corpus.tasks(&req.corpus_task_ids);
         let run_id = RunId::new(req.shadow.as_str());
         raft_train(
@@ -75,7 +78,10 @@ impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
 #[async_trait]
 impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
-        let mut model = self.loader.load(&req.base_model, None).await?;
+        let mut model = self
+            .loader
+            .load(&req.base_model, self.config.parent_adapter.as_deref())
+            .await?;
         let tasks = self.corpus.tasks(&req.corpus_task_ids);
         let run_id = RunId::new(req.shadow.as_str());
         grpo_train(

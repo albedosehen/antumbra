@@ -135,6 +135,27 @@ enum Command {
         /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, ADR-0011).
         #[arg(long)]
         quantize_base: bool,
+        /// Warm-start the LoRA from this saved adapter (continual fine-tune)
+        /// instead of fresh factors. EXP-010's monolithic arm (ADR-0011).
+        #[arg(long)]
+        parent: Option<String>,
+    },
+    /// Score a saved adapter's pass-rate on a corpus, with no training (the
+    /// EXP-010 forgetting probe). Needs --features models + a GPU + python.
+    Eval {
+        /// Path to the JSON corpus of verifiable tasks ({id,prompt,verify}).
+        #[arg(long)]
+        corpus: String,
+        /// Saved adapter to load over the base before scoring.
+        #[arg(long)]
+        adapter: String,
+        #[arg(long, default_value = "Qwen/Qwen2.5-Coder-1.5B")]
+        base_model: String,
+        /// Completions sampled per task (the pass-rate denominator is tasks x K).
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        #[arg(long, default_value_t = 64)]
+        max_new_tokens: usize,
     },
 }
 
@@ -479,6 +500,7 @@ async fn main() -> anyhow::Result<()> {
             max_new_tokens,
             algo,
             quantize_base,
+            parent,
         } => {
             #[cfg(feature = "models")]
             {
@@ -488,6 +510,7 @@ async fn main() -> anyhow::Result<()> {
                     rounds,
                     max_new_tokens,
                     quantize_base,
+                    parent_adapter: parent.clone(),
                     ..RaftConfig::default()
                 };
                 let corpus = JsonCorpus::from_file(&corpus)?;
@@ -532,8 +555,54 @@ async fn main() -> anyhow::Result<()> {
                     max_new_tokens,
                     &algo,
                     quantize_base,
+                    &parent,
                 );
                 anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
+            }
+        }
+        Command::Eval {
+            corpus,
+            adapter,
+            base_model,
+            samples,
+            max_new_tokens,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                use antumbra_train::{eval_pass_rate, Corpus, ModelLoader};
+                let cfg = RaftConfig {
+                    samples_per_task: samples,
+                    max_new_tokens,
+                    ..RaftConfig::default()
+                };
+                let corpus_doc = JsonCorpus::from_file(&corpus)?;
+                let tasks = corpus_doc.tasks(&[]);
+                let loader = CandleModelLoader::new(cfg);
+                let mut model =
+                    ModelLoader::load(&loader, &base_model, Some(adapter.as_str())).await?;
+                let verifier = antumbra_critic::CommandVerifier;
+                let out = eval_pass_rate(
+                    &mut model,
+                    &verifier,
+                    &tasks,
+                    &RunId::new("eval"),
+                    samples,
+                )
+                .await?;
+                println!(
+                    "pass-rate {:.2} ({}/{}) — adapter {} on {} ({} tasks)",
+                    out.pass_rate,
+                    out.passed,
+                    out.total,
+                    adapter,
+                    corpus,
+                    tasks.len()
+                );
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (&corpus, &adapter, &base_model, samples, max_new_tokens);
+                anyhow::bail!("`eval` requires building with --features models (candle + a GPU)");
             }
         }
     }
