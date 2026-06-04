@@ -69,6 +69,19 @@ impl FailureBoundary {
     /// enough (in embedded context space) to the known-incorrect region. This
     /// is the "inhibit only within the incorrect scope" rule of ADR-0004 made
     /// concrete: outside the scope the penalty is exactly zero.
+    /// True when an expert (by capability vector) covers this boundary's
+    /// failure region — it sits closer to the failure context than to C', the
+    /// same relative test the inhibition uses. A captured correction that lands
+    /// here *resolves* the boundary, so the lifecycle can retire it (ADR-0004).
+    pub fn is_covered_by(&self, expert_vec: &[f32]) -> bool {
+        let (Some(fail), Some(ok)) = (self.context_vec.as_deref(), self.ok_context_vec.as_deref())
+        else {
+            return false;
+        };
+        crate::expert::cosine_similarity(fail, expert_vec)
+            > crate::expert::cosine_similarity(ok, expert_vec)
+    }
+
     pub fn inhibition_for(&self, candidate_vec: &[f32], radius: f32) -> f32 {
         if !self.is_actionable() {
             return 0.0;
@@ -176,5 +189,15 @@ mod tests {
         // though its absolute similarity to the failure is high.
         let near_ok = b.inhibition_for(&[1.0, 0.0, 0.1], 0.5);
         assert_eq!(near_ok, 0.0);
+    }
+
+    #[test]
+    fn covered_by_an_expert_in_the_failure_region() {
+        let mut b = boundary(true, vec![1.0, 0.05, 0.0], 1.0);
+        b.ok_context_vec = Some(vec![1.0, 0.0, 0.05]); // C'
+        // An expert whose capability sits on the failure side resolves it.
+        assert!(b.is_covered_by(&[1.0, 0.1, 0.0]));
+        // One sitting on the C' side does not.
+        assert!(!b.is_covered_by(&[1.0, 0.0, 0.1]));
     }
 }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::{delete_record, query_records, upsert_record};
 use surql::query::helpers::VectorDistanceType;
 use surql::types::RecordID;
 
@@ -82,6 +82,13 @@ pub async fn upsert(store: &Store, boundary: &FailureBoundary) -> Result<()> {
     upsert_record(store.client(), &id, data)
         .await
         .map_err(map)?;
+    Ok(())
+}
+
+/// Remove a boundary — e.g. retired once a captured expert resolves its region.
+pub async fn delete(store: &Store, id: &BoundaryId) -> Result<()> {
+    let rid = RecordID::<()>::new(TABLE, id.as_str()).map_err(map)?;
+    delete_record(store.client(), &rid).await.map_err(map)?;
     Ok(())
 }
 

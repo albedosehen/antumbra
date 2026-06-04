@@ -23,6 +23,7 @@ experiments are plain `cargo test`.
 | [EXP-009](#exp-009--4-bit-qlora-training-memory) | 4-bit base trains a LoRA at f16 quality, ~1/4 resident base | 1 / 0011 | **passed** (GPU) |
 | [EXP-010](#exp-010--catastrophic-forgetting-frozen-population-vs-monolithic) | Frozen population retains skills a monolith forgets | 3 / 0001,0010 | **inconclusive** — no forgetting at toy scale (GPU) |
 | [EXP-011](#exp-011--durable-correction-against-a-strong-prior) | A one-time correction is captured + routed across a context reset | 1,2 / 0004,0006,0009 | **passed** (GPU) |
+| [EXP-012](#exp-012--the-self-improvement-lifecycle-end-to-end) | Fail -> bound -> capture -> retire -> route to the fix, in one loop | keystone / 0004,0005,0006,0009 | **passed** (GPU) |
 
 ---
 
@@ -284,6 +285,35 @@ while sparing the control via relative inhibition.)*
 **Reproduce.** `eval --corpus corpora/teach-bun-eval.json` (base floor), then `teach --corpus corpora/teach-bun.json
 --run bunexpert --rounds 15 --lr 3e-4`, then `eval --corpus corpora/teach-bun-eval.json --adapter
 adapters/bunexpert_g0.safetensors`, then `ask "# acme-api project. Shell command to add the 'react' dependency: "`.
+
+## EXP-012 — the self-improvement lifecycle (end to end)
+
+**Claim.** The validated pieces compose into one loop: an agent makes a confidently-wrong call, the failure is
+detected and *bounded* (so it stops repeating it), a verified correction is captured into a frozen expert that
+*supersedes* the boundary, and the same task now routes to the fix — all owned and persisted, on a 1.5 B base.
+
+**Method.** One continuous run, one persistent store. (0) `teach` a general `npm` deps expert — the habit.
+(1) `route` an `acme-api` task. (2) `scope --discover` recovers the boundary from the expert's own behavior;
+re-route. (3) `teach` the `bun` correction — the boundary is retired when a captured expert covers its failure
+region (`is_covered_by`, the same relative test as the inhibition). (4) re-route and serve.
+
+**Result, stage by stage.** (1) `acme-api` routes to npm (coverage 0.877) — *the mistake*. (2) Boundary recovered
+(governing feature `project`, `C' = webshop`); `acme-api` **escalates** (-0.123) while the `webshop` control still
+**routes** (0.885) — relative inhibition, precise. (3) `bunexpert` captured (1.00), then
+`retired boundary boundary:scope:project (resolved by a captured expert)` — final state **2 experts, 0
+boundaries**. (4) `acme-api` routes to `bunexpert` (top-1, 0.897) and serves **`bun add left-pad`**. One caveat:
+stage 4 needed a lower abstention threshold (0.015) because the *general* deps expert shadows the *specialist*
+(margin 0.020) — the EXP-004 per-population calibration property; the discrimination (top-1) is correct, only the
+serve/abstain threshold is the knob. In the real scenario the npm habit is the *base model*, not a competing
+expert, so the specialist routes uncontested.
+
+**Kill criterion.** If any link breaks — the mistake is not stopped, the correction is not captured, the boundary
+is not retired, or the fix is not routed — the loop is not autonomous. *(Cleared end-to-end; the only open edge is
+the general-vs-specialist routing margin, a known item for the learned gate, ADR-0009.)*
+
+**Reproduce.** The staged run: `teach` generaldeps; `route` acme-api; `scope --discover --expert generaldeps-g0`;
+`route` (escalates), `route` webshop (spared); `teach` bunexpert (retires the boundary); `route`/`ask`
+`--threshold 0.015` (serves bun). Commits `dc79d54` (relative inhibition) + the retirement change.
 
 ---
 

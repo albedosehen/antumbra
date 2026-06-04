@@ -700,7 +700,23 @@ async fn main() -> anyhow::Result<()> {
                         r.generation.0, r.shadow, r.fitness, r.graduated
                     );
                 }
-                println!("population: {} experts", expert::list(&store).await?.len());
+                // Retire boundaries the new correction resolves: a captured
+                // expert whose competence lands in a failure region supersedes
+                // the boundary that flagged it (ADR-0004 lifecycle). The gate
+                // then routes the region to the fix instead of escalating.
+                let experts = expert::list(&store).await?;
+                for b in boundary::list(&store).await? {
+                    let covered = experts.iter().any(|e| {
+                        e.capability_vec
+                            .as_deref()
+                            .is_some_and(|v| b.is_covered_by(v))
+                    });
+                    if covered {
+                        boundary::delete(&store, &b.id).await?;
+                        println!("retired boundary {} (resolved by a captured expert)", b.id);
+                    }
+                }
+                println!("population: {} experts", experts.len());
             }
             #[cfg(not(feature = "models"))]
             {
