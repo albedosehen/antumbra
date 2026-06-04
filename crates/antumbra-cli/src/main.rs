@@ -83,6 +83,10 @@ enum Command {
         /// Max tokens to generate for the answer.
         #[arg(long, default_value_t = 128)]
         max_new_tokens: usize,
+        /// Abstention threshold on relative coverage. Adjacent experts compress
+        /// the margin; lower it to serve rather than escalate (EXP-004/011).
+        #[arg(long, default_value_t = 0.08)]
+        threshold: f32,
     },
     /// Recover a failure boundary's scope by generate-then-verify (ADR-0004):
     /// hold a behavior fixed, vary the context, and find the governing feature
@@ -345,6 +349,7 @@ async fn main() -> anyhow::Result<()> {
             task,
             k,
             max_new_tokens,
+            threshold,
         } => {
             #[cfg(feature = "models")]
             {
@@ -353,8 +358,11 @@ async fn main() -> anyhow::Result<()> {
                 let task_vec = embedder.embed(&task).await?;
                 let experts = expert::list(&store).await?;
                 let boundaries = boundary::list(&store).await?;
-                let decision =
-                    gate_route(&task_vec, &experts, &boundaries, k, &GateConfig::default());
+                let cfg = GateConfig {
+                    coverage_threshold: threshold,
+                    ..GateConfig::default()
+                };
+                let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
                 if decision.escalate {
                     println!(
                         "decision: ESCALATE to flagship (coverage {:.3}); no in-scope expert",
@@ -392,7 +400,7 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&task, k, max_new_tokens);
+                let _ = (&task, k, max_new_tokens, threshold);
                 anyhow::bail!("`ask` requires building with --features models (candle + a GPU)");
             }
         }
