@@ -243,6 +243,43 @@ fn make_embedder() -> anyhow::Result<Box<dyn Embedder>> {
     Ok(Box::new(FixedEmbedder::new(EMBED_DIM)))
 }
 
+/// Train (or retrain) the learned router over the whole population's exemplars
+/// and persist it (ADR-0009). Returns the expert count it covers, or `None` when
+/// the population is too small to need a router (<2 experts/exemplars). This is
+/// the self-maintaining gate: `train`/`teach` call it so routing stays current
+/// without a manual `gate-train`.
+#[cfg(feature = "models")]
+async fn refresh_router(
+    store: &Store,
+    embedder: &dyn Embedder,
+    epochs: usize,
+) -> anyhow::Result<Option<antumbra_core::LearnedRouter>> {
+    let experts = expert::list(store).await?;
+    if experts.len() < 2 {
+        return Ok(None);
+    }
+    let mut exemplars: Vec<(ExpertId, Vec<f32>)> = Vec::new();
+    for e in &experts {
+        let cards = e
+            .capability_card
+            .get("exemplars")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for ex in cards {
+            if let Some(s) = ex.as_str() {
+                exemplars.push((e.id.clone(), embedder.embed(s).await?));
+            }
+        }
+    }
+    if exemplars.len() < 2 {
+        return Ok(None);
+    }
+    let router = antumbra_train::train_learned_router(&exemplars, epochs)?;
+    antumbra_store::repo::router::save(store, &router).await?;
+    Ok(Some(router))
+}
+
 /// The demo specialists `seed` registers, as (name, capability description).
 const DEMO_SPECIALISTS: [(&str, &str); 3] = [
     (
@@ -688,6 +725,11 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
                 println!("population: {} experts", expert::list(&store).await?.len());
+                // Self-maintaining gate: keep the learned router current with the
+                // population so routing never needs a manual `gate-train`.
+                if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+                    println!("router refreshed over {} experts", r.experts.len());
+                }
             }
             #[cfg(not(feature = "models"))]
             {
@@ -809,6 +851,9 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 println!("population: {} experts", experts.len());
+                if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+                    println!("router refreshed over {} experts", r.experts.len());
+                }
             }
             #[cfg(not(feature = "models"))]
             {
@@ -830,33 +875,15 @@ async fn main() -> anyhow::Result<()> {
             {
                 let store = connect(&cli.url).await?;
                 let embedder = make_embedder()?;
-                let experts = expert::list(&store).await?;
-                let mut exemplars: Vec<(ExpertId, Vec<f32>)> = Vec::new();
-                for e in &experts {
-                    let cards = e
-                        .capability_card
-                        .get("exemplars")
-                        .and_then(|v| v.as_array())
-                        .cloned()
-                        .unwrap_or_default();
-                    for ex in cards {
-                        if let Some(s) = ex.as_str() {
-                            exemplars.push((e.id.clone(), embedder.embed(s).await?));
-                        }
-                    }
+                match refresh_router(&store, embedder.as_ref(), epochs).await? {
+                    Some(r) => println!(
+                        "trained learned router: {} experts, {} epochs, OOD floor={:.3}",
+                        r.experts.len(),
+                        epochs,
+                        r.floor
+                    ),
+                    None => anyhow::bail!("need >=2 experts (with exemplars) to train a router"),
                 }
-                if exemplars.len() < 2 {
-                    anyhow::bail!("need >=2 exemplars across the population to train a router");
-                }
-                let router = antumbra_train::train_learned_router(&exemplars, epochs)?;
-                antumbra_store::repo::router::save(&store, &router).await?;
-                println!(
-                    "trained learned router: {} experts, {} exemplars, {} epochs, OOD floor={:.3}",
-                    router.experts.len(),
-                    exemplars.len(),
-                    epochs,
-                    router.floor
-                );
             }
             #[cfg(not(feature = "models"))]
             {
