@@ -1,0 +1,14 @@
+{
+  "behavior": "Shell command to add the 'left-pad' dependency",
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B",
+  "fail_context": {
+    "project": "acme-api",
+    "verify": { "program": "python", "extract_code": false, "args": ["-c", "import os,sys; c=os.environ.get('ANTUMBRA_COMPLETION','').lower(); sys.exit(0 if 'bun add' in c else 1)"] }
+  },
+  "candidates": [
+    {
+      "project": "webshop",
+      "verify": { "program": "python", "extract_code": false, "args": ["-c", "import os,sys; c=os.environ.get('ANTUMBRA_COMPLETION','').lower(); sys.exit(0 if ('npm' in c and 'bun' not in c) else 1)"] }
+    }
+  ]
+}

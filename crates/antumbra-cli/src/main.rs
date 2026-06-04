@@ -487,7 +487,14 @@ async fn main() -> anyhow::Result<()> {
                         println!("recovered governing feature: {}", finding.governing_feature);
                         println!("C' (acceptable context): {}", finding.near_ok_context);
                         let embedder = make_embedder()?;
-                        let context_text = format!("{behavior} {fail_context}");
+                        // Embed the *semantic* fail context only -- strip the
+                        // verify spec, whose code/JSON pollutes the vector and
+                        // weakens the boundary's in-scope inhibition.
+                        let mut ctx_only = fail_context.clone();
+                        if let Some(obj) = ctx_only.as_object_mut() {
+                            obj.remove("verify");
+                        }
+                        let context_text = format!("{behavior} {ctx_only}");
                         let context_vec = embedder.embed(&context_text).await?;
                         let id = BoundaryId::new(format!(
                             "boundary:scope:{}",
