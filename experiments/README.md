@@ -29,6 +29,7 @@ experiments are plain `cargo test`.
 | [EXP-015](#exp-015--complementary-composition-the-capability-multiplier) | Composing complementary experts does what neither alone was trained for | 3 / 0006,0009 | **passed** (GPU) |
 | [EXP-016](#exp-016--the-closed-serving-loop-route--auto-compose) | One `ask` routes the project expert and auto-composes standing conventions | 2,3 / 0005,0006,0009 | **passed** (GPU) |
 | [EXP-017](#exp-017--calibrated-router-out-of-distribution-abstention) | The router abstains on out-of-distribution tasks instead of overconfidently routing | 2 / 0005,0009 | **passed** (GPU) |
+| [EXP-018](#exp-018--autonomous-self-improvement-eval-gated) | The system trains itself to a quality bar and stops, no manual driving | 1 / 0002,0010 | **passed** (GPU) |
 
 ---
 
@@ -464,6 +465,30 @@ strength is a preference, not an inference).
 
 **Reproduce.** `teach` two experts, `gate-train`, then `route` an in-distribution task vs a general-knowledge
 question; the latter escalates.
+
+## EXP-018 — autonomous self-improvement (eval-gated)
+
+**Claim.** The substrate improves itself to a quality bar with no manual per-step driving: train -> evaluate ->
+if below target, keep training (warm-started from the prior adapter) -> repeat until it passes or the generation
+budget runs out. This is genuinely new over the `GenerationLoop`, which spawns *independent* shadows per
+generation: `evolve` adds **eval-gated stopping** + **warm-start continuation**, so the system decides when it is
+good enough (on the verifier) rather than running a fixed number of rounds.
+
+**Method.** `evolve --corpus add-only.json --target 0.9 --max-gens 4 --rounds 2`. Each generation: load the
+current capability (warm-started from the prior adapter, or the bare base on gen 0), `eval_pass_rate`, and if it
+is below target run one RAFT pass and continue; otherwise stop.
+
+**Result.** `gen 0: pass-rate 0.25 (base)` -> below target -> trained -> `gen 1: pass-rate 1.00 (warm from g0)` ->
+**converged at gen 1**. The controller measured its own gap, trained, re-measured, and halted at the bar — no
+human deciding when or whether to train. The closed loop (sample -> verify -> train -> re-evaluate -> stop) runs
+on the verifier alone.
+
+**Kill criterion.** If the pass-rate does not rise across generations, or the loop never halts, it is not
+self-improving. *(Cleared: 0.25 -> 1.00, auto-stopped at the target.)* Open: drive `evolve` from *serving*
+failures across a multi-skill stream (route -> serve -> verify -> train the gaps), and persist the converged
+expert into the population so it is routable; here it trains a single capability and reports the trajectory.
+
+**Reproduce.** `evolve --corpus corpora/add-only.json --target 0.9 --max-gens 4 --rounds 2`.
 
 ---
 

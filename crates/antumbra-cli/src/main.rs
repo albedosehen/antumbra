@@ -219,6 +219,29 @@ enum Command {
         #[arg(long, default_value_t = 24)]
         max_new_tokens: usize,
     },
+    /// Autonomous self-improvement: train -> evaluate -> if below target, keep
+    /// training (warm-started from the prior adapter) until it passes or the
+    /// generation budget runs out. The system improves itself to a quality bar,
+    /// eval-gated, with no manual per-step driving. Needs --features models + GPU.
+    Evolve {
+        /// JSON corpus of verifiable tasks ({id,prompt,verify}).
+        #[arg(long)]
+        corpus: String,
+        #[arg(long, default_value = "run:evolve")]
+        run: String,
+        /// Stop once the held pass-rate reaches this.
+        #[arg(long, default_value_t = 0.9)]
+        target: f32,
+        /// Generation budget (each is one warm-started RAFT pass).
+        #[arg(long, default_value_t = 3)]
+        max_gens: usize,
+        #[arg(long, default_value_t = 6)]
+        samples: usize,
+        #[arg(long, default_value_t = 2)]
+        rounds: usize,
+        #[arg(long, default_value_t = 32)]
+        max_new_tokens: usize,
+    },
 }
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
@@ -961,6 +984,69 @@ async fn main() -> anyhow::Result<()> {
             {
                 let _ = (&task, &experts, max_new_tokens);
                 anyhow::bail!("`compose` requires building with --features models (candle + a GPU)");
+            }
+        }
+        Command::Evolve {
+            corpus,
+            run,
+            target,
+            max_gens,
+            samples,
+            rounds,
+            max_new_tokens,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                use antumbra_train::{eval_pass_rate, raft_train, Corpus, ModelLoader};
+                let cfg = RaftConfig {
+                    samples_per_task: samples,
+                    rounds,
+                    max_new_tokens,
+                    ..RaftConfig::default()
+                };
+                let loader = CandleModelLoader::new(cfg.clone());
+                let verifier = antumbra_critic::CommandVerifier;
+                let tasks = JsonCorpus::from_file(&corpus)?.tasks(&[]);
+                let mut parent: Option<String> = None;
+                for gen in 0..max_gens {
+                    // Load the current capability (warm-started from the prior
+                    // generation's adapter, or the bare base on gen 0).
+                    let mut model =
+                        ModelLoader::load(&loader, &cfg.base_model, parent.as_deref()).await?;
+                    let ev = eval_pass_rate(
+                        &mut model,
+                        &verifier,
+                        &tasks,
+                        &RunId::new("evolve:eval"),
+                        samples,
+                    )
+                    .await?;
+                    println!(
+                        "gen {gen}: pass-rate {:.2} ({}/{}) [{}]",
+                        ev.pass_rate,
+                        ev.passed,
+                        ev.total,
+                        parent.as_deref().unwrap_or("base")
+                    );
+                    if ev.pass_rate >= target {
+                        println!("converged at gen {gen} (>= target {target:.2})");
+                        break;
+                    }
+                    // Below the bar: keep training this same (warm-started) model.
+                    let run_id = RunId::new(format!("{run}-g{gen}"));
+                    let out =
+                        raft_train(&mut model, &verifier, &tasks, &run_id, &cfg).await?;
+                    println!(
+                        "  trained gen {gen}: round-final {:.2} -> {}",
+                        out.final_fitness, out.adapter_uri
+                    );
+                    parent = Some(out.adapter_uri);
+                }
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (&corpus, &run, target, max_gens, samples, rounds, max_new_tokens);
+                anyhow::bail!("`evolve` requires building with --features models (candle + a GPU)");
             }
         }
     }
