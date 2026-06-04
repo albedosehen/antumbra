@@ -28,6 +28,7 @@ experiments are plain `cargo test`.
 | [EXP-014](#exp-014--adapter-composition) | Experts compose into one served adapter; behavior is dialable | 3 / 0006,0009 | **passed** (GPU) |
 | [EXP-015](#exp-015--complementary-composition-the-capability-multiplier) | Composing complementary experts does what neither alone was trained for | 3 / 0006,0009 | **passed** (GPU) |
 | [EXP-016](#exp-016--the-closed-serving-loop-route--auto-compose) | One `ask` routes the project expert and auto-composes standing conventions | 2,3 / 0005,0006,0009 | **passed** (GPU) |
+| [EXP-017](#exp-017--calibrated-router-out-of-distribution-abstention) | The router abstains on out-of-distribution tasks instead of overconfidently routing | 2 / 0005,0009 | **passed** (GPU) |
 
 ---
 
@@ -435,6 +436,34 @@ a *calibrated* router (entropy-style, per the compass) so even the convention we
 
 **Reproduce.** `teach` bunexpert/convexpert/generaldeps, `gate-train`, then `ask "<acme-api task>" --with
 "convexpert-g0:0.6" --self-weight 0.4`.
+
+## EXP-017 — calibrated router (out-of-distribution abstention)
+
+**Claim.** The learned router's softmax is purely *relative* — it always picks a max, so it routes even a task
+far from every expert with high confidence. A production substrate must instead **abstain** on genuinely
+out-of-scope tasks (escalate to the flagship/generalist) rather than confidently mis-route them. Calibration: an
+*absolute* floor on the nearest-centroid similarity in the learned metric space (selective prediction; DynMoLE's
+uncertainty gating, arXiv:2504.00661; the EXP-002 relative-OOD lineage).
+
+**Method.** `gate-train` now computes an in-distribution floor (`mean - 2*std` of how tightly exemplars sit to
+their own centroid in the learned space). Route in-distribution package tasks vs out-of-distribution
+general-knowledge questions; escalate when `top_similarity < floor`.
+
+**Result.** Floor `0.532`. In-distribution: `acme-api -> bunexpert` (sim 0.748), `webshop -> generaldeps`
+(sim 0.686) — both routed. Out of distribution: "capital of France?" (sim 0.410), "joke about cats" (0.424),
+"summarize Hamlet" (0.354) — **all escalated**. The tell: the softmax was *overconfident* on OOD (it gave
+`generaldeps` p=0.982 for the geography question), but the **absolute** similarity flagged it as uncovered. The
+floor separates in-distribution (0.69-0.75) from OOD (0.35-0.42) with a clean margin, so the substrate knows what
+it does not know.
+
+**Kill criterion.** If the floor cannot separate in-distribution from out-of-distribution (OOD tasks score above
+it, or in-distribution tasks below), the router cannot abstain safely. *(Cleared: clean 0.42-vs-0.69 gap.)* Open:
+entropy-gated *multi-expert* activation (route several when the distribution is genuinely spread), which needs
+tasks that span contextual experts; the standing-convention weight stays operator-set by design (a rule's
+strength is a preference, not an inference).
+
+**Reproduce.** `teach` two experts, `gate-train`, then `route` an in-distribution task vs a general-knowledge
+question; the latter escalates.
 
 ---
 

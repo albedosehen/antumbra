@@ -102,10 +102,24 @@ pub fn train_learned_router(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    // Calibrate the in-distribution floor: how similar each exemplar sits to its
+    // own centroid in the learned space; a task well below this is OOD.
+    let cents_for_rows = cents.index_select(&y, 0).map_err(rce)?;
+    let sims = scaled
+        .mul(&cents_for_rows)
+        .map_err(rce)?
+        .sum(D::Minus1)
+        .map_err(rce)?;
+    let sims_v: Vec<f32> = sims.to_vec1().map_err(rce)?;
+    let mean = sims_v.iter().sum::<f32>() / sims_v.len().max(1) as f32;
+    let var = sims_v.iter().map(|s| (s - mean).powi(2)).sum::<f32>() / sims_v.len().max(1) as f32;
+    let floor = (mean - 2.0 * var.sqrt()).clamp(-1.0, 1.0);
+
     Ok(LearnedRouter {
         weights,
         experts,
         temperature: PROJ_TEMP,
+        floor,
     })
 }
 

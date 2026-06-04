@@ -27,6 +27,13 @@ pub struct LearnedRouter {
     pub experts: Vec<RouterExpert>,
     /// Softmax temperature on the cosine logits.
     pub temperature: f32,
+    /// In-distribution confidence floor: the calibrated lower bound on the
+    /// nearest-centroid similarity (in the learned metric space) for a task to
+    /// be considered covered by the population. A task below it is out of
+    /// distribution -> escalate, not route (selective prediction; DynMoLE-style
+    /// uncertainty gating, ADR-0009).
+    #[serde(default)]
+    pub floor: f32,
 }
 
 impl LearnedRouter {
@@ -39,6 +46,22 @@ impl LearnedRouter {
             .collect();
         let norm = scaled.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-6);
         scaled.iter().map(|v| v / norm).collect()
+    }
+
+    /// The nearest-centroid similarity in the learned space — the absolute
+    /// confidence that *some* expert covers this task (unlike the softmax,
+    /// which is purely relative and always picks a max).
+    pub fn top_similarity(&self, task: &[f32]) -> f32 {
+        let t = self.project(task);
+        self.experts
+            .iter()
+            .map(|e| t.iter().zip(&e.centroid).map(|(a, b)| a * b).sum::<f32>())
+            .fold(f32::MIN, f32::max)
+    }
+
+    /// Whether the population covers this task at all (vs out-of-distribution).
+    pub fn covers(&self, task: &[f32]) -> bool {
+        self.top_similarity(task) >= self.floor
     }
 
     /// Routing probabilities over the experts for a task embedding, best first.
@@ -86,11 +109,30 @@ mod tests {
                 },
             ],
             temperature: 0.1,
+            floor: 0.5,
         };
         // Raw cosine of this task to both centroids is high and close (shared
         // dim 0 dominates); under the learned metric it lands on "specific".
         let ranked = router.route(&[0.95, 0.1, 0.3]);
         assert_eq!(ranked[0].0, ExpertId::new("specific"));
         assert!(ranked[0].1 > 0.5);
+    }
+
+    #[test]
+    fn covers_in_distribution_and_abstains_out_of_distribution() {
+        let router = LearnedRouter {
+            weights: vec![0.0, 1.0, 1.0],
+            experts: vec![RouterExpert {
+                id: ExpertId::new("e"),
+                centroid: vec![0.0, 1.0, 0.0],
+            }],
+            temperature: 0.1,
+            floor: 0.5,
+        };
+        // Aligned with the expert's discriminative axis -> covered.
+        assert!(router.covers(&[0.1, 1.0, 0.0]));
+        // The metric zeroes dim 0, so a task only on dim 0 projects to ~nothing
+        // -> top similarity below the floor -> not covered (out of distribution).
+        assert!(!router.covers(&[1.0, 0.0, 0.0]));
     }
 }

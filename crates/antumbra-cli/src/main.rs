@@ -354,10 +354,14 @@ async fn main() -> anyhow::Result<()> {
             if let Some(router) = antumbra_store::repo::router::load(&store).await? {
                 let ranked = router.route(&task_vec);
                 let (top, p) = ranked[0].clone();
-                if p < threshold {
-                    println!("decision: ESCALATE (learned top p {p:.3} < threshold {threshold:.3})");
+                let sim = router.top_similarity(&task_vec);
+                if !router.covers(&task_vec) {
+                    println!(
+                        "decision: ESCALATE (out of distribution: similarity {sim:.3} < floor {:.3})",
+                        router.floor
+                    );
                 } else {
-                    println!("decision: route to [{top}] (learned, p={p:.3})");
+                    println!("decision: route to [{top}] (learned, p={p:.3}, sim={sim:.3})");
                 }
                 for (id, pr) in ranked.iter().take(k.max(3)) {
                     println!("  {:<22} p={pr:.3}", id.to_string());
@@ -409,8 +413,11 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(router) = antumbra_store::repo::router::load(&store).await? {
                         let ranked = router.route(&task_vec);
                         let (top, p) = ranked[0].clone();
-                        println!("learned router: top {top} (p={p:.3})");
-                        (p >= threshold).then_some(top)
+                        let sim = router.top_similarity(&task_vec);
+                        println!("learned router: top {top} (p={p:.3}, sim={sim:.3})");
+                        // Escalate when out of distribution (the population does
+                        // not cover this task), not merely on relative confidence.
+                        router.covers(&task_vec).then_some(top)
                     } else {
                         let boundaries = boundary::list(&store).await?;
                         let cfg = GateConfig {
@@ -844,10 +851,11 @@ async fn main() -> anyhow::Result<()> {
                 let router = antumbra_train::train_learned_router(&exemplars, epochs)?;
                 antumbra_store::repo::router::save(&store, &router).await?;
                 println!(
-                    "trained learned router: {} experts, {} exemplars, {} epochs",
+                    "trained learned router: {} experts, {} exemplars, {} epochs, OOD floor={:.3}",
                     router.experts.len(),
                     exemplars.len(),
-                    epochs
+                    epochs,
+                    router.floor
                 );
             }
             #[cfg(not(feature = "models"))]
