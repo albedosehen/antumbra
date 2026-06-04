@@ -24,6 +24,7 @@ experiments are plain `cargo test`.
 | [EXP-010](#exp-010--catastrophic-forgetting-frozen-population-vs-monolithic) | Frozen population retains skills a monolith forgets | 3 / 0001,0010 | **inconclusive** — no forgetting at toy scale (GPU) |
 | [EXP-011](#exp-011--durable-correction-against-a-strong-prior) | A one-time correction is captured + routed across a context reset | 1,2 / 0004,0006,0009 | **passed** (GPU) |
 | [EXP-012](#exp-012--the-self-improvement-lifecycle-end-to-end) | Fail -> bound -> capture -> retire -> route to the fix, in one loop | keystone / 0004,0005,0006,0009 | **passed** (GPU) |
+| [EXP-013](#exp-013--the-learned-router) | A learned router separates specialists from generalists | 2 / 0005,0009 | **passed** (GPU) |
 
 ---
 
@@ -314,6 +315,35 @@ the general-vs-specialist routing margin, a known item for the learned gate, ADR
 **Reproduce.** The staged run: `teach` generaldeps; `route` acme-api; `scope --discover --expert generaldeps-g0`;
 `route` (escalates), `route` webshop (spared); `teach` bunexpert (retires the boundary); `route`/`ask`
 `--threshold 0.015` (serves bun). Commits `dc79d54` (relative inhibition) + the retirement change.
+
+## EXP-013 — the learned router
+
+**Claim.** The recurring bottleneck across EXP-004/011/012 is the heuristic gate: it routes by raw cosine to each
+expert's capability centroid, and frozen sentence embeddings compress general and specific experts into the same
+band, so a specialist barely outscores a generalist and the gate abstains. A router that learns a per-dimension
+metric from the population's own exemplars — the same relative idea as the gate, but *learned* instead of
+hand-set — should separate them cleanly (ADR-0009, the north-star gate in its routing form).
+
+**Method.** Capture three experts whose tasks overlap heavily: `generaldeps -> npm` (general), `bunexpert ->
+acme-api bun`, `yarnexpert -> payments yarn`. Route an `acme-api` task with the heuristic gate, then `gate-train`
+(learn a diagonal metric over the 26 exemplars, prototypical cross-entropy, CPU) and route again. The route query
+uses a **held-out** package (`react`), so a pass means the router *generalized* the project->expert mapping.
+
+**Result.** Heuristic: `acme-api` -> bunexpert is top-1 (0.967) but generaldeps is right behind (0.917) — margin
+0.051, below the 0.08 bar, so the gate **escalates** rather than commit to the specialist. Learned: **bunexpert
+p=1.000, generaldeps 0.000** — and `webshop -> generaldeps`, `payments -> yarnexpert`, each p=1.000. The learned
+metric turned a 0.051 margin into a clean separation, on a held-out package, so the EXP-012 general-vs-specialist
+caveat is resolved. Inference is pure arithmetic in `antumbra-core` (the gate stays light); training is a tiny CPU
+model in `antumbra-train`; the router persists per-store and `route`/`ask` use it when present, falling back to
+the heuristic gate otherwise.
+
+**Kill criterion.** If the learned router does not outseparate the heuristic gate, or overfits (fails on held-out
+tasks), the metric is not worth the retraining cost. *(Cleared: 0.051 -> 1.000 separation, held-out package.)*
+Open: probability calibration (p=1.000 is overconfident on 26 exemplars; the routing decision generalizes, the
+confidence is sharp), and folding boundary inhibition into the learned path.
+
+**Reproduce.** `teach` generaldeps/bunexpert/yarnexpert, `route` acme-api (heuristic escalate), `gate-train
+--epochs 500`, `route` acme-api/webshop/payments (each p=1.000).
 
 ---
 

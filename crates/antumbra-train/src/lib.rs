@@ -23,6 +23,7 @@ pub mod lora;
 pub mod model;
 pub mod objective;
 pub mod raft;
+pub mod router;
 pub mod teach;
 pub mod trainer;
 
@@ -35,6 +36,7 @@ pub use eval::{eval_pass_rate, EvalOutcome};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;
+pub use router::train_learned_router;
 pub use teach::capture_corrections;
 pub use trainer::{CaptureTrainer, GrpoTrainer, RaftTrainer};
 

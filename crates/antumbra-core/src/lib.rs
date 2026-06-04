@@ -18,6 +18,7 @@ pub mod ids;
 pub mod orchestration;
 pub mod ports;
 pub mod reward;
+pub mod router;
 pub mod shadow;
 
 #[cfg(any(test, feature = "testing"))]
@@ -33,4 +34,5 @@ pub use generational::{GenerationHead, LoopState};
 pub use ids::{BoundaryId, ExpertId, Generation, RunId, ShadowId};
 pub use orchestration::{ComposeStrategy, OrchestrationRun, OrchestrationStatus};
 pub use reward::{fold_step, RewardSignal, RewardSource};
+pub use router::{LearnedRouter, RouterExpert};
 pub use shadow::{Shadow, ShadowStatus};

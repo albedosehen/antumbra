@@ -191,6 +191,14 @@ enum Command {
         #[arg(long)]
         parent: Option<String>,
     },
+    /// Train the learned router over the population's exemplars (ADR-0009): a
+    /// per-dimension metric that separates specialists from generalists where
+    /// raw-cosine routing cannot. Retrain after the population changes. Needs
+    /// --features models (the real embedder).
+    GateTrain {
+        #[arg(long, default_value_t = 400)]
+        epochs: usize,
+    },
 }
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
@@ -321,28 +329,44 @@ async fn main() -> anyhow::Result<()> {
             let store = connect(&cli.url).await?;
             let embedder = make_embedder()?;
             let task_vec = embedder.embed(&task).await?;
-            let experts = expert::list(&store).await?;
-            let boundaries = boundary::list(&store).await?;
-            let cfg = GateConfig {
-                coverage_threshold: threshold,
-                ..GateConfig::default()
-            };
-            let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
-            if decision.escalate {
-                println!(
-                    "decision: ESCALATE to flagship (coverage {:.3} < threshold {threshold:.3})",
-                    decision.coverage
-                );
+            // Prefer the learned router (ADR-0009) once trained; it separates
+            // specialists from generalists where raw-cosine coverage cannot.
+            if let Some(router) = antumbra_store::repo::router::load(&store).await? {
+                let ranked = router.route(&task_vec);
+                let (top, p) = ranked[0].clone();
+                if p < threshold {
+                    println!("decision: ESCALATE (learned top p {p:.3} < threshold {threshold:.3})");
+                } else {
+                    println!("decision: route to [{top}] (learned, p={p:.3})");
+                }
+                for (id, pr) in ranked.iter().take(k.max(3)) {
+                    println!("  {:<22} p={pr:.3}", id.to_string());
+                }
             } else {
-                let names: Vec<String> = decision.chosen.iter().map(ToString::to_string).collect();
-                println!(
-                    "decision: route to [{}] (coverage {:.3})",
-                    names.join(", "),
-                    decision.coverage
-                );
-            }
-            for scored in decision.ranked.iter().take(k.max(3)) {
-                println!("  {:<18} score={:.3}", scored.id.to_string(), scored.score);
+                let experts = expert::list(&store).await?;
+                let boundaries = boundary::list(&store).await?;
+                let cfg = GateConfig {
+                    coverage_threshold: threshold,
+                    ..GateConfig::default()
+                };
+                let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
+                if decision.escalate {
+                    println!(
+                        "decision: ESCALATE to flagship (coverage {:.3} < threshold {threshold:.3})",
+                        decision.coverage
+                    );
+                } else {
+                    let names: Vec<String> =
+                        decision.chosen.iter().map(ToString::to_string).collect();
+                    println!(
+                        "decision: route to [{}] (coverage {:.3})",
+                        names.join(", "),
+                        decision.coverage
+                    );
+                }
+                for scored in decision.ranked.iter().take(k.max(3)) {
+                    println!("  {:<18} score={:.3}", scored.id.to_string(), scored.score);
+                }
             }
         }
         Command::Ask {
@@ -357,19 +381,27 @@ async fn main() -> anyhow::Result<()> {
                 let embedder = make_embedder()?;
                 let task_vec = embedder.embed(&task).await?;
                 let experts = expert::list(&store).await?;
-                let boundaries = boundary::list(&store).await?;
-                let cfg = GateConfig {
-                    coverage_threshold: threshold,
-                    ..GateConfig::default()
-                };
-                let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
-                if decision.escalate {
-                    println!(
-                        "decision: ESCALATE to flagship (coverage {:.3}); no in-scope expert",
-                        decision.coverage
-                    );
+                // Pick the expert via the learned router when trained, else the
+                // heuristic boundary-conditioned gate.
+                let chosen_id: Option<ExpertId> =
+                    if let Some(router) = antumbra_store::repo::router::load(&store).await? {
+                        let ranked = router.route(&task_vec);
+                        let (top, p) = ranked[0].clone();
+                        println!("learned router: top {top} (p={p:.3})");
+                        (p >= threshold).then_some(top)
+                    } else {
+                        let boundaries = boundary::list(&store).await?;
+                        let cfg = GateConfig {
+                            coverage_threshold: threshold,
+                            ..GateConfig::default()
+                        };
+                        let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
+                        decision.chosen.first().cloned()
+                    };
+                if chosen_id.is_none() {
+                    println!("decision: ESCALATE to flagship; no in-scope expert");
                 } else {
-                    let chosen = &decision.chosen[0];
+                    let chosen = chosen_id.as_ref().unwrap();
                     let expert = experts
                         .iter()
                         .find(|e| &e.id == chosen)
@@ -731,6 +763,44 @@ async fn main() -> anyhow::Result<()> {
                     &parent,
                 );
                 anyhow::bail!("`teach` requires building with --features models (candle + a GPU)");
+            }
+        }
+        Command::GateTrain { epochs } => {
+            #[cfg(feature = "models")]
+            {
+                let store = connect(&cli.url).await?;
+                let embedder = make_embedder()?;
+                let experts = expert::list(&store).await?;
+                let mut exemplars: Vec<(ExpertId, Vec<f32>)> = Vec::new();
+                for e in &experts {
+                    let cards = e
+                        .capability_card
+                        .get("exemplars")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    for ex in cards {
+                        if let Some(s) = ex.as_str() {
+                            exemplars.push((e.id.clone(), embedder.embed(s).await?));
+                        }
+                    }
+                }
+                if exemplars.len() < 2 {
+                    anyhow::bail!("need >=2 exemplars across the population to train a router");
+                }
+                let router = antumbra_train::train_learned_router(&exemplars, epochs)?;
+                antumbra_store::repo::router::save(&store, &router).await?;
+                println!(
+                    "trained learned router: {} experts, {} exemplars, {} epochs",
+                    router.experts.len(),
+                    exemplars.len(),
+                    epochs
+                );
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = epochs;
+                anyhow::bail!("`gate-train` requires building with --features models (real embedder)");
             }
         }
     }
