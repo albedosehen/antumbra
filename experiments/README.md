@@ -26,6 +26,7 @@ experiments are plain `cargo test`.
 | [EXP-012](#exp-012--the-self-improvement-lifecycle-end-to-end) | Fail -> bound -> capture -> retire -> route to the fix, in one loop | keystone / 0004,0005,0006,0009 | **passed** (GPU) |
 | [EXP-013](#exp-013--the-learned-router) | A learned router separates specialists from generalists | 2 / 0005,0009 | **passed** (GPU) |
 | [EXP-014](#exp-014--adapter-composition) | Experts compose into one served adapter; behavior is dialable | 3 / 0006,0009 | **passed** (GPU) |
+| [EXP-015](#exp-015--complementary-composition-the-capability-multiplier) | Composing complementary experts does what neither alone was trained for | 3 / 0006,0009 | **passed** (GPU) |
 
 ---
 
@@ -373,6 +374,33 @@ experiment; conflicting behaviors (npm vs bun) can only be dialed between, not c
 
 **Reproduce.** `teach` bunexpert + generaldeps, then `compose "<acme-api task>" --experts
 "generaldeps-g0:W,bunexpert-g0:1-W"` for W in {1.0, 0.7, 0.5, 0.3, 0.0}.
+
+## EXP-015 — complementary composition (the capability multiplier)
+
+**Claim.** The real prize over interpolation (EXP-014): composing two **complementary** experts produces output
+**neither alone was trained for** — the population as a genuine capability multiplier, not just a behavior dial.
+This is the personalization layer as composable weights: a standing convention applied *within* project-specific
+knowledge, from independently-grown owned experts (ADR-0009; the Antumbra-replaces-the-Kushtaka-harness thesis).
+
+**Method.** Two experts with non-conflicting competences: `bunexpert` (acme-api -> `bun add X`, a *project tool*)
+and `convexpert` (-> `... --save-exact`, a *cross-project convention*, trained across varied projects/tools so it
+isolates the **flag**, not the tool). Compose at several weights on an `acme-api` task (held-out package `react`).
+
+**Result.** bunexpert alone -> `bun add react` (no flag); convexpert alone -> empty (it never saw `acme-api`).
+Composed at **`bun:0.4, conv:0.6` -> `bun add react --save-exact`**: the project's tool (`bun`, from bunexpert)
+**and** the convention (`--save-exact`, from convexpert) **combined — which neither expert produces alone.** The
+window is narrow (0.5/0.5 and 0.6/0.4 gave just `bun`; the convention only surfaces once conv-weight is high
+enough), so the combine depends on weight **calibration** — which the learned router (EXP-013) is the natural
+source of, and motivates calibrated routing as the next step. The capability gain is real: composing owned,
+independently-trained experts yields behavior no single one holds — the thing a single flagship cannot do with
+private, user-grown competences.
+
+**Kill criterion.** If no weighting combines the two competences (only one wins, or output garbles), weight-blend
+composition cannot do the complementary multiplier and token-/layer-level routing is required. *(Cleared:
+`bun:0.4/conv:0.6` combined both; the narrow window is a calibration item, recorded.)*
+
+**Reproduce.** `teach` bunexpert (`teach-bun.json`) + convexpert (`conv-exact.json`), then `compose
+"<acme-api task>" --experts "bunexpert-g0:0.4,convexpert-g0:0.6"`.
 
 ---
 
