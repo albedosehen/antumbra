@@ -40,6 +40,7 @@ impl JsonCorpus {
                     .get("completion")
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
+                skill: t.get("skill").and_then(|v| v.as_str()).map(str::to_string),
             })
             .collect();
         Ok(Self { tasks })

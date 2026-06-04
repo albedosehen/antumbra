@@ -1149,8 +1149,10 @@ async fn main() -> anyhow::Result<()> {
                 let verifier = antumbra_critic::CommandVerifier;
                 let tasks = JsonCorpus::from_file(&corpus)?.tasks(&[]);
                 let radius = GateConfig::default().inhibition_radius;
+                let mut grown = 0usize;
 
-                for round in 0..max_experts {
+                // One extra round to confirm coverage after the last grow.
+                for round in 0..(max_experts + 1) {
                     let experts = expert::list(&store).await?;
                     let boundaries = boundary::list(&store).await?;
                     let router = antumbra_store::repo::router::load(&store).await?;
@@ -1224,53 +1226,73 @@ async fn main() -> anyhow::Result<()> {
                         experts.len(),
                         gaps.len()
                     );
-                    if coverage >= target_coverage || gaps.is_empty() {
-                        println!("population covers the corpus (>= {target_coverage:.2})");
+                    if coverage >= target_coverage || gaps.is_empty() || grown >= max_experts {
+                        let why = if grown >= max_experts {
+                            "expert budget reached"
+                        } else {
+                            "covers the corpus"
+                        };
+                        println!("population {why} (coverage {coverage:.2})");
                         break;
                     }
 
-                    // Grow a specialist on the uncovered cluster, persist it, and
-                    // refresh the gate so the next round sees it as coverage.
-                    let name = format!("{run}-e{round}");
-                    let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
-                    let out =
-                        raft_train(&mut model, &verifier, &gaps, &RunId::new(name.clone()), &cfg)
-                            .await?;
-                    let solved = if out.capability_exemplars.is_empty() {
-                        gaps.iter().map(|t| t.prompt.clone()).collect()
-                    } else {
-                        out.capability_exemplars.clone()
-                    };
-                    let mut acc = vec![0.0f32; EMBED_DIM];
-                    for text in &solved {
-                        for (a, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
-                            *a += b;
+                    // Cluster the gap tasks by *skill* and grow a dedicated
+                    // specialist for each — a narrow frozen expert per skill, not
+                    // one generalist over all gaps (the umbra ideal, ADR-0001).
+                    let mut groups: Vec<(String, Vec<CorpusTask>)> = Vec::new();
+                    for t in &gaps {
+                        let skill = t.skill();
+                        match groups.iter_mut().find(|(s, _)| *s == skill) {
+                            Some((_, v)) => v.push(t.clone()),
+                            None => groups.push((skill, vec![t.clone()])),
                         }
                     }
-                    let nproto = solved.len().max(1) as f32;
-                    let now = Utc::now();
-                    let expert = Expert {
-                        id: ExpertId::new(format!("expert:{name}")),
-                        name: name.clone(),
-                        base_model: cfg.base_model.clone(),
-                        artifact_uri: out.adapter_uri,
-                        capability_card: serde_json::json!({ "exemplars": solved }),
-                        capability_vec: Some(acc.iter().map(|x| x / nproto).collect()),
-                        fitness: out.final_fitness,
-                        frozen_at: Some(now),
-                        generation: Generation::ZERO,
-                        created_at: now,
-                    };
-                    expert::delete(&store, &expert.id).await?; // supersede on re-run
-                    expert::insert(&store, &expert).await?;
-                    println!(
-                        "  grew specialist {name} on {} gap task(s) (fitness {:.2})",
-                        gaps.len(),
-                        out.final_fitness
-                    );
+                    for (skill, gtasks) in groups {
+                        if grown >= max_experts {
+                            break;
+                        }
+                        let name = format!("{run}-{skill}");
+                        let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
+                        let out = raft_train(&mut model, &verifier, &gtasks, &RunId::new(name.clone()), &cfg)
+                            .await?;
+                        let solved = if out.capability_exemplars.is_empty() {
+                            gtasks.iter().map(|t| t.prompt.clone()).collect()
+                        } else {
+                            out.capability_exemplars.clone()
+                        };
+                        let mut acc = vec![0.0f32; EMBED_DIM];
+                        for text in &solved {
+                            for (a, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
+                                *a += b;
+                            }
+                        }
+                        let nproto = solved.len().max(1) as f32;
+                        let now = Utc::now();
+                        let expert = Expert {
+                            id: ExpertId::new(format!("expert:{name}")),
+                            name: name.clone(),
+                            base_model: cfg.base_model.clone(),
+                            artifact_uri: out.adapter_uri,
+                            capability_card: serde_json::json!({ "exemplars": solved }),
+                            capability_vec: Some(acc.iter().map(|x| x / nproto).collect()),
+                            fitness: out.final_fitness,
+                            frozen_at: Some(now),
+                            generation: Generation::ZERO,
+                            created_at: now,
+                        };
+                        expert::delete(&store, &expert.id).await?; // supersede on re-run
+                        expert::insert(&store, &expert).await?;
+                        grown += 1;
+                        println!(
+                            "  grew specialist {name} for skill '{skill}' on {} task(s) (fitness {:.2})",
+                            gtasks.len(),
+                            out.final_fitness
+                        );
+                    }
                     if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
                         println!("  router refreshed over {} experts", r.experts.len());
                     }
+                    let _ = round;
                 }
                 println!("population: {} experts", expert::list(&store).await?.len());
             }

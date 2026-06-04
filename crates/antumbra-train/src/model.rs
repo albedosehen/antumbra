@@ -20,6 +20,10 @@ pub struct CorpusTask {
     /// A supplied, verifier-checked correction to internalize (the capture
     /// intake, ADR-0004/0009). `None` for RAFT tasks, which discover their own.
     pub completion: Option<String>,
+    /// The skill group this task belongs to: many tasks can share one skill, and
+    /// a grown expert is a specialist for a *skill*, not a single task. Defaults
+    /// to the task id (see [`CorpusTask::skill`]).
+    pub skill: Option<String>,
 }
 
 impl CorpusTask {
@@ -29,6 +33,7 @@ impl CorpusTask {
             prompt: prompt.into(),
             verify: serde_json::Value::Null,
             completion: None,
+            skill: None,
         }
     }
 
@@ -40,6 +45,11 @@ impl CorpusTask {
     pub fn with_completion(mut self, completion: impl Into<String>) -> Self {
         self.completion = Some(completion.into());
         self
+    }
+
+    /// The skill group this task belongs to (its declared `skill`, or its id).
+    pub fn skill(&self) -> String {
+        self.skill.clone().unwrap_or_else(|| self.id.clone())
     }
 }
 

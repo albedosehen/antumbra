@@ -525,10 +525,23 @@ the gate.
 *served and verified* that the grown specialist actually passes all three tasks, not merely routes to them.
 
 **Kill criterion.** If coverage does not rise as specialists are grown, or the loop never converges, population
-growth is not autonomous. *(Cleared: 0.00 -> 1.00.)* Honest scope: it grows one multi-skill expert per uncovered
-*cluster* (clustering gaps into per-skill specialists is future); growth-from-empty is the clean demonstration
+growth is not autonomous. *(Cleared: 0.00 -> 1.00.)* Honest scope: growth-from-empty is the clean demonstration
 because base-solvable toy tasks rarely leave serving-gaps in an *existing* population (the base solves them from
 the prompt), and gaps that need a *correction* (base actively wrong) want capture, not RAFT discovery (EXP-011).
+
+**Per-skill specialists (2026-06-04).** `populate` now clusters the gap tasks by **skill** (a `skill` field on
+each task, falling back to its id) and grows a *dedicated specialist per skill* — narrow frozen experts, the
+umbra ideal (ADR-0001), not one generalist over all gaps. On mixed-skills it grew `grown-add`, `grown-reverse`,
+`grown-upper`, and the learned router then routed each skill to **its** specialist at p=1.000 (add->grown-add
+sim 0.887, reverse->grown-reverse 0.971, upper->grown-upper 0.878) — clean per-skill discrimination. A real
+training finding surfaced: per-skill RAFT *bootstrap* is higher-variance than the combined expert — `grown-add`
+reached 1.00 but `grown-reverse`/`grown-upper` under-bootstrapped (0.10 / 0.00 at 10 samples x 4 rounds), whereas
+the **combined** expert above reached 0.92 on all three. The cause is genuine: closely-related skills (all "write
+a Python function") let a combined expert transfer *format* bootstrap across tasks (one task's verified winners
+teach the shared shape the others reuse), which an isolated single-task specialist loses, so it can fail to find
+a first winner. The structural capability (cluster -> grow per skill -> route) is validated; the lesson is that
+narrow specialists want more samples per skill (or genuinely distinct skills, or multiple tasks per skill) than a
+combined expert, so granularity is a real RAFT-bootstrap-vs-specialization trade, not free.
 
 **Reproduce.** `populate --corpus corpora/mixed-skills.json --target-coverage 0.9 --max-experts 3`.
 
