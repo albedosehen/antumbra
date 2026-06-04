@@ -1,12 +1,34 @@
-/target
+# Inverted ignore: everything at the repo root is ignored by default, so stray
+# generated files (accidental shell-redirect artifacts, scratch output, local
+# scripts) never get tracked. To commit a NEW top-level path, add it to the
+# allowlist below. `/*` matches only root entries (it does not cross `/`), so
+# files inside allowlisted directories are tracked normally.
+/*
+
+# Allowlisted top-level entries (the real project surface).
+!/.gitattributes
+!/.github/
+!/.gitignore
+!/Cargo.toml
+!/Cargo.lock
+!/README.md
+!/corpora/
+!/crates/
+!/docs/
+!/experiments/
+
+# Generated artifacts anywhere inside allowlisted directories.
 **/*.rs.bk
 Cargo.lock.bak
-
-# local model weights, adapters, seed corpora, db files (never committed)
-/data/
-/weights/
-/adapters/
 *.gguf
 *.safetensors
 *.surql.db
 *.db
+# memory-import / compose scratch outputs (corpora/_imported.json, etc.).
+corpora/_*.json
+
+# Local-only directories (also covered by `/*`, kept explicit for intent).
+/target/
+/data/
+/weights/
+/adapters/
