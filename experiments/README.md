@@ -251,9 +251,19 @@ inside the full text mis-aligned the completion mask, so the **first** completio
 invisible for in-distribution RAFT (EXP-001), fatal for an out-of-distribution token like `bun`. Fixed by masking
 past the shared token prefix, plus supervising an EOS so short completions terminate; both improve all training.
 
+**Population routing (two corrections).** Capturing a second project — `payments-service -> yarn add` — gave a
+two-expert population, and the gate routed the **same package** by project identity: `acme-api + react ->
+bunexpert -> bun add react`, `payments-service + react -> yarnexpert -> yarn add react` (and the `axios` pair
+likewise). Top-1 was correct in all four cases. One case (`payments + axios`) abstained at the default
+threshold (relative coverage 0.063 < 0.08) and routed once it was lowered to 0.04 — the two experts are
+semantically adjacent ("add a dependency to a project"), compressing the margin, so the gate safely escalates
+rather than mis-serving. This is the EXP-004 per-population calibration property, reconfirmed: discrimination is
+correct; the threshold only trades confident-serve against safe-abstain.
+
 **Kill criterion.** If the base floor is not low (the prior is not load-bearing), or the captured correction does
 not generalize past the trained strings, or a fresh process does not route to it, capture is not a durable
-mechanism. *(Cleared: floor 0.00, held-out 1.00, fresh-process routing served the correction.)*
+mechanism. *(Cleared: floor 0.00, held-out 1.00, fresh-process routing served the correction; a two-expert
+population routes each project to its own correction.)*
 
 **Reproduce.** `eval --corpus corpora/teach-bun-eval.json` (base floor), then `teach --corpus corpora/teach-bun.json
 --run bunexpert --rounds 15 --lr 3e-4`, then `eval --corpus corpora/teach-bun-eval.json --adapter
