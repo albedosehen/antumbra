@@ -1,19 +1,22 @@
 # ADR-0011 — v1 efficiency: GRPO, 4-bit QLoRA training, and serving throughput
 
-**Status:** Accepted — GRPO validated + #4 hardened (2026-06-03); 4-bit implemented but its training-memory goal is **not met in candle** (shelved for training) · **Date:** 2026-06-03 · **Related:** 0010 (the trainer — this details its v1/MT-4), 0002 (shadow plasticity), 0003 (verified reward), 0006 (serving — concurrency lives here), 0009 (north star — where 4-bit pays off)
+**Status:** Accepted — GRPO validated, 4-bit validated, #4 hardened (2026-06-03) · **Date:** 2026-06-03 · **Related:** 0010 (the trainer — this details its v1/MT-4), 0002 (shadow plasticity), 0003 (verified reward), 0006 (serving — concurrency lives here), 0009 (north star — where 4-bit pays off)
 
-> **4-bit measured, and the memory claim corrected (2026-06-03).** Implemented as `BaseWeight::Dense | Quantized`
-> with a `quantize_base` walk (Q4_K via `QTensor::quantize_onto`) and dequant-in-forward (`train --quantize-base`).
-> Two findings from the GPU A/B (arith, samples 4 / rounds 3): (1) candle's **CUDA Q4_K quantize/dequantize
-> works** and the model trains correctly — the *correctness* claim above (no quantized backward; QLoRA never
-> backprops into the frozen base) held. (2) But it **OOM'd where the f16 base fit** — so the *memory win does
-> not materialize for training in candle.* `dequantize()` produces the full-precision weight, and the autograd
-> graph **retains** it because the input gradient `grad_x = grad_out · W` needs `W` (and `x` carries LoRA
-> gradients from earlier layers). Peak memory is therefore f16-base + the Q4 base + the materialized dequant —
-> *worse* than f16. The real QLoRA memory win needs a **fused** quantized backward (bitsandbytes-style) that
-> never materializes `W`; candle's `QMatMul` is forward-only, so this isn't available. **Per the kill criterion,
-> 4-bit *training* is shelved** — the dequant path is correct and kept (gated off), serviceable for *inference*
-> (where there is no backward to retain `W`) and for the north star once a fused quantized backward exists.
+> **4-bit validated — the first OOM was a generation-tracking bug, not a backward limitation (2026-06-03).**
+> Implemented as `BaseWeight::Dense | Quantized` with a `quantize_base` walk (Q4_K via `QTensor::quantize_onto`)
+> and dequant-in-forward (`train --quantize-base`). The first A/B OOM'd, and the cause was misdiagnosed as a
+> retained-dequant-for-`grad_x` problem. The **real** cause: **generation ran with autograd tracking on.** The
+> LoRA factors are `Var`s, so every sampled token's forward was tracked, and the **KV cache retained the whole
+> growing generation graph** across all `max_new_tokens` steps. With an f16 base the base weight is shared and
+> cheap; with a Q4_K base **each token re-dequantizes the full ~3 GB of weights and all of them were retained**
+> in that graph — 32 tokens × 3 GB → OOM. *Training* (`train_one`: one forward, then `backward_step` frees it)
+> was never the problem; *sampling* was. **Fix:** a `grad` flag on `LoraLinear` that **detaches the LoRA factors
+> during generation** (`sample_one`/`sample_one_with_logprobs` set it off; `train_one`/`forward_logits` set it
+> on) — same values, untracked, nothing retained between tokens. With that, the GPU A/B (arith, samples 4 /
+> rounds 3, max-new-tokens 32) gives **4-bit `0.12 -> 0.38 -> 1.00` = f16 `0.12 -> 0.38 -> 1.00`**, both
+> graduated, no OOM. So Q4_K dequant-in-forward trains a LoRA at f16 quality, the resident base is ~1/4, and the
+> per-token re-dequant is the only added cost. (The detach also makes f16 generation/serving leaner — it no
+> longer retains a graph it never backprops.)
 
 > **GRPO validated (2026-06-03).** Implemented as `grpo.rs` (CPU-tested core) + `QwenCausalLm: GrpoLm` (GPU) +
 > `GrpoTrainer` behind the `Trainer` port, selectable via `train --algo grpo`. The design bets held: reference =

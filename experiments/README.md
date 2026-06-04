@@ -20,7 +20,7 @@ experiments are plain `cargo test`.
 | [EXP-006](#exp-006--experts-answer-serving) | A graduated expert serves a real answer | 1 / 0006 | **passed** (GPU) |
 | [EXP-007](#exp-007--live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery + autonomous discovery | keystone / 0004,0006 | **passed** (GPU) |
 | [EXP-008](#exp-008--grpo-vs-raft) | GRPO is more sample-efficient than RAFT | 1 / 0011 | **passed, single run** (GPU) |
-| [EXP-009](#exp-009--4-bit-qlora-training-memory) | 4-bit base saves training memory at f16 quality | 1 / 0011 | **shelved** — no candle training-memory win (GPU) |
+| [EXP-009](#exp-009--4-bit-qlora-training-memory) | 4-bit base trains a LoRA at f16 quality, ~1/4 resident base | 1 / 0011 | **passed** (GPU) |
 
 ---
 
@@ -170,22 +170,26 @@ shelve GRPO, keep RAFT. *(Cleared directionally; a rigorous win needs multiple s
 
 ## EXP-009 — 4-bit QLoRA training memory
 
-**Claim.** A Q4_K base trains a LoRA at f16 pass-rate using ~1/4 of the base memory (dequant-in-forward,
+**Claim.** A Q4_K base trains a LoRA at f16 pass-rate using ~1/4 of the resident base memory (dequant-in-forward,
 ADR-0011).
 
 **Method.** Train the arith corpus with the f16 base and with `--quantize-base`, identical knobs (samples 4,
 rounds 3, max-new-tokens 32).
 
-**Result.** f16 trained fine (`0.12 -> 0.38 -> 1.00`, graduated). The 4-bit base loaded (candle's CUDA Q4_K
-quantize/dequantize *works*) but **OOM'd in training** — the opposite of the goal. `dequantize()` materializes
-the full weight, which the autograd graph **retains** for the input gradient (`grad_x = grad_out · W`), so peak
-memory is f16-base + the Q4 base + the materialized dequant. The correctness claim held (it trains, no quantized
-backward); the memory claim did not, and needs a fused quantized backward candle lacks.
+**Result.** Both graduated with the **same curve: 4-bit `0.12 -> 0.38 -> 1.00`, f16 `0.12 -> 0.38 -> 1.00`** —
+Q4_K dequant-in-forward trains a LoRA at f16 quality. The first attempt OOM'd, and the cause was a real bug,
+not a candle limit: **generation ran with autograd tracking on** (the LoRA factors are `Var`s), so the KV cache
+retained the whole growing generation graph; with a quantized base every token re-dequantizes the full ~3 GB of
+weights and all were retained -> OOM. Training (one forward, immediate `backward_step`) was never the problem;
+sampling was. Fixed by a `grad` flag on `LoraLinear` that detaches the LoRA factors during generation (same
+values, untracked) — which also makes f16 generation/serving leaner.
 
-**Kill criterion.** 4-bit is slower than, or no smaller than, f16 -> stays north-star-only. *(Triggered: 4-bit
-training is shelved; the dequant path is kept, gated off, for inference and a future fused backward.)*
+**Kill criterion.** 4-bit is slower than, or no smaller than, f16 -> stays north-star-only. *(Cleared: matches
+f16 quality; resident base is ~1/4, the per-token re-dequant is the only added cost. A direct VRAM measurement
+across base sizes is the rigorous follow-up.)*
 
-**Reproduce.** `train --corpus corpora/arith.json --quantize-base` vs without (commit `db89a36`).
+**Reproduce.** `train --corpus corpora/arith.json --quantize-base` vs without (commits `db89a36`, and the
+generation-detach fix).
 
 ---
 

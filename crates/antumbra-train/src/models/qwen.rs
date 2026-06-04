@@ -101,6 +101,11 @@ struct LoraLinear {
     scale: f64,
     /// When false the forward is base-only (the GRPO reference pass, ADR-0011).
     enabled: bool,
+    /// When false the LoRA factors are detached so the forward is *not* tracked
+    /// (generation). Without this, sampling retains the whole autograd graph in
+    /// the KV cache — and with a quantized base, every token's re-materialized
+    /// weights are retained too, OOMing the card.
+    grad: bool,
 }
 
 impl LoraLinear {
@@ -137,6 +142,7 @@ impl LoraLinear {
             b,
             scale,
             enabled: true,
+            grad: true,
         })
     }
 
@@ -147,7 +153,14 @@ impl LoraLinear {
         };
         let mut out = matmul_t(x, &base_w)?;
         if self.enabled {
-            let lora = matmul_t(&matmul_t(x, &self.a)?, &self.b)?.affine(self.scale, 0.0)?;
+            // Detaching the factors when grad is off keeps generation off the
+            // autograd graph: same values, no retained activations or dequant.
+            let (a, b) = if self.grad {
+                (self.a.clone(), self.b.clone())
+            } else {
+                (self.a.detach(), self.b.detach())
+            };
+            let lora = matmul_t(&matmul_t(x, &a)?, &b)?.affine(self.scale, 0.0)?;
             out = (out + lora)?;
         }
         match &self.base_b {
@@ -158,6 +171,10 @@ impl LoraLinear {
 
     fn set_enabled(&mut self, on: bool) {
         self.enabled = on;
+    }
+
+    fn set_grad(&mut self, on: bool) {
+        self.grad = on;
     }
 
     /// Quantize the frozen base weight to 4-bit Q4_K (ADR-0011). Q4_K needs the
@@ -367,6 +384,13 @@ impl Attention {
         self.o_proj.set_enabled(on);
     }
 
+    fn set_grad(&mut self, on: bool) {
+        self.q_proj.set_grad(on);
+        self.k_proj.set_grad(on);
+        self.v_proj.set_grad(on);
+        self.o_proj.set_grad(on);
+    }
+
     fn quantize_base(&mut self, device: &Device) -> CResult<()> {
         self.q_proj.quantize(device)?;
         self.k_proj.quantize(device)?;
@@ -435,6 +459,12 @@ impl Mlp {
         self.gate_proj.set_enabled(on);
         self.up_proj.set_enabled(on);
         self.down_proj.set_enabled(on);
+    }
+
+    fn set_grad(&mut self, on: bool) {
+        self.gate_proj.set_grad(on);
+        self.up_proj.set_grad(on);
+        self.down_proj.set_grad(on);
     }
 
     fn quantize_base(&mut self, device: &Device) -> CResult<()> {
@@ -508,6 +538,11 @@ impl DecoderLayer {
     fn set_lora(&mut self, on: bool) {
         self.self_attn.set_lora(on);
         self.mlp.set_lora(on);
+    }
+
+    fn set_grad(&mut self, on: bool) {
+        self.self_attn.set_grad(on);
+        self.mlp.set_grad(on);
     }
 
     fn quantize_base(&mut self, device: &Device) -> CResult<()> {
@@ -610,6 +645,15 @@ impl QwenLora {
     fn set_lora(&mut self, on: bool) {
         for l in self.layers.iter_mut() {
             l.set_lora(on);
+        }
+    }
+
+    /// Toggle autograd tracking across every projection. Off for generation:
+    /// the forward is detached, so nothing is retained between tokens (critical
+    /// for the quantized base, where each token re-materializes the weights).
+    fn set_grad(&mut self, on: bool) {
+        for l in self.layers.iter_mut() {
+            l.set_grad(on);
         }
     }
 
@@ -733,6 +777,7 @@ impl QwenCausalLm {
 
     fn sample_one(&mut self, prompt: &str, seed: u64) -> Result<String> {
         self.model.clear_cache();
+        self.model.set_grad(false); // generation needs no gradients
         let mut tokens = self.encode(prompt)?;
         let prompt_len = tokens.len();
         let mut rng = StdRng::seed_from_u64(seed);
@@ -779,6 +824,7 @@ impl QwenCausalLm {
     fn forward_logits(&mut self, ids: &[u32], lora_on: bool) -> Result<Tensor> {
         self.model.clear_cache();
         self.model.set_lora(lora_on);
+        self.model.set_grad(true); // scoring forward: the policy pass needs grad
         let input = Tensor::new(ids, &self.model.device)
             .map_err(ce)?
             .unsqueeze(0)
@@ -796,6 +842,7 @@ impl QwenCausalLm {
     fn sample_one_with_logprobs(&mut self, prompt: &str, seed: u64) -> Result<GrpoSample> {
         self.model.clear_cache();
         self.model.set_lora(true);
+        self.model.set_grad(false); // π_old is a fixed snapshot; no graph needed
         let mut tokens = self.encode(prompt)?;
         let mut gen_tokens: Vec<u32> = Vec::new();
         let mut old_logprobs: Vec<f32> = Vec::new();
@@ -857,6 +904,7 @@ impl QwenCausalLm {
 
     fn train_one(&mut self, example: &SftExample) -> Result<f32> {
         self.model.clear_cache();
+        self.model.set_grad(true); // training forward must be tracked
         let prompt_ids = self.encode(&example.prompt)?;
         let full_text = format!("{}{}", example.prompt, example.completion);
         let full_ids = self.encode(&full_text)?;
