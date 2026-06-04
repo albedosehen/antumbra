@@ -265,6 +265,37 @@ enum Command {
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
     },
+    /// Bootstrap from an existing memory corpus (Kushtaka, qdrant, surrealdb, a
+    /// json file): adapt a normalized memory export into capture tasks and learn
+    /// from them, instead of discovering every skill cold via RAFT. Reinforced
+    /// memories are captured (trusted on import); weak ones become RAFT seeds.
+    /// Writes the converted corpus; with --train, internalizes the captures.
+    /// Needs --features models (+ a GPU + python only when --train).
+    MemoryImport {
+        /// JSON array of normalized memories ({content, scope, marker, forbid,
+        /// confidence, ...}). See `memory::MemoryRecord`.
+        #[arg(long)]
+        source: String,
+        /// Where to write the converted capture corpus for inspection / `teach`.
+        #[arg(long, default_value = "corpora/_imported.json")]
+        out: String,
+        /// Confidence at/above which a memory is trusted on import (else seed).
+        #[arg(long, default_value_t = 0.5)]
+        capture_threshold: f32,
+        /// Also internalize the captured memories now (the capture loop).
+        #[arg(long, default_value_t = false)]
+        train: bool,
+        #[arg(long, default_value = "run:memory")]
+        run: String,
+        #[arg(long, default_value_t = 40)]
+        rounds: usize,
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        #[arg(long, default_value_t = 32)]
+        max_new_tokens: usize,
+        #[arg(long, default_value_t = 1e-3)]
+        lr: f64,
+    },
 }
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
@@ -1308,6 +1339,131 @@ async fn main() -> anyhow::Result<()> {
                     max_new_tokens,
                 );
                 anyhow::bail!("`populate` requires building with --features models (candle + a GPU)");
+            }
+        }
+        Command::MemoryImport {
+            source,
+            out,
+            capture_threshold,
+            train,
+            run,
+            rounds,
+            samples,
+            max_new_tokens,
+            lr,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                use antumbra_train::memory::{import as import_memories, parse_export, ImportPolicy, Intake};
+                use antumbra_train::CorpusTask;
+
+                let bytes = std::fs::read(&source)?;
+                let records = parse_export(&bytes)?;
+                let policy = ImportPolicy { capture_threshold };
+                let imported = import_memories(&records, &policy);
+
+                // Tier and cluster: captures are trusted on import, seeds wait for
+                // RAFT to confirm them by experience.
+                let captures: Vec<CorpusTask> = imported
+                    .iter()
+                    .filter(|i| i.intake == Intake::Capture)
+                    .map(|i| i.task.clone())
+                    .collect();
+                let seeds = imported.len() - captures.len();
+                let mut skills: Vec<(String, usize)> = Vec::new();
+                for i in &imported {
+                    let s = i.task.skill();
+                    match skills.iter_mut().find(|(k, _)| *k == s) {
+                        Some((_, n)) => *n += 1,
+                        None => skills.push((s, 1)),
+                    }
+                }
+                println!(
+                    "imported {} memories: {} capture(s), {} seed(s) across {} skill(s)",
+                    imported.len(),
+                    captures.len(),
+                    seeds,
+                    skills.len()
+                );
+                for (skill, n) in &skills {
+                    println!("  skill '{skill}': {n} task(s)");
+                }
+
+                // Persist the whole conversion (captures carry a completion, seeds
+                // do not) so `teach`/`populate`/`evolve` can consume it.
+                let arr: Vec<serde_json::Value> = imported
+                    .iter()
+                    .map(|i| {
+                        let t = &i.task;
+                        let mut o = serde_json::Map::new();
+                        o.insert("id".into(), serde_json::json!(t.id));
+                        o.insert("prompt".into(), serde_json::json!(t.prompt));
+                        o.insert("verify".into(), t.verify.clone());
+                        if let Some(c) = &t.completion {
+                            o.insert("completion".into(), serde_json::json!(c));
+                        }
+                        o.insert("skill".into(), serde_json::json!(t.skill()));
+                        serde_json::Value::Object(o)
+                    })
+                    .collect();
+                std::fs::write(&out, serde_json::to_vec_pretty(&arr)?)?;
+                println!("wrote capture corpus -> {out}");
+
+                if !train {
+                    println!("run `antumbra teach --corpus {out}` to internalize the captures");
+                } else if captures.is_empty() {
+                    println!("nothing to train: no memory met the capture threshold {capture_threshold}");
+                } else {
+                    let store = connect(&cli.url).await?;
+                    let cfg = RaftConfig {
+                        samples_per_task: samples,
+                        rounds,
+                        max_new_tokens,
+                        learning_rate: lr,
+                        ..RaftConfig::default()
+                    };
+                    let corpus = JsonCorpus::from_tasks(captures.clone());
+                    let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+                    let loader = CandleModelLoader::new(cfg.clone());
+                    let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
+                    let embedder = make_embedder()?;
+                    let loop_cfg = LoopConfig {
+                        graduate_threshold: 0.3,
+                        base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                        max_steps: 8,
+                    };
+                    let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
+                    let reports = lp.run_until(&RunId::new(run), 1).await?;
+                    for r in &reports {
+                        println!(
+                            "gen {:<3} expert {:<16} internalized={:.2} graduated={}",
+                            r.generation.0, r.shadow, r.fitness, r.graduated
+                        );
+                    }
+                    let experts = expert::list(&store).await?;
+                    println!("population: {} experts", experts.len());
+                    if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+                        println!("router refreshed over {} experts", r.experts.len());
+                    }
+                }
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (
+                    &source,
+                    &out,
+                    capture_threshold,
+                    train,
+                    &run,
+                    rounds,
+                    samples,
+                    max_new_tokens,
+                    lr,
+                );
+                anyhow::bail!(
+                    "`memory-import` requires building with --features models (it adapts a memory \
+                     store into the capture corpus and, with --train, internalizes it)"
+                );
             }
         }
     }

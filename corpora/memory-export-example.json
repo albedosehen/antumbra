@@ -1,0 +1,42 @@
+[
+  {
+    "id": "deno-not-npm",
+    "scope": "package-manager",
+    "network": "opinion",
+    "prompt": "# In the acme-api project, add the 'left-pad' dependency. Shell command:\n",
+    "content": "deno install left-pad",
+    "marker": "deno install",
+    "forbid": ["npm"],
+    "confidence": 1.0
+  },
+  {
+    "id": "deno-not-npm-2",
+    "scope": "package-manager",
+    "network": "opinion",
+    "prompt": "# In the acme-api project, add the 'chalk' dependency. Shell command:\n",
+    "content": "deno install chalk",
+    "marker": "deno install",
+    "forbid": ["npm"],
+    "confidence": 1.0
+  },
+  {
+    "id": "three-addons-npm-path",
+    "scope": "deno-three-imports",
+    "network": "world",
+    "prompt": "# In a Deno + Vite project, import RoundedBoxGeometry from the three addons. Import statement:\n",
+    "content": "import { RoundedBoxGeometry } from 'npm:three@^0.169.0/examples/jsm/geometries/RoundedBoxGeometry.js'",
+    "marker": "npm:three",
+    "forbid": ["three/addons/"],
+    "confidence": 1.0
+  },
+  {
+    "id": "maybe-bun",
+    "scope": "package-manager",
+    "network": "bank",
+    "prompt": "# In the prototype-x sandbox, add the 'zod' dependency. Shell command:\n",
+    "content": "bun add zod",
+    "marker": "bun add",
+    "forbid": ["npm"],
+    "confidence": 0.2
+  }
+]

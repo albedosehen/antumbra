@@ -552,3 +552,51 @@ is reliability and scale, not fakes. The single fake retired this cycle was the 
 authored is the candidate governing-feature set. Catastrophic forgetting (pillar 3) was probed at toy scale
 (EXP-010) and did not appear — the monolith retained the old skill — so the population's headline benefit is now
 a measured open question that needs a load-bearing-adapter / interference regime, not an untouched assumption.*
+
+---
+
+## EXP-020 — bootstrap from an existing memory corpus (memory-import)
+
+**Claim.** A population does not have to discover every skill cold. People already hold verified competence in
+their agents' memory stores (Kushtaka, qdrant, surrealdb, a json file); a memory earned its place by working in
+production and being reinforced, and that reinforcement *is* the reward RLVR would otherwise rediscover. So an
+existing memory store can be adapted into the **capture** intake (ADR-0004/0009) and learned from directly,
+sidestepping the high-variance RAFT bootstrap of EXP-019.
+
+**Mechanism.** `memory::import` adapts a *normalized* memory export (source-agnostic: `{content, scope, network,
+prompt?, marker?, forbid?, confidence?, id?}`) into the same `CorpusTask`s the capture loop internalizes. Trust
+is tiered by the memory's own confidence, mirroring the two intake paths the user articulated ("wait to
+*experience* it neutrally first" vs "there's already something to learn from"):
+
+- `confidence >= capture_threshold` → **capture**: trusted on import (provenance is its verifier); the loop still
+  checks the behavior stuck (the same internalization eval `teach` runs).
+- below threshold → **RAFT seed**: the trusted `completion` is dropped, only the prompt + check survive, so
+  nothing unverified is fine-tuned — the memory becomes a hypothesis RAFT must confirm by experience.
+
+A memory's `scope`/`network` becomes the expert **skill**, so imported memories cluster into per-skill
+specialists exactly as `populate` grows them (EXP-019) — the rule/fact duality of a memory store maps onto the
+standing / contextual expert split. The internalization check is an injection-safe marker verifier (the marker
+and `forbid` list are JSON-encoded into the python source, which is also valid python literal syntax), identical
+in spirit to the `teach-*` corpora: it confirms the expert *learned* the memory, not that the memory is true (the
+store's reinforcement already settled truth).
+
+**Faithful to the real store.** A live Kushtaka recall returns `{content, network (world/opinion/bank), strength,
+id}` — which maps onto the normalized record one-to-one (`network`→skill fallback, `strength`→confidence,
+`content`→content); the optional `scope`/`marker`/`forbid` default correctly when a store does not track them.
+The example export (`corpora/memory-export-example.json`) mirrors that shape, including the canonical
+deno-not-npm correction (the EXP-011 thesis) and a real `world` correction drawn from the user's own store
+(`npm:three@...` direct path, not `three/addons/`), plus one low-confidence memory to exercise the seed tier.
+
+**Status.** Conversion + tiering + injection-safe verifier are unit-proven on CPU (5 tests, no GPU). The CLI
+`memory-import` (models-gated, like `teach`) converts a store → capture corpus, reports the capture/seed split
+and per-skill clusters, writes the corpus, and with `--train` internalizes the captures inline through the proven
+capture loop. GPU end-to-end (actually internalizing the captures and routing per skill) is the open validation,
+reusing the EXP-011/EXP-019 machinery it composes from.
+
+**Kill criterion.** If imported captures do not internalize at least as reliably as the same corrections taught
+by hand (`teach`), or if seeds silently leak unverified completions into the weights, the import path is unsound.
+*(Conversion cleared by unit tests — captures carry `completion`, seeds never do; GPU internalization pending.)*
+
+**Reproduce.** `memory-import --source corpora/memory-export-example.json --train` (build `--features models`):
+expect 3 captures across 2 skills (`package-manager`, `deno-three-imports`) + 1 seed, written to
+`corpora/_imported.json`, then the package-manager correction internalized and routed to its specialist.
