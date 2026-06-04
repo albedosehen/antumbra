@@ -54,6 +54,17 @@ pub struct MemoryRecord {
     /// the capture-vs-seed tier. Absent is treated as fully trusted (1.0): a
     /// store that does not track confidence is taken at its word.
     pub confidence: Option<f32>,
+    /// How many times the memory was reinforced / accessed — the *recurrence*
+    /// signal the consolidation gate scores (EXP-021). Absent is treated as 0.
+    pub reinforcement: Option<u32>,
+    /// `true` if the fact changes over time (current branch, today's deploy
+    /// state). Volatile memories never graduate into frozen weights — they stay
+    /// in the store. Absent is treated as stable.
+    pub volatile: Option<bool>,
+    /// Explicit verifiability override for the consolidation gate. Absent lets
+    /// the gate derive it (an `opinion` is treated as unverifiable unless its
+    /// confidence clears the provenance tier; everything else is verifiable).
+    pub verifiable: Option<bool>,
     /// Stable id for the task; synthesized from the skill + index when absent.
     pub id: Option<String>,
 }
@@ -80,6 +91,12 @@ impl MemoryRecord {
             marker: s("marker"),
             forbid,
             confidence: v.get("confidence").and_then(Value::as_f64).map(|x| x as f32),
+            reinforcement: v
+                .get("reinforcement")
+                .and_then(Value::as_u64)
+                .map(|x| x as u32),
+            volatile: v.get("volatile").and_then(Value::as_bool),
+            verifiable: v.get("verifiable").and_then(Value::as_bool),
             id: s("id"),
         }
     }
@@ -213,6 +230,7 @@ mod tests {
             forbid: vec!["npm".into()],
             confidence,
             id: None,
+            ..Default::default()
         }
     }
 

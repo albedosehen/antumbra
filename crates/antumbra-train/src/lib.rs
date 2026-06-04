@@ -35,7 +35,9 @@ pub mod models;
 
 pub use compose::compose_adapters;
 pub use config::{RaftConfig, TrainDtype};
-pub use consolidate::{interleave_replay, replay_from_tasks};
+pub use consolidate::{
+    interleave_replay, replay_from_tasks, score_memory, ConsolidationPolicy, Verdict,
+};
 pub use corpus::JsonCorpus;
 pub use eval::{eval_pass_rate, EvalOutcome, TaskResult};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};

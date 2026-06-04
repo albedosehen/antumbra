@@ -600,3 +600,55 @@ by hand (`teach`), or if seeds silently leak unverified completions into the wei
 **Reproduce.** `memory-import --source corpora/memory-export-example.json --train` (build `--features models`):
 expect 3 captures across 2 skills (`package-manager`, `deno-three-imports`) + 1 seed, written to
 `corpora/_imported.json`, then the package-manager correction internalized and routed to its specialist.
+
+---
+
+## EXP-021 — consolidation: graduate trusted memories into the population (with replay)
+
+**Claim.** The honest version of "Kushtaka made obsolete" is *not* deleting the store — it is **consolidation**.
+Take the hippocampus/neocortex analogy literally and it prescribes the engineering: the store is the hippocampus
+(fast, editable, episodic), the expert population is the neocortex (slow, distributed, reflexive, permanent), and
+the capture path (EXP-020) is consolidation during sleep. Memories flow store→weights on consolidation, state
+flows weights→store on graduation, and corrections flow store→weights→retirement on contradiction. The store and
+the population become one circulatory system; the store is metabolized, not removed.
+
+**The gate (`consolidate::score_memory`).** A memory graduates only when it clears three signals, else it stays in
+the store (the volatile / episodic / under-reinforced long tail): **recurrence** (reinforced enough — a
+maximally-confident memory needs no repeats), **stability** (not a fact that changes over time), and
+**verifiability** (a behavior we can check internalized). Opinions carry no executable check, so they graduate
+only on the weaker *provenance tier* (a high confidence stands in for verification) — the honest boundary that
+keeps unverifiable preferences from being trusted as cheaply as checkable facts.
+
+**Replay — the load-bearing soundness piece (`consolidate::interleave_replay`).** Consolidating many memories into
+one shared base risks clobbering skills already learned (catastrophic interference). The complementary-learning-
+systems answer is not to train new traces alone but to **interleave** them with rehearsal of already-consolidated
+skills, so the gradient mixes old and new. `capture_corrections` threads a rehearsal buffer (drawn round-robin,
+deterministic, no RNG) through every SFT round; `RaftConfig.replay_ratio` sets the dose (`0.0` = off, preserving
+plain capture). This is the principled, literature-backed answer to the EXP-010 forgetting risk — not a hack.
+
+**Contradiction → retirement — forgetting from frozen weights (`retire`).** A LoRA cannot be edited per-fact, but
+the *population* can forget: `retire` supersedes an expert by name and refreshes the router. Wiring a store's
+`report_contradiction` against a *consolidated* memory to `retire` undoes a graduation at the population scale
+(ADR-0004 retire-on-correction). That closes the one limit that looked fundamental — you *can* unlearn, by
+retiring the whole expert and (optionally) re-consolidating from the corrected memory.
+
+**Write-back / demotion.** `consolidate` appends graduates to an accumulating consolidated log
+(`corpora/_consolidated.json`, gitignored) which is both the demotion record and the replay source for the next
+run — so each run rehearses everything graduated before it, and within a run each freshly-consolidated skill is
+appended to the buffer while the remaining skills train.
+
+**Status.** The gate (recurrence/stability/verifiability + provenance tier), the replay interleave, and
+`replay_from_tasks` are unit-proven on CPU (9 consolidation tests; train suite 27 → 37). The `consolidate` and
+`retire` CLI handlers live in `antumbra-cli/src/ops.rs` (kept out of the already-large `main.rs`); both are
+models-gated. GPU end-to-end (graduates internalize at-or-above hand-taught reliability *without* replay
+degrading prior skills) is the open validation, composing the EXP-011/019/020 machinery.
+
+**Kill criterion.** If replay does not measurably reduce interference vs. replay-off consolidation at scale, or if
+graduating a batch degrades a previously-consolidated skill below its solo fitness, the consolidation story is
+unsound. *(Gate + replay mechanics cleared by unit tests; the interference-reduction claim is the GPU open item —
+EXP-010 only toy-probed forgetting, so this is the regime that needs a load-bearing-adapter measurement.)*
+
+**Reproduce.** `consolidate --source corpora/memory-export-example.json --train` (build `--features models`):
+the deno/three corrections graduate (reinforced, verifiable), a low-confidence/volatile memory stays in the
+store, graduates train per-skill with `--replay-ratio 0.5` rehearsing the consolidated log, and the log grows.
+Then `retire --expert expert:consolidated-package-manager` to exercise the contradiction→forget path.

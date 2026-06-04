@@ -15,6 +15,8 @@ use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 
+mod ops;
+
 #[cfg(feature = "models")]
 use antumbra_boundary::{discover_boundary, find_scope_over_contexts, finding_to_boundary};
 #[cfg(feature = "models")]
@@ -295,6 +297,52 @@ enum Command {
         max_new_tokens: usize,
         #[arg(long, default_value_t = 1e-3)]
         lr: f64,
+    },
+    /// Consolidation (EXP-021): score a normalized memory export against the
+    /// graduation gate (recurrence x verifiability x stability), graduate the
+    /// survivors into per-skill specialists rehearsing already-consolidated
+    /// skills (replay, the catastrophic-interference fix), and append them to
+    /// the consolidated log. The store keeps everything that does not graduate
+    /// (volatile / episodic / under-reinforced). Needs --features models.
+    Consolidate {
+        /// JSON array of normalized memories (see `memory::MemoryRecord`).
+        #[arg(long)]
+        source: String,
+        /// Accumulating consolidated corpus: the replay source and demotion log.
+        #[arg(long, default_value = "corpora/_consolidated.json")]
+        log: String,
+        /// Reinforcement count at/above which recurrence is satisfied.
+        #[arg(long, default_value_t = 2)]
+        min_recurrence: u32,
+        /// Confidence floor a graduating memory must clear.
+        #[arg(long, default_value_t = 0.5)]
+        min_confidence: f32,
+        /// Internalize the graduates now (else dry-run scoring + log only).
+        #[arg(long, default_value_t = false)]
+        train: bool,
+        /// Rehearsal examples per winner interleaved into capture SFT.
+        #[arg(long, default_value_t = 0.5)]
+        replay_ratio: f64,
+        #[arg(long, default_value = "expert:consolidated")]
+        run: String,
+        #[arg(long, default_value_t = 40)]
+        rounds: usize,
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        #[arg(long, default_value_t = 32)]
+        max_new_tokens: usize,
+        #[arg(long, default_value_t = 1e-3)]
+        lr: f64,
+    },
+    /// Retire an expert by name and refresh the router: population-level
+    /// forgetting. Wire a store's contradiction report against a consolidated
+    /// memory to this to undo a graduation (a frozen LoRA cannot be edited
+    /// per-fact; retiring the whole expert is how you forget). Needs --features
+    /// models (the real embedder for the router refresh).
+    Retire {
+        /// The expert name to supersede.
+        #[arg(long)]
+        expert: String,
     },
 }
 
@@ -1465,6 +1513,40 @@ async fn main() -> anyhow::Result<()> {
                      store into the capture corpus and, with --train, internalizes it)"
                 );
             }
+        }
+        Command::Consolidate {
+            source,
+            log,
+            min_recurrence,
+            min_confidence,
+            train,
+            replay_ratio,
+            run,
+            rounds,
+            samples,
+            max_new_tokens,
+            lr,
+        } => {
+            ops::consolidate(
+                &cli.url,
+                ops::ConsolidateArgs {
+                    source,
+                    log,
+                    min_recurrence,
+                    min_confidence,
+                    train,
+                    replay_ratio,
+                    run,
+                    rounds,
+                    samples,
+                    max_new_tokens,
+                    lr,
+                },
+            )
+            .await?;
+        }
+        Command::Retire { expert } => {
+            ops::retire(&cli.url, &expert).await?;
         }
     }
     Ok(())

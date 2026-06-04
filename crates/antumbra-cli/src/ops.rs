@@ -1,0 +1,244 @@
+//! Heavier command handlers kept out of `main.rs` (which is already large):
+//! `consolidate` (EXP-021, graduate trusted memories into the population with
+//! replay) and `retire` (population-level forgetting, the contradiction hook).
+//!
+//! These reuse `main.rs`'s `connect` / `make_embedder` / `refresh_router`
+//! helpers via `crate::` (a child module sees its parent's private items), so
+//! no infrastructure is duplicated.
+
+#[cfg(feature = "models")]
+use chrono::Utc;
+
+#[cfg(feature = "models")]
+use antumbra_core::{Expert, ExpertId, Generation, RunId};
+#[cfg(feature = "models")]
+use antumbra_store::repo::expert;
+#[cfg(feature = "models")]
+use antumbra_store::EMBED_DIM;
+#[cfg(feature = "models")]
+use antumbra_train::consolidate::{replay_from_tasks, score_memory, ConsolidationPolicy};
+#[cfg(feature = "models")]
+use antumbra_train::memory::{parse_export, to_task, ImportPolicy, MemoryRecord};
+#[cfg(feature = "models")]
+use antumbra_train::{
+    capture_corrections, CandleModelLoader, Corpus, CorpusTask, JsonCorpus, ModelLoader, RaftConfig,
+};
+
+#[cfg(feature = "models")]
+use crate::refresh_router;
+
+/// Serialize capture tasks back to the `{id, prompt, verify, completion, skill}`
+/// corpus shape (captures carry a completion; seeds do not).
+#[cfg(feature = "models")]
+fn corpus_to_json(tasks: &[CorpusTask]) -> Vec<serde_json::Value> {
+    tasks
+        .iter()
+        .map(|t| {
+            let mut o = serde_json::Map::new();
+            o.insert("id".into(), serde_json::json!(t.id));
+            o.insert("prompt".into(), serde_json::json!(t.prompt));
+            o.insert("verify".into(), t.verify.clone());
+            if let Some(c) = &t.completion {
+                o.insert("completion".into(), serde_json::json!(c));
+            }
+            o.insert("skill".into(), serde_json::json!(t.skill()));
+            serde_json::Value::Object(o)
+        })
+        .collect()
+}
+
+/// Parameters for [`consolidate`]; mirrors the clap variant so `main.rs`'s arm
+/// stays a one-line dispatch. Fields are read only in the `models` build; the
+/// stub ignores them.
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
+pub struct ConsolidateArgs {
+    pub source: String,
+    pub log: String,
+    pub min_recurrence: u32,
+    pub min_confidence: f32,
+    pub train: bool,
+    pub replay_ratio: f64,
+    pub run: String,
+    pub rounds: usize,
+    pub samples: usize,
+    pub max_new_tokens: usize,
+    pub lr: f64,
+}
+
+/// Score a memory export against the consolidation gate, graduate the survivors
+/// into per-skill specialists (rehearsing already-consolidated skills via the
+/// replay buffer), and append them to the consolidated log (the demotion record
+/// and future replay source). The store stays the home of everything that does
+/// not graduate.
+#[cfg(feature = "models")]
+pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
+    let bytes = std::fs::read(&a.source)?;
+    let records = parse_export(&bytes)?;
+    let policy = ConsolidationPolicy {
+        min_recurrence: a.min_recurrence,
+        min_confidence: a.min_confidence,
+        ..ConsolidationPolicy::default()
+    };
+
+    // Score every memory; a graduate carries its original index (for to_task)
+    // and ranking score so a budgeted run could take the strongest first.
+    let mut graduates: Vec<(usize, &MemoryRecord, f32)> = Vec::new();
+    let mut stays = 0usize;
+    for (i, r) in records.iter().enumerate() {
+        let v = score_memory(r, &policy);
+        let id = r.id.clone().unwrap_or_else(|| format!("mem-{i}"));
+        println!("  {} {id}: {}", if v.graduate { "[grad]" } else { "[stay]" }, v.reason);
+        if v.graduate {
+            graduates.push((i, r, v.score));
+        } else {
+            stays += 1;
+        }
+    }
+    graduates.sort_by(|x, y| y.2.partial_cmp(&x.2).unwrap_or(std::cmp::Ordering::Equal));
+    println!(
+        "scored {} memories: {} graduate, {stays} stay in store",
+        records.len(),
+        graduates.len()
+    );
+
+    // Graduates are always trusted captures (they cleared the gate).
+    let conv = ImportPolicy { capture_threshold: 0.0 };
+    let new_tasks: Vec<CorpusTask> = graduates
+        .iter()
+        .map(|(i, r, _)| to_task(r, *i, &conv).task)
+        .collect();
+
+    // The prior consolidated corpus is the rehearsal source.
+    let prior: Vec<CorpusTask> = if std::path::Path::new(&a.log).exists() {
+        JsonCorpus::from_file(&a.log)?.tasks(&[])
+    } else {
+        Vec::new()
+    };
+    let mut replay = replay_from_tasks(&prior);
+    println!("replay buffer: {} prior consolidated example(s)", replay.len());
+
+    if a.train && !new_tasks.is_empty() {
+        let store = crate::connect(url).await?;
+        let embedder = crate::make_embedder()?;
+        let cfg = RaftConfig {
+            samples_per_task: a.samples,
+            rounds: a.rounds,
+            max_new_tokens: a.max_new_tokens,
+            learning_rate: a.lr,
+            replay_ratio: a.replay_ratio,
+            ..RaftConfig::default()
+        };
+        let loader = CandleModelLoader::new(cfg.clone());
+        let verifier = antumbra_critic::CommandVerifier;
+
+        // One specialist per skill, each rehearsing already-consolidated skills
+        // (and the ones trained earlier this run, appended to `replay` below).
+        let mut groups: Vec<(String, Vec<CorpusTask>)> = Vec::new();
+        for t in &new_tasks {
+            let s = t.skill();
+            match groups.iter_mut().find(|(k, _)| *k == s) {
+                Some((_, v)) => v.push(t.clone()),
+                None => groups.push((s, vec![t.clone()])),
+            }
+        }
+        for (skill, tasks) in groups {
+            let name = format!("{}-{skill}", a.run);
+            let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
+            let out = capture_corrections(
+                &mut model,
+                &verifier,
+                &tasks,
+                &RunId::new(name.clone()),
+                &cfg,
+                &replay,
+            )
+            .await?;
+            let solved = if out.capability_exemplars.is_empty() {
+                tasks.iter().map(|t| t.prompt.clone()).collect()
+            } else {
+                out.capability_exemplars.clone()
+            };
+            let mut acc = vec![0.0f32; EMBED_DIM];
+            for text in &solved {
+                for (x, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
+                    *x += b;
+                }
+            }
+            let nproto = solved.len().max(1) as f32;
+            let now = Utc::now();
+            let e = Expert {
+                id: ExpertId::new(format!("expert:{name}")),
+                name: name.clone(),
+                base_model: cfg.base_model.clone(),
+                artifact_uri: out.adapter_uri,
+                capability_card: serde_json::json!({ "exemplars": solved, "consolidated": true }),
+                capability_vec: Some(acc.iter().map(|v| v / nproto).collect()),
+                fitness: out.final_fitness,
+                frozen_at: Some(now),
+                generation: Generation::ZERO,
+                created_at: now,
+            };
+            expert::delete(&store, &e.id).await?; // supersede on re-run
+            expert::insert(&store, &e).await?;
+            println!(
+                "  consolidated '{skill}' -> {name} (internalized {:.2})",
+                out.final_fitness
+            );
+            // Rehearse this freshly-consolidated skill while training the rest.
+            replay.extend(replay_from_tasks(&tasks));
+        }
+        if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+            println!("router refreshed over {} experts", r.experts.len());
+        }
+    } else if !a.train {
+        println!("dry run: re-invoke with --train to internalize the graduates");
+    }
+
+    // Write-back: append graduates to the consolidated log, deduped by id.
+    if !new_tasks.is_empty() {
+        let mut merged = prior;
+        for t in new_tasks {
+            if !merged.iter().any(|m| m.id == t.id) {
+                merged.push(t);
+            }
+        }
+        let arr = corpus_to_json(&merged);
+        let n = arr.len();
+        std::fs::write(&a.log, serde_json::to_vec_pretty(&arr)?)?;
+        println!("consolidated log -> {} ({n} entries)", a.log);
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "models"))]
+pub async fn consolidate(_url: &str, _a: ConsolidateArgs) -> anyhow::Result<()> {
+    anyhow::bail!("`consolidate` requires building with --features models (candle + a GPU)")
+}
+
+/// Supersede an expert by name and refresh the router — population-level
+/// forgetting. Wire a store's `report_contradiction` against a *consolidated*
+/// memory to this: a contradiction retires the expert that memory produced, so
+/// the gate stops routing to it (ADR-0004 retire-on-correction at the
+/// population scale, since a frozen LoRA cannot be edited per-fact).
+#[cfg(feature = "models")]
+pub async fn retire(url: &str, expert_name: &str) -> anyhow::Result<()> {
+    let store = crate::connect(url).await?;
+    let target = expert::list(&store)
+        .await?
+        .into_iter()
+        .find(|e| e.name == expert_name)
+        .ok_or_else(|| anyhow::anyhow!("expert '{expert_name}' not found"))?;
+    expert::delete(&store, &target.id).await?;
+    println!("retired expert {} ({})", target.name, target.id);
+    let embedder = crate::make_embedder()?;
+    match refresh_router(&store, embedder.as_ref(), 400).await? {
+        Some(r) => println!("router refreshed over {} experts", r.experts.len()),
+        None => println!("router cleared (fewer than 2 experts remain)"),
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "models"))]
+pub async fn retire(_url: &str, _expert_name: &str) -> anyhow::Result<()> {
+    anyhow::bail!("`retire` requires building with --features models (real embedder for the router)")
+}
