@@ -17,6 +17,9 @@ pub struct CorpusTask {
     pub id: String,
     pub prompt: String,
     pub verify: serde_json::Value,
+    /// A supplied, verifier-checked correction to internalize (the capture
+    /// intake, ADR-0004/0009). `None` for RAFT tasks, which discover their own.
+    pub completion: Option<String>,
 }
 
 impl CorpusTask {
@@ -25,11 +28,17 @@ impl CorpusTask {
             id: id.into(),
             prompt: prompt.into(),
             verify: serde_json::Value::Null,
+            completion: None,
         }
     }
 
     pub fn with_verify(mut self, verify: serde_json::Value) -> Self {
         self.verify = verify;
+        self
+    }
+
+    pub fn with_completion(mut self, completion: impl Into<String>) -> Self {
+        self.completion = Some(completion.into());
         self
     }
 }

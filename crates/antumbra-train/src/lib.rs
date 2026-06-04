@@ -23,6 +23,7 @@ pub mod lora;
 pub mod model;
 pub mod objective;
 pub mod raft;
+pub mod teach;
 pub mod trainer;
 
 #[cfg(feature = "models")]
@@ -34,7 +35,8 @@ pub use eval::{eval_pass_rate, EvalOutcome};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;
-pub use trainer::{GrpoTrainer, RaftTrainer};
+pub use teach::capture_corrections;
+pub use trainer::{CaptureTrainer, GrpoTrainer, RaftTrainer};
 
 /// Placeholder for the candle model until MT-1 lands; implements [`CausalLm`]
 /// so the loader's associated type is complete, but every method reports

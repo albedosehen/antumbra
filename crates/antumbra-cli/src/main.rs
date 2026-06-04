@@ -24,7 +24,9 @@ use antumbra_core::{BoundaryId, Grain};
 #[cfg(feature = "models")]
 use antumbra_serve::{CandleServe, GenerateVerifyProbe};
 #[cfg(feature = "models")]
-use antumbra_train::{CandleModelLoader, GrpoTrainer, JsonCorpus, RaftConfig, RaftTrainer};
+use antumbra_train::{
+    CandleModelLoader, CaptureTrainer, GrpoTrainer, JsonCorpus, RaftConfig, RaftTrainer,
+};
 
 #[derive(Parser)]
 #[command(name = "antumbra", about = "Antumbra operator CLI", version)]
@@ -146,9 +148,10 @@ enum Command {
         /// Path to the JSON corpus of verifiable tasks ({id,prompt,verify}).
         #[arg(long)]
         corpus: String,
-        /// Saved adapter to load over the base before scoring.
+        /// Saved adapter to load over the base before scoring. Omit to score
+        /// the bare base — the prior floor (EXP-011's load-bearing check).
         #[arg(long)]
-        adapter: String,
+        adapter: Option<String>,
         #[arg(long, default_value = "Qwen/Qwen2.5-Coder-1.5B")]
         base_model: String,
         /// Completions sampled per task (the pass-rate denominator is tasks x K).
@@ -156,6 +159,29 @@ enum Command {
         samples: usize,
         #[arg(long, default_value_t = 64)]
         max_new_tokens: usize,
+    },
+    /// Capture a supplied, verifier-checked correction into a frozen expert (the
+    /// other intake path beside `train`, ADR-0004/0009). The corpus carries a
+    /// `completion` per task. Needs --features models + a GPU + python.
+    Teach {
+        /// JSON corpus of {id, prompt, completion, verify} corrections.
+        #[arg(long)]
+        corpus: String,
+        #[arg(long, default_value_t = 1)]
+        generations: u32,
+        #[arg(long, default_value = "run:teach")]
+        run: String,
+        /// SFT epochs over the verified corrections.
+        #[arg(long, default_value_t = 3)]
+        rounds: usize,
+        /// Completions sampled to measure whether the correction internalized.
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        #[arg(long, default_value_t = 32)]
+        max_new_tokens: usize,
+        /// Warm-start from this adapter (accumulate onto an existing expert).
+        #[arg(long)]
+        parent: Option<String>,
     },
 }
 
@@ -579,7 +605,7 @@ async fn main() -> anyhow::Result<()> {
                 let tasks = corpus_doc.tasks(&[]);
                 let loader = CandleModelLoader::new(cfg);
                 let mut model =
-                    ModelLoader::load(&loader, &base_model, Some(adapter.as_str())).await?;
+                    ModelLoader::load(&loader, &base_model, adapter.as_deref()).await?;
                 let verifier = antumbra_critic::CommandVerifier;
                 let out = eval_pass_rate(
                     &mut model,
@@ -590,11 +616,11 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
                 println!(
-                    "pass-rate {:.2} ({}/{}) — adapter {} on {} ({} tasks)",
+                    "pass-rate {:.2} ({}/{}) — {} on {} ({} tasks)",
                     out.pass_rate,
                     out.passed,
                     out.total,
-                    adapter,
+                    adapter.as_deref().unwrap_or("(base only)"),
                     corpus,
                     tasks.len()
                 );
@@ -603,6 +629,51 @@ async fn main() -> anyhow::Result<()> {
             {
                 let _ = (&corpus, &adapter, &base_model, samples, max_new_tokens);
                 anyhow::bail!("`eval` requires building with --features models (candle + a GPU)");
+            }
+        }
+        Command::Teach {
+            corpus,
+            generations,
+            run,
+            rounds,
+            samples,
+            max_new_tokens,
+            parent,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                let store = connect(&cli.url).await?;
+                let cfg = RaftConfig {
+                    samples_per_task: samples,
+                    rounds,
+                    max_new_tokens,
+                    parent_adapter: parent.clone(),
+                    ..RaftConfig::default()
+                };
+                let corpus = JsonCorpus::from_file(&corpus)?;
+                let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+                let loader = CandleModelLoader::new(cfg.clone());
+                let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
+                let embedder = make_embedder()?;
+                let loop_cfg = LoopConfig {
+                    graduate_threshold: 0.3,
+                    base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                    max_steps: 8,
+                };
+                let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
+                let reports = lp.run_until(&RunId::new(run), generations).await?;
+                for r in &reports {
+                    println!(
+                        "gen {:<3} expert {:<16} internalized={:.2} graduated={}",
+                        r.generation.0, r.shadow, r.fitness, r.graduated
+                    );
+                }
+                println!("population: {} experts", expert::list(&store).await?.len());
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (&corpus, generations, &run, rounds, samples, max_new_tokens, &parent);
+                anyhow::bail!("`teach` requires building with --features models (candle + a GPU)");
             }
         }
     }

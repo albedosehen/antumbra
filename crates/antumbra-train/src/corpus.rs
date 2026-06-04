@@ -36,6 +36,10 @@ impl JsonCorpus {
                     .unwrap_or_default()
                     .to_string(),
                 verify: t.get("verify").cloned().unwrap_or(serde_json::Value::Null),
+                completion: t
+                    .get("completion")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             })
             .collect();
         Ok(Self { tasks })

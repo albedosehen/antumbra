@@ -16,6 +16,7 @@ use crate::config::RaftConfig;
 use crate::grpo::{grpo_train, GrpoModelLoader};
 use crate::model::{Corpus, ModelLoader};
 use crate::raft::raft_train;
+use crate::teach::capture_corrections;
 
 pub struct RaftTrainer<L: ModelLoader, C: Corpus> {
     config: RaftConfig,
@@ -85,6 +86,47 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
         let tasks = self.corpus.tasks(&req.corpus_task_ids);
         let run_id = RunId::new(req.shadow.as_str());
         grpo_train(
+            &mut model,
+            self.verifier.as_ref(),
+            &tasks,
+            &run_id,
+            &self.config,
+        )
+        .await
+    }
+}
+
+/// The [`Trainer`] port realized as correction capture (ADR-0004/0009): same
+/// shape as [`RaftTrainer`], but it internalizes the corpus's supplied,
+/// verifier-checked corrections instead of discovering them by sampling.
+pub struct CaptureTrainer<L: ModelLoader, C: Corpus> {
+    config: RaftConfig,
+    loader: L,
+    corpus: C,
+    verifier: Arc<dyn Verifier>,
+}
+
+impl<L: ModelLoader, C: Corpus> CaptureTrainer<L, C> {
+    pub fn new(config: RaftConfig, loader: L, corpus: C, verifier: Arc<dyn Verifier>) -> Self {
+        Self {
+            config,
+            loader,
+            corpus,
+            verifier,
+        }
+    }
+}
+
+#[async_trait]
+impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
+    async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
+        let mut model = self
+            .loader
+            .load(&req.base_model, self.config.parent_adapter.as_deref())
+            .await?;
+        let tasks = self.corpus.tasks(&req.corpus_task_ids);
+        let run_id = RunId::new(req.shadow.as_str());
+        capture_corrections(
             &mut model,
             self.verifier.as_ref(),
             &tasks,
