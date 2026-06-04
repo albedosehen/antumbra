@@ -10,6 +10,7 @@ members = [
     "crates/antumbra-train",
     "crates/antumbra-serve",
     "crates/antumbra-cli",
+    "crates/antumbra-tui",
 ]
 
 [workspace.package]
@@ -27,6 +28,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# The TUI stack (ADR-0009 operator console): ratatui + its bundled crossterm,
+# tachyonfx for composable shader-like animation/transitions.
+ratatui = "0.30"
+tachyonfx = "0.25"
 # The user's code-first SurrealDB toolkit (surql-rs), published as `oneiriq-surql`.
 # Pure-Rust TLS so CI/Windows builds need no system OpenSSL.
 oneiriq-surql = { version = "0.2", default-features = false, features = ["client-rustls"] }
