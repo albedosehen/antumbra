@@ -484,9 +484,17 @@ human deciding when or whether to train. The closed loop (sample -> verify -> tr
 on the verifier alone.
 
 **Kill criterion.** If the pass-rate does not rise across generations, or the loop never halts, it is not
-self-improving. *(Cleared: 0.25 -> 1.00, auto-stopped at the target.)* Open: drive `evolve` from *serving*
-failures across a multi-skill stream (route -> serve -> verify -> train the gaps), and persist the converged
-expert into the population so it is routable; here it trains a single capability and reports the trajectory.
+self-improving. *(Cleared: 0.25 -> 1.00, auto-stopped at the target.)*
+
+**Full cycle (2026-06-04).** `evolve` now **persists** the converged capability as a routable expert
+(behavior-derived capability vector from the solved exemplars) and refreshes the gate — so self-improvement
+feeds the population. Evolving two skills into one store grew `adder` and `reverser` autonomously (each
+0.25 -> 1.00, converged at gen 1), and the gate then routed `add -> adder` (sim 0.870) and `reverse -> reverser`
+(sim 0.979) while "capital of France" escalated (sim 0.298 < floor 0.850). This surfaced a real bug: with one
+exemplar per expert the centroid *is* the exemplar, so std ~ 0 and the OOD floor collapsed to 1.0 (rejecting
+everything); fixed with a minimum floor margin (`mean - max(2*std, 0.15)`), a no-op for well-sampled populations
+(EXP-017's 0.532 floor is unchanged). Still open: drive `evolve` from *serving* failures across a mixed stream
+(route -> serve -> verify -> train only the gaps), rather than one corpus per skill.
 
 **Reproduce.** `evolve --corpus corpora/add-only.json --target 0.9 --max-gens 4 --rounds 2`.
 

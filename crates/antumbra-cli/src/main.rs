@@ -998,6 +998,8 @@ async fn main() -> anyhow::Result<()> {
             #[cfg(feature = "models")]
             {
                 use antumbra_train::{eval_pass_rate, raft_train, Corpus, ModelLoader};
+                let store = connect(&cli.url).await?;
+                let embedder = make_embedder()?;
                 let cfg = RaftConfig {
                     samples_per_task: samples,
                     rounds,
@@ -1008,6 +1010,8 @@ async fn main() -> anyhow::Result<()> {
                 let verifier = antumbra_critic::CommandVerifier;
                 let tasks = JsonCorpus::from_file(&corpus)?.tasks(&[]);
                 let mut parent: Option<String> = None;
+                let mut solved: Vec<String> = Vec::new();
+                let mut final_rate = 0.0f32;
                 for gen in 0..max_gens {
                     // Load the current capability (warm-started from the prior
                     // generation's adapter, or the bare base on gen 0).
@@ -1021,6 +1025,7 @@ async fn main() -> anyhow::Result<()> {
                         samples,
                     )
                     .await?;
+                    final_rate = ev.pass_rate;
                     println!(
                         "gen {gen}: pass-rate {:.2} ({}/{}) [{}]",
                         ev.pass_rate,
@@ -1041,6 +1046,45 @@ async fn main() -> anyhow::Result<()> {
                         out.final_fitness, out.adapter_uri
                     );
                     parent = Some(out.adapter_uri);
+                    solved = out.capability_exemplars;
+                    final_rate = out.final_fitness;
+                }
+
+                // Self-improvement feeds the population: persist the converged
+                // capability as a routable expert (behavior-derived capability
+                // vector), then refresh the gate so it can route to it.
+                if let Some(uri) = parent {
+                    let protos: Vec<String> = if solved.is_empty() {
+                        tasks.iter().map(|t| t.prompt.clone()).collect()
+                    } else {
+                        solved.clone()
+                    };
+                    let mut acc = vec![0.0f32; EMBED_DIM];
+                    for text in &protos {
+                        for (a, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
+                            *a += b;
+                        }
+                    }
+                    let n = protos.len().max(1) as f32;
+                    let centroid: Vec<f32> = acc.iter().map(|x| x / n).collect();
+                    let now = Utc::now();
+                    let expert = Expert {
+                        id: ExpertId::new(format!("expert:{run}")),
+                        name: run.clone(),
+                        base_model: cfg.base_model.clone(),
+                        artifact_uri: uri,
+                        capability_card: serde_json::json!({ "exemplars": solved }),
+                        capability_vec: Some(centroid),
+                        fitness: final_rate,
+                        frozen_at: Some(now),
+                        generation: Generation::ZERO,
+                        created_at: now,
+                    };
+                    expert::insert(&store, &expert).await?;
+                    println!("persisted expert {run} into the population (fitness {final_rate:.2})");
+                    if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+                        println!("router refreshed over {} experts", r.experts.len());
+                    }
                 }
             }
             #[cfg(not(feature = "models"))]

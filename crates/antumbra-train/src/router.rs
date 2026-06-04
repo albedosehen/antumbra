@@ -10,6 +10,9 @@ use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use antumbra_core::{AntumbraError, ExpertId, LearnedRouter, Result, RouterExpert};
 
 const PROJ_TEMP: f32 = 0.07;
+/// Minimum gap below the in-distribution mean for the OOD floor, so a
+/// low-variance population (few exemplars per expert) still gets a usable band.
+const FLOOR_MARGIN: f32 = 0.15;
 
 fn rce(e: candle_core::Error) -> AntumbraError {
     AntumbraError::other(format!("router: {e}"))
@@ -113,7 +116,11 @@ pub fn train_learned_router(
     let sims_v: Vec<f32> = sims.to_vec1().map_err(rce)?;
     let mean = sims_v.iter().sum::<f32>() / sims_v.len().max(1) as f32;
     let var = sims_v.iter().map(|s| (s - mean).powi(2)).sum::<f32>() / sims_v.len().max(1) as f32;
-    let floor = (mean - 2.0 * var.sqrt()).clamp(-1.0, 1.0);
+    // Subtract at least FLOOR_MARGIN: with few exemplars per expert the centroid
+    // is the exemplar, so std ~ 0 and `mean - 2*std` collapses to ~1.0 and
+    // rejects everything. The margin keeps a usable band in that regime; when
+    // the population is well-sampled, 2*std dominates and this is a no-op.
+    let floor = (mean - (2.0 * var.sqrt()).max(FLOOR_MARGIN)).clamp(-1.0, 1.0);
 
     Ok(LearnedRouter {
         weights,
