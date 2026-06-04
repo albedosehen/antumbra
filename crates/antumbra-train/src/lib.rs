@@ -13,6 +13,7 @@ use async_trait::async_trait;
 
 use antumbra_core::{AntumbraError, Result};
 
+pub mod compose;
 pub mod config;
 pub mod corpus;
 pub mod decode;
@@ -30,6 +31,7 @@ pub mod trainer;
 #[cfg(feature = "models")]
 pub mod models;
 
+pub use compose::compose_adapters;
 pub use config::{RaftConfig, TrainDtype};
 pub use corpus::JsonCorpus;
 pub use eval::{eval_pass_rate, EvalOutcome};

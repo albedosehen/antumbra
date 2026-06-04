@@ -199,6 +199,18 @@ enum Command {
         #[arg(long, default_value_t = 400)]
         epochs: usize,
     },
+    /// Compose several experts into one blended adapter and serve a task
+    /// through it (ADR-0009): the population as a capability multiplier. Needs
+    /// --features models + a GPU.
+    Compose {
+        /// The task to answer with the blended experts.
+        task: String,
+        /// Expert blend as `name:weight,...` (e.g. `bunexpert-g0:0.6,generaldeps-g0:0.4`).
+        #[arg(long)]
+        experts: String,
+        #[arg(long, default_value_t = 24)]
+        max_new_tokens: usize,
+    },
 }
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
@@ -801,6 +813,62 @@ async fn main() -> anyhow::Result<()> {
             {
                 let _ = epochs;
                 anyhow::bail!("`gate-train` requires building with --features models (real embedder)");
+            }
+        }
+        Command::Compose {
+            task,
+            experts,
+            max_new_tokens,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                let store = connect(&cli.url).await?;
+                let population = expert::list(&store).await?;
+                // Resolve "name:weight,..." to adapter paths + weights.
+                let mut specs: Vec<(String, f32)> = Vec::new();
+                let mut base_model = String::new();
+                for part in experts.split(',') {
+                    let (name, w) = part
+                        .split_once(':')
+                        .ok_or_else(|| anyhow::anyhow!("bad spec `{part}` (want name:weight)"))?;
+                    let e = population
+                        .iter()
+                        .find(|e| e.name == name.trim())
+                        .ok_or_else(|| anyhow::anyhow!("expert `{}` not found", name.trim()))?;
+                    base_model = e.base_model.clone();
+                    specs.push((e.artifact_uri.clone(), w.trim().parse()?));
+                }
+                let merged = "adapters/_composed.safetensors";
+                let rank = antumbra_train::compose_adapters(&specs, merged)?;
+                println!(
+                    "composed {} experts -> rank {} blended adapter",
+                    specs.len(),
+                    rank
+                );
+                // Keep the effective LoRA scale at the experts' value (alpha/rank)
+                // even though the merged rank is larger.
+                let base_scale = RaftConfig::default().lora_scale();
+                let cfg = RaftConfig {
+                    lora_rank: rank,
+                    lora_alpha: base_scale * rank as f64,
+                    max_new_tokens,
+                    ..RaftConfig::default()
+                };
+                let serve = CandleServe::new(base_model, Some(merged.to_string()), cfg);
+                let out = serve
+                    .act(ActRequest {
+                        task_id: "compose".into(),
+                        prompt: task.clone(),
+                        adapters: vec![],
+                    })
+                    .await?;
+                println!("---");
+                println!("{}", out.final_output);
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (&task, &experts, max_new_tokens);
+                anyhow::bail!("`compose` requires building with --features models (candle + a GPU)");
             }
         }
     }

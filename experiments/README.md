@@ -25,6 +25,7 @@ experiments are plain `cargo test`.
 | [EXP-011](#exp-011--durable-correction-against-a-strong-prior) | A one-time correction is captured + routed across a context reset | 1,2 / 0004,0006,0009 | **passed** (GPU) |
 | [EXP-012](#exp-012--the-self-improvement-lifecycle-end-to-end) | Fail -> bound -> capture -> retire -> route to the fix, in one loop | keystone / 0004,0005,0006,0009 | **passed** (GPU) |
 | [EXP-013](#exp-013--the-learned-router) | A learned router separates specialists from generalists | 2 / 0005,0009 | **passed** (GPU) |
+| [EXP-014](#exp-014--adapter-composition) | Experts compose into one served adapter; behavior is dialable | 3 / 0006,0009 | **passed** (GPU) |
 
 ---
 
@@ -344,6 +345,34 @@ confidence is sharp), and folding boundary inhibition into the learned path.
 
 **Reproduce.** `teach` generaldeps/bunexpert/yarnexpert, `route` acme-api (heuristic escalate), `gate-train
 --epochs 500`, `route` acme-api/webshop/payments (each p=1.000).
+
+## EXP-014 — adapter composition
+
+**Claim.** A population is a *capability multiplier*: several frozen experts can be blended into one served
+adapter, with the mix controllable (and ultimately driven by the learned router's weights). Because every expert
+shares the base rank and scale, the weighted delta-sum is **exact** as a rank-concatenated adapter — no
+weight-space interference, no model surgery (ADR-0009).
+
+**Method.** `compose_adapters` stacks each expert's `sqrt(w_i)`-scaled `A`/`B` factors (A along its rank rows, B
+along its rank columns) into one rank-`(sum r_i)` adapter; the existing single-adapter forward serves it (with
+`alpha = scale * merged_rank` so the effective LoRA scale is unchanged). Validated by dialing the bun-weight from
+0 to 1 on an `acme-api` task (held-out package `react`), composing `generaldeps -> npm` with `bunexpert -> bun`.
+
+**Result.** Endpoints reproduce the individual experts exactly (`generaldeps:1.0 -> npm install react`,
+`bunexpert:1.0 -> bun add react`), proving the rank-concatenated merge serves correctly. The blend is
+**controllable**: `npm` holds through 0.5 bun-weight and flips to `bun` by 0.7 — a sensible crossover, since bun
+must overcome the base's npm prior. So composition is real, exact at the ends, and a continuous behavior dial —
+owned control a single model does not expose. A unit test confirms the concatenation realizes the exact weighted
+delta-sum.
+
+**Kill criterion.** If a composed adapter does not reproduce its experts at the endpoints, or serving the merged
+rank fails, composition is broken. *(Cleared.)* Open frontier — the *complementary* multiplier: blending experts
+with **non-conflicting** competences (e.g. a project-convention expert + a code-style expert) so the output does
+something *neither alone was trained for*. That is the real capability gain over a flagship and the next
+experiment; conflicting behaviors (npm vs bun) can only be dialed between, not combined.
+
+**Reproduce.** `teach` bunexpert + generaldeps, then `compose "<acme-api task>" --experts
+"generaldeps-g0:W,bunexpert-g0:1-W"` for W in {1.0, 0.7, 0.5, 0.3, 0.0}.
 
 ---
 
