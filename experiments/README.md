@@ -30,6 +30,7 @@ experiments are plain `cargo test`.
 | [EXP-016](#exp-016--the-closed-serving-loop-route--auto-compose) | One `ask` routes the project expert and auto-composes standing conventions | 2,3 / 0005,0006,0009 | **passed** (GPU) |
 | [EXP-017](#exp-017--calibrated-router-out-of-distribution-abstention) | The router abstains on out-of-distribution tasks instead of overconfidently routing | 2 / 0005,0009 | **passed** (GPU) |
 | [EXP-018](#exp-018--autonomous-self-improvement-eval-gated) | The system trains itself to a quality bar and stops, no manual driving | 1 / 0002,0010 | **passed** (GPU) |
+| [EXP-019](#exp-019--autonomous-population-growth-serving-coverage) | The system grows its own population from a task stream until it covers it | 1,2,3 / 0001,0005,0006 | **passed** (GPU) |
 
 ---
 
@@ -503,6 +504,33 @@ them. Still open: the population-level version (route each task to its expert, s
 specialist only for the uncovered cluster) rather than improving one evolving capability.
 
 **Reproduce.** `evolve --corpus corpora/add-only.json --target 0.9 --max-gens 4 --rounds 2`.
+
+## EXP-019 — autonomous population growth (serving-coverage)
+
+**Claim.** The substrate grows its *own population* from a task stream: route each task across the population,
+**serve and verify** it, and grow a new specialist for the uncovered/failed cluster — repeating until coverage
+meets target. Additive (existing experts are kept). The key soundness point: coverage is *serving* coverage, not
+the gate's route-claim. An expert can route-claim a task it cannot actually do (a `reverse` expert claiming
+`upper` by string-op similarity; the learned OOD floor catches *domain*-OOD but not *skill*-OOD), so a task only
+counts as covered when the routed expert **serves a verified-correct answer**.
+
+**Method.** `populate --corpus mixed-skills.json` (add + reverse + upper) from an empty population, serving
+coverage, target 0.9. Each round: route every task (learned router / heuristic gate); escalated tasks are gaps;
+routed tasks are gaps only if the routed expert fails to serve them (`eval_pass_rate` per expert on its routed
+tasks); grow one specialist (RAFT) on the gap cluster, persist it (behavior-derived capability vector), refresh
+the gate.
+
+**Result.** `round 0: coverage 0.00 (0 experts, 3 gaps) -> grew grown-e0 (fitness 0.92) -> round 1: coverage 1.00
+(1 expert, 0 gaps) -> covered`. The system went from empty to full coverage on the verifier alone — round 1
+*served and verified* that the grown specialist actually passes all three tasks, not merely routes to them.
+
+**Kill criterion.** If coverage does not rise as specialists are grown, or the loop never converges, population
+growth is not autonomous. *(Cleared: 0.00 -> 1.00.)* Honest scope: it grows one multi-skill expert per uncovered
+*cluster* (clustering gaps into per-skill specialists is future); growth-from-empty is the clean demonstration
+because base-solvable toy tasks rarely leave serving-gaps in an *existing* population (the base solves them from
+the prompt), and gaps that need a *correction* (base actively wrong) want capture, not RAFT discovery (EXP-011).
+
+**Reproduce.** `populate --corpus corpora/mixed-skills.json --target-coverage 0.9 --max-experts 3`.
 
 ---
 

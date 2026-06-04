@@ -242,6 +242,29 @@ enum Command {
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
     },
+    /// Autonomous population growth: route each task across the population, and
+    /// grow a NEW specialist for the cluster the gate cannot cover, until
+    /// coverage meets target or the expert budget runs out. Additive — existing
+    /// experts are kept. Needs --features models + a GPU.
+    Populate {
+        /// JSON corpus of verifiable tasks ({id,prompt,verify}).
+        #[arg(long)]
+        corpus: String,
+        #[arg(long, default_value = "grown")]
+        run: String,
+        /// Stop once this fraction of tasks is covered by the population.
+        #[arg(long, default_value_t = 0.9)]
+        target_coverage: f32,
+        /// How many new specialists to grow at most.
+        #[arg(long, default_value_t = 3)]
+        max_experts: usize,
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        #[arg(long, default_value_t = 3)]
+        rounds: usize,
+        #[arg(long, default_value_t = 32)]
+        max_new_tokens: usize,
+    },
 }
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
@@ -1099,6 +1122,168 @@ async fn main() -> anyhow::Result<()> {
             {
                 let _ = (&corpus, &run, target, max_gens, samples, rounds, max_new_tokens);
                 anyhow::bail!("`evolve` requires building with --features models (candle + a GPU)");
+            }
+        }
+        Command::Populate {
+            corpus,
+            run,
+            target_coverage,
+            max_experts,
+            samples,
+            rounds,
+            max_new_tokens,
+        } => {
+            #[cfg(feature = "models")]
+            {
+                use antumbra_train::{eval_pass_rate, raft_train, Corpus, CorpusTask, ModelLoader};
+                let store = connect(&cli.url).await?;
+                let embedder = make_embedder()?;
+                let cfg = RaftConfig {
+                    samples_per_task: samples,
+                    rounds,
+                    max_new_tokens,
+                    ..RaftConfig::default()
+                };
+                let loader = CandleModelLoader::new(cfg.clone());
+                let verifier = antumbra_critic::CommandVerifier;
+                let tasks = JsonCorpus::from_file(&corpus)?.tasks(&[]);
+                let radius = GateConfig::default().inhibition_radius;
+
+                for round in 0..max_experts {
+                    let experts = expert::list(&store).await?;
+                    let boundaries = boundary::list(&store).await?;
+                    let router = antumbra_store::repo::router::load(&store).await?;
+
+                    // Route each task to an expert (or none, if the gate
+                    // escalates). Coverage is *serving* coverage: an expert only
+                    // covers a task if it actually serves a verified-correct
+                    // answer -- a route-claim it cannot fulfil is still a gap.
+                    let mut routed: Vec<(CorpusTask, Option<ExpertId>)> = Vec::new();
+                    for task in &tasks {
+                        let v = embedder.embed(&task.prompt).await?;
+                        let inhib = boundaries
+                            .iter()
+                            .map(|b| b.inhibition_for(&v, radius))
+                            .fold(0.0f32, f32::max);
+                        let pick = match &router {
+                            Some(r) if r.covers(&v) && inhib <= 0.5 => {
+                                r.route(&v).first().map(|(id, _)| id.clone())
+                            }
+                            Some(_) => None,
+                            None => {
+                                let gc = GateConfig {
+                                    coverage_threshold: 0.08,
+                                    ..GateConfig::default()
+                                };
+                                let d = gate_route(&v, &experts, &boundaries, 1, &gc);
+                                if d.escalate {
+                                    None
+                                } else {
+                                    d.chosen.first().cloned()
+                                }
+                            }
+                        };
+                        routed.push((task.clone(), pick));
+                    }
+                    // Escalated tasks are gaps; routed tasks are gaps only if the
+                    // routed expert fails to serve them.
+                    let mut gaps: Vec<CorpusTask> = routed
+                        .iter()
+                        .filter(|(_, id)| id.is_none())
+                        .map(|(t, _)| t.clone())
+                        .collect();
+                    for e in &experts {
+                        let etasks: Vec<CorpusTask> = routed
+                            .iter()
+                            .filter(|(_, id)| id.as_ref() == Some(&e.id))
+                            .map(|(t, _)| t.clone())
+                            .collect();
+                        if etasks.is_empty() {
+                            continue;
+                        }
+                        let mut m =
+                            ModelLoader::load(&loader, &e.base_model, Some(&e.artifact_uri)).await?;
+                        let ev = eval_pass_rate(
+                            &mut m,
+                            &verifier,
+                            &etasks,
+                            &RunId::new("populate:cov"),
+                            samples,
+                        )
+                        .await?;
+                        for (t, r) in etasks.iter().zip(&ev.per_task) {
+                            if r.rate() < 0.5 {
+                                gaps.push(t.clone());
+                            }
+                        }
+                    }
+                    let coverage = 1.0 - gaps.len() as f32 / tasks.len().max(1) as f32;
+                    println!(
+                        "round {round}: coverage {coverage:.2} ({} experts, {} gaps served-and-failed/uncovered)",
+                        experts.len(),
+                        gaps.len()
+                    );
+                    if coverage >= target_coverage || gaps.is_empty() {
+                        println!("population covers the corpus (>= {target_coverage:.2})");
+                        break;
+                    }
+
+                    // Grow a specialist on the uncovered cluster, persist it, and
+                    // refresh the gate so the next round sees it as coverage.
+                    let name = format!("{run}-e{round}");
+                    let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
+                    let out =
+                        raft_train(&mut model, &verifier, &gaps, &RunId::new(name.clone()), &cfg)
+                            .await?;
+                    let solved = if out.capability_exemplars.is_empty() {
+                        gaps.iter().map(|t| t.prompt.clone()).collect()
+                    } else {
+                        out.capability_exemplars.clone()
+                    };
+                    let mut acc = vec![0.0f32; EMBED_DIM];
+                    for text in &solved {
+                        for (a, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
+                            *a += b;
+                        }
+                    }
+                    let nproto = solved.len().max(1) as f32;
+                    let now = Utc::now();
+                    let expert = Expert {
+                        id: ExpertId::new(format!("expert:{name}")),
+                        name: name.clone(),
+                        base_model: cfg.base_model.clone(),
+                        artifact_uri: out.adapter_uri,
+                        capability_card: serde_json::json!({ "exemplars": solved }),
+                        capability_vec: Some(acc.iter().map(|x| x / nproto).collect()),
+                        fitness: out.final_fitness,
+                        frozen_at: Some(now),
+                        generation: Generation::ZERO,
+                        created_at: now,
+                    };
+                    expert::insert(&store, &expert).await?;
+                    println!(
+                        "  grew specialist {name} on {} gap task(s) (fitness {:.2})",
+                        gaps.len(),
+                        out.final_fitness
+                    );
+                    if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+                        println!("  router refreshed over {} experts", r.experts.len());
+                    }
+                }
+                println!("population: {} experts", expert::list(&store).await?.len());
+            }
+            #[cfg(not(feature = "models"))]
+            {
+                let _ = (
+                    &corpus,
+                    &run,
+                    target_coverage,
+                    max_experts,
+                    samples,
+                    rounds,
+                    max_new_tokens,
+                );
+                anyhow::bail!("`populate` requires building with --features models (candle + a GPU)");
             }
         }
     }
