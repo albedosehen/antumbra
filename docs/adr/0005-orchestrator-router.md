@@ -2,6 +2,20 @@
 
 **Status:** Accepted · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundary keystone), 0006 (serving), 0009 (north star)
 
+> **Learned gate realized (2026-06-04).** The relative-coverage heuristic below is now backed by a *learned*
+> boundary-conditioned gate (ADR-0009's mixer in routing form), validated in EXP-013/017. A per-dimension metric,
+> trained on the population's own solved exemplars (prototypical cross-entropy, `antumbra-train::router`),
+> amplifies the directions that separate experts — turning the compressed cosine band into clean separation: a
+> specialist the heuristic margin *escalated* (0.051) now routes at p=1.000, and it generalizes to held-out
+> tasks. Out-of-distribution is caught by an **absolute floor** on the nearest-centroid similarity in the learned
+> space (calibrated `mean-2σ` over in-distribution exemplars): "capital of France" escalates (sim 0.41 < floor
+> 0.53) where the softmax was overconfident (p=0.98). The router is **self-maintaining** (auto-retrained on every
+> `train`/`teach` once ≥2 experts) and **unified with boundaries** (route by the learned metric, but escalate on
+> OOD *or* boundary inhibition). The heuristic gate stays the fallback (<2 experts / no router). Recurring
+> principle, proven three times now (this gate EXP-002, the boundary, the router EXP-017): on compressed sentence
+> embeddings use *relative/learned* separation + an *absolute* OOD floor, never a raw similarity cutoff. Compass:
+> RMD (2106.09022), DynMoLE entropy gating (2504.00661), selective prediction (1705.08500).
+
 > **Validation (2026-06-03).** The real candle embedder (all-MiniLM-L6-v2, 384-d) is now wired
 > (`antumbra-serve::BertEmbedder`), replacing the byte-histogram fake, so the v0 coverage gate runs on real
 > semantic vectors. Seeding three described specialists (arithmetic / strings / dates) and routing matched
