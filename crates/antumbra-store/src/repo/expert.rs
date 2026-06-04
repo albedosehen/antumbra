@@ -5,7 +5,7 @@
 //! hand-authored SurrealQL.
 
 use surql::query::builder::Query;
-use surql::query::crud::{create_record, first, query_records};
+use surql::query::crud::{create_record, delete_records, first, query_records};
 use surql::query::helpers::VectorDistanceType;
 use surql::types::operators::eq;
 
@@ -22,6 +22,16 @@ const TABLE: &str = "expert";
 pub async fn insert(store: &Store, expert: &Expert) -> Result<()> {
     let data = serde_json::to_value(ExpertRow::from_domain(expert))?;
     create_record(store.client(), TABLE, data)
+        .await
+        .map_err(map)?;
+    Ok(())
+}
+
+/// Remove an expert by domain id (no-op if absent). Used to supersede an
+/// expert when a run re-trains under the same name, so the population does not
+/// accumulate stale duplicates.
+pub async fn delete(store: &Store, id: &ExpertId) -> Result<()> {
+    delete_records(store.client(), TABLE, Some(&eq("key", id.as_str())))
         .await
         .map_err(map)?;
     Ok(())

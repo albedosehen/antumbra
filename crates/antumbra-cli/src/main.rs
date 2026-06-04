@@ -1111,6 +1111,7 @@ async fn main() -> anyhow::Result<()> {
                         generation: Generation::ZERO,
                         created_at: now,
                     };
+                    expert::delete(&store, &expert.id).await?; // supersede on re-run
                     expert::insert(&store, &expert).await?;
                     println!("persisted expert {run} into the population (fitness {final_rate:.2})");
                     if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
@@ -1260,6 +1261,7 @@ async fn main() -> anyhow::Result<()> {
                         generation: Generation::ZERO,
                         created_at: now,
                     };
+                    expert::delete(&store, &expert.id).await?; // supersede on re-run
                     expert::insert(&store, &expert).await?;
                     println!(
                         "  grew specialist {name} on {} gap task(s) (fitness {:.2})",
