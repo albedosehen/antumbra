@@ -42,6 +42,11 @@ pub struct FailureBoundary {
     /// Embedded context for inhibitory-penalty KNN lookup (ADR-0005/0007).
     #[serde(default)]
     pub context_vec: Option<Vec<f32>>,
+    /// Embedded C' (the acceptable context). When present, inhibition is
+    /// *relative* — closer to the failure than to C' — which separates
+    /// near-identical contexts an absolute radius cannot (ADR-0004).
+    #[serde(default)]
+    pub ok_context_vec: Option<Vec<f32>>,
     #[serde(default)]
     pub confidence: f32,
     #[serde(default)]
@@ -68,19 +73,46 @@ impl FailureBoundary {
         if !self.is_actionable() {
             return 0.0;
         }
-        let Some(ctx) = self.context_vec.as_deref() else {
+        let Some(fail) = self.context_vec.as_deref() else {
             return 0.0;
         };
-        let sim = crate::expert::cosine_similarity(ctx, candidate_vec);
-        if sim < radius {
-            0.0
-        } else {
-            // Scale within the in-scope band by both proximity and confidence.
-            let span = (1.0 - radius).max(1e-6);
-            ((sim - radius) / span) * self.confidence.clamp(0.0, 1.0)
+        let conf = self.confidence.clamp(0.0, 1.0);
+        let sim_fail = crate::expert::cosine_similarity(fail, candidate_vec);
+
+        match self.ok_context_vec.as_deref() {
+            // Relative scope (preferred): fire only when the candidate sits
+            // closer to the failure context than to the acceptable one (C').
+            // The shared background cancels in the difference, so contexts that
+            // differ only slightly (same task, different project) separate by
+            // the *sign* of the margin — the gate's top-1-minus-top-2 idea,
+            // applied to the boundary (ADR-0004; an absolute radius cannot).
+            Some(ok) => {
+                let sim_ok = crate::expert::cosine_similarity(ok, candidate_vec);
+                let margin = sim_fail - sim_ok;
+                if margin <= 0.0 {
+                    0.0
+                } else {
+                    (margin / RELATIVE_SENSITIVITY).clamp(0.0, 1.0) * conf
+                }
+            }
+            // Legacy absolute radius (boundaries with no embedded C').
+            None => {
+                if sim_fail < radius {
+                    0.0
+                } else {
+                    let span = (1.0 - radius).max(1e-6);
+                    ((sim_fail - radius) / span) * conf
+                }
+            }
         }
     }
 }
+
+/// Relative-margin scale at which inhibition saturates. Sentence-embedding
+/// cosine compresses near-identical contexts into a narrow band, so the
+/// discriminative fail-vs-C' margin is small; this is the calibratable knob
+/// that turns that small margin into a usable penalty.
+const RELATIVE_SENSITIVITY: f32 = 0.05;
 
 #[cfg(test)]
 mod tests {
@@ -99,6 +131,7 @@ mod tests {
             },
             grain: Some(Grain::Project),
             context_vec: Some(ctx),
+            ok_context_vec: None,
             confidence,
             generation: Generation::ZERO,
             created_at: Utc::now(),
@@ -125,5 +158,23 @@ mod tests {
         // Identical context -> max proximity, scaled by confidence 0.5.
         let p = b.inhibition_for(&[1.0, 0.0], 0.0);
         assert!((p - 0.5).abs() < 1e-6);
+    }
+
+    /// Relative scope separates near-identical contexts an absolute radius
+    /// cannot: with a fail and a C' that are *both* highly similar to two
+    /// candidates, inhibition fires for the one nearer the failure and is zero
+    /// for the one nearer C' — by the sign of the margin.
+    #[test]
+    fn relative_scope_fires_only_nearer_the_failure() {
+        let mut b = boundary(true, vec![1.0, 0.05, 0.0], 1.0);
+        b.ok_context_vec = Some(vec![1.0, 0.0, 0.05]); // C' — same background, tilted
+
+        // Candidate tilted toward the failure axis -> positive margin -> inhibit.
+        let near_fail = b.inhibition_for(&[1.0, 0.1, 0.0], 0.5);
+        assert!(near_fail > 0.0);
+        // Candidate tilted toward C' -> negative margin -> no inhibition, even
+        // though its absolute similarity to the failure is high.
+        let near_ok = b.inhibition_for(&[1.0, 0.0, 0.1], 0.5);
+        assert_eq!(near_ok, 0.0);
     }
 }

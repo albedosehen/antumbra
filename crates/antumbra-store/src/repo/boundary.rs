@@ -34,6 +34,8 @@ struct BoundaryRow {
     #[serde(default)]
     context_vec: Option<Vec<f32>>,
     #[serde(default)]
+    ok_context_vec: Option<Vec<f32>>,
+    #[serde(default)]
     confidence: f32,
     generation: u32,
     created_at: String,
@@ -49,6 +51,7 @@ impl BoundaryRow {
             governing_features: b.governing_features.clone(),
             grain: b.grain,
             context_vec: b.context_vec.clone(),
+            ok_context_vec: b.ok_context_vec.clone(),
             confidence: b.confidence,
             generation: b.generation.0,
             created_at: b.created_at.to_rfc3339(),
@@ -64,6 +67,7 @@ impl BoundaryRow {
             governing_features: self.governing_features,
             grain: self.grain,
             context_vec: self.context_vec,
+            ok_context_vec: self.ok_context_vec,
             confidence: self.confidence,
             generation: Generation(self.generation),
             created_at: parse_dt(&self.created_at)?,

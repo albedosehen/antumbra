@@ -178,6 +178,7 @@ mod tests {
             governing_features: vec!["f".into()],
             grain: Some(Grain::Project),
             context_vec: Some(ctx),
+            ok_context_vec: None,
             confidence,
             generation: Generation::ZERO,
             created_at: Utc::now(),

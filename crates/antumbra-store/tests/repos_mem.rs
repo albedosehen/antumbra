@@ -68,6 +68,7 @@ async fn boundary_persists_and_recalls_by_context() {
         governing_features: vec!["runtime".into()],
         grain: Some(Grain::Project),
         context_vec: Some(vec![1.0, 0.0, 0.0, 0.0]),
+        ok_context_vec: Some(vec![0.0, 1.0, 0.0, 0.0]),
         confidence: 0.8,
         generation: Generation::ZERO,
         created_at: Utc::now(),

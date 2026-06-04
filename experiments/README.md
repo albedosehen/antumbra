@@ -260,26 +260,26 @@ semantically adjacent ("add a dependency to a project"), compressing the margin,
 rather than mis-serving. This is the EXP-004 per-population calibration property, reconfirmed: discrimination is
 correct; the threshold only trades confident-serve against safe-abstain.
 
-**Boundary probe (ADR-0004), a mixed result.** We also tried the *counterfactual boundary* on this scenario:
-a general `generaldeps -> npm` expert (which covers `acme-api` by similarity, coverage 0.877 — the confident
-mistake), then `scope --discover` to recover where it is wrong. Recovery **worked**: probing the expert's own
-behavior inferred `governing feature: project`, found `C' = webshop`, and stored an actionable boundary. Forcing
-escalation **also worked** once the boundary's context vector excluded the verify spec (which had polluted the
-embedding): `acme-api` flipped from route (0.877) to **escalate** (-0.076). But the absolute cosine-radius
-inhibition **over-generalized** — the `webshop` control also escalated (0.885 -> 0.063). The two contexts'
-boundary-similarities (0.977 vs 0.911) are 0.066 apart, too close for a radius to isolate one without the other,
-and no radius is both strong enough to escalate `acme-api` and precise enough to spare `webshop`. This is the
-EXP-002/004 compressed-embedding limit reaching the boundary: per-project scope that differs only by name is
-below sentence-embedding cosine resolution. Upshot, recorded as design guidance: **nearest-expert routing (the
-relative top-1 comparison above) already discriminates per-project corrections**, where the boundary's *absolute*
-radius cannot — so the boundary belongs on semantically-distinct failure regions (EXP-005), not fine per-project
-scoping. A real fix landed regardless: the boundary context vector now strips the verify spec before embedding.
+**Boundary probe (ADR-0004), now with relative inhibition.** We also drove the *counterfactual boundary* on this
+scenario: a general `generaldeps -> npm` expert (which covers `acme-api` by similarity, coverage 0.877 — the
+confident mistake), then `scope --discover` to recover where it is wrong. Recovery worked: probing the expert's
+own behavior inferred `governing feature: project`, found `C' = webshop`, and stored an actionable boundary. The
+first attempt exposed a real limit — an **absolute cosine-radius** inhibition either fired too weakly to act or,
+once strong enough, **over-generalized** (the `webshop` control escalated too); the two contexts are only 0.066
+apart in boundary-similarity, below sentence-embedding resolution (the EXP-002/004 compressed-band problem,
+reaching the boundary). The fix is the same relative trick that makes the gate work: store **C''s embedding too**
+and inhibit on the *margin* `sim(fail) - sim(C')`, so the shared "add a dependency" background cancels and only
+the discriminative project signal remains. With that, **`acme-api` escalates (coverage -0.123) while the
+`webshop` control routes normally (0.885)** — precise per-project scope. So both halves discriminate per project
+now: nearest-expert routing for the correction, relative-margin inhibition for the boundary. Two real fixes
+landed: the context vector strips the verify spec before embedding, and `FailureBoundary` carries `ok_context_vec`
+for relative inhibition (legacy absolute radius kept as the fallback when C' is not embedded).
 
 **Kill criterion.** If the base floor is not low (the prior is not load-bearing), or the captured correction does
 not generalize past the trained strings, or a fresh process does not route to it, capture is not a durable
 mechanism. *(Cleared: floor 0.00, held-out 1.00, fresh-process routing served the correction; a two-expert
-population routes each project to its own correction. Boundary inhibition for per-project scope is left open — a
-resolution limit, not a capture failure.)*
+population routes each project to its own correction; and a recovered boundary escalates the in-scope project
+while sparing the control via relative inhibition.)*
 
 **Reproduce.** `eval --corpus corpora/teach-bun-eval.json` (base floor), then `teach --corpus corpora/teach-bun.json
 --run bunexpert --rounds 15 --lr 3e-4`, then `eval --corpus corpora/teach-bun-eval.json --adapter

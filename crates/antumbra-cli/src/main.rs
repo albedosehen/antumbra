@@ -494,8 +494,15 @@ async fn main() -> anyhow::Result<()> {
                         if let Some(obj) = ctx_only.as_object_mut() {
                             obj.remove("verify");
                         }
-                        let context_text = format!("{behavior} {ctx_only}");
-                        let context_vec = embedder.embed(&context_text).await?;
+                        let context_vec = embedder.embed(&format!("{behavior} {ctx_only}")).await?;
+                        // Embed C' too, so inhibition is relative (closer to the
+                        // failure than to the acceptable context) -- the only
+                        // way to scope contexts that differ slightly (ADR-0004).
+                        let mut ok_only = finding.near_ok_context.clone();
+                        if let Some(obj) = ok_only.as_object_mut() {
+                            obj.remove("verify");
+                        }
+                        let ok_vec = embedder.embed(&format!("{behavior} {ok_only}")).await?;
                         let id = BoundaryId::new(format!(
                             "boundary:scope:{}",
                             finding.governing_feature
@@ -506,6 +513,7 @@ async fn main() -> anyhow::Result<()> {
                             Grain::Project,
                             confidence,
                             Some(context_vec),
+                            Some(ok_vec),
                             Generation::ZERO,
                             Utc::now(),
                         );

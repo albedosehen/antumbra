@@ -63,6 +63,7 @@ async fn actionable_boundary_inhibits_routing_inside_its_scope_only() {
         Grain::Project,
         1.0,
         Some(context_vec),
+        None,
         Generation::ZERO,
         Utc::now(),
     );

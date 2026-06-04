@@ -163,6 +163,7 @@ pub fn finding_to_boundary(
     grain: Grain,
     confidence: f32,
     context_vec: Option<Vec<f32>>,
+    ok_context_vec: Option<Vec<f32>>,
     generation: Generation,
     now: DateTime<Utc>,
 ) -> FailureBoundary {
@@ -174,6 +175,7 @@ pub fn finding_to_boundary(
         governing_features: vec![finding.governing_feature.clone()],
         grain: Some(grain),
         context_vec,
+        ok_context_vec,
         confidence,
         generation,
         created_at: now,
@@ -211,6 +213,7 @@ mod tests {
             &finding,
             Grain::Project,
             0.8,
+            None,
             None,
             Generation::ZERO,
             Utc::now(),

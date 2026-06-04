@@ -281,6 +281,7 @@ impl<'a> GenerationLoop<'a> {
             governing_features: Vec::new(),
             grain: None,
             context_vec: None,
+            ok_context_vec: None,
             confidence: 0.3,
             generation,
             created_at: Utc::now(),
