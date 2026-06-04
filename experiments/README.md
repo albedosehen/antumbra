@@ -27,6 +27,7 @@ experiments are plain `cargo test`.
 | [EXP-013](#exp-013--the-learned-router) | A learned router separates specialists from generalists | 2 / 0005,0009 | **passed** (GPU) |
 | [EXP-014](#exp-014--adapter-composition) | Experts compose into one served adapter; behavior is dialable | 3 / 0006,0009 | **passed** (GPU) |
 | [EXP-015](#exp-015--complementary-composition-the-capability-multiplier) | Composing complementary experts does what neither alone was trained for | 3 / 0006,0009 | **passed** (GPU) |
+| [EXP-016](#exp-016--the-closed-serving-loop-route--auto-compose) | One `ask` routes the project expert and auto-composes standing conventions | 2,3 / 0005,0006,0009 | **passed** (GPU) |
 
 ---
 
@@ -401,6 +402,39 @@ composition cannot do the complementary multiplier and token-/layer-level routin
 
 **Reproduce.** `teach` bunexpert (`teach-bun.json`) + convexpert (`conv-exact.json`), then `compose
 "<acme-api task>" --experts "bunexpert-g0:0.4,convexpert-g0:0.6"`.
+
+## EXP-016 — the closed serving loop (route + auto-compose)
+
+**Claim.** The whole gate+composition axis closes into one serving call: the substrate auto-routes the
+*contextual* (project) expert **and** auto-composes the *standing* (convention) experts, applying both at once.
+This internalizes Kushtaka's two jobs — recall the relevant fact, enforce the standing rule — into the weights:
+contextual experts are task-routed (fact recall), standing experts are always composed (rule enforcement).
+
+**Compass (arXiv).** The direction is grounded in the mixture-of-LoRA literature and sharpened against it.
+RAMoLE (2406.16989) retrieves relevant LoRAs from a *dynamically-growing pool* and composes them on the fly —
+the closest prior art to Antumbra's population + router + composition. DynMoLE (2504.00661) routes by the
+*entropy* of the router distribution (the calibration fix for the EXP-015 narrow window). RouteDK (2508.17250)
+routes *complementary* knowledge types and balances contributions to avoid conflict. MoLE (2404.13628) warns
+naive arithmetic merging can lose capability — handled here because the experts share rank/scale so the merge is
+exact. **What these do not have, and Antumbra does:** experts grown *independently from verified self-improvement*
+(RAFT/capture), carrying *counterfactual boundaries* with recovery/retirement, and the *contextual-vs-standing*
+split that maps Kushtaka's fact/rule duality onto routing-vs-always-compose.
+
+**Method.** Grow `bunexpert` (acme-api, contextual), `convexpert` (`--save-exact`, standing), `generaldeps`
+(npm); `gate-train` the learned router; then one `ask` on an `acme-api` task, with and without the standing
+convention (`--with convexpert-g0:0.6`).
+
+**Result.** Routed only: the learned router picks `bunexpert` (p=0.725) -> **`bun add react`**. With the standing
+convention: same routing, then auto-composition -> **`bun add react --save-exact`** — the project's tool (routed)
+**and** the convention (composed), applied automatically in a single call. The loop capture -> route -> compose
+runs end to end with no manual weights at serve time beyond naming the standing experts.
+
+**Kill criterion.** If routing and composition cannot run in one serving call, or the standing convention is not
+applied, the substrate is not a usable serving layer. *(Cleared.)* Open: derive the standing-expert weights from
+a *calibrated* router (entropy-style, per the compass) so even the convention weight is automatic.
+
+**Reproduce.** `teach` bunexpert/convexpert/generaldeps, `gate-train`, then `ask "<acme-api task>" --with
+"convexpert-g0:0.6" --self-weight 0.4`.
 
 ---
 

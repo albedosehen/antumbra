@@ -87,6 +87,14 @@ enum Command {
         /// the margin; lower it to serve rather than escalate (EXP-004/011).
         #[arg(long, default_value_t = 0.08)]
         threshold: f32,
+        /// Standing experts always composed onto the routed one (your conventions),
+        /// `name:weight,...` — the Kushtaka rule layer, internalized (ADR-0009).
+        #[arg(long)]
+        with: Option<String>,
+        /// Blend weight for the task-routed (contextual) expert when composing
+        /// with standing experts.
+        #[arg(long, default_value_t = 0.4)]
+        self_weight: f32,
     },
     /// Recover a failure boundary's scope by generate-then-verify (ADR-0004):
     /// hold a behavior fixed, vary the context, and find the governing feature
@@ -386,6 +394,8 @@ async fn main() -> anyhow::Result<()> {
             k,
             max_new_tokens,
             threshold,
+            with,
+            self_weight,
         } => {
             #[cfg(feature = "models")]
             {
@@ -422,15 +432,46 @@ async fn main() -> anyhow::Result<()> {
                         "routing to {} (adapter {})",
                         expert.name, expert.artifact_uri
                     );
-                    let cfg = RaftConfig {
-                        max_new_tokens,
-                        ..RaftConfig::default()
+                    // Compose the routed (contextual) expert with the named
+                    // standing experts (your conventions, always applied); else
+                    // serve the routed expert alone.
+                    let serve = if let Some(with_spec) = &with {
+                        let mut specs: Vec<(String, f32)> =
+                            vec![(expert.artifact_uri.clone(), self_weight)];
+                        for part in with_spec.split(',') {
+                            let (name, w) = part.split_once(':').ok_or_else(|| {
+                                anyhow::anyhow!("bad --with `{part}` (want name:weight)")
+                            })?;
+                            let s = experts
+                                .iter()
+                                .find(|e| e.name == name.trim())
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!("standing expert `{}` not found", name.trim())
+                                })?;
+                            specs.push((s.artifact_uri.clone(), w.trim().parse()?));
+                        }
+                        let merged = "adapters/_composed.safetensors";
+                        let rank = antumbra_train::compose_adapters(&specs, merged)?;
+                        let base_scale = RaftConfig::default().lora_scale();
+                        println!("composing with {} standing expert(s) -> rank {rank}", specs.len() - 1);
+                        let cfg = RaftConfig {
+                            lora_rank: rank,
+                            lora_alpha: base_scale * rank as f64,
+                            max_new_tokens,
+                            ..RaftConfig::default()
+                        };
+                        CandleServe::new(expert.base_model.clone(), Some(merged.to_string()), cfg)
+                    } else {
+                        let cfg = RaftConfig {
+                            max_new_tokens,
+                            ..RaftConfig::default()
+                        };
+                        CandleServe::new(
+                            expert.base_model.clone(),
+                            Some(expert.artifact_uri.clone()),
+                            cfg,
+                        )
                     };
-                    let serve = CandleServe::new(
-                        expert.base_model.clone(),
-                        Some(expert.artifact_uri.clone()),
-                        cfg,
-                    );
                     let out = serve
                         .act(ActRequest {
                             task_id: "ask".into(),
@@ -444,7 +485,7 @@ async fn main() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&task, k, max_new_tokens, threshold);
+                let _ = (&task, k, max_new_tokens, threshold, &with, self_weight);
                 anyhow::bail!("`ask` requires building with --features models (candle + a GPU)");
             }
         }
