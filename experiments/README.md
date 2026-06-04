@@ -493,8 +493,14 @@ feeds the population. Evolving two skills into one store grew `adder` and `rever
 (sim 0.979) while "capital of France" escalated (sim 0.298 < floor 0.850). This surfaced a real bug: with one
 exemplar per expert the centroid *is* the exemplar, so std ~ 0 and the OOD floor collapsed to 1.0 (rejecting
 everything); fixed with a minimum floor margin (`mean - max(2*std, 0.15)`), a no-op for well-sampled populations
-(EXP-017's 0.532 floor is unchanged). Still open: drive `evolve` from *serving* failures across a mixed stream
-(route -> serve -> verify -> train only the gaps), rather than one corpus per skill.
+(EXP-017's 0.532 floor is unchanged).
+
+**Failure-driven (2026-06-04).** `evolve` is now gap-focused: each generation evaluates **per task** (the
+generation+verify *is* the serving check) and trains only the tasks that currently fail. On a mixed corpus
+(add + reverse + upper) it went `gen 0: 0.17 (4/24, base) -> train 3 gap tasks -> gen 1: 1.00 (24/24) ->
+converged`, then persisted a routable multi-skill `mixed` expert — the system found its own gaps and closed
+them. Still open: the population-level version (route each task to its expert, serve, verify, and grow a *new*
+specialist only for the uncovered cluster) rather than improving one evolving capability.
 
 **Reproduce.** `evolve --corpus corpora/add-only.json --target 0.9 --max-gens 4 --rounds 2`.
 

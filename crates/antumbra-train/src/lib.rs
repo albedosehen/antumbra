@@ -34,7 +34,7 @@ pub mod models;
 pub use compose::compose_adapters;
 pub use config::{RaftConfig, TrainDtype};
 pub use corpus::JsonCorpus;
-pub use eval::{eval_pass_rate, EvalOutcome};
+pub use eval::{eval_pass_rate, EvalOutcome, TaskResult};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;

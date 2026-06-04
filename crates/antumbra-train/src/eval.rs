@@ -13,10 +13,29 @@ use antumbra_core::{Result, RunId};
 use crate::model::{CausalLm, CorpusTask};
 
 #[derive(Debug, Clone)]
+pub struct TaskResult {
+    pub id: String,
+    pub passed: usize,
+    pub total: usize,
+}
+
+impl TaskResult {
+    pub fn rate(&self) -> f32 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.passed as f32 / self.total as f32
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct EvalOutcome {
     pub pass_rate: f32,
     pub passed: usize,
     pub total: usize,
+    /// Per-task pass counts, so a controller can train only the tasks that fail.
+    pub per_task: Vec<TaskResult>,
     /// A few raw completions, for eyeballing what the model actually emits.
     pub examples: Vec<String>,
 }
@@ -33,8 +52,10 @@ pub async fn eval_pass_rate(
 ) -> Result<EvalOutcome> {
     let (mut total, mut passed) = (0usize, 0usize);
     let mut examples: Vec<String> = Vec::new();
+    let mut per_task: Vec<TaskResult> = Vec::new();
     for task in tasks {
         let draws = model.generate(&task.prompt, samples).await?;
+        let mut task_passed = 0usize;
         for (i, sample) in draws.iter().enumerate() {
             total += 1;
             if examples.len() < 5 {
@@ -53,8 +74,14 @@ pub async fn eval_pass_rate(
             };
             if verifier.verify(&req).await?.passed {
                 passed += 1;
+                task_passed += 1;
             }
         }
+        per_task.push(TaskResult {
+            id: task.id.clone(),
+            passed: task_passed,
+            total: draws.len(),
+        });
     }
     let pass_rate = if total == 0 {
         0.0
@@ -65,6 +92,7 @@ pub async fn eval_pass_rate(
         pass_rate,
         passed,
         total,
+        per_task,
         examples,
     })
 }

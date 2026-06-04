@@ -1037,10 +1037,18 @@ async fn main() -> anyhow::Result<()> {
                         println!("converged at gen {gen} (>= target {target:.2})");
                         break;
                     }
-                    // Below the bar: keep training this same (warm-started) model.
+                    // Below the bar: train only the tasks currently failing
+                    // (the gaps the serving check just found), warm-started.
+                    let failing: Vec<_> = tasks
+                        .iter()
+                        .zip(&ev.per_task)
+                        .filter(|(_, r)| r.rate() < target)
+                        .map(|(t, _)| t.clone())
+                        .collect();
+                    let gaps = if failing.is_empty() { tasks.clone() } else { failing };
                     let run_id = RunId::new(format!("{run}-g{gen}"));
-                    let out =
-                        raft_train(&mut model, &verifier, &tasks, &run_id, &cfg).await?;
+                    println!("  training {} gap task(s)", gaps.len());
+                    let out = raft_train(&mut model, &verifier, &gaps, &run_id, &cfg).await?;
                     println!(
                         "  trained gen {gen}: round-final {:.2} -> {}",
                         out.final_fitness, out.adapter_uri
