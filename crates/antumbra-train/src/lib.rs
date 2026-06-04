@@ -15,6 +15,7 @@ use antumbra_core::{AntumbraError, Result};
 
 pub mod compose;
 pub mod config;
+pub mod consolidate;
 pub mod corpus;
 pub mod decode;
 pub mod device;
@@ -34,6 +35,7 @@ pub mod models;
 
 pub use compose::compose_adapters;
 pub use config::{RaftConfig, TrainDtype};
+pub use consolidate::{interleave_replay, replay_from_tasks};
 pub use corpus::JsonCorpus;
 pub use eval::{eval_pass_rate, EvalOutcome, TaskResult};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};

@@ -54,6 +54,11 @@ pub struct RaftConfig {
     /// training *continues* a prior expert. `None` trains from scratch. EXP-010
     /// uses it for the monolithic continual-fine-tune arm.
     pub parent_adapter: Option<String>,
+    /// Rehearsal examples per winner interleaved into capture SFT (EXP-021).
+    /// `0.0` is replay off (plain capture); consolidating many memories at once
+    /// sets it `> 0` to rehearse already-consolidated skills and resist
+    /// catastrophic interference (the complementary-learning-systems fix).
+    pub replay_ratio: f64,
 }
 
 impl Default for RaftConfig {
@@ -75,6 +80,7 @@ impl Default for RaftConfig {
             kl_beta: 0.04,
             quantize_base: false,
             parent_adapter: None,
+            replay_ratio: 0.0,
         }
     }
 }

@@ -12,6 +12,7 @@ use antumbra_core::{Result, RunId};
 use serde_json::json;
 
 use crate::config::RaftConfig;
+use crate::consolidate::interleave_replay;
 use crate::eval::eval_pass_rate;
 use crate::model::{CausalLm, CorpusTask, SftExample};
 
@@ -32,12 +33,18 @@ fn verify_request(run_id: &RunId, idx: usize, task: &CorpusTask, completion: &st
 /// Verify each supplied correction, fine-tune the adapter on the ones that hold
 /// for `cfg.rounds` epochs, then measure whether the expert now reproduces them.
 /// `final_fitness` is that internalized pass-rate — the honest "did it stick".
+///
+/// `replay` is a rehearsal buffer of already-consolidated `prompt -> behavior`
+/// pairs (EXP-021): when `cfg.replay_ratio > 0` it is interleaved into every SFT
+/// round so consolidating new memories does not clobber old skills. Plain
+/// capture passes an empty buffer (replay off).
 pub async fn capture_corrections(
     model: &mut (dyn CausalLm + Send),
     verifier: &dyn Verifier,
     tasks: &[CorpusTask],
     run_id: &RunId,
     cfg: &RaftConfig,
+    replay: &[SftExample],
 ) -> Result<TrainOutcome> {
     // A correction we cannot check is not trusted into the population.
     let mut winners: Vec<SftExample> = Vec::new();
@@ -58,9 +65,12 @@ pub async fn capture_corrections(
         }
     }
 
+    // Interleave the rehearsal buffer once; reused each round. With replay off
+    // (empty buffer or ratio 0) this is exactly the winners.
+    let batch = interleave_replay(&winners, replay, cfg.replay_ratio);
     for _ in 0..cfg.rounds.max(1) {
-        if !winners.is_empty() {
-            model.sft_step(&winners).await?;
+        if !batch.is_empty() {
+            model.sft_step(&batch).await?;
         }
     }
 
@@ -129,7 +139,7 @@ mod tests {
             samples_per_task: 4,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:g0"), &cfg)
+        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:g0"), &cfg, &[])
             .await
             .unwrap();
         // The correction verified, was internalized, and the expert now emits it.
@@ -152,10 +162,60 @@ mod tests {
             samples_per_task: 4,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:g1"), &cfg)
+        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:g1"), &cfg, &[])
             .await
             .unwrap();
         assert_eq!(out.final_fitness, 0.0);
         assert!(out.capability_exemplars.is_empty());
+    }
+
+    /// Records every prompt it is fine-tuned on, so a test can assert the
+    /// rehearsal buffer actually reached the SFT batch.
+    struct Recorder {
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl CausalLm for Recorder {
+        async fn generate(&mut self, _prompt: &str, n: usize) -> Result<Vec<String>> {
+            Ok(vec!["deno install".to_string(); n])
+        }
+        async fn sft_step(&mut self, batch: &[SftExample]) -> Result<f32> {
+            let mut seen = self.seen.lock().unwrap();
+            seen.extend(batch.iter().map(|e| e.prompt.clone()));
+            Ok(0.0)
+        }
+        fn save_adapter(&self, _path: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn replay_buffer_is_rehearsed_during_consolidation() {
+        let mut lm = Recorder {
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let verifier = MarkerVerifier {
+            expect: "deno install".into(),
+        };
+        let tasks = vec![CorpusTask::new("p", "new project").with_completion("deno install")];
+        // A previously-consolidated skill to rehearse so it is not clobbered.
+        let replay = vec![SftExample {
+            prompt: "old skill".into(),
+            completion: "reverse a string".into(),
+        }];
+        let cfg = RaftConfig {
+            rounds: 1,
+            samples_per_task: 2,
+            replay_ratio: 1.0,
+            ..RaftConfig::default()
+        };
+        capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cons:g0"), &cfg, &replay)
+            .await
+            .unwrap();
+        let seen = lm.seen.lock().unwrap();
+        // Both the new memory and the rehearsed old skill were trained on.
+        assert!(seen.iter().any(|p| p == "new project"));
+        assert!(seen.iter().any(|p| p == "old skill"));
     }
 }

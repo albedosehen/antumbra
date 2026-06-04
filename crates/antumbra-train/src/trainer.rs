@@ -132,6 +132,7 @@ impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
             &tasks,
             &run_id,
             &self.config,
+            &[],
         )
         .await
     }
