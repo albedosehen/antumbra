@@ -1,6 +1,15 @@
 # ADR-0014 - Compartments: latent-spaces of memory
 
-**Status:** Accepted (Phase 1–2a, auto-compartmentalization) · Proposed (private experts) · **Date:** 2026-06-04 · **Related:** 0004 (antumbra/boundary), 0012 (Penumbra), 0013 (identity)
+**Status:** Accepted (Phase 1–2a, auto-compartmentalization, private experts) · **Date:** 2026-06-04 · **Related:** 0004 (antumbra/boundary), 0012 (Penumbra), 0013 (identity)
+
+> **Private expert minted on GPU (2026-06-05).** The personalization north-star is closed end to end on the
+> 3090 Ti: `antumbra remember` seeded three memories into `comp:alice:deno` (owner `user:alice`), then
+> `consolidate-compartment` gathered the compartment, scored the gate (3/3 graduated), capture-trained on GPU
+> (`internalized 1.00`, verifier-gated), and minted a **private, owner-scoped** expert
+> `expert:user:alice:comp:alice:deno` (`owner = user:alice`, `compartment = comp:alice:deno`). So a private
+> compartment of memory becomes a private LoRA — "private experts via private discrete training". The engine
+> hides another user's private expert (proven in `antumbra-store/tests/penumbra_auth.rs`); the mint creates the
+> owner-tagged row.
 
 > **Auto-compartmentalization implemented (2026-06-04).** `antumbra-core::penumbra::propose_compartments` is a
 > pure, deterministic single-pass cosine clustering over the embeddings already stored on each `Memory`: it
