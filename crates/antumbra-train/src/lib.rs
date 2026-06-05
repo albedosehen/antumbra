@@ -166,7 +166,10 @@ impl ModelLoader for CandleModelLoader {
     }
 }
 
-#[cfg(test)]
+// The stub loaders only exist (and only return `Unimplemented`) in the
+// non-models build; under `--features models` `load` returns a real
+// `QwenCausalLm`, so this test is non-models only.
+#[cfg(all(test, not(feature = "models")))]
 mod tests {
     use super::*;
 

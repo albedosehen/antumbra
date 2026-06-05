@@ -122,7 +122,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
                 let col = if selected {
                     Color::Rgb((150.0 + 80.0 * glow) as u8, (90.0 * glow) as u8, 255)
                 } else {
-                    fitness_color(e.fitness as f32, glow)
+                    fitness_color(e.fitness, glow)
                 };
                 ctx.print(ex, ey, Span::styled(glyph, Style::default().fg(col)));
                 ctx.print(

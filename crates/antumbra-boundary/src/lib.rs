@@ -157,6 +157,10 @@ pub async fn discover_boundary(
 /// Promote a finding to a persistable [`FailureBoundary`]. Confidence and the
 /// embedded `context_vec` are supplied by the caller (the loop owns the
 /// embedder); the boundary is only actionable because C' was recovered.
+// Each argument is a distinct required input to the persisted boundary (id,
+// finding, grain, confidence, the two context embeddings, generation, time);
+// there is no natural grouping that reads more clearly than the explicit list.
+#[allow(clippy::too_many_arguments)]
 pub fn finding_to_boundary(
     id: BoundaryId,
     finding: &BoundaryFinding,
