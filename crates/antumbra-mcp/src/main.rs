@@ -164,7 +164,13 @@ pub(crate) async fn build_serve(
         return Ok(None);
     }
     let base = experts[0].base_model.clone();
-    let mut engine = MultiAdapterServe::new(base, RaftConfig::default());
+    // Serve greedily (temperature 0): the `answer` tool wants the learned mode,
+    // not the training-time exploration draw.
+    let cfg = RaftConfig {
+        temperature: 0.0,
+        ..RaftConfig::default()
+    };
+    let mut engine = MultiAdapterServe::new(base, cfg);
     for e in &experts {
         engine.register(e.id.clone(), e.artifact_uri.clone());
     }

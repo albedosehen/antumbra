@@ -38,3 +38,7 @@ default = []
 # Swap the byte-histogram embedder for the real candle BERT embedder (needs the
 # model weights). Same dimension (EMBED_DIM) either way.
 models = ["dep:antumbra-serve", "antumbra-serve/models"]
+# GPU backend for the embedder + the `answer` tool's MultiAdapterServe (so the
+# networked server can actually serve through experts on a CUDA box).
+cuda = ["models", "antumbra-serve/cuda"]
+metal = ["models", "antumbra-serve/metal"]

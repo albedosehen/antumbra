@@ -70,6 +70,10 @@ pub enum Command {
         /// with standing experts.
         #[arg(long, default_value_t = 0.4)]
         self_weight: f32,
+        /// Sampling temperature. 0 = greedy (deterministic, the learned mode —
+        /// the right default for serving); raise for diverse draws.
+        #[arg(long, default_value_t = 0.0)]
+        temperature: f64,
     },
     /// Resident multi-adapter server (ADR-0006): load the shared base ONCE and
     /// hot-swap each routed expert's adapter per prompt, instead of cold-loading
@@ -87,6 +91,9 @@ pub enum Command {
         /// Abstention threshold on relative coverage; below it the gate escalates.
         #[arg(long, default_value_t = 0.08)]
         threshold: f32,
+        /// Sampling temperature. 0 = greedy (deterministic, the learned mode).
+        #[arg(long, default_value_t = 0.0)]
+        temperature: f64,
     },
     /// Recover a failure boundary's scope by generate-then-verify (ADR-0004):
     /// hold a behavior fixed, vary the context, and find the governing feature

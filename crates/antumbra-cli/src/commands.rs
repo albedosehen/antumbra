@@ -519,6 +519,7 @@ pub struct ServeArgs {
     pub task: Option<String>,
     pub max_new_tokens: usize,
     pub threshold: f32,
+    pub temperature: f64,
 }
 
 /// Resident multi-adapter server (ADR-0006): load the shared base once and
@@ -532,6 +533,7 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
         task,
         max_new_tokens,
         threshold,
+        temperature,
     } = args;
     #[cfg(feature = "models")]
     {
@@ -553,6 +555,7 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
         let base_model = experts[0].base_model.clone();
         let cfg = RaftConfig {
             max_new_tokens,
+            temperature,
             ..RaftConfig::default()
         };
         let mut engine = MultiAdapterServe::new(base_model, cfg);
@@ -592,7 +595,7 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
     }
     #[cfg(not(feature = "models"))]
     {
-        let _ = (url, &task, max_new_tokens, threshold);
+        let _ = (url, &task, max_new_tokens, threshold, temperature);
         anyhow::bail!("`serve` requires building with --features models (candle + a GPU)")
     }
 }

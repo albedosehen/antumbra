@@ -277,6 +277,7 @@ async fn run() -> anyhow::Result<()> {
             threshold,
             with,
             self_weight,
+            temperature,
         } => {
             #[cfg(feature = "models")]
             {
@@ -349,12 +350,14 @@ async fn run() -> anyhow::Result<()> {
                             lora_rank: rank,
                             lora_alpha: base_scale * rank as f64,
                             max_new_tokens,
+                            temperature,
                             ..RaftConfig::default()
                         };
                         CandleServe::new(expert.base_model.clone(), Some(merged.to_string()), cfg)
                     } else {
                         let cfg = RaftConfig {
                             max_new_tokens,
+                            temperature,
                             ..RaftConfig::default()
                         };
                         CandleServe::new(
@@ -376,7 +379,7 @@ async fn run() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&task, k, max_new_tokens, threshold, &with, self_weight);
+                let _ = (&task, k, max_new_tokens, threshold, &with, self_weight, temperature);
                 anyhow::bail!("`ask` requires building with --features models (candle + a GPU)");
             }
         }
@@ -821,6 +824,7 @@ async fn run() -> anyhow::Result<()> {
             task,
             max_new_tokens,
             threshold,
+            temperature,
         } => {
             commands::serve(
                 &cli.url,
@@ -828,6 +832,7 @@ async fn run() -> anyhow::Result<()> {
                     task,
                     max_new_tokens,
                     threshold,
+                    temperature,
                 },
             )
             .await?;
