@@ -19,7 +19,9 @@ use surql::query::helpers::VectorDistanceType;
 use surql::types::operators::{and_, eq};
 use surql::types::RecordID;
 
-use antumbra_core::{ExpertId, Memory, MemoryId, MemoryNetwork, Result, TenantId};
+use antumbra_core::{
+    CompartmentId, ExpertId, Memory, MemoryId, MemoryNetwork, MemoryStatus, Result, TenantId, UserId,
+};
 
 use crate::dto::parse_dt;
 use crate::error::map;
@@ -45,6 +47,14 @@ struct MemoryRow {
     volatile: bool,
     #[serde(default)]
     consolidated_expert: Option<String>,
+    #[serde(default)]
+    compartment: Option<String>,
+    #[serde(default)]
+    author: Option<String>,
+    #[serde(default)]
+    author_host: Option<String>,
+    #[serde(default)]
+    status: MemoryStatus,
     created_at: String,
     updated_at: String,
 }
@@ -62,6 +72,10 @@ impl MemoryRow {
             evidence: m.evidence.clone(),
             volatile: m.volatile,
             consolidated_expert: m.consolidated_expert.as_ref().map(|e| e.as_str().to_string()),
+            compartment: m.compartment.as_ref().map(|c| c.as_str().to_string()),
+            author: m.author.as_ref().map(|u| u.as_str().to_string()),
+            author_host: m.author_host.clone(),
+            status: m.status,
             created_at: m.created_at.to_rfc3339(),
             updated_at: m.updated_at.to_rfc3339(),
         }
@@ -79,6 +93,10 @@ impl MemoryRow {
             evidence: self.evidence,
             volatile: self.volatile,
             consolidated_expert: self.consolidated_expert.map(ExpertId::new),
+            compartment: self.compartment.map(CompartmentId::new),
+            author: self.author.map(UserId::new),
+            author_host: self.author_host,
+            status: self.status,
             created_at: parse_dt(&self.created_at)?,
             updated_at: parse_dt(&self.updated_at)?,
         })

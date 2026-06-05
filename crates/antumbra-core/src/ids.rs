@@ -71,6 +71,17 @@ string_id!(
     /// isolates by authenticating as its own tenant.
     TenantId
 );
+string_id!(
+    /// A user (person) within a tenant — the actor that owns and shares
+    /// compartments. `$auth.user` carries this; an agent acts as a user and
+    /// stamps provenance, but is not itself an ownership boundary.
+    UserId
+);
+string_id!(
+    /// A compartment (a named "latent-space" of memories) — the unit of
+    /// organization, sharing, deletion, and reference-scope within a tenant.
+    CompartmentId
+);
 
 /// Monotonic generation counter for the durable loop (ADR-0008).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]

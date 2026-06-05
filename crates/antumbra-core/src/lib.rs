@@ -10,6 +10,7 @@
 //! - **antumbra** = the counterfactual boundary, the keystone ([`boundary`], ADR-0004)
 
 pub mod boundary;
+pub mod compartment;
 pub mod error;
 pub mod evaluation;
 pub mod expert;
@@ -32,8 +33,11 @@ pub use boundary::{FailureBoundary, Grain};
 pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};
 pub use expert::{cosine_similarity, Expert};
 pub use generational::{GenerationHead, LoopState};
-pub use ids::{BoundaryId, ExpertId, Generation, MemoryId, RunId, ShadowId, TenantId};
-pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork};
+pub use compartment::{Capability, Compartment, Grant, Origin};
+pub use ids::{
+    BoundaryId, CompartmentId, ExpertId, Generation, MemoryId, RunId, ShadowId, TenantId, UserId,
+};
+pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork, MemoryStatus};
 pub use orchestration::{ComposeStrategy, OrchestrationRun, OrchestrationStatus};
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};

@@ -13,7 +13,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ExpertId, MemoryId, TenantId};
+use crate::ids::{CompartmentId, ExpertId, MemoryId, TenantId, UserId};
 
 /// Which network a memory belongs to — the coarse skill/kind it carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +33,26 @@ impl MemoryNetwork {
             MemoryNetwork::World => "world",
             MemoryNetwork::Bank => "bank",
             MemoryNetwork::Opinion => "opinion",
+        }
+    }
+}
+
+/// Whether a memory is a committed trace or a *planned* one — an announced
+/// intent that other agents can see before it is acted on (the "planned
+/// changes" awareness signal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryStatus {
+    #[default]
+    Committed,
+    Planned,
+}
+
+impl MemoryStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MemoryStatus::Committed => "committed",
+            MemoryStatus::Planned => "planned",
         }
     }
 }
@@ -121,6 +141,15 @@ pub struct Memory {
     /// Set once the trace has graduated into the umbra: the expert it produced.
     /// A contradiction against a consolidated memory retires this expert.
     pub consolidated_expert: Option<ExpertId>,
+    /// The compartment this memory lives in. `None` = the author's default
+    /// compartment (resolved at the boundary). The unit of sharing/reference.
+    pub compartment: Option<CompartmentId>,
+    /// Provenance: the user who authored the memory, and the host/device it was
+    /// written from (so a recall can say who learned this, and where).
+    pub author: Option<UserId>,
+    pub author_host: Option<String>,
+    /// Committed vs a planned/announced intent (cross-agent awareness).
+    pub status: MemoryStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -146,6 +175,10 @@ impl Memory {
             evidence: Vec::new(),
             volatile: false,
             consolidated_expert: None,
+            compartment: None,
+            author: None,
+            author_host: None,
+            status: MemoryStatus::Committed,
             created_at: now,
             updated_at: now,
         }
@@ -153,6 +186,25 @@ impl Memory {
 
     pub fn with_embedding(mut self, embedding: Vec<f32>) -> Self {
         self.embedding = Some(embedding);
+        self
+    }
+
+    /// Place the memory in a compartment (the unit of sharing).
+    pub fn in_compartment(mut self, compartment: impl Into<CompartmentId>) -> Self {
+        self.compartment = Some(compartment.into());
+        self
+    }
+
+    /// Stamp provenance: who authored it and from which host/device.
+    pub fn by(mut self, author: impl Into<UserId>, host: impl Into<String>) -> Self {
+        self.author = Some(author.into());
+        self.author_host = Some(host.into());
+        self
+    }
+
+    /// Mark the memory as a planned/announced intent rather than committed.
+    pub fn planned(mut self) -> Self {
+        self.status = MemoryStatus::Planned;
         self
     }
 
