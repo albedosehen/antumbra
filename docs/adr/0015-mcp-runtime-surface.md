@@ -1,6 +1,21 @@
 # ADR-0015 - The MCP server: Antumbra's runtime surface
 
-**Status:** Accepted (v0, stdio single-tenant) · **Date:** 2026-06-04 · **Related:** 0005 (gate/route), 0012 (Penumbra), 0013 (identity), 0014 (compartments)
+**Status:** Accepted (stdio single-tenant + networked JWT multi-tenant) · **Date:** 2026-06-04 · **Related:** 0005 (gate/route), 0012 (Penumbra), 0013 (identity), 0014 (compartments)
+
+> **Networked multi-tenant surface (2026-06-05).** `--http <addr>` serves the same tools over rmcp's
+> streamable-HTTP transport (axum), multi-tenant **per request**: each request carries a signed JWT whose
+> `tenant`/`user` claims become `$auth` (the decision was JWT claims over a token→identity lookup — the verified
+> token *is* the identity, so a leaked token grants exactly its claimed scope). `auth.rs` verifies the bearer
+> token (HS256 secret or RS256 PEM public key; mandatory `exp`; optional `aud`) and `http.rs` resolves identity
+> *before* dispatch — rmcp's service factory takes no request context, so the handler verifies the token then
+> looks up (or lazily builds) a per-identity session whose `McpServer` is already `signin`'d as that
+> `(tenant, user)`, and delegates. Each identity owns its own store connection (signin binds the session).
+> **Caveat:** true enforcement of the engine ACL over the network requires pointing `--url` at a real SurrealDB
+> server (`ws://`) where record-access PERMISSIONS are live; on the embedded kv engine the in-process session is
+> effectively root, so the networked server's isolation guarantee is only as strong as the engine it is given.
+> Verified: JWT core (7 tests) and the HTTP auth boundary (rejects missing/garbage/non-bearer with 401 before any
+> store work). Still to do: the authenticated happy-path against a live deployment, and "live propagation"
+> (server→client SSE notifications when a shared compartment changes) — today it is recall-on-demand.
 
 ## Context
 
@@ -30,10 +45,11 @@ real embedder (candle BERT) lands under `--features models`; a byte-histogram fa
 
 - **Positive:** Antumbra is usable as an agent's memory + routing engine today; one MCP server, one engine, one
   tenant boundary; consolidate/recall/route all hit a single store.
-- **Negative:** v0 is **stdio, single-tenant** — the networked, per-request multi-tenant surface (HTTP, tenant
-  from authenticated identity, live propagation) is the next step; `ask` (serve *through* the routed expert) and
-  the consolidate/retire owner ops are not yet on the surface (owner ops belong on a future admin surface, not
-  the tenant session).
+- **Negative:** the networked surface's isolation is only enforced when `--url` points at a real SurrealDB
+  server (the embedded kv session is in-process root); **live propagation** (push on shared-compartment change)
+  is not yet built (recall-on-demand today); and `ask` (serve *through* the routed expert) plus the
+  consolidate/retire owner ops are not yet on the surface (owner ops belong on a future admin surface, not the
+  tenant session).
 - **Neutral:** `get_neighbors` 1-hop today (native N-hop graph traversal deferred, ADR-0014).
 
 ## Alternatives considered
