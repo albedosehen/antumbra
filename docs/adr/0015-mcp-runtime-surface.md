@@ -21,8 +21,10 @@
 > an edge device; a high-concurrency deployment points `--url` at a `ws://` server and the model is unchanged).
 > The stateless JSON response mode keeps each `handle` bounded so the lock never spans a long-lived stream.
 > Verified: JWT core (7), HTTP auth boundary (3, 401 before any store work), embedded single-writer + serialized
-> isolation (3). Still to do: the authenticated happy-path against a live deployment, and "live propagation"
-> (server→client SSE notifications when a shared compartment changes) — today it is recall-on-demand.
+> isolation (3), and the **authenticated happy-path** (a valid token → signin → rmcp dispatches `initialize` →
+> 200 with `serverInfo`, driven through the router via `oneshot`). Deferred to the [roadmap](../roadmap.md):
+> R-1 the collector/sync (local-embedded ↔ remote-authoritative, the multi-device story) and R-2 live
+> propagation (server→client SSE push on shared-compartment change; today recall-on-demand).
 
 ## Context
 

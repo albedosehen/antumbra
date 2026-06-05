@@ -238,4 +238,64 @@ mod tests {
             StatusCode::UNAUTHORIZED
         );
     }
+
+    fn valid_token() -> String {
+        use jsonwebtoken::{encode, get_current_timestamp, Algorithm, EncodingKey, Header};
+        #[derive(serde::Serialize)]
+        struct C {
+            tenant: String,
+            user: String,
+            exp: u64,
+        }
+        encode(
+            &Header::new(Algorithm::HS256),
+            &C {
+                tenant: "ws:t".into(),
+                user: "user:t".into(),
+                exp: get_current_timestamp() + 3600,
+            },
+            &EncodingKey::from_secret(b"test-secret"),
+        )
+        .unwrap()
+    }
+
+    // The happy path: a valid token verifies, the shared connection signs in as
+    // the identity, and rmcp dispatches `initialize` to the McpServer — proving
+    // the full auth -> signin -> handle wiring end to end (provisioning the
+    // identity on first contact). No socket: the router is driven via oneshot.
+    #[tokio::test]
+    async fn valid_token_reaches_the_service() {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "test", "version": "0" }
+            }
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            // A real HTTP client always sends Host; oneshot does not synthesize it.
+            .header(header::HOST, "localhost")
+            .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .body(Body::from(body))
+            .unwrap();
+        let resp = router(state().await).oneshot(req).await.unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert_eq!(status, StatusCode::OK, "reached service? body: {text}");
+        // Stateless mode may answer as JSON or a single SSE `data:` line; either
+        // way the initialize result (serverInfo) must be present.
+        assert!(
+            text.contains("serverInfo") || text.contains("protocolVersion"),
+            "expected an initialize result, got: {text}"
+        );
+    }
 }
