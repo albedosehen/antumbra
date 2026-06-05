@@ -47,7 +47,9 @@ struct MemoryRow {
     volatile: bool,
     #[serde(default)]
     consolidated_expert: Option<String>,
-    #[serde(default)]
+    // Absent (not null) when None so the engine sees `compartment = NONE` for
+    // un-compartmentalized memories (the shared tenant pool).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     compartment: Option<String>,
     #[serde(default)]
     author: Option<String>,

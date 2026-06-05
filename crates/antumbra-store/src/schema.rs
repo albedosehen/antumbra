@@ -34,6 +34,26 @@ const SHARED_POPULATION_PERMS: [(&str, &str); 4] = [
     ("delete", "false"),
 ];
 
+/// Tenant-scoped permissions: any authenticated session in the tenant may
+/// read/write the row (the engine still bars cross-tenant access).
+const TENANT_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "tenant_id = $auth.tenant"),
+    ("update", "tenant_id = $auth.tenant"),
+    ("delete", "tenant_id = $auth.tenant"),
+];
+
+/// The compartment-aware read rule for `memory` (the grant-graph ACL): a memory
+/// is visible to a session when it is in the session's tenant AND either it is
+/// un-compartmentalized (the shared tenant pool), OR its compartment is owned by
+/// `$auth.user`, OR its compartment is granted to `$auth.user`. Evaluated by the
+/// engine per row via subqueries over the (tenant-readable) compartment/grant
+/// tables, so a forgotten app filter cannot leak and a revoke takes effect at
+/// once.
+const MEMORY_SELECT_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
+     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user) \
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user))";
+
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
     vec![
@@ -115,7 +135,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("memory")
             .with_mode(TableMode::Schemaless)
             .with_permissions([
-                ("select", "tenant_id = $auth.tenant"),
+                ("select", MEMORY_SELECT_RULE),
                 ("create", "tenant_id = $auth.tenant"),
                 ("update", "tenant_id = $auth.tenant"),
                 ("delete", "tenant_id = $auth.tenant"),
@@ -149,6 +169,25 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_indexes([
                 index("memory_edge_from_idx", ["tenant_id", "from_id"]),
                 index("memory_edge_to_idx", ["tenant_id", "to_id"]),
+            ]),
+        // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
+        // subqueries resolve; ownership/sharing is carried in the rows (owner +
+        // the grant table) and enforced by the memory rule.
+        table_schema("compartment")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(TENANT_PERMS)
+            .with_indexes([
+                unique_index("compartment_key_uq", ["tenant_id", "key"]),
+                index("compartment_owner_idx", ["tenant_id", "owner"]),
+            ]),
+        // Capability grants (intra-tenant, user-to-user). Tenant-readable so the
+        // memory ACL can resolve `grantee = $auth.user`.
+        table_schema("grant")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(TENANT_PERMS)
+            .with_indexes([
+                index("grant_grantee_idx", ["tenant_id", "grantee"]),
+                index("grant_compartment_idx", ["tenant_id", "compartment"]),
             ]),
         // Principals: one record per (tenant, user). The record-access SIGNIN
         // resolves a principal so `$auth` carries both `$auth.tenant` (the hard
