@@ -21,7 +21,7 @@ use antumbra_core::{
     Capability, Compartment, CompartmentId, EdgeType, Grant, Memory, MemoryEdge, MemoryId,
     MemoryNetwork, Origin, TenantId, UserId,
 };
-use antumbra_store::repo::{compartment, edge, memory, router};
+use antumbra_store::repo::{compartment, edge, expert, memory, router};
 use antumbra_store::Store;
 
 /// One (tenant, user) MCP session over its Penumbra. `#[tool_handler]` resolves
@@ -238,10 +238,19 @@ struct RouteParams {
     top_k: Option<u32>,
 }
 
+/// Minimum cosine similarity for one of the user's *private* experts to be
+/// offered as a route candidate (a heuristic floor — private experts are not in
+/// the shared learned router, so they are matched directly by centroid; a
+/// per-private-expert learned boundary is the eventual refinement).
+const PRIVATE_ROUTE_FLOOR: f32 = 0.3;
+
 #[derive(Serialize, schemars::JsonSchema)]
 struct RouteHit {
     expert_id: String,
     probability: f32,
+    /// `true` if this is one of *your* private experts (consolidated from your
+    /// compartment), matched by centroid; `false` for a shared expert.
+    private: bool,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -453,39 +462,52 @@ impl McpServer {
     /// Route a task across the shared expert population (the brain). Returns the
     /// covering expert(s) ranked, or escalate when the task is out of
     /// distribution. Pure-arithmetic gate inference (no model load).
-    #[tool(description = "Route a task across the shared expert population: which expert(s) cover it, ranked, or escalate if none.")]
+    #[tool(description = "Route a task across the shared population AND your private experts: which expert(s) cover it, ranked, or escalate if none.")]
     async fn route(&self, Parameters(p): Parameters<RouteParams>) -> Result<Json<RouteOut>, ErrorData> {
         let v = self.embedder.embed(&p.task).await.map_err(err)?;
-        let router = match router::load(&self.store).await.map_err(err)? {
-            Some(r) => r,
-            None => {
-                return Ok(Json(RouteOut {
-                    covered: false,
-                    escalate: true,
-                    routes: Vec::new(),
-                }))
-            }
-        };
-        if !router.covers(&v) {
-            return Ok(Json(RouteOut {
-                covered: false,
-                escalate: true,
-                routes: Vec::new(),
-            }));
-        }
         let k = p.top_k.unwrap_or(3) as usize;
-        let routes = router
-            .route(&v)
-            .into_iter()
-            .take(k)
-            .map(|(id, probability)| RouteHit {
-                expert_id: id.as_str().to_string(),
-                probability,
-            })
-            .collect();
+        let mut routes: Vec<RouteHit> = Vec::new();
+
+        // Shared experts via the learned router (pure-arithmetic gate).
+        if let Some(router) = router::load(&self.store).await.map_err(err)? {
+            if router.covers(&v) {
+                for (id, probability) in router.route(&v) {
+                    routes.push(RouteHit {
+                        expert_id: id.as_str().to_string(),
+                        probability,
+                        private: false,
+                    });
+                }
+            }
+        }
+
+        // The user's own private experts (not in the shared router) — matched by
+        // centroid. The session's expert ACL already scopes the list to shared +
+        // own-private; the explicit owner filter keeps only the private ones.
+        for e in expert::list(&self.store).await.map_err(err)? {
+            if e.owner.as_ref() == Some(&self.user) {
+                if let Some(sim) = e.capability_similarity(&v) {
+                    if sim >= PRIVATE_ROUTE_FLOOR {
+                        routes.push(RouteHit {
+                            expert_id: e.id.as_str().to_string(),
+                            probability: sim,
+                            private: true,
+                        });
+                    }
+                }
+            }
+        }
+
+        routes.sort_by(|a, b| {
+            b.probability
+                .partial_cmp(&a.probability)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        routes.truncate(k);
+        let covered = !routes.is_empty();
         Ok(Json(RouteOut {
-            covered: true,
-            escalate: false,
+            covered,
+            escalate: !covered,
             routes,
         }))
     }
@@ -574,9 +596,10 @@ mod tests {
     use super::*;
     use antumbra_core::router::{LearnedRouter, RouterExpert};
     use antumbra_core::testing::FixedEmbedder;
-    use antumbra_core::ExpertId;
-    use antumbra_store::repo::router;
+    use antumbra_core::{Expert, ExpertId, Generation};
+    use antumbra_store::repo::{expert, router};
     use antumbra_store::EMBED_DIM;
+    use chrono::Utc;
 
     async fn server() -> McpServer {
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();
@@ -721,6 +744,44 @@ mod tests {
         assert!(r.0.covered && !r.0.escalate);
         assert_eq!(r.0.routes.len(), 1);
         assert_eq!(r.0.routes[0].expert_id, "expert:adder");
+
+        // A PRIVATE expert owned by this session's user is matched by centroid
+        // and offered alongside the shared route (flagged private).
+        let cap = FixedEmbedder::new(EMBED_DIM)
+            .embed("my private skill")
+            .await
+            .unwrap();
+        let now = Utc::now();
+        expert::insert(
+            &s.store,
+            &Expert {
+                id: ExpertId::new("expert:mine"),
+                name: "mine".into(),
+                base_model: "base".into(),
+                artifact_uri: "mem://mine".into(),
+                capability_card: serde_json::Value::Null,
+                capability_vec: Some(cap),
+                fitness: 1.0,
+                frozen_at: Some(now),
+                generation: Generation::ZERO,
+                owner: Some(UserId::new("user:test")),
+                compartment: Some(CompartmentId::new("comp:test")),
+                created_at: now,
+            },
+        )
+        .await
+        .unwrap();
+        let r = s
+            .route(Parameters(RouteParams {
+                task: "my private skill".into(),
+                top_k: Some(5),
+            }))
+            .await
+            .unwrap();
+        assert!(
+            r.0.routes.iter().any(|h| h.private && h.expert_id == "expert:mine"),
+            "the user's private expert must be routable"
+        );
     }
 
     #[tokio::test]
