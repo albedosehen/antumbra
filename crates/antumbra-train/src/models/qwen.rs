@@ -999,40 +999,58 @@ impl QwenCausalLm {
         }
     }
 
-    /// One optimizer step over the whole batch: accumulate the per-example
-    /// gradients, average them, and apply a single update (true mini-batch
-    /// descent). The averaged gradient is far less noisy than any single
-    /// example's, so the adapter learns the shared, prompt-conditioned mapping
-    /// instead of lurching toward whichever example was seen last -- and a higher
-    /// learning rate stays stable ("Beware of the Batch Size"). Returns the mean
-    /// supervised loss over the batch.
+    /// Shuffled mini-batch SGD: step on the **mean loss of a small micro-batch**
+    /// rather than one example at a time. By linearity of backprop the gradient of
+    /// the mean loss is the mean of the per-example gradients, so each step is a
+    /// genuine mini-batch update -- far less noisy than batch-of-1, stable at a
+    /// higher learning rate ("Beware of the Batch Size") and free of last-example
+    /// dominance within the group.
+    ///
+    /// Why mini-batches and not one step over the whole batch: accumulating the
+    /// loss retains every example's forward graph until its backward, so peak
+    /// memory scales with the group -- the full (replay-inflated) batch OOMs a
+    /// 24 GB card. A small group caps retained graphs while still capturing most
+    /// of the variance reduction. (Manually merging per-example `GradStore`s would
+    /// be O(1) memory, but candle's `step` matches grads to vars by tensor
+    /// identity and a hand-rebuilt store silently matched none -- a no-op.) The
+    /// batch is shuffled first so groups are random across rounds. Returns the
+    /// mean supervised loss over the steps taken.
     fn train_batch(&mut self, batch: &[SftExample]) -> Result<f32> {
-        let mut accum: Option<candle_core::backprop::GradStore> = None;
+        // Retained forward graphs per step; small enough to fit alongside the
+        // frozen base, large enough to denoise the gradient over batch-of-1.
+        const MICRO_BATCH: usize = 4;
+
+        let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut order: Vec<usize> = (0..batch.len()).collect();
+        let mut rng = StdRng::seed_from_u64(0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)));
+        order.shuffle(&mut rng);
+
         let mut total = 0.0f32;
-        let mut supervised = 0usize;
-        for example in batch {
-            let Some(loss) = self.forward_loss(example)? else {
-                continue;
-            };
-            total += loss.to_scalar::<f32>().map_err(ce)?;
-            supervised += 1;
-            let grads = loss.backward().map_err(ce)?;
-            match accum.as_mut() {
-                None => accum = Some(grads),
-                Some(acc) => {
-                    super::grad_accum::accumulate_into(acc, &grads).map_err(ce)?
+        let mut steps = 0usize;
+        for group in order.chunks(MICRO_BATCH) {
+            let mut losses: Vec<Tensor> = Vec::with_capacity(group.len());
+            for &i in group {
+                if let Some(loss) = self.forward_loss(&batch[i])? {
+                    losses.push(loss);
                 }
             }
+            if losses.is_empty() {
+                continue;
+            }
+            let n = losses.len();
+            let mut sum = losses[0].clone();
+            for loss in &losses[1..] {
+                sum = (sum + loss).map_err(ce)?;
+            }
+            let mean = (sum / n as f64).map_err(ce)?;
+            total += mean.to_scalar::<f32>().map_err(ce)?;
+            self.opt.backward_step(&mean).map_err(ce)?;
+            steps += 1;
         }
-        if supervised == 0 {
+        if steps == 0 {
             return Ok(0.0);
         }
-        if let Some(mut acc) = accum {
-            // Average the accumulated gradient, then take the single step.
-            super::grad_accum::scale_grads(&mut acc, 1.0 / supervised as f64).map_err(ce)?;
-            self.opt.step(&acc).map_err(ce)?;
-        }
-        Ok(total / supervised as f32)
+        Ok(total / steps as f32)
     }
 }
 
