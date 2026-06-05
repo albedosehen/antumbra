@@ -6,9 +6,10 @@
 use chrono::Utc;
 
 use antumbra_core::{
-    Capability, Compartment, CompartmentId, Grant, Memory, MemoryNetwork, TenantId, UserId,
+    Capability, Compartment, CompartmentId, EdgeType, Grant, Memory, MemoryEdge, MemoryId,
+    MemoryNetwork, TenantId, UserId,
 };
-use antumbra_store::repo::{compartment, memory, principal};
+use antumbra_store::repo::{compartment, edge, memory, principal};
 use antumbra_store::Store;
 
 fn mem(id: &str, tenant: &str, content: &str, comp: Option<&str>) -> Memory {
@@ -93,4 +94,59 @@ async fn memory_visibility_follows_compartment_grants() {
     store.signin(&t, &ua).await.unwrap();
     let seen = visible_ids(&store).await;
     assert!(seen.contains(&"memory:priv".to_string()) && seen.contains(&"memory:pub".to_string()));
+}
+
+#[tokio::test]
+async fn linking_into_a_compartment_requires_link_capability() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let t = TenantId::new("ws:org");
+    let ua = UserId::new("user:a");
+    let ub = UserId::new("user:b");
+    let ca = CompartmentId::new("comp:a");
+    let now = Utc::now();
+
+    principal::provision(&store, &t, &ua).await.unwrap();
+    principal::provision(&store, &t, &ub).await.unwrap();
+    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
+        .await
+        .unwrap();
+    memory::upsert(&store, &mem("memory:target", "ws:org", "A target", Some("comp:a")))
+        .await
+        .unwrap();
+    memory::upsert(&store, &mem("memory:source", "ws:org", "shared source", None))
+        .await
+        .unwrap();
+
+    let e = MemoryEdge::new(t.clone(), "memory:source", "memory:target", EdgeType::References, 1.0, now);
+    let from = MemoryId::new("memory:source");
+
+    // userB with only REFERENCE can read A's target but may not LINK into it.
+    compartment::grant(
+        &store,
+        &Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Reference, ua.clone(), now),
+    )
+    .await
+    .unwrap();
+    store.signin(&t, &ub).await.unwrap();
+    let _ = edge::relate(&store, &e).await; // engine denies the create (no link)
+    assert!(
+        edge::neighbors(&store, &t, &from, None).await.unwrap().is_empty(),
+        "reference grant must not permit linking"
+    );
+
+    // Upgrade to LINK -> the edge create now succeeds.
+    store.invalidate().await.unwrap();
+    compartment::grant(
+        &store,
+        &Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Link, ua.clone(), now),
+    )
+    .await
+    .unwrap();
+    store.signin(&t, &ub).await.unwrap();
+    edge::relate(&store, &e).await.unwrap();
+    assert_eq!(
+        edge::neighbors(&store, &t, &from, None).await.unwrap().len(),
+        1,
+        "link grant must permit linking"
+    );
 }

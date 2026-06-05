@@ -54,6 +54,16 @@ const MEMORY_SELECT_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NO
      OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user) \
      OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user))";
 
+/// The link-capability gate for `memory_edge` create/update: you may create an
+/// edge only when its *target* memory is in a compartment you may LINK into —
+/// the shared pool (un-compartmentalized), a compartment you own, or one granted
+/// to you with the `link` capability (not mere `reference`). Read visibility of
+/// the target is already enforced when an edge is resolved back to a memory.
+const EDGE_LINK_RULE: &str = "tenant_id = $auth.tenant AND to_id IN (SELECT VALUE key FROM memory \
+     WHERE compartment = NONE \
+     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user) \
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link'))";
+
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
     vec![
@@ -162,8 +172,8 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", "tenant_id = $auth.tenant"),
-                ("create", "tenant_id = $auth.tenant"),
-                ("update", "tenant_id = $auth.tenant"),
+                ("create", EDGE_LINK_RULE),
+                ("update", EDGE_LINK_RULE),
                 ("delete", "tenant_id = $auth.tenant"),
             ])
             .with_indexes([
