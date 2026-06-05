@@ -35,7 +35,8 @@ compartment).
 ## Foundational — make the current surface provably work
 
 ### R-3 · Networked MCP end-to-end validation
-**Status:** in progress. The JWT core, auth boundary, and per-tenant isolation are
-unit-tested; the authenticated happy-path (a valid token reaching a real tool
-call) is the closing gap, and a live multi-tenant deployment against a `ws://`
-SurrealDB is the field test. R-1 and R-2 build on this holding.
+**Status:** done in unit form. The JWT core, auth boundary, per-tenant isolation
+(through the real MCP tools), and the authenticated happy-path (a valid token
+verifies → signin → rmcp dispatches `initialize` → 200) are all tested. The one
+remaining checkpoint is a **live multi-tenant deployment** against a real `ws://`
+SurrealDB — a field test, not a unit gap. R-1 and R-2 build on that holding.

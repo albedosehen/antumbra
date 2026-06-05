@@ -194,33 +194,28 @@ The Penumbra memory store, engine-enforced multi-tenancy, and compartments (ADR-
 record-access auth, and the engine-enforced ACL); `antumbra-train` carries the consolidation gate + replay; the
 `antumbra-mcp` server is the agent-facing runtime surface (ADR-0015).
 
-### v0 implementation status (2026-06-02)
+### v0 implementation status (2026-06-05)
 
-> **Update (2026-06-03).** Since this snapshot: MT-3 is validated on the GPU (the trainer learns - pass-rate to
-> 1.0 under both a convention and a real exec verifier), the real candle BERT embedder is wired, the gate does
-> relative-coverage out-of-scope escalation, and capability vectors are derived from evaluated behavior. See
-> the [Technical Reference](technical-reference.md) §13 for current validation results.
-
-All eleven crates exist and compile; the workspace is green (`cargo test`, clippy clean) on Rust 1.96 + your
-**surql-rs** (`oneiriq-surql`, the local `release/0.28.0` checkout) on the SurrealDB 3.x driver, **builder-only -
-no hand-written SurrealQL**. (surql-rs gained three fixes this cycle — table/edge `PERMISSIONS` rendering and
-`DEFINE ACCESS IF NOT EXISTS` — required for the engine-enforced ACL; bundled toward a `0.28.0` release.)
+All **eleven crates** exist and compile; the workspace is green (`cargo test`, clippy clean) on your **surql-rs**
+(`oneiriq-surql`, the local `release/0.28.0` checkout, builder-only — no hand-written SurrealQL) on the SurrealDB
+3.x driver. Since the early snapshots: the trainer is GPU-validated (MT-3, pass-rate to 1.0), the real candle
+BERT embedder + relative-coverage gate are wired, the Penumbra memory store landed with engine-enforced
+tenant/compartment isolation (ADR-0012/0013/0014), and the agent-facing MCP runtime surface (ADR-0015) is up.
 
 | Crate | State |
 |---|---|
-| core, store, critic, gate, boundary, loop | **implemented + tested** - the generational loop persists its full lineage (shadow lifecycle, source-tagged rewards, evaluation runs, graduated experts, open-negative boundaries) and resumes from the persisted head across process restarts (proven on `surrealkv://`). |
-| train (ADR-0002/0010) | **implemented, compiles** - RAFT reward-ranked LoRA fine-tuning: candle Qwen2.5-Coder + LoRA `CausalLm` (generate + SFT + save), `RaftTrainer` (the `Trainer` port), `CommandVerifier` (env-as-reward), `JsonCorpus`. Behind the `models` feature; CPU-tested except the model forward, which is validated on the GPU (`docs/running-the-trainer.md`). |
-| serve (ADR-0006) | **seam only** - `Serve` port returns `Unimplemented`; not needed for training (the trainer does its own candle generation). |
-| cli | `antumbra migrate · schema · experts · status · loop · route · seed · train · ask · scope` |
+| core, store, critic, gate, boundary, loop | **implemented + tested** - the generational loop persists its full lineage and resumes across restarts (proven on `surrealkv://`); the store adds the Penumbra (memory + graph + compartments) under an engine-enforced, record-access ACL (`$auth.tenant`/`$auth.user`), with `penumbra::propose_compartments` clustering. |
+| train (ADR-0002/0010/0012) | **implemented** - RAFT/GRPO LoRA fine-tuning (candle Qwen2.5-Coder + LoRA `CausalLm`), capture/teach intake, consolidation (gate + replay), memory-import. Behind `models`; CPU-tested except the model forward (GPU-validated, `docs/running-the-trainer.md`). |
+| serve (ADR-0006) | **implemented** - `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert); device-free resolution CPU-tested, generate+swap pending GPU validation. |
+| mcp (ADR-0015) | **implemented + tested** - 13 tools over the Penumbra + population; stdio (single identity) and networked JWT multi-tenant HTTP (per-request `$auth`, isolation proven on embedded). |
+| cli | `migrate · schema · experts · status · loop · route · seed · ask · serve · train · teach · evolve · populate · memory-import · consolidate · consolidate-compartment · propose-compartments · retire · scope · gate-train · compose` |
+| tui (ADR-0005) | operator console (ratatui) over the live population/gate. |
 
-Since validated on the GPU: the trainer learns (MT-3), the real candle BERT embedder + relative-coverage gate
-(route + escalate), capability vectors from evaluated behavior, and the keystone end-to-end (counterfactual
-search -> actionable boundary -> scoped inhibition). See the [Technical Reference](technical-reference.md) §13.
-
-Not yet runtime-validated / built: the real `AcceptabilityProbe` + llama/mistral serving (ADR-0006), automatic
-governing-feature discovery, the learned latent gate (v0 is the heuristic coverage gate), GRPO (v1 over RAFT),
-GGUF-Q4 quantized backward (MT-4), `SCHEMAFULL` + the surql-rs migration-history runner, and the
-orchestration-run repo. The validations to date are catalogued in the [experiment ledger](../experiments/README.md).
+Not yet runtime-validated / built: GPU validation of `MultiAdapterServe`'s swap and a real private-LoRA mint
+(`consolidate-compartment`); a live multi-tenant deployment of the networked MCP against a `ws://` server; the
+learned latent gate (v0 is the heuristic coverage gate); GGUF-Q4 quantized backward (MT-4); `SCHEMAFULL` + the
+surql-rs migration-history runner. Forward-looking work is tracked in the [roadmap](roadmap.md); validations to
+date are in the [experiment ledger](../experiments/README.md).
 
 ---
 
