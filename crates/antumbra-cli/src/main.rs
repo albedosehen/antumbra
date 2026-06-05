@@ -344,6 +344,34 @@ enum Command {
         #[arg(long)]
         expert: String,
     },
+    /// Consolidate a private compartment into a **private expert** (ADR-0014):
+    /// gather the compartment's memories, score them through the consolidation
+    /// gate, capture the graduates, and mint an expert owned by the user (not in
+    /// the shared router; routed for its owner by centroid). Needs --features
+    /// models + a GPU.
+    ConsolidateCompartment {
+        #[arg(long)]
+        tenant: String,
+        #[arg(long)]
+        user: String,
+        #[arg(long)]
+        compartment: String,
+        /// Reinforcement floor for a memory to graduate (0 = any in-compartment).
+        #[arg(long, default_value_t = 0)]
+        min_recurrence: u32,
+        #[arg(long, default_value_t = 0.5)]
+        min_confidence: f32,
+        #[arg(long, default_value_t = 40)]
+        rounds: usize,
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        #[arg(long, default_value_t = 32)]
+        max_new_tokens: usize,
+        #[arg(long, default_value_t = 1e-3)]
+        lr: f64,
+        #[arg(long, default_value_t = 0.5)]
+        replay_ratio: f64,
+    },
 }
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
@@ -1547,6 +1575,35 @@ async fn main() -> anyhow::Result<()> {
                     samples,
                     max_new_tokens,
                     lr,
+                },
+            )
+            .await?;
+        }
+        Command::ConsolidateCompartment {
+            tenant,
+            user,
+            compartment,
+            min_recurrence,
+            min_confidence,
+            rounds,
+            samples,
+            max_new_tokens,
+            lr,
+            replay_ratio,
+        } => {
+            ops::consolidate_compartment(
+                &cli.url,
+                ops::ConsolidateCompartmentArgs {
+                    tenant,
+                    user,
+                    compartment,
+                    min_recurrence,
+                    min_confidence,
+                    rounds,
+                    samples,
+                    max_new_tokens,
+                    lr,
+                    replay_ratio,
                 },
             )
             .await?;

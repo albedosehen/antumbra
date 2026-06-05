@@ -151,6 +151,26 @@ pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
     rows.into_iter().map(MemoryRow::into_domain).collect()
 }
 
+/// A compartment's memories (the corpus for per-compartment consolidation,
+/// ADR-0014/0012). Tenant + compartment filtered; the engine ACL also applies
+/// under a tenant session.
+pub async fn list_by_compartment(
+    store: &Store,
+    tenant: &TenantId,
+    compartment: &CompartmentId,
+) -> Result<Vec<Memory>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("compartment", compartment.as_str()),
+        ));
+    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(MemoryRow::into_domain).collect()
+}
+
 /// A tenant's memories in one network (tenant + network filtered).
 pub async fn list_by_network(
     store: &Store,

@@ -217,6 +217,131 @@ pub async fn consolidate(_url: &str, _a: ConsolidateArgs) -> anyhow::Result<()> 
     anyhow::bail!("`consolidate` requires building with --features models (candle + a GPU)")
 }
 
+/// Parameters for [`consolidate_compartment`].
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
+pub struct ConsolidateCompartmentArgs {
+    pub tenant: String,
+    pub user: String,
+    pub compartment: String,
+    pub min_recurrence: u32,
+    pub min_confidence: f32,
+    pub rounds: usize,
+    pub samples: usize,
+    pub max_new_tokens: usize,
+    pub lr: f64,
+    pub replay_ratio: f64,
+}
+
+/// Consolidate a **private compartment** into a **private expert** (ADR-0014/0012,
+/// the personalization north star). Gathers the compartment's memories, scores
+/// them through the consolidation gate, captures the graduates, and mints an
+/// expert tagged `(owner = user, compartment)`. The expert is NOT added to the
+/// shared learned router (it would leak); the route tool matches it by centroid
+/// for its owner only. Runs as owner (training writes the expert table).
+#[cfg(feature = "models")]
+pub async fn consolidate_compartment(
+    url: &str,
+    a: ConsolidateCompartmentArgs,
+) -> anyhow::Result<()> {
+    use antumbra_core::{CompartmentId, Memory, TenantId, UserId};
+    use antumbra_store::repo::{memory, principal};
+
+    let store = crate::connect(url).await?;
+    let embedder = crate::make_embedder()?;
+    let tenant = TenantId::new(a.tenant.as_str());
+    let user = UserId::new(a.user.as_str());
+    let comp = CompartmentId::new(a.compartment.as_str());
+    principal::provision(&store, &tenant, &user).await?;
+
+    // Gather -> convert -> score -> graduate (all CPU; the gate is arithmetic).
+    let mems: Vec<Memory> = memory::list_by_compartment(&store, &tenant, &comp).await?;
+    let policy = ConsolidationPolicy {
+        min_confidence: a.min_confidence,
+        min_recurrence: a.min_recurrence,
+        ..ConsolidationPolicy::default()
+    };
+    let conv = ImportPolicy {
+        capture_threshold: 0.0,
+    };
+    let tasks: Vec<CorpusTask> = mems
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (i, MemoryRecord::from_memory(m)))
+        .filter(|(_, r)| score_memory(r, &policy).graduate)
+        .map(|(i, r)| to_task(&r, i, &conv).task)
+        .collect();
+    println!(
+        "compartment {} : {} memories, {} graduate",
+        a.compartment,
+        mems.len(),
+        tasks.len()
+    );
+    if tasks.is_empty() {
+        println!("nothing to consolidate");
+        return Ok(());
+    }
+
+    // Capture into a private expert (the only GPU step; the rest is CPU).
+    let cfg = RaftConfig {
+        samples_per_task: a.samples,
+        rounds: a.rounds,
+        max_new_tokens: a.max_new_tokens,
+        learning_rate: a.lr,
+        replay_ratio: a.replay_ratio,
+        ..RaftConfig::default()
+    };
+    let loader = CandleModelLoader::new(cfg.clone());
+    let verifier = antumbra_critic::CommandVerifier;
+    let name = format!("expert:{}:{}", a.user, a.compartment);
+    let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
+    let out = capture_corrections(&mut model, &verifier, &tasks, &RunId::new(name.clone()), &cfg, &[])
+        .await?;
+    let solved = if out.capability_exemplars.is_empty() {
+        tasks.iter().map(|t| t.prompt.clone()).collect()
+    } else {
+        out.capability_exemplars.clone()
+    };
+    let mut acc = vec![0.0f32; EMBED_DIM];
+    for text in &solved {
+        for (x, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
+            *x += b;
+        }
+    }
+    let nproto = solved.len().max(1) as f32;
+    let now = Utc::now();
+    let e = Expert {
+        id: ExpertId::new(name.clone()),
+        name: name.clone(),
+        base_model: cfg.base_model.clone(),
+        artifact_uri: out.adapter_uri,
+        capability_card: serde_json::json!({ "exemplars": solved, "compartment": a.compartment, "private": true }),
+        capability_vec: Some(acc.iter().map(|v| v / nproto).collect()),
+        fitness: out.final_fitness,
+        frozen_at: Some(now),
+        generation: Generation::ZERO,
+        owner: Some(user),
+        compartment: Some(comp),
+        created_at: now,
+    };
+    expert::delete(&store, &e.id).await?; // supersede on re-run
+    expert::insert(&store, &e).await?;
+    println!(
+        "minted PRIVATE expert {name} for {} (internalized {:.2})",
+        a.user, out.final_fitness
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "models"))]
+pub async fn consolidate_compartment(
+    _url: &str,
+    _a: ConsolidateCompartmentArgs,
+) -> anyhow::Result<()> {
+    anyhow::bail!(
+        "`consolidate-compartment` requires building with --features models (candle + a GPU)"
+    )
+}
+
 /// Supersede an expert by name and refresh the router — population-level
 /// forgetting. Wire a store's `report_contradiction` against a *consolidated*
 /// memory to this: a contradiction retires the expert that memory produced, so

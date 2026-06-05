@@ -33,3 +33,4 @@ models = ["dep:serde", "dep:tokenizers", "dep:hf-hub", "dep:rand"]
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+chrono.workspace = true

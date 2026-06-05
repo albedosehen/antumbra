@@ -100,6 +100,25 @@ impl MemoryRecord {
             id: s("id"),
         }
     }
+
+    /// Build a normalized record from a stored Penumbra memory (the source for
+    /// per-compartment consolidation, ADR-0014/0012). The compartment is the
+    /// skill grouping; strength/reinforcement/volatile carry the gate signals.
+    pub fn from_memory(m: &antumbra_core::Memory) -> Self {
+        Self {
+            content: m.content.clone(),
+            prompt: None,
+            scope: m.compartment.as_ref().map(|c| c.as_str().to_string()),
+            network: Some(m.network.as_str().to_string()),
+            marker: None,
+            forbid: Vec::new(),
+            confidence: Some(m.confidence),
+            reinforcement: Some(m.reinforcement),
+            volatile: Some(m.volatile),
+            verifiable: None,
+            id: Some(m.id.as_str().to_string()),
+        }
+    }
 }
 
 /// How much to trust an imported memory.
@@ -266,6 +285,31 @@ mod tests {
         // forbid is lowercased.
         assert!(src.contains("npm"));
         assert!(!src.contains("NPM"));
+    }
+
+    #[test]
+    fn from_memory_maps_compartment_and_gate_signals() {
+        let now = chrono::Utc::now();
+        let mut m = antumbra_core::Memory::new(
+            "memory:x",
+            "ws:1",
+            antumbra_core::MemoryNetwork::World,
+            "use deno install",
+            0.9,
+            now,
+        )
+        .in_compartment("comp:a");
+        m.reinforcement = 3;
+        let r = MemoryRecord::from_memory(&m);
+        assert_eq!(r.content, "use deno install");
+        assert_eq!(r.scope.as_deref(), Some("comp:a")); // compartment = the skill group
+        assert_eq!(r.network.as_deref(), Some("world"));
+        assert_eq!(r.confidence, Some(0.9));
+        assert_eq!(r.reinforcement, Some(3));
+        assert_eq!(r.id.as_deref(), Some("memory:x"));
+        // And it flows through the consolidation gate.
+        let v = crate::consolidate::score_memory(&r, &crate::consolidate::ConsolidationPolicy::default());
+        assert!(v.graduate, "a reinforced, verifiable compartment memory should graduate: {}", v.reason);
     }
 
     #[test]

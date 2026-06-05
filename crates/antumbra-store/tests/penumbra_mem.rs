@@ -5,9 +5,32 @@
 
 use chrono::Utc;
 
-use antumbra_core::{ExpertId, Memory, MemoryId, MemoryNetwork, TenantId};
+use antumbra_core::{CompartmentId, ExpertId, Memory, MemoryId, MemoryNetwork, TenantId};
 use antumbra_store::repo::memory;
 use antumbra_store::Store;
+
+#[tokio::test]
+async fn list_by_compartment_gathers_only_that_compartment() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let ws = TenantId::new("ws:a");
+    let mk = |id: &str, comp: Option<&str>| {
+        let m = Memory::new(id, "ws:a", MemoryNetwork::World, "c", 0.8, Utc::now())
+            .with_embedding(vec![1.0, 0.0, 0.0, 0.0]);
+        match comp {
+            Some(c) => m.in_compartment(c),
+            None => m,
+        }
+    };
+    memory::upsert(&store, &mk("memory:1", Some("comp:x"))).await.unwrap();
+    memory::upsert(&store, &mk("memory:2", Some("comp:y"))).await.unwrap();
+    memory::upsert(&store, &mk("memory:3", None)).await.unwrap();
+
+    let got = memory::list_by_compartment(&store, &ws, &CompartmentId::new("comp:x"))
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].id, MemoryId::new("memory:1"));
+}
 
 fn trace(id: &str, ws: &str, net: MemoryNetwork, content: &str, embed: Vec<f32>) -> Memory {
     Memory::new(id, ws, net, content, 0.8, Utc::now()).with_embedding(embed)
