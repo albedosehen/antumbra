@@ -81,18 +81,21 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("device_host_idx", ["host", "backend"])]),
         // Penumbra memory (the soft, editable consolidation source). Tenant-
-        // isolated by a `tenant_id` on every row, a composite unique index so
-        // the same key can exist per tenant, an HNSW recall index, and a
-        // per-tenant network index. The intended engine guard is a row-level
-        // `PERMISSIONS ... WHERE tenant_id = $auth.tenant` clause, but it is NOT
-        // emitted yet: oneiriq-surql 0.2.7 has no working renderer for table
-        // PERMISSIONS — both `to_surql_all_with_options` and `generate_table_sql`
-        // (a thin wrapper over it) emit a malformed `DEFINE FIELD PERMISSIONS
-        // ...`. Engine enforcement is blocked on fixing that crate. Until then
-        // isolation is the repo's explicit `WHERE tenant_id = ...` plus the
-        // per-record tenant re-check on point reads.
+        // isolated the way the data-plane design intends: a `tenant_id` on every
+        // row and an engine-enforced row-level `PERMISSIONS` clause comparing it
+        // to `$auth.tenant`, so a handler that forgets its filter still cannot
+        // leak — the engine refuses the read. The repo also carries an explicit
+        // `WHERE tenant_id = ...` as the documented second layer. The clause
+        // becomes load-bearing once a per-tenant `ScopeCredentials` session binds
+        // `$auth.tenant`; a rootful schema/migration session bypasses it.
         table_schema("memory")
             .with_mode(TableMode::Schemaless)
+            .with_permissions([
+                ("select", "tenant_id = $auth.tenant"),
+                ("create", "tenant_id = $auth.tenant"),
+                ("update", "tenant_id = $auth.tenant"),
+                ("delete", "tenant_id = $auth.tenant"),
+            ])
             .with_indexes([
                 unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
                 index("memory_tenant_network_idx", ["tenant_id", "network"]),
@@ -111,10 +114,10 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
 
 /// Validate every table and render the idempotent (`IF NOT EXISTS`) DDL the
 /// builders generate. The returned statements are surql-rs output, not
-/// hand-authored SurrealQL. Uses `generate_table_sql` (not the table's
-/// `to_surql_all_with_options`) because only the former renders table-level
-/// `PERMISSIONS` correctly on oneiriq-surql 0.2.7 — the latter emits a malformed
-/// `DEFINE FIELD PERMISSIONS ...` (defect to report upstream).
+/// hand-authored SurrealQL. Table-level `PERMISSIONS` render inline on the
+/// `DEFINE TABLE` statement (the surql-rs fix; published 0.2.7 emitted a
+/// malformed `DEFINE FIELD PERMISSIONS ...`, patched via the workspace's local
+/// checkout until released).
 pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for table in tables(embed_dim) {
@@ -122,4 +125,27 @@ pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
         out.extend(generate_table_sql(&table, true));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_table_carries_engine_enforced_tenant_permissions() {
+        let stmts = schema_statements(EMBED_DIM as u32).unwrap();
+        let define = stmts
+            .iter()
+            .find(|s| s.starts_with("DEFINE TABLE") && s.contains(" memory "))
+            .expect("memory DEFINE TABLE statement");
+        // The clause renders inline on DEFINE TABLE (valid SurrealQL), not as a
+        // malformed `DEFINE FIELD PERMISSIONS ...` statement. (Actions are
+        // emitted in BTreeMap order, so don't assume select is first.)
+        assert!(define.contains("PERMISSIONS FOR"));
+        assert!(define.contains("FOR select WHERE tenant_id = $auth.tenant"));
+        assert!(define.contains("FOR create WHERE tenant_id = $auth.tenant"));
+        assert!(define.contains("FOR update WHERE tenant_id = $auth.tenant"));
+        assert!(define.contains("FOR delete WHERE tenant_id = $auth.tenant"));
+        assert!(!stmts.iter().any(|s| s.contains("DEFINE FIELD PERMISSIONS")));
+    }
 }
