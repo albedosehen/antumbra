@@ -31,16 +31,30 @@ each cycle scans full tables — fine at penumbra scale).
 **Was deferred on:** a conflict/ordering policy — now decided (LWW).
 
 ### R-2 · Live propagation (real-time awareness)
-**Status:** deferred.
+**Status:** ENGINE BUILT (`antumbra-sync::propagate`, validated 2026-06-05); MCP
+SSE delivery remaining.
 **Shape:** server→client push when a **shared compartment** changes (a grantee's
 agent learns of new/planned memories without polling). SurrealDB `LIVE SELECT`
 detects the change; it is delivered as an MCP server notification over the
-streamable-HTTP SSE stream. **Tension to resolve:** the networked transport runs
-in stateless-JSON mode with a serialized authed section (ADR-0015); live
-notifications need a persistent per-subscriber SSE stream, so the lock must wrap
-only the DB POSTs, never the idle stream. Today the surface is recall-on-demand.
-**Depends on:** R-3; a subscription registry (which identity watches which
-compartment).
+streamable-HTTP SSE stream.
+**Done:** the detection + routing engine. `antumbra-store::repo::sync::watch_table`
+wraps surql-rs `LiveQuery` into a tokio change-feed channel — **proven to deliver
+on the embedded engine** (the key unknown). `propagate::watch_shared_memories`
+parses each memory change, resolves its **audience** (`compartment` owner +
+grantees, via new `repo::compartment::get`/`list_grants`), and emits a routed
+`MemoryChange { action, tenant, compartment, memory, recipients }`. Tested
+end-to-end: a write into a shared compartment reaches the owner and the grantee.
+**Remaining (the transport last mile):** deliver a `MemoryChange` to each
+recipient's live MCP client as an SSE notification. **Tension to resolve:** the
+networked transport runs in stateless-JSON mode (rmcp `StreamableHttpService`,
+single shared single-writer connection, serialized authed section — ADR-0015);
+live notifications need a persistent per-subscriber SSE stream, so the lock must
+wrap only the DB POSTs, never the idle stream. Needs a subscription registry
+(identity → active session) and a decision on stateful streaming vs the current
+stateless mode.
+**Depends on:** R-3 for the networked surface end-to-end.
+**Known gaps:** deletes are not routed (the notification payload carries no
+compartment on delete) — same tombstone gap as R-1.
 
 ## GPU-gated wiring
 

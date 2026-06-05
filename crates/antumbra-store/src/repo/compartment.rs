@@ -82,6 +82,22 @@ pub async fn list_owned(store: &Store, tenant: &TenantId, owner: &UserId) -> Res
     rows.into_iter().map(CompartmentRow::into_domain).collect()
 }
 
+/// Fetch one compartment by id within a tenant (e.g. to read its `owner` for
+/// audience resolution). `None` if absent or owned by another tenant.
+pub async fn get(
+    store: &Store,
+    tenant: &TenantId,
+    id: &CompartmentId,
+) -> Result<Option<Compartment>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(COMPARTMENT)
+        .map_err(map)?
+        .where_(and_(eq("tenant_id", tenant.as_str()), eq("key", id.as_str())));
+    let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().next().map(CompartmentRow::into_domain).transpose()
+}
+
 /// Delete a compartment (owner-scoped; the engine bars non-owners on memory).
 pub async fn delete(store: &Store, tenant: &TenantId, id: &CompartmentId) -> Result<()> {
     let condition = and_(eq("key", id.as_str()), eq("tenant_id", tenant.as_str()));
@@ -167,6 +183,26 @@ pub async fn list_for_grantee(store: &Store, tenant: &TenantId, grantee: &UserId
         .from_table(GRANT)
         .map_err(map)?
         .where_(and_(eq("tenant_id", tenant.as_str()), eq("grantee", grantee.as_str())));
+    let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(GrantRow::into_domain).collect()
+}
+
+/// Every grant on a compartment (its grantees) -- the other half, with the
+/// owner, of who may see the compartment's memories. Used to fan a live change
+/// out to its audience (R-2).
+pub async fn list_grants(
+    store: &Store,
+    tenant: &TenantId,
+    compartment: &CompartmentId,
+) -> Result<Vec<Grant>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(GRANT)
+        .map_err(map)?
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("compartment", compartment.as_str()),
+        ));
     let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
     rows.into_iter().map(GrantRow::into_domain).collect()
 }

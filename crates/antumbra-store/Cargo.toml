@@ -19,6 +19,8 @@ chrono.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+# Polls the surql-rs LiveQuery stream for the change-feed watcher (R-2).
+futures = "0.3"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
