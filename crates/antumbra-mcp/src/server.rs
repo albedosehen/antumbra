@@ -17,8 +17,8 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 
 use antumbra_core::ports::Embedder;
-use antumbra_core::{Memory, MemoryId, MemoryNetwork, TenantId};
-use antumbra_store::repo::memory;
+use antumbra_core::{EdgeType, Memory, MemoryEdge, MemoryId, MemoryNetwork, TenantId};
+use antumbra_store::repo::{edge, memory};
 use antumbra_store::Store;
 
 /// One tenant's MCP session over its Penumbra. `#[tool_handler]` resolves the
@@ -66,6 +66,20 @@ fn next_id(counter: &AtomicU64) -> String {
 
 fn default_network() -> String {
     "world".into()
+}
+
+fn parse_edge_type(s: &str) -> EdgeType {
+    match s.trim().to_lowercase().as_str() {
+        "supersedes" => EdgeType::Supersedes,
+        "contradicts" => EdgeType::Contradicts,
+        "follows" => EdgeType::Follows,
+        "caused" => EdgeType::Caused,
+        _ => EdgeType::References,
+    }
+}
+
+fn default_edge_type() -> String {
+    "references".into()
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -145,6 +159,41 @@ struct ReinforceOut {
 #[derive(Serialize, schemars::JsonSchema)]
 struct ForgetOut {
     forgotten: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct RelateParams {
+    from_id: String,
+    to_id: String,
+    /// `references` / `supersedes` / `contradicts` / `follows` / `caused`.
+    #[serde(default = "default_edge_type")]
+    edge_type: String,
+    /// Edge strength (default 1.0).
+    weight: Option<f32>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct RelateOut {
+    related: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct NeighborsParams {
+    memory_id: String,
+    /// Optional edge-type filter.
+    edge_type: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct NeighborView {
+    edge_type: String,
+    weight: f32,
+    memory: MemoryView,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct NeighborsOut {
+    neighbors: Vec<NeighborView>,
 }
 
 #[tool_router]
@@ -249,6 +298,50 @@ impl McpServer {
             memories: mems.iter().map(MemoryView::from).collect(),
         }))
     }
+
+    /// Relate two memories with a typed edge (the Penumbra graph).
+    #[tool(description = "Relate two memories with a typed edge: references/supersedes/contradicts/follows/caused.")]
+    async fn relate_memories(
+        &self,
+        Parameters(p): Parameters<RelateParams>,
+    ) -> Result<Json<RelateOut>, ErrorData> {
+        let e = MemoryEdge::new(
+            self.tenant.clone(),
+            p.from_id,
+            p.to_id,
+            parse_edge_type(&p.edge_type),
+            p.weight.unwrap_or(1.0),
+            Utc::now(),
+        );
+        edge::relate(&self.store, &e).await.map_err(err)?;
+        Ok(Json(RelateOut { related: true }))
+    }
+
+    /// The memories connected from a memory (optionally one edge type).
+    #[tool(description = "Get the memories connected from a memory (optionally filtered to one edge type).")]
+    async fn get_neighbors(
+        &self,
+        Parameters(p): Parameters<NeighborsParams>,
+    ) -> Result<Json<NeighborsOut>, ErrorData> {
+        let et = p.edge_type.as_deref().map(parse_edge_type);
+        let edges = edge::neighbors(&self.store, &self.tenant, &MemoryId::new(p.memory_id), et)
+            .await
+            .map_err(err)?;
+        let mut neighbors = Vec::new();
+        for e in &edges {
+            if let Some(m) = memory::get(&self.store, &self.tenant, &e.to_id)
+                .await
+                .map_err(err)?
+            {
+                neighbors.push(NeighborView {
+                    edge_type: e.edge_type.as_str().to_string(),
+                    weight: e.weight,
+                    memory: MemoryView::from(&m),
+                });
+            }
+        }
+        Ok(Json(NeighborsOut { neighbors }))
+    }
 }
 
 #[tool_handler]
@@ -322,5 +415,39 @@ mod tests {
             .0
             .memories
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn relate_and_get_neighbors() {
+        let s = server().await;
+        let store = |content: &str| StoreParams {
+            content: content.into(),
+            network: "world".into(),
+            confidence: None,
+            evidence: None,
+            volatile: None,
+        };
+        let a = s.store_memory(Parameters(store("a deno project"))).await.unwrap().0.id;
+        let b = s.store_memory(Parameters(store("use deno install"))).await.unwrap().0.id;
+
+        s.relate_memories(Parameters(RelateParams {
+            from_id: a.clone(),
+            to_id: b.clone(),
+            edge_type: "supersedes".into(),
+            weight: Some(0.8),
+        }))
+        .await
+        .unwrap();
+
+        let neighbors = s
+            .get_neighbors(Parameters(NeighborsParams {
+                memory_id: a,
+                edge_type: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(neighbors.0.neighbors.len(), 1);
+        assert_eq!(neighbors.0.neighbors[0].edge_type, "supersedes");
+        assert_eq!(neighbors.0.neighbors[0].memory.id, b);
     }
 }

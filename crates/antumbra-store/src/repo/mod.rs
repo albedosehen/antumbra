@@ -4,6 +4,7 @@
 //! and `crud` helpers — never raw SurrealQL.
 
 pub mod boundary;
+pub mod edge;
 pub mod evaluation;
 pub mod expert;
 pub mod generation;

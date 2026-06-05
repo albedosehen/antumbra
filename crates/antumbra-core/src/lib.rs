@@ -33,7 +33,7 @@ pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};
 pub use expert::{cosine_similarity, Expert};
 pub use generational::{GenerationHead, LoopState};
 pub use ids::{BoundaryId, ExpertId, Generation, MemoryId, RunId, ShadowId, TenantId};
-pub use memory::{Memory, MemoryNetwork};
+pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork};
 pub use orchestration::{ComposeStrategy, OrchestrationRun, OrchestrationStatus};
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};

@@ -37,6 +37,66 @@ impl MemoryNetwork {
     }
 }
 
+/// A typed relationship between two memories (the Penumbra graph). `Supersedes`
+/// and `Contradicts` are the native signal for the consolidation→retire loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeType {
+    /// Cites or relates to another memory.
+    References,
+    /// Replaces an older memory.
+    Supersedes,
+    /// Conflicts with another memory.
+    Contradicts,
+    /// Comes after another in a sequence.
+    Follows,
+    /// Was caused by another.
+    Caused,
+}
+
+impl EdgeType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EdgeType::References => "references",
+            EdgeType::Supersedes => "supersedes",
+            EdgeType::Contradicts => "contradicts",
+            EdgeType::Follows => "follows",
+            EdgeType::Caused => "caused",
+        }
+    }
+}
+
+/// A directed, tenant-scoped edge `from -> to` in the Penumbra graph.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemoryEdge {
+    pub tenant: TenantId,
+    pub from_id: MemoryId,
+    pub to_id: MemoryId,
+    pub edge_type: EdgeType,
+    pub weight: f32,
+    pub created_at: DateTime<Utc>,
+}
+
+impl MemoryEdge {
+    pub fn new(
+        tenant: impl Into<TenantId>,
+        from_id: impl Into<MemoryId>,
+        to_id: impl Into<MemoryId>,
+        edge_type: EdgeType,
+        weight: f32,
+        now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            tenant: tenant.into(),
+            from_id: from_id.into(),
+            to_id: to_id.into(),
+            edge_type,
+            weight,
+            created_at: now,
+        }
+    }
+}
+
 /// A tenant-scoped memory trace in the Penumbra.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Memory {

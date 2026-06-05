@@ -110,6 +110,23 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                     None,
                 ),
             ]),
+        // Penumbra graph: typed, directed edges between memories
+        // (references/supersedes/contradicts/follows/caused). Tenant-isolated
+        // like `memory` (engine-enforced PERMISSIONS + the repo's explicit
+        // filter). A plain table keyed by from/to/type, queried by clean
+        // equality (native N-hop RELATION traversal is a later enhancement).
+        table_schema("memory_edge")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions([
+                ("select", "tenant_id = $auth.tenant"),
+                ("create", "tenant_id = $auth.tenant"),
+                ("update", "tenant_id = $auth.tenant"),
+                ("delete", "tenant_id = $auth.tenant"),
+            ])
+            .with_indexes([
+                index("memory_edge_from_idx", ["tenant_id", "from_id"]),
+                index("memory_edge_to_idx", ["tenant_id", "to_id"]),
+            ]),
         // Tenant principals: one record per tenant carrying its `tenant`. The
         // record-access SIGNIN resolves a principal so `$auth` is that record
         // and `$auth.tenant` drives the engine-enforced PERMISSIONS. Provisioned
