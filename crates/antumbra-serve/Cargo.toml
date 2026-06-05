@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ADR-0006: S-LoRA-style multi-adapter serving (llama-cpp-2 / mistral.rs) over one base. Seam only — the real engine is not yet wired."
+description = "ADR-0006: S-LoRA-style multi-adapter serving over one resident base via candle (hot-swap LoRA factors per routed expert). Build with --features models for the real engine."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
