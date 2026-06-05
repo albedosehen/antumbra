@@ -59,6 +59,18 @@ string_id!(
     /// A durable orchestration or generational run. ADR-0005 / ADR-0008.
     RunId
 );
+string_id!(
+    /// A Penumbra memory trace (the soft, editable region that consolidates
+    /// into the umbra). ADR-0004/0009.
+    MemoryId
+);
+string_id!(
+    /// The tenant: the isolation key for the Penumbra (Kushtaka's `workspace_id`
+    /// maps onto this). Engine-enforced via `PERMISSIONS ... WHERE tenant_id =
+    /// $auth.tenant`; an owner role queries across tenants, and an agent
+    /// isolates by authenticating as its own tenant.
+    TenantId
+);
 
 /// Monotonic generation counter for the durable loop (ADR-0008).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]

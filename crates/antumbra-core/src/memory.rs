@@ -1,0 +1,161 @@
+//! Penumbra — the soft, editable memory store (the partial shadow).
+//!
+//! A memory is a trace that has not yet hardened into the umbra (a frozen
+//! expert). It is fast to write, editable, reinforced over use, and tenant-
+//! scoped to a [`WorkspaceId`]. Memories are the *consolidation source*: a
+//! reinforced, stable, verifiable trace graduates store→weights (EXP-021); a
+//! contradicted one retires the expert it produced. This is the hippocampus to
+//! the population's neocortex.
+//!
+//! The three networks mirror the rule/fact/judgment split a memory store keeps:
+//! `World` (facts), `Bank` (experiences), `Opinion` (judgments/preferences).
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::ids::{ExpertId, MemoryId, TenantId};
+
+/// Which network a memory belongs to — the coarse skill/kind it carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryNetwork {
+    /// Durable facts about the world.
+    World,
+    /// Lived experiences / incidents.
+    Bank,
+    /// Judgments, preferences, feedback.
+    Opinion,
+}
+
+impl MemoryNetwork {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MemoryNetwork::World => "world",
+            MemoryNetwork::Bank => "bank",
+            MemoryNetwork::Opinion => "opinion",
+        }
+    }
+}
+
+/// A tenant-scoped memory trace in the Penumbra.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Memory {
+    /// Globally-unique id (the SurrealDB record key).
+    pub id: MemoryId,
+    /// The owning tenant — the isolation key (engine-enforced via `tenant_id =
+    /// $auth.tenant`; the repo also filters on it as the second layer).
+    pub tenant: TenantId,
+    pub network: MemoryNetwork,
+    pub content: String,
+    /// Semantic embedding for recall (KNN). `None` until embedded.
+    pub embedding: Option<Vec<f32>>,
+    /// Confidence / strength in `[0, 1]`; rises as the trace is reinforced.
+    pub confidence: f32,
+    /// How many times the trace has been reinforced/accessed — the recurrence
+    /// signal the consolidation gate scores.
+    pub reinforcement: u32,
+    /// Provenance — the sources/evidence that justify the trace.
+    pub evidence: Vec<String>,
+    /// `true` if the fact changes over time; volatile traces never graduate.
+    pub volatile: bool,
+    /// Set once the trace has graduated into the umbra: the expert it produced.
+    /// A contradiction against a consolidated memory retires this expert.
+    pub consolidated_expert: Option<ExpertId>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Memory {
+    /// A fresh, un-reinforced trace at the given confidence.
+    pub fn new(
+        id: impl Into<MemoryId>,
+        tenant: impl Into<TenantId>,
+        network: MemoryNetwork,
+        content: impl Into<String>,
+        confidence: f32,
+        now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            tenant: tenant.into(),
+            network,
+            content: content.into(),
+            embedding: None,
+            confidence: confidence.clamp(0.0, 1.0),
+            reinforcement: 0,
+            evidence: Vec::new(),
+            volatile: false,
+            consolidated_expert: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn with_embedding(mut self, embedding: Vec<f32>) -> Self {
+        self.embedding = Some(embedding);
+        self
+    }
+
+    pub fn with_evidence(mut self, evidence: Vec<String>) -> Self {
+        self.evidence = evidence;
+        self
+    }
+
+    pub fn volatile(mut self, volatile: bool) -> Self {
+        self.volatile = volatile;
+        self
+    }
+
+    /// Reinforce the trace: bump the recurrence count and nudge confidence up
+    /// toward 1.0 (diminishing returns), stamping the update time.
+    pub fn reinforce(&mut self, now: DateTime<Utc>) {
+        self.reinforcement = self.reinforcement.saturating_add(1);
+        self.confidence = (self.confidence + (1.0 - self.confidence) * 0.25).clamp(0.0, 1.0);
+        self.updated_at = now;
+    }
+
+    /// Record that this trace graduated into the umbra as `expert`.
+    pub fn mark_consolidated(&mut self, expert: ExpertId, now: DateTime<Utc>) {
+        self.consolidated_expert = Some(expert);
+        self.updated_at = now;
+    }
+
+    /// Whether the trace has already hardened into the umbra.
+    pub fn is_consolidated(&self) -> bool {
+        self.consolidated_expert.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reinforce_raises_confidence_and_count() {
+        let now = Utc::now();
+        let mut m = Memory::new("memory:a", "ws:1", MemoryNetwork::World, "use deno", 0.4, now);
+        assert_eq!(m.reinforcement, 0);
+        m.reinforce(now);
+        assert_eq!(m.reinforcement, 1);
+        assert!(m.confidence > 0.4 && m.confidence < 1.0);
+    }
+
+    #[test]
+    fn consolidation_link_round_trips() {
+        let now = Utc::now();
+        let mut m = Memory::new("memory:a", "ws:1", MemoryNetwork::World, "x", 1.0, now);
+        assert!(!m.is_consolidated());
+        m.mark_consolidated(ExpertId::new("expert:consolidated-pm"), now);
+        assert!(m.is_consolidated());
+        assert_eq!(
+            m.consolidated_expert,
+            Some(ExpertId::new("expert:consolidated-pm"))
+        );
+    }
+
+    #[test]
+    fn network_serializes_lowercase() {
+        let json = serde_json::to_string(&MemoryNetwork::Opinion).unwrap();
+        assert_eq!(json, "\"opinion\"");
+    }
+}

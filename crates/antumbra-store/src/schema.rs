@@ -6,6 +6,7 @@
 //! production uses the 384-d all-MiniLM-L6-v2 convention (the real candle
 //! embedder in antumbra-serve).
 
+use surql::schema::generate_table_sql;
 use surql::schema::table::{
     hnsw_index, index, table_schema, unique_index, HnswDistanceType, MTreeVectorType,
     TableDefinition, TableMode,
@@ -79,17 +80,46 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("device_profile")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("device_host_idx", ["host", "backend"])]),
+        // Penumbra memory (the soft, editable consolidation source). Tenant-
+        // isolated by a `tenant_id` on every row, a composite unique index so
+        // the same key can exist per tenant, an HNSW recall index, and a
+        // per-tenant network index. The intended engine guard is a row-level
+        // `PERMISSIONS ... WHERE tenant_id = $auth.tenant` clause, but it is NOT
+        // emitted yet: oneiriq-surql 0.2.7 has no working renderer for table
+        // PERMISSIONS — both `to_surql_all_with_options` and `generate_table_sql`
+        // (a thin wrapper over it) emit a malformed `DEFINE FIELD PERMISSIONS
+        // ...`. Engine enforcement is blocked on fixing that crate. Until then
+        // isolation is the repo's explicit `WHERE tenant_id = ...` plus the
+        // per-record tenant re-check on point reads.
+        table_schema("memory")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([
+                unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
+                index("memory_tenant_network_idx", ["tenant_id", "network"]),
+                hnsw_index(
+                    "memory_embedding_hnsw",
+                    "embedding",
+                    embed_dim,
+                    HnswDistanceType::Cosine,
+                    MTreeVectorType::F32,
+                    None,
+                    None,
+                ),
+            ]),
     ]
 }
 
 /// Validate every table and render the idempotent (`IF NOT EXISTS`) DDL the
 /// builders generate. The returned statements are surql-rs output, not
-/// hand-authored SurrealQL.
+/// hand-authored SurrealQL. Uses `generate_table_sql` (not the table's
+/// `to_surql_all_with_options`) because only the former renders table-level
+/// `PERMISSIONS` correctly on oneiriq-surql 0.2.7 — the latter emits a malformed
+/// `DEFINE FIELD PERMISSIONS ...` (defect to report upstream).
 pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
     let mut out = Vec::new();
     for table in tables(embed_dim) {
         table.validate().map_err(map)?;
-        out.extend(table.to_surql_all_with_options(true));
+        out.extend(generate_table_sql(&table, true));
     }
     Ok(out)
 }
