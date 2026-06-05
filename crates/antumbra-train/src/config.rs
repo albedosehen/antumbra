@@ -77,7 +77,11 @@ pub struct RaftConfig {
 impl Default for RaftConfig {
     fn default() -> Self {
         Self {
-            base_model: "Qwen/Qwen2.5-Coder-1.5B".to_string(),
+            // Instruct (chat-tuned) base: for short instruction-following skills
+            // it produces clean, controllable output where the raw completion
+            // base rambles (model-quality #2). The chat template is applied
+            // automatically (QwenCausalLm detects the `-Instruct` name).
+            base_model: "Qwen/Qwen2.5-Coder-1.5B-Instruct".to_string(),
             adapter_dir: "adapters".to_string(),
             lora_rank: 16,
             lora_alpha: 32.0,

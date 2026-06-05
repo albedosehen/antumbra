@@ -678,6 +678,10 @@ pub struct QwenCausalLm {
     top_p: f64,
     repetition_penalty: f64,
     no_repeat_ngram_size: usize,
+    /// `true` for an `-Instruct` base: prompts are wrapped in the Qwen chat
+    /// template (so the model is prompted the way it was tuned) and generation
+    /// stops at `<|im_end|>` instead of `<|endoftext|>`.
+    chat: bool,
 }
 
 /// Process-global generation nonce, so every `generate` call (even repeated
@@ -744,9 +748,13 @@ impl QwenCausalLm {
         )
         .map_err(ce)?;
 
+        // An `-Instruct` base is chat-tuned: prompt it with the chat template and
+        // stop the assistant turn at `<|im_end|>`.
+        let chat = cfg.base_model.contains("Instruct");
+        let eos_token = if chat { "<|im_end|>" } else { "<|endoftext|>" };
         let eos = tokenizer
-            .token_to_id("<|endoftext|>")
-            .ok_or_else(|| AntumbraError::other("tokenizer missing <|endoftext|>"))?;
+            .token_to_id(eos_token)
+            .ok_or_else(|| AntumbraError::other(format!("tokenizer missing {eos_token}")))?;
 
         Ok(Self {
             model,
@@ -758,6 +766,7 @@ impl QwenCausalLm {
             top_p: cfg.top_p,
             repetition_penalty: cfg.repetition_penalty,
             no_repeat_ngram_size: cfg.no_repeat_ngram_size,
+            chat,
         })
     }
 
@@ -772,6 +781,18 @@ impl QwenCausalLm {
             .map_err(|e| AntumbraError::other(format!("load adapter `{path}`: {e}")))
     }
 
+    /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so
+    /// the model is prompted the way it was tuned (a `user` turn, then the open
+    /// `assistant` turn it completes). A plain base sees the prompt unchanged.
+    /// Applied at *every* prompt-encoding site so training and serving agree.
+    fn wrap_prompt(&self, prompt: &str) -> String {
+        if self.chat {
+            format!("<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n")
+        } else {
+            prompt.to_string()
+        }
+    }
+
     fn encode(&self, text: &str) -> Result<Vec<u32>> {
         Ok(self
             .tokenizer
@@ -784,7 +805,7 @@ impl QwenCausalLm {
     fn sample_one(&mut self, prompt: &str, seed: u64) -> Result<String> {
         self.model.clear_cache();
         self.model.set_grad(false); // generation needs no gradients
-        let mut tokens = self.encode(prompt)?;
+        let mut tokens = self.encode(&self.wrap_prompt(prompt))?;
         let prompt_len = tokens.len();
         let mut rng = StdRng::seed_from_u64(seed);
         let policy = crate::decode::DecodePolicy {
@@ -857,7 +878,7 @@ impl QwenCausalLm {
         self.model.clear_cache();
         self.model.set_lora(true);
         self.model.set_grad(false); // π_old is a fixed snapshot; no graph needed
-        let mut tokens = self.encode(prompt)?;
+        let mut tokens = self.encode(&self.wrap_prompt(prompt))?;
         let mut gen_tokens: Vec<u32> = Vec::new();
         let mut old_logprobs: Vec<f32> = Vec::new();
         let mut rng = StdRng::seed_from_u64(seed);
@@ -919,8 +940,9 @@ impl QwenCausalLm {
     fn train_one(&mut self, example: &SftExample) -> Result<f32> {
         self.model.clear_cache();
         self.model.set_grad(true); // training forward must be tracked
-        let prompt_ids = self.encode(&example.prompt)?;
-        let full_text = format!("{}{}", example.prompt, example.completion);
+        let wrapped = self.wrap_prompt(&example.prompt);
+        let prompt_ids = self.encode(&wrapped)?;
+        let full_text = format!("{}{}", wrapped, example.completion);
         let mut full_ids = self.encode(&full_text)?;
         if full_ids.len() <= prompt_ids.len() || full_ids.len() < 2 {
             return Ok(0.0);
@@ -1032,7 +1054,7 @@ impl GrpoLm for QwenCausalLm {
         if tokens.is_empty() {
             return Ok(Vec::new());
         }
-        let prompt_ids = self.encode(prompt)?;
+        let prompt_ids = self.encode(&self.wrap_prompt(prompt))?;
         let plen = prompt_ids.len();
         let mut ids = prompt_ids;
         ids.extend_from_slice(tokens);
@@ -1058,7 +1080,7 @@ impl GrpoLm for QwenCausalLm {
         cfg: &RaftConfig,
     ) -> Result<f32> {
         let dev = self.model.device.clone();
-        let prompt_ids = self.encode(prompt)?;
+        let prompt_ids = self.encode(&self.wrap_prompt(prompt))?;
         let plen = prompt_ids.len();
         // One backward step per group member (as RAFT steps per winner), so only
         // a single forward graph is alive at a time — a combined-group backward
