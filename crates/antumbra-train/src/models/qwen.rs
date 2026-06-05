@@ -18,6 +18,7 @@ use candle_nn::{Activation, Embedding, Module, Optimizer, VarBuilder, VarMap};
 
 use rand::distributions::{Distribution, WeightedIndex};
 use rand::rngs::StdRng;
+use rand::seq::SliceRandom;
 use rand::SeedableRng;
 
 use async_trait::async_trait;
@@ -1024,9 +1025,18 @@ impl CausalLm for QwenCausalLm {
         if batch.is_empty() {
             return Ok(0.0);
         }
+        // Each example is one SGD step (batch-of-1). Shuffle the order every call
+        // so no single example is consistently trained *last* and dominates the
+        // LoRA — otherwise the adapter collapses to the final example instead of
+        // learning the prompt-conditioned mapping. The nonce varies the shuffle
+        // per round.
+        let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut order: Vec<usize> = (0..batch.len()).collect();
+        let mut rng = StdRng::seed_from_u64(0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)));
+        order.shuffle(&mut rng);
         let mut total = 0.0f32;
-        for ex in batch {
-            total += self.train_one(ex)?;
+        for &i in &order {
+            total += self.train_one(&batch[i])?;
         }
         Ok(total / batch.len() as f32)
     }
