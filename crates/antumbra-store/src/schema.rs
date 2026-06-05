@@ -6,11 +6,12 @@
 //! production uses the 384-d all-MiniLM-L6-v2 convention (the real candle
 //! embedder in antumbra-serve).
 
-use surql::schema::generate_table_sql;
+use surql::schema::access::{record_access, AccessDefinition, RecordAccessConfig};
 use surql::schema::table::{
     hnsw_index, index, table_schema, unique_index, HnswDistanceType, MTreeVectorType,
     TableDefinition, TableMode,
 };
+use surql::schema::{generate_access_sql, generate_table_sql};
 
 use antumbra_core::Result;
 
@@ -109,8 +110,32 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                     None,
                 ),
             ]),
+        // Tenant principals: one record per tenant carrying its `tenant`. The
+        // record-access SIGNIN resolves a principal so `$auth` is that record
+        // and `$auth.tenant` drives the engine-enforced PERMISSIONS. Provisioned
+        // by the owner/root; read only by the access SIGNIN expression.
+        table_schema("principal")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([unique_index("principal_tenant_uq", ["tenant"])]),
     ]
 }
+
+/// The record-access method that binds `$auth.tenant` for a session. Signing in
+/// with a `tenant` variable (via `ScopeCredentials`) resolves the matching
+/// principal; `$auth` becomes that record, so the `memory` table's row-level
+/// `PERMISSIONS ... WHERE tenant_id = $auth.tenant` are enforced by the engine
+/// for that session. Root/owner sessions (no signin) bypass the clause and see
+/// across tenants.
+pub fn tenant_access() -> AccessDefinition {
+    record_access(
+        "tenant",
+        RecordAccessConfig::new().with_signin("SELECT * FROM principal WHERE tenant = $tenant"),
+    )
+    .with_session("1h")
+}
+
+/// The record-access method name (the `ac` in a scope signin).
+pub const TENANT_ACCESS: &str = "tenant";
 
 /// Validate every table and render the idempotent (`IF NOT EXISTS`) DDL the
 /// builders generate. The returned statements are surql-rs output, not
@@ -124,6 +149,11 @@ pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
         table.validate().map_err(map)?;
         out.extend(generate_table_sql(&table, true));
     }
+    // The tenant record-access method (binds $auth.tenant). Note: surql-rs does
+    // not yet emit IF NOT EXISTS for access, so a persistent store re-applying
+    // the schema would re-DEFINE it (harmless overwrite on a fresh connect; an
+    // access-idempotency patch is a release/0.28.0 follow-up).
+    out.extend(generate_access_sql(&tenant_access()).map_err(map)?);
     Ok(out)
 }
 

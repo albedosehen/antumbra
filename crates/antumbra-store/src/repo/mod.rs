@@ -8,6 +8,7 @@ pub mod evaluation;
 pub mod expert;
 pub mod generation;
 pub mod memory;
+pub mod principal;
 pub mod reward;
 pub mod router;
 pub mod shadow;

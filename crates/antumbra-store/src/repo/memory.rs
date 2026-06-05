@@ -120,6 +120,17 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
     rows.into_iter().map(MemoryRow::into_domain).collect()
 }
 
+/// Every memory across all tenants, with NO tenant filter. As an owner/root
+/// session this is the cross-tenant view (profiling / training across tenants);
+/// as a tenant-authenticated session the engine's row-level PERMISSIONS still
+/// scope the result to that tenant — which is precisely the engine-enforcement
+/// guarantee (isolation holds even with no app-side WHERE).
+pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
+    let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
+    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(MemoryRow::into_domain).collect()
+}
+
 /// A tenant's memories in one network (tenant + network filtered).
 pub async fn list_by_network(
     store: &Store,
