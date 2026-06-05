@@ -23,9 +23,14 @@
 > Its long-running caller landed the same day: `antumbra serve` registers every expert's adapter into one
 > resident `MultiAdapterServe`, then routes a single `--task` or a stream of stdin prompts through the learned
 > router and answers from the resident engine — a stream pays the base load only on the first prompt and reuses
-> the loaded factors when consecutive prompts route to the same expert. **Still to do:** GPU validation of the
-> swap on real adapters (the only remaining unproven step — the orchestration is type-checked under
-> `--features models` and its device-free resolution logic is unit-tested on CPU).
+> the loaded factors when consecutive prompts route to the same expert.
+>
+> **GPU-validated (2026-06-05).** On the RTX 3090 Ti (CUDA 13.3): `train` learned a LoRA on `smoke.json`
+> (graduated, pass-rate 1.0), then both serving paths answered through it — `ask` (`CandleServe`: routed to the
+> expert, cold-loaded `adapters/run_train_g0.safetensors`, generated) and `serve` (`MultiAdapterServe`: registered
+> the adapter, loaded the base once, hot-swapped, and served). So the candle forward/backward/save and the
+> S-LoRA hot-swap are proven on real hardware, not just type-checked. (Generation quality is untuned — the smoke
+> corpus uses a trivial always-pass verifier; this validated the *pipeline*, not the model's answers.)
 
 ## Context
 
