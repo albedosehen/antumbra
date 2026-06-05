@@ -21,8 +21,10 @@ The name is load-bearing. A shadow cast by an occluder has three regions, and so
 
 - **Umbra** = the frozen experts - total shadow, full and proven coverage; immutable (immutability is the only
   guarantee a skill is never forgotten) - *ADR-0001*
-- **Penumbra** = the shadows-in-training - the partial-shadow ring around the umbra where coverage is still
-  forming; each one then deepens into umbra (graduates) or fades (prunes) - *ADR-0002*
+- **Penumbra** = the partial-shadow region: everything soft, editable, and not-yet-frozen. Two facets, both of
+  which deepen into umbra (graduate) or fade (prune): the **shadows-in-training** (trainable adapters, *ADR-0002*)
+  and the **memory store** (raw, editable, reinforced experiences — the bootstrap and training unit, *ADR-0012*;
+  organized into shareable *compartments*, *ADR-0014*). The hippocampus to the umbra's neocortex.
 - **Antumbra** = the keystone - the region beyond the umbra's tip where the geometry *inverts*: the occluder no
   longer covers the light source and a ring of light breaks through. That inversion is the counterfactual
   *scope* - the context where a behavior that was right becomes wrong, where local competence gives out and you
@@ -114,6 +116,28 @@ maximally context-scoped (per-repo conventions are textbook boundaries), and the
 
 ---
 
+## Memory, tenants, and the runtime surface
+
+Antumbra absorbs the memory and runtime role of a separate agent engine, rather than running alongside one.
+
+- **Penumbra memory** (*ADR-0012*) — a first-class, tenant-scoped memory store (`world`/`bank`/`opinion`
+  networks, HNSW recall, reinforcement, provenance). It is the **bootstrap** (existing memories seed the
+  population without a cold start, via *memory-import*) and the **consolidation source**: an offline "sleep"
+  scores memories (recurrence × verifiability × stability), graduates the trusted ones into experts with an
+  interleaved **replay** buffer, and **retires** an expert when a consolidated memory is later contradicted. The
+  store + population become one circulatory system: memory → weights → forgetting.
+- **Engine-enforced multi-tenancy** (*ADR-0013*) — isolation lives in the SurrealDB engine (record access +
+  `PERMISSIONS WHERE tenant_id = $auth.tenant`), not in handler code: a forgotten filter cannot leak. `$auth`
+  carries `(tenant, user)`; the population (experts/router) is the **shared umbra**, memory is the **private
+  penumbra**, and an owner role can read across tenants to profile and train.
+- **Compartments** (*ADR-0014*) — named, ownable "latent-spaces" of memory: the unit of organization, deletion,
+  sharing (`reference`/`link` grants, user-to-user, engine-enforced), and the natural **training unit** — a
+  private compartment consolidates into a *private* expert. The **antumbra** itself can *propose* compartments by
+  clustering the penumbra (the same boundary machinery that does routing). Every memory carries who/which-machine
+  provenance.
+- **MCP server** (*ADR-0015*) — `antumbra-mcp`, a Rust Model Context Protocol server (12 tools: memory, graph,
+  compartments, `route`), each engine-isolated to the bound `(tenant, user)`. The surface an agent talks to.
+
 ## Status & shape (honest)
 
 - **Research project, not a product.** Every milestone is a falsifiable experiment with a kill criterion.
@@ -182,4 +206,5 @@ See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per
 - **[Running the trainer](docs/running-the-trainer.md)** - the CUDA-13 / Windows GPU recipe.
 - **[Experiment Ledger](experiments/README.md)** - every falsifiable validation: claim, method, result, kill
   criterion, reproduce command.
-- **[Architecture Decision Records](docs/adr/README.md)** - every load-bearing decision, ADR-0001 … ADR-0011.
+- **[Architecture Decision Records](docs/adr/README.md)** - every load-bearing decision, ADR-0001 … ADR-0015
+  (incl. Penumbra memory, tenant isolation, compartments, and the MCP runtime surface).

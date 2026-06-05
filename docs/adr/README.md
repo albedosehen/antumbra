@@ -28,6 +28,10 @@ Read them against the [two readings of the chain](../architecture.md#1-the-thesi
 | [0009](0009-heterogeneous-composition.md) | Heterogeneous composed model | **North star** | The end goal: genuinely separate frozen experts wired by learned cross-attention bridges (CALM/BTX). v0's gate/boundary/loop/substrate carry over. |
 | [0010](0010-candle-qlora-trainer.md) | The candle QLoRA trainer | Accepted (MT-3 validated) | The RAFT reward-ranked LoRA trainer: sample K -> verify -> SFT the winners; candle Qwen2.5-Coder + LoRA; learning validated on the GPU. |
 | [0011](0011-v1-efficiency.md) | v1 efficiency: GRPO, 4-bit, serving | Proposed | Study before build: GRPO (group-relative PG over RAFT, reference via LoRA-toggle), 4-bit QLoRA via **dequant-in-forward** (not a quantized backward), and serving throughput. |
+| [0012](0012-penumbra-memory.md) | Penumbra: memory store + consolidation | Accepted | The editable **memory store** (the other facet of the penumbra) is the bootstrap + training unit; **memory-import** + **consolidation** (score → capture-with-replay → graduate; contradiction → retire) turn lived experience into owned weights. |
+| [0013](0013-tenant-isolation-identity.md) | Multi-tenant isolation & identity | Accepted | Isolation is **engine-enforced** (SurrealDB record access + `PERMISSIONS`); `$auth` carries `(tenant, user)`; hierarchy = tenant(org) → user → compartment → agent(provenance); **shared umbra, private penumbra**. |
+| [0014](0014-compartments.md) | Compartments: latent-spaces of memory | Accepted (P1–2a) / Proposed | Named, ownable, shareable memory groups (reference/link grants), engine-enforced ACL; the **training unit** (compartment → private expert) and the thing the **antumbra proposes** by clustering the penumbra. |
+| [0015](0015-mcp-runtime-surface.md) | The MCP server (runtime surface) | Accepted (v0) | `antumbra-mcp` over `rmcp`/stdio: 12 tools (memory, graph, compartments, `route`), each engine-isolated to the bound `(tenant, user)` — the start of replacing a separate engine's runtime role. |
 
 ## Format
 

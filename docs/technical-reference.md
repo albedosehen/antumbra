@@ -27,19 +27,21 @@ The candidate context set is still authored, and scale remains untested.
 
 ## 2. Crate map
 
-Nine crates, single Rust workspace. The default build is light (no ML deps); candle is gated behind `models`.
+Eleven crates, single Rust workspace. The default build is light (no ML deps); candle is gated behind `models`.
 
 | Crate | ADR | Responsibility | Heavy deps (feature) |
 |---|---|---|---|
-| `antumbra-core` | 0001-0004 | Domain types, state machines, the port traits, and `testing` fakes. No I/O. | - (`testing` feature for fakes) |
-| `antumbra-store` | 0007 | SurrealDB data layer, **surql-rs builders only** (no hand-written SurrealQL): schema-as-code, repositories, HNSW vector index. | `surrealdb` (kv-mem, kv-surrealkv) |
+| `antumbra-core` | 0001-0004, 0012-0014 | Domain types (incl. `Memory`, `Compartment`, `Grant`, identity ids), state machines, port traits, `testing` fakes. No I/O. | - (`testing` feature for fakes) |
+| `antumbra-store` | 0007, 0012-0014 | SurrealDB data layer, **surql-rs builders only** (no hand-written SurrealQL): schema-as-code, repositories, HNSW recall, the Penumbra memory store + graph + **compartments**, record-access auth and the **engine-enforced tenant/compartment ACL**. | `surrealdb` (kv-mem, kv-surrealkv) |
 | `antumbra-critic` | 0003 | Verifiers (the reward is the environment): in-process rules + external commands. | - |
 | `antumbra-gate` | 0005 | Boundary-conditioned coverage gate: rank by capability, escalate on relative coverage. | - |
 | `antumbra-boundary` | 0004 | Counterfactual scope engine (keystone). Seam for `C'` recovery. | - |
 | `antumbra-loop` | 0008 | Durable generational loop; writes full lineage to the substrate. | - |
-| `antumbra-train` | 0002, 0010 | candle QLoRA/RAFT trainer: Qwen2.5-Coder + LoRA, SFT, save. | `candle-*`, `tokenizers`, `hf-hub` (`models`); `cuda`/`metal` |
+| `antumbra-train` | 0002, 0010, 0012 | candle QLoRA/RAFT trainer: Qwen2.5-Coder + LoRA, SFT, save; capture/teach intake; **consolidation** (gate + replay) and memory-import. | `candle-*`, `tokenizers`, `hf-hub` (`models`); `cuda`/`metal` |
 | `antumbra-serve` | 0006 | Candle adapter serving (`CandleServe`: load base + adapter, generate) and the real candle BERT embedder. | `candle-*`, `candle-transformers`, `antumbra-train` (`models`); `cuda`/`metal` |
-| `antumbra-cli` | - | Operator CLI: `migrate · schema · experts · status · loop · route · seed · train`. | pulls `train`/`serve`/`critic` (`models`) |
+| `antumbra-cli` | - | Operator CLI: `migrate · schema · experts · status · loop · route · ask · train · teach · evolve · populate · memory-import · consolidate · retire`. | pulls `train`/`serve`/`critic` (`models`) |
+| `antumbra-mcp` | 0015 | MCP server (`rmcp`/stdio) over the Penumbra + population: 12 tools (memory, graph, compartments, `route`), engine-isolated to the bound `(tenant, user)`. | `rmcp`; `antumbra-serve` (`models`) |
+| `antumbra-tui` | 0005 | Operator console (ratatui): the live population/gate observatory. | `ratatui` |
 
 ## 3. Domain model (`antumbra-core`)
 

@@ -178,14 +178,21 @@ antumbra/
     antumbra-boundary/     # ADR-0004: counterfactual scope engine (keystone)
     antumbra-loop/         # ADR-0008: durable generational loop
     antumbra-critic/       # ADR-0003: verifiers + optional flagship-as-critic
-    antumbra-train/        # ADR-0002: candle QLoRA + gate training
-    antumbra-serve/        # llama-cpp-2 / mistral.rs multi-adapter serving
-    antumbra-cli/          # operator CLI + TUI
+    antumbra-train/        # ADR-0002: candle QLoRA + gate training; consolidation (ADR-0012)
+    antumbra-serve/        # embedder (candle BERT) + multi-adapter serving seam
+    antumbra-cli/          # operator CLI
+    antumbra-mcp/          # ADR-0015: MCP server (memory + graph + compartments + route)
+    antumbra-tui/          # operator console (ratatui)
   migrations/            # SurrealDB .surql
   corpora/               # verifiable corpora - selected repos for the coding domain
   experiments/           # the falsifiable validations ARE the milestones
-  docs/adr/              # 0001..0009
+  docs/adr/              # 0001..0015
 ```
+
+The Penumbra memory store, engine-enforced multi-tenancy, and compartments (ADR-0012/0013/0014) live in
+`antumbra-core` (domain) + `antumbra-store` (the `memory`/`memory_edge`/`compartment`/`grant`/`principal` tables,
+record-access auth, and the engine-enforced ACL); `antumbra-train` carries the consolidation gate + replay; the
+`antumbra-mcp` server is the agent-facing runtime surface (ADR-0015).
 
 ### v0 implementation status (2026-06-02)
 
@@ -194,8 +201,10 @@ antumbra/
 > relative-coverage out-of-scope escalation, and capability vectors are derived from evaluated behavior. See
 > the [Technical Reference](technical-reference.md) §13 for current validation results.
 
-All nine crates exist and compile; the workspace is green (`cargo test`, clippy clean) on Rust 1.96 + your
-**surql-rs** (`oneiriq-surql`) on the SurrealDB 3.x driver, **builder-only - no hand-written SurrealQL**.
+All eleven crates exist and compile; the workspace is green (`cargo test`, clippy clean) on Rust 1.96 + your
+**surql-rs** (`oneiriq-surql`, the local `release/0.28.0` checkout) on the SurrealDB 3.x driver, **builder-only -
+no hand-written SurrealQL**. (surql-rs gained three fixes this cycle — table/edge `PERMISSIONS` rendering and
+`DEFINE ACCESS IF NOT EXISTS` — required for the engine-enforced ACL; bundled toward a `0.28.0` release.)
 
 | Crate | State |
 |---|---|

@@ -1,0 +1,62 @@
+# ADR-0014 - Compartments: latent-spaces of memory
+
+**Status:** Accepted (Phase 1–2a) · Proposed (private experts, auto-compartmentalization) · **Date:** 2026-06-04 · **Related:** 0004 (antumbra/boundary), 0012 (Penumbra), 0013 (identity)
+
+## Context
+
+A single flat memory pool per user is too coarse: every agent shares it, a new agent cannot start clean, and a
+user cannot delete or share *a group* of memories or control whether groups may reference each other. The deeper
+need: the unit that ties **memory organization** to **learning**. A coherent body of experience is exactly what
+the antumbra (the competence-boundary system, ADR-0004) recognizes — and exactly what consolidates into an
+expert. Compartments are that unit.
+
+## Decision
+
+A **compartment** is a named latent-space of memory, owned by a `$auth.user` within a tenant — the unit of
+organization, sharing, deletion, and reference-scope, and the natural **training unit** (a compartment
+consolidates into a *private* expert, ADR-0012). Two creation modes: **explicit** (a user creates/names/shares)
+and **emergent** — the antumbra *proposes* compartments by clustering the penumbra (`Origin::Proposed`); the user
+disposes (keep/name/merge/share). The same centroid/boundary machinery that does routing + OOD drawing also
+draws the compartment lines: **penumbra → antumbra clusters into compartments → umbra**.
+
+**Sharing** is intra-tenant, user-to-user, via capability **grants**: `Reference` (recall/read) or `Link` (also
+create graph edges into it). Access is **engine-enforced** (ADR-0013) by the grant graph:
+
+- `memory` read rule: visible when in the tenant AND (un-compartmentalized = the shared pool, OR compartment
+  owned by `$auth.user`, OR compartment granted to `$auth.user`) — a subquery over `compartment`/`grant`.
+- `memory_edge` create rule (the **link gate**): an edge may target a memory only when its compartment is the
+  shared pool, owned, or granted with `capability = 'link'` (mere `reference` is not enough).
+
+Every memory carries **provenance** (`author` user, `author_host` device, `status` committed/planned) so a
+recall says who learned it and where, and an agent can announce *planned* changes other agents see.
+
+```mermaid
+flowchart LR
+  PEN["penumbra (raw memory)"] -->|"antumbra clusters"| COMP["compartments<br/>(competence regions)"]
+  COMP -->|"share: reference / link grant"| OTHER["another user's agent"]
+  COMP -->|"consolidate"| EXPERT["private expert (umbra)"]
+```
+
+## Consequences
+
+- **Positive:** private-by-default working memory with opt-in sharing; cross-user knowledge transfer at
+  grant-speed, not retrain-speed; the substrate for **private populations** (the personalization north star —
+  private compartment → private LoRA); the antumbra curates its own training units.
+- **Negative:** richer engine predicates (nested subquery permissions: edge → memory → compartment/grant); the
+  per-compartment consolidation → private experts (scoped routing + GPU minting) is not yet built;
+  revocation/deletion semantics for already-linked shared memory need a documented rule.
+- **Neutral:** un-compartmentalized memory remains the tenant-shared pool (backward compatible); a new
+  agent/session defaults to a fresh private compartment.
+
+## Alternatives considered
+
+- **Agent as the isolation boundary** (each agent its own tenant). Rejected as too binary — it breaks "all my
+  agents share + benefit"; the user is the actor, the agent is provenance.
+- **App-layer ACL.** Rejected: the contractor model. The compartment ACL is engine-enforced (ADR-0013).
+
+## Validation
+
+`penumbra_compartment` tests: a user cannot see another's private compartment until granted (visible immediately
+on grant, hidden on revoke), and may not *link* into it without `link` — all on unfiltered reads, engine-enforced
+(SurrealDB evaluates the subquery-in-`PERMISSIONS` on the embedded engine). *Kill criterion:* a grant/revoke does
+not change visibility at the engine, or link is creatable with only `reference` → the ACL is unsound.
