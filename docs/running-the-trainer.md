@@ -6,11 +6,14 @@ first real run is where model-specific behaviour gets tuned.
 
 ## Prerequisites
 
-- An NVIDIA GPU + CUDA toolkit (candle's `cuda` feature links it).
+- An NVIDIA GPU + CUDA toolkit (candle's `cuda` feature links it). On Windows
+  with CUDA 13.x see the dedicated build section below — the toolkit version
+  needs handling.
 - Rust 1.90+.
-- `python` on `PATH` (only for the example corpus' verifier).
-- Network access for the first run (downloads Qwen2.5-Coder-1.5B, ~3 GB, into
-  the Hugging Face cache).
+- A real `python` on `PATH` *only* for corpora whose `verify` calls it (the
+  Windows Store alias is not a real Python — see "No Python?" below).
+- Network access for the *first* run (downloads Qwen2.5-Coder-1.5B, ~3 GB, into
+  the Hugging Face cache; already cached here).
 
 ## Build
 
@@ -79,25 +82,53 @@ code out of a markdown fence first.
 - **Verifier safety:** `verify` runs real commands - point it at a sandboxed
   corpus, not arbitrary input.
 
-## Building for CUDA on Windows (CUDA 13 + MSVC)
+## Building for CUDA on Windows (CUDA 13.3 + MSVC) — validated 2026-06-05
 
-candle 0.10 builds its CUDA kernels with `nvcc` at compile time, which on Windows
-needs the MSVC host compiler. The validated environment (all set before `cargo`):
+candle 0.10 compiles its CUDA kernels with `nvcc` (which needs the MSVC host
+compiler) and pins **cudarc 0.19**, whose build script only knows CUDA toolkits
+**≤ 13.2**. A newer toolkit (13.3) trips two failures; both are handled:
+
+1. **cudarc version panic** (`Unsupported cuda toolkit version: 13.3`). cudarc's
+   probe runs bare `nvcc` (found via `PATH`) and panics on an unknown version.
+   The `cudarc/fallback-latest` feature (wired into `antumbra-train`'s `cuda`
+   feature) makes it fall back to its newest supported version (13.2, ABI-
+   compatible with the 13.3 libs) — but *only when the `nvcc` probe fails to
+   run*. So **keep `nvcc` off `PATH` at build time**; candle-kernels still finds
+   it via `CUDA_PATH`.
+2. **CCCL preprocessor error** (`C1189: MSVC/cl.exe with traditional
+   preprocessor`). CUDA 13's CCCL headers require the conforming preprocessor;
+   forward it to `cl.exe` with `NVCC_PREPEND_FLAGS=-Xcompiler /Zc:preprocessor`.
+
+The validated build environment (all set before `cargo`; **`%CUDA_PATH%\bin` is
+deliberately NOT on `PATH`** so cudarc falls back):
 
 ```bat
 call "...\VC\Auxiliary\Build\vcvars64.bat"            rem cl.exe + INCLUDE/LIB for nvcc
 set "CUDA_PATH=...\CUDA\v13.3"
-set "PATH=%CUDA_PATH%\bin;%CUDA_PATH%\bin\x64;%PATH%"  rem bin=nvcc, bin\x64=runtime DLLs (CUDA 13 moved them)
-set "CUDARC_CUDA_VERSION=13000"                        rem cudarc tops out at 13.2; pin 13.0 (ABI-compatible)
-set "NVCC_PREPEND_FLAGS=-Xcompiler /Zc:preprocessor"   rem CUDA 13 CCCL headers reject MSVC's traditional preprocessor
-cargo run -p antumbra-cli --features models,cuda --release -- train --corpus corpora/smoke.json ...
+set "CUDA_ROOT=...\CUDA\v13.3"                         rem candle-kernels finds nvcc + libs here
+set "NVCC_PREPEND_FLAGS=-Xcompiler=/Zc:preprocessor"  rem CUDA 13 CCCL needs the conforming preprocessor
+cargo build -p antumbra-cli --features models,cuda
+```
+
+**At run time** (not build time) the CUDA runtime DLLs must be loadable, so put
+both on `PATH` then run the built binary directly (avoids a cargo rebuild that
+would re-trip the probe):
+
+```bat
+set "PATH=%CUDA_PATH%\bin;%CUDA_PATH%\bin\x64;%PATH%"  rem bin\x64 = runtime DLLs (CUDA 13 moved them)
+target\debug\antumbra.exe --url surrealkv://./data/antumbra.skv train --corpus corpora/arith.json --generations 1
 ```
 
 Release builds also need the `surrealdb` / `surrealdb-core` `opt-level = 1`
-overrides in the root `Cargo.toml` (rustc 1.96 ICEs optimizing them at opt 3).
+overrides in the root `Cargo.toml` (rustc ICEs optimizing them at opt 3).
+
+**No Python?** The example corpora's verifiers shell out to `python`; on a box
+without a real Python (e.g. only the Windows Store stub), use a corpus whose
+`verify` is `cmd /C exit 0` (e.g. `corpora/smoke.json`) — RAFT then treats every
+completion as a pass, which still trains and serves a real adapter for validating
+the GPU path (generation quality just isn't gated).
 
 **Driver requirement:** the GPU driver must support the *toolkit* version, or PTX
-load fails with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Check `nvidia-smi` ("CUDA
-Version" = the driver's max); it must be **≥ the installed toolkit**. If it's
-lower, either update the NVIDIA driver or install a matching (lower) toolkit and
-set `CUDA_PATH` / `CUDARC_CUDA_VERSION` to it.
+load fails with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Check `nvidia-smi` (driver
+610.47 here covers CUDA 13.3). If the driver is older than the toolkit, update it
+or install a matching (lower) toolkit.
