@@ -362,4 +362,28 @@ pub enum Command {
         #[arg(long, default_value_t = 0.5)]
         replay_ratio: f64,
     },
+    /// Have the antumbra propose compartments (ADR-0014) by clustering a user's
+    /// unorganized memory (their inbox compartment + anything they authored
+    /// uncompartmented) into competence-coherent regions. Needs no model — it
+    /// clusters the embeddings already stored on each memory. With --apply it
+    /// creates each proposal as an `Origin::Proposed` compartment and moves its
+    /// members in (reversible by deleting the compartment).
+    ProposeCompartments {
+        #[arg(long)]
+        tenant: String,
+        #[arg(long)]
+        user: String,
+        /// The inbox compartment to cluster; defaults to comp:{tenant}:{user}:default.
+        #[arg(long)]
+        inbox: Option<String>,
+        /// Cosine at/above which two memories cluster together.
+        #[arg(long, default_value_t = 0.6)]
+        similarity_threshold: f32,
+        /// Smallest cluster worth proposing.
+        #[arg(long, default_value_t = 3)]
+        min_size: usize,
+        /// Persist the proposals (else print only).
+        #[arg(long, default_value_t = false)]
+        apply: bool,
+    },
 }

@@ -342,6 +342,103 @@ pub async fn consolidate_compartment(
     )
 }
 
+/// Arguments for [`propose_compartments`].
+pub struct ProposeCompartmentsArgs {
+    pub tenant: String,
+    pub user: String,
+    /// The inbox compartment whose contents are clustered. Defaults to the MCP
+    /// session default `comp:{tenant}:{user}:default`.
+    pub inbox: Option<String>,
+    pub similarity_threshold: f32,
+    pub min_size: usize,
+    /// Persist proposals as `Origin::Proposed` compartments and move members in.
+    pub apply: bool,
+}
+
+/// The antumbra proposes compartments by clustering a user's **unorganized**
+/// memory (the inbox compartment plus anything they authored uncompartmented)
+/// into competence-coherent regions (ADR-0014). This is the owner/offline
+/// surface mirroring the MCP `propose_compartments` tool — cron-able, and the
+/// path toward proposing autonomously as the penumbra grows. It needs no model:
+/// clustering runs over the embeddings already stored on each memory, so this is
+/// available in the default build. Runs as owner (mints compartments / reassigns
+/// memory), the same provenance the consolidate ops use.
+pub async fn propose_compartments(url: &str, a: ProposeCompartmentsArgs) -> anyhow::Result<()> {
+    use antumbra_core::{ClusterConfig, Compartment, CompartmentId, Memory, TenantId, UserId};
+    use antumbra_store::repo::{compartment, memory, principal};
+
+    let store = crate::connect(url).await?;
+    let tenant = TenantId::new(a.tenant.as_str());
+    let user = UserId::new(a.user.as_str());
+    principal::provision(&store, &tenant, &user).await?;
+
+    let inbox = a
+        .inbox
+        .clone()
+        .unwrap_or_else(|| format!("comp:{}:{}:default", a.tenant, a.user));
+    let inbox_id = CompartmentId::new(inbox.as_str());
+
+    // Pool = the user's unorganized memory: in their inbox, or uncompartmented
+    // and authored by them. Deliberately-filed compartments are left alone.
+    let pool: Vec<Memory> = memory::list(&store, &tenant)
+        .await?
+        .into_iter()
+        .filter(|m| {
+            m.compartment.as_ref() == Some(&inbox_id)
+                || (m.compartment.is_none() && m.author.as_ref() == Some(&user))
+        })
+        .collect();
+
+    let cfg = ClusterConfig {
+        similarity_threshold: a.similarity_threshold,
+        min_size: a.min_size,
+        ..ClusterConfig::default()
+    };
+    let proposals = antumbra_core::propose_compartments(&pool, &cfg);
+    println!(
+        "{} unorganized memories -> {} proposal(s)",
+        pool.len(),
+        proposals.len()
+    );
+
+    let now = chrono::Utc::now();
+    for (i, p) in proposals.iter().enumerate() {
+        println!(
+            "  [{i}] '{}' : {} member(s), cohesion {:.3}",
+            p.label,
+            p.members.len(),
+            p.cohesion
+        );
+        if a.apply {
+            let id = format!("comp:{}:{}:proposed:{}", a.tenant, a.user, p.label);
+            let c = Compartment::new(
+                id.as_str(),
+                tenant.clone(),
+                user.clone(),
+                p.label.clone(),
+                now,
+            )
+            .proposed();
+            compartment::create(&store, &c).await?;
+            let target = CompartmentId::new(id.as_str());
+            let mut moved = 0usize;
+            for mid in &p.members {
+                if let Some(mut m) = memory::get(&store, &tenant, mid).await? {
+                    m.compartment = Some(target.clone());
+                    m.updated_at = now;
+                    memory::upsert(&store, &m).await?;
+                    moved += 1;
+                }
+            }
+            println!("      applied -> {id} ({moved} moved)");
+        }
+    }
+    if !a.apply && !proposals.is_empty() {
+        println!("re-run with --apply to create these as proposed compartments");
+    }
+    Ok(())
+}
+
 /// Supersede an expert by name and refresh the router — population-level
 /// forgetting. Wire a store's `report_contradiction` against a *consolidated*
 /// memory to this: a contradiction retires the expert that memory produced, so

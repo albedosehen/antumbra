@@ -929,6 +929,27 @@ async fn main() -> anyhow::Result<()> {
         Command::Retire { expert } => {
             ops::retire(&cli.url, &expert).await?;
         }
+        Command::ProposeCompartments {
+            tenant,
+            user,
+            inbox,
+            similarity_threshold,
+            min_size,
+            apply,
+        } => {
+            ops::propose_compartments(
+                &cli.url,
+                ops::ProposeCompartmentsArgs {
+                    tenant,
+                    user,
+                    inbox,
+                    similarity_threshold,
+                    min_size,
+                    apply,
+                },
+            )
+            .await?;
+        }
     }
     Ok(())
 }
