@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::{EdgeType, Memory, MemoryEdge, MemoryId, MemoryNetwork, TenantId};
-use antumbra_store::repo::{edge, memory};
+use antumbra_store::repo::{edge, memory, router};
 use antumbra_store::Store;
 
 /// One tenant's MCP session over its Penumbra. `#[tool_handler]` resolves the
@@ -196,6 +196,29 @@ struct NeighborsOut {
     neighbors: Vec<NeighborView>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+struct RouteParams {
+    /// The task to route across the shared expert population.
+    task: String,
+    /// How many candidate experts to return (default 3).
+    top_k: Option<u32>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct RouteHit {
+    expert_id: String,
+    probability: f32,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct RouteOut {
+    /// Whether the population covers this task (vs out-of-distribution).
+    covered: bool,
+    /// `true` when no expert covers it — defer to the generalist.
+    escalate: bool,
+    routes: Vec<RouteHit>,
+}
+
 #[tool_router]
 impl McpServer {
     /// Store a memory in this tenant's Penumbra.
@@ -342,6 +365,46 @@ impl McpServer {
         }
         Ok(Json(NeighborsOut { neighbors }))
     }
+
+    /// Route a task across the shared expert population (the brain). Returns the
+    /// covering expert(s) ranked, or escalate when the task is out of
+    /// distribution. Pure-arithmetic gate inference (no model load).
+    #[tool(description = "Route a task across the shared expert population: which expert(s) cover it, ranked, or escalate if none.")]
+    async fn route(&self, Parameters(p): Parameters<RouteParams>) -> Result<Json<RouteOut>, ErrorData> {
+        let v = self.embedder.embed(&p.task).await.map_err(err)?;
+        let router = match router::load(&self.store).await.map_err(err)? {
+            Some(r) => r,
+            None => {
+                return Ok(Json(RouteOut {
+                    covered: false,
+                    escalate: true,
+                    routes: Vec::new(),
+                }))
+            }
+        };
+        if !router.covers(&v) {
+            return Ok(Json(RouteOut {
+                covered: false,
+                escalate: true,
+                routes: Vec::new(),
+            }));
+        }
+        let k = p.top_k.unwrap_or(3) as usize;
+        let routes = router
+            .route(&v)
+            .into_iter()
+            .take(k)
+            .map(|(id, probability)| RouteHit {
+                expert_id: id.as_str().to_string(),
+                probability,
+            })
+            .collect();
+        Ok(Json(RouteOut {
+            covered: true,
+            escalate: false,
+            routes,
+        }))
+    }
 }
 
 #[tool_handler]
@@ -350,7 +413,10 @@ impl ServerHandler for McpServer {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::router::{LearnedRouter, RouterExpert};
     use antumbra_core::testing::FixedEmbedder;
+    use antumbra_core::ExpertId;
+    use antumbra_store::repo::router;
     use antumbra_store::EMBED_DIM;
 
     async fn server() -> McpServer {
@@ -449,5 +515,47 @@ mod tests {
         assert_eq!(neighbors.0.neighbors.len(), 1);
         assert_eq!(neighbors.0.neighbors[0].edge_type, "supersedes");
         assert_eq!(neighbors.0.neighbors[0].memory.id, b);
+    }
+
+    #[tokio::test]
+    async fn route_escalates_without_router_then_routes_with_one() {
+        let s = server().await;
+
+        // No router trained yet -> escalate (out of distribution).
+        let r = s
+            .route(Parameters(RouteParams {
+                task: "add two numbers".into(),
+                top_k: None,
+            }))
+            .await
+            .unwrap();
+        assert!(r.0.escalate && !r.0.covered && r.0.routes.is_empty());
+
+        // Save a permissive router with one expert.
+        router::save(
+            &s.store,
+            &LearnedRouter {
+                weights: vec![1.0; EMBED_DIM],
+                experts: vec![RouterExpert {
+                    id: ExpertId::new("expert:adder"),
+                    centroid: vec![0.0; EMBED_DIM],
+                }],
+                temperature: 0.1,
+                floor: -1.0,
+            },
+        )
+        .await
+        .unwrap();
+
+        let r = s
+            .route(Parameters(RouteParams {
+                task: "add two numbers".into(),
+                top_k: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert!(r.0.covered && !r.0.escalate);
+        assert_eq!(r.0.routes.len(), 1);
+        assert_eq!(r.0.routes[0].expert_id, "expert:adder");
     }
 }

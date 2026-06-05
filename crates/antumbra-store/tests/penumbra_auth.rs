@@ -5,12 +5,60 @@
 
 use chrono::Utc;
 
-use antumbra_core::{Memory, MemoryNetwork, TenantId};
-use antumbra_store::repo::{memory, principal};
+use antumbra_core::router::{LearnedRouter, RouterExpert};
+use antumbra_core::{Expert, ExpertId, Generation, Memory, MemoryNetwork, TenantId};
+use antumbra_store::repo::{expert, memory, principal, router};
 use antumbra_store::Store;
 
 fn trace(id: &str, tenant: &str, content: &str, embed: Vec<f32>) -> Memory {
     Memory::new(id, tenant, MemoryNetwork::World, content, 0.8, Utc::now()).with_embedding(embed)
+}
+
+#[tokio::test]
+async fn shared_population_is_readable_under_tenant_auth() {
+    // The umbra (experts + learned router) is shared: a tenant-authenticated
+    // session can READ it (to route), while the per-tenant memory stays private.
+    let store = Store::connect_memory(4).await.unwrap();
+    let alpha = TenantId::new("ws:alpha");
+    principal::provision(&store, &alpha).await.unwrap();
+
+    let now = Utc::now();
+    expert::insert(
+        &store,
+        &Expert {
+            id: ExpertId::new("expert:adder"),
+            name: "adder".into(),
+            base_model: "base".into(),
+            artifact_uri: "mem://a".into(),
+            capability_card: serde_json::Value::Null,
+            capability_vec: Some(vec![1.0, 0.0, 0.0, 0.0]),
+            fitness: 1.0,
+            frozen_at: Some(now),
+            generation: Generation::ZERO,
+            created_at: now,
+        },
+    )
+    .await
+    .unwrap();
+    router::save(
+        &store,
+        &LearnedRouter {
+            weights: vec![1.0; 4],
+            experts: vec![RouterExpert {
+                id: ExpertId::new("expert:adder"),
+                centroid: vec![1.0, 0.0, 0.0, 0.0],
+            }],
+            temperature: 0.1,
+            floor: -1.0,
+        },
+    )
+    .await
+    .unwrap();
+
+    // As a tenant: the shared population reads through (select = true).
+    store.signin_tenant(&alpha).await.unwrap();
+    assert_eq!(expert::list(&store).await.unwrap().len(), 1);
+    assert!(router::load(&store).await.unwrap().is_some());
 }
 
 #[tokio::test]

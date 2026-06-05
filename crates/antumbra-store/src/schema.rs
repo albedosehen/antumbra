@@ -20,12 +20,27 @@ use crate::error::map;
 /// Default embedding dimension (all-MiniLM-L6-v2). ADR-0007.
 pub const EMBED_DIM: usize = 384;
 
+/// Permissions for the shared-population tables (the umbra: experts, the learned
+/// router, boundaries). Any authenticated tenant session may READ them — the
+/// brain is shared across tenants — but only the owner/root may WRITE (a record
+/// session is denied; the rootful owner connection bypasses the clause).
+/// `WHERE true` / `WHERE false` are the always / never predicates. Private
+/// per-tenant data (`memory`, `memory_edge`) uses tenant-scoped permissions
+/// instead; the rest of the tables are owner-internal (no record access).
+const SHARED_POPULATION_PERMS: [(&str, &str); 4] = [
+    ("select", "true"),
+    ("create", "false"),
+    ("update", "false"),
+    ("delete", "false"),
+];
+
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
     vec![
-        // Expert population (umbra). ADR-0001.
+        // Expert population (umbra). ADR-0001. Shared: tenants read, owner writes.
         table_schema("expert")
             .with_mode(TableMode::Schemaless)
+            .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([
                 unique_index("expert_key_uq", ["key"]),
                 hnsw_index(
@@ -49,9 +64,10 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("reward_signal")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("reward_run_idx", ["run_id", "step_idx"])]),
-        // Inhibitory store (antumbra / keystone). ADR-0004.
+        // Inhibitory store (antumbra / keystone). ADR-0004. Shared population.
         table_schema("failure_boundary")
             .with_mode(TableMode::Schemaless)
+            .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([
                 unique_index("fb_key_uq", ["key"]),
                 hnsw_index(
@@ -81,6 +97,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("device_profile")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("device_host_idx", ["host", "backend"])]),
+        // Learned router singleton (ADR-0009). Shared population: tenants read
+        // it to route a task across the shared experts; the owner trains/writes
+        // it. Previously auto-created (which defaulted to deny for record
+        // sessions); defined here so the read permission is explicit.
+        table_schema("learned_router")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(SHARED_POPULATION_PERMS),
         // Penumbra memory (the soft, editable consolidation source). Tenant-
         // isolated the way the data-plane design intends: a `tenant_id` on every
         // row and an engine-enforced row-level `PERMISSIONS` clause comparing it
