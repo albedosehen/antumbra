@@ -16,10 +16,10 @@ use rmcp::schemars;
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 
-use antumbra_core::ports::Embedder;
+use antumbra_core::ports::{ActRequest, Embedder};
 use antumbra_core::{
-    Capability, ClusterConfig, Compartment, CompartmentId, EdgeType, Grant, Memory, MemoryEdge,
-    MemoryId, MemoryNetwork, Origin, TenantId, UserId,
+    Capability, ClusterConfig, Compartment, CompartmentId, EdgeType, ExpertId, Grant, Memory,
+    MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId, UserId,
 };
 use antumbra_store::repo::{compartment, edge, expert, memory, router};
 use antumbra_store::Store;
@@ -41,6 +41,9 @@ pub struct McpServer {
     /// When set, the antumbra auto-organizes the inbox once it grows past the
     /// threshold (the autonomous propose trigger). `None` = on-demand only.
     auto_propose: Option<AutoProposeConfig>,
+    /// The serving engine the `answer` tool drives (route → serve through the
+    /// expert's adapter). `None` = serving not configured (route-only surface).
+    serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
     counter: Arc<AtomicU64>,
 }
 
@@ -54,6 +57,9 @@ struct AutoProposeConfig {
 }
 
 impl McpServer {
+    /// `serve` is the engine the `answer` tool drives (a real `MultiAdapterServe`
+    /// under `--features models`, a fake in tests, or `None` for a route-only
+    /// surface where `answer` reports serving is not configured).
     pub fn new(
         store: Store,
         embedder: Arc<dyn Embedder>,
@@ -61,6 +67,7 @@ impl McpServer {
         user: UserId,
         host: String,
         default_compartment: CompartmentId,
+        serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
     ) -> Self {
         Self {
             store,
@@ -70,6 +77,7 @@ impl McpServer {
             host,
             default_compartment,
             auto_propose: None,
+            serve,
             counter: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -151,6 +159,44 @@ impl McpServer {
             created.push(self.apply_proposal(prop).await?);
         }
         Ok(created)
+    }
+
+    /// Rank the experts covering an embedded task: shared experts via the learned
+    /// router, plus the user's own private experts by centroid. Top-`k`, best
+    /// first. The expert ACL already scopes `expert::list` to shared + own-private.
+    async fn ranked_routes(&self, v: &[f32], k: usize) -> antumbra_core::Result<Vec<RouteHit>> {
+        let mut routes: Vec<RouteHit> = Vec::new();
+        if let Some(router) = router::load(&self.store).await? {
+            if router.covers(v) {
+                for (id, probability) in router.route(v) {
+                    routes.push(RouteHit {
+                        expert_id: id.as_str().to_string(),
+                        probability,
+                        private: false,
+                    });
+                }
+            }
+        }
+        for e in expert::list(&self.store).await? {
+            if e.owner.as_ref() == Some(&self.user) {
+                if let Some(sim) = e.capability_similarity(v) {
+                    if sim >= PRIVATE_ROUTE_FLOOR {
+                        routes.push(RouteHit {
+                            expert_id: e.id.as_str().to_string(),
+                            probability: sim,
+                            private: true,
+                        });
+                    }
+                }
+            }
+        }
+        routes.sort_by(|a, b| {
+            b.probability
+                .partial_cmp(&a.probability)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        routes.truncate(k);
+        Ok(routes)
     }
 }
 
@@ -356,6 +402,26 @@ struct RouteOut {
     /// `true` when no expert covers it — defer to the generalist.
     escalate: bool,
     routes: Vec<RouteHit>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct AnswerParams {
+    /// The task to route and answer through the covering expert.
+    task: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct AnswerOut {
+    /// The generated answer (empty when escalating).
+    answer: String,
+    /// The expert that served it, when one covered the task.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expert_id: Option<String>,
+    /// `true` when no expert covered it, or serving is not configured.
+    escalate: bool,
+    /// Why it escalated, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -605,50 +671,55 @@ impl McpServer {
     #[tool(description = "Route a task across the shared population AND your private experts: which expert(s) cover it, ranked, or escalate if none.")]
     async fn route(&self, Parameters(p): Parameters<RouteParams>) -> Result<Json<RouteOut>, ErrorData> {
         let v = self.embedder.embed(&p.task).await.map_err(err)?;
-        let k = p.top_k.unwrap_or(3) as usize;
-        let mut routes: Vec<RouteHit> = Vec::new();
-
-        // Shared experts via the learned router (pure-arithmetic gate).
-        if let Some(router) = router::load(&self.store).await.map_err(err)? {
-            if router.covers(&v) {
-                for (id, probability) in router.route(&v) {
-                    routes.push(RouteHit {
-                        expert_id: id.as_str().to_string(),
-                        probability,
-                        private: false,
-                    });
-                }
-            }
-        }
-
-        // The user's own private experts (not in the shared router) — matched by
-        // centroid. The session's expert ACL already scopes the list to shared +
-        // own-private; the explicit owner filter keeps only the private ones.
-        for e in expert::list(&self.store).await.map_err(err)? {
-            if e.owner.as_ref() == Some(&self.user) {
-                if let Some(sim) = e.capability_similarity(&v) {
-                    if sim >= PRIVATE_ROUTE_FLOOR {
-                        routes.push(RouteHit {
-                            expert_id: e.id.as_str().to_string(),
-                            probability: sim,
-                            private: true,
-                        });
-                    }
-                }
-            }
-        }
-
-        routes.sort_by(|a, b| {
-            b.probability
-                .partial_cmp(&a.probability)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        routes.truncate(k);
+        let routes = self
+            .ranked_routes(&v, p.top_k.unwrap_or(3) as usize)
+            .await
+            .map_err(err)?;
         let covered = !routes.is_empty();
         Ok(Json(RouteOut {
             covered,
             escalate: !covered,
             routes,
+        }))
+    }
+
+    /// Route a task and serve the answer through the covering expert's adapter
+    /// (the full recall→route→serve surface). Escalates when nothing covers it
+    /// or when no serving engine is configured.
+    #[tool(description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter. Escalates if nothing covers it.")]
+    async fn answer(&self, Parameters(p): Parameters<AnswerParams>) -> Result<Json<AnswerOut>, ErrorData> {
+        let Some(serve) = self.serve.clone() else {
+            return Ok(Json(AnswerOut {
+                answer: String::new(),
+                expert_id: None,
+                escalate: true,
+                note: Some("serving not configured (run the server with a serving engine / --features models)".into()),
+            }));
+        };
+        let v = self.embedder.embed(&p.task).await.map_err(err)?;
+        let routes = self.ranked_routes(&v, 1).await.map_err(err)?;
+        let Some(top) = routes.first() else {
+            return Ok(Json(AnswerOut {
+                answer: String::new(),
+                expert_id: None,
+                escalate: true,
+                note: Some("no in-scope expert; escalate".into()),
+            }));
+        };
+        let expert_id = top.expert_id.clone();
+        let out = serve
+            .act(ActRequest {
+                task_id: next_id(&self.counter, "answer"),
+                prompt: p.task,
+                adapters: vec![ExpertId::new(expert_id.clone())],
+            })
+            .await
+            .map_err(err)?;
+        Ok(Json(AnswerOut {
+            answer: out.final_output,
+            expert_id: Some(expert_id),
+            escalate: false,
+            note: None,
         }))
     }
 
@@ -781,6 +852,7 @@ mod tests {
             UserId::new("user:test"),
             "test-host".into(),
             CompartmentId::new("comp:test:default"),
+            None,
         )
     }
 
@@ -1093,9 +1165,9 @@ mod tests {
         let comp_a = crate::provision_identity(&store, &ta, &ua).await.unwrap();
         let comp_b = crate::provision_identity(&store, &tb, &ub).await.unwrap();
         let server_a =
-            McpServer::new(store.clone(), embedder.clone(), ta.clone(), ua.clone(), "h".into(), comp_a);
+            McpServer::new(store.clone(), embedder.clone(), ta.clone(), ua.clone(), "h".into(), comp_a, None);
         let server_b =
-            McpServer::new(store.clone(), embedder.clone(), tb.clone(), ub.clone(), "h".into(), comp_b);
+            McpServer::new(store.clone(), embedder.clone(), tb.clone(), ub.clone(), "h".into(), comp_b, None);
 
         // Request 1: bind tenant a, store a memory via a's server.
         store.signin(&ta, &ua).await.unwrap();
@@ -1147,6 +1219,7 @@ mod tests {
             UserId::new("user:test"),
             "h".into(),
             CompartmentId::new("comp:ws:test:user:test:default"),
+            None,
         )
         .with_auto_propose(4);
 
@@ -1178,5 +1251,55 @@ mod tests {
         // The inbox shrank below the threshold, so the next write does not re-fire.
         let again = s.store_memory(Parameters(put(99))).await.unwrap();
         assert!(again.0.auto_proposed.is_empty(), "inbox no longer over threshold");
+    }
+
+    #[tokio::test]
+    async fn answer_routes_then_serves_through_the_expert() {
+        use antumbra_core::testing::EchoServe;
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        // A permissive router with one expert so routing covers any task.
+        router::save(
+            &store,
+            &LearnedRouter {
+                weights: vec![1.0; EMBED_DIM],
+                experts: vec![RouterExpert {
+                    id: ExpertId::new("expert:adder"),
+                    centroid: vec![0.0; EMBED_DIM],
+                }],
+                temperature: 0.1,
+                floor: -1.0,
+            },
+        )
+        .await
+        .unwrap();
+        let s = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "h".into(),
+            CompartmentId::new("comp:test:default"),
+            Some(Arc::new(EchoServe)),
+        );
+        let out = s
+            .answer(Parameters(AnswerParams {
+                task: "add two numbers".into(),
+            }))
+            .await
+            .unwrap();
+        assert!(!out.0.escalate, "the population covers the task");
+        assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
+        // EchoServe serves the prompt straight back — proves route -> serve wiring.
+        assert_eq!(out.0.answer, "add two numbers");
+    }
+
+    #[tokio::test]
+    async fn answer_without_a_serving_engine_reports_not_configured() {
+        let s = server().await; // serve = None
+        let out = s
+            .answer(Parameters(AnswerParams { task: "x".into() }))
+            .await
+            .unwrap();
+        assert!(out.0.escalate && out.0.note.is_some());
     }
 }

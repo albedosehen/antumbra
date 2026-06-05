@@ -133,6 +133,8 @@ async fn build_session(
     let store = connect(url).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
+    // Serving (the `answer` tool) is a route-only seam here; wiring the real
+    // MultiAdapterServe is GPU work tracked on the roadmap (R-4).
     Ok(McpServer::new(
         store,
         embedder,
@@ -140,6 +142,7 @@ async fn build_session(
         user,
         host,
         default_compartment,
+        None,
     ))
 }
 

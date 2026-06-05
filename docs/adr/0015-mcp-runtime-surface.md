@@ -45,7 +45,11 @@ The tool surface:
 | Memory | `store_memory` (compartment + provenance), `recall_memories` (semantic), `reinforce_memory`, `forget_memory`, `list_memories` |
 | Graph (ADR-0014) | `relate_memories` (typed edges), `get_neighbors` |
 | Compartments (ADR-0014) | `create_compartment`, `list_compartments`, `share_compartment` (reference/link), `revoke_compartment`, `propose_compartments` (cluster the unorganized pool; `apply` to persist as `Origin::Proposed`) |
-| Brain (ADR-0005) | `route` (which expert covers a task, ranked, or escalate — pure-arithmetic gate inference) |
+| Brain (ADR-0005) | `route` (which expert covers a task, ranked, or escalate — pure-arithmetic gate inference); `answer` (route *and serve* through the covering expert's adapter; escalates if uncovered or no serving engine is configured) |
+
+The `answer` tool takes an injectable `Serve` engine: a real `MultiAdapterServe` under `--features models`, or
+`None` for a route-only surface (it then reports serving is not configured). The antumbra can also be told to
+self-organize: `--auto-propose <N>` fires `propose_compartments` over the inbox once it reaches `N` memories.
 
 The client never passes `tenant`/`user`; the server resolves them from the bound session and applies them. The
 real embedder (candle BERT) lands under `--features models`; a byte-histogram fake otherwise.

@@ -157,6 +157,7 @@ impl HttpState {
             user,
             self.host.clone(),
             default_compartment,
+            None,
         );
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);

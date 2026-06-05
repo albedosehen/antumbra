@@ -32,6 +32,18 @@ only the DB POSTs, never the idle stream. Today the surface is recall-on-demand.
 **Depends on:** R-3; a subscription registry (which identity watches which
 compartment).
 
+## GPU-gated wiring
+
+### R-4 · Wire `MultiAdapterServe` into the MCP `answer` tool
+**Status:** seam shipped, GPU wiring deferred.
+**Shape:** the `answer` tool (route → serve through the covering expert) takes an
+injectable `Serve` engine and is CPU-proven with a fake (`EchoServe`). What's
+left is GPU-only: build a resident `MultiAdapterServe` from the population
+(register each expert's adapter), wrap it in `Arc`, and pass it to the per-session
+`McpServer`s — so a server built `--features models` answers for real. Needs the
+3090 Ti, and a decision on the per-tenant private-adapter registry (the engine
+sees all adapters; routing already scopes which a session may pick).
+
 ## Foundational — make the current surface provably work
 
 ### R-3 · Networked MCP end-to-end validation
