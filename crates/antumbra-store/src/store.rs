@@ -5,7 +5,7 @@ use surql::connection::auth::ScopeCredentials;
 use surql::connection::ConnectionConfig;
 use surql::DatabaseClient;
 
-use antumbra_core::{Result, TenantId};
+use antumbra_core::{Result, TenantId, UserId};
 
 use crate::error::map;
 use crate::schema::{self, EMBED_DIM, TENANT_ACCESS};
@@ -48,14 +48,15 @@ impl Store {
         Ok(store)
     }
 
-    /// Authenticate this session as `tenant` via the record-access method, so
-    /// `$auth.tenant` is bound and the engine enforces the row-level PERMISSIONS
-    /// (a tenant session can no longer read another tenant's rows, even with the
-    /// app-side WHERE removed). Requires a provisioned principal for the tenant.
-    /// Root/owner sessions skip this and see across tenants.
-    pub async fn signin_tenant(&self, tenant: &TenantId) -> Result<()> {
+    /// Authenticate this session as `(tenant, user)` via the record-access
+    /// method, so `$auth.tenant` (the hard isolation key) and `$auth.user` (the
+    /// compartment-ownership / sharing actor) are bound and the engine enforces
+    /// the row-level PERMISSIONS. Requires a provisioned principal. Root/owner
+    /// sessions skip this and see across tenants.
+    pub async fn signin(&self, tenant: &TenantId, user: &UserId) -> Result<()> {
         let creds = ScopeCredentials::new(&self.namespace, &self.database, TENANT_ACCESS)
-            .with("tenant", tenant.as_str());
+            .with("tenant", tenant.as_str())
+            .with("user", user.as_str());
         self.client.signin(&creds).await.map_err(map)?;
         Ok(())
     }

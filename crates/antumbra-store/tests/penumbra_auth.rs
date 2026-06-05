@@ -6,7 +6,7 @@
 use chrono::Utc;
 
 use antumbra_core::router::{LearnedRouter, RouterExpert};
-use antumbra_core::{Expert, ExpertId, Generation, Memory, MemoryNetwork, TenantId};
+use antumbra_core::{Expert, ExpertId, Generation, Memory, MemoryNetwork, TenantId, UserId};
 use antumbra_store::repo::{expert, memory, principal, router};
 use antumbra_store::Store;
 
@@ -20,7 +20,7 @@ async fn shared_population_is_readable_under_tenant_auth() {
     // session can READ it (to route), while the per-tenant memory stays private.
     let store = Store::connect_memory(4).await.unwrap();
     let alpha = TenantId::new("ws:alpha");
-    principal::provision(&store, &alpha).await.unwrap();
+    principal::provision(&store, &alpha, &UserId::new("user:a")).await.unwrap();
 
     let now = Utc::now();
     expert::insert(
@@ -56,7 +56,7 @@ async fn shared_population_is_readable_under_tenant_auth() {
     .unwrap();
 
     // As a tenant: the shared population reads through (select = true).
-    store.signin_tenant(&alpha).await.unwrap();
+    store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
     assert_eq!(expert::list(&store).await.unwrap().len(), 1);
     assert!(router::load(&store).await.unwrap().is_some());
 }
@@ -68,8 +68,8 @@ async fn engine_enforces_tenant_isolation_under_record_auth() {
     let beta = TenantId::new("ws:beta");
 
     // Owner/root provisions principals and seeds both tenants' memories.
-    principal::provision(&store, &alpha).await.unwrap();
-    principal::provision(&store, &beta).await.unwrap();
+    principal::provision(&store, &alpha, &UserId::new("user:a")).await.unwrap();
+    principal::provision(&store, &beta, &UserId::new("user:b")).await.unwrap();
     memory::upsert(&store, &trace("memory:a", "ws:alpha", "alpha", vec![1.0, 0.0, 0.0, 0.0]))
         .await
         .unwrap();
@@ -81,7 +81,7 @@ async fn engine_enforces_tenant_isolation_under_record_auth() {
     assert_eq!(memory::all_unscoped(&store).await.unwrap().len(), 2);
 
     // Bind a tenant session: $auth.tenant = ws:alpha, engine PERMISSIONS active.
-    store.signin_tenant(&alpha).await.unwrap();
+    store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
 
     // The SAME unfiltered query now returns ONLY alpha's row — the engine hides
     // beta's, with no app-side WHERE involved. This is the structural guarantee.

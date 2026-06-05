@@ -150,13 +150,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("memory_edge_from_idx", ["tenant_id", "from_id"]),
                 index("memory_edge_to_idx", ["tenant_id", "to_id"]),
             ]),
-        // Tenant principals: one record per tenant carrying its `tenant`. The
-        // record-access SIGNIN resolves a principal so `$auth` is that record
-        // and `$auth.tenant` drives the engine-enforced PERMISSIONS. Provisioned
-        // by the owner/root; read only by the access SIGNIN expression.
+        // Principals: one record per (tenant, user). The record-access SIGNIN
+        // resolves a principal so `$auth` carries both `$auth.tenant` (the hard
+        // isolation key) and `$auth.user` (the compartment-ownership / sharing
+        // actor). Provisioned by the owner/root; read only by the SIGNIN.
         table_schema("principal")
             .with_mode(TableMode::Schemaless)
-            .with_indexes([unique_index("principal_tenant_uq", ["tenant"])]),
+            .with_indexes([unique_index("principal_tenant_user_uq", ["tenant", "user"])]),
     ]
 }
 
@@ -169,7 +169,8 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
 pub fn tenant_access() -> AccessDefinition {
     record_access(
         "tenant",
-        RecordAccessConfig::new().with_signin("SELECT * FROM principal WHERE tenant = $tenant"),
+        RecordAccessConfig::new()
+            .with_signin("SELECT * FROM principal WHERE tenant = $tenant AND user = $user"),
     )
     .with_session("1h")
 }

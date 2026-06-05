@@ -14,7 +14,7 @@ use clap::Parser;
 use rmcp::ServiceExt;
 
 use antumbra_core::ports::Embedder;
-use antumbra_core::TenantId;
+use antumbra_core::{TenantId, UserId};
 use antumbra_store::repo::principal;
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
@@ -28,9 +28,14 @@ struct Cli {
     /// `mem://` (ephemeral), or `ws://host:8000/rpc`.
     #[arg(long, default_value = "surrealkv://./data/antumbra.skv")]
     url: String,
-    /// The workspace this server serves. Every tool is engine-isolated to it.
+    /// The workspace (tenant) this server serves. Every tool is engine-isolated
+    /// to it.
     #[arg(long)]
     tenant: String,
+    /// The user this session acts as (the compartment-ownership / sharing
+    /// actor). Defaults to a per-tenant default user.
+    #[arg(long, default_value = "user:default")]
+    user: String,
 }
 
 async fn connect(url: &str) -> Result<Store> {
@@ -58,12 +63,14 @@ fn make_embedder() -> Result<Box<dyn Embedder>> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Connect as owner (applies the schema), provision the tenant's principal,
-    // then bind the session as that tenant so the engine enforces isolation.
+    // Connect as owner (applies the schema), provision the (tenant, user)
+    // principal, then bind the session so the engine enforces isolation and
+    // compartment access for this user.
     let store = connect(&cli.url).await?;
     let tenant = TenantId::new(cli.tenant);
-    principal::provision(&store, &tenant).await?;
-    store.signin_tenant(&tenant).await?;
+    let user = UserId::new(cli.user);
+    principal::provision(&store, &tenant, &user).await?;
+    store.signin(&tenant, &user).await?;
 
     let embedder: Arc<dyn Embedder> = Arc::from(make_embedder()?);
     let service = McpServer::new(store, embedder, tenant);

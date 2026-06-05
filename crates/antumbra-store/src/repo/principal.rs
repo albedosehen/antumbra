@@ -9,19 +9,25 @@ use serde_json::json;
 use surql::query::crud::upsert_record;
 use surql::types::RecordID;
 
-use antumbra_core::{Result, TenantId};
+use antumbra_core::{Result, TenantId, UserId};
 
 use crate::error::map;
 use crate::store::Store;
 
 const TABLE: &str = "principal";
 
-/// Create (or refresh) the principal for a tenant. Idempotent.
-pub async fn provision(store: &Store, tenant: &TenantId) -> Result<()> {
-    let key = tenant.as_str().replace([':', '/', '\\'], "_");
+/// Create (or refresh) the principal for a `(tenant, user)`. Idempotent. The
+/// record-access SIGNIN resolves this so `$auth` carries both `tenant` and
+/// `user`.
+pub async fn provision(store: &Store, tenant: &TenantId, user: &UserId) -> Result<()> {
+    let key = format!("{}|{}", tenant.as_str(), user.as_str()).replace([':', '/', '\\', '|'], "_");
     let rid = RecordID::<()>::new(TABLE, key.as_str()).map_err(map)?;
-    upsert_record(store.client(), &rid, json!({ "tenant": tenant.as_str() }))
-        .await
-        .map_err(map)?;
+    upsert_record(
+        store.client(),
+        &rid,
+        json!({ "tenant": tenant.as_str(), "user": user.as_str() }),
+    )
+    .await
+    .map_err(map)?;
     Ok(())
 }
