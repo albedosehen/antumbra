@@ -44,6 +44,15 @@ left is GPU-only: build a resident `MultiAdapterServe` from the population
 3090 Ti, and a decision on the per-tenant private-adapter registry (the engine
 sees all adapters; routing already scopes which a session may pick).
 
+### R-5 · Live harness metabolization
+**Status:** first increment shipped (normalized-export → capture tasks via
+`antumbra metabolize`); live ingestion deferred.
+**Shape:** instead of a hand-exported trace file, pull successful orchestration
+traces **live** from a running harness — Kushtaka's task-trace / behavior-graph /
+loop-run MCP tools — and metabolize on a cadence. Plus behavior-graph-*structure*
+aware metabolization (learn the graph's decomposition, not just its collapsed
+outcome). The brain absorbs the scaffold continuously, so the harness shrinks.
+
 ## Foundational — make the current surface provably work
 
 ### R-3 · Networked MCP end-to-end validation

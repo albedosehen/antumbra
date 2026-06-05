@@ -929,6 +929,33 @@ async fn main() -> anyhow::Result<()> {
         Command::Retire { expert } => {
             ops::retire(&cli.url, &expert).await?;
         }
+        Command::Metabolize {
+            source,
+            out,
+            min_recurrence,
+            train,
+            run,
+            rounds,
+            samples,
+            max_new_tokens,
+            lr,
+        } => {
+            commands::metabolize(
+                &cli.url,
+                commands::MetabolizeArgs {
+                    source,
+                    out,
+                    min_recurrence,
+                    train,
+                    run,
+                    rounds,
+                    samples,
+                    max_new_tokens,
+                    lr,
+                },
+            )
+            .await?;
+        }
         Command::ProposeCompartments {
             tenant,
             user,

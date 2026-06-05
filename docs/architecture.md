@@ -208,8 +208,8 @@ tenant/compartment isolation (ADR-0012/0013/0014), and the agent-facing MCP runt
 | train (ADR-0002/0010/0012) | **implemented** - RAFT/GRPO LoRA fine-tuning (candle Qwen2.5-Coder + LoRA `CausalLm`), capture/teach intake, consolidation (gate + replay), memory-import. Behind `models`; CPU-tested except the model forward (GPU-validated, `docs/running-the-trainer.md`). |
 | serve (ADR-0006) | **implemented** - `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert); device-free resolution CPU-tested, generate+swap pending GPU validation. |
 | mcp (ADR-0015) | **implemented + tested** - 14 tools over the Penumbra + population (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`); the antumbra can auto-organize the inbox (`--auto-propose`); stdio (single identity) and networked JWT multi-tenant HTTP (per-request `$auth`, isolation proven on embedded). |
-| cli | `migrate · schema · experts · status · loop · route · seed · ask · serve · train · teach · evolve · populate · memory-import · consolidate · consolidate-compartment · propose-compartments · retire · scope · gate-train · compose` |
-| tui (ADR-0005) | operator console (ratatui) over the live population/gate. |
+| cli | `migrate · schema · experts · status · loop · route · seed · ask · serve · train · teach · evolve · populate · memory-import · metabolize · consolidate · consolidate-compartment · propose-compartments · retire · scope · gate-train · compose` |
+| tui (ADR-0005/0009) | operator console (ratatui) over the live population/gate; a headless `snapshot` mode renders to an in-memory buffer and emits a text grid (e2e) + a PNG screenshot. |
 
 Not yet runtime-validated / built: GPU validation of `MultiAdapterServe`'s swap and a real private-LoRA mint
 (`consolidate-compartment`); a live multi-tenant deployment of the networked MCP against a `ws://` server; the

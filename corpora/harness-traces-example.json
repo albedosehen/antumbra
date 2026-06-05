@@ -1,0 +1,36 @@
+[
+  {
+    "id": "trace:reverse-string",
+    "goal": "Reverse a string in Python.",
+    "solution": "def reverse(s):\n    return s[::-1]",
+    "marker": "[::-1]",
+    "kind": "task",
+    "success": true,
+    "recurrence": 7
+  },
+  {
+    "id": "trace:dedupe-list",
+    "goal": "Remove duplicates from a list while preserving order.",
+    "solution": "def dedupe(xs):\n    seen = set()\n    return [x for x in xs if not (x in seen or seen.add(x))]",
+    "marker": "seen",
+    "kind": "loop",
+    "success": true,
+    "recurrence": 4
+  },
+  {
+    "id": "trace:flaky-one-off",
+    "goal": "A one-off orchestration that happened to work once.",
+    "solution": "print('lucky')",
+    "kind": "task",
+    "success": true,
+    "recurrence": 1
+  },
+  {
+    "id": "trace:failed-attempt",
+    "goal": "An orchestration the harness marked as failed.",
+    "solution": "def add(a, b):\n    return a - b",
+    "kind": "graph",
+    "success": false,
+    "recurrence": 3
+  }
+]

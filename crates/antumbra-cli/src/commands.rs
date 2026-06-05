@@ -655,3 +655,138 @@ async fn serve_prompt(
     }
     Ok(())
 }
+
+/// Parameters for [`metabolize`].
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
+pub struct MetabolizeArgs {
+    pub source: String,
+    pub out: String,
+    pub min_recurrence: u32,
+    pub train: bool,
+    pub run: String,
+    pub rounds: usize,
+    pub samples: usize,
+    pub max_new_tokens: usize,
+    pub lr: f64,
+}
+
+/// Metabolize a harness's successful orchestration traces (ADR-0001): adapt a
+/// normalized harness-trace export (loop runs, behavior-graph evaluations, task
+/// executions) into capture tasks the population internalizes, so the brain
+/// learns to do in one shot what the harness did in many steps. Writes the
+/// converted corpus; with `--train`, internalizes it through the capture loop.
+pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
+    let MetabolizeArgs {
+        source,
+        out,
+        min_recurrence,
+        train,
+        run,
+        rounds,
+        samples,
+        max_new_tokens,
+        lr,
+    } = args;
+    #[cfg(feature = "models")]
+    {
+        use antumbra_train::{metabolize as metabolize_traces, parse_harness_traces, MetabolizePolicy};
+
+        let bytes = std::fs::read(&source)?;
+        let traces = parse_harness_traces(&bytes)?;
+        let policy = MetabolizePolicy { min_recurrence };
+        let tasks = metabolize_traces(&traces, &policy);
+
+        // Cluster by kind (loop / graph / task) for an honest report.
+        let mut kinds: Vec<(String, usize)> = Vec::new();
+        for t in &tasks {
+            let k = t.skill();
+            match kinds.iter_mut().find(|(s, _)| *s == k) {
+                Some((_, n)) => *n += 1,
+                None => kinds.push((k, 1)),
+            }
+        }
+        println!(
+            "metabolized {}/{} traces into capture tasks across {} kind(s)",
+            tasks.len(),
+            traces.len(),
+            kinds.len()
+        );
+        for (k, n) in &kinds {
+            println!("  kind '{k}': {n} task(s)");
+        }
+
+        // Persist the converted capture corpus ({id,prompt,verify,completion,skill}).
+        let arr: Vec<serde_json::Value> = tasks
+            .iter()
+            .map(|t| {
+                let mut o = serde_json::Map::new();
+                o.insert("id".into(), serde_json::json!(t.id));
+                o.insert("prompt".into(), serde_json::json!(t.prompt));
+                o.insert("verify".into(), t.verify.clone());
+                if let Some(c) = &t.completion {
+                    o.insert("completion".into(), serde_json::json!(c));
+                }
+                o.insert("skill".into(), serde_json::json!(t.skill()));
+                serde_json::Value::Object(o)
+            })
+            .collect();
+        std::fs::write(&out, serde_json::to_vec_pretty(&arr)?)?;
+        println!("wrote capture corpus -> {out}");
+
+        if !train {
+            println!("run `antumbra teach --corpus {out}` to internalize the metabolized traces");
+        } else if tasks.is_empty() {
+            println!("nothing to train: no trace cleared the metabolization gate");
+        } else {
+            let store = crate::connect(url).await?;
+            let cfg = RaftConfig {
+                samples_per_task: samples,
+                rounds,
+                max_new_tokens,
+                learning_rate: lr,
+                ..RaftConfig::default()
+            };
+            let corpus = JsonCorpus::from_tasks(tasks.clone());
+            let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+            let loader = CandleModelLoader::new(cfg.clone());
+            let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
+            let embedder = crate::make_embedder()?;
+            let loop_cfg = LoopConfig {
+                graduate_threshold: 0.3,
+                base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                max_steps: 8,
+            };
+            let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
+            let reports = lp.run_until(&RunId::new(run), 1).await?;
+            for r in &reports {
+                println!(
+                    "gen {:<3} expert {:<16} internalized={:.2} graduated={}",
+                    r.generation.0, r.shadow, r.fitness, r.graduated
+                );
+            }
+            if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+                println!("router refreshed over {} experts", r.experts.len());
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "models"))]
+    {
+        let _ = (
+            url,
+            &source,
+            &out,
+            min_recurrence,
+            train,
+            &run,
+            rounds,
+            samples,
+            max_new_tokens,
+            lr,
+        );
+        anyhow::bail!(
+            "`metabolize` requires building with --features models (it adapts harness traces \
+             into the capture corpus and, with --train, internalizes them)"
+        )
+    }
+}

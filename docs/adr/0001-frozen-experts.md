@@ -2,6 +2,15 @@
 
 **Status:** Accepted · **Date:** 2026-05-30 · **Related:** 0002 (shadows), 0005 (gate), 0006 (serving), 0008 (loop), 0009 (north star)
 
+> **Metabolizing the harness — first increment (2026-06-05).** The thesis that the *harness* (loops, behavior
+> graphs, task execution) is scaffolding to absorb into weights rather than clone now has a runnable path:
+> `antumbra-train::harness` adapts a harness's **successful, recurrent orchestration traces** into the same
+> capture tasks the population internalizes (goal → prompt, collapsed outcome → completion), gated so a one-off
+> or failed orchestration is never frozen. Driven by `antumbra metabolize` (mirrors `memory-import`; `--train`
+> internalizes through the capture loop). So the brain can learn to do in one shot what the harness did in many
+> steps. Deferred: ingesting traces live from a running harness (Kushtaka's task-trace / behavior-graph MCP) and
+> behavior-graph-structure-aware metabolization, rather than a normalized export.
+
 ## Context
 
 Catastrophic forgetting is the central failure mode of continual learning: train on task B and you degrade on

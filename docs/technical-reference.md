@@ -37,9 +37,9 @@ Eleven crates, single Rust workspace. The default build is light (no ML deps); c
 | `antumbra-gate` | 0005 | Boundary-conditioned coverage gate: rank by capability, escalate on relative coverage. | - |
 | `antumbra-boundary` | 0004 | Counterfactual scope engine (keystone). Seam for `C'` recovery. | - |
 | `antumbra-loop` | 0008 | Durable generational loop; writes full lineage to the substrate. | - |
-| `antumbra-train` | 0002, 0010, 0012 | candle QLoRA/RAFT trainer: Qwen2.5-Coder + LoRA, SFT, save; capture/teach intake; **consolidation** (gate + replay) and memory-import. | `candle-*`, `tokenizers`, `hf-hub` (`models`); `cuda`/`metal` |
+| `antumbra-train` | 0001, 0002, 0010, 0012 | candle QLoRA/RAFT trainer: Qwen2.5-Coder + LoRA, SFT, save; capture/teach intake; **consolidation** (gate + replay), memory-import, and **harness metabolization** (`harness`: successful orchestration traces → capture tasks). | `candle-*`, `tokenizers`, `hf-hub` (`models`); `cuda`/`metal` |
 | `antumbra-serve` | 0006 | Candle adapter serving: `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert), plus the real candle BERT embedder. | `candle-*`, `candle-transformers`, `antumbra-train` (`models`); `cuda`/`metal` |
-| `antumbra-cli` | - | Operator CLI: `migrate · schema · experts · status · loop · route · ask · serve · train · teach · evolve · populate · memory-import · consolidate · retire`. | pulls `train`/`serve`/`critic` (`models`) |
+| `antumbra-cli` | - | Operator CLI: `migrate · schema · experts · status · loop · route · ask · serve · train · teach · evolve · populate · memory-import · metabolize · consolidate · consolidate-compartment · propose-compartments · retire`. | pulls `train`/`serve`/`critic` (`models`) |
 | `antumbra-mcp` | 0015 | MCP server over the Penumbra + population: 14 tools (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`), an optional autonomous propose trigger (`--auto-propose`). Two transports: stdio (one bound `(tenant, user)`) and `--http` (networked, multi-tenant per request — JWT claims become `$auth`). | `rmcp`, `axum`, `jsonwebtoken`; `antumbra-serve` (`models`) |
 | `antumbra-tui` | 0005 | Operator console (ratatui): the live population/gate observatory. | `ratatui` |
 

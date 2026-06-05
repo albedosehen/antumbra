@@ -168,7 +168,7 @@ pub fn parse_export(bytes: &[u8]) -> Result<Vec<MemoryRecord>> {
 /// check. This is the same marker check the teach corpora use; it confirms the
 /// expert *internalized* the memory, not that the memory is true (the store's
 /// reinforcement already settled truth).
-fn marker_verify(marker: &str, forbid: &[String]) -> serde_json::Value {
+pub(crate) fn marker_verify(marker: &str, forbid: &[String]) -> serde_json::Value {
     let m = serde_json::to_string(&marker.to_lowercase()).unwrap_or_else(|_| "\"\"".into());
     let f: Vec<String> = forbid.iter().map(|s| s.to_lowercase()).collect();
     let f = serde_json::to_string(&f).unwrap_or_else(|_| "[]".into());

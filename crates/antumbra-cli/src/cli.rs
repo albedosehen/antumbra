@@ -362,6 +362,37 @@ pub enum Command {
         #[arg(long, default_value_t = 0.5)]
         replay_ratio: f64,
     },
+    /// Metabolize a harness (ADR-0001): adapt a harness's successful
+    /// orchestration traces (loop runs, behavior-graph evaluations, task
+    /// executions) into capture tasks the population internalizes — so the brain
+    /// learns to do in one shot what the harness did in many steps. Only
+    /// successful, recurrent traces metabolize. Writes the converted corpus; with
+    /// --train, internalizes it. Needs --features models.
+    Metabolize {
+        /// JSON array of normalized harness traces ({goal, solution, kind,
+        /// success, recurrence, ...}). See `harness::HarnessTrace`.
+        #[arg(long)]
+        source: String,
+        /// Where to write the converted capture corpus for inspection / `teach`.
+        #[arg(long, default_value = "corpora/_metabolized.json")]
+        out: String,
+        /// Recurrence floor: only patterns seen at least this often metabolize.
+        #[arg(long, default_value_t = 1)]
+        min_recurrence: u32,
+        /// Also internalize the metabolized traces now (the capture loop).
+        #[arg(long, default_value_t = false)]
+        train: bool,
+        #[arg(long, default_value = "run:metabolize")]
+        run: String,
+        #[arg(long, default_value_t = 40)]
+        rounds: usize,
+        #[arg(long, default_value_t = 8)]
+        samples: usize,
+        #[arg(long, default_value_t = 32)]
+        max_new_tokens: usize,
+        #[arg(long, default_value_t = 1e-3)]
+        lr: f64,
+    },
     /// Have the antumbra propose compartments (ADR-0014) by clustering a user's
     /// unorganized memory (their inbox compartment + anything they authored
     /// uncompartmented) into competence-coherent regions. Needs no model — it
