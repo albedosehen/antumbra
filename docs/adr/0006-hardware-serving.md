@@ -18,9 +18,14 @@
 > `ExpertId -> adapter-path` map resolves the gate's selections; resolution failures (empty request, unregistered
 > expert) error *before* any device load, so that logic is unit-tested on CPU, and the candle generation path is
 > type-checked under `--features models`. v0 serves the single top-ranked adapter; a true latent blend of >1
-> (which changes the LoRA rank and so the base shape) stays the `ask --with` `compose_adapters` path. Still to do:
-> GPU validation of the swap on real adapters, and a resident server/daemon (or MCP `act` tool) to give the
-> engine a long-running caller — a one-shot CLI would not exercise the base-resident, swap-skip behavior.
+> (which changes the LoRA rank and so the base shape) stays the `ask --with` `compose_adapters` path.
+>
+> Its long-running caller landed the same day: `antumbra serve` registers every expert's adapter into one
+> resident `MultiAdapterServe`, then routes a single `--task` or a stream of stdin prompts through the learned
+> router and answers from the resident engine — a stream pays the base load only on the first prompt and reuses
+> the loaded factors when consecutive prompts route to the same expert. **Still to do:** GPU validation of the
+> swap on real adapters (the only remaining unproven step — the orchestration is type-checked under
+> `--features models` and its device-free resolution logic is unit-tested on CPU).
 
 ## Context
 

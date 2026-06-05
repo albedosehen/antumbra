@@ -20,7 +20,7 @@ The tool surface:
 |---|---|
 | Memory | `store_memory` (compartment + provenance), `recall_memories` (semantic), `reinforce_memory`, `forget_memory`, `list_memories` |
 | Graph (ADR-0014) | `relate_memories` (typed edges), `get_neighbors` |
-| Compartments (ADR-0014) | `create_compartment`, `list_compartments`, `share_compartment` (reference/link), `revoke_compartment` |
+| Compartments (ADR-0014) | `create_compartment`, `list_compartments`, `share_compartment` (reference/link), `revoke_compartment`, `propose_compartments` (cluster the unorganized pool; `apply` to persist as `Origin::Proposed`) |
 | Brain (ADR-0005) | `route` (which expert covers a task, ranked, or escalate — pure-arithmetic gate inference) |
 
 The client never passes `tenant`/`user`; the server resolves them from the bound session and applies them. The

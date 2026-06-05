@@ -1,6 +1,17 @@
 # ADR-0014 - Compartments: latent-spaces of memory
 
-**Status:** Accepted (Phase 1–2a) · Proposed (private experts, auto-compartmentalization) · **Date:** 2026-06-04 · **Related:** 0004 (antumbra/boundary), 0012 (Penumbra), 0013 (identity)
+**Status:** Accepted (Phase 1–2a, auto-compartmentalization) · Proposed (private experts) · **Date:** 2026-06-04 · **Related:** 0004 (antumbra/boundary), 0012 (Penumbra), 0013 (identity)
+
+> **Auto-compartmentalization implemented (2026-06-04).** `antumbra-core::penumbra::propose_compartments` is a
+> pure, deterministic single-pass cosine clustering over the embeddings already stored on each `Memory`: it
+> groups a pool into `ProposedCompartment{label, members, centroid, cohesion}` (labels slugged from each
+> cluster's medoid, proposals returned best-cohesion first). It is policy-free — **the caller selects the pool**,
+> since the core cannot know which compartment is the inbox. Surfaced as the MCP `propose_compartments` tool: it
+> clusters the *unorganized* pool (the default/inbox compartment plus any uncompartmented memory), leaving filed
+> compartments alone. `apply=false` suggests only; `apply=true` creates each as an `Origin::Proposed` compartment
+> the user owns and moves its members in (reversible by deleting it — the user curates: keep/name/merge/share).
+> The antumbra thus both *draws boundaries* (ADR-0004) and *proposes structure*. Pending: surfacing proposals in
+> the TUI, and an antumbra-driven trigger (propose on penumbra growth) rather than on-demand only.
 
 ## Context
 
