@@ -11,6 +11,17 @@
 > (S-LoRA) and the `llama-cpp-2` / `mistral.rs` backends with the ternary tier remain the deferred richer scope.
 > It also unblocks the real `AcceptabilityProbe` (ADR-0004): a behavior can now be generated and then judged.
 
+> **Resident multi-adapter engine (2026-06-04).** `antumbra-serve::MultiAdapterServe` now implements the S-LoRA
+> hot-swap directly on the candle path: it loads the shared base **once** (neutral zero LoRA factors) and, per
+> request, `load_adapter`s the routed expert's factors into the resident model — an O(adapter) swap, not an
+> O(base) reload — skipping the swap when consecutive routes name the same expert. A registered
+> `ExpertId -> adapter-path` map resolves the gate's selections; resolution failures (empty request, unregistered
+> expert) error *before* any device load, so that logic is unit-tested on CPU, and the candle generation path is
+> type-checked under `--features models`. v0 serves the single top-ranked adapter; a true latent blend of >1
+> (which changes the LoRA rank and so the base shape) stays the `ask --with` `compose_adapters` path. Still to do:
+> GPU validation of the swap on real adapters, and a resident server/daemon (or MCP `act` tool) to give the
+> engine a long-running caller — a one-shot CLI would not exercise the base-resident, swap-skip behavior.
+
 ## Context
 
 The eventual target is a heterogeneous home cluster, but building placement first would sink the project before
