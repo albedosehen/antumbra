@@ -109,8 +109,24 @@ const DEMO_SPECIALISTS: [(&str, &str); 3] = [
     ),
 ];
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // SurrealDB query evaluation (the engine-enforced ACL subqueries, ADR-0013/
+    // 0014) recurses deep; the OS default main-thread stack (1 MB on Windows)
+    // overflows. Host the runtime on a thread with a large stack. (Tests pass
+    // because they run on tokio worker threads, which already have room.)
+    std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .block_on(run())
+        })?
+        .join()
+        .map_err(|_| anyhow::anyhow!("antumbra worker thread panicked"))?
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Migrate => {

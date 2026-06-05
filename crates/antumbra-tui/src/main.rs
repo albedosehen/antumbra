@@ -49,8 +49,22 @@ enum Command {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // Host the runtime on a large-stack thread: SurrealDB's ACL subqueries
+    // recurse past the 1 MB Windows main-thread stack (see the CLI note).
+    std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .block_on(app_main())
+        })?
+        .join()
+        .map_err(|_| anyhow::anyhow!("antumbra-tui worker thread panicked"))?
+}
+
+async fn app_main() -> Result<()> {
     let args = Args::parse();
     if let Some(Command::Snapshot {
         out,

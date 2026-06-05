@@ -154,8 +154,23 @@ fn default_host(explicit: Option<String>) -> String {
     })
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // SurrealDB's engine-enforced ACL subqueries (ADR-0013/0014) recurse deep;
+    // host the runtime on a large-stack thread so the 1 MB Windows main-thread
+    // stack does not overflow (see the matching note in the CLI).
+    std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .block_on(run())
+        })?
+        .join()
+        .map_err(|_| anyhow::anyhow!("antumbra-mcp worker thread panicked"))?
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let host = default_host(cli.host);
     let embedder: Arc<dyn Embedder> = Arc::from(make_embedder()?);
