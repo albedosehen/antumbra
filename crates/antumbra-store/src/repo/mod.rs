@@ -14,3 +14,4 @@ pub mod principal;
 pub mod reward;
 pub mod router;
 pub mod shadow;
+pub mod sync;

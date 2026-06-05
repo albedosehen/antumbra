@@ -133,6 +133,36 @@ async fn run() -> anyhow::Result<()> {
             connect(&cli.url).await?;
             println!("schema applied at {}", cli.url);
         }
+        Command::Sync {
+            remote,
+            remote_user,
+            remote_pass,
+            interval,
+            once,
+        } => {
+            let local = antumbra_sync::Endpoint::embedded(&cli.url);
+            let remote_ep = match (remote_user, remote_pass) {
+                (Some(user), Some(pass)) => {
+                    antumbra_sync::Endpoint::authoritative(&remote, user, pass)
+                }
+                _ => antumbra_sync::Endpoint::embedded(&remote),
+            };
+            let cfg = antumbra_sync::SyncConfig::new(local, remote_ep)
+                .with_interval(std::time::Duration::from_secs(interval));
+            if once {
+                let stats = antumbra_sync::worker::run_once(&cfg).await?;
+                println!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
+            } else {
+                println!("sync: reconciling {} <-> {} every {interval}s (ctrl-c to stop)", cli.url, remote);
+                let (tx, rx) = tokio::sync::watch::channel(false);
+                tokio::spawn(async move {
+                    let _ = tokio::signal::ctrl_c().await;
+                    let _ = tx.send(true);
+                });
+                antumbra_sync::worker::run(cfg, rx).await?;
+                println!("sync: stopped");
+            }
+        }
         Command::Schema => {
             for statement in schema::schema_statements(EMBED_DIM as u32)? {
                 println!("{statement}");

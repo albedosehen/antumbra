@@ -8,17 +8,27 @@ is only the *not-yet-built* queue.
 ## Deferred — networked / multi-device
 
 ### R-1 · Collector / sync: local-embedded penumbra ↔ remote-authoritative store
-**Status:** deferred until the single-node networked surface is proven end-to-end.
+**Status:** BUILT (crate `antumbra-sync`, CLI `sync`; GPU-free, validated 2026-06-05).
 **Shape:** an edge device keeps its **embedded** penumbra (`surrealkv://`, single
-writer — see ADR-0015) and a background **collector** syncs it to a **remote
-authoritative** SurrealDB (`ws://`), so a fleet of devices shares one source of
-truth without each opening the embedded file. Mirrors the proven pattern in
-`many-tiny-stuff/tinytropolis/sync` (`connect_local` surrealkv + `connect_authoritative`
-ws://, a supervised reconnect/backoff worker). This is the genuine multi-device
-story behind "userA's memories become visible to userB's agent across machines."
-**Unblocks:** multi-device compartment sharing; the fleet (ADR-0006/0009).
-**Depends on:** the networked MCP surface working end-to-end (R-3); a conflict /
-ordering policy for two-way sync (last-write-wins vs CRDT-ish per-field).
+writer — see ADR-0015) and a **collector** reconciles it with a **remote
+authoritative** SurrealDB (`ws://`), so a fleet shares one source of truth without
+each opening the embedded file. Mirrors the supervised reconnect/backoff worker in
+`many-tiny-stuff/tinytropolis/sync`. **Conflict policy chosen: bidirectional
+last-write-wins** by each row's RFC3339 version field (`memory.updated_at`,
+`created_at` for the write-once tables), compared in Rust so no datetime crosses
+into a query. Strict-`>` propagation makes the two-way flow converge and self-
+terminate (no echo). Replicates `memory`, `memory_edge`, `compartment`, `grant`
+(experts/adapters are on-disk safetensors, out of scope). Runs as a root/owner
+session spanning tenants; per-tenant isolation is preserved by each row's
+`tenant_id`. Generic row access went into `antumbra-store::repo::sync` (surql-rs
+builders only — `list_rows`/`put_row`/`row_id`, reusing the record-id target
+verbatim to dodge v3 escaping). End-to-end: bidirectional seed (1 push / 1 pull),
+convergence (0/0), and LWW propagation (1/0) all verified through the CLI on two
+persistent `surrealkv://` stores.
+**Known gaps:** delete propagation (needs tombstones); incremental cursors (today
+each cycle scans full tables — fine at penumbra scale).
+**Unblocks:** multi-device compartment sharing; the fleet (ADR-0006/0009); R-2.
+**Was deferred on:** a conflict/ordering policy — now decided (LWW).
 
 ### R-2 · Live propagation (real-time awareness)
 **Status:** deferred.

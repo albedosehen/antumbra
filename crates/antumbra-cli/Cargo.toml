@@ -15,6 +15,7 @@ path = "src/main.rs"
 # embedder until the real candle/llama engines (antumbra-train/serve) land.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-sync = { path = "../antumbra-sync" }
 antumbra-loop = { path = "../antumbra-loop" }
 antumbra-gate = { path = "../antumbra-gate" }
 antumbra-boundary = { path = "../antumbra-boundary" }
@@ -22,7 +23,7 @@ antumbra-train = { path = "../antumbra-train", optional = true }
 antumbra-critic = { path = "../antumbra-critic", optional = true }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
 clap.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 anyhow.workspace = true
 chrono.workspace = true
 serde_json.workspace = true

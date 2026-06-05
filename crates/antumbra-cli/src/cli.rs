@@ -95,6 +95,29 @@ pub enum Command {
         #[arg(long, default_value_t = 0.0)]
         temperature: f64,
     },
+    /// Collector/sync (R-1): bidirectionally reconcile this local store (the
+    /// global `--url`, an embedded penumbra) with a remote authoritative
+    /// SurrealDB, last-write-wins by each row's version timestamp. Runs on a
+    /// cadence until ctrl-c, or `--once` for a single pass. Replicates the
+    /// penumbra tables (memory, edges, compartments, grants) across the fleet;
+    /// experts/adapters (on-disk safetensors) are out of scope.
+    Sync {
+        /// Remote authoritative SurrealDB url, e.g. `ws://host:8000/rpc`.
+        #[arg(long)]
+        remote: String,
+        /// Root username for the remote (omit for an unauthenticated remote).
+        #[arg(long)]
+        remote_user: Option<String>,
+        /// Root password for the remote.
+        #[arg(long)]
+        remote_pass: Option<String>,
+        /// Seconds between reconcile cycles.
+        #[arg(long, default_value_t = 15)]
+        interval: u64,
+        /// Reconcile once and exit, instead of running continuously.
+        #[arg(long, default_value_t = false)]
+        once: bool,
+    },
     /// Recover a failure boundary's scope by generate-then-verify (ADR-0004):
     /// hold a behavior fixed, vary the context, and find the governing feature
     /// and C' by actually serving and checking. Stores an actionable boundary.
