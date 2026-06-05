@@ -53,6 +53,8 @@ struct HttpState {
     /// Serializes `signin(identity) -> handle` so two identities never share the
     /// connection's auth state concurrently.
     auth: Mutex<()>,
+    /// Autonomous propose threshold, applied to every per-identity server.
+    auto_propose: Option<usize>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     sessions: Mutex<HashMap<Identity, IdentityService>>,
 }
@@ -65,6 +67,7 @@ pub async fn serve(
     host: String,
     embedder: Arc<dyn Embedder>,
     verifier: JwtVerifier,
+    auto_propose: Option<usize>,
 ) -> Result<()> {
     let store = crate::connect(&url).await?;
     let state = Arc::new(HttpState {
@@ -73,6 +76,7 @@ pub async fn serve(
         verifier,
         embedder,
         auth: Mutex::new(()),
+        auto_propose,
         sessions: Mutex::new(HashMap::new()),
     });
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -146,7 +150,7 @@ impl HttpState {
             crate::provision_identity(&self.store, &tenant, &user).await?
         };
 
-        let mcp = McpServer::new(
+        let mut mcp = McpServer::new(
             self.store.clone(),
             self.embedder.clone(),
             tenant,
@@ -154,6 +158,9 @@ impl HttpState {
             self.host.clone(),
             default_compartment,
         );
+        if let Some(threshold) = self.auto_propose {
+            mcp = mcp.with_auto_propose(threshold);
+        }
         // The factory clones the (store-sharing) server for each MCP exchange.
         let service = StreamableHttpService::new(
             move || Ok(mcp.clone()),
@@ -203,6 +210,7 @@ mod tests {
             verifier: JwtVerifier::hs256(b"test-secret"),
             embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
             auth: Mutex::new(()),
+            auto_propose: None,
             sessions: Mutex::new(HashMap::new()),
         })
     }

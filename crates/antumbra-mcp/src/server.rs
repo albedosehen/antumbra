@@ -38,7 +38,19 @@ pub struct McpServer {
     /// The compartment new memories land in when none is named (the session's
     /// fresh space; engine-isolated to this user until shared).
     default_compartment: CompartmentId,
+    /// When set, the antumbra auto-organizes the inbox once it grows past the
+    /// threshold (the autonomous propose trigger). `None` = on-demand only.
+    auto_propose: Option<AutoProposeConfig>,
     counter: Arc<AtomicU64>,
+}
+
+/// Tuning for the autonomous propose trigger.
+#[derive(Clone)]
+struct AutoProposeConfig {
+    /// Inbox size at/above which a proposal pass fires after a write.
+    threshold: usize,
+    min_size: usize,
+    similarity_threshold: f32,
 }
 
 impl McpServer {
@@ -57,8 +69,88 @@ impl McpServer {
             user,
             host,
             default_compartment,
+            auto_propose: None,
             counter: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Enable the autonomous propose trigger: once the unorganized inbox reaches
+    /// `threshold` memories, a write auto-clusters it into `Origin::Proposed`
+    /// compartments (reversible — the user curates). Off by default.
+    #[must_use]
+    pub fn with_auto_propose(mut self, threshold: usize) -> Self {
+        self.auto_propose = Some(AutoProposeConfig {
+            threshold,
+            min_size: 3,
+            similarity_threshold: 0.6,
+        });
+        self
+    }
+
+    /// The *unorganized* memory pool: the inbox (default compartment) plus
+    /// anything uncompartmented. Deliberately-filed compartments are left alone —
+    /// the antumbra proposes structure only over what the user has not organized.
+    async fn inbox_pool(&self) -> antumbra_core::Result<Vec<Memory>> {
+        Ok(memory::list(&self.store, &self.tenant)
+            .await?
+            .into_iter()
+            .filter(|m| {
+                m.compartment.is_none()
+                    || m.compartment.as_ref() == Some(&self.default_compartment)
+            })
+            .collect())
+    }
+
+    /// Persist one proposal as an `Origin::Proposed` compartment you own and move
+    /// its members in. Reversible: deleting the compartment undoes it. Returns the
+    /// new compartment id.
+    async fn apply_proposal(
+        &self,
+        prop: &antumbra_core::ProposedCompartment,
+    ) -> antumbra_core::Result<String> {
+        let id = next_id(&self.counter, "comp");
+        let c = Compartment::new(
+            id.clone(),
+            self.tenant.clone(),
+            self.user.clone(),
+            prop.label.clone(),
+            Utc::now(),
+        )
+        .proposed();
+        compartment::create(&self.store, &c).await?;
+        for mid in &prop.members {
+            if let Some(mut m) = memory::get(&self.store, &self.tenant, mid).await? {
+                m.compartment = Some(CompartmentId::new(id.clone()));
+                m.updated_at = Utc::now();
+                memory::upsert(&self.store, &m).await?;
+            }
+        }
+        Ok(id)
+    }
+
+    /// The autonomous propose trigger: once the inbox reaches the configured
+    /// threshold, cluster it and auto-create the proposals (so the inbox shrinks
+    /// below the threshold and the trigger quiets until it grows again). Returns
+    /// the created compartment ids; empty when disabled or below threshold.
+    async fn maybe_auto_propose(&self) -> antumbra_core::Result<Vec<String>> {
+        let Some(cfg) = self.auto_propose.clone() else {
+            return Ok(Vec::new());
+        };
+        let pool = self.inbox_pool().await?;
+        if pool.len() < cfg.threshold {
+            return Ok(Vec::new());
+        }
+        let cluster_cfg = ClusterConfig {
+            similarity_threshold: cfg.similarity_threshold,
+            min_size: cfg.min_size,
+            ..ClusterConfig::default()
+        };
+        let proposals = antumbra_core::propose_compartments(&pool, &cluster_cfg);
+        let mut created = Vec::with_capacity(proposals.len());
+        for prop in &proposals {
+            created.push(self.apply_proposal(prop).await?);
+        }
+        Ok(created)
     }
 }
 
@@ -134,6 +226,10 @@ struct StoreParams {
 #[derive(Serialize, schemars::JsonSchema)]
 struct StoredOut {
     id: String,
+    /// Compartment ids the antumbra auto-created from the inbox on this write
+    /// (only when the autonomous propose trigger is enabled and fired).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    auto_proposed: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -379,7 +475,10 @@ impl McpServer {
             m = m.volatile(true);
         }
         memory::upsert(&self.store, &m).await.map_err(err)?;
-        Ok(Json(StoredOut { id }))
+        // Autonomous trigger: if the inbox has grown enough, the antumbra
+        // organizes it now (no-op when disabled or below threshold).
+        let auto_proposed = self.maybe_auto_propose().await.map_err(err)?;
+        Ok(Json(StoredOut { id, auto_proposed }))
     }
 
     /// Semantic recall over this tenant's Penumbra.
@@ -581,19 +680,7 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<ProposeCompartmentsParams>,
     ) -> Result<Json<ProposalsOut>, ErrorData> {
-        // The pool is the *unorganized* memory: the inbox (default compartment)
-        // plus anything uncompartmented. Deliberately-filed compartments are left
-        // alone — the antumbra proposes structure over what the user has not yet
-        // organized.
-        let candidates: Vec<Memory> = memory::list(&self.store, &self.tenant)
-            .await
-            .map_err(err)?
-            .into_iter()
-            .filter(|m| {
-                m.compartment.is_none()
-                    || m.compartment.as_ref() == Some(&self.default_compartment)
-            })
-            .collect();
+        let candidates = self.inbox_pool().await.map_err(err)?;
         let cfg = ClusterConfig {
             similarity_threshold: p.similarity_threshold,
             min_size: p.min_size,
@@ -604,27 +691,7 @@ impl McpServer {
         let mut views = Vec::with_capacity(proposals.len());
         for prop in proposals {
             let compartment_id = if p.apply {
-                let id = next_id(&self.counter, "comp");
-                let c = Compartment::new(
-                    id.clone(),
-                    self.tenant.clone(),
-                    self.user.clone(),
-                    prop.label.clone(),
-                    Utc::now(),
-                )
-                .proposed();
-                compartment::create(&self.store, &c).await.map_err(err)?;
-                // Move members in. Reversible: deleting the compartment undoes it.
-                for mid in &prop.members {
-                    if let Some(mut m) =
-                        memory::get(&self.store, &self.tenant, mid).await.map_err(err)?
-                    {
-                        m.compartment = Some(CompartmentId::new(id.clone()));
-                        m.updated_at = Utc::now();
-                        memory::upsert(&self.store, &m).await.map_err(err)?;
-                    }
-                }
-                Some(id)
+                Some(self.apply_proposal(&prop).await.map_err(err)?)
             } else {
                 None
             };
@@ -1065,5 +1132,51 @@ mod tests {
             a_view.0.memories.iter().any(|m| m.content.contains("alpha")),
             "tenant a must see its own memory"
         );
+    }
+
+    #[tokio::test]
+    async fn auto_propose_trigger_fires_once_the_inbox_grows() {
+        // With the autonomous trigger armed at 4, the inbox is left alone until it
+        // reaches 4 memories, at which point a write self-organizes it into an
+        // Origin::Proposed compartment (and the inbox shrinks, quieting the trigger).
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let s = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "h".into(),
+            CompartmentId::new("comp:ws:test:user:test:default"),
+        )
+        .with_auto_propose(4);
+
+        let put = |n: usize| StoreParams {
+            content: format!("deno typescript task {n}"),
+            network: "world".into(),
+            confidence: None,
+            evidence: None,
+            volatile: None,
+            compartment: None,
+        };
+
+        // The first three writes stay below the threshold: no auto-proposal.
+        for n in 0..3 {
+            let out = s.store_memory(Parameters(put(n))).await.unwrap();
+            assert!(out.0.auto_proposed.is_empty(), "below threshold: inbox left alone");
+        }
+        // The fourth write reaches the threshold: the antumbra organizes the inbox.
+        let out = s.store_memory(Parameters(put(3))).await.unwrap();
+        assert!(
+            !out.0.auto_proposed.is_empty(),
+            "at threshold the antumbra auto-creates proposed compartment(s)"
+        );
+
+        // The created compartment is a proposal the user owns, awaiting curation.
+        let comps = s.list_compartments().await.unwrap();
+        assert!(comps.0.compartments.iter().any(|c| c.origin == "proposed"));
+
+        // The inbox shrank below the threshold, so the next write does not re-fire.
+        let again = s.store_memory(Parameters(put(99))).await.unwrap();
+        assert!(again.0.auto_proposed.is_empty(), "inbox no longer over threshold");
     }
 }

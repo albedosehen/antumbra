@@ -58,6 +58,11 @@ struct Cli {
     /// Required JWT audience claim (this server's identifier), if set.
     #[arg(long)]
     jwt_audience: Option<String>,
+    /// Enable the autonomous propose trigger: once a user's unorganized inbox
+    /// reaches this many memories, a write auto-clusters it into proposed
+    /// compartments (reversible; the user curates). Off when unset.
+    #[arg(long)]
+    auto_propose: Option<usize>,
 }
 
 async fn connect(url: &str) -> Result<Store> {
@@ -155,11 +160,11 @@ async fn main() -> Result<()> {
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&cli.jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
-        return http::serve(addr, cli.url, host, embedder, verifier).await;
+        return http::serve(addr, cli.url, host, embedder, verifier, cli.auto_propose).await;
     }
 
     // stdio: one fixed identity for the life of the process.
-    let service = build_session(
+    let mut service = build_session(
         &cli.url,
         TenantId::new(cli.tenant),
         UserId::new(cli.user),
@@ -167,6 +172,9 @@ async fn main() -> Result<()> {
         embedder,
     )
     .await?;
+    if let Some(threshold) = cli.auto_propose {
+        service = service.with_auto_propose(threshold);
+    }
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))
         .await?;
