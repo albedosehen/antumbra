@@ -500,6 +500,8 @@ async fn main() -> anyhow::Result<()> {
                     fitness: 1.0,
                     frozen_at: Some(now),
                     generation: Generation::ZERO,
+                    owner: None,
+                    compartment: None,
                     created_at: now,
                 };
                 expert::insert(&store, &e).await?;
@@ -1188,6 +1190,8 @@ async fn main() -> anyhow::Result<()> {
                         fitness: final_rate,
                         frozen_at: Some(now),
                         generation: Generation::ZERO,
+                        owner: None,
+                        compartment: None,
                         created_at: now,
                     };
                     expert::delete(&store, &expert.id).await?; // supersede on re-run
@@ -1357,6 +1361,8 @@ async fn main() -> anyhow::Result<()> {
                             fitness: out.final_fitness,
                             frozen_at: Some(now),
                             generation: Generation::ZERO,
+                            owner: None,
+                            compartment: None,
                             created_at: now,
                         };
                         expert::delete(&store, &expert.id).await?; // supersede on re-run

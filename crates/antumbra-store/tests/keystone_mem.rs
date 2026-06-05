@@ -23,6 +23,8 @@ fn expert_at(key: &str, vec: Vec<f32>) -> Expert {
         fitness: 1.0,
         frozen_at: Some(Utc::now()),
         generation: Generation::ZERO,
+        owner: None,
+        compartment: None,
         created_at: Utc::now(),
     }
 }

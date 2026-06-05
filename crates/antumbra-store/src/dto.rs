@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use antumbra_core::ids::{ExpertId, Generation};
+use antumbra_core::ids::{CompartmentId, ExpertId, Generation, UserId};
 use antumbra_core::{AntumbraError, Expert, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +25,12 @@ pub(crate) struct ExpertRow {
     pub frozen_at: Option<String>,
     #[serde(default)]
     pub generation: u32,
+    // Omitted when None so the engine sees `owner = NONE` for shared experts
+    // (the shared-umbra read rule, ADR-0013).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compartment: Option<String>,
     pub created_at: String,
 }
 
@@ -40,6 +46,8 @@ impl ExpertRow {
             fitness: e.fitness,
             frozen_at: e.frozen_at.map(|t| t.to_rfc3339()),
             generation: e.generation.0,
+            owner: e.owner.as_ref().map(|u| u.as_str().to_string()),
+            compartment: e.compartment.as_ref().map(|c| c.as_str().to_string()),
             created_at: e.created_at.to_rfc3339(),
         }
     }
@@ -55,6 +63,8 @@ impl ExpertRow {
             fitness: self.fitness,
             frozen_at: self.frozen_at.as_deref().map(parse_dt).transpose()?,
             generation: Generation(self.generation),
+            owner: self.owner.map(UserId::new),
+            compartment: self.compartment.map(CompartmentId::new),
             created_at: parse_dt(&self.created_at)?,
         })
     }

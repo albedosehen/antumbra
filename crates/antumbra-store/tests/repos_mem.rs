@@ -132,6 +132,8 @@ async fn expert_population_crud_and_knn() {
         fitness: 1.0,
         frozen_at: Some(now),
         generation: Generation::ZERO,
+        owner: None,
+        compartment: None,
         created_at: now,
     };
     expert::insert(&store, &mk("expert:a", vec![1.0, 0.0, 0.0, 0.0]))

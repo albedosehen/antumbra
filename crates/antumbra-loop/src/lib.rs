@@ -239,6 +239,8 @@ impl<'a> GenerationLoop<'a> {
             fitness,
             frozen_at: Some(now),
             generation,
+            owner: None,
+            compartment: None,
             created_at: now,
         };
         expert::insert(self.store, &expert).await

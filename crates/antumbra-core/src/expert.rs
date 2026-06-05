@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ExpertId, Generation};
+use crate::ids::{CompartmentId, ExpertId, Generation, UserId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Expert {
@@ -30,6 +30,14 @@ pub struct Expert {
     pub frozen_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub generation: Generation,
+    /// The owning user for a **private** expert (consolidated from a private
+    /// compartment, ADR-0014/0012). `None` = a shared expert in the common umbra
+    /// (readable by every tenant session; ADR-0013).
+    #[serde(default)]
+    pub owner: Option<UserId>,
+    /// The source compartment a private expert was consolidated from.
+    #[serde(default)]
+    pub compartment: Option<CompartmentId>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -38,6 +46,11 @@ impl Expert {
     /// never written again.
     pub fn is_frozen(&self) -> bool {
         self.frozen_at.is_some()
+    }
+
+    /// A private expert is owned by a user (vs a shared expert, `owner = None`).
+    pub fn is_private(&self) -> bool {
+        self.owner.is_some()
     }
 
     /// Cosine similarity of this expert's capability vector to a query vector,

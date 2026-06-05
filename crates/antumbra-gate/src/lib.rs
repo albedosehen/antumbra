@@ -165,6 +165,8 @@ mod tests {
             fitness: 0.5,
             frozen_at: None,
             generation: Generation::ZERO,
+            owner: None,
+            compartment: None,
             created_at: Utc::now(),
         }
     }

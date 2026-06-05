@@ -34,6 +34,17 @@ const SHARED_POPULATION_PERMS: [(&str, &str); 4] = [
     ("delete", "false"),
 ];
 
+/// Expert population permissions (ADR-0013/0014): a session reads a **shared**
+/// expert (`owner = NONE`, the common umbra) or one it **owns** (a private
+/// expert consolidated from its compartment); only the owner/root writes (a
+/// record session is denied; the rootful owner connection bypasses).
+const EXPERT_PERMS: [(&str, &str); 4] = [
+    ("select", "owner = NONE OR owner = $auth.user"),
+    ("create", "false"),
+    ("update", "false"),
+    ("delete", "false"),
+];
+
 /// Tenant-scoped permissions: any authenticated session in the tenant may
 /// read/write the row (the engine still bars cross-tenant access).
 const TENANT_PERMS: [(&str, &str); 4] = [
@@ -67,10 +78,11 @@ const EDGE_LINK_RULE: &str = "tenant_id = $auth.tenant AND to_id IN (SELECT VALU
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
     vec![
-        // Expert population (umbra). ADR-0001. Shared: tenants read, owner writes.
+        // Expert population (umbra). ADR-0001/0013/0014. Shared experts read by
+        // all; private experts read only by their owner; owner writes.
         table_schema("expert")
             .with_mode(TableMode::Schemaless)
-            .with_permissions(SHARED_POPULATION_PERMS)
+            .with_permissions(EXPERT_PERMS)
             .with_indexes([
                 unique_index("expert_key_uq", ["key"]),
                 hnsw_index(

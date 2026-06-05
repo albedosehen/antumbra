@@ -35,6 +35,28 @@ async fn shared_population_is_readable_under_tenant_auth() {
             fitness: 1.0,
             frozen_at: Some(now),
             generation: Generation::ZERO,
+            owner: None,
+            compartment: None,
+            created_at: now,
+        },
+    )
+    .await
+    .unwrap();
+    // A PRIVATE expert owned by a different user must not be visible to user:a.
+    expert::insert(
+        &store,
+        &Expert {
+            id: ExpertId::new("expert:private"),
+            name: "private".into(),
+            base_model: "base".into(),
+            artifact_uri: "mem://p".into(),
+            capability_card: serde_json::Value::Null,
+            capability_vec: Some(vec![0.0, 1.0, 0.0, 0.0]),
+            fitness: 1.0,
+            frozen_at: Some(now),
+            generation: Generation::ZERO,
+            owner: Some(UserId::new("user:other")),
+            compartment: Some(antumbra_core::CompartmentId::new("comp:other")),
             created_at: now,
         },
     )
@@ -55,9 +77,12 @@ async fn shared_population_is_readable_under_tenant_auth() {
     .await
     .unwrap();
 
-    // As a tenant: the shared population reads through (select = true).
+    // As user:a: the shared expert + router read through, but another user's
+    // private expert is hidden by the engine (owner-scoped select).
     store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
-    assert_eq!(expert::list(&store).await.unwrap().len(), 1);
+    let seen = expert::list(&store).await.unwrap();
+    assert_eq!(seen.len(), 1, "private expert of another user must be hidden");
+    assert_eq!(seen[0].id, ExpertId::new("expert:adder"));
     assert!(router::load(&store).await.unwrap().is_some());
 }
 

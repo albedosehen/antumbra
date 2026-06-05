@@ -17,6 +17,8 @@ fn expert_fixture(key: &str, name: &str, vec: Vec<f32>) -> Expert {
         fitness: 0.5,
         frozen_at: None,
         generation: Generation::ZERO,
+        owner: None,
+        compartment: None,
         created_at: chrono::Utc::now(),
     }
 }
