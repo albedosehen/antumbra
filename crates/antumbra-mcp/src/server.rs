@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::{
-    Capability, Compartment, CompartmentId, EdgeType, Grant, Memory, MemoryEdge, MemoryId,
-    MemoryNetwork, Origin, TenantId, UserId,
+    Capability, ClusterConfig, Compartment, CompartmentId, EdgeType, Grant, Memory, MemoryEdge,
+    MemoryId, MemoryNetwork, Origin, TenantId, UserId,
 };
 use antumbra_store::repo::{compartment, edge, expert, memory, router};
 use antumbra_store::Store;
@@ -306,6 +306,47 @@ struct RevokeOut {
     revoked: bool,
 }
 
+fn default_threshold() -> f32 {
+    0.6
+}
+
+fn default_min_size() -> usize {
+    3
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct ProposeCompartmentsParams {
+    /// Cosine at/above which two memories cluster together (default 0.6).
+    #[serde(default = "default_threshold")]
+    similarity_threshold: f32,
+    /// Smallest cluster worth proposing; singletons and pairs are noise (default 3).
+    #[serde(default = "default_min_size")]
+    min_size: usize,
+    /// Persist each proposal as an `Origin::Proposed` compartment you own and
+    /// move its members into it. Default false (suggest only; reversible by
+    /// deleting the compartment).
+    #[serde(default)]
+    apply: bool,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ProposalView {
+    /// Heuristic label from the cluster's most central memory; rename on accept.
+    label: String,
+    /// The memory ids grouped into this proposed region.
+    members: Vec<String>,
+    /// Mean cosine of members to the centroid — rank proposals by this.
+    cohesion: f32,
+    /// Set when `apply` was true: the id of the created proposed compartment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compartment_id: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ProposalsOut {
+    proposals: Vec<ProposalView>,
+}
+
 #[tool_router]
 impl McpServer {
     /// Store a memory in this tenant's Penumbra.
@@ -532,6 +573,69 @@ impl McpServer {
             name: p.name,
             origin: Origin::User.as_str().to_string(),
         }))
+    }
+
+    /// Propose compartments by clustering your uncompartmented memories.
+    #[tool(description = "Have the antumbra propose compartments by clustering your uncompartmented memories into competence-coherent regions. Returns proposals (label, member ids, cohesion). With apply=true it also creates each as a proposed compartment you own and moves its members in (reversible by deleting the compartment).")]
+    async fn propose_compartments(
+        &self,
+        Parameters(p): Parameters<ProposeCompartmentsParams>,
+    ) -> Result<Json<ProposalsOut>, ErrorData> {
+        // The pool is the *unorganized* memory: the inbox (default compartment)
+        // plus anything uncompartmented. Deliberately-filed compartments are left
+        // alone — the antumbra proposes structure over what the user has not yet
+        // organized.
+        let candidates: Vec<Memory> = memory::list(&self.store, &self.tenant)
+            .await
+            .map_err(err)?
+            .into_iter()
+            .filter(|m| {
+                m.compartment.is_none()
+                    || m.compartment.as_ref() == Some(&self.default_compartment)
+            })
+            .collect();
+        let cfg = ClusterConfig {
+            similarity_threshold: p.similarity_threshold,
+            min_size: p.min_size,
+            ..ClusterConfig::default()
+        };
+        // Fully-qualified: the crate fn shares this tool's name.
+        let proposals = antumbra_core::propose_compartments(&candidates, &cfg);
+        let mut views = Vec::with_capacity(proposals.len());
+        for prop in proposals {
+            let compartment_id = if p.apply {
+                let id = next_id(&self.counter, "comp");
+                let c = Compartment::new(
+                    id.clone(),
+                    self.tenant.clone(),
+                    self.user.clone(),
+                    prop.label.clone(),
+                    Utc::now(),
+                )
+                .proposed();
+                compartment::create(&self.store, &c).await.map_err(err)?;
+                // Move members in. Reversible: deleting the compartment undoes it.
+                for mid in &prop.members {
+                    if let Some(mut m) =
+                        memory::get(&self.store, &self.tenant, mid).await.map_err(err)?
+                    {
+                        m.compartment = Some(CompartmentId::new(id.clone()));
+                        m.updated_at = Utc::now();
+                        memory::upsert(&self.store, &m).await.map_err(err)?;
+                    }
+                }
+                Some(id)
+            } else {
+                None
+            };
+            views.push(ProposalView {
+                label: prop.label,
+                members: prop.members.iter().map(|m| m.as_str().to_string()).collect(),
+                cohesion: prop.cohesion,
+                compartment_id,
+            });
+        }
+        Ok(Json(ProposalsOut { proposals: views }))
     }
 
     /// List the compartments you own.
@@ -837,5 +941,73 @@ mod tests {
             .0
             .revoked
         );
+    }
+
+    #[tokio::test]
+    async fn propose_compartments_clusters_inbox_then_applies() {
+        let s = server().await;
+        // Memories written with no compartment land in the inbox (default).
+        for content in [
+            "deno run typescript module",
+            "deno test typescript suite",
+            "deno bundle typescript output",
+            "deno fmt typescript files",
+        ] {
+            s.store_memory(Parameters(StoreParams {
+                content: content.into(),
+                network: "world".into(),
+                confidence: None,
+                evidence: None,
+                volatile: None,
+                compartment: None,
+            }))
+            .await
+            .unwrap();
+        }
+
+        // Suggest-only: proposals returned, nothing persisted. Threshold 0.0
+        // groups the whole inbox into one cluster regardless of the embedder's
+        // geometry, so the wiring (list -> cluster -> view) is deterministic.
+        let suggested = s
+            .propose_compartments(Parameters(ProposeCompartmentsParams {
+                similarity_threshold: 0.0,
+                min_size: 3,
+                apply: false,
+            }))
+            .await
+            .unwrap();
+        assert!(!suggested.0.proposals.is_empty(), "a region is proposed");
+        assert!(
+            suggested.0.proposals.iter().all(|p| p.compartment_id.is_none()),
+            "suggest-only must not persist"
+        );
+
+        // Apply: the antumbra creates a proposed compartment and moves members in.
+        let applied = s
+            .propose_compartments(Parameters(ProposeCompartmentsParams {
+                similarity_threshold: 0.0,
+                min_size: 3,
+                apply: true,
+            }))
+            .await
+            .unwrap();
+        let prop = applied.0.proposals.first().expect("a proposal");
+        let new_id = prop.compartment_id.clone().expect("apply persisted an id");
+
+        // It is owned by the user and marked as a proposal awaiting curation.
+        let comps = s.list_compartments().await.unwrap();
+        assert!(comps
+            .0
+            .compartments
+            .iter()
+            .any(|c| c.id == new_id && c.origin == "proposed"));
+
+        // Its members were moved out of the inbox into it (engine round-trip).
+        let moved =
+            memory::list_by_compartment(&s.store, &s.tenant, &CompartmentId::new(new_id))
+                .await
+                .unwrap();
+        assert_eq!(moved.len(), prop.members.len());
+        assert!(moved.len() >= 3, "the whole inbox region moved");
     }
 }
