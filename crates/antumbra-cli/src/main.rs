@@ -15,8 +15,9 @@ use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::Parser;
 
-mod ops;
 mod cli;
+mod commands;
+mod ops;
 use cli::{Cli, Command};
 
 #[cfg(feature = "models")]
@@ -786,114 +787,19 @@ async fn main() -> anyhow::Result<()> {
             rounds,
             max_new_tokens,
         } => {
-            #[cfg(feature = "models")]
-            {
-                use antumbra_train::{eval_pass_rate, raft_train, Corpus, ModelLoader};
-                let store = connect(&cli.url).await?;
-                let embedder = make_embedder()?;
-                let cfg = RaftConfig {
-                    samples_per_task: samples,
+            commands::evolve(
+                &cli.url,
+                commands::EvolveArgs {
+                    corpus,
+                    run,
+                    target,
+                    max_gens,
+                    samples,
                     rounds,
                     max_new_tokens,
-                    ..RaftConfig::default()
-                };
-                let loader = CandleModelLoader::new(cfg.clone());
-                let verifier = antumbra_critic::CommandVerifier;
-                let tasks = JsonCorpus::from_file(&corpus)?.tasks(&[]);
-                let mut parent: Option<String> = None;
-                let mut solved: Vec<String> = Vec::new();
-                let mut final_rate = 0.0f32;
-                for gen in 0..max_gens {
-                    // Load the current capability (warm-started from the prior
-                    // generation's adapter, or the bare base on gen 0).
-                    let mut model =
-                        ModelLoader::load(&loader, &cfg.base_model, parent.as_deref()).await?;
-                    let ev = eval_pass_rate(
-                        &mut model,
-                        &verifier,
-                        &tasks,
-                        &RunId::new("evolve:eval"),
-                        samples,
-                    )
-                    .await?;
-                    final_rate = ev.pass_rate;
-                    println!(
-                        "gen {gen}: pass-rate {:.2} ({}/{}) [{}]",
-                        ev.pass_rate,
-                        ev.passed,
-                        ev.total,
-                        parent.as_deref().unwrap_or("base")
-                    );
-                    if ev.pass_rate >= target {
-                        println!("converged at gen {gen} (>= target {target:.2})");
-                        break;
-                    }
-                    // Below the bar: train only the tasks currently failing
-                    // (the gaps the serving check just found), warm-started.
-                    let failing: Vec<_> = tasks
-                        .iter()
-                        .zip(&ev.per_task)
-                        .filter(|(_, r)| r.rate() < target)
-                        .map(|(t, _)| t.clone())
-                        .collect();
-                    let gaps = if failing.is_empty() { tasks.clone() } else { failing };
-                    let run_id = RunId::new(format!("{run}-g{gen}"));
-                    println!("  training {} gap task(s)", gaps.len());
-                    let out = raft_train(&mut model, &verifier, &gaps, &run_id, &cfg).await?;
-                    println!(
-                        "  trained gen {gen}: round-final {:.2} -> {}",
-                        out.final_fitness, out.adapter_uri
-                    );
-                    parent = Some(out.adapter_uri);
-                    solved = out.capability_exemplars;
-                    final_rate = out.final_fitness;
-                }
-
-                // Self-improvement feeds the population: persist the converged
-                // capability as a routable expert (behavior-derived capability
-                // vector), then refresh the gate so it can route to it.
-                if let Some(uri) = parent {
-                    let protos: Vec<String> = if solved.is_empty() {
-                        tasks.iter().map(|t| t.prompt.clone()).collect()
-                    } else {
-                        solved.clone()
-                    };
-                    let mut acc = vec![0.0f32; EMBED_DIM];
-                    for text in &protos {
-                        for (a, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
-                            *a += b;
-                        }
-                    }
-                    let n = protos.len().max(1) as f32;
-                    let centroid: Vec<f32> = acc.iter().map(|x| x / n).collect();
-                    let now = Utc::now();
-                    let expert = Expert {
-                        id: ExpertId::new(format!("expert:{run}")),
-                        name: run.clone(),
-                        base_model: cfg.base_model.clone(),
-                        artifact_uri: uri,
-                        capability_card: serde_json::json!({ "exemplars": solved }),
-                        capability_vec: Some(centroid),
-                        fitness: final_rate,
-                        frozen_at: Some(now),
-                        generation: Generation::ZERO,
-                        owner: None,
-                        compartment: None,
-                        created_at: now,
-                    };
-                    expert::delete(&store, &expert.id).await?; // supersede on re-run
-                    expert::insert(&store, &expert).await?;
-                    println!("persisted expert {run} into the population (fitness {final_rate:.2})");
-                    if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
-                        println!("router refreshed over {} experts", r.experts.len());
-                    }
-                }
-            }
-            #[cfg(not(feature = "models"))]
-            {
-                let _ = (&corpus, &run, target, max_gens, samples, rounds, max_new_tokens);
-                anyhow::bail!("`evolve` requires building with --features models (candle + a GPU)");
-            }
+                },
+            )
+            .await?;
         }
         Command::Populate {
             corpus,
@@ -904,183 +810,19 @@ async fn main() -> anyhow::Result<()> {
             rounds,
             max_new_tokens,
         } => {
-            #[cfg(feature = "models")]
-            {
-                use antumbra_train::{eval_pass_rate, raft_train, Corpus, CorpusTask, ModelLoader};
-                let store = connect(&cli.url).await?;
-                let embedder = make_embedder()?;
-                let cfg = RaftConfig {
-                    samples_per_task: samples,
-                    rounds,
-                    max_new_tokens,
-                    ..RaftConfig::default()
-                };
-                let loader = CandleModelLoader::new(cfg.clone());
-                let verifier = antumbra_critic::CommandVerifier;
-                let tasks = JsonCorpus::from_file(&corpus)?.tasks(&[]);
-                let radius = GateConfig::default().inhibition_radius;
-                let mut grown = 0usize;
-
-                // One extra round to confirm coverage after the last grow.
-                for round in 0..(max_experts + 1) {
-                    let experts = expert::list(&store).await?;
-                    let boundaries = boundary::list(&store).await?;
-                    let router = antumbra_store::repo::router::load(&store).await?;
-
-                    // Route each task to an expert (or none, if the gate
-                    // escalates). Coverage is *serving* coverage: an expert only
-                    // covers a task if it actually serves a verified-correct
-                    // answer -- a route-claim it cannot fulfil is still a gap.
-                    let mut routed: Vec<(CorpusTask, Option<ExpertId>)> = Vec::new();
-                    for task in &tasks {
-                        let v = embedder.embed(&task.prompt).await?;
-                        let inhib = boundaries
-                            .iter()
-                            .map(|b| b.inhibition_for(&v, radius))
-                            .fold(0.0f32, f32::max);
-                        let pick = match &router {
-                            Some(r) if r.covers(&v) && inhib <= 0.5 => {
-                                r.route(&v).first().map(|(id, _)| id.clone())
-                            }
-                            Some(_) => None,
-                            None => {
-                                let gc = GateConfig {
-                                    coverage_threshold: 0.08,
-                                    ..GateConfig::default()
-                                };
-                                let d = gate_route(&v, &experts, &boundaries, 1, &gc);
-                                if d.escalate {
-                                    None
-                                } else {
-                                    d.chosen.first().cloned()
-                                }
-                            }
-                        };
-                        routed.push((task.clone(), pick));
-                    }
-                    // Escalated tasks are gaps; routed tasks are gaps only if the
-                    // routed expert fails to serve them.
-                    let mut gaps: Vec<CorpusTask> = routed
-                        .iter()
-                        .filter(|(_, id)| id.is_none())
-                        .map(|(t, _)| t.clone())
-                        .collect();
-                    for e in &experts {
-                        let etasks: Vec<CorpusTask> = routed
-                            .iter()
-                            .filter(|(_, id)| id.as_ref() == Some(&e.id))
-                            .map(|(t, _)| t.clone())
-                            .collect();
-                        if etasks.is_empty() {
-                            continue;
-                        }
-                        let mut m =
-                            ModelLoader::load(&loader, &e.base_model, Some(&e.artifact_uri)).await?;
-                        let ev = eval_pass_rate(
-                            &mut m,
-                            &verifier,
-                            &etasks,
-                            &RunId::new("populate:cov"),
-                            samples,
-                        )
-                        .await?;
-                        for (t, r) in etasks.iter().zip(&ev.per_task) {
-                            if r.rate() < 0.5 {
-                                gaps.push(t.clone());
-                            }
-                        }
-                    }
-                    let coverage = 1.0 - gaps.len() as f32 / tasks.len().max(1) as f32;
-                    println!(
-                        "round {round}: coverage {coverage:.2} ({} experts, {} gaps served-and-failed/uncovered)",
-                        experts.len(),
-                        gaps.len()
-                    );
-                    if coverage >= target_coverage || gaps.is_empty() || grown >= max_experts {
-                        let why = if grown >= max_experts {
-                            "expert budget reached"
-                        } else {
-                            "covers the corpus"
-                        };
-                        println!("population {why} (coverage {coverage:.2})");
-                        break;
-                    }
-
-                    // Cluster the gap tasks by *skill* and grow a dedicated
-                    // specialist for each — a narrow frozen expert per skill, not
-                    // one generalist over all gaps (the umbra ideal, ADR-0001).
-                    let mut groups: Vec<(String, Vec<CorpusTask>)> = Vec::new();
-                    for t in &gaps {
-                        let skill = t.skill();
-                        match groups.iter_mut().find(|(s, _)| *s == skill) {
-                            Some((_, v)) => v.push(t.clone()),
-                            None => groups.push((skill, vec![t.clone()])),
-                        }
-                    }
-                    for (skill, gtasks) in groups {
-                        if grown >= max_experts {
-                            break;
-                        }
-                        let name = format!("{run}-{skill}");
-                        let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
-                        let out = raft_train(&mut model, &verifier, &gtasks, &RunId::new(name.clone()), &cfg)
-                            .await?;
-                        let solved = if out.capability_exemplars.is_empty() {
-                            gtasks.iter().map(|t| t.prompt.clone()).collect()
-                        } else {
-                            out.capability_exemplars.clone()
-                        };
-                        let mut acc = vec![0.0f32; EMBED_DIM];
-                        for text in &solved {
-                            for (a, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
-                                *a += b;
-                            }
-                        }
-                        let nproto = solved.len().max(1) as f32;
-                        let now = Utc::now();
-                        let expert = Expert {
-                            id: ExpertId::new(format!("expert:{name}")),
-                            name: name.clone(),
-                            base_model: cfg.base_model.clone(),
-                            artifact_uri: out.adapter_uri,
-                            capability_card: serde_json::json!({ "exemplars": solved }),
-                            capability_vec: Some(acc.iter().map(|x| x / nproto).collect()),
-                            fitness: out.final_fitness,
-                            frozen_at: Some(now),
-                            generation: Generation::ZERO,
-                            owner: None,
-                            compartment: None,
-                            created_at: now,
-                        };
-                        expert::delete(&store, &expert.id).await?; // supersede on re-run
-                        expert::insert(&store, &expert).await?;
-                        grown += 1;
-                        println!(
-                            "  grew specialist {name} for skill '{skill}' on {} task(s) (fitness {:.2})",
-                            gtasks.len(),
-                            out.final_fitness
-                        );
-                    }
-                    if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
-                        println!("  router refreshed over {} experts", r.experts.len());
-                    }
-                    let _ = round;
-                }
-                println!("population: {} experts", expert::list(&store).await?.len());
-            }
-            #[cfg(not(feature = "models"))]
-            {
-                let _ = (
-                    &corpus,
-                    &run,
+            commands::populate(
+                &cli.url,
+                commands::PopulateArgs {
+                    corpus,
+                    run,
                     target_coverage,
                     max_experts,
                     samples,
                     rounds,
                     max_new_tokens,
-                );
-                anyhow::bail!("`populate` requires building with --features models (candle + a GPU)");
-            }
+                },
+            )
+            .await?;
         }
         Command::MemoryImport {
             source,
@@ -1093,119 +835,21 @@ async fn main() -> anyhow::Result<()> {
             max_new_tokens,
             lr,
         } => {
-            #[cfg(feature = "models")]
-            {
-                use antumbra_train::memory::{import as import_memories, parse_export, ImportPolicy, Intake};
-                use antumbra_train::CorpusTask;
-
-                let bytes = std::fs::read(&source)?;
-                let records = parse_export(&bytes)?;
-                let policy = ImportPolicy { capture_threshold };
-                let imported = import_memories(&records, &policy);
-
-                // Tier and cluster: captures are trusted on import, seeds wait for
-                // RAFT to confirm them by experience.
-                let captures: Vec<CorpusTask> = imported
-                    .iter()
-                    .filter(|i| i.intake == Intake::Capture)
-                    .map(|i| i.task.clone())
-                    .collect();
-                let seeds = imported.len() - captures.len();
-                let mut skills: Vec<(String, usize)> = Vec::new();
-                for i in &imported {
-                    let s = i.task.skill();
-                    match skills.iter_mut().find(|(k, _)| *k == s) {
-                        Some((_, n)) => *n += 1,
-                        None => skills.push((s, 1)),
-                    }
-                }
-                println!(
-                    "imported {} memories: {} capture(s), {} seed(s) across {} skill(s)",
-                    imported.len(),
-                    captures.len(),
-                    seeds,
-                    skills.len()
-                );
-                for (skill, n) in &skills {
-                    println!("  skill '{skill}': {n} task(s)");
-                }
-
-                // Persist the whole conversion (captures carry a completion, seeds
-                // do not) so `teach`/`populate`/`evolve` can consume it.
-                let arr: Vec<serde_json::Value> = imported
-                    .iter()
-                    .map(|i| {
-                        let t = &i.task;
-                        let mut o = serde_json::Map::new();
-                        o.insert("id".into(), serde_json::json!(t.id));
-                        o.insert("prompt".into(), serde_json::json!(t.prompt));
-                        o.insert("verify".into(), t.verify.clone());
-                        if let Some(c) = &t.completion {
-                            o.insert("completion".into(), serde_json::json!(c));
-                        }
-                        o.insert("skill".into(), serde_json::json!(t.skill()));
-                        serde_json::Value::Object(o)
-                    })
-                    .collect();
-                std::fs::write(&out, serde_json::to_vec_pretty(&arr)?)?;
-                println!("wrote capture corpus -> {out}");
-
-                if !train {
-                    println!("run `antumbra teach --corpus {out}` to internalize the captures");
-                } else if captures.is_empty() {
-                    println!("nothing to train: no memory met the capture threshold {capture_threshold}");
-                } else {
-                    let store = connect(&cli.url).await?;
-                    let cfg = RaftConfig {
-                        samples_per_task: samples,
-                        rounds,
-                        max_new_tokens,
-                        learning_rate: lr,
-                        ..RaftConfig::default()
-                    };
-                    let corpus = JsonCorpus::from_tasks(captures.clone());
-                    let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
-                    let loader = CandleModelLoader::new(cfg.clone());
-                    let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
-                    let embedder = make_embedder()?;
-                    let loop_cfg = LoopConfig {
-                        graduate_threshold: 0.3,
-                        base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
-                        max_steps: 8,
-                    };
-                    let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
-                    let reports = lp.run_until(&RunId::new(run), 1).await?;
-                    for r in &reports {
-                        println!(
-                            "gen {:<3} expert {:<16} internalized={:.2} graduated={}",
-                            r.generation.0, r.shadow, r.fitness, r.graduated
-                        );
-                    }
-                    let experts = expert::list(&store).await?;
-                    println!("population: {} experts", experts.len());
-                    if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
-                        println!("router refreshed over {} experts", r.experts.len());
-                    }
-                }
-            }
-            #[cfg(not(feature = "models"))]
-            {
-                let _ = (
-                    &source,
-                    &out,
+            commands::memory_import(
+                &cli.url,
+                commands::MemoryImportArgs {
+                    source,
+                    out,
                     capture_threshold,
                     train,
-                    &run,
+                    run,
                     rounds,
                     samples,
                     max_new_tokens,
                     lr,
-                );
-                anyhow::bail!(
-                    "`memory-import` requires building with --features models (it adapts a memory \
-                     store into the capture corpus and, with --train, internalizes it)"
-                );
-            }
+                },
+            )
+            .await?;
         }
         Command::Consolidate {
             source,
