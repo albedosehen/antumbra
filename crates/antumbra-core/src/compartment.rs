@@ -58,6 +58,15 @@ pub enum Origin {
     Proposed,
 }
 
+impl Origin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Origin::User => "user",
+            Origin::Proposed => "proposed",
+        }
+    }
+}
+
 /// A named latent-space of memory owned by a user within a tenant.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Compartment {

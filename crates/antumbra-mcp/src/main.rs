@@ -10,12 +10,13 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use chrono::Utc;
 use clap::Parser;
 use rmcp::ServiceExt;
 
 use antumbra_core::ports::Embedder;
-use antumbra_core::{TenantId, UserId};
-use antumbra_store::repo::principal;
+use antumbra_core::{Compartment, CompartmentId, TenantId, UserId};
+use antumbra_store::repo::{compartment, principal};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
 mod server;
@@ -36,6 +37,10 @@ struct Cli {
     /// actor). Defaults to a per-tenant default user.
     #[arg(long, default_value = "user:default")]
     user: String,
+    /// The host/device this session runs on (stamped as memory provenance).
+    /// Defaults to the machine name.
+    #[arg(long)]
+    host: Option<String>,
 }
 
 async fn connect(url: &str) -> Result<Store> {
@@ -69,11 +74,32 @@ async fn main() -> Result<()> {
     let store = connect(&cli.url).await?;
     let tenant = TenantId::new(cli.tenant);
     let user = UserId::new(cli.user);
+    let host = cli.host.unwrap_or_else(|| {
+        std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_else(|_| "local".into())
+    });
     principal::provision(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
 
+    // The session's default compartment (fresh space; new memories land here
+    // unless a compartment is named). Engine-isolated to this user until shared.
+    let default_compartment =
+        CompartmentId::new(format!("comp:{}:{}:default", tenant.as_str(), user.as_str()));
+    compartment::create(
+        &store,
+        &Compartment::new(
+            default_compartment.clone(),
+            tenant.clone(),
+            user.clone(),
+            "default",
+            Utc::now(),
+        ),
+    )
+    .await?;
+
     let embedder: Arc<dyn Embedder> = Arc::from(make_embedder()?);
-    let service = McpServer::new(store, embedder, tenant);
+    let service = McpServer::new(store, embedder, tenant, user, host, default_compartment);
 
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))

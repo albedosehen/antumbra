@@ -17,26 +17,46 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 
 use antumbra_core::ports::Embedder;
-use antumbra_core::{EdgeType, Memory, MemoryEdge, MemoryId, MemoryNetwork, TenantId};
-use antumbra_store::repo::{edge, memory, router};
+use antumbra_core::{
+    Capability, Compartment, CompartmentId, EdgeType, Grant, Memory, MemoryEdge, MemoryId,
+    MemoryNetwork, Origin, TenantId, UserId,
+};
+use antumbra_store::repo::{compartment, edge, memory, router};
 use antumbra_store::Store;
 
-/// One tenant's MCP session over its Penumbra. `#[tool_handler]` resolves the
-/// tools via `Self::tool_router()`, so no router field is stored.
+/// One (tenant, user) MCP session over its Penumbra. `#[tool_handler]` resolves
+/// the tools via `Self::tool_router()`, so no router field is stored.
 #[derive(Clone)]
 pub struct McpServer {
     store: Store,
     embedder: Arc<dyn Embedder>,
     tenant: TenantId,
+    /// The user this session acts as (compartment owner / grantor).
+    user: UserId,
+    /// The host/device, stamped as provenance on every memory written.
+    host: String,
+    /// The compartment new memories land in when none is named (the session's
+    /// fresh space; engine-isolated to this user until shared).
+    default_compartment: CompartmentId,
     counter: Arc<AtomicU64>,
 }
 
 impl McpServer {
-    pub fn new(store: Store, embedder: Arc<dyn Embedder>, tenant: TenantId) -> Self {
+    pub fn new(
+        store: Store,
+        embedder: Arc<dyn Embedder>,
+        tenant: TenantId,
+        user: UserId,
+        host: String,
+        default_compartment: CompartmentId,
+    ) -> Self {
         Self {
             store,
             embedder,
             tenant,
+            user,
+            host,
+            default_compartment,
             counter: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -54,14 +74,15 @@ fn parse_network(s: &str) -> MemoryNetwork {
     }
 }
 
-/// A process-unique, monotonic memory id (timestamp + counter; no extra deps).
-fn next_id(counter: &AtomicU64) -> String {
+/// A process-unique, monotonic id with a table prefix (timestamp + counter; no
+/// extra deps).
+fn next_id(counter: &AtomicU64, prefix: &str) -> String {
     let n = counter.fetch_add(1, Ordering::Relaxed);
     let t = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("memory:{t:x}-{n:x}")
+    format!("{prefix}:{t:x}-{n:x}")
 }
 
 fn default_network() -> String {
@@ -82,6 +103,17 @@ fn default_edge_type() -> String {
     "references".into()
 }
 
+fn parse_capability(s: &str) -> Capability {
+    match s.trim().to_lowercase().as_str() {
+        "link" => Capability::Link,
+        _ => Capability::Reference,
+    }
+}
+
+fn default_capability() -> String {
+    "reference".into()
+}
+
 #[derive(Deserialize, schemars::JsonSchema)]
 struct StoreParams {
     /// The text to remember.
@@ -95,6 +127,8 @@ struct StoreParams {
     evidence: Option<Vec<String>>,
     /// `true` if the fact changes over time (kept in store, never consolidated).
     volatile: Option<bool>,
+    /// The compartment to store into. Omit to use this session's default space.
+    compartment: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -219,6 +253,50 @@ struct RouteOut {
     routes: Vec<RouteHit>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+struct CreateCompartmentParams {
+    /// A display name for the new compartment.
+    name: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct CompartmentView {
+    id: String,
+    name: String,
+    origin: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct CompartmentsOut {
+    compartments: Vec<CompartmentView>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct ShareParams {
+    compartment_id: String,
+    /// The user to share with (a user id in this tenant).
+    grantee: String,
+    /// `reference` (recall) or `link` (also connect). Defaults to reference.
+    #[serde(default = "default_capability")]
+    capability: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct ShareOut {
+    shared: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct RevokeParams {
+    compartment_id: String,
+    grantee: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct RevokeOut {
+    revoked: bool,
+}
+
 #[tool_router]
 impl McpServer {
     /// Store a memory in this tenant's Penumbra.
@@ -228,7 +306,11 @@ impl McpServer {
         Parameters(p): Parameters<StoreParams>,
     ) -> Result<Json<StoredOut>, ErrorData> {
         let embedding = self.embedder.embed(&p.content).await.map_err(err)?;
-        let id = next_id(&self.counter);
+        let id = next_id(&self.counter, "memory");
+        let compartment = p
+            .compartment
+            .map(CompartmentId::new)
+            .unwrap_or_else(|| self.default_compartment.clone());
         let mut m = Memory::new(
             id.clone(),
             self.tenant.clone(),
@@ -237,7 +319,9 @@ impl McpServer {
             p.confidence.unwrap_or(0.6),
             Utc::now(),
         )
-        .with_embedding(embedding);
+        .with_embedding(embedding)
+        .in_compartment(compartment)
+        .by(self.user.clone(), self.host.clone());
         if let Some(ev) = p.evidence {
             m = m.with_evidence(ev);
         }
@@ -405,6 +489,81 @@ impl McpServer {
             routes,
         }))
     }
+
+    /// Create a private compartment (latent-space) owned by you.
+    #[tool(description = "Create a new compartment (a private latent-space of memory) you own. Store into it via store_memory's compartment arg. Returns its id.")]
+    async fn create_compartment(
+        &self,
+        Parameters(p): Parameters<CreateCompartmentParams>,
+    ) -> Result<Json<CompartmentView>, ErrorData> {
+        let id = next_id(&self.counter, "comp");
+        let c = Compartment::new(
+            id.clone(),
+            self.tenant.clone(),
+            self.user.clone(),
+            p.name.clone(),
+            Utc::now(),
+        );
+        compartment::create(&self.store, &c).await.map_err(err)?;
+        Ok(Json(CompartmentView {
+            id,
+            name: p.name,
+            origin: Origin::User.as_str().to_string(),
+        }))
+    }
+
+    /// List the compartments you own.
+    #[tool(description = "List the compartments you own (including any the antumbra proposed).")]
+    async fn list_compartments(&self) -> Result<Json<CompartmentsOut>, ErrorData> {
+        let comps = compartment::list_owned(&self.store, &self.tenant, &self.user)
+            .await
+            .map_err(err)?;
+        Ok(Json(CompartmentsOut {
+            compartments: comps
+                .iter()
+                .map(|c| CompartmentView {
+                    id: c.id.as_str().to_string(),
+                    name: c.name.clone(),
+                    origin: c.origin.as_str().to_string(),
+                })
+                .collect(),
+        }))
+    }
+
+    /// Share a compartment you own with another user.
+    #[tool(description = "Share one of your compartments with another user: reference (they can recall it) or link (they can also connect to it).")]
+    async fn share_compartment(
+        &self,
+        Parameters(p): Parameters<ShareParams>,
+    ) -> Result<Json<ShareOut>, ErrorData> {
+        let g = Grant::new(
+            self.tenant.clone(),
+            CompartmentId::new(p.compartment_id),
+            UserId::new(p.grantee),
+            parse_capability(&p.capability),
+            self.user.clone(),
+            Utc::now(),
+        );
+        compartment::grant(&self.store, &g).await.map_err(err)?;
+        Ok(Json(ShareOut { shared: true }))
+    }
+
+    /// Revoke a user's access to one of your compartments.
+    #[tool(description = "Revoke a user's access to one of your compartments (takes effect immediately).")]
+    async fn revoke_compartment(
+        &self,
+        Parameters(p): Parameters<RevokeParams>,
+    ) -> Result<Json<RevokeOut>, ErrorData> {
+        compartment::revoke(
+            &self.store,
+            &self.tenant,
+            &CompartmentId::new(p.compartment_id),
+            &UserId::new(p.grantee),
+        )
+        .await
+        .map_err(err)?;
+        Ok(Json(RevokeOut { revoked: true }))
+    }
 }
 
 #[tool_handler]
@@ -425,6 +584,9 @@ mod tests {
             store,
             Arc::new(FixedEmbedder::new(EMBED_DIM)),
             TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "test-host".into(),
+            CompartmentId::new("comp:test:default"),
         )
     }
 
@@ -439,6 +601,7 @@ mod tests {
                 confidence: Some(0.9),
                 evidence: None,
                 volatile: None,
+                compartment: None,
             }))
             .await
             .unwrap();
@@ -492,6 +655,7 @@ mod tests {
             confidence: None,
             evidence: None,
             volatile: None,
+            compartment: None,
         };
         let a = s.store_memory(Parameters(store("a deno project"))).await.unwrap().0.id;
         let b = s.store_memory(Parameters(store("use deno install"))).await.unwrap().0.id;
@@ -557,5 +721,60 @@ mod tests {
         assert!(r.0.covered && !r.0.escalate);
         assert_eq!(r.0.routes.len(), 1);
         assert_eq!(r.0.routes[0].expert_id, "expert:adder");
+    }
+
+    #[tokio::test]
+    async fn compartment_tools_create_list_store_share() {
+        let s = server().await;
+
+        let c = s
+            .create_compartment(Parameters(CreateCompartmentParams {
+                name: "deno work".into(),
+            }))
+            .await
+            .unwrap();
+        assert!(c.0.id.starts_with("comp:"));
+        assert_eq!(c.0.origin, "user");
+
+        let listed = s.list_compartments().await.unwrap();
+        assert!(listed.0.compartments.iter().any(|x| x.id == c.0.id));
+
+        // Store a memory explicitly into the new compartment.
+        let m = s
+            .store_memory(Parameters(StoreParams {
+                content: "use deno install".into(),
+                network: "opinion".into(),
+                confidence: None,
+                evidence: None,
+                volatile: None,
+                compartment: Some(c.0.id.clone()),
+            }))
+            .await
+            .unwrap();
+        assert!(m.0.id.starts_with("memory:"));
+
+        // Share + revoke succeed (engine enforcement is proven in the store
+        // crate's penumbra_compartment test; here we exercise the tool plumbing).
+        assert!(
+            s.share_compartment(Parameters(ShareParams {
+                compartment_id: c.0.id.clone(),
+                grantee: "user:other".into(),
+                capability: "reference".into(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .shared
+        );
+        assert!(
+            s.revoke_compartment(Parameters(RevokeParams {
+                compartment_id: c.0.id,
+                grantee: "user:other".into(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .revoked
+        );
     }
 }
