@@ -69,14 +69,43 @@ code out of a markdown fence first.
 - generation: `max_new_tokens` and `DEFAULT_STOPS` in `decode.rs` end the
   completion at the function boundary.
 
+## Generation quality (the validated recipe, 2026-06-05)
+
+Getting clean, *correct* output from a small LoRA over few examples took four
+research-grounded fixes (each diagnosed against a real GPU failure, citations in
+the ADRs / experiment ledger). The end state: a 10-example "deno install &lt;pkg&gt;"
+corpus trains an expert that emits the right command for trained **and held-out**
+packages.
+
+1. **Decode policy** (`decode.rs::DecodePolicy`): a repetition penalty + no-repeat
+   n-gram + nucleus top-p, applied to the generated continuation only. Without it
+   greedy decoding loops (`axios axios axios…`). `RaftConfig::for_serving` turns
+   it on for `ask`/`serve`/`answer`; training leaves it off.
+2. **Instruct base + chat template**: the default base is
+   `Qwen2.5-Coder-1.5B-Instruct`; `QwenCausalLm` detects the `-Instruct` name and
+   wraps every prompt in the Qwen chat template (and stops at `<|im_end|>`). The
+   raw completion base rambles word-salad; the instruct base produces clean,
+   well-formed commands.
+3. **Shuffle the SFT order** every step (`sft_step`): per-example SGD over a
+   fixed-order corpus collapses to the *last* example. Shuffling lets the LoRA
+   learn the prompt-conditioned mapping instead of memorizing the tail.
+4. **Learning rate**: batch-of-1 SGD + shuffle is unstable at `lr 1e-3` (it
+   over-updates into `den den` fragments). `3e-4` (the new default) is stable
+   ("Beware of the Batch Size" effect).
+
+Open levers if quality is still short: true gradient accumulation (one step per
+batch, not per example), more examples per skill, denser-than-binary rewards, and
+a proper eval harness (pass@k at low temperature, not a single `ask`).
+
 ## Known first-run caveats
 
 - **Precision:** v0 trains in f32 (so autograd flows through the frozen base
   into the LoRA factors). Fine for 1.5 B on 24 GB; if memory is tight, lower K
   or sequence length before reaching for quantization (MT-4).
-- **Prompt shape:** the base completion model is prompted with a comment; if it
-  rambles, tighten `DEFAULT_STOPS` or the prompt. An instruct variant would need
-  a chat template.
+- **Prompt shape:** the default base is now the instruct variant with the chat
+  template applied automatically (see "Generation quality" above), so prompts no
+  longer need to be bare comments. To train on the raw completion base instead,
+  set a non-`Instruct` `base_model` and the chat wrapping switches off.
 - **Speed:** a full pass is `K × tasks × rounds` generations; start with
   `--generations 1`, small K.
 - **Verifier safety:** `verify` runs real commands - point it at a sandboxed
