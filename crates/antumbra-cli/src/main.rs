@@ -945,6 +945,27 @@ async fn run() -> anyhow::Result<()> {
         Command::Retire { expert } => {
             ops::retire(&cli.url, &expert).await?;
         }
+        Command::Remember {
+            tenant,
+            user,
+            compartment,
+            content,
+            network,
+            confidence,
+        } => {
+            ops::remember(
+                &cli.url,
+                ops::RememberArgs {
+                    tenant,
+                    user,
+                    compartment,
+                    content,
+                    network,
+                    confidence,
+                },
+            )
+            .await?;
+        }
         Command::Metabolize {
             source,
             out,

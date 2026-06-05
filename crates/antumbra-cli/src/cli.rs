@@ -334,6 +334,25 @@ pub enum Command {
         #[arg(long)]
         expert: String,
     },
+    /// Seed a memory into a user's compartment from the CLI (the owner/admin
+    /// path; agents write via the MCP `store_memory` tool). No embedding is
+    /// attached — consolidation gathers a compartment by membership. Pair with
+    /// `consolidate-compartment` to mint the compartment into a private expert.
+    Remember {
+        #[arg(long)]
+        tenant: String,
+        #[arg(long)]
+        user: String,
+        #[arg(long)]
+        compartment: String,
+        /// The memory content — the behavior/fact to internalize on consolidation.
+        #[arg(long)]
+        content: String,
+        #[arg(long, default_value = "world")]
+        network: String,
+        #[arg(long, default_value_t = 1.0)]
+        confidence: f32,
+    },
     /// Consolidate a private compartment into a **private expert** (ADR-0014):
     /// gather the compartment's memories, score them through the consolidation
     /// gate, capture the graduates, and mint an expert owned by the user (not in

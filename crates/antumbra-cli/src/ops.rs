@@ -466,3 +466,58 @@ pub async fn retire(url: &str, expert_name: &str) -> anyhow::Result<()> {
 pub async fn retire(_url: &str, _expert_name: &str) -> anyhow::Result<()> {
     anyhow::bail!("`retire` requires building with --features models (real embedder for the router)")
 }
+
+/// Arguments for [`remember`].
+pub struct RememberArgs {
+    pub tenant: String,
+    pub user: String,
+    pub compartment: String,
+    pub content: String,
+    pub network: String,
+    pub confidence: f32,
+}
+
+/// Seed a memory into a user's compartment from the CLI -- the owner/admin path
+/// (the agent-facing writer is the MCP `store_memory` tool). No embedding is
+/// attached: consolidation gathers a compartment by membership, not by
+/// similarity, so this needs no embedder and runs in the default build. Mint the
+/// compartment into a private expert with `consolidate-compartment`.
+pub async fn remember(url: &str, a: RememberArgs) -> anyhow::Result<()> {
+    use std::hash::{Hash, Hasher};
+
+    use antumbra_core::{CompartmentId, Memory, MemoryNetwork, TenantId, UserId};
+    use antumbra_store::repo::{memory, principal};
+
+    let store = crate::connect(url).await?;
+    let tenant = TenantId::new(a.tenant.as_str());
+    let user = UserId::new(a.user.as_str());
+    principal::provision(&store, &tenant, &user).await?;
+
+    let network = match a.network.trim().to_lowercase().as_str() {
+        "bank" => MemoryNetwork::Bank,
+        "opinion" => MemoryNetwork::Opinion,
+        _ => MemoryNetwork::World,
+    };
+    // Deterministic id from (compartment, content) so re-seeding is idempotent.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    a.compartment.hash(&mut hasher);
+    a.content.hash(&mut hasher);
+    let id = format!("memory:{:x}", hasher.finish());
+
+    let m = Memory::new(
+        id.clone(),
+        tenant.clone(),
+        network,
+        a.content.clone(),
+        a.confidence,
+        chrono::Utc::now(),
+    )
+    .by(user.clone(), "cli")
+    .in_compartment(CompartmentId::new(a.compartment.as_str()));
+    memory::upsert(&store, &m).await?;
+    println!(
+        "remembered {id} in {} (tenant {}, user {})",
+        a.compartment, a.tenant, a.user
+    );
+    Ok(())
+}
