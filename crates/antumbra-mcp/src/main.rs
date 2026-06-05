@@ -164,12 +164,9 @@ pub(crate) async fn build_serve(
         return Ok(None);
     }
     let base = experts[0].base_model.clone();
-    // Serve greedily (temperature 0): the `answer` tool wants the learned mode,
-    // not the training-time exploration draw.
-    let cfg = RaftConfig {
-        temperature: 0.0,
-        ..RaftConfig::default()
-    };
+    // Serve the learned mode (greedy + repetition penalty + n-gram block +
+    // nucleus), not the training-time exploration draw.
+    let cfg = RaftConfig::for_serving(RaftConfig::default().max_new_tokens, 0.0);
     let mut engine = MultiAdapterServe::new(base, cfg);
     for e in &experts {
         engine.register(e.id.clone(), e.artifact_uri.clone());

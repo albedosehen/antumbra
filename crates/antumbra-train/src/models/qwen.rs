@@ -675,6 +675,9 @@ pub struct QwenCausalLm {
     eos: u32,
     max_new_tokens: usize,
     temperature: f64,
+    top_p: f64,
+    repetition_penalty: f64,
+    no_repeat_ngram_size: usize,
 }
 
 /// Process-global generation nonce, so every `generate` call (even repeated
@@ -752,6 +755,9 @@ impl QwenCausalLm {
             eos,
             max_new_tokens: cfg.max_new_tokens,
             temperature: cfg.temperature,
+            top_p: cfg.top_p,
+            repetition_penalty: cfg.repetition_penalty,
+            no_repeat_ngram_size: cfg.no_repeat_ngram_size,
         })
     }
 
@@ -781,7 +787,12 @@ impl QwenCausalLm {
         let mut tokens = self.encode(prompt)?;
         let prompt_len = tokens.len();
         let mut rng = StdRng::seed_from_u64(seed);
-        let temp = self.temperature;
+        let policy = crate::decode::DecodePolicy {
+            temperature: self.temperature,
+            top_p: self.top_p,
+            repetition_penalty: self.repetition_penalty,
+            no_repeat_ngram_size: self.no_repeat_ngram_size,
+        };
 
         for index in 0..self.max_new_tokens {
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
@@ -800,7 +811,10 @@ impl QwenCausalLm {
                 .map_err(ce)?
                 .to_dtype(DType::F32)
                 .map_err(ce)?;
-            let next = sample_token(&logits, temp, &mut rng)?;
+            // Decode policy over the generated continuation only (not the prompt).
+            let logits_vec: Vec<f32> = logits.to_vec1().map_err(ce)?;
+            let next =
+                crate::decode::pick_token(logits_vec, &tokens[prompt_len..], &policy, &mut rng);
             if next == self.eos {
                 break;
             }

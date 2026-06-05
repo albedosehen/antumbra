@@ -553,11 +553,7 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
         // The resident engine: one shared base, every expert's adapter registered
         // so a route hot-swaps to it without reloading the base.
         let base_model = experts[0].base_model.clone();
-        let cfg = RaftConfig {
-            max_new_tokens,
-            temperature,
-            ..RaftConfig::default()
-        };
+        let cfg = RaftConfig::for_serving(max_new_tokens, temperature);
         let mut engine = MultiAdapterServe::new(base_model, cfg);
         for e in &experts {
             engine.register(e.id.clone(), e.artifact_uri.clone());

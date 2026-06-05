@@ -43,6 +43,19 @@ pub struct RaftConfig {
     /// Sampling temperature for generation; higher = more diverse draws (so
     /// best-of-K actually explores). `<= 0` is greedy/argmax.
     pub temperature: f64,
+    /// Nucleus (top-p) sampling cutoff: keep the smallest set of tokens whose
+    /// cumulative probability reaches `top_p`, then sample within it
+    /// (Holtzman et al, 1904.09751). `>= 1.0` disables truncation. Ignored when
+    /// greedy. Off by default so RAFT exploration is unchanged; serving sets it.
+    pub top_p: f64,
+    /// Repetition penalty over the generated continuation (Keskar et al,
+    /// 1909.05858): `> 1.0` divides the logit of an already-generated token,
+    /// suppressing loops. `1.0` is off. Serving raises it (~1.2); training leaves
+    /// it off so best-of-K draws stay faithful to the policy.
+    pub repetition_penalty: f64,
+    /// Block any token that would complete an `n`-gram already present in the
+    /// generated continuation (a hard anti-loop guard). `0` is off.
+    pub no_repeat_ngram_size: usize,
     /// GRPO PPO-clip epsilon (ADR-0011). Unused by RAFT.
     pub clip_eps: f64,
     /// GRPO KL-to-reference penalty weight (ADR-0011). Unused by RAFT.
@@ -76,6 +89,9 @@ impl Default for RaftConfig {
             // forward can't overflow like f16 does (CPU is forced to f32).
             dtype: TrainDtype::Bf16,
             temperature: 0.8,
+            top_p: 1.0,
+            repetition_penalty: 1.0,
+            no_repeat_ngram_size: 0,
             clip_eps: 0.2,
             kl_beta: 0.04,
             quantize_base: false,
@@ -89,5 +105,22 @@ impl RaftConfig {
     /// LoRA scaling factor `alpha / rank`.
     pub fn lora_scale(&self) -> f64 {
         self.lora_alpha / self.lora_rank as f64
+    }
+
+    /// A config tuned for **serving** a learned skill rather than RAFT
+    /// exploration: the caller's `temperature` (0 = greedy) plus a repetition
+    /// penalty, an n-gram block, and nucleus truncation, so generation is the
+    /// learned mode without the degeneration greedy/likelihood decoding is prone
+    /// to (Holtzman et al, Keskar et al). Training keeps the defaults (off) so
+    /// best-of-K draws stay faithful to the policy.
+    pub fn for_serving(max_new_tokens: usize, temperature: f64) -> Self {
+        Self {
+            max_new_tokens,
+            temperature,
+            top_p: 0.9,
+            repetition_penalty: 1.2,
+            no_repeat_ngram_size: 3,
+            ..Self::default()
+        }
     }
 }

@@ -349,17 +349,11 @@ async fn run() -> anyhow::Result<()> {
                         let cfg = RaftConfig {
                             lora_rank: rank,
                             lora_alpha: base_scale * rank as f64,
-                            max_new_tokens,
-                            temperature,
-                            ..RaftConfig::default()
+                            ..RaftConfig::for_serving(max_new_tokens, temperature)
                         };
                         CandleServe::new(expert.base_model.clone(), Some(merged.to_string()), cfg)
                     } else {
-                        let cfg = RaftConfig {
-                            max_new_tokens,
-                            temperature,
-                            ..RaftConfig::default()
-                        };
+                        let cfg = RaftConfig::for_serving(max_new_tokens, temperature);
                         CandleServe::new(
                             expert.base_model.clone(),
                             Some(expert.artifact_uri.clone()),
