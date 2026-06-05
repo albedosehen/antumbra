@@ -512,3 +512,146 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
         anyhow::bail!("`evolve` requires building with --features models (candle + a GPU)")
     }
 }
+
+/// Parameters for [`serve`].
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
+pub struct ServeArgs {
+    pub task: Option<String>,
+    pub max_new_tokens: usize,
+    pub threshold: f32,
+}
+
+/// Resident multi-adapter server (ADR-0006): load the shared base once and
+/// hot-swap each routed expert's adapter per prompt via [`MultiAdapterServe`].
+/// Answers a single `--task` or a stream of prompts from stdin, routing each
+/// through the learned router (boundary-conditioned gate as fallback). A stream
+/// pays the base load only on the first prompt; repeated routes to the same
+/// expert reuse the resident factors.
+pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
+    let ServeArgs {
+        task,
+        max_new_tokens,
+        threshold,
+    } = args;
+    #[cfg(feature = "models")]
+    {
+        use antumbra_serve::MultiAdapterServe;
+
+        let store = crate::connect(url).await?;
+        let embedder = crate::make_embedder()?;
+        let experts = expert::list(&store).await?;
+        if experts.is_empty() {
+            anyhow::bail!(
+                "no experts in the population; grow some with `populate` / `evolve` first"
+            );
+        }
+        let boundaries = boundary::list(&store).await?;
+        let router = antumbra_store::repo::router::load(&store).await?;
+
+        // The resident engine: one shared base, every expert's adapter registered
+        // so a route hot-swaps to it without reloading the base.
+        let base_model = experts[0].base_model.clone();
+        let cfg = RaftConfig {
+            max_new_tokens,
+            ..RaftConfig::default()
+        };
+        let mut engine = MultiAdapterServe::new(base_model, cfg);
+        for e in &experts {
+            engine.register(e.id.clone(), e.artifact_uri.clone());
+        }
+        eprintln!(
+            "resident server: {} adapter(s) registered; base loads on the first prompt",
+            engine.len()
+        );
+
+        match task {
+            Some(prompt) => {
+                serve_prompt(
+                    &engine, embedder.as_ref(), &router, &boundaries, &experts, threshold, &prompt,
+                )
+                .await?;
+            }
+            None => {
+                use std::io::BufRead;
+                let stdin = std::io::stdin();
+                for line in stdin.lock().lines() {
+                    let prompt = line?;
+                    let prompt = prompt.trim();
+                    if prompt.is_empty() {
+                        continue;
+                    }
+                    serve_prompt(
+                        &engine, embedder.as_ref(), &router, &boundaries, &experts, threshold,
+                        prompt,
+                    )
+                    .await?;
+                }
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "models"))]
+    {
+        let _ = (url, &task, max_new_tokens, threshold);
+        anyhow::bail!("`serve` requires building with --features models (candle + a GPU)")
+    }
+}
+
+/// Route one prompt and serve its answer from the resident engine. Shared by the
+/// one-shot and stdin paths so residency (base loaded once, adapters swapped) is
+/// the only difference between them.
+#[cfg(feature = "models")]
+#[allow(clippy::too_many_arguments)]
+async fn serve_prompt(
+    engine: &antumbra_serve::MultiAdapterServe,
+    embedder: &dyn antumbra_core::ports::Embedder,
+    router: &Option<antumbra_core::LearnedRouter>,
+    boundaries: &[antumbra_core::FailureBoundary],
+    experts: &[Expert],
+    threshold: f32,
+    prompt: &str,
+) -> anyhow::Result<()> {
+    use antumbra_core::ports::{ActRequest, Serve};
+
+    let v = embedder.embed(prompt).await?;
+    let radius = GateConfig::default().inhibition_radius;
+    let inhib = boundaries
+        .iter()
+        .map(|b| b.inhibition_for(&v, radius))
+        .fold(0.0f32, f32::max);
+    let chosen: Option<ExpertId> = match router {
+        Some(r) if r.covers(&v) && inhib <= 0.5 => r.route(&v).first().map(|(id, _)| id.clone()),
+        Some(_) => None,
+        None => {
+            let gc = GateConfig {
+                coverage_threshold: threshold,
+                ..GateConfig::default()
+            };
+            let d = gate_route(&v, experts, boundaries, 1, &gc);
+            if d.escalate {
+                None
+            } else {
+                d.chosen.first().cloned()
+            }
+        }
+    };
+    match chosen {
+        None => println!("[escalate] no in-scope expert for: {prompt}"),
+        Some(id) => {
+            let out = engine
+                .act(ActRequest {
+                    task_id: "serve".into(),
+                    prompt: prompt.into(),
+                    adapters: vec![id.clone()],
+                })
+                .await?;
+            let name = experts
+                .iter()
+                .find(|e| e.id == id)
+                .map(|e| e.name.as_str())
+                .unwrap_or_else(|| id.as_str());
+            println!("[{name}] {}", out.final_output);
+        }
+    }
+    Ok(())
+}

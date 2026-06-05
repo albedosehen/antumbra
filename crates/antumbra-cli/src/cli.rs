@@ -71,6 +71,23 @@ pub enum Command {
         #[arg(long, default_value_t = 0.4)]
         self_weight: f32,
     },
+    /// Resident multi-adapter server (ADR-0006): load the shared base ONCE and
+    /// hot-swap each routed expert's adapter per prompt, instead of cold-loading
+    /// a model per call. Reads prompts from stdin (one per line) or a single
+    /// --task, routes each via the learned router, and serves the answer from the
+    /// resident engine — so a stream of prompts pays the base load only once.
+    /// Needs --features models + a GPU.
+    Serve {
+        /// Answer this one prompt and exit; omit to stream prompts from stdin.
+        #[arg(long)]
+        task: Option<String>,
+        /// Max tokens to generate per answer.
+        #[arg(long, default_value_t = 128)]
+        max_new_tokens: usize,
+        /// Abstention threshold on relative coverage; below it the gate escalates.
+        #[arg(long, default_value_t = 0.08)]
+        threshold: f32,
+    },
     /// Recover a failure boundary's scope by generate-then-verify (ADR-0004):
     /// hold a behavior fixed, vary the context, and find the governing feature
     /// and C' by actually serving and checking. Stores an actionable boundary.

@@ -801,6 +801,21 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
+        Command::Serve {
+            task,
+            max_new_tokens,
+            threshold,
+        } => {
+            commands::serve(
+                &cli.url,
+                commands::ServeArgs {
+                    task,
+                    max_new_tokens,
+                    threshold,
+                },
+            )
+            .await?;
+        }
         Command::Populate {
             corpus,
             run,
