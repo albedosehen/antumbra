@@ -93,9 +93,22 @@ packages.
    over-updates into `den den` fragments). `3e-4` (the new default) is stable
    ("Beware of the Batch Size" effect).
 
-Open levers if quality is still short: true gradient accumulation (one step per
-batch, not per example), more examples per skill, denser-than-binary rewards, and
-a proper eval harness (pass@k at low temperature, not a single `ask`).
+5. **Gradient accumulation** (opt-in, `RaftConfig::grad_accumulation` /
+   `consolidate --grad-accumulation`): step on the mean loss of a small
+   micro-batch instead of one example at a time. Batch-of-1 SGD chases each
+   example's noisy gradient; the mini-batch mean is far less noisy, so a higher
+   learning rate stays stable. GPU-validated: at `lr 3e-4` it matches the
+   per-example baseline (internalized 1.00, held-out `fastify` generalizes), and
+   at `lr 1e-3` -- the rate that degenerates to `den den` under batch-of-1 -- it
+   is stable and correct. Off by default; the per-example shuffle recipe above is
+   the validated standard. (It steps on the mean *loss* via `backward_step`, not a
+   hand-merged gradient store -- candle matches grads to vars by tensor identity,
+   so a rebuilt store silently no-ops; and it micro-batches rather than loading
+   the whole replay-inflated batch, which OOMs a 24 GB card.)
+
+Open levers if quality is still short: more examples per skill, denser-than-binary
+rewards, and a proper eval harness (pass@k at low temperature, not a single
+`ask`).
 
 ## Known first-run caveats
 
@@ -153,7 +166,14 @@ overrides in the root `Cargo.toml` (rustc ICEs optimizing them at opt 3).
 
 **Python for verifiers.** The example corpora's verifiers shell out to `python`.
 On Windows the `python` command is often the **Store alias stub** (prints "Python
-was not found" and fails *every* verify, so nothing graduates). Two fixes:
+was not found" and fails *every* verify). For `train` this means nothing
+graduates. For `consolidate`/`capture` the failure is more insidious: graduation
+still happens (the gate is internal, no python), but capture only trains on
+corrections it can *re-verify*, so a broken verifier yields zero winners, an empty
+SFT batch, and a saved adapter that is the **untrained init** -- `internalized
+0.00` and `ask` returns the base model's prose, even though the run looked
+successful. (capture now prints a `warning: 0 of N correction(s) verified` line
+for exactly this.) Two fixes:
 
 - Point the verifier straight at a real interpreter with **`ANTUMBRA_PYTHON`**
   (the `CommandVerifier` substitutes it for `python`/`python3`), e.g.
