@@ -1,0 +1,10 @@
+CascadiaMono.ttf is Cascadia Code / Cascadia Mono by Microsoft, licensed under
+the SIL Open Font License, Version 1.1 (OFL-1.1). It is embedded here solely to
+rasterize terminal snapshots (braille, box-drawing, and symbol glyphs) for the
+operator console's headless screenshot mode; it is not modified.
+
+Upstream + full license text: https://github.com/microsoft/cascadia-code
+SIL OFL 1.1: https://openfontlicense.org/
+
+The OFL permits bundling and redistribution with software. The font is not sold
+on its own and retains its reserved font names.
