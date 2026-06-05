@@ -24,6 +24,22 @@ const VERIFY_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Debug, Default, Clone)]
 pub struct CommandVerifier;
 
+/// Resolve a verifier `program` to an executable. `python`/`python3` honor the
+/// `ANTUMBRA_PYTHON` env var when it is set and non-empty — so a verifier that
+/// shells out to `python` works even when a shadowing interpreter is first on
+/// `PATH` (e.g. the Windows Store `python.exe` alias, which is not a real
+/// interpreter). Everything else is passed through unchanged.
+fn resolve_program(program: &str) -> String {
+    if matches!(program, "python" | "python3") {
+        if let Ok(p) = std::env::var("ANTUMBRA_PYTHON") {
+            if !p.trim().is_empty() {
+                return p;
+            }
+        }
+    }
+    program.to_string()
+}
+
 /// Extract the first fenced code block (```` ```lang\n...\n``` ````), or return
 /// the trimmed text if there is no fence. Models frequently wrap code in
 /// fences; the runnable code is inside.
@@ -97,7 +113,7 @@ impl Verifier for CommandVerifier {
             .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
             .unwrap_or_default();
 
-        let mut cmd = Command::new(program);
+        let mut cmd = Command::new(resolve_program(program));
         cmd.args(&args)
             .env("ANTUMBRA_COMPLETION", completion)
             .stdin(Stdio::null())
@@ -209,5 +225,23 @@ mod tests {
         );
         assert_eq!(extract_code_block("no fence here"), "no fence here");
         assert_eq!(extract_code_block("```\nx = 1\n```"), "x = 1");
+    }
+
+    #[test]
+    fn resolve_program_honors_antumbra_python_override() {
+        // No env -> pass through.
+        std::env::remove_var("ANTUMBRA_PYTHON");
+        assert_eq!(resolve_program("python"), "python");
+
+        // Set -> python/python3 resolve to it; other programs are untouched.
+        std::env::set_var("ANTUMBRA_PYTHON", "/real/python.exe");
+        assert_eq!(resolve_program("python"), "/real/python.exe");
+        assert_eq!(resolve_program("python3"), "/real/python.exe");
+        assert_eq!(resolve_program("cmd"), "cmd");
+
+        // Empty/whitespace is ignored (treated as unset).
+        std::env::set_var("ANTUMBRA_PYTHON", "  ");
+        assert_eq!(resolve_program("python"), "python");
+        std::env::remove_var("ANTUMBRA_PYTHON");
     }
 }

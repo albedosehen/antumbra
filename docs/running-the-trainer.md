@@ -122,11 +122,18 @@ target\debug\antumbra.exe --url surrealkv://./data/antumbra.skv train --corpus c
 Release builds also need the `surrealdb` / `surrealdb-core` `opt-level = 1`
 overrides in the root `Cargo.toml` (rustc ICEs optimizing them at opt 3).
 
-**No Python?** The example corpora's verifiers shell out to `python`; on a box
-without a real Python (e.g. only the Windows Store stub), use a corpus whose
-`verify` is `cmd /C exit 0` (e.g. `corpora/smoke.json`) — RAFT then treats every
-completion as a pass, which still trains and serves a real adapter for validating
-the GPU path (generation quality just isn't gated).
+**Python for verifiers.** The example corpora's verifiers shell out to `python`.
+On Windows the `python` command is often the **Store alias stub** (prints "Python
+was not found" and fails *every* verify, so nothing graduates). Two fixes:
+
+- Point the verifier straight at a real interpreter with **`ANTUMBRA_PYTHON`**
+  (the `CommandVerifier` substitutes it for `python`/`python3`), e.g.
+  `set "ANTUMBRA_PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"` —
+  more robust than fighting `PATH` order.
+- Or, to validate the GPU path with no Python at all, use a corpus whose `verify`
+  is `cmd /C exit 0` (e.g. `corpora/smoke.json`): RAFT treats every completion as
+  a pass, which still trains and serves a real adapter (generation quality just
+  isn't gated).
 
 **Driver requirement:** the GPU driver must support the *toolkit* version, or PTX
 load fails with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Check `nvidia-smi` (driver
