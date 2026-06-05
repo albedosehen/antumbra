@@ -81,33 +81,26 @@ fn make_embedder() -> Result<Box<dyn Embedder>> {
     Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(EMBED_DIM)))
 }
 
-/// Build a fully-initialized, signed-in session for one identity: a fresh store
-/// connection bound as `(tenant, user)`, the provisioned principal, and the
-/// user's default (inbox) compartment. Each identity needs its own connection
-/// because `signin` binds the whole session. Shared by both transports.
-async fn build_session(
-    url: &str,
-    tenant: TenantId,
-    user: UserId,
-    host: String,
-    embedder: Arc<dyn Embedder>,
-) -> Result<McpServer> {
-    let store = connect(url).await?;
-    principal::provision(&store, &tenant, &user).await?;
-    store.signin(&tenant, &user).await?;
-
-    // The session's default compartment (the inbox; new memories land here unless
-    // a compartment is named). Idempotent: it persists across restarts, so a
-    // re-provision of the same identity finds it already present.
+/// Owner-side provisioning for an identity: ensure the principal exists and the
+/// user's default (inbox) compartment is present. Idempotent (safe across
+/// restarts). The caller must be in **owner mode** (not signed in as a tenant),
+/// since it writes the principal/compartment tables. Returns the default
+/// compartment id. Shared by both transports.
+pub(crate) async fn provision_identity(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+) -> Result<CompartmentId> {
+    principal::provision(store, tenant, user).await?;
     let default_compartment =
         CompartmentId::new(format!("comp:{}:{}:default", tenant.as_str(), user.as_str()));
-    let exists = compartment::list_owned(&store, &tenant, &user)
+    let exists = compartment::list_owned(store, tenant, user)
         .await?
         .iter()
         .any(|c| c.id == default_compartment);
     if !exists {
         compartment::create(
-            &store,
+            store,
             &Compartment::new(
                 default_compartment.clone(),
                 tenant.clone(),
@@ -118,7 +111,23 @@ async fn build_session(
         )
         .await?;
     }
+    Ok(default_compartment)
+}
 
+/// Build a signed-in stdio session: one connection, provisioned and bound as
+/// `(tenant, user)` for the life of the process. (The HTTP transport instead
+/// shares one connection across identities — see [`http`] — because an embedded
+/// engine is single-writer.)
+async fn build_session(
+    url: &str,
+    tenant: TenantId,
+    user: UserId,
+    host: String,
+    embedder: Arc<dyn Embedder>,
+) -> Result<McpServer> {
+    let store = connect(url).await?;
+    let default_compartment = provision_identity(&store, &tenant, &user).await?;
+    store.signin(&tenant, &user).await?;
     Ok(McpServer::new(
         store,
         embedder,

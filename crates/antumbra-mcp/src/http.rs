@@ -1,13 +1,23 @@
 //! The networked multi-tenant HTTP transport (ADR-0015).
 //!
-//! Each request carries a signed JWT; its verified `tenant`/`user` claims select
-//! (or lazily create) a session signed in as that identity, so the engine
-//! enforces isolation **per request** — one server, many tenants, no app-side
-//! filtering. rmcp's `StreamableHttpService` factory takes no request context, so
-//! identity is resolved *before* dispatch: the axum handler verifies the token,
-//! looks up the per-identity service (whose `McpServer` is already signed in),
-//! and delegates. The bearer token is the boundary — a leaked token grants
-//! exactly its claimed `(tenant, user)` scope and nothing wider.
+//! Each request carries a signed JWT; its verified `tenant`/`user` claims become
+//! `$auth`, so the engine enforces isolation **per request** — one server, many
+//! tenants, no app-side filtering. A leaked token grants exactly its claimed
+//! scope and nothing wider.
+//!
+//! ## One connection, serialized — works on embedded too
+//!
+//! An embedded SurrealDB (`surrealkv://`, the edge/IoT case) is **single-writer**:
+//! only one connection may open the datastore. So the server holds **one** shared
+//! connection and multiplexes tenants over it — it does *not* open a connection
+//! per identity. Because `signin` binds the whole connection, each request takes
+//! a lock, signs the shared connection in as its identity, runs, and releases;
+//! the next request re-signs-in. The engine then hides other tenants' rows even
+//! on an unfiltered query (proven in `antumbra-store`'s embedded tests). The cost
+//! is serialization of the authenticated section — fine for an edge device; a
+//! high-concurrency deployment points `--url` at a real `ws://` server. The
+//! stateless JSON response mode keeps each `handle` bounded so the lock is never
+//! held across a long-lived stream.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,6 +36,7 @@ use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::{TenantId, UserId};
+use antumbra_store::Store;
 
 use crate::auth::{Identity, JwtVerifier};
 use crate::server::McpServer;
@@ -33,17 +44,21 @@ use crate::server::McpServer;
 type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
 
 struct HttpState {
-    url: String,
+    /// The one shared connection. Embedded is single-writer, so every tenant is
+    /// served over this; `auth` serializes the signed-in section.
+    store: Store,
     host: String,
     verifier: JwtVerifier,
     embedder: Arc<dyn Embedder>,
-    /// One signed-in MCP service per identity, created on first authenticated
-    /// request. Each owns its own store connection bound to that `(tenant, user)`.
+    /// Serializes `signin(identity) -> handle` so two identities never share the
+    /// connection's auth state concurrently.
+    auth: Mutex<()>,
+    /// One MCP service per identity (provisioned once), all sharing `store`.
     sessions: Mutex<HashMap<Identity, IdentityService>>,
 }
 
-/// Serve the networked surface on `addr`. Every `/mcp` request must present a
-/// JWT whose claims this `verifier` accepts.
+/// Serve the networked surface on `addr` over one shared connection to `url`.
+/// Every `/mcp` request must present a JWT this `verifier` accepts.
 pub async fn serve(
     addr: String,
     url: String,
@@ -51,11 +66,13 @@ pub async fn serve(
     embedder: Arc<dyn Embedder>,
     verifier: JwtVerifier,
 ) -> Result<()> {
+    let store = crate::connect(&url).await?;
     let state = Arc::new(HttpState {
-        url,
+        store,
         host,
         verifier,
         embedder,
+        auth: Mutex::new(()),
         sessions: Mutex::new(HashMap::new()),
     });
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -84,7 +101,7 @@ async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Resp
         }
     };
 
-    let service = match state.session_for(&identity).await {
+    let service = match state.service_for(&identity).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
@@ -95,43 +112,73 @@ async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Resp
         }
     };
 
+    // Serialize the authenticated section over the single shared connection: bind
+    // this identity, run the request, then release so the next request re-binds.
+    let _guard = state.auth.lock().await;
+    if let Err(e) = state
+        .store
+        .signin(&TenantId::new(&identity.tenant), &UserId::new(&identity.user))
+        .await
+    {
+        eprintln!("antumbra-mcp: signin failed for {}: {e}", identity.tenant);
+        return internal_error();
+    }
     // rmcp returns its own boxed body; rewrap it as an axum body.
     let (parts, body) = service.handle(req).await.into_parts();
     Response::from_parts(parts, Body::new(body))
 }
 
 impl HttpState {
-    async fn session_for(&self, identity: &Identity) -> Result<IdentityService> {
-        let mut map = self.sessions.lock().await;
-        if let Some(s) = map.get(identity) {
+    /// Get (or first-time provision) the MCP service for an identity. All
+    /// services share the one `store`; only their provenance fields differ.
+    async fn service_for(&self, identity: &Identity) -> Result<IdentityService> {
+        if let Some(s) = self.sessions.lock().await.get(identity) {
             return Ok(s.clone());
         }
-        let mcp = crate::build_session(
-            &self.url,
-            TenantId::new(identity.tenant.as_str()),
-            UserId::new(identity.user.as_str()),
-            self.host.clone(),
+        let tenant = TenantId::new(&identity.tenant);
+        let user = UserId::new(&identity.user);
+
+        // Provision owner-side (principal + default compartment). Done under the
+        // auth lock in owner mode so it never races a signed-in request.
+        let default_compartment = {
+            let _guard = self.auth.lock().await;
+            self.store.invalidate().await?; // owner mode for the writes
+            crate::provision_identity(&self.store, &tenant, &user).await?
+        };
+
+        let mcp = McpServer::new(
+            self.store.clone(),
             self.embedder.clone(),
-        )
-        .await?;
-        // The factory clones the already-signed-in server for each new MCP
-        // session opened under this identity.
+            tenant,
+            user,
+            self.host.clone(),
+            default_compartment,
+        );
+        // The factory clones the (store-sharing) server for each MCP exchange.
         let service = StreamableHttpService::new(
             move || Ok(mcp.clone()),
             Arc::new(LocalSessionManager::default()),
             server_config(),
         );
-        map.insert(identity.clone(), service.clone());
+        self.sessions
+            .lock()
+            .await
+            .insert(identity.clone(), service.clone());
         Ok(service)
     }
 }
 
 fn server_config() -> StreamableHttpServerConfig {
-    // The JWT is the access guard, so we do not restrict by `Host` (the default
-    // loopback-only allowlist would refuse LAN clients). DNS-rebinding is moot:
-    // there is no ambient-authority cookie or session — every request re-proves
-    // identity with a bearer token.
-    StreamableHttpServerConfig::default().disable_allowed_hosts()
+    StreamableHttpServerConfig::default()
+        // Stateless JSON: each POST is a complete request/response, so the auth
+        // lock is never held across a long-lived SSE stream.
+        .with_stateful_mode(false)
+        .with_json_response(true)
+        // The JWT is the access guard, so we do not restrict by `Host` (the
+        // default loopback-only allowlist would refuse LAN clients). DNS-rebinding
+        // is moot: every request re-proves identity with a bearer token, there is
+        // no ambient-authority cookie or session.
+        .disable_allowed_hosts()
 }
 
 fn unauthorized() -> Response {
@@ -149,12 +196,13 @@ mod tests {
     use antumbra_store::EMBED_DIM;
     use tower::ServiceExt; // oneshot
 
-    fn state() -> Arc<HttpState> {
+    async fn state() -> Arc<HttpState> {
         Arc::new(HttpState {
-            url: "mem://".into(),
+            store: Store::connect_memory(EMBED_DIM).await.unwrap(),
             host: "test".into(),
             verifier: JwtVerifier::hs256(b"test-secret"),
             embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            auth: Mutex::new(()),
             sessions: Mutex::new(HashMap::new()),
         })
     }
@@ -165,11 +213,11 @@ mod tests {
             builder = builder.header(header::AUTHORIZATION, a);
         }
         let req = builder.body(Body::empty()).unwrap();
-        router(state()).oneshot(req).await.unwrap().status()
+        router(state().await).oneshot(req).await.unwrap().status()
     }
 
     // The auth boundary rejects before any store/session work, so these need no
-    // running socket and no database.
+    // running socket and no provisioned tenant.
     #[tokio::test]
     async fn missing_token_is_unauthorized() {
         assert_eq!(status_for(None).await, StatusCode::UNAUTHORIZED);

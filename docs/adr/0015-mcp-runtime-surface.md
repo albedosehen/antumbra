@@ -7,14 +7,21 @@
 > `tenant`/`user` claims become `$auth` (the decision was JWT claims over a token→identity lookup — the verified
 > token *is* the identity, so a leaked token grants exactly its claimed scope). `auth.rs` verifies the bearer
 > token (HS256 secret or RS256 PEM public key; mandatory `exp`; optional `aud`) and `http.rs` resolves identity
-> *before* dispatch — rmcp's service factory takes no request context, so the handler verifies the token then
-> looks up (or lazily builds) a per-identity session whose `McpServer` is already `signin`'d as that
-> `(tenant, user)`, and delegates. Each identity owns its own store connection (signin binds the session).
-> **Caveat:** true enforcement of the engine ACL over the network requires pointing `--url` at a real SurrealDB
-> server (`ws://`) where record-access PERMISSIONS are live; on the embedded kv engine the in-process session is
-> effectively root, so the networked server's isolation guarantee is only as strong as the engine it is given.
-> Verified: JWT core (7 tests) and the HTTP auth boundary (rejects missing/garbage/non-bearer with 401 before any
-> store work). Still to do: the authenticated happy-path against a live deployment, and "live propagation"
+> *before* dispatch — rmcp's service factory takes no request context, so the handler verifies the token, binds
+> the identity, and delegates.
+>
+> **Isolation holds on embedded too (corrects an earlier note).** The embedded engine *does* enforce
+> record-access PERMISSIONS once a session is signed in — proven in `antumbra-store`'s embedded tests (an `alpha`
+> session cannot see `beta`'s rows even on an unfiltered query). The only unenforced mode is the owner/root path,
+> used solely for schema + provisioning. The real embedded constraint is **single-writer**: `surrealkv` admits
+> one connection (a 2nd is refused — regression-tested), so the server holds **one** shared connection and signs
+> it in per request as the JWT identity, **serializing** the authenticated section with a lock. Two tenants over
+> that one connection see only their own rows — proven through the real MCP tools
+> (`shared_connection_isolates_tenants_under_signin`). The cost is serialization of the authed section (fine for
+> an edge device; a high-concurrency deployment points `--url` at a `ws://` server and the model is unchanged).
+> The stateless JSON response mode keeps each `handle` bounded so the lock never spans a long-lived stream.
+> Verified: JWT core (7), HTTP auth boundary (3, 401 before any store work), embedded single-writer + serialized
+> isolation (3). Still to do: the authenticated happy-path against a live deployment, and "live propagation"
 > (server→client SSE notifications when a shared compartment changes) — today it is recall-on-demand.
 
 ## Context
@@ -45,9 +52,10 @@ real embedder (candle BERT) lands under `--features models`; a byte-histogram fa
 
 - **Positive:** Antumbra is usable as an agent's memory + routing engine today; one MCP server, one engine, one
   tenant boundary; consolidate/recall/route all hit a single store.
-- **Negative:** the networked surface's isolation is only enforced when `--url` points at a real SurrealDB
-  server (the embedded kv session is in-process root); **live propagation** (push on shared-compartment change)
-  is not yet built (recall-on-demand today); and `ask` (serve *through* the routed expert) plus the
+- **Negative:** the networked surface **serializes** the authenticated section over its single shared connection
+  (correct and isolated on embedded *and* networked, but not concurrent — a high-throughput deployment wants a
+  `ws://` server, where the same model still holds); **live propagation** (push on shared-compartment change) is
+  not yet built (recall-on-demand today); and `ask` (serve *through* the routed expert) plus the
   consolidate/retire owner ops are not yet on the surface (owner ops belong on a future admin surface, not the
   tenant session).
 - **Neutral:** `get_neighbors` 1-hop today (native N-hop graph traversal deferred, ADR-0014).

@@ -1010,4 +1010,60 @@ mod tests {
         assert_eq!(moved.len(), prop.members.len());
         assert!(moved.len() >= 3, "the whole inbox region moved");
     }
+
+    #[tokio::test]
+    async fn shared_connection_isolates_tenants_under_signin() {
+        // The HTTP transport's model on an embedded (single-writer) engine: ONE
+        // shared connection, signed in per request. Two tenants' servers share
+        // the store; serialized signin must isolate them through the real MCP
+        // tools, not just at the store layer.
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
+        let (ta, ua) = (TenantId::new("ws:a"), UserId::new("user:a"));
+        let (tb, ub) = (TenantId::new("ws:b"), UserId::new("user:b"));
+
+        // Provision both identities owner-side (principal + default compartment).
+        let comp_a = crate::provision_identity(&store, &ta, &ua).await.unwrap();
+        let comp_b = crate::provision_identity(&store, &tb, &ub).await.unwrap();
+        let server_a =
+            McpServer::new(store.clone(), embedder.clone(), ta.clone(), ua.clone(), "h".into(), comp_a);
+        let server_b =
+            McpServer::new(store.clone(), embedder.clone(), tb.clone(), ub.clone(), "h".into(), comp_b);
+
+        // Request 1: bind tenant a, store a memory via a's server.
+        store.signin(&ta, &ua).await.unwrap();
+        server_a
+            .store_memory(Parameters(StoreParams {
+                content: "alpha-only secret".into(),
+                network: "world".into(),
+                confidence: None,
+                evidence: None,
+                volatile: None,
+                compartment: None,
+            }))
+            .await
+            .unwrap();
+
+        // Request 2: re-bind the SAME connection as tenant b; b must not see it.
+        store.signin(&tb, &ub).await.unwrap();
+        let b_view = server_b
+            .list_memories(Parameters(ListParams { network: None }))
+            .await
+            .unwrap();
+        assert!(
+            b_view.0.memories.iter().all(|m| !m.content.contains("alpha")),
+            "tenant b must not see tenant a's memory over the shared connection"
+        );
+
+        // Request 3: a re-binds and DOES see its own memory.
+        store.signin(&ta, &ua).await.unwrap();
+        let a_view = server_a
+            .list_memories(Parameters(ListParams { network: None }))
+            .await
+            .unwrap();
+        assert!(
+            a_view.0.memories.iter().any(|m| m.content.contains("alpha")),
+            "tenant a must see its own memory"
+        );
+    }
 }
