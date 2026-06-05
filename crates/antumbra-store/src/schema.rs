@@ -11,7 +11,7 @@ use surql::schema::table::{
     hnsw_index, index, table_schema, unique_index, HnswDistanceType, MTreeVectorType,
     TableDefinition, TableMode,
 };
-use surql::schema::{generate_access_sql, generate_table_sql};
+use surql::schema::{generate_access_sql_with_options, generate_table_sql};
 
 use antumbra_core::Result;
 
@@ -149,11 +149,9 @@ pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
         table.validate().map_err(map)?;
         out.extend(generate_table_sql(&table, true));
     }
-    // The tenant record-access method (binds $auth.tenant). Note: surql-rs does
-    // not yet emit IF NOT EXISTS for access, so a persistent store re-applying
-    // the schema would re-DEFINE it (harmless overwrite on a fresh connect; an
-    // access-idempotency patch is a release/0.28.0 follow-up).
-    out.extend(generate_access_sql(&tenant_access()).map_err(map)?);
+    // The tenant record-access method (binds $auth.tenant), idempotent so a
+    // persistent store can re-apply the schema on every connect.
+    out.extend(generate_access_sql_with_options(&tenant_access(), true).map_err(map)?);
     Ok(out)
 }
 
