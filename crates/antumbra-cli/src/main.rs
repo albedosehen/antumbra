@@ -893,6 +893,7 @@ async fn run() -> anyhow::Result<()> {
             samples,
             max_new_tokens,
             lr,
+            grad_accumulation,
         } => {
             ops::consolidate(
                 &cli.url,
@@ -908,6 +909,7 @@ async fn run() -> anyhow::Result<()> {
                     samples,
                     max_new_tokens,
                     lr,
+                    grad_accumulation,
                 },
             )
             .await?;

@@ -683,6 +683,10 @@ pub struct QwenCausalLm {
     /// template (so the model is prompted the way it was tuned) and generation
     /// stops at `<|im_end|>` instead of `<|endoftext|>`.
     chat: bool,
+    /// Accumulate the batch gradient and take one optimizer step per `sft_step`
+    /// (mean gradient) rather than one step per example. See
+    /// [`RaftConfig::grad_accumulation`].
+    grad_accumulation: bool,
 }
 
 /// Process-global generation nonce, so every `generate` call (even repeated
@@ -768,6 +772,7 @@ impl QwenCausalLm {
             repetition_penalty: cfg.repetition_penalty,
             no_repeat_ngram_size: cfg.no_repeat_ngram_size,
             chat,
+            grad_accumulation: cfg.grad_accumulation,
         })
     }
 
@@ -938,7 +943,11 @@ impl QwenCausalLm {
             .map_err(|e| AntumbraError::other(format!("save adapter: {e}")))
     }
 
-    fn train_one(&mut self, example: &SftExample) -> Result<f32> {
+    /// Forward + masked LM loss for one example, with autograd tracked. Returns
+    /// the loss tensor (graph attached) or `None` if the example is too short to
+    /// supervise. The caller drives backward/step -- per example (`train_one`) or
+    /// accumulated over a batch (`sft_step` with `grad_accumulation`).
+    fn forward_loss(&mut self, example: &SftExample) -> Result<Option<Tensor>> {
         self.model.clear_cache();
         self.model.set_grad(true); // training forward must be tracked
         let wrapped = self.wrap_prompt(&example.prompt);
@@ -946,7 +955,7 @@ impl QwenCausalLm {
         let full_text = format!("{}{}", wrapped, example.completion);
         let mut full_ids = self.encode(&full_text)?;
         if full_ids.len() <= prompt_ids.len() || full_ids.len() < 2 {
-            return Ok(0.0);
+            return Ok(None);
         }
         // Supervise an EOS after the completion so the model learns to *stop*
         // there; without it a short taught completion runs on and degenerates.
@@ -976,8 +985,54 @@ impl QwenCausalLm {
             .to_dtype(DType::F32)
             .map_err(ce)?;
         let loss = causal_lm_loss(&logits, &input, &mask).map_err(ce)?;
-        self.opt.backward_step(&loss).map_err(ce)?;
-        loss.to_scalar::<f32>().map_err(ce)
+        Ok(Some(loss))
+    }
+
+    /// One example, one optimizer step (batch-of-1 SGD). The per-example path.
+    fn train_one(&mut self, example: &SftExample) -> Result<f32> {
+        match self.forward_loss(example)? {
+            Some(loss) => {
+                self.opt.backward_step(&loss).map_err(ce)?;
+                loss.to_scalar::<f32>().map_err(ce)
+            }
+            None => Ok(0.0),
+        }
+    }
+
+    /// One optimizer step over the whole batch: accumulate the per-example
+    /// gradients, average them, and apply a single update (true mini-batch
+    /// descent). The averaged gradient is far less noisy than any single
+    /// example's, so the adapter learns the shared, prompt-conditioned mapping
+    /// instead of lurching toward whichever example was seen last -- and a higher
+    /// learning rate stays stable ("Beware of the Batch Size"). Returns the mean
+    /// supervised loss over the batch.
+    fn train_batch(&mut self, batch: &[SftExample]) -> Result<f32> {
+        let mut accum: Option<candle_core::backprop::GradStore> = None;
+        let mut total = 0.0f32;
+        let mut supervised = 0usize;
+        for example in batch {
+            let Some(loss) = self.forward_loss(example)? else {
+                continue;
+            };
+            total += loss.to_scalar::<f32>().map_err(ce)?;
+            supervised += 1;
+            let grads = loss.backward().map_err(ce)?;
+            match accum.as_mut() {
+                None => accum = Some(grads),
+                Some(acc) => {
+                    super::grad_accum::accumulate_into(acc, &grads).map_err(ce)?
+                }
+            }
+        }
+        if supervised == 0 {
+            return Ok(0.0);
+        }
+        if let Some(mut acc) = accum {
+            // Average the accumulated gradient, then take the single step.
+            super::grad_accum::scale_grads(&mut acc, 1.0 / supervised as f64).map_err(ce)?;
+            self.opt.step(&acc).map_err(ce)?;
+        }
+        Ok(total / supervised as f32)
     }
 }
 
@@ -1024,6 +1079,12 @@ impl CausalLm for QwenCausalLm {
     async fn sft_step(&mut self, batch: &[SftExample]) -> Result<f32> {
         if batch.is_empty() {
             return Ok(0.0);
+        }
+        // True mini-batch descent: accumulate the batch gradient, one step. Order
+        // is irrelevant (summation commutes), and no example dominates by being
+        // trained last, so no shuffle is needed.
+        if self.grad_accumulation {
+            return self.train_batch(batch);
         }
         // Each example is one SGD step (batch-of-1). Shuffle the order every call
         // so no single example is consistently trained *last* and dominates the

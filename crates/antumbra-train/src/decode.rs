@@ -72,7 +72,7 @@ pub fn pick_token(
     // Temperature softmax (shifted for numerical stability).
     let temp = policy.temperature as f32;
     let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let mut probs: Vec<f32> = logits.iter().map(|l| (((l - max) / temp) as f32).exp()).collect();
+    let mut probs: Vec<f32> = logits.iter().map(|l| ((l - max) / temp).exp()).collect();
     let sum: f32 = probs.iter().sum();
     if sum <= 0.0 || !sum.is_finite() {
         return argmax(&logits);

@@ -72,6 +72,13 @@ pub struct RaftConfig {
     /// sets it `> 0` to rehearse already-consolidated skills and resist
     /// catastrophic interference (the complementary-learning-systems fix).
     pub replay_ratio: f64,
+    /// Accumulate gradients over the whole SFT batch and apply **one** optimizer
+    /// step (the mean gradient), instead of one step per example (batch-of-1
+    /// SGD). True mini-batch descent: the gradient is far less noisy, so a higher
+    /// learning rate is stable and the adapter no longer over-updates toward
+    /// whatever example it saw last ("Beware of the Batch Size"). `false` keeps
+    /// the per-example path. Off by default so the validated recipe is unchanged.
+    pub grad_accumulation: bool,
 }
 
 impl Default for RaftConfig {
@@ -101,6 +108,7 @@ impl Default for RaftConfig {
             quantize_base: false,
             parent_adapter: None,
             replay_ratio: 0.0,
+            grad_accumulation: false,
         }
     }
 }

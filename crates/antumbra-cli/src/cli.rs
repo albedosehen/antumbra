@@ -330,6 +330,12 @@ pub enum Command {
         max_new_tokens: usize,
         #[arg(long, default_value_t = 3e-4)]
         lr: f64,
+        /// Accumulate the batch gradient and take one optimizer step per round
+        /// (true mini-batch descent) instead of one step per example. Less noisy,
+        /// so a higher `--lr` stays stable and no example dominates by being
+        /// trained last.
+        #[arg(long, default_value_t = false)]
+        grad_accumulation: bool,
     },
     /// Retire an expert by name and refresh the router: population-level
     /// forgetting. Wire a store's contradiction report against a consolidated
