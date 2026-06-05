@@ -55,6 +55,10 @@ struct HttpState {
     auth: Mutex<()>,
     /// Autonomous propose threshold, applied to every per-identity server.
     auto_propose: Option<usize>,
+    /// The serving engine the `answer` tool drives, built once from the owner
+    /// view of the population and shared by every per-identity server (routing
+    /// scopes which expert a session may pick).
+    serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     sessions: Mutex<HashMap<Identity, IdentityService>>,
 }
@@ -70,6 +74,9 @@ pub async fn serve(
     auto_propose: Option<usize>,
 ) -> Result<()> {
     let store = crate::connect(&url).await?;
+    // Built once here in owner mode (before any per-request signin), so it sees
+    // the whole population; the answer tool's routing enforces per-session scope.
+    let serve = crate::build_serve(&store).await?;
     let state = Arc::new(HttpState {
         store,
         host,
@@ -77,6 +84,7 @@ pub async fn serve(
         embedder,
         auth: Mutex::new(()),
         auto_propose,
+        serve,
         sessions: Mutex::new(HashMap::new()),
     });
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -157,7 +165,7 @@ impl HttpState {
             user,
             self.host.clone(),
             default_compartment,
-            None,
+            self.serve.clone(),
         );
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
@@ -212,6 +220,7 @@ mod tests {
             embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
             auth: Mutex::new(()),
             auto_propose: None,
+            serve: None,
             sessions: Mutex::new(HashMap::new()),
         })
     }

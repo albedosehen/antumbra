@@ -25,6 +25,11 @@ mod serve_candle;
 #[cfg(feature = "models")]
 pub use serve_candle::CandleServe;
 
+/// Re-exported so callers can construct [`MultiAdapterServe`] without depending
+/// on `antumbra-train` directly.
+#[cfg(feature = "models")]
+pub use antumbra_train::RaftConfig;
+
 // --- the real resident multi-adapter engine (models build) ----------------
 
 /// Multi-adapter server over a shared base. Loads the base once (with neutral

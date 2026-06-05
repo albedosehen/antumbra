@@ -133,8 +133,9 @@ async fn build_session(
     let store = connect(url).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
-    // Serving (the `answer` tool) is a route-only seam here; wiring the real
-    // MultiAdapterServe is GPU work tracked on the roadmap (R-4).
+    // The `answer` tool serves through the routed expert. Build the engine from
+    // the session's visible population (one connection — embedded is single-writer).
+    let serve = build_serve(&store).await?;
     Ok(McpServer::new(
         store,
         embedder,
@@ -142,8 +143,39 @@ async fn build_session(
         user,
         host,
         default_compartment,
-        None,
+        serve,
     ))
+}
+
+/// Build the serving engine the `answer` tool drives: a resident
+/// [`MultiAdapterServe`](antumbra_serve::MultiAdapterServe) over the shared base,
+/// registered with every expert the `store` can currently see (routing scopes
+/// which a session may actually pick). `None` when the population is empty or the
+/// build has no model backend. Built once at startup; restart to pick up experts
+/// minted afterward.
+#[cfg(feature = "models")]
+pub(crate) async fn build_serve(
+    store: &Store,
+) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
+    use antumbra_serve::{MultiAdapterServe, RaftConfig};
+
+    let experts = antumbra_store::repo::expert::list(store).await?;
+    if experts.is_empty() {
+        return Ok(None);
+    }
+    let base = experts[0].base_model.clone();
+    let mut engine = MultiAdapterServe::new(base, RaftConfig::default());
+    for e in &experts {
+        engine.register(e.id.clone(), e.artifact_uri.clone());
+    }
+    Ok(Some(Arc::new(engine)))
+}
+
+#[cfg(not(feature = "models"))]
+pub(crate) async fn build_serve(
+    _store: &Store,
+) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
+    Ok(None)
 }
 
 fn default_host(explicit: Option<String>) -> String {
