@@ -192,7 +192,7 @@ pub enum Command {
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
         /// LoRA learning rate. Capturing a correction wants it higher than RAFT.
-        #[arg(long, default_value_t = 1e-3)]
+        #[arg(long, default_value_t = 3e-4)]
         lr: f64,
         /// Warm-start from this adapter (accumulate onto an existing expert).
         #[arg(long)]
@@ -292,7 +292,7 @@ pub enum Command {
         samples: usize,
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
-        #[arg(long, default_value_t = 1e-3)]
+        #[arg(long, default_value_t = 3e-4)]
         lr: f64,
     },
     /// Consolidation (EXP-021): score a normalized memory export against the
@@ -328,7 +328,7 @@ pub enum Command {
         samples: usize,
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
-        #[arg(long, default_value_t = 1e-3)]
+        #[arg(long, default_value_t = 3e-4)]
         lr: f64,
     },
     /// Retire an expert by name and refresh the router: population-level
@@ -383,7 +383,7 @@ pub enum Command {
         samples: usize,
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
-        #[arg(long, default_value_t = 1e-3)]
+        #[arg(long, default_value_t = 3e-4)]
         lr: f64,
         #[arg(long, default_value_t = 0.5)]
         replay_ratio: f64,
@@ -416,7 +416,7 @@ pub enum Command {
         samples: usize,
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
-        #[arg(long, default_value_t = 1e-3)]
+        #[arg(long, default_value_t = 3e-4)]
         lr: f64,
     },
     /// Have the antumbra propose compartments (ADR-0014) by clustering a user's
