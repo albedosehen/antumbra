@@ -277,6 +277,7 @@ dependencies = [
  "async-trait",
  "candle-core",
  "candle-nn",
+ "chrono",
  "hf-hub",
  "rand 0.8.6",
  "serde",
@@ -4171,7 +4172,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneiriq-surql"
-version = "0.2.7"
+version = "0.28.0"
 dependencies = [
  "chrono",
  "futures",

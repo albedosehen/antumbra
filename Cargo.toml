@@ -35,7 +35,7 @@ ratatui = "0.30"
 tachyonfx = "0.25"
 # The user's code-first SurrealDB toolkit (surql-rs), published as `oneiriq-surql`.
 # Pure-Rust TLS so CI/Windows builds need no system OpenSSL.
-oneiriq-surql = { version = "0.2", default-features = false, features = ["client-rustls"] }
+oneiriq-surql = { version = "0.28", default-features = false, features = ["client-rustls"] }
 
 # Use a local checkout of surql-rs carrying the table-PERMISSIONS rendering fix
 # (the published 0.2.7 emits malformed `DEFINE FIELD PERMISSIONS ...`). Drop this
