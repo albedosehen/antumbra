@@ -2,10 +2,12 @@
 //! Penumbra memory to an agent. The runtime surface that lets a client (Claude
 //! Code, any MCP host) talk to Antumbra instead of a separate memory service.
 //!
-//! v0 serves a single tenant (the workspace passed via `--tenant`) over stdio:
-//! it connects as owner, provisions the tenant's principal, then signs the
-//! session in as that tenant so every tool is engine-isolated. The networked,
-//! per-request multi-tenant surface (HTTP, identity-resolved tenant) is next.
+//! Two transports. **stdio** (default) serves a single `(tenant, user)` passed
+//! on the command line: connect as owner, provision the principal, sign the
+//! session in so every tool is engine-isolated. **HTTP** (`--http <addr>`) is
+//! the networked, per-request multi-tenant surface: each request carries a
+//! signed JWT whose `tenant`/`user` claims become `$auth`, and the server keeps
+//! one signed-in session per identity (see [`http`]).
 
 use std::sync::Arc;
 
@@ -19,6 +21,8 @@ use antumbra_core::{Compartment, CompartmentId, TenantId, UserId};
 use antumbra_store::repo::{compartment, principal};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
+mod auth;
+mod http;
 mod server;
 use server::McpServer;
 
@@ -29,18 +33,31 @@ struct Cli {
     /// `mem://` (ephemeral), or `ws://host:8000/rpc`.
     #[arg(long, default_value = "surrealkv://./data/antumbra.skv")]
     url: String,
-    /// The workspace (tenant) this server serves. Every tool is engine-isolated
-    /// to it.
-    #[arg(long)]
+    /// The workspace (tenant) this stdio server serves. Ignored with `--http`,
+    /// where the tenant comes from each request's verified JWT.
+    #[arg(long, default_value = "ws:default")]
     tenant: String,
-    /// The user this session acts as (the compartment-ownership / sharing
-    /// actor). Defaults to a per-tenant default user.
+    /// The user this stdio session acts as (the compartment-ownership / sharing
+    /// actor). Ignored with `--http`.
     #[arg(long, default_value = "user:default")]
     user: String,
     /// The host/device this session runs on (stamped as memory provenance).
     /// Defaults to the machine name.
     #[arg(long)]
     host: Option<String>,
+    /// Serve the networked multi-tenant HTTP surface on this address
+    /// (e.g. `0.0.0.0:8081`) instead of stdio. Requires a JWT key.
+    #[arg(long)]
+    http: Option<String>,
+    /// HS256 shared secret for verifying request JWTs (symmetric).
+    #[arg(long, env = "ANTUMBRA_JWT_SECRET")]
+    jwt_secret: Option<String>,
+    /// Path to a PEM RSA public key for verifying request JWTs (RS256).
+    #[arg(long)]
+    jwt_public_key: Option<std::path::PathBuf>,
+    /// Required JWT audience claim (this server's identifier), if set.
+    #[arg(long)]
+    jwt_audience: Option<String>,
 }
 
 async fn connect(url: &str) -> Result<Store> {
@@ -64,46 +81,109 @@ fn make_embedder() -> Result<Box<dyn Embedder>> {
     Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(EMBED_DIM)))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
-
-    // Connect as owner (applies the schema), provision the (tenant, user)
-    // principal, then bind the session so the engine enforces isolation and
-    // compartment access for this user.
-    let store = connect(&cli.url).await?;
-    let tenant = TenantId::new(cli.tenant);
-    let user = UserId::new(cli.user);
-    let host = cli.host.unwrap_or_else(|| {
-        std::env::var("COMPUTERNAME")
-            .or_else(|_| std::env::var("HOSTNAME"))
-            .unwrap_or_else(|_| "local".into())
-    });
+/// Build a fully-initialized, signed-in session for one identity: a fresh store
+/// connection bound as `(tenant, user)`, the provisioned principal, and the
+/// user's default (inbox) compartment. Each identity needs its own connection
+/// because `signin` binds the whole session. Shared by both transports.
+async fn build_session(
+    url: &str,
+    tenant: TenantId,
+    user: UserId,
+    host: String,
+    embedder: Arc<dyn Embedder>,
+) -> Result<McpServer> {
+    let store = connect(url).await?;
     principal::provision(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
 
-    // The session's default compartment (fresh space; new memories land here
-    // unless a compartment is named). Engine-isolated to this user until shared.
+    // The session's default compartment (the inbox; new memories land here unless
+    // a compartment is named). Idempotent: it persists across restarts, so a
+    // re-provision of the same identity finds it already present.
     let default_compartment =
         CompartmentId::new(format!("comp:{}:{}:default", tenant.as_str(), user.as_str()));
-    compartment::create(
-        &store,
-        &Compartment::new(
-            default_compartment.clone(),
-            tenant.clone(),
-            user.clone(),
-            "default",
-            Utc::now(),
-        ),
+    let exists = compartment::list_owned(&store, &tenant, &user)
+        .await?
+        .iter()
+        .any(|c| c.id == default_compartment);
+    if !exists {
+        compartment::create(
+            &store,
+            &Compartment::new(
+                default_compartment.clone(),
+                tenant.clone(),
+                user.clone(),
+                "default",
+                Utc::now(),
+            ),
+        )
+        .await?;
+    }
+
+    Ok(McpServer::new(
+        store,
+        embedder,
+        tenant,
+        user,
+        host,
+        default_compartment,
+    ))
+}
+
+fn default_host(explicit: Option<String>) -> String {
+    explicit.unwrap_or_else(|| {
+        std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_else(|_| "local".into())
+    })
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let host = default_host(cli.host);
+    let embedder: Arc<dyn Embedder> = Arc::from(make_embedder()?);
+
+    if let Some(addr) = cli.http {
+        // Networked multi-tenant surface: identity per request from a verified JWT.
+        let verifier = build_verifier(&cli.jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
+        return http::serve(addr, cli.url, host, embedder, verifier).await;
+    }
+
+    // stdio: one fixed identity for the life of the process.
+    let service = build_session(
+        &cli.url,
+        TenantId::new(cli.tenant),
+        UserId::new(cli.user),
+        host,
+        embedder,
     )
     .await?;
-
-    let embedder: Arc<dyn Embedder> = Arc::from(make_embedder()?);
-    let service = McpServer::new(store, embedder, tenant, user, host, default_compartment);
-
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))
         .await?;
     running.waiting().await?;
     Ok(())
+}
+
+/// Resolve the JWT verifier from the configured key material. RS256 (a PEM
+/// public key) takes precedence over an HS256 secret; one is required.
+fn build_verifier(
+    secret: &Option<String>,
+    public_key: &Option<std::path::PathBuf>,
+    audience: &Option<String>,
+) -> Result<auth::JwtVerifier> {
+    let mut v = match (public_key, secret) {
+        (Some(pem_path), _) => {
+            let pem = std::fs::read(pem_path)?;
+            auth::JwtVerifier::rs256_pem(&pem)?
+        }
+        (None, Some(secret)) => auth::JwtVerifier::hs256(secret.as_bytes()),
+        (None, None) => anyhow::bail!(
+            "--http needs a JWT key: pass --jwt-secret (HS256) or --jwt-public-key <pem> (RS256)"
+        ),
+    };
+    if let Some(aud) = audience {
+        v = v.with_audience(aud);
+    }
+    Ok(v)
 }
