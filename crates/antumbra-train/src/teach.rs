@@ -65,6 +65,21 @@ pub async fn capture_corrections(
         }
     }
 
+    // Nothing verified means nothing to capture: the batch will be empty (replay
+    // is scaled by the winner count), so training is a no-op and the saved adapter
+    // stays at its untrained init -- a silent failure that looks like graduation
+    // succeeded. Surface it, and name the usual Windows cause (the `python`
+    // verifier resolving to the Store stub; set ANTUMBRA_PYTHON).
+    let with_corrections = tasks.iter().filter(|t| t.completion.is_some()).count();
+    if winners.is_empty() && with_corrections > 0 {
+        eprintln!(
+            "warning: 0 of {with_corrections} correction(s) verified for {} -- nothing \
+             captured, the adapter will be UNTRAINED. Is the verifier runnable? (on Windows, \
+             set ANTUMBRA_PYTHON to a real interpreter)",
+            run_id.as_str()
+        );
+    }
+
     // Interleave the rehearsal buffer once; reused each round. With replay off
     // (empty buffer or ratio 0) this is exactly the winners.
     let batch = interleave_replay(&winners, replay, cfg.replay_ratio);
