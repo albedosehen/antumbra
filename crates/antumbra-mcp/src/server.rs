@@ -684,7 +684,21 @@ impl McpServer {
         Parameters(p): Parameters<NeighborsParams>,
     ) -> Result<Json<NeighborsOut>, ErrorData> {
         let et = p.edge_type.as_deref().map(parse_edge_type);
-        let edges = edge::neighbors(&self.store, &self.tenant, &MemoryId::new(p.memory_id), et)
+        let from = MemoryId::new(p.memory_id);
+        // Only list a memory's edges if the caller can actually see that memory:
+        // edge rows are tenant-scoped, so without this a caller who knows another
+        // user's private memory id could enumerate its edge structure (types,
+        // weights). Target content is already gated below via memory::get.
+        if memory::get(&self.store, &self.tenant, &from)
+            .await
+            .map_err(err)?
+            .is_none()
+        {
+            return Ok(Json(NeighborsOut {
+                neighbors: Vec::new(),
+            }));
+        }
+        let edges = edge::neighbors(&self.store, &self.tenant, &from, et)
             .await
             .map_err(err)?;
         let mut neighbors = Vec::new();

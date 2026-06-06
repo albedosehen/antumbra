@@ -85,6 +85,17 @@ const MEMORY_SELECT_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NO
      OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
      OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE))";
 
+/// The write rule for `memory` (create/update). A session may write a memory only
+/// into a compartment it may contribute to — the shared pool (un-compartmentalized),
+/// a compartment it owns, or one granted to it with the **`link`** capability (not
+/// mere `reference`, which is read-only). Without this, the create rule would only
+/// check the tenant, letting any tenant member inject a memory into another user's
+/// private compartment (which the owner would then see as their own). This mirrors
+/// `EDGE_LINK_RULE` for the write side of the graph (the dual of `GRANT_PERMS`).
+const MEMORY_WRITE_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
+     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
+
 /// The link-capability gate for `memory_edge` create/update: you may create an
 /// edge only when its *target* memory is in a compartment you may LINK into —
 /// the shared pool (un-compartmentalized), a compartment you own, or one granted
@@ -178,8 +189,8 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", MEMORY_SELECT_RULE),
-                ("create", "tenant_id = $auth.tenant"),
-                ("update", "tenant_id = $auth.tenant"),
+                ("create", MEMORY_WRITE_RULE),
+                ("update", MEMORY_WRITE_RULE),
                 ("delete", "tenant_id = $auth.tenant"),
             ])
             .with_indexes([

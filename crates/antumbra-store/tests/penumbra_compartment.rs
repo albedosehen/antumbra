@@ -361,3 +361,71 @@ async fn an_owner_can_share_their_own_compartment_while_scoped() {
         "the owner can share their own compartment under a scoped session"
     );
 }
+
+// Security (the write-side dual of grant-forgery): a tenant member who does NOT
+// own a compartment cannot inject a memory into it. The memory CREATE permission
+// (MEMORY_WRITE_RULE) requires owning the compartment or a `link` grant, so B's
+// scoped write into A's private compartment fails closed -- A never finds a memory
+// planted by B in their own private space. The owner's own/shared writes still work.
+#[tokio::test]
+async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let t = TenantId::new("ws:org");
+    let ua = UserId::new("user:a");
+    let ub = UserId::new("user:b");
+    let ca = CompartmentId::new("comp:a-private");
+    let now = Utc::now();
+
+    principal::provision(&store, &t, &ua).await.unwrap();
+    principal::provision(&store, &t, &ub).await.unwrap();
+    compartment::create(
+        &store,
+        &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
+    )
+    .await
+    .unwrap();
+
+    // B (scoped, non-owner) tries to plant a memory in A's private compartment.
+    store.signin(&t, &ub).await.unwrap();
+    let _ = memory::upsert(
+        &store,
+        &mem(
+            "memory:injected",
+            "ws:org",
+            "planted by B",
+            Some("comp:a-private"),
+        ),
+    )
+    .await; // engine denies the create; ignore the result, assert the end-state
+
+    // A (the owner) never sees a planted memory in their own space.
+    store.invalidate().await.unwrap();
+    store.signin(&t, &ua).await.unwrap();
+    assert!(
+        !visible_ids(&store)
+            .await
+            .contains(&"memory:injected".to_string()),
+        "a non-owner must not be able to inject into a private compartment"
+    );
+
+    // The owner can still write into their own compartment and the shared pool.
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:own",
+            "ws:org",
+            "A owns this",
+            Some("comp:a-private"),
+        ),
+    )
+    .await
+    .unwrap();
+    memory::upsert(&store, &mem("memory:shared", "ws:org", "shared pool", None))
+        .await
+        .unwrap();
+    let seen = visible_ids(&store).await;
+    assert!(
+        seen.contains(&"memory:own".to_string()) && seen.contains(&"memory:shared".to_string()),
+        "the owner writes its own compartment + the shared pool"
+    );
+}
