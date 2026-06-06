@@ -16,7 +16,6 @@
 !/crates/
 !/docs/
 !/experiments/
-!/hooks/
 !/scripts/
 
 # Generated artifacts anywhere inside allowlisted directories.

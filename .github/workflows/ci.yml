@@ -35,3 +35,29 @@ jobs:
       # Compile the candle Qwen2.5-Coder + LoRA stack (no run — training needs a GPU).
       - name: build --features models
         run: cargo build -p antumbra-train --features models
+
+  hooks:
+    name: agent hook scripts
+    runs-on: ubuntu-latest  # jq + curl preinstalled — exercises the POSIX .sh path
+    steps:
+      - uses: actions/checkout@v4
+      - name: syntax check (bash -n)
+        run: for f in scripts/hooks/*.sh; do bash -n "$f"; done
+      - name: capture hook emits a block decision, then fires once
+        run: |
+          out=$(printf '%s' '{"session_id":"ci","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh)
+          echo "$out" | jq -e '.decision == "block"' > /dev/null
+          # The same turn fires once: a second call clears the sentinel and is silent.
+          printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh > /dev/null
+          again=$(printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh)
+          test -z "$again"
+      - name: strip-attribution denies vendor attribution, allows a clean command
+        run: |
+          deny=$(printf '%s' '{"tool_input":{"command":"git commit -m x --trailer Co-Authored-By:Claude"}}' | bash scripts/hooks/strip-attribution.sh)
+          echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' > /dev/null
+          clean=$(printf '%s' '{"tool_input":{"command":"git commit -m clean"}}' | bash scripts/hooks/strip-attribution.sh)
+          test -z "$clean"
+      - name: session-start emits valid additionalContext (no server → cold bootstrap)
+        run: |
+          ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
+          echo "$ctx" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' > /dev/null
