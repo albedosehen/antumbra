@@ -33,6 +33,8 @@ jsonwebtoken = "9"
 [dev-dependencies]
 # `oneshot` to drive the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
+# Read the SSE response body incrementally in the live-notification round-trip test.
+futures = "0.3"
 
 [features]
 default = []

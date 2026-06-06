@@ -31,8 +31,7 @@ each cycle scans full tables — fine at penumbra scale).
 **Was deferred on:** a conflict/ordering policy — now decided (LWW).
 
 ### R-2 · Live propagation (real-time awareness)
-**Status:** BUILT (engine + MCP SSE delivery wired and validated 2026-06-05); one
-remaining check is the over-the-wire SSE round-trip with a real MCP client.
+**Status:** DONE (engine + MCP SSE delivery, end-to-end validated 2026-06-05).
 **Shape:** server→client push when a **shared compartment** changes (a grantee's
 agent learns of new/planned memories without polling). SurrealDB `LIVE SELECT`
 detects the change; it is delivered as an MCP server notification over the
@@ -57,11 +56,12 @@ feed), and pushes each change to recipients' captured peers. The **subscription
 registry** (`notify::PeerRegistry`, identity → live `Peer`s) is populated by
 `McpServer::on_initialized` and fanned out as a `notifications/message`
 (`type: antumbra/memory_changed`), pruning closed peers.
-**Remaining check:** an over-the-wire SSE round-trip with a real MCP client
-(A writes → B's stream receives) — not exercised in-process because the crate has
-no MCP HTTP/SSE *client* dependency; the Antumbra-authored logic (engine, audience
-under signin, registry, notification shape) is unit-tested, and the peer→SSE hop
-is rmcp's own machinery.
+**End-to-end validated:** `http::tests::live_notification_reaches_a_grantees_stream`
+drives the real `/mcp` router through the full stateful handshake (initialize →
+initialized → GET SSE) as a grantee, has another user write into the shared
+compartment, and asserts the `antumbra/memory_changed` notification arrives on the
+grantee's SSE stream — exercising the actual transport, peer capture, watcher, and
+push (no real socket / external client needed).
 **Known gaps:** deletes are not routed (the notification payload carries no
 compartment on delete) — same tombstone gap as R-1.
 
