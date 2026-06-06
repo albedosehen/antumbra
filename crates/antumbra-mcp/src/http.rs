@@ -158,6 +158,10 @@ fn spawn_live_propagation(state: Arc<HttpState>) {
                 state.registry.notify(&change).await;
             }
         }
+        // The feed only closes when the watch task ends (stream error/kill or the
+        // connection dropping). Surface it: otherwise live propagation would stop
+        // for every connected client with no trace.
+        eprintln!("antumbra-mcp: live propagation stopped (memory change feed closed)");
     });
 }
 
