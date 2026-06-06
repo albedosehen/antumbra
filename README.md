@@ -267,6 +267,9 @@ GPU recipe and the validated generation-quality settings.
 
 ## Documentation
 
+- **[Antumbra, explained for anyone](docs/antumbra-explained.md)** — a plain-English,
+  no-jargon tour with diagrams and analogies (no ML background needed). Share this
+  with a non-technical friend.
 - **[Using Antumbra](docs/integration.md)** — wire it into your coding agent (the
   bootstrap/capture lifecycle hooks), offline vs hosted, and why it beats a memory
   layer. Start here.
