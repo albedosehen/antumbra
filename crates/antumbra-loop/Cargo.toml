@@ -11,6 +11,9 @@ antumbra-core = { path = "../antumbra-core" }
 antumbra-store = { path = "../antumbra-store" }
 chrono.workspace = true
 serde_json.workspace = true
+# sha256 of a frozen adapter's bytes = the no-forgetting regression fingerprint
+# (ADR-0001). Already in the dependency tree, so no new compile cost.
+sha2 = "0.10"
 
 [dev-dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }

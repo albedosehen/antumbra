@@ -13,6 +13,7 @@
 //! wired). Driven entirely by the injected ports, so it runs with fakes.
 
 use chrono::Utc;
+use sha2::{Digest, Sha256};
 
 use antumbra_core::generational::{GenerationHead, LoopState};
 use antumbra_core::ports::{Embedder, TrainOutcome, TrainRequest, Trainer};
@@ -53,6 +54,27 @@ pub struct GenerationReport {
     /// Per-round pass-rate (RAFT reward curve) — rising means the adapter is
     /// learning to satisfy the verifier.
     pub reward_curve: Vec<f32>,
+    /// Frozen experts whose regression fingerprint drifted this generation — the
+    /// ADR-0001 no-forgetting kill criterion firing. Empty when the freeze held
+    /// (the expected case); a non-empty list is a serious integrity alarm.
+    pub regressions: Vec<ExpertId>,
+}
+
+/// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
+/// frozen expert whose weights file is mutated under it is caught. Falls back to
+/// the uri when the file is absent (the demo trainer, or an artifact not present
+/// on this node) — still deterministic, so the tripwire works without a GPU.
+fn fingerprint(adapter_uri: &str) -> String {
+    match std::fs::read(adapter_uri) {
+        Ok(bytes) => {
+            let hex: String = Sha256::digest(&bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            format!("sha256:{hex}")
+        }
+        Err(_) => format!("uri:{adapter_uri}"),
+    }
 }
 
 /// Drives the loop over a [`Store`] using injected ports. Holds no durable
@@ -146,12 +168,17 @@ impl<'a> GenerationLoop<'a> {
         self.advance(head, LoopState::Consolidate).await?;
         self.advance(head, LoopState::Grow).await?;
 
+        // The population just changed; verify every frozen expert is still
+        // byte-identical to its freeze baseline (ADR-0001 no-forgetting tripwire).
+        let regressions = self.check_no_forgetting(&run_id).await?;
+
         Ok(GenerationReport {
             generation,
             shadow: shadow_id,
             fitness,
             graduated,
             reward_curve: outcome.reward_curve.clone(),
+            regressions,
         })
     }
 
@@ -243,7 +270,60 @@ impl<'a> GenerationLoop<'a> {
             compartment: None,
             created_at: now,
         };
-        expert::insert(self.store, &expert).await
+        expert::insert(self.store, &expert).await?;
+        // Snapshot the freeze baseline for the no-forgetting tripwire (ADR-0001/
+        // 0002): this fingerprint must never change while the expert is frozen in
+        // the population. Stored once, at graduation, and re-checked each later
+        // generation by `check_no_forgetting`.
+        let baseline = EvaluationRun {
+            run_id: run_id.clone(),
+            subject_kind: SubjectKind::Expert,
+            subject_id: expert.id.to_string(),
+            corpus_task_id: format!("freeze:g{}", generation.0),
+            status: EvalStatus::Success,
+            metrics: Some(serde_json::json!({ "fitness": fitness, "event": "freeze" })),
+            regression_fingerprint: Some(fingerprint(adapter_uri)),
+            created_at: now,
+        };
+        evaluation::insert(self.store, &baseline).await
+    }
+
+    /// The no-forgetting tripwire (ADR-0001/0002): re-fingerprint every frozen
+    /// expert and compare to its freeze baseline. A mismatch means a frozen
+    /// expert's weights changed under it — the kill criterion firing — and the
+    /// expert's id is returned (and logged). Experts with no baseline (frozen
+    /// before this check existed) are skipped. Logged, not fatal: a drift is a
+    /// loud alarm, but halting every other expert's progress on it is the
+    /// operator's call, not the loop's. Public so an operator can run the audit on
+    /// demand, not only as part of a generation.
+    pub async fn check_no_forgetting(&self, run_id: &RunId) -> Result<Vec<ExpertId>> {
+        let mut regressions = Vec::new();
+        for frozen in expert::list(self.store).await? {
+            let id = frozen.id.to_string();
+            let Some(baseline) =
+                evaluation::latest_for_subject(self.store, SubjectKind::Expert, &id).await?
+            else {
+                continue;
+            };
+            let current = EvaluationRun {
+                run_id: run_id.clone(),
+                subject_kind: SubjectKind::Expert,
+                subject_id: id,
+                corpus_task_id: baseline.corpus_task_id.clone(),
+                status: EvalStatus::Success,
+                metrics: None,
+                regression_fingerprint: Some(fingerprint(&frozen.artifact_uri)),
+                created_at: Utc::now(),
+            };
+            if !baseline.fingerprint_matches(&current) {
+                eprintln!(
+                    "no-forgetting KILL CRITERION: frozen expert {} drifted (baseline {:?} != now {:?})",
+                    frozen.id, baseline.regression_fingerprint, current.regression_fingerprint
+                );
+                regressions.push(frozen.id);
+            }
+        }
+        Ok(regressions)
     }
 
     /// The capability vector: the mean of the embeddings of solved-task prompts
