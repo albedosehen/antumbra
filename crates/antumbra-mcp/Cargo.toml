@@ -28,7 +28,7 @@ rmcp = { version = "1.7.0", features = ["server", "macros", "transport-io", "tra
 # HTTP surface. axum hosts the streamable-HTTP service; jsonwebtoken verifies the
 # bearer token whose claims become $auth (tenant, user).
 axum = "0.8"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 
 [dev-dependencies]
 # `oneshot` to drive the axum router in tests without binding a socket.
