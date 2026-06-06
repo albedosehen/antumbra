@@ -697,18 +697,37 @@ static GEN_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 impl QwenCausalLm {
     /// Load Qwen2.5-Coder + a fresh LoRA adapter from the Hugging Face hub.
     pub fn load(device: Device, cfg: RaftConfig) -> Result<Self> {
-        let api = hf_hub::api::sync::Api::new()
-            .map_err(|e| AntumbraError::other(format!("hf-hub: {e}")))?;
-        let repo = api.model(cfg.base_model.clone());
-        let tok_path = repo
-            .get("tokenizer.json")
-            .map_err(|e| AntumbraError::other(format!("hf-hub tokenizer: {e}")))?;
-        let cfg_path = repo
-            .get("config.json")
-            .map_err(|e| AntumbraError::other(format!("hf-hub config: {e}")))?;
-        let weights: Vec<PathBuf> = vec![repo
-            .get("model.safetensors")
-            .map_err(|e| AntumbraError::other(format!("hf-hub weights: {e}")))?];
+        // hf-hub 1.0's blocking client `block_on`s an async runtime, which panics
+        // inside an existing tokio runtime (the CLI/MCP load from async). Run the
+        // downloads on a dedicated thread that has no ambient runtime.
+        let base_model = cfg.base_model.as_str();
+        let (tok_path, cfg_path, weights_path) = std::thread::scope(|s| {
+            s.spawn(|| -> Result<(PathBuf, PathBuf, PathBuf)> {
+                let client = hf_hub::HFClientSync::new()
+                    .map_err(|e| AntumbraError::other(format!("hf-hub: {e}")))?;
+                let (owner, name) = base_model.split_once('/').unwrap_or(("", base_model));
+                let repo = client.model(owner, name);
+                let tok = repo
+                    .download_file()
+                    .filename("tokenizer.json")
+                    .send()
+                    .map_err(|e| AntumbraError::other(format!("hf-hub tokenizer: {e}")))?;
+                let config = repo
+                    .download_file()
+                    .filename("config.json")
+                    .send()
+                    .map_err(|e| AntumbraError::other(format!("hf-hub config: {e}")))?;
+                let weights = repo
+                    .download_file()
+                    .filename("model.safetensors")
+                    .send()
+                    .map_err(|e| AntumbraError::other(format!("hf-hub weights: {e}")))?;
+                Ok((tok, config, weights))
+            })
+            .join()
+        })
+        .map_err(|_| AntumbraError::other("hf-hub download thread panicked".to_string()))??;
+        let weights: Vec<PathBuf> = vec![weights_path];
 
         let tokenizer = tokenizers::Tokenizer::from_file(tok_path)
             .map_err(|e| AntumbraError::other(format!("tokenizer: {e}")))?;

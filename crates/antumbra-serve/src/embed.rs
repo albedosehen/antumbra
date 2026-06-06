@@ -10,8 +10,9 @@ use async_trait::async_trait;
 use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config, DTYPE};
-use hf_hub::api::sync::Api;
-use hf_hub::{Repo, RepoType};
+use std::path::PathBuf;
+
+use hf_hub::HFClientSync;
 use tokenizers::Tokenizer;
 
 use antumbra_core::ports::Embedder;
@@ -37,15 +38,13 @@ impl BertEmbedder {
     /// model on CPU. Network on first call; cached thereafter.
     pub fn load() -> Result<Self> {
         let device = Device::Cpu;
-        let api = Api::new().map_err(|e| err("hf-hub api", e))?;
-        let repo = api.repo(Repo::new(MODEL_ID.to_string(), RepoType::Model));
-        let config_path = repo.get("config.json").map_err(|e| err("get config", e))?;
-        let tokenizer_path = repo
-            .get("tokenizer.json")
-            .map_err(|e| err("get tokenizer", e))?;
-        let weights_path = repo
-            .get("model.safetensors")
-            .map_err(|e| err("get weights", e))?;
+        // hf-hub 1.0's blocking client wraps an async runtime and `block_on`s it,
+        // which panics if called from within an existing tokio runtime (the CLI and
+        // MCP load the embedder from async). Run the downloads on a dedicated thread
+        // that has no ambient runtime.
+        let (config_path, tokenizer_path, weights_path) =
+            std::thread::scope(|s| s.spawn(Self::fetch_files).join())
+                .map_err(|_| err("hf-hub", "download thread panicked"))??;
 
         let config_str = std::fs::read_to_string(config_path).map_err(|e| err("read config", e))?;
         let config: Config =
@@ -65,6 +64,31 @@ impl BertEmbedder {
             device,
             dim,
         })
+    }
+
+    /// Fetch the model's config/tokenizer/weights from the hf-hub (cached after the
+    /// first call). Runs the hf-hub 1.0 blocking client, so it must be called off
+    /// any tokio runtime (see [`load`](Self::load)).
+    fn fetch_files() -> Result<(PathBuf, PathBuf, PathBuf)> {
+        let client = HFClientSync::new().map_err(|e| err("hf-hub client", e))?;
+        let (owner, name) = MODEL_ID.split_once('/').unwrap_or(("", MODEL_ID));
+        let repo = client.model(owner, name);
+        let config = repo
+            .download_file()
+            .filename("config.json")
+            .send()
+            .map_err(|e| err("get config", e))?;
+        let tokenizer = repo
+            .download_file()
+            .filename("tokenizer.json")
+            .send()
+            .map_err(|e| err("get tokenizer", e))?;
+        let weights = repo
+            .download_file()
+            .filename("model.safetensors")
+            .send()
+            .map_err(|e| err("get weights", e))?;
+        Ok((config, tokenizer, weights))
     }
 
     /// Tokenize, run BERT, mean-pool over tokens, and L2-normalize.
