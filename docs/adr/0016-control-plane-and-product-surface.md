@@ -21,7 +21,7 @@ re-implemented as runtime features. But observability and control are about the
 a real, separate gap.
 
 A second, concrete gap: lifecycle-hook clients (the SessionStart/Stop scripts that
-wire a coding agent in — see [`/hooks`](../../hooks) and
+wire a coding agent in — see [`/scripts/hooks`](../../scripts/hooks) and
 [`docs/integration.md`](../integration.md)) are non-interactive and need a
 **long-lived credential**, but the networked surface today mints a per-request JWT
 (ADR-0015). And the embedder is a build-time feature, not a per-workspace runtime
@@ -49,8 +49,8 @@ APIs**, not a second source of truth. Specifically:
    experts + weights into a saved serve profile; the user-facing form of ADR-0009's
    composition) and driving a connected agent's `answer`/`route` from the web.
 6. **Hosted onboarding** — signup, tenant provisioning, and the setup flow that wraps
-   the `hooks/` templates; billing for the SaaS tier. The offline tier needs none of
-   this — `hooks/` + the CLI are its onboarding.
+   the `scripts/hooks/` templates; billing for the SaaS tier. The offline tier needs
+   none of this — `scripts/hooks/` + the CLI are its onboarding.
 
 Sequence captured as roadmap items P-1…P-5 (see [`roadmap.md`](../roadmap.md)).
 

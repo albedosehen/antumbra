@@ -16,6 +16,8 @@
 !/crates/
 !/docs/
 !/experiments/
+!/hooks/
+!/scripts/
 
 # Generated artifacts anywhere inside allowlisted directories.
 **/*.rs.bk
@@ -24,6 +26,9 @@ Cargo.lock.bak
 *.safetensors
 *.surql.db
 *.db
+!*.ps1
+!*.bat
+!*.sh
 # memory-import / compose scratch outputs (corpora/_imported.json, etc.).
 corpora/_*.json
 

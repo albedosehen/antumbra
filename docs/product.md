@@ -94,7 +94,7 @@ hosted product needs:
 | Knowledge documents | memory networks only | A `document` first-class type (ingest → chunk → embed → recall), distinct from episodic memory |
 | Remote agent interaction from the dashboard | none | Drive a connected agent (the `answer`/`route` tools) from the web |
 | Per-workspace bring-your-own embedder | `Embedder` port (Bert/fake) | Expose an embedder **config per workspace** (set model/endpoint), not a build-time choice |
-| Onboarding: signup, docs site, agent setup guide | `docs/` + `hooks/` templates | A signup/setup flow for the hosted tier; the [`hooks/`](../hooks) guide is the offline start |
+| Onboarding: signup, docs site, agent setup guide | `docs/` + `scripts/hooks/` templates | A signup/setup flow for the hosted tier; the [`scripts/hooks/`](../scripts/hooks) guide is the offline start |
 | Hook / non-interactive auth | per-request JWT, JSON-RPC `/mcp` only | A long-lived **hook token** + a REST `/mcp/call` shim for lifecycle-hook clients |
 
 ## Bring your own embedder
@@ -121,7 +121,7 @@ Tracked as roadmap items (see [`roadmap.md`](roadmap.md)); decision recorded in
 4. **Interactive control** — the expert mixer (compose + save serve profiles) and
    driving a connected agent's `answer`/`route` from the dashboard.
 5. **Hosted onboarding** — signup, tenant provisioning, the setup flow that wraps
-   the `hooks/` templates; billing for the SaaS tier.
+   the `scripts/hooks/` templates; billing for the SaaS tier.
 
 The engine is built; this is the surface that makes it *usable by a non-operator and
 sellable as a product* — without competing with the predecessor, which winds down as

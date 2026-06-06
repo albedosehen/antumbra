@@ -186,7 +186,7 @@ Antumbra *supersedes by metabolizing* vs *must build*.
 
 ### P-1 · Hook auth + REST shim + per-workspace embedder config
 **Status:** queued (unblocks onboarding + bring-your-own-embedder).
-Three small pieces that make the lifecycle-hook integration ([`/hooks`](../hooks),
+Three small pieces that make the lifecycle-hook integration ([`/scripts/hooks`](../scripts/hooks),
 [`integration.md`](integration.md)) work end-to-end against the networked surface:
 (a) a long-lived, scope-bound **hook token** (API-key-style) for non-interactive
 clients, since the surface mints only a per-request JWT today; (b) a **REST
@@ -219,7 +219,7 @@ precursor) — and driving a connected agent's `answer`/`route` from the dashboa
 
 ### P-5 · Hosted onboarding
 **Status:** queued.
-Signup, tenant provisioning, and the setup flow wrapping the [`hooks/`](../hooks)
+Signup, tenant provisioning, and the setup flow wrapping the [`scripts/hooks/`](../scripts/hooks)
 templates; billing for the SaaS tier. The offline tier needs none of this — the CLI
 + hooks are its onboarding.
 

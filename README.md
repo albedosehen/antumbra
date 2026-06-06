@@ -63,7 +63,8 @@ Antumbra](docs/integration.md)**; the shape:
    new permanent expert — so next session the agent is measurably better, and more of
    your work is served locally for free.
 
-Ready-to-adapt hook templates (PowerShell + POSIX) live in **[`hooks/`](hooks/)**.
+Ready-to-adapt hook templates (PowerShell + bash, Windows/macOS/Linux) live in
+**[`scripts/hooks/`](scripts/hooks/)**.
 
 **Why this beats a memory layer.** Retrieval-memory tools (Mem0, Letta, Zep, Cognee)
 make a frozen model *remember*; every run re-pays the prompt/lookup cost against the
@@ -230,8 +231,8 @@ separate experts wired by learned cross-attention bridges, ADR-0009) — for whi
 v0 gate, boundary engine, loop, and substrate all carry over. On the **product**
 side, the web control plane — dashboard, knowledge documents, the expert mixer,
 hosted onboarding — is specified ([ADR-0016](docs/adr/0016-control-plane-and-product-surface.md),
-roadmap P-1…P-5) but not built; the CLI/TUI and the [`hooks/`](hooks/) templates are
-today's interface.
+roadmap P-1…P-5) but not built; the CLI/TUI and the [`scripts/hooks/`](scripts/hooks/)
+templates are today's interface.
 
 ---
 

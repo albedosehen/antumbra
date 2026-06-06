@@ -40,17 +40,18 @@ relevant to this project. No cold start — the agent already knows "this repo u
 
 ```jsonc
 // settings.json (Claude Code shape; adapt the event names to your runtime)
+// Windows: pwsh … .ps1   ·   macOS/Linux: bash … .sh   (both are provided)
 "hooks": {
   "SessionStart": [{ "hooks": [{
     "type": "command",
-    "command": "pwsh -NonInteractive -File ./hooks/antumbra-session-start.ps1",
+    "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-session-start.ps1",
     "timeout": 10
   }]}]
 }
 ```
 
 The script fetches the bootstrap memory and returns it as `additionalContext`.
-(See the [`hooks/`](../hooks/) templates.) *Today:* the capture + attribution hooks
+(See the [`scripts/hooks/`](../scripts/hooks/) templates.) *Today:* the capture + attribution hooks
 work as-is (they emit hook decisions, no Antumbra call); the bootstrap fetch wants a
 REST convenience endpoint + hook token, tracked as roadmap **P-1** — until then, have
 the agent run `recall_memories` at the top of its first turn instead.
@@ -64,8 +65,8 @@ This is the write half of memory — and the raw successful traces it leaves are
 `antumbra metabolize` later turns into a trained expert.
 
 ```jsonc
-"Stop":       [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./hooks/antumbra-capture.ps1", "timeout": 5 }]}],
-"PreCompact": [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./hooks/antumbra-capture.ps1", "timeout": 5 }]}]
+"Stop":       [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
+"PreCompact": [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}]
 ```
 
 ### 3. Behavior overrides (make Antumbra the single source of truth)
@@ -84,13 +85,15 @@ Two settings make the agent defer to Antumbra instead of its built-ins:
   "deny": ["Write(**/.agent/memory/**)", "Edit(**/.agent/memory/**)"]
 },
 "hooks": { "PreToolUse": [{ "matcher": "Bash", "hooks": [
-  { "type": "command", "command": "pwsh -File ./hooks/strip-attribution.ps1", "if": "Bash(git *)" },
-  { "type": "command", "command": "pwsh -File ./hooks/strip-attribution.ps1", "if": "Bash(gh *)" }
+  { "type": "command", "command": "pwsh -File ./scripts/hooks/strip-attribution.ps1", "if": "Bash(git *)" },
+  { "type": "command", "command": "pwsh -File ./scripts/hooks/strip-attribution.ps1", "if": "Bash(gh *)" }
 ]}]}
 ```
 
-Template scripts for all of the above (PowerShell + POSIX) live under
-[`hooks/`](../hooks/). They are thin: read stdin JSON, call Antumbra's `/mcp/call`
+Template scripts for all of the above live under
+[`scripts/hooks/`](../scripts/hooks/) for **both platforms** — PowerShell (`.ps1`,
+Windows) and POSIX `bash` (`.sh`, macOS/Linux; needs `jq` + `curl`). Use the pair
+for your OS. They are thin: read stdin JSON, call Antumbra's `/mcp/call`
 (or the stdio server), emit the hook's JSON response. Point them at your endpoint
 with four env vars:
 
