@@ -111,7 +111,9 @@ pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<Pro
 
     let mut proposals: Vec<ProposedCompartment> = clusters
         .into_iter()
-        .filter(|c| c.members.len() >= cfg.min_size)
+        // `min_size` is at least 1: a 0 from a request is meaningless (a cluster
+        // always has its seed member) and would only emit singleton noise.
+        .filter(|c| c.members.len() >= cfg.min_size.max(1))
         .map(|c| {
             // Medoid: the member nearest the centroid — its content names the
             // region, and its cosine anchors the cohesion average.

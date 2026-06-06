@@ -52,8 +52,10 @@ pub fn pick_token(
     }
 
     // No-repeat n-gram: ban any token that would repeat an n-gram already seen.
+    // `n < 2` is a no-op: a 1-gram block would forbid re-emitting *every* token
+    // already produced, which is degenerate, not repetition avoidance.
     let n = policy.no_repeat_ngram_size;
-    if n >= 1 && generated.len() >= n {
+    if n >= 2 && generated.len() >= n {
         let prefix = &generated[generated.len() + 1 - n..]; // last n-1 tokens
         for i in 0..=generated.len() - n {
             if &generated[i..i + n - 1] == prefix {
@@ -221,6 +223,16 @@ mod tests {
                                       // After "...2,3,2", the bigram prefix is [2]; 2 was followed by 3 before.
         let t = pick_token(logits, &generated, &greedy(0.0, 1.0, 2), &mut rng());
         assert_ne!(t, 3, "the n-gram that would repeat 2->3 is blocked");
+    }
+
+    #[test]
+    fn no_repeat_ngram_of_one_is_a_no_op() {
+        // A 1-gram block would forbid re-emitting any already-generated token,
+        // which is degenerate; n < 2 must leave the logits untouched. Token 2 is
+        // the argmax and was already generated, so it is still picked.
+        let logits = vec![0.1, 0.2, 5.0, 0.3];
+        let t = pick_token(logits, &[2u32], &greedy(0.0, 1.0, 1), &mut rng());
+        assert_eq!(t, 2, "a 1-gram block must not ban the generated argmax");
     }
 
     #[test]

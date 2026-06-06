@@ -8,6 +8,7 @@
 //! the change watcher then notifies every recipient's live peers.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use rmcp::model::{LoggingLevel, LoggingMessageNotificationParam};
@@ -19,11 +20,20 @@ use antumbra_sync::MemoryChange;
 
 use crate::auth::Identity;
 
+/// A process-unique id for one open session, so a closed transport can be pruned
+/// without disturbing concurrently-registered sessions of the same identity.
+type SessionId = u64;
+
+/// Each identity's open sessions: its tagged server peers.
+type Sessions = HashMap<Identity, Vec<(SessionId, Peer<RoleServer>)>>;
+
 /// Maps a JWT identity to its currently-connected server peers (a client may
-/// hold more than one session). Cloneable; all clones share one map.
+/// hold more than one session). Cloneable; all clones share one map and id
+/// counter.
 #[derive(Clone, Default)]
 pub struct PeerRegistry {
-    peers: Arc<Mutex<HashMap<Identity, Vec<Peer<RoleServer>>>>>,
+    peers: Arc<Mutex<Sessions>>,
+    next_id: Arc<AtomicU64>,
 }
 
 impl PeerRegistry {
@@ -33,37 +43,64 @@ impl PeerRegistry {
 
     /// Record a freshly-initialized session's peer for an identity.
     pub async fn register(&self, identity: Identity, peer: Peer<RoleServer>) {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         self.peers
             .lock()
             .await
             .entry(identity)
             .or_default()
-            .push(peer);
+            .push((id, peer));
     }
 
     /// Push `change` to every live session of each of its recipients, as a
     /// `notifications/message` carrying the structured change. Returns how many
     /// sessions were notified, and prunes peers whose transport has closed.
+    ///
+    /// Delivery snapshots the target peers under the lock, then releases it
+    /// before awaiting the per-peer sends: holding the registry lock across a
+    /// send would let one stuck SSE consumer stall every other session's
+    /// registration and the next change's fan-out. Peers are cheap cloneable
+    /// handles. Failed sends are pruned by session id afterwards, so a peer that
+    /// a concurrent `register` appended in the meantime is left untouched.
     pub async fn notify(&self, change: &MemoryChange) -> usize {
         let param = change_notification(change);
-        let mut delivered = 0;
-        let mut map = self.peers.lock().await;
-        for user in &change.recipients {
-            let identity = Identity {
-                tenant: change.tenant.as_str().to_string(),
-                user: user.as_str().to_string(),
-            };
-            let Some(peers) = map.get_mut(&identity) else {
-                continue;
-            };
-            let mut live = Vec::with_capacity(peers.len());
-            for peer in std::mem::take(peers) {
-                if peer.notify_logging_message(param.clone()).await.is_ok() {
-                    delivered += 1;
-                    live.push(peer); // keep only peers still connected
+        let targets: Vec<(Identity, u64, Peer<RoleServer>)> = {
+            let map = self.peers.lock().await;
+            let mut targets = Vec::new();
+            for user in &change.recipients {
+                let identity = Identity {
+                    tenant: change.tenant.as_str().to_string(),
+                    user: user.as_str().to_string(),
+                };
+                if let Some(peers) = map.get(&identity) {
+                    for (id, peer) in peers {
+                        targets.push((identity.clone(), *id, peer.clone()));
+                    }
                 }
             }
-            *peers = live;
+            targets
+        };
+
+        let mut delivered = 0;
+        let mut dead: Vec<(Identity, u64)> = Vec::new();
+        for (identity, id, peer) in targets {
+            if peer.notify_logging_message(param.clone()).await.is_ok() {
+                delivered += 1;
+            } else {
+                dead.push((identity, id));
+            }
+        }
+
+        if !dead.is_empty() {
+            let mut map = self.peers.lock().await;
+            for (identity, id) in dead {
+                if let Some(peers) = map.get_mut(&identity) {
+                    peers.retain(|(pid, _)| *pid != id);
+                    if peers.is_empty() {
+                        map.remove(&identity);
+                    }
+                }
+            }
         }
         delivered
     }

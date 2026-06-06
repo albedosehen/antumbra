@@ -114,8 +114,13 @@ impl Default for RaftConfig {
 }
 
 impl RaftConfig {
-    /// LoRA scaling factor `alpha / rank`.
+    /// LoRA scaling factor `alpha / rank`. A rank-0 adapter (an empty or corrupt
+    /// load) scales to `0.0` rather than `0/0 = NaN`, so a bad adapter contributes
+    /// nothing instead of poisoning every logit with NaN.
     pub fn lora_scale(&self) -> f64 {
+        if self.lora_rank == 0 {
+            return 0.0;
+        }
         self.lora_alpha / self.lora_rank as f64
     }
 
@@ -166,6 +171,18 @@ mod tests {
             ..RaftConfig::default()
         };
         assert_eq!(cfg.lora_scale(), 2.0);
+    }
+
+    #[test]
+    fn lora_scale_is_zero_not_nan_for_a_rank_zero_adapter() {
+        let cfg = RaftConfig {
+            lora_rank: 0,
+            lora_alpha: 32.0,
+            ..RaftConfig::default()
+        };
+        let scale = cfg.lora_scale();
+        assert!(scale.is_finite(), "a rank-0 adapter must not yield NaN");
+        assert_eq!(scale, 0.0);
     }
 
     #[test]

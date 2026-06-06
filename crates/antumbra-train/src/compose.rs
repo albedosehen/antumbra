@@ -48,12 +48,19 @@ pub fn compose_adapters(specs: &[(String, f32)], out_path: &str) -> Result<usize
         out.insert(key.clone(), Tensor::cat(&parts, dim).map_err(ce)?);
     }
 
-    candle_core::safetensors::save(&out, out_path).map_err(ce)?;
     let rank = out
         .iter()
         .find(|(k, _)| k.ends_with("lora_a"))
         .map(|(_, t)| t.dim(0).unwrap_or(0))
         .unwrap_or(0);
+    // A rank-0 result (no `lora_a` rows) would scale to a NaN `alpha/rank` and
+    // poison generation; reject it before writing a garbage adapter to disk.
+    if rank == 0 {
+        return Err(AntumbraError::other(
+            "compose: composed adapter has rank 0 (no lora_a rows)",
+        ));
+    }
+    candle_core::safetensors::save(&out, out_path).map_err(ce)?;
     Ok(rank)
 }
 
@@ -110,6 +117,27 @@ mod tests {
 
         for p in [p1, p2, pm] {
             std::fs::remove_file(p).ok();
+        }
+    }
+
+    #[test]
+    fn rejects_a_rank_zero_adapter() {
+        let dir = std::env::temp_dir();
+        let (p, pm) = (
+            dir.join("ant_rank0.safetensors"),
+            dir.join("ant_rank0_m.safetensors"),
+        );
+        // lora_a is (0, 2): zero rank rows. A composed rank-0 adapter would scale
+        // to a NaN alpha/rank and poison generation, so compose must refuse it.
+        write_adapter(p.to_str().unwrap(), &[], &[], 0, 2, 1);
+        let err = compose_adapters(&[(p.to_str().unwrap().into(), 1.0)], pm.to_str().unwrap());
+        assert!(err.is_err(), "rank-0 compose must be rejected");
+        assert!(
+            !pm.exists(),
+            "a rejected compose must not leave a garbage adapter on disk"
+        );
+        for q in [p, pm] {
+            std::fs::remove_file(q).ok();
         }
     }
 }
