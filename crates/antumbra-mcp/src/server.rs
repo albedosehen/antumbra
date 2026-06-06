@@ -845,6 +845,7 @@ impl McpServer {
             &self.tenant,
             &CompartmentId::new(p.compartment_id),
             &UserId::new(p.grantee),
+            Utc::now(),
         )
         .await
         .map_err(err)?;

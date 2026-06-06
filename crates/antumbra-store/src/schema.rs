@@ -63,7 +63,7 @@ const TENANT_PERMS: [(&str, &str); 4] = [
 /// once.
 const MEMORY_SELECT_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
      OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user))";
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE))";
 
 /// The link-capability gate for `memory_edge` create/update: you may create an
 /// edge only when its *target* memory is in a compartment you may LINK into —
@@ -73,7 +73,7 @@ const MEMORY_SELECT_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NO
 const EDGE_LINK_RULE: &str = "tenant_id = $auth.tenant AND to_id IN (SELECT VALUE key FROM memory \
      WHERE compartment = NONE \
      OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link'))";
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
 
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {

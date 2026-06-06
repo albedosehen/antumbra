@@ -422,6 +422,8 @@ mod tests {
                 capability: Capability::Reference,
                 granted_by: alice.clone(),
                 created_at: now,
+                updated_at: now,
+                deleted_at: None,
             },
         )
         .await

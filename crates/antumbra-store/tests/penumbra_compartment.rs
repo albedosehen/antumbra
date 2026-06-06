@@ -82,7 +82,7 @@ async fn memory_visibility_follows_compartment_grants() {
 
     // Revoke → hidden again.
     store.invalidate().await.unwrap();
-    compartment::revoke(&store, &t, &ca, &ub).await.unwrap();
+    compartment::revoke(&store, &t, &ca, &ub, now).await.unwrap();
     store.signin(&t, &ub).await.unwrap();
     assert!(
         !visible_ids(&store).await.contains(&"memory:priv".to_string()),

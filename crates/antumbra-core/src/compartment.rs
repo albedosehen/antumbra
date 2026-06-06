@@ -114,6 +114,14 @@ pub struct Grant {
     pub capability: Capability,
     pub granted_by: UserId,
     pub created_at: DateTime<Utc>,
+    /// Bumped whenever the grant changes (notably on revoke), so a revocation is
+    /// the grant's newest version and wins under last-write-wins sync — a stale
+    /// live copy on another device cannot out-rank it.
+    pub updated_at: DateTime<Utc>,
+    /// When set, the grant is **revoked** (a tombstone): the engine ACL excludes
+    /// it (access ends at once, locally), and the revocation propagates across the
+    /// fleet rather than leaving a stale grant that keeps the grantee in.
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 impl Grant {
@@ -132,7 +140,22 @@ impl Grant {
             capability,
             granted_by: granted_by.into(),
             created_at: now,
+            updated_at: now,
+            deleted_at: None,
         }
+    }
+
+    /// Revoke the grant as a tombstone at `now` (stamping `updated_at`, so the
+    /// revocation is the newest version). Access ends immediately where the engine
+    /// ACL runs, and the revocation propagates.
+    pub fn revoke(&mut self, now: DateTime<Utc>) {
+        self.deleted_at = Some(now);
+        self.updated_at = now;
+    }
+
+    /// `true` if this grant has been revoked (a tombstone).
+    pub fn is_revoked(&self) -> bool {
+        self.deleted_at.is_some()
     }
 }
 

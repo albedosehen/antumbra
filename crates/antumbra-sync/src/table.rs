@@ -23,7 +23,9 @@ impl TableSpec {
 /// are out of scope for store sync.
 pub const PENUMBRA_TABLES: &[TableSpec] = &[
     TableSpec::new("compartment", "created_at"),
-    TableSpec::new("grant", "created_at"),
+    // grant carries `updated_at` (bumped on revoke) so a revocation out-versions a
+    // stale live grant and propagates under LWW.
+    TableSpec::new("grant", "updated_at"),
     TableSpec::new("memory", "updated_at"),
     TableSpec::new("memory_edge", "created_at"),
 ];

@@ -118,3 +118,46 @@ embedded engine):
   root on a credentialed remote (and falls back to `invalidate` on embedded); the
   HTTP layer uses it wherever it needs the cross-tenant owner view (provisioning,
   the R-2 watcher).
+
+> **Correction (2026-06-06):** R-3's "isolation over the wire" is *cross-tenant*,
+> and it holds because `list`/`recall` filter by the session's tenant **app-side**
+> (plus the engine rule's `tenant_id = $auth.tenant` clause). The **engine** ACL's
+> *intra-tenant compartment* enforcement does **not** hold on `ws://` today — see
+> the security item R-6 below. Cross-tenant isolation is safe; compartment privacy
+> between users of the same tenant is not yet engine-enforced on a remote.
+
+## Security
+
+### Grant-revoke propagation (tombstones) — done on embedded, ws:// pending R-6
+A `forget`-style soft delete now covers grants: `compartment::revoke` writes a
+**tombstone** (`deleted_at` + bumped `updated_at`) instead of hard-deleting, so the
+revocation (a) ends access at once where the engine ACL runs — the grant subqueries
+in `MEMORY_SELECT_RULE`/`EDGE_LINK_RULE` now exclude `deleted_at` rows — and (b)
+**propagates** under LWW (the bumped `updated_at` out-versions a stale live grant,
+so a revoked grantee cannot be kept in by another replica's copy). Research
+corroborated the urgency: eventually-consistent systems leave revoked credentials
+valid during the propagation window (AWS IAM persistence abuse); a *hard delete that
+never propagates* is strictly worse. Validated: the embedded grant-ACL test still
+fails closed after revoke, and a reconcile test shows the revocation propagating
+without resurrection. `compartment::purge_grants` GCs tombstones past a grace
+window. **Caveat:** fully effective on `ws://` only once R-6 lands (below).
+
+### R-6 · Engine permission enforcement on `ws://` (CRITICAL)
+**Discovered 2026-06-06 while validating grant-revoke over a real `ws://` server.**
+The networked server holds **one root-authenticated connection** and signs in per
+request as each `(tenant, user)` record. But **a root session bypasses row-level
+permissions**, and SurrealDB has no way to run a permission-scoped query from a
+root/system session ([surrealdb#6259](https://github.com/surrealdb/surrealdb/issues/6259));
+signing in as a record from a root connection does not downgrade enforcement. So on
+`ws://` the engine ACL is effectively **not enforced** — intra-tenant compartment
+privacy (and therefore grant/revoke) is unprotected at the engine. It works on
+**embedded** because that connection is owner/anonymous (not authenticated root), so
+the per-request record signin scopes correctly (proven by the embedded ACL tests).
+This is a **pre-existing** hole the grant-revoke validation surfaced, not a
+regression. **Fix (architecture):** serve requests over a **non-root** connection —
+e.g. a second, credential-less serving connection that only ever holds the
+per-request record session (scoped, enforced), while the root connection is reserved
+for provisioning and the owner-view watcher. (`ws://` permits multiple connections;
+embedded keeps its single connection, which already enforces.) Until then, networked
+multi-tenant **compartment** isolation must not be relied on; cross-tenant isolation
+is safe (app-side tenant filter).

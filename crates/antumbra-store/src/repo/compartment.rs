@@ -115,6 +115,14 @@ struct GrantRow {
     capability: Capability,
     granted_by: String,
     created_at: String,
+    // Defaulted for rows written before grants carried a version; falls back to
+    // created_at on read.
+    #[serde(default)]
+    updated_at: Option<String>,
+    // The revocation tombstone. Absent (NONE) for a live grant so the engine ACL
+    // subquery (`deleted_at IS NONE`) admits it; an RFC3339 timestamp once revoked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deleted_at: Option<String>,
 }
 
 impl GrantRow {
@@ -126,17 +134,23 @@ impl GrantRow {
             capability: g.capability,
             granted_by: g.granted_by.as_str().to_string(),
             created_at: g.created_at.to_rfc3339(),
+            updated_at: Some(g.updated_at.to_rfc3339()),
+            deleted_at: g.deleted_at.map(|t| t.to_rfc3339()),
         }
     }
 
     fn into_domain(self) -> Result<Grant> {
+        let created_at = parse_dt(&self.created_at)?;
+        let updated_at = self.updated_at.as_deref().map(parse_dt).transpose()?.unwrap_or(created_at);
         Ok(Grant {
             tenant: TenantId::new(self.tenant_id),
             compartment: CompartmentId::new(self.compartment),
             grantee: UserId::new(self.grantee),
             capability: self.capability,
             granted_by: UserId::new(self.granted_by),
-            created_at: parse_dt(&self.created_at)?,
+            created_at,
+            updated_at,
+            deleted_at: self.deleted_at.as_deref().map(parse_dt).transpose()?,
         })
     }
 }
@@ -159,24 +173,75 @@ pub async fn grant(store: &Store, grant: &Grant) -> Result<()> {
     Ok(())
 }
 
-/// Revoke a user's grant on a compartment.
+/// Revoke a user's grant on a compartment as a **tombstone** (not a hard delete),
+/// so the revocation propagates across the fleet instead of leaving a stale grant
+/// that keeps the grantee in (the security gap). Access ends at once where the
+/// engine ACL runs — its grant subquery already excludes `deleted_at` rows. A
+/// no-op if there is no live grant. `now` stamps the revocation.
 pub async fn revoke(
     store: &Store,
     tenant: &TenantId,
     compartment: &CompartmentId,
     grantee: &UserId,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let condition = and_(
-        and_(eq("tenant_id", tenant.as_str()), eq("compartment", compartment.as_str())),
-        eq("grantee", grantee.as_str()),
-    );
-    delete_records(store.client(), GRANT, Some(&condition))
-        .await
-        .map_err(map)?;
+    if let Some(mut g) = live_grant(store, tenant, compartment, grantee).await? {
+        g.revoke(now);
+        grant(store, &g).await?;
+    }
     Ok(())
 }
 
-/// The grants a user has received in a tenant.
+/// The single **live** grant for (tenant, compartment, grantee), or `None` if
+/// absent or already revoked.
+async fn live_grant(
+    store: &Store,
+    tenant: &TenantId,
+    compartment: &CompartmentId,
+    grantee: &UserId,
+) -> Result<Option<Grant>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(GRANT)
+        .map_err(map)?
+        .where_(and_(
+            and_(eq("tenant_id", tenant.as_str()), eq("compartment", compartment.as_str())),
+            eq("grantee", grantee.as_str()),
+        ));
+    let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter()
+        .find(|r| r.deleted_at.is_none())
+        .map(GrantRow::into_domain)
+        .transpose()
+}
+
+/// Hard-remove revoked-grant tombstones older than `older_than` (the grace
+/// window), so they do not accumulate. Run wider than the sync interval so every
+/// replica saw the revocation first (resurrection-safe GC). Returns the count.
+pub async fn purge_grants(
+    store: &Store,
+    older_than: chrono::DateTime<chrono::Utc>,
+) -> Result<usize> {
+    let query = Query::new().select(None).from_table(GRANT).map_err(map)?;
+    let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
+    let mut purged = 0;
+    for row in rows {
+        let Some(ts) = row.deleted_at.as_deref() else {
+            continue;
+        };
+        if parse_dt(ts).map(|t| t < older_than).unwrap_or(false) {
+            let condition = and_(
+                and_(eq("tenant_id", row.tenant_id.as_str()), eq("compartment", row.compartment.as_str())),
+                eq("grantee", row.grantee.as_str()),
+            );
+            delete_records(store.client(), GRANT, Some(&condition)).await.map_err(map)?;
+            purged += 1;
+        }
+    }
+    Ok(purged)
+}
+
+/// The (live) grants a user has received in a tenant. Revoked grants are hidden.
 pub async fn list_for_grantee(store: &Store, tenant: &TenantId, grantee: &UserId) -> Result<Vec<Grant>> {
     let query = Query::new()
         .select(None)
@@ -184,12 +249,15 @@ pub async fn list_for_grantee(store: &Store, tenant: &TenantId, grantee: &UserId
         .map_err(map)?
         .where_(and_(eq("tenant_id", tenant.as_str()), eq("grantee", grantee.as_str())));
     let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().map(GrantRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(GrantRow::into_domain)
+        .collect()
 }
 
-/// Every grant on a compartment (its grantees) -- the other half, with the
-/// owner, of who may see the compartment's memories. Used to fan a live change
-/// out to its audience (R-2).
+/// Every **live** grant on a compartment (its grantees) -- the other half, with
+/// the owner, of who may see the compartment's memories. Used to fan a live
+/// change out to its audience (R-2). Revoked grants are excluded.
 pub async fn list_grants(
     store: &Store,
     tenant: &TenantId,
@@ -204,5 +272,8 @@ pub async fn list_grants(
             eq("compartment", compartment.as_str()),
         ));
     let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().map(GrantRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(GrantRow::into_domain)
+        .collect()
 }

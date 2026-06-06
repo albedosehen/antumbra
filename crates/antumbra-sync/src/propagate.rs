@@ -137,6 +137,8 @@ mod tests {
                 capability: Capability::Reference,
                 granted_by: UserId::new("alice"),
                 created_at: now,
+                updated_at: now,
+                deleted_at: None,
             },
         )
         .await
@@ -197,6 +199,8 @@ mod tests {
                 capability: Capability::Reference,
                 granted_by: UserId::new("alice"),
                 created_at: now,
+                updated_at: now,
+                deleted_at: None,
             },
         )
         .await

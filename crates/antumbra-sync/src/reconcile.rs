@@ -221,4 +221,56 @@ mod tests {
             ReconcileStats::default()
         );
     }
+
+    // Security: a revoke on one store propagates to the other (a stale live grant
+    // cannot keep the grantee in). The revocation tombstone out-versions the live
+    // copy (bumped updated_at) and wins.
+    #[tokio::test]
+    async fn a_revoke_propagates_and_cannot_be_out_voted_by_a_stale_grant() {
+        use antumbra_core::{Capability, Compartment, CompartmentId, Origin, UserId};
+        use antumbra_store::repo::compartment;
+
+        const GRANT: &TableSpec = &TableSpec { name: "grant", version_field: "updated_at" };
+        let (local, remote) = (mem_store().await, mem_store().await);
+        let tenant = TenantId::new("t");
+        let comp = CompartmentId::new("comp-g");
+        let bob = UserId::new("bob");
+        let t0 = Utc::now();
+
+        let new_comp = || Compartment {
+            id: comp.clone(),
+            tenant: tenant.clone(),
+            owner: UserId::new("alice"),
+            name: "shared".into(),
+            origin: Origin::User,
+            created_at: t0,
+        };
+        let grant = antumbra_core::Grant::new(
+            tenant.clone(), comp.clone(), bob.clone(), Capability::Reference, UserId::new("alice"), t0,
+        );
+        // Both sides start with the compartment + the live grant.
+        for s in [&local, &remote] {
+            compartment::create(s, &new_comp()).await.unwrap();
+            compartment::grant(s, &grant).await.unwrap();
+        }
+
+        // Local revokes bob (a newer version than remote's still-live grant).
+        compartment::revoke(&local, &tenant, &comp, &bob, t0 + ChronoDuration::seconds(5))
+            .await
+            .unwrap();
+
+        let stats = reconcile_table(&local, &remote, GRANT).await.unwrap();
+        assert_eq!(stats, ReconcileStats { pushed: 1, pulled: 0 }, "revocation pushed");
+
+        // Remote no longer lists bob as a grantee (revoked everywhere).
+        assert!(
+            compartment::list_grants(&remote, &tenant, &comp).await.unwrap().is_empty(),
+            "the revocation reached the remote: bob is no longer a live grantee"
+        );
+        // And it does not resurrect from the stale side.
+        assert_eq!(
+            reconcile_table(&local, &remote, GRANT).await.unwrap(),
+            ReconcileStats::default()
+        );
+    }
 }
