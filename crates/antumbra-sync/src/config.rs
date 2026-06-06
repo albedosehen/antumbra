@@ -84,6 +84,14 @@ pub struct SyncConfig {
     /// skipped. Re-reconciling settled rows is a no-op, so this only costs a small
     /// overlapping fetch. Keep it well under `interval`.
     pub lookback: Duration,
+    /// Tombstone garbage-collection grace window: a soft-deleted row is hard-
+    /// purged only once its deletion is older than this, so every replica has
+    /// reconciled the tombstone first (resurrection-safe). Keep it far wider than
+    /// `interval`.
+    pub gc_grace: Duration,
+    /// Run tombstone GC every this many reconcile cycles (`0` disables it). At the
+    /// default `interval` this is roughly hourly.
+    pub gc_every: usize,
 }
 
 impl SyncConfig {
@@ -95,6 +103,8 @@ impl SyncConfig {
             min_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
             lookback: Duration::from_secs(5),
+            gc_grace: Duration::from_secs(24 * 60 * 60),
+            gc_every: 240,
         }
     }
 
@@ -148,6 +158,8 @@ mod tests {
         assert_eq!(cfg.min_backoff, Duration::from_millis(500));
         assert_eq!(cfg.max_backoff, Duration::from_secs(30));
         assert_eq!(cfg.lookback, Duration::from_secs(5));
+        assert_eq!(cfg.gc_grace, Duration::from_secs(86_400));
+        assert_eq!(cfg.gc_every, 240);
         let cfg = cfg.with_interval(Duration::from_secs(2));
         assert_eq!(cfg.interval, Duration::from_secs(2));
     }

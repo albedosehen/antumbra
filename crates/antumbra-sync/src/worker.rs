@@ -54,6 +54,7 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
         // a full scan -- the backstop that re-syncs anything changed while down --
         // then later passes move only what changed.
         let mut cursors = Cursors::new();
+        let mut cycle: u64 = 0;
 
         // Reconcile on the cadence until a cycle fails or shutdown is requested.
         loop {
@@ -67,9 +68,31 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
                     break;
                 }
             }
+            cycle += 1;
+            collect_garbage(&cfg, &local, &remote, cycle).await;
             if sleep_or_shutdown(cfg.interval, &mut shutdown).await {
                 return Ok(());
             }
+        }
+    }
+}
+
+/// Hard-purge tombstones past the grace window on both stores, every `gc_every`
+/// reconcile cycles (so the soft-delete tables don't grow without bound). Best
+/// effort: a GC error is logged, not fatal -- it must never break the sync loop.
+async fn collect_garbage(cfg: &SyncConfig, local: &Store, remote: &Store, cycle: u64) {
+    if cfg.gc_every == 0 || !cycle.is_multiple_of(cfg.gc_every as u64) {
+        return;
+    }
+    let Ok(grace) = chrono::Duration::from_std(cfg.gc_grace) else {
+        return;
+    };
+    let older_than = chrono::Utc::now() - grace;
+    for store in [local, remote] {
+        match crate::gc::purge_store(store, older_than).await {
+            Ok(n) if n > 0 => eprintln!("sync: gc purged {n} tombstone(s)"),
+            Ok(_) => {}
+            Err(e) => eprintln!("sync: gc error: {e}"),
         }
     }
 }

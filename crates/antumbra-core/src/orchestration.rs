@@ -89,7 +89,14 @@ impl OrchestrationRun {
     }
 
     pub fn advance_to(&mut self, to: OrchestrationStatus, now: DateTime<Utc>) -> Result<()> {
+        let from = self.status;
         self.status = self.status.transition(to)?;
+        // Looping back to route again (Deciding -> Routing) begins a new round, so
+        // `round` actually counts the compose/refine iterations it is meant to
+        // (it was previously fixed at 0 -- the loop edge never advanced it).
+        if from == OrchestrationStatus::Deciding && to == OrchestrationStatus::Routing {
+            self.round += 1;
+        }
         self.updated_at = now;
         Ok(())
     }
@@ -118,6 +125,31 @@ mod tests {
         assert!(OrchestrationStatus::Deciding
             .transition(OrchestrationStatus::Routing)
             .is_ok());
+    }
+
+    #[test]
+    fn looping_back_to_routing_advances_the_round() {
+        let mut run = OrchestrationRun::start(RunId::new("run:1"), "task:1", Utc::now());
+        assert_eq!(run.round, 0);
+        for to in [
+            OrchestrationStatus::Executing,
+            OrchestrationStatus::Scoring,
+            OrchestrationStatus::Deciding,
+            OrchestrationStatus::Routing, // loop back: round 1
+        ] {
+            run.advance_to(to, Utc::now()).unwrap();
+        }
+        assert_eq!(run.round, 1, "the Deciding -> Routing loop begins a new round");
+        // A second lap bumps it again; non-loop transitions leave it alone.
+        for to in [
+            OrchestrationStatus::Executing,
+            OrchestrationStatus::Scoring,
+            OrchestrationStatus::Deciding,
+            OrchestrationStatus::Routing,
+        ] {
+            run.advance_to(to, Utc::now()).unwrap();
+        }
+        assert_eq!(run.round, 2);
     }
 
     #[test]

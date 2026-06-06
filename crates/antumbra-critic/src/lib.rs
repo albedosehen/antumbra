@@ -44,11 +44,15 @@ pub async fn run_verifiers(
     for req in requests {
         for verifier in verifiers {
             let verdict = verifier.verify(req).await?;
+            // pass/fail is authoritative (ADR-0003): a failed verdict contributes
+            // zero reward regardless of any partial `value` it reports, so a
+            // not-quite-passing step can never be rescued into a verified win.
+            let value = if verdict.passed { verdict.value } else { 0.0 };
             out.push(RewardSignal::verifier(
                 run_id.clone(),
                 req.step_idx,
                 req.dimension.clone(),
-                verdict.value,
+                value,
                 now,
             ));
         }
@@ -162,6 +166,34 @@ mod tests {
         .unwrap();
         assert_eq!(critique.total, 1.0);
         assert!(critique.signals.iter().all(RewardSignal::is_verifier));
+    }
+
+    // A misbehaving verifier that reports partial credit on a FAILED step. The
+    // critic must still score it zero -- `passed` is authoritative, so the
+    // `value` of a failed verdict can never leak into the reward (ADR-0003).
+    struct PartialCreditOnFail;
+    #[async_trait::async_trait]
+    impl antumbra_core::ports::Verifier for PartialCreditOnFail {
+        async fn verify(
+            &self,
+            _req: &VerifyRequest,
+        ) -> antumbra_core::Result<antumbra_core::ports::VerifierVerdict> {
+            Ok(antumbra_core::ports::VerifierVerdict { passed: false, value: 0.3 })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_verdict_contributes_zero_despite_a_nonzero_value() {
+        let signals = run_verifiers(
+            &RunId::new("run:1"),
+            &[&PartialCreditOnFail],
+            &[request("anything")],
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].value, 0.0, "a failed verdict's partial value is dropped");
     }
 
     #[tokio::test]

@@ -17,6 +17,7 @@
 //!   change to its audience (owner + grantees) (R-2 engine).
 
 pub mod config;
+pub mod gc;
 pub mod propagate;
 pub mod reconcile;
 pub mod table;

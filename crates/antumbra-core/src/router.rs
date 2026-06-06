@@ -36,9 +36,23 @@ pub struct LearnedRouter {
     pub floor: f32,
 }
 
+/// Dot product, or `None` when the vectors are different lengths. A dimension
+/// mismatch (e.g. a router trained at one embedding width meeting a task embedded
+/// at another) must not silently `zip`-truncate into a plausible-but-wrong
+/// similarity; the caller treats `None` as "no match" and abstains, mirroring the
+/// length guard in [`crate::expert`]'s `cosine_similarity`.
+fn aligned_dot(a: &[f32], b: &[f32]) -> Option<f32> {
+    (a.len() == b.len()).then(|| a.iter().zip(b).map(|(x, y)| x * y).sum())
+}
+
 impl LearnedRouter {
-    /// Apply the learned metric and L2-normalize.
+    /// Apply the learned metric and L2-normalize. Returns an empty vector when the
+    /// task width does not match the learned `weights` (no valid projection), so
+    /// downstream scoring abstains rather than routing on a truncated vector.
     pub fn project(&self, x: &[f32]) -> Vec<f32> {
+        if x.len() != self.weights.len() {
+            return Vec::new();
+        }
         let scaled: Vec<f32> = x
             .iter()
             .zip(&self.weights)
@@ -50,12 +64,13 @@ impl LearnedRouter {
 
     /// The nearest-centroid similarity in the learned space — the absolute
     /// confidence that *some* expert covers this task (unlike the softmax,
-    /// which is purely relative and always picks a max).
+    /// which is purely relative and always picks a max). A dim mismatch yields
+    /// `f32::MIN` (no expert matched), so `covers` reports out-of-distribution.
     pub fn top_similarity(&self, task: &[f32]) -> f32 {
         let t = self.project(task);
         self.experts
             .iter()
-            .map(|e| t.iter().zip(&e.centroid).map(|(a, b)| a * b).sum::<f32>())
+            .filter_map(|e| aligned_dot(&t, &e.centroid))
             .fold(f32::MIN, f32::max)
     }
 
@@ -65,22 +80,26 @@ impl LearnedRouter {
     }
 
     /// Routing probabilities over the experts for a task embedding, best first.
+    /// Experts whose centroid width does not match the projected task are not
+    /// candidates; if none match, the result is empty (escalate, don't route).
     pub fn route(&self, task: &[f32]) -> Vec<(ExpertId, f32)> {
         let t = self.project(task);
         let temp = self.temperature.max(1e-4);
-        let logits: Vec<f32> = self
+        let scored: Vec<(&RouterExpert, f32)> = self
             .experts
             .iter()
-            .map(|e| t.iter().zip(&e.centroid).map(|(a, b)| a * b).sum::<f32>() / temp)
+            .filter_map(|e| aligned_dot(&t, &e.centroid).map(|s| (e, s / temp)))
             .collect();
-        let max = logits.iter().copied().fold(f32::MIN, f32::max);
-        let exps: Vec<f32> = logits.iter().map(|l| (l - max).exp()).collect();
+        if scored.is_empty() {
+            return Vec::new();
+        }
+        let max = scored.iter().map(|(_, l)| *l).fold(f32::MIN, f32::max);
+        let exps: Vec<f32> = scored.iter().map(|(_, l)| (l - max).exp()).collect();
         let sum: f32 = exps.iter().sum::<f32>().max(1e-9);
-        let mut out: Vec<(ExpertId, f32)> = self
-            .experts
+        let mut out: Vec<(ExpertId, f32)> = scored
             .iter()
             .zip(exps)
-            .map(|(e, x)| (e.id.clone(), x / sum))
+            .map(|((e, _), x)| (e.id.clone(), x / sum))
             .collect();
         out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         out
@@ -134,5 +153,25 @@ mod tests {
         // The metric zeroes dim 0, so a task only on dim 0 projects to ~nothing
         // -> top similarity below the floor -> not covered (out of distribution).
         assert!(!router.covers(&[1.0, 0.0, 0.0]));
+    }
+
+    // A task embedded at the wrong width must abstain (escalate), not route on a
+    // silently truncated dot product.
+    #[test]
+    fn a_dimension_mismatch_abstains_instead_of_routing() {
+        let router = LearnedRouter {
+            weights: vec![1.0, 1.0, 1.0],
+            experts: vec![RouterExpert {
+                id: ExpertId::new("e"),
+                centroid: vec![0.0, 1.0, 0.0],
+            }],
+            temperature: 0.1,
+            floor: -1.0, // a permissive floor: only the dim guard should abstain
+        };
+        // Wrong width (2 vs 3): no valid projection -> not covered, no route.
+        assert!(!router.covers(&[1.0, 1.0]));
+        assert!(router.route(&[1.0, 1.0]).is_empty());
+        // Correct width still routes.
+        assert_eq!(router.route(&[0.0, 1.0, 0.0]).len(), 1);
     }
 }

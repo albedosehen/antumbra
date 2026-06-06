@@ -54,6 +54,26 @@ const TENANT_PERMS: [(&str, &str); 4] = [
     ("delete", "tenant_id = $auth.tenant"),
 ];
 
+/// Only the **owner** of the referenced compartment may write the row. The
+/// compartment table is tenant-readable, so the subquery resolves for any session,
+/// but it returns the compartment id only when `$auth.user` owns it.
+const COMPARTMENT_OWNER_RULE: &str = "tenant_id = $auth.tenant AND compartment IN \
+    (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE)";
+
+/// Grant-table permissions. Any tenant member may **read** grants (so the memory
+/// rule's `grantee = $auth.user` subquery resolves), but only the **owner of the
+/// compartment** may create/update/delete a grant on it. Without the owner check
+/// any tenant member could forge a grant to another user's private compartment
+/// (the `share_compartment` tool accepts an arbitrary compartment id and runs
+/// under the caller's scoped session) and then read it; engine-enforced here so a
+/// non-owner's `share`/`revoke` fails closed regardless of the app layer.
+const GRANT_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", COMPARTMENT_OWNER_RULE),
+    ("update", COMPARTMENT_OWNER_RULE),
+    ("delete", COMPARTMENT_OWNER_RULE),
+];
+
 /// The compartment-aware read rule for `memory` (the grant-graph ACL): a memory
 /// is visible to a session when it is in the session's tenant AND either it is
 /// un-compartmentalized (the shared tenant pool), OR its compartment is owned by
@@ -208,10 +228,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("compartment_updated_at_idx", ["updated_at"]),
             ]),
         // Capability grants (intra-tenant, user-to-user). Tenant-readable so the
-        // memory ACL can resolve `grantee = $auth.user`.
+        // memory ACL can resolve `grantee = $auth.user`; only the compartment's
+        // owner may write a grant on it (GRANT_PERMS) so a grant cannot be forged.
         table_schema("grant")
             .with_mode(TableMode::Schemaless)
-            .with_permissions(TENANT_PERMS)
+            .with_permissions(GRANT_PERMS)
             .with_indexes([
                 index("grant_grantee_idx", ["tenant_id", "grantee"]),
                 index("grant_compartment_idx", ["tenant_id", "compartment"]),

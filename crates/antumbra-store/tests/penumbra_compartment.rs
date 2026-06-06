@@ -183,3 +183,86 @@ async fn linking_into_a_compartment_requires_link_capability() {
         "link grant must permit linking"
     );
 }
+
+// Security: a tenant member who does NOT own a compartment cannot forge a grant
+// to it. The grant table's create permission requires compartment ownership, so
+// B's scoped attempt to share A's private compartment with themselves fails
+// closed at the engine -- no grant row is written and B still cannot see A's
+// memory. (Without the owner check, any tenant member could grant themselves
+// into another user's private compartment, since share_compartment accepts an
+// arbitrary compartment id.)
+#[tokio::test]
+async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let t = TenantId::new("ws:org");
+    let ua = UserId::new("user:a");
+    let ub = UserId::new("user:b");
+    let ca = CompartmentId::new("comp:a-private");
+    let now = Utc::now();
+
+    principal::provision(&store, &t, &ua).await.unwrap();
+    principal::provision(&store, &t, &ub).await.unwrap();
+    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
+        .await
+        .unwrap();
+    memory::upsert(&store, &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")))
+        .await
+        .unwrap();
+
+    // B (scoped, non-owner) tries to forge a grant to A's compartment.
+    store.signin(&t, &ub).await.unwrap();
+    let forged = Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Reference, ub.clone(), now);
+    let _ = compartment::grant(&store, &forged).await; // engine refuses; ignore the result
+
+    // The forged grant did not take effect: B still cannot see A's private memory.
+    assert!(
+        !visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        "a forged grant must not unlock a non-owned compartment"
+    );
+
+    // And no live grant row exists for the compartment (verified in owner mode).
+    store.invalidate().await.unwrap();
+    assert!(
+        compartment::list_grants(&store, &t, &ca).await.unwrap().is_empty(),
+        "the engine refused to create the forged grant"
+    );
+}
+
+// The legitimate path the `share_compartment` tool drives in production: the
+// OWNER, under their own scoped session, can grant on their own compartment, and
+// the grantee then sees it. Proves the owner-only grant rule does not break real
+// sharing (the existing visibility test grants in owner/bypass mode).
+#[tokio::test]
+async fn an_owner_can_share_their_own_compartment_while_scoped() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let t = TenantId::new("ws:org");
+    let ua = UserId::new("user:a");
+    let ub = UserId::new("user:b");
+    let ca = CompartmentId::new("comp:a-private");
+    let now = Utc::now();
+
+    principal::provision(&store, &t, &ua).await.unwrap();
+    principal::provision(&store, &t, &ub).await.unwrap();
+    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
+        .await
+        .unwrap();
+    memory::upsert(&store, &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")))
+        .await
+        .unwrap();
+
+    // A (scoped, the owner) shares the compartment with B -- must succeed.
+    store.signin(&t, &ua).await.unwrap();
+    compartment::grant(
+        &store,
+        &Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Reference, ua.clone(), now),
+    )
+    .await
+    .unwrap();
+
+    // B now sees A's compartment memory.
+    store.signin(&t, &ub).await.unwrap();
+    assert!(
+        visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        "the owner can share their own compartment under a scoped session"
+    );
+}
