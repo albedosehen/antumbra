@@ -5,9 +5,10 @@
 //!
 //! Built bottom-up and tested on CPU: the LoRA training primitive ([`lora`]),
 //! the SFT objective ([`objective`]), the RAFT loop ([`raft`]), and the
-//! [`Trainer`] realization ([`trainer::RaftTrainer`]) are all in place. The one
-//! remaining GPU-validated piece (MT-1) is the candle Qwen2.5-Coder + LoRA
-//! [`CausalLm`], loaded by [`CandleModelLoader`] — currently a typed seam.
+//! [`Trainer`] realizations ([`trainer::RaftTrainer`]/`GrpoTrainer`/`CaptureTrainer`).
+//! The candle Qwen2.5-Coder + LoRA [`CausalLm`] (loaded by [`CandleModelLoader`])
+//! is the real, GPU-validated body behind the `models` feature; with `models`
+//! off it compiles to a CPU stub so the control flow stays exercisable.
 
 use async_trait::async_trait;
 
@@ -95,9 +96,9 @@ impl GrpoLm for PendingModel {
     }
 }
 
-/// Loads the candle Qwen2.5-Coder base + a fresh LoRA adapter (MT-1). The real
-/// body — candle-transformers + hf-hub + tokenizers + LoRA injection — runs on
-/// the GPU and lands behind a `models` feature; this is its typed seam.
+/// Loads the candle Qwen2.5-Coder base + a fresh LoRA adapter (MT-1, GPU-
+/// validated). The real body — candle-transformers + hf-hub + tokenizers + LoRA
+/// injection — is behind the `models` feature; without it this is a CPU stub.
 pub struct CandleModelLoader {
     pub config: RaftConfig,
 }

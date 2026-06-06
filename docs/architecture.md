@@ -157,7 +157,7 @@ erDiagram
 | Layer | Choice |
 |---|---|
 | Language | **Rust** (single plane) |
-| Substrate | **SurrealDB ≥ 3.0** via `surql-rs` (`oneiriq-surql` ≥ 0.2.7) |
+| Substrate | **SurrealDB ≥ 3.0** via `surql-rs` (`oneiriq-surql` ≥ 0.28) |
 | Inference | `llama-cpp-2` (GGUF + LoRA) and/or `mistral.rs` (S-LoRA-style multi-adapter) |
 | Training | **`candle`** - QLoRA adapters **and** the gate (NF4 4-bit base + LoRA); `burn` fallback |
 | Base model | open, **code-capable** (Qwen-Coder-class or a code-tuned OLMo 3); shared by all adapters |

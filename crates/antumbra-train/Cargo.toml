@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ADR-0002: the DIY candle QLoRA trainer (shadow adapters + the gate). Seam only — the real candle path is not yet built."
+description = "ADR-0002/0010: the DIY candle QLoRA trainer (Qwen2.5-Coder + LoRA; RAFT + GRPO), GPU-validated. The real candle path is behind --features models; a CPU stub otherwise."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }

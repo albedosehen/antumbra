@@ -226,7 +226,8 @@ exercisable without a GPU.
 
 **Not yet:** large corpora and many experts (the real generalization-and-forgetting
 test at scale); the learned latent-mixing gate (the north star beyond the coverage
-gate); GRPO and 4-bit quantized training; heterogeneous composition (genuinely
+gate); 4-bit quantized training (GRPO is built — RAFT and GRPO both ship);
+heterogeneous composition (genuinely
 separate experts wired by learned cross-attention bridges, ADR-0009) — for which the
 v0 gate, boundary engine, loop, and substrate all carry over. On the **product**
 side, the web control plane — dashboard, knowledge documents, the expert mixer,

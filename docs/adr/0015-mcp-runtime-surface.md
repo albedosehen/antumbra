@@ -19,12 +19,14 @@
 > that one connection see only their own rows — proven through the real MCP tools
 > (`shared_connection_isolates_tenants_under_signin`). The cost is serialization of the authed section (fine for
 > an edge device; a high-concurrency deployment points `--url` at a `ws://` server and the model is unchanged).
-> The stateless JSON response mode keeps each `handle` bounded so the lock never spans a long-lived stream.
+> The auth lock is held only while `handle` builds a response, so it never spans the long-lived SSE stream
+> (R-2 runs the transport in **stateful** mode for server-initiated pushes; the stream does no DB work after
+> the handler returns — the ADR's original stateless-vs-streaming tension was a misframing).
 > Verified: JWT core (7), HTTP auth boundary (3, 401 before any store work), embedded single-writer + serialized
 > isolation (3), and the **authenticated happy-path** (a valid token → signin → rmcp dispatches `initialize` →
-> 200 with `serverInfo`, driven through the router via `oneshot`). Deferred to the [roadmap](../roadmap.md):
+> 200 with `serverInfo`, driven through the router via `oneshot`). Since shipped (see [roadmap](../roadmap.md)):
 > R-1 the collector/sync (local-embedded ↔ remote-authoritative, the multi-device story) and R-2 live
-> propagation (server→client SSE push on shared-compartment change; today recall-on-demand).
+> propagation (server→client SSE push on shared-compartment change, stateful mode).
 
 ## Context
 
@@ -58,12 +60,12 @@ real embedder (candle BERT) lands under `--features models`; a byte-histogram fa
 
 - **Positive:** Antumbra is usable as an agent's memory + routing engine today; one MCP server, one engine, one
   tenant boundary; consolidate/recall/route all hit a single store.
-- **Negative:** the networked surface **serializes** the authenticated section over its single shared connection
-  (correct and isolated on embedded *and* networked, but not concurrent — a high-throughput deployment wants a
-  `ws://` server, where the same model still holds); **live propagation** (push on shared-compartment change) is
-  not yet built (recall-on-demand today); and `ask` (serve *through* the routed expert) plus the
-  consolidate/retire owner ops are not yet on the surface (owner ops belong on a future admin surface, not the
-  tenant session).
+- **Negative:** the per-request authenticated section **serializes** over the scoped connection on the
+  networked path (correct and isolated, but not concurrent — the R-6 follow-up notes it could be relaxed now
+  that each session has its own scoped connection). The consolidate/retire owner ops remain off the tenant
+  surface by design (they belong on a future admin surface). *(Superseded: **live propagation** shipped in R-2
+  — the server runs in stateful SSE mode and pushes `antumbra/memory_changed` on a shared-compartment change;
+  and `ask`-through-the-routed-expert shipped as the **`answer`** tool in R-4.)*
 - **Neutral:** `get_neighbors` 1-hop today (native N-hop graph traversal deferred, ADR-0014).
 
 ## Alternatives considered
@@ -76,6 +78,6 @@ real embedder (candle BERT) lands under `--features models`; a byte-histogram fa
 ## Validation
 
 In-process integration test (store → recall → reinforce → list → forget; compartment create/list/store/share/
-revoke) + a real MCP stdio smoke (initialize + `tools/list` returns all 12; store/recall round-trips). *Kill
+revoke) + a real MCP stdio smoke (initialize + `tools/list` returns all 14; store/recall round-trips). *Kill
 criterion:* an MCP client cannot drive memory + routing against a real workspace → the runtime surface is not
 usable.

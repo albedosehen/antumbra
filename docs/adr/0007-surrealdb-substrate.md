@@ -6,7 +6,7 @@
 
 Antumbra needs a document store (the stores), a vector index (router retrieval, boundary lookup), a graph
 (lineage), and durable flow state (resumable loop/router). Running four systems is overhead. SurrealDB is one
-multi-model engine that does all four, and `surql-rs` (`oneiriq-surql` ≥ 0.2.7) gives Rust a type-safe layer
+multi-model engine that does all four, and `surql-rs` (`oneiriq-surql` ≥ 0.28) gives Rust a type-safe layer
 with HNSW index defs, `<|k|>` KNN, `RELATE`/traverse helpers, migrations, and transactions - exactly this
 project's hot path.
 
@@ -19,15 +19,18 @@ in `schema/_permissions.py`).
 ## Decision
 
 A single SurrealDB instance is every store **and** the durable flow state, accessed only through `surql-rs`.
-Schema is authored as `surql-rs` migrations with drift detection (the dpbg pattern). `EMBED_DIM = 1024`
-(mxbai-embed-large convention).
+Schema is authored as `surql-rs` migrations with drift detection (the dpbg pattern). `EMBED_DIM = 384`
+(all-MiniLM-L6-v2 convention; the embedder choice moved to MiniLM, see ADR-0005).
 
-> **Hard rule:** never hand-write raw SurrealQL. All schema, reads, writes, and KNN go through `surql-rs`
-> abstractions (the schema builders, the `Query` builder, and the `crud` helpers).
+> **Rule:** schema, reads, writes, and KNN go through `surql-rs` abstractions (the schema builders, the
+> `Query` builder, the `crud` helpers) — no hand-authored SurrealQL for data access. The **one** exception is
+> the engine-enforced **table PERMISSIONS predicates** (the ACL subqueries in `schema.rs`, ADR-0013/0014):
+> SurrealQL expression strings rendered onto the builder-generated `DEFINE TABLE`, because the row-level ACL
+> has no builder representation. Those predicates are the deliberate, reviewed exception — not a data path.
 
 ### Implementation note (v0, 2026-06-02)
 
-The `antumbra-store` crate implements this substrate against **`oneiriq-surql` 0.2.7** (public on crates.io,
+The `antumbra-store` crate implements this substrate against **`oneiriq-surql` 0.28** (public on crates.io,
 lib `surql`, feature `client-rustls`) on the **SurrealDB 3.x** driver - builder-only, no hand-authored SurrealQL:
 
 - **Schema as code** via the surql-rs builders (`table_schema`, `hnsw_index`, `unique_index`, `index`); the
@@ -71,7 +74,7 @@ DEFINE FIELD generation      ON expert TYPE int DEFAULT 0;
 DEFINE FIELD created_at       ON expert TYPE datetime DEFAULT time::now();
 DEFINE INDEX expert_name_idx ON expert FIELDS name UNIQUE;
 DEFINE INDEX expert_cap_hnsw ON expert
-    FIELDS capability_vec HNSW DIMENSION 1024 DIST COSINE TYPE F32;  -- routing-as-retrieval (0005)
+    FIELDS capability_vec HNSW DIMENSION 384 DIST COSINE TYPE F32;  -- routing-as-retrieval (0005)
 
 -- Shadow lifecycle (ADR-0002). The trainable penumbra.
 DEFINE TABLE shadow SCHEMAFULL;
@@ -107,7 +110,7 @@ DEFINE FIELD confidence      ON failure_boundary TYPE float DEFAULT 0.5;
 DEFINE FIELD generation      ON failure_boundary TYPE int;
 DEFINE FIELD created_at       ON failure_boundary TYPE datetime DEFAULT time::now();
 DEFINE INDEX fb_ctx_hnsw ON failure_boundary
-    FIELDS context_vec HNSW DIMENSION 1024 DIST COSINE TYPE F32;    -- inhibitory penalty lookup (0005)
+    FIELDS context_vec HNSW DIMENSION 384 DIST COSINE TYPE F32;    -- inhibitory penalty lookup (0005)
 DEFINE TABLE boundary_evidence TYPE RELATION FROM failure_boundary TO shadow;
 
 -- Durable orchestration + generational loop (ADR-0005/0008). State = checkpoint.

@@ -339,4 +339,4 @@ The newer subsystems carry their diagrams inline in their ADRs, to avoid drift:
   boundary (tenant org → user → compartment → agent; shared umbra, private penumbra).
 - **[ADR-0014](adr/0014-compartments.md)** - penumbra → antumbra-clustered compartments → (share / consolidate
   into a private expert).
-- **[ADR-0015](adr/0015-mcp-runtime-surface.md)** - the 12-tool MCP surface over the bound `(tenant, user)`.
+- **[ADR-0015](adr/0015-mcp-runtime-surface.md)** - the 14-tool MCP surface over the bound `(tenant, user)`.
