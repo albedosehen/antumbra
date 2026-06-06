@@ -102,14 +102,40 @@ forgets, not just writes (validated end-to-end).
 ## GPU-gated wiring
 
 ### R-4 · Wire `MultiAdapterServe` into the MCP `answer` tool
-**Status:** seam shipped, GPU wiring deferred.
+**Status:** DONE — real GPU path validated end-to-end on the 3090 Ti (2026-06-05).
 **Shape:** the `answer` tool (route → serve through the covering expert) takes an
-injectable `Serve` engine and is CPU-proven with a fake (`EchoServe`). What's
-left is GPU-only: build a resident `MultiAdapterServe` from the population
-(register each expert's adapter), wrap it in `Arc`, and pass it to the per-session
-`McpServer`s — so a server built `--features models` answers for real. Needs the
-3090 Ti, and a decision on the per-tenant private-adapter registry (the engine
-sees all adapters; routing already scopes which a session may pick).
+injectable `Serve` engine; `build_serve` constructs a resident `MultiAdapterServe`
+from the visible population (registering each expert's adapter), wraps it in `Arc`,
+and shares it across the per-session `McpServer`s. CPU-proven with `EchoServe`; now
+GPU-proven for real.
+**Validated:** `crates/antumbra-serve/tests/gpu_serve.rs` (gated on
+`ANTUMBRA_GPU_SERVE`, `#![cfg(feature = "models")]`) loads the shared
+`Qwen2.5-Coder-1.5B-Instruct` base resident on CUDA, hot-swaps a trained LoRA
+adapter (`adapters/run_train_g0.safetensors`), and runs a real generation —
+producing coherent Rust (`fn add(a: i64, b: i32) -> i6 { a + b }`); a second route
+to the same expert reuses the resident base (the O(adapter) swap, not an O(base)
+reload). PASS.
+**Build recipe (this machine: CUDA 13.3 toolkit, VS 2026):** cudarc 0.17/0.19
+predate CUDA 13.3 and panic on it, but both support 13.0 bindings (major-versioned
+`*_13.dll` link fine against a 13.3 runtime) — so build under a VS Dev Shell with
+`CUDARC_CUDA_VERSION=13000`, and put **`<CUDA>\bin\x64`** on PATH at runtime (CUDA
+13 moved the runtime DLLs from `bin` to `bin\x64`). No CUDA-12 install or candle
+bump needed. `cargo test -p antumbra-serve --features cuda --test gpu_serve`.
+**Registry decision — keep one shared registry (no per-tenant split):** the
+`MultiAdapterServe` registry physically holds every adapter, but a session can only
+ever *name* an `ExpertId` that routing surfaces — `ranked_routes` draws from the
+shared learned router (shared experts, `owner = NONE`) plus the caller's own
+private experts (`expert::list` is engine-ACL-scoped to `owner = NONE OR owner =
+$auth.user`, then filtered to `e.owner == self.user`), and the `answer` tool serves
+through that routed id while the client supplies only the prompt. So **routing is
+the authorization boundary**; the id namespace is the capability, and a physical
+per-tenant registry is unnecessary. Invariant to preserve: any future path that
+lets a client name an expert id directly must re-validate it against routing/
+visibility before serving.
+**Drive-by:** `antumbra-serve` / `antumbra-train` `cuda`/`metal` features now imply
+`models` (matching `antumbra-mcp`), so `--features cuda` builds the real engine
+instead of silently compiling the CPU stub — the footgun that first made the GPU
+test compile to zero tests.
 
 ### R-5 · Live harness metabolization
 **Status:** first increment shipped (normalized-export → capture tasks via

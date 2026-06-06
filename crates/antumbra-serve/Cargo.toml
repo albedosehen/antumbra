@@ -36,8 +36,11 @@ models = [
     "antumbra-train/models",
     "dep:tokio",
 ]
-cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "antumbra-train/cuda"]
-metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal", "antumbra-train/metal"]
+# A GPU backend only matters for the candle model path, so it implies `models`
+# (a `--features cuda` build gives the real engine, not the CPU stub). Matches
+# antumbra-mcp's `cuda = ["models", ...]`.
+cuda = ["models", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "antumbra-train/cuda"]
+metal = ["models", "candle-core/metal", "candle-nn/metal", "candle-transformers/metal", "antumbra-train/metal"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
