@@ -1,12 +1,18 @@
 # Antumbra
 
-> A private, self-improving AI that grows a team of small specialists on your own
-> hardware — and learns the **scope** of what each one is good at, so it knows when
-> to answer locally and when to escalate.
+> A private, self-improving AI that plugs into your coding agent and grows a team of
+> small specialists on your own hardware — turning the work you repeat into
+> permanent, private skills, and learning the **scope** of what each is good at so it
+> knows when to answer locally and when to escalate.
 
-Antumbra runs on your own machine and turns the work you repeat into permanent,
-private skills. It is all-Rust, single-process, and keeps your data on your
-hardware. This README describes the system as it is built today.
+You keep the agent you already use (Claude Code, Cursor, any MCP client); Antumbra
+becomes its **persistent brain** — memory, identity, multi-tenant boundaries, and a
+growing population of experts. Unlike a memory layer that only makes a frozen model
+*remember*, Antumbra makes it **get better**: verified outcomes are metabolized into
+the weights, so the orchestration scaffolding shrinks as competence accrues. All-Rust,
+single-process, your data stays on your hardware. Runs **fully offline** or as a
+**hosted-but-private** service. This README describes the system as built today; see
+**[Using Antumbra](docs/integration.md)** for how to wire it into your agent.
 
 ---
 
@@ -37,6 +43,50 @@ Two design commitments make this more than a model zoo:
   absolute: "use `deno install`, not `npm install`" is true **in this repo**, not
   everywhere. That boundary is what the route-locally-vs-escalate decision rests on
   (ADR-0004).
+
+---
+
+## How you use it
+
+Antumbra is not an app you open — it is the brain your coding agent plugs into,
+through MCP plus three lifecycle hooks. The full guide is **[Using
+Antumbra](docs/integration.md)**; the shape:
+
+1. **Bootstrap on session start.** A hook pulls your standing conventions and the
+   memory relevant to this project from Antumbra into the agent's opening context —
+   no cold start, it already knows "this repo uses `deno`."
+2. **Route or answer.** The agent calls Antumbra's `answer`/`route` tools: a task
+   goes to the frozen expert most likely to cover it, or escalates when out of scope.
+   A served task costs nothing; only genuine novelty hits the expensive model.
+3. **Capture on stop.** A hook nudges the agent to write verified observations back.
+   Those recurrent, checked traces are what `antumbra metabolize` later turns into a
+   new permanent expert — so next session the agent is measurably better, and more of
+   your work is served locally for free.
+
+Ready-to-adapt hook templates (PowerShell + POSIX) live in **[`hooks/`](hooks/)**.
+
+**Why this beats a memory layer.** Retrieval-memory tools (Mem0, Letta, Zep, Cognee)
+make a frozen model *remember*; every run re-pays the prompt/lookup cost against the
+same base. Antumbra makes the model *get better* — capability compounds into weights
+and the scaffold shrinks. It is also a memory store **and** a skill engine in one
+private, ACL-governed process, where those tools stop at retrieval.
+
+### Three ways to run it
+
+Same engine; only transport, identity, and who runs the box differ.
+
+- **Offline / private** — embedded store, stdio or loopback MCP, one identity.
+  Nothing leaves the machine. The default and the privacy floor (a solo dev, an
+  air-gapped or regulated box).
+- **Hosted, still private** — networked HTTP/SSE, JWT per request, engine-enforced
+  multi-tenancy, device sync, live propagation. A team or fleet shares one brain
+  without running the infrastructure; each consumer's data is isolated in the engine.
+- **Bespoke** — for businesses that want this implemented and operated for them,
+  integrated into their repos, verifiers, and compliance boundary.
+
+See **[Product surface](docs/product.md)** for the control plane (dashboard,
+knowledge documents, onboarding) and how Antumbra supersedes a separate agent-memory
+engine.
 
 ---
 
@@ -96,7 +146,9 @@ alongside a separate agent engine.
   with an interleaved **replay** buffer that resists catastrophic forgetting, and
   retires an expert when a consolidated memory is later contradicted. Forgetting is
   a **soft-delete tombstone**, so a deletion is retained long enough to propagate
-  and is not silently resurrected by another replica.
+  and is not silently resurrected by another replica. The embedder is **yours** — a
+  local model behind the `Embedder` port — so the embedding step that touches your
+  content stays on your side (per-workspace bring-your-own-embedder is roadmap P-1).
 
 - **Engine-enforced isolation** (ADR-0013) — multi-tenancy lives in the SurrealDB
   engine, not in handler code. Record-access binds `(tenant, user)` to `$auth`, and
@@ -175,7 +227,11 @@ exercisable without a GPU.
 test at scale); the learned latent-mixing gate (the north star beyond the coverage
 gate); GRPO and 4-bit quantized training; heterogeneous composition (genuinely
 separate experts wired by learned cross-attention bridges, ADR-0009) — for which the
-v0 gate, boundary engine, loop, and substrate all carry over.
+v0 gate, boundary engine, loop, and substrate all carry over. On the **product**
+side, the web control plane — dashboard, knowledge documents, the expert mixer,
+hosted onboarding — is specified ([ADR-0016](docs/adr/0016-control-plane-and-product-surface.md),
+roadmap P-1…P-5) but not built; the CLI/TUI and the [`hooks/`](hooks/) templates are
+today's interface.
 
 ---
 
@@ -211,6 +267,11 @@ GPU recipe and the validated generation-quality settings.
 
 ## Documentation
 
+- **[Using Antumbra](docs/integration.md)** — wire it into your coding agent (the
+  bootstrap/capture lifecycle hooks), offline vs hosted, and why it beats a memory
+  layer. Start here.
+- **[Product surface](docs/product.md)** — who it's for, the three tiers, and the
+  control-plane gap (dashboard, knowledge documents, onboarding) Antumbra is closing.
 - **[Architecture](docs/architecture.md)** — system, substrate, decision chain,
   training and data flow, schema.
 - **[Technical Reference](docs/technical-reference.md)** — crate map, domain model,
@@ -220,7 +281,7 @@ GPU recipe and the validated generation-quality settings.
 - **[Running the trainer](docs/running-the-trainer.md)** — the CUDA GPU recipe and
   the validated generation-quality recipe.
 - **[Architecture Decision Records](docs/adr/README.md)** — every load-bearing
-  decision, ADR-0001 … ADR-0015.
+  decision, ADR-0001 … ADR-0016.
 - **[Experiment Ledger](experiments/README.md)** — each falsifiable validation:
   claim, method, result, kill criterion, reproduce command.
 

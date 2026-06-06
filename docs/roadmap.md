@@ -176,6 +176,53 @@ hence the mock + gated-real split above, run it against a harness with traces.
 **Deferred:** multi-tool fan-out in one pull (list tasks → fetch each trace) and
 behavior-graph *edge* structure (ordering/branching), beyond per-node steps.
 
+## Product / control plane (ADR-0016)
+
+The engine is built; this is the surface that makes it usable by a non-operator and
+sellable in three tiers (offline-private / hosted-but-private / bespoke). Each item
+is a **thin, ACL-safe surface over the existing engine-isolated MCP tools** — not a
+second source of truth. See [`product.md`](product.md) for the gap analysis and what
+Antumbra *supersedes by metabolizing* vs *must build*.
+
+### P-1 · Hook auth + REST shim + per-workspace embedder config
+**Status:** queued (unblocks onboarding + bring-your-own-embedder).
+Three small pieces that make the lifecycle-hook integration ([`/hooks`](../hooks),
+[`integration.md`](integration.md)) work end-to-end against the networked surface:
+(a) a long-lived, scope-bound **hook token** (API-key-style) for non-interactive
+clients, since the surface mints only a per-request JWT today; (b) a **REST
+`/mcp/call` convenience endpoint** (`{tool, arguments}` → result) beside the
+JSON-RPC `/mcp` router, so a shell hook can fetch bootstrap context without the
+initialize→tools/call handshake (the *capture* and *attribution* hooks already work
+— they only emit hook decisions; the *bootstrap* hook is the one that needs this);
+and (c) promoting the `Embedder` port to a **per-workspace runtime config** (model
+id / local endpoint) instead of a build-time choice, keeping the embedding step on
+the tenant's side with HNSW dims consistent.
+
+### P-2 · Read-only web dashboard
+**Status:** queued.
+A browser surface over the same MCP tools an agent calls: the population + experts +
+fitness, route hit-rate / escalation / cost-avoided stats, memory recall, and the
+compartment/`memory_edge` graph (2D first, 3D after). Inherits the engine ACL
+(ADR-0013) — it can see no more than the bound `(tenant, user)`.
+
+### P-3 · Knowledge documents
+**Status:** queued.
+A first-class `document` type (ingest → chunk → embed → recall) distinct from
+episodic memory, surfaced in recall and the dashboard — the predecessor's knowledge
+docs as a native Antumbra type.
+
+### P-4 · Interactive control (expert mixer + agent drive)
+**Status:** queued (after P-2 lands).
+The **expert mixer** — pick experts + weights, preview, save a composed serve
+profile (the user-facing form of ADR-0009 composition; `compose_adapters` is the
+precursor) — and driving a connected agent's `answer`/`route` from the dashboard.
+
+### P-5 · Hosted onboarding
+**Status:** queued.
+Signup, tenant provisioning, and the setup flow wrapping the [`hooks/`](../hooks)
+templates; billing for the SaaS tier. The offline tier needs none of this — the CLI
++ hooks are its onboarding.
+
 ## Foundational — make the current surface provably work
 
 ### R-3 · Networked MCP end-to-end validation

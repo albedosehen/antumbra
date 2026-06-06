@@ -32,6 +32,7 @@ Read them against the [two readings of the chain](../architecture.md#1-the-thesi
 | [0013](0013-tenant-isolation-identity.md) | Multi-tenant isolation & identity | Accepted | Isolation is **engine-enforced** (SurrealDB record access + `PERMISSIONS`); `$auth` carries `(tenant, user)`; hierarchy = tenant(org) → user → compartment → agent(provenance); **shared umbra, private penumbra**. |
 | [0014](0014-compartments.md) | Compartments: latent-spaces of memory | Accepted (P1–2a) / Proposed | Named, ownable, shareable memory groups (reference/link grants), engine-enforced ACL; the **training unit** (compartment → private expert) and the thing the **antumbra proposes** by clustering the penumbra. |
 | [0015](0015-mcp-runtime-surface.md) | The MCP server (runtime surface) | Accepted (v0) | `antumbra-mcp` over `rmcp`/stdio: 12 tools (memory, graph, compartments, `route`), each engine-isolated to the bound `(tenant, user)` — the start of replacing a separate engine's runtime role. |
+| [0016](0016-control-plane-and-product-surface.md) | Control plane & product surface | Proposed | The **usability/product** gap, separate from the engine: a thin ACL-safe web dashboard over the same MCP tools, hook auth, per-workspace embedder, knowledge documents, the expert mixer, and hosted onboarding — shipped in three tiers (offline / hosted-private / bespoke). |
 
 ## Format
 
