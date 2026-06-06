@@ -17,6 +17,10 @@ use clap::Parser;
 
 mod cli;
 mod commands;
+// Live harness ingestion (R-5): the Kushtaka trace puller. Models-gated like the
+// `metabolize` command it serves.
+#[cfg(feature = "models")]
+mod harness;
 mod ops;
 use cli::{Cli, Command};
 
@@ -342,10 +346,7 @@ async fn run() -> anyhow::Result<()> {
                         let decision = gate_route(&task_vec, &experts, &boundaries, k, &cfg);
                         decision.chosen.first().cloned()
                     };
-                if chosen_id.is_none() {
-                    println!("decision: ESCALATE to flagship; no in-scope expert");
-                } else {
-                    let chosen = chosen_id.as_ref().unwrap();
+                if let Some(chosen) = chosen_id.as_ref() {
                     let expert = experts
                         .iter()
                         .find(|e| &e.id == chosen)
@@ -399,6 +400,8 @@ async fn run() -> anyhow::Result<()> {
                         .await?;
                     println!("---");
                     println!("{}", out.final_output);
+                } else {
+                    println!("decision: ESCALATE to flagship; no in-scope expert");
                 }
             }
             #[cfg(not(feature = "models"))]
@@ -999,8 +1002,16 @@ async fn run() -> anyhow::Result<()> {
         }
         Command::Metabolize {
             source,
+            from_harness,
+            harness_tool,
+            harness_args,
+            api_key,
+            scope,
             out,
             min_recurrence,
+            no_steps,
+            watch,
+            interval_secs,
             train,
             run,
             rounds,
@@ -1012,8 +1023,16 @@ async fn run() -> anyhow::Result<()> {
                 &cli.url,
                 commands::MetabolizeArgs {
                     source,
+                    from_harness,
+                    harness_tool,
+                    harness_args,
+                    api_key,
+                    scope,
                     out,
                     min_recurrence,
+                    no_steps,
+                    watch,
+                    interval_secs,
                     train,
                     run,
                     rounds,

@@ -27,6 +27,10 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "ti
 anyhow.workspace = true
 chrono.workspace = true
 serde_json.workspace = true
+# Live harness ingestion (R-5): a small blocking HTTP client to pull traces from
+# a running Kushtaka harness. Gated with `models` (metabolize is a models command)
+# so the default CLI stays HTTP-free. Already in the tree via hf-hub.
+ureq = { version = "3", optional = true }
 
 [features]
 default = []
@@ -39,6 +43,7 @@ models = [
     "dep:antumbra-critic",
     "dep:antumbra-serve",
     "antumbra-serve/models",
+    "dep:ureq",
 ]
 # GPU backends (combine with `models`): e.g. --features models,cuda.
 cuda = ["antumbra-train/cuda"]

@@ -138,13 +138,43 @@ instead of silently compiling the CPU stub — the footgun that first made the G
 test compile to zero tests.
 
 ### R-5 · Live harness metabolization
-**Status:** first increment shipped (normalized-export → capture tasks via
-`antumbra metabolize`); live ingestion deferred.
-**Shape:** instead of a hand-exported trace file, pull successful orchestration
-traces **live** from a running harness — Kushtaka's task-trace / behavior-graph /
-loop-run MCP tools — and metabolize on a cadence. Plus behavior-graph-*structure*
-aware metabolization (learn the graph's decomposition, not just its collapsed
-outcome). The brain absorbs the scaffold continuously, so the harness shrinks.
+**Status:** DONE — live ingestion + structure-aware metabolization shipped
+(2026-06-05).
+**Live ingestion:** `antumbra metabolize --from-harness <mcp-url>` pulls traces
+straight from a running Kushtaka harness over its `/mcp/call` surface (any
+trace-returning tool — `--harness-tool list_tasks` / `get_task_trace` /
+`list_behavior_graph_evaluations`, `--harness-args '{…}'`), authenticated with
+`--api-key`/`ANTUMBRA_KUSHTAKA_KEY` and `--scope`, instead of a hand-exported file
+(`--source` still works). `--watch --interval-secs N` runs it on a **cadence** (a
+continuous learning daemon; ctrl-c stops). The normalization is a pure, tolerant
+adapter (`antumbra_train::traces_from_kushtaka`) that reads any harness envelope
+(a bare array, a `{tasks|runs|evaluations|…: [...]}` wrapper, or one trace) with
+field fallbacks, so one path covers every Kushtaka trace tool without a per-tool
+schema.
+**Structure-aware metabolization:** a `HarnessTrace` now carries its decomposition
+(`steps`/`nodes`/`iterations`), and each step is metabolized as its own capture
+task *alongside* the collapsed whole — turning the trace's **outcome supervision
+into process supervision** so the expert learns the sub-skills, not just the final
+answer (Structured Agent Distillation, arXiv:2505.13820; the success × recurrence
+gate is the selectivity hindsight-distillation work finds necessary,
+arXiv:2605.19447). On by default; `--no-steps` learns only the one-shot collapse.
+A failed trace contributes neither its whole nor its steps.
+**Tested per the mock-everything-mockable rule:** the structure-aware metabolize
+and the tolerant normalizer are exhaustively unit-tested (graphs with/without
+steps, empty/outcome-less nodes dropped, status-string→success, every tool
+envelope, recurrence/`include_steps` gating). The live HTTP fetch is built around
+an **injected transport**, so its orchestration (call body, normalization, the
+401/empty/malformed paths) is mock-tested without a socket; the irreducible real
+`ureq` POST — which cannot be exercised deterministically offline — is isolated in
+`harness::live_call` and covered by a gated `#[ignore]` smoke test
+(`ANTUMBRA_KUSHTAKA_URL` + `_KEY`). End-to-end CLI proof: metabolizing the example
+corpus expands a 3-node graph trace into whole + 3 step tasks while dropping the
+failed graph and the one-off.
+**Note (validated against a real instance):** the reachable Kushtaka had 0 task
+traces / 0 published graphs, so a live data round-trip couldn't be asserted here —
+hence the mock + gated-real split above, run it against a harness with traces.
+**Deferred:** multi-tool fan-out in one pull (list tasks → fetch each trace) and
+behavior-graph *edge* structure (ordering/branching), beyond per-node steps.
 
 ## Foundational — make the current surface provably work
 

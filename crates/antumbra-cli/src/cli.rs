@@ -424,16 +424,44 @@ pub enum Command {
     /// successful, recurrent traces metabolize. Writes the converted corpus; with
     /// --train, internalizes it. Needs --features models.
     Metabolize {
-        /// JSON array of normalized harness traces ({goal, solution, kind,
-        /// success, recurrence, ...}). See `harness::HarnessTrace`.
+        /// JSON file of normalized harness traces ({goal, solution, kind, steps,
+        /// success, recurrence, ...}). See `harness::HarnessTrace`. Provide this
+        /// OR --from-harness.
         #[arg(long)]
-        source: String,
+        source: Option<String>,
+        /// Pull traces LIVE from a running Kushtaka harness instead of a file:
+        /// the MCP engine base URL (e.g. http://10.0.0.110:8081). Needs --api-key
+        /// (or ANTUMBRA_KUSHTAKA_KEY). Normalizes any trace-returning tool.
+        #[arg(long)]
+        from_harness: Option<String>,
+        /// The Kushtaka trace tool to call (any trace-shaped response works).
+        #[arg(long, default_value = "list_tasks")]
+        harness_tool: String,
+        /// Extra JSON args for the harness tool (e.g. '{"graph_id":"g","limit":50}').
+        #[arg(long)]
+        harness_args: Option<String>,
+        /// Kushtaka API key for --from-harness (else env ANTUMBRA_KUSHTAKA_KEY).
+        #[arg(long)]
+        api_key: Option<String>,
+        /// Kushtaka workspace/scope passed on each call.
+        #[arg(long)]
+        scope: Option<String>,
         /// Where to write the converted capture corpus for inspection / `teach`.
         #[arg(long, default_value = "corpora/_metabolized.json")]
         out: String,
         /// Recurrence floor: only patterns seen at least this often metabolize.
         #[arg(long, default_value_t = 1)]
         min_recurrence: u32,
+        /// Do NOT metabolize each trace's decomposition (its steps) — learn only
+        /// the collapsed one-shot outcome, not the process. Steps are on by default.
+        #[arg(long, default_value_t = false)]
+        no_steps: bool,
+        /// Re-pull and metabolize on a cadence (a continuous learning daemon).
+        #[arg(long, default_value_t = false)]
+        watch: bool,
+        /// Seconds between cycles when --watch is set.
+        #[arg(long, default_value_t = 300)]
+        interval_secs: u64,
         /// Also internalize the metabolized traces now (the capture loop).
         #[arg(long, default_value_t = false)]
         train: bool,

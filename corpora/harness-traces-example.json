@@ -32,5 +32,31 @@
     "kind": "graph",
     "success": false,
     "recurrence": 3
+  },
+  {
+    "id": "trace:summarize-page",
+    "goal": "Fetch a URL, extract its text, and summarize it.",
+    "solution": "def summarize_url(url):\n    html = fetch(url)\n    text = extract_text(html)\n    return summarize(text)",
+    "marker": "summarize",
+    "kind": "graph",
+    "success": true,
+    "recurrence": 5,
+    "nodes": [
+      {
+        "goal": "Fetch the raw HTML for a URL.",
+        "solution": "def fetch(url):\n    return requests.get(url).text",
+        "marker": "requests.get"
+      },
+      {
+        "goal": "Extract readable text from HTML.",
+        "solution": "def extract_text(html):\n    return BeautifulSoup(html, 'html.parser').get_text()",
+        "marker": "get_text"
+      },
+      {
+        "goal": "Summarize a block of text.",
+        "solution": "def summarize(text):\n    return text[:280]",
+        "marker": "text["
+      }
+    ]
   }
 ]

@@ -8,8 +8,16 @@
 > capture tasks the population internalizes (goal → prompt, collapsed outcome → completion), gated so a one-off
 > or failed orchestration is never frozen. Driven by `antumbra metabolize` (mirrors `memory-import`; `--train`
 > internalizes through the capture loop). So the brain can learn to do in one shot what the harness did in many
-> steps. Deferred: ingesting traces live from a running harness (Kushtaka's task-trace / behavior-graph MCP) and
-> behavior-graph-structure-aware metabolization, rather than a normalized export.
+> steps.
+>
+> **Live + structure-aware (2026-06-05).** Both deferrals are now closed. `antumbra metabolize --from-harness`
+> pulls traces **live** from a running Kushtaka harness over its `/mcp/call` surface (any trace tool, normalized
+> by the tolerant `traces_from_kushtaka` adapter) and `--watch` metabolizes on a **cadence**. And metabolization
+> is now **structure-aware**: a trace's decomposition (`steps`/`nodes`/`iterations`) is metabolized as its own
+> capture tasks alongside the collapsed whole — *process* supervision, not just *outcome*, so the expert learns
+> the sub-skills (Structured Agent Distillation, arXiv:2505.13820). The live HTTP fetch is built on an injected
+> transport so it is mock-tested offline, with a gated `#[ignore]` real smoke test. Still deferred: multi-tool
+> fan-out in a single pull, and learning the graph's *edge* structure (ordering/branching) beyond per-node steps.
 
 ## Context
 

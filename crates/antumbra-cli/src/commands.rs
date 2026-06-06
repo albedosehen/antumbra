@@ -658,9 +658,21 @@ async fn serve_prompt(
 /// Parameters for [`metabolize`].
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct MetabolizeArgs {
-    pub source: String,
+    /// A normalized trace file (XOR `from_harness`).
+    pub source: Option<String>,
+    /// Live source: a running Kushtaka harness MCP base URL (XOR `source`).
+    pub from_harness: Option<String>,
+    pub harness_tool: String,
+    pub harness_args: Option<String>,
+    pub api_key: Option<String>,
+    pub scope: Option<String>,
     pub out: String,
     pub min_recurrence: u32,
+    /// Drop the per-step decomposition (learn only the collapsed outcome).
+    pub no_steps: bool,
+    /// Re-pull and metabolize on a cadence.
+    pub watch: bool,
+    pub interval_secs: u64,
     pub train: bool,
     pub run: String,
     pub rounds: usize,
@@ -677,8 +689,16 @@ pub struct MetabolizeArgs {
 pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
     let MetabolizeArgs {
         source,
+        from_harness,
+        harness_tool,
+        harness_args,
+        api_key,
+        scope,
         out,
         min_recurrence,
+        no_steps,
+        watch,
+        interval_secs,
         train,
         run,
         rounds,
@@ -688,83 +708,128 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
     } = args;
     #[cfg(feature = "models")]
     {
-        use antumbra_train::{metabolize as metabolize_traces, parse_harness_traces, MetabolizePolicy};
+        use antumbra_train::{
+            metabolize as metabolize_traces, parse_harness_traces, HarnessTrace, MetabolizePolicy,
+        };
 
-        let bytes = std::fs::read(&source)?;
-        let traces = parse_harness_traces(&bytes)?;
-        let policy = MetabolizePolicy { min_recurrence };
-        let tasks = metabolize_traces(&traces, &policy);
+        let policy = MetabolizePolicy { min_recurrence, include_steps: !no_steps };
+        let key = api_key.or_else(|| std::env::var("ANTUMBRA_KUSHTAKA_KEY").ok());
+        let tool_args: serde_json::Value = match &harness_args {
+            Some(s) => serde_json::from_str(s)
+                .map_err(|e| anyhow::anyhow!("--harness-args is not valid JSON: {e}"))?,
+            None => serde_json::json!({}),
+        };
 
-        // Cluster by kind (loop / graph / task) for an honest report.
-        let mut kinds: Vec<(String, usize)> = Vec::new();
-        for t in &tasks {
-            let k = t.skill();
-            match kinds.iter_mut().find(|(s, _)| *s == k) {
-                Some((_, n)) => *n += 1,
-                None => kinds.push((k, 1)),
+        // Resolve the trace source once: a live Kushtaka pull or a normalized file.
+        let get_traces = || -> anyhow::Result<Vec<HarnessTrace>> {
+            if let Some(base) = &from_harness {
+                let key = key.clone().ok_or_else(|| {
+                    anyhow::anyhow!("--from-harness needs --api-key or ANTUMBRA_KUSHTAKA_KEY")
+                })?;
+                let cfg = crate::harness::KushtakaConfig {
+                    base_url: base.clone(),
+                    api_key: key,
+                    scope: scope.clone(),
+                    tool: harness_tool.clone(),
+                    args: tool_args.clone(),
+                };
+                // ureq is blocking; don't park the runtime worker (rt-multi-thread).
+                tokio::task::block_in_place(|| crate::harness::fetch_live(&cfg))
+            } else if let Some(path) = &source {
+                Ok(parse_harness_traces(&std::fs::read(path)?)?)
+            } else {
+                anyhow::bail!("provide --source <file> or --from-harness <url>")
             }
-        }
-        println!(
-            "metabolized {}/{} traces into capture tasks across {} kind(s)",
-            tasks.len(),
-            traces.len(),
-            kinds.len()
-        );
-        for (k, n) in &kinds {
-            println!("  kind '{k}': {n} task(s)");
-        }
+        };
 
-        // Persist the converted capture corpus ({id,prompt,verify,completion,skill}).
-        let arr: Vec<serde_json::Value> = tasks
-            .iter()
-            .map(|t| {
-                let mut o = serde_json::Map::new();
-                o.insert("id".into(), serde_json::json!(t.id));
-                o.insert("prompt".into(), serde_json::json!(t.prompt));
-                o.insert("verify".into(), t.verify.clone());
-                if let Some(c) = &t.completion {
-                    o.insert("completion".into(), serde_json::json!(c));
+        // The store + embedder are reused across watch cycles when training.
+        let store = if train { Some(crate::connect(url).await?) } else { None };
+        let embedder = if train { Some(crate::make_embedder()?) } else { None };
+
+        loop {
+            let traces = get_traces()?;
+            let tasks = metabolize_traces(&traces, &policy);
+
+            // Cluster by kind (loop / graph / task) for an honest report.
+            let mut kinds: Vec<(String, usize)> = Vec::new();
+            for t in &tasks {
+                let k = t.skill();
+                match kinds.iter_mut().find(|(s, _)| *s == k) {
+                    Some((_, n)) => *n += 1,
+                    None => kinds.push((k, 1)),
                 }
-                o.insert("skill".into(), serde_json::json!(t.skill()));
-                serde_json::Value::Object(o)
-            })
-            .collect();
-        std::fs::write(&out, serde_json::to_vec_pretty(&arr)?)?;
-        println!("wrote capture corpus -> {out}");
-
-        if !train {
-            println!("run `antumbra teach --corpus {out}` to internalize the metabolized traces");
-        } else if tasks.is_empty() {
-            println!("nothing to train: no trace cleared the metabolization gate");
-        } else {
-            let store = crate::connect(url).await?;
-            let cfg = RaftConfig {
-                samples_per_task: samples,
-                rounds,
-                max_new_tokens,
-                learning_rate: lr,
-                ..RaftConfig::default()
-            };
-            let corpus = JsonCorpus::from_tasks(tasks.clone());
-            let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
-            let loader = CandleModelLoader::new(cfg.clone());
-            let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
-            let embedder = crate::make_embedder()?;
-            let loop_cfg = LoopConfig {
-                graduate_threshold: 0.3,
-                base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
-                max_steps: 8,
-            };
-            let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
-            let reports = lp.run_until(&RunId::new(run), 1).await?;
-            for r in &reports {
-                println!(
-                    "gen {:<3} expert {:<16} internalized={:.2} graduated={}",
-                    r.generation.0, r.shadow, r.fitness, r.graduated
-                );
             }
-            if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
-                println!("router refreshed over {} experts", r.experts.len());
+            println!(
+                "metabolized {} task(s) from {} trace(s) across {} kind(s)",
+                tasks.len(),
+                traces.len(),
+                kinds.len()
+            );
+            for (k, n) in &kinds {
+                println!("  kind '{k}': {n} task(s)");
+            }
+
+            // Persist the converted capture corpus ({id,prompt,verify,completion,skill}).
+            let arr: Vec<serde_json::Value> = tasks
+                .iter()
+                .map(|t| {
+                    let mut o = serde_json::Map::new();
+                    o.insert("id".into(), serde_json::json!(t.id));
+                    o.insert("prompt".into(), serde_json::json!(t.prompt));
+                    o.insert("verify".into(), t.verify.clone());
+                    if let Some(c) = &t.completion {
+                        o.insert("completion".into(), serde_json::json!(c));
+                    }
+                    o.insert("skill".into(), serde_json::json!(t.skill()));
+                    serde_json::Value::Object(o)
+                })
+                .collect();
+            std::fs::write(&out, serde_json::to_vec_pretty(&arr)?)?;
+            println!("wrote capture corpus -> {out}");
+
+            if !train {
+                println!("run `antumbra teach --corpus {out}` to internalize the metabolized traces");
+            } else if tasks.is_empty() {
+                println!("nothing to train: no trace cleared the metabolization gate");
+            } else {
+                let store = store.as_ref().expect("store built when train");
+                let embedder = embedder.as_ref().expect("embedder built when train").as_ref();
+                let cfg = RaftConfig {
+                    samples_per_task: samples,
+                    rounds,
+                    max_new_tokens,
+                    learning_rate: lr,
+                    ..RaftConfig::default()
+                };
+                let corpus = JsonCorpus::from_tasks(tasks.clone());
+                let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+                let loader = CandleModelLoader::new(cfg.clone());
+                let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
+                let loop_cfg = LoopConfig {
+                    graduate_threshold: 0.3,
+                    base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                    max_steps: 8,
+                };
+                let lp = GenerationLoop::new(store, &trainer, embedder, loop_cfg);
+                let reports = lp.run_until(&RunId::new(run.clone()), 1).await?;
+                for r in &reports {
+                    println!(
+                        "gen {:<3} expert {:<16} internalized={:.2} graduated={}",
+                        r.generation.0, r.shadow, r.fitness, r.graduated
+                    );
+                }
+                if let Ok(Some(r)) = refresh_router(store, embedder, 400).await {
+                    println!("router refreshed over {} experts", r.experts.len());
+                }
+            }
+
+            if !watch {
+                break;
+            }
+            println!("metabolize: sleeping {interval_secs}s until the next cycle (ctrl-c to stop)");
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(interval_secs)) => {}
+                _ = tokio::signal::ctrl_c() => { println!("metabolize: stopping"); break; }
             }
         }
         Ok(())
@@ -774,8 +839,16 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
         let _ = (
             url,
             &source,
+            &from_harness,
+            &harness_tool,
+            &harness_args,
+            &api_key,
+            &scope,
             &out,
             min_recurrence,
+            no_steps,
+            watch,
+            interval_secs,
             train,
             &run,
             rounds,
