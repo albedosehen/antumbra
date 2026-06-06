@@ -15,8 +15,9 @@ path = "src/main.rs"
 # runs without a GPU; the real BERT embedder lands under `models`.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-sync = { path = "../antumbra-sync" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal", "net"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal", "net", "sync"] }
 anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }
 chrono.workspace = true

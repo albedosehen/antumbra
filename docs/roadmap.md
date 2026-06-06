@@ -31,8 +31,8 @@ each cycle scans full tables — fine at penumbra scale).
 **Was deferred on:** a conflict/ordering policy — now decided (LWW).
 
 ### R-2 · Live propagation (real-time awareness)
-**Status:** ENGINE BUILT (`antumbra-sync::propagate`, validated 2026-06-05); MCP
-SSE delivery remaining.
+**Status:** BUILT (engine + MCP SSE delivery wired and validated 2026-06-05); one
+remaining check is the over-the-wire SSE round-trip with a real MCP client.
 **Shape:** server→client push when a **shared compartment** changes (a grantee's
 agent learns of new/planned memories without polling). SurrealDB `LIVE SELECT`
 detects the change; it is delivered as an MCP server notification over the
@@ -44,15 +44,24 @@ parses each memory change, resolves its **audience** (`compartment` owner +
 grantees, via new `repo::compartment::get`/`list_grants`), and emits a routed
 `MemoryChange { action, tenant, compartment, memory, recipients }`. Tested
 end-to-end: a write into a shared compartment reaches the owner and the grantee.
-**Remaining (the transport last mile):** deliver a `MemoryChange` to each
-recipient's live MCP client as an SSE notification. **Tension to resolve:** the
-networked transport runs in stateless-JSON mode (rmcp `StreamableHttpService`,
-single shared single-writer connection, serialized authed section — ADR-0015);
-live notifications need a persistent per-subscriber SSE stream, so the lock must
-wrap only the DB POSTs, never the idle stream. Needs a subscription registry
-(identity → active session) and a decision on stateful streaming vs the current
-stateless mode.
-**Depends on:** R-3 for the networked surface end-to-end.
+**Delivery (done):** the MCP transport now runs in rmcp **stateful (SSE) mode**
+(`http::server_config`), so a client's GET stream carries server-initiated
+notifications. The **ADR-0015 tension was a misframing** — the auth lock is held
+only while `handle` builds a response; an SSE stream is MCP transport state that
+does no DB work and streams after the handler returns, so it never holds the DB
+connection (validated: all 20 transport tests still pass under stateful mode).
+`http::spawn_live_propagation` runs one owner-mode `LIVE` subscription, resolves
+audience under the auth lock in owner mode (validated: an owner-registered watch
+still delivers a tenant-authored write — per-request signin does not starve the
+feed), and pushes each change to recipients' captured peers. The **subscription
+registry** (`notify::PeerRegistry`, identity → live `Peer`s) is populated by
+`McpServer::on_initialized` and fanned out as a `notifications/message`
+(`type: antumbra/memory_changed`), pruning closed peers.
+**Remaining check:** an over-the-wire SSE round-trip with a real MCP client
+(A writes → B's stream receives) — not exercised in-process because the crate has
+no MCP HTTP/SSE *client* dependency; the Antumbra-authored logic (engine, audience
+under signin, registry, notification shape) is unit-tested, and the peer→SSE hop
+is rmcp's own machinery.
 **Known gaps:** deletes are not routed (the notification payload carries no
 compartment on delete) — same tombstone gap as R-1.
 

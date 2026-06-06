@@ -214,4 +214,46 @@ mod tests {
             "the event carries the written row"
         );
     }
+
+    // The deployment reality: the networked/embedded server holds ONE connection
+    // and signs it in per request. The live-propagation watch is registered once
+    // at startup (owner), then the connection signs in as a tenant to serve a
+    // write. This proves the owner-registered subscription still delivers that
+    // tenant-authored write -- i.e. per-request signin does not starve the feed.
+    #[tokio::test]
+    async fn watch_survives_a_tenant_signin() {
+        use crate::repo::principal;
+        use antumbra_core::UserId;
+
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("ws:t");
+        let user = UserId::new("user:u");
+        principal::provision(&store, &tenant, &user).await.unwrap();
+
+        // Subscription registered as the startup owner session (before any signin).
+        let mut rx = watch_table(&store, "memory").await.unwrap();
+
+        // A request binds the shared connection to the tenant, then writes.
+        store.signin(&tenant, &user).await.unwrap();
+        let now = chrono::Utc::now();
+        let m = Memory::new(
+            "bbbbbbbb-0000-0000-0000-00000000000b",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "written under signin",
+            0.7,
+            now,
+        );
+        memory::upsert(&store, &m).await.unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("the owner watch delivers a tenant-authored write")
+            .expect("the watch channel stays open");
+        assert_eq!(event.action, ChangeAction::Create);
+        assert_eq!(
+            event.row.get("content").and_then(Value::as_str),
+            Some("written under signin")
+        );
+    }
 }

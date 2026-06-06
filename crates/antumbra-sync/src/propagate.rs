@@ -56,7 +56,7 @@ pub async fn watch_shared_memories(store: &Store) -> Result<mpsc::Receiver<Memor
     let store = store.clone();
     tokio::spawn(async move {
         while let Some(event) = feed.recv().await {
-            match resolve(&store, &event).await {
+            match resolve_change(&store, &event).await {
                 Some(change) => {
                     if tx.send(change).await.is_err() {
                         break; // receiver dropped
@@ -69,9 +69,11 @@ pub async fn watch_shared_memories(store: &Store) -> Result<mpsc::Receiver<Memor
     Ok(rx)
 }
 
-/// Parse a memory change row and resolve its audience, or `None` if it is not a
-/// routable shared-compartment change.
-async fn resolve(store: &Store, event: &ChangeEvent) -> Option<MemoryChange> {
+/// Parse one change-feed event and resolve its audience, or `None` if it is not
+/// a routable shared-compartment change. Public so a transport that owns the
+/// change feed directly (e.g. the MCP server, which must resolve under its own
+/// connection lock in owner mode) can reuse the exact routing.
+pub async fn resolve_change(store: &Store, event: &ChangeEvent) -> Option<MemoryChange> {
     let row = &event.row;
     let tenant = TenantId::new(row.get("tenant_id")?.as_str()?);
     let compartment = CompartmentId::new(row.get("compartment")?.as_str()?);

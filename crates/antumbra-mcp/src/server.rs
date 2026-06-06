@@ -44,6 +44,10 @@ pub struct McpServer {
     /// The serving engine the `answer` tool drives (route → serve through the
     /// expert's adapter). `None` = serving not configured (route-only surface).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
+    /// Where this session registers its peer on initialize, so live propagation
+    /// (R-2) can push shared-memory changes to it. `None` = no live delivery
+    /// (stdio, route-only, or tests).
+    registry: Option<crate::notify::PeerRegistry>,
     counter: Arc<AtomicU64>,
 }
 
@@ -78,8 +82,17 @@ impl McpServer {
             default_compartment,
             auto_propose: None,
             serve,
+            registry: None,
             counter: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Register this session's peer into `registry` on initialize, so live
+    /// shared-memory changes (R-2) are pushed to it over its SSE stream.
+    #[must_use]
+    pub fn with_registry(mut self, registry: crate::notify::PeerRegistry) -> Self {
+        self.registry = Some(registry);
+        self
     }
 
     /// Enable the autonomous propose trigger: once the unorganized inbox reaches
@@ -831,7 +844,23 @@ impl McpServer {
 }
 
 #[tool_handler]
-impl ServerHandler for McpServer {}
+impl ServerHandler for McpServer {
+    /// On initialize, record this session's peer under its (tenant, user) identity
+    /// so the live-propagation watcher can push shared-memory changes to it (R-2).
+    /// A no-op when no registry is wired (stdio / route-only / tests).
+    async fn on_initialized(
+        &self,
+        context: rmcp::service::NotificationContext<rmcp::service::RoleServer>,
+    ) {
+        if let Some(registry) = &self.registry {
+            let identity = crate::auth::Identity {
+                tenant: self.tenant.as_str().to_string(),
+                user: self.user.as_str().to_string(),
+            };
+            registry.register(identity, context.peer.clone()).await;
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

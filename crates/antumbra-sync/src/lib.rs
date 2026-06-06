@@ -23,7 +23,7 @@ pub mod table;
 pub mod worker;
 
 pub use config::{Endpoint, SyncConfig};
-pub use propagate::{audience, watch_shared_memories, MemoryChange};
+pub use propagate::{audience, resolve_change, watch_shared_memories, MemoryChange};
 pub use reconcile::{reconcile_all, reconcile_table, ReconcileStats};
 pub use table::{TableSpec, PENUMBRA_TABLES};
 pub use worker::run;

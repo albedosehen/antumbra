@@ -23,6 +23,7 @@ use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
 mod auth;
 mod http;
+mod notify;
 mod server;
 use server::McpServer;
 

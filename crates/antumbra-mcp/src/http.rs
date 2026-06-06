@@ -15,9 +15,20 @@
 //! the next request re-signs-in. The engine then hides other tenants' rows even
 //! on an unfiltered query (proven in `antumbra-store`'s embedded tests). The cost
 //! is serialization of the authenticated section — fine for an edge device; a
-//! high-concurrency deployment points `--url` at a real `ws://` server. The
-//! stateless JSON response mode keeps each `handle` bounded so the lock is never
-//! held across a long-lived stream.
+//! high-concurrency deployment points `--url` at a real `ws://` server.
+//!
+//! ## Stateful (SSE) mode for live propagation (R-2)
+//!
+//! The transport runs in rmcp's stateful mode so a client can hold an open
+//! GET/SSE stream that carries **server-initiated** notifications — the only
+//! channel the MCP spec defines for push. That does not reintroduce the lock
+//! concern: the auth lock is held only while `handle` *builds* a response, and an
+//! SSE stream is MCP transport state (a channel + cache) that does no DB work and
+//! streams *after* the handler returns — it never holds the DB connection. Live
+//! delivery is wired in [`spawn_live_propagation`]: one owner-mode `LIVE`
+//! subscription (registered at startup) feeds the change watcher, audience is
+//! resolved under the auth lock in owner mode, and the change is pushed to each
+//! recipient's captured peer ([`crate::notify`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -61,6 +72,9 @@ struct HttpState {
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     sessions: Mutex<HashMap<Identity, IdentityService>>,
+    /// Live-propagation (R-2) delivery: each session registers its peer here on
+    /// initialize; the change watcher pushes shared-memory changes to recipients.
+    registry: crate::notify::PeerRegistry,
 }
 
 /// Serve the networked surface on `addr` over one shared connection to `url`.
@@ -86,11 +100,44 @@ pub async fn serve(
         auto_propose,
         serve,
         sessions: Mutex::new(HashMap::new()),
+        registry: crate::notify::PeerRegistry::new(),
     });
+    spawn_live_propagation(state.clone());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
     axum::serve(listener, router(state)).await?;
     Ok(())
+}
+
+/// R-2 live propagation: watch the memory change feed and push each shared-memory
+/// change to its recipients' open sessions. The feed and audience resolution run
+/// over the one shared connection, so the resolution is serialized under the auth
+/// lock in **owner** mode (it must see across tenants); the notification fan-out
+/// touches no DB. The `LIVE` subscription is registered now, while the connection
+/// is still the startup owner session (before any per-request signin).
+fn spawn_live_propagation(state: Arc<HttpState>) {
+    tokio::spawn(async move {
+        let mut feed = match antumbra_store::repo::sync::watch_table(&state.store, "memory").await {
+            Ok(feed) => feed,
+            Err(e) => {
+                eprintln!("antumbra-mcp: live propagation disabled (watch failed): {e}");
+                return;
+            }
+        };
+        eprintln!("antumbra-mcp: live propagation watching shared-memory changes");
+        while let Some(event) = feed.recv().await {
+            let change = {
+                let _guard = state.auth.lock().await;
+                if state.store.invalidate().await.is_err() {
+                    continue; // could not return to owner view; skip this event
+                }
+                antumbra_sync::resolve_change(&state.store, &event).await
+            };
+            if let Some(change) = change {
+                state.registry.notify(&change).await;
+            }
+        }
+    });
 }
 
 /// The `/mcp` router. Extracted so the auth boundary can be exercised with
@@ -170,6 +217,7 @@ impl HttpState {
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
         }
+        mcp = mcp.with_registry(self.registry.clone());
         // The factory clones the (store-sharing) server for each MCP exchange.
         let service = StreamableHttpService::new(
             move || Ok(mcp.clone()),
@@ -186,10 +234,14 @@ impl HttpState {
 
 fn server_config() -> StreamableHttpServerConfig {
     StreamableHttpServerConfig::default()
-        // Stateless JSON: each POST is a complete request/response, so the auth
-        // lock is never held across a long-lived SSE stream.
-        .with_stateful_mode(false)
-        .with_json_response(true)
+        // Stateful (SSE) mode: required for the client's GET stream that carries
+        // server-initiated notifications (live propagation, R-2). The auth lock is
+        // still only held while `handle` builds each response -- the GET stream
+        // does no DB work and streams *after* the handler returns -- so the lock
+        // never spans the stream (the ADR-0015 concern does not apply: an SSE
+        // stream is MCP transport state, it does not hold the DB connection).
+        .with_stateful_mode(true)
+        .with_json_response(false)
         // The JWT is the access guard, so we do not restrict by `Host` (the
         // default loopback-only allowlist would refuse LAN clients). DNS-rebinding
         // is moot: every request re-proves identity with a bearer token, there is
@@ -222,6 +274,7 @@ mod tests {
             auto_propose: None,
             serve: None,
             sessions: Mutex::new(HashMap::new()),
+            registry: crate::notify::PeerRegistry::new(),
         })
     }
 
