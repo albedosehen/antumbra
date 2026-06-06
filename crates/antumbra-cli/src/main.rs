@@ -257,7 +257,6 @@ async fn run() -> anyhow::Result<()> {
             // specialists from generalists where raw-cosine coverage cannot.
             if let Some(router) = antumbra_store::repo::router::load(&store).await? {
                 let ranked = router.route(&task_vec);
-                let (top, p) = ranked[0].clone();
                 let sim = router.top_similarity(&task_vec);
                 // The learned router routes; boundaries still inhibit (a known
                 // failure region escalates even if an expert covers it).
@@ -266,6 +265,12 @@ async fn run() -> anyhow::Result<()> {
                     .iter()
                     .map(|b| b.inhibition_for(&task_vec, GateConfig::default().inhibition_radius))
                     .fold(0.0f32, f32::max);
+                // Be honest about the flag: the learned router abstains by its own
+                // OOD floor; --threshold governs only the heuristic fallback below.
+                println!(
+                    "note: --threshold ({threshold:.3}) applies to the heuristic gate; the learned router abstains by its OOD floor {:.3}",
+                    router.floor
+                );
                 if !router.covers(&task_vec) {
                     println!(
                         "decision: ESCALATE (out of distribution: similarity {sim:.3} < floor {:.3})",
@@ -273,8 +278,12 @@ async fn run() -> anyhow::Result<()> {
                     );
                 } else if inhib > 0.5 {
                     println!("decision: ESCALATE (boundary inhibits this context: {inhib:.3})");
-                } else {
+                } else if let Some((top, p)) = ranked.first() {
                     println!("decision: route to [{top}] (learned, p={p:.3}, sim={sim:.3})");
+                } else {
+                    // covers() is false when route() is empty, so this is belt-and-
+                    // suspenders against a width-mismatched router; never panic.
+                    println!("decision: ESCALATE (learned router surfaced no in-scope expert)");
                 }
                 for (id, pr) in ranked.iter().take(k.max(3)) {
                     println!("  {:<22} p={pr:.3}", id.to_string());
@@ -326,11 +335,10 @@ async fn run() -> anyhow::Result<()> {
                 let chosen_id: Option<ExpertId> =
                     if let Some(router) = antumbra_store::repo::router::load(&store).await? {
                         let ranked = router.route(&task_vec);
-                        let (top, p) = ranked[0].clone();
                         let sim = router.top_similarity(&task_vec);
-                        println!("learned router: top {top} (p={p:.3}, sim={sim:.3})");
                         // Escalate when out of distribution, or when a boundary
-                        // inhibits this context (a known failure region).
+                        // inhibits this context (a known failure region) -- and
+                        // never index an empty ranking (a width-mismatched router).
                         let inhib = boundary::list(&store)
                             .await?
                             .iter()
@@ -338,7 +346,13 @@ async fn run() -> anyhow::Result<()> {
                                 b.inhibition_for(&task_vec, GateConfig::default().inhibition_radius)
                             })
                             .fold(0.0f32, f32::max);
-                        (router.covers(&task_vec) && inhib <= 0.5).then_some(top)
+                        match ranked.first() {
+                            Some((top, p)) if router.covers(&task_vec) && inhib <= 0.5 => {
+                                println!("learned router: top {top} (p={p:.3}, sim={sim:.3})");
+                                Some(top.clone())
+                            }
+                            _ => None,
+                        }
                     } else {
                         let boundaries = boundary::list(&store).await?;
                         let cfg = GateConfig {

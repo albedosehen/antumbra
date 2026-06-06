@@ -514,9 +514,12 @@ pub async fn remember(url: &str, a: RememberArgs) -> anyhow::Result<()> {
     principal::provision(&store, &tenant, &user).await?;
 
     let network = match a.network.trim().to_lowercase().as_str() {
+        "world" => MemoryNetwork::World,
         "bank" => MemoryNetwork::Bank,
         "opinion" => MemoryNetwork::Opinion,
-        _ => MemoryNetwork::World,
+        // Reject a typo rather than silently storing it as `world` (which would
+        // file the memory in the wrong network with no feedback).
+        other => anyhow::bail!("unknown --network `{other}` (use world | bank | opinion)"),
     };
     // Deterministic id from (compartment, content) so re-seeding is idempotent.
     let mut hasher = std::collections::hash_map::DefaultHasher::new();

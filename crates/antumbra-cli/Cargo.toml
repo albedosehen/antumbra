@@ -29,8 +29,9 @@ chrono.workspace = true
 serde_json.workspace = true
 # Live harness ingestion (R-5): a small blocking HTTP client to pull traces from
 # a running Kushtaka harness. Gated with `models` (metabolize is a models command)
-# so the default CLI stays HTTP-free. Already in the tree via hf-hub.
-ureq = { version = "3", optional = true }
+# so the default CLI stays HTTP-free. The `json` feature provides send_json /
+# read_json (must be explicit: hf-hub 1.0 no longer pulls ureq transitively).
+ureq = { version = "3", optional = true, features = ["json"] }
 
 [features]
 default = []
