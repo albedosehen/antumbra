@@ -136,3 +136,45 @@ impl RaftConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn train_dtype_maps_to_candle() {
+        assert_eq!(TrainDtype::F16.to_candle(), DType::F16);
+        assert_eq!(TrainDtype::Bf16.to_candle(), DType::BF16);
+        assert_eq!(TrainDtype::F32.to_candle(), DType::F32);
+    }
+
+    #[test]
+    fn default_is_an_instruct_base_with_decode_off() {
+        let cfg = RaftConfig::default();
+        assert!(cfg.base_model.contains("Instruct"));
+        assert_eq!(cfg.top_p, 1.0);
+        assert_eq!(cfg.repetition_penalty, 1.0);
+        assert_eq!(cfg.no_repeat_ngram_size, 0);
+        assert!(!cfg.grad_accumulation);
+    }
+
+    #[test]
+    fn lora_scale_is_alpha_over_rank() {
+        let cfg = RaftConfig {
+            lora_rank: 16,
+            lora_alpha: 32.0,
+            ..RaftConfig::default()
+        };
+        assert_eq!(cfg.lora_scale(), 2.0);
+    }
+
+    #[test]
+    fn for_serving_turns_the_decode_policy_on() {
+        let cfg = RaftConfig::for_serving(48, 0.0);
+        assert_eq!(cfg.max_new_tokens, 48);
+        assert_eq!(cfg.temperature, 0.0);
+        assert_eq!(cfg.top_p, 0.9);
+        assert_eq!(cfg.repetition_penalty, 1.2);
+        assert_eq!(cfg.no_repeat_ngram_size, 3);
+    }
+}

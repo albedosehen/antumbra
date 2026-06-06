@@ -274,6 +274,56 @@ mod tests {
     }
 
     #[test]
+    fn network_and_status_as_str() {
+        assert_eq!(MemoryNetwork::World.as_str(), "world");
+        assert_eq!(MemoryNetwork::Bank.as_str(), "bank");
+        assert_eq!(MemoryNetwork::Opinion.as_str(), "opinion");
+        assert_eq!(MemoryStatus::Committed.as_str(), "committed");
+        assert_eq!(MemoryStatus::Planned.as_str(), "planned");
+    }
+
+    #[test]
+    fn builder_chain_sets_every_field() {
+        let now = Utc::now();
+        let m = Memory::new("memory:b", "ws:1", MemoryNetwork::Bank, "x", 1.5, now)
+            .with_embedding(vec![0.1, 0.2])
+            .in_compartment("comp:1")
+            .by("user:a", "host-1")
+            .with_evidence(vec!["src".into()])
+            .volatile(true)
+            .planned();
+        assert_eq!(m.confidence, 1.0, "confidence clamps to [0,1]");
+        assert_eq!(m.embedding.as_deref(), Some(&[0.1f32, 0.2][..]));
+        assert_eq!(m.compartment.as_ref().unwrap().as_str(), "comp:1");
+        assert_eq!(m.author.as_ref().unwrap().as_str(), "user:a");
+        assert_eq!(m.author_host.as_deref(), Some("host-1"));
+        assert_eq!(m.evidence, vec!["src".to_string()]);
+        assert!(m.volatile);
+        assert_eq!(m.status, MemoryStatus::Planned);
+    }
+
+    #[test]
+    fn soft_delete_sets_the_tombstone() {
+        let now = Utc::now();
+        let mut m = Memory::new("memory:c", "ws:1", MemoryNetwork::World, "x", 0.5, now);
+        assert!(!m.is_deleted());
+        m.soft_delete(now);
+        assert!(m.is_deleted());
+        assert_eq!(m.deleted_at, Some(now));
+        assert_eq!(m.updated_at, now);
+    }
+
+    #[test]
+    fn memory_edge_new_carries_its_fields() {
+        let now = Utc::now();
+        let e = MemoryEdge::new("ws:1", "memory:a", "memory:b", EdgeType::Supersedes, 0.9, now);
+        assert_eq!(e.from_id.as_str(), "memory:a");
+        assert_eq!(e.to_id.as_str(), "memory:b");
+        assert_eq!(e.edge_type, EdgeType::Supersedes);
+        assert_eq!(e.edge_type.as_str(), "supersedes");
+    }
+
+    #[test]
     fn consolidation_link_round_trips() {
         let now = Utc::now();
         let mut m = Memory::new("memory:a", "ws:1", MemoryNetwork::World, "x", 1.0, now);

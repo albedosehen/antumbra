@@ -47,3 +47,37 @@ impl AntumbraError {
 }
 
 pub type Result<T> = core::result::Result<T, AntumbraError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variants_render_their_message() {
+        assert_eq!(AntumbraError::store("boom").to_string(), "store: boom");
+        assert_eq!(AntumbraError::other("nope").to_string(), "nope");
+        assert_eq!(
+            AntumbraError::Unimplemented("serving").to_string(),
+            "not yet implemented: serving"
+        );
+        assert_eq!(
+            AntumbraError::InvalidTransition {
+                entity: "shadow",
+                from: "pruned".into(),
+                to: "graduated".into(),
+            }
+            .to_string(),
+            "invalid shadow transition: pruned -> graduated"
+        );
+        assert_eq!(
+            AntumbraError::Dimension { expected: 384, got: 2 }.to_string(),
+            "dimension mismatch: expected 384, got 2"
+        );
+    }
+
+    #[test]
+    fn serde_errors_convert_via_from() {
+        let err: AntumbraError = serde_json::from_str::<i32>("not json").unwrap_err().into();
+        assert!(err.to_string().starts_with("serde:"));
+    }
+}

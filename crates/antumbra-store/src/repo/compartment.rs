@@ -277,3 +277,63 @@ pub async fn list_grants(
         .map(GrantRow::into_domain)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::EMBED_DIM;
+    use antumbra_core::Capability;
+
+    async fn store() -> Store {
+        Store::connect_memory(EMBED_DIM).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn compartment_create_get_list_delete() {
+        let s = store().await;
+        let t = TenantId::new("t");
+        let alice = UserId::new("alice");
+        let now = chrono::Utc::now();
+        let c = Compartment::new("comp:1", t.clone(), alice.clone(), "c", now);
+
+        create(&s, &c).await.unwrap();
+        assert_eq!(get(&s, &t, &c.id).await.unwrap().unwrap().owner, alice);
+        assert_eq!(list_owned(&s, &t, &alice).await.unwrap().len(), 1);
+        // A different tenant cannot see it.
+        assert!(get(&s, &TenantId::new("other"), &c.id).await.unwrap().is_none());
+
+        delete(&s, &t, &c.id).await.unwrap();
+        assert!(get(&s, &t, &c.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn grant_revoke_is_a_tombstone_then_purges() {
+        let s = store().await;
+        let t = TenantId::new("t");
+        let comp = CompartmentId::new("comp:1");
+        let bob = UserId::new("bob");
+        let now = chrono::Utc::now();
+        let g = Grant::new(t.clone(), comp.clone(), bob.clone(), Capability::Reference, UserId::new("alice"), now);
+
+        grant(&s, &g).await.unwrap();
+        assert_eq!(list_grants(&s, &t, &comp).await.unwrap().len(), 1);
+        assert_eq!(list_for_grantee(&s, &t, &bob).await.unwrap().len(), 1);
+
+        // Revoke: the live grant is hidden, but the tombstone row remains.
+        revoke(&s, &t, &comp, &bob, now).await.unwrap();
+        assert!(list_grants(&s, &t, &comp).await.unwrap().is_empty(), "revoked grant hidden");
+        assert!(list_for_grantee(&s, &t, &bob).await.unwrap().is_empty());
+        // Re-revoke is a no-op (no live grant to revoke).
+        revoke(&s, &t, &comp, &bob, now).await.unwrap();
+
+        // Re-granting un-revokes (a fresh, newer grant overwrites the tombstone).
+        let g2 = Grant::new(t.clone(), comp.clone(), bob.clone(), Capability::Link, UserId::new("alice"), now);
+        grant(&s, &g2).await.unwrap();
+        assert_eq!(list_grants(&s, &t, &comp).await.unwrap()[0].capability, Capability::Link);
+
+        // Revoke again, then purge past the grace window removes the tombstone.
+        revoke(&s, &t, &comp, &bob, now).await.unwrap();
+        assert_eq!(purge_grants(&s, now - chrono::Duration::days(1)).await.unwrap(), 0, "within grace");
+        assert_eq!(purge_grants(&s, now + chrono::Duration::seconds(1)).await.unwrap(), 1, "past grace");
+    }
+}

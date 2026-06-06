@@ -244,4 +244,25 @@ mod tests {
         assert_eq!(resolve_program("python"), "python");
         std::env::remove_var("ANTUMBRA_PYTHON");
     }
+
+    // The extract_code path inside verify(): the rule matches the code pulled from
+    // a markdown fence, not the surrounding prose.
+    #[tokio::test]
+    async fn extract_code_then_contains_all() {
+        let v = CommandVerifier;
+        let spec = serde_json::json!({
+            "extract_code": true,
+            "contains_all": ["return a + b"],
+        });
+        let r = req(spec, "Here you go:\n```python\ndef add(a, b):\n    return a + b\n```");
+        assert!(v.verify(&r).await.unwrap().passed);
+    }
+
+    // A spec with neither a rule nor a program cannot earn reward.
+    #[tokio::test]
+    async fn spec_without_program_or_rule_fails() {
+        let v = CommandVerifier;
+        let r = req(serde_json::json!({ "extract_code": false }), "x");
+        assert!(!v.verify(&r).await.unwrap().passed);
+    }
 }

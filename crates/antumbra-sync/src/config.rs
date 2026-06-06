@@ -96,3 +96,51 @@ impl SyncConfig {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_endpoint_carries_no_credentials() {
+        let e = Endpoint::embedded("mem://");
+        assert_eq!(e.url, "mem://");
+        assert_eq!(e.namespace, "antumbra");
+        assert_eq!(e.database, "main");
+        assert!(e.username.is_none() && e.password.is_none());
+        // Builds a valid connection config (no creds branch).
+        assert!(e.connection_config().is_ok());
+    }
+
+    #[test]
+    fn authoritative_endpoint_carries_root_credentials() {
+        let e = Endpoint::authoritative("ws://h:8000/rpc", "root", "pw");
+        assert_eq!(e.username.as_deref(), Some("root"));
+        assert_eq!(e.password.as_deref(), Some("pw"));
+        // Builds a valid connection config (creds branch).
+        assert!(e.connection_config().is_ok());
+    }
+
+    #[tokio::test]
+    async fn embedded_endpoint_connects_and_applies_schema() {
+        let store = Endpoint::embedded("mem://").connect().await.unwrap();
+        // A connected store can be queried (schema applied).
+        assert_eq!(
+            antumbra_store::repo::sync::list_rows(&store, "memory")
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn sync_config_defaults_and_with_interval() {
+        let cfg = SyncConfig::new(Endpoint::embedded("mem://"), Endpoint::embedded("mem://"));
+        assert_eq!(cfg.interval, Duration::from_secs(15));
+        assert_eq!(cfg.min_backoff, Duration::from_millis(500));
+        assert_eq!(cfg.max_backoff, Duration::from_secs(30));
+        let cfg = cfg.with_interval(Duration::from_secs(2));
+        assert_eq!(cfg.interval, Duration::from_secs(2));
+    }
+}

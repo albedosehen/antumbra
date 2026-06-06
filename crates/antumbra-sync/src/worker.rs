@@ -110,4 +110,44 @@ mod tests {
         let _ = tx; // already signalled
         run(mem_cfg(), rx).await.unwrap();
     }
+
+    // The full supervisor path: connect both, reconcile on the cadence, then exit
+    // cleanly when shutdown fires mid-cadence.
+    #[tokio::test]
+    async fn run_reconciles_on_a_cadence_then_stops() {
+        let cfg = mem_cfg().with_interval(Duration::from_millis(20));
+        let (tx, rx) = watch::channel(false);
+        let handle = tokio::spawn(run(cfg, rx));
+        tokio::time::sleep(Duration::from_millis(70)).await; // a few reconcile cycles
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("worker stops promptly")
+            .unwrap()
+            .unwrap();
+    }
+
+    // A failing remote sends the supervisor into the backoff path; shutdown during
+    // backoff still exits cleanly.
+    #[tokio::test]
+    async fn run_backs_off_on_connect_failure_then_stops() {
+        let cfg = SyncConfig {
+            min_backoff: Duration::from_millis(20),
+            max_backoff: Duration::from_millis(40),
+            ..SyncConfig::new(
+                Endpoint::embedded("mem://"),
+                // A refused port: connecting fails fast.
+                Endpoint::authoritative("ws://127.0.0.1:1/rpc", "root", "x"),
+            )
+        };
+        let (tx, rx) = watch::channel(false);
+        let handle = tokio::spawn(run(cfg, rx));
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("worker stops promptly after a connect failure")
+            .unwrap()
+            .unwrap();
+    }
 }

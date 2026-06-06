@@ -75,3 +75,47 @@ pub async fn knn_by_capability(store: &Store, query: &[f32], k: usize) -> Result
     let rows: Vec<ExpertRow> = query_records(store.client(), &q).await.map_err(map)?;
     rows.into_iter().map(ExpertRow::into_domain).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::EMBED_DIM;
+    use antumbra_core::{Expert, Generation};
+    use chrono::Utc;
+
+    fn expert(id: &str, vec: Vec<f32>) -> Expert {
+        Expert {
+            id: ExpertId::new(id),
+            name: id.to_string(),
+            base_model: "base".into(),
+            artifact_uri: "adapters/x.safetensors".into(),
+            capability_card: serde_json::json!({}),
+            capability_vec: Some(vec),
+            fitness: 1.0,
+            frozen_at: Some(Utc::now()),
+            generation: Generation::ZERO,
+            owner: None,
+            compartment: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn insert_get_list_knn_delete() {
+        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let mut v = vec![0.0f32; EMBED_DIM];
+        v[0] = 1.0;
+        insert(&s, &expert("expert:a", v.clone())).await.unwrap();
+
+        assert_eq!(get(&s, &ExpertId::new("expert:a")).await.unwrap().unwrap().name, "expert:a");
+        assert!(get(&s, &ExpertId::new("expert:missing")).await.unwrap().is_none());
+        assert_eq!(list(&s).await.unwrap().len(), 1);
+
+        let near = knn_by_capability(&s, &v, 1).await.unwrap();
+        assert_eq!(near.len(), 1);
+        assert_eq!(near[0].id.as_str(), "expert:a");
+
+        delete(&s, &ExpertId::new("expert:a")).await.unwrap();
+        assert!(list(&s).await.unwrap().is_empty());
+    }
+}
