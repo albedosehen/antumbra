@@ -96,6 +96,39 @@ async fn memory_visibility_follows_compartment_grants() {
     assert!(seen.contains(&"memory:priv".to_string()) && seen.contains(&"memory:pub".to_string()));
 }
 
+// Deleting a compartment is a tombstone: the engine's owner subquery excludes it
+// (`deleted_at IS NONE`), so its memories become invisible to the owner at once --
+// and the deletion is a row that propagates rather than orphaning silently.
+#[tokio::test]
+async fn deleting_a_compartment_hides_its_memories_from_the_owner() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let t = TenantId::new("ws:org");
+    let ua = UserId::new("user:a");
+    let ca = CompartmentId::new("comp:a-private");
+    let now = Utc::now();
+
+    principal::provision(&store, &t, &ua).await.unwrap();
+    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
+        .await
+        .unwrap();
+    memory::upsert(&store, &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")))
+        .await
+        .unwrap();
+
+    // The owner sees its compartment memory.
+    store.signin(&t, &ua).await.unwrap();
+    assert!(visible_ids(&store).await.contains(&"memory:priv".to_string()));
+
+    // Delete the compartment (owner mode), then the owner no longer sees it.
+    store.invalidate().await.unwrap();
+    compartment::delete(&store, &t, &ca, now).await.unwrap();
+    store.signin(&t, &ua).await.unwrap();
+    assert!(
+        !visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        "a deleted compartment hides its memories from the owner"
+    );
+}
+
 #[tokio::test]
 async fn linking_into_a_compartment_requires_link_capability() {
     let store = Store::connect_memory(4).await.unwrap();

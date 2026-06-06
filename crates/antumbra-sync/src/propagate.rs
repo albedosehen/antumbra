@@ -124,6 +124,8 @@ mod tests {
                 name: "shared".into(),
                 origin: Origin::User,
                 created_at: now,
+                updated_at: now,
+                deleted_at: None,
             },
         )
         .await
@@ -186,6 +188,8 @@ mod tests {
                 name: "shared".into(),
                 origin: Origin::User,
                 created_at: now,
+                updated_at: now,
+                deleted_at: None,
             },
         )
         .await

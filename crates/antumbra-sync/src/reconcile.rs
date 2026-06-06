@@ -244,6 +244,8 @@ mod tests {
             name: "shared".into(),
             origin: Origin::User,
             created_at: t0,
+            updated_at: t0,
+            deleted_at: None,
         };
         let grant = antumbra_core::Grant::new(
             tenant.clone(), comp.clone(), bob.clone(), Capability::Reference, UserId::new("alice"), t0,
@@ -270,6 +272,37 @@ mod tests {
         // And it does not resurrect from the stale side.
         assert_eq!(
             reconcile_table(&local, &remote, GRANT).await.unwrap(),
+            ReconcileStats::default()
+        );
+    }
+
+    // A compartment deletion (tombstone) propagates and does not resurrect from a
+    // replica still holding the live row.
+    #[tokio::test]
+    async fn a_compartment_deletion_propagates_and_does_not_resurrect() {
+        use antumbra_core::{Compartment, CompartmentId, UserId};
+        use antumbra_store::repo::compartment;
+
+        const COMPARTMENT: &TableSpec = &TableSpec { name: "compartment", version_field: "updated_at" };
+        let (local, remote) = (mem_store().await, mem_store().await);
+        let tenant = TenantId::new("t");
+        let id = CompartmentId::new("comp-d");
+        let t0 = Utc::now();
+
+        for s in [&local, &remote] {
+            compartment::create(s, &Compartment::new(id.clone(), tenant.clone(), UserId::new("alice"), "c", t0))
+                .await
+                .unwrap();
+        }
+        compartment::delete(&local, &tenant, &id, t0 + ChronoDuration::seconds(5))
+            .await
+            .unwrap();
+
+        let stats = reconcile_table(&local, &remote, COMPARTMENT).await.unwrap();
+        assert_eq!(stats, ReconcileStats { pushed: 1, pulled: 0 });
+        assert!(compartment::get(&remote, &tenant, &id).await.unwrap().is_none(), "deletion reached remote");
+        assert_eq!(
+            reconcile_table(&local, &remote, COMPARTMENT).await.unwrap(),
             ReconcileStats::default()
         );
     }

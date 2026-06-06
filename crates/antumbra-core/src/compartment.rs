@@ -76,6 +76,14 @@ pub struct Compartment {
     pub name: String,
     pub origin: Origin,
     pub created_at: DateTime<Utc>,
+    /// Bumped on any change (notably deletion), so a delete is the newest version
+    /// and wins under last-write-wins sync.
+    pub updated_at: DateTime<Utc>,
+    /// When set, the compartment is **deleted** (a tombstone): read paths hide it
+    /// and the engine ACL stops treating the owner as owning it (so its memories
+    /// become invisible), and the deletion propagates across the fleet instead of
+    /// resurrecting from another replica that still has the live row.
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 impl Compartment {
@@ -93,6 +101,8 @@ impl Compartment {
             name: name.into(),
             origin: Origin::User,
             created_at: now,
+            updated_at: now,
+            deleted_at: None,
         }
     }
 
@@ -100,6 +110,18 @@ impl Compartment {
     pub fn proposed(mut self) -> Self {
         self.origin = Origin::Proposed;
         self
+    }
+
+    /// Delete the compartment as a tombstone at `now` (stamping `updated_at`), so
+    /// the deletion is the newest version and propagates rather than resurrecting.
+    pub fn soft_delete(&mut self, now: DateTime<Utc>) {
+        self.deleted_at = Some(now);
+        self.updated_at = now;
+    }
+
+    /// `true` if this compartment is a tombstone (deleted).
+    pub fn is_deleted(&self) -> bool {
+        self.deleted_at.is_some()
     }
 }
 

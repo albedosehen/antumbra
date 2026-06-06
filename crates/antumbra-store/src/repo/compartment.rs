@@ -32,6 +32,12 @@ struct CompartmentRow {
     name: String,
     origin: Origin,
     created_at: String,
+    #[serde(default)]
+    updated_at: Option<String>,
+    // The deletion tombstone. Absent (NONE) for a live compartment so the engine
+    // ACL's owner subquery (`deleted_at IS NONE`) admits it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deleted_at: Option<String>,
 }
 
 impl CompartmentRow {
@@ -43,17 +49,23 @@ impl CompartmentRow {
             name: c.name.clone(),
             origin: c.origin,
             created_at: c.created_at.to_rfc3339(),
+            updated_at: Some(c.updated_at.to_rfc3339()),
+            deleted_at: c.deleted_at.map(|t| t.to_rfc3339()),
         }
     }
 
     fn into_domain(self) -> Result<Compartment> {
+        let created_at = parse_dt(&self.created_at)?;
+        let updated_at = self.updated_at.as_deref().map(parse_dt).transpose()?.unwrap_or(created_at);
         Ok(Compartment {
             id: CompartmentId::new(self.key),
             tenant: TenantId::new(self.tenant_id),
             owner: UserId::new(self.owner),
             name: self.name,
             origin: self.origin,
-            created_at: parse_dt(&self.created_at)?,
+            created_at,
+            updated_at,
+            deleted_at: self.deleted_at.as_deref().map(parse_dt).transpose()?,
         })
     }
 }
@@ -79,11 +91,15 @@ pub async fn list_owned(store: &Store, tenant: &TenantId, owner: &UserId) -> Res
         .map_err(map)?
         .where_(and_(eq("tenant_id", tenant.as_str()), eq("owner", owner.as_str())));
     let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().map(CompartmentRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(CompartmentRow::into_domain)
+        .collect()
 }
 
-/// Fetch one compartment by id within a tenant (e.g. to read its `owner` for
-/// audience resolution). `None` if absent or owned by another tenant.
+/// Fetch one **live** compartment by id within a tenant (e.g. to read its `owner`
+/// for audience resolution). `None` if absent, deleted, or owned by another
+/// tenant.
 pub async fn get(
     store: &Store,
     tenant: &TenantId,
@@ -95,16 +111,52 @@ pub async fn get(
         .map_err(map)?
         .where_(and_(eq("tenant_id", tenant.as_str()), eq("key", id.as_str())));
     let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().next().map(CompartmentRow::into_domain).transpose()
+    rows.into_iter()
+        .find(|r| r.deleted_at.is_none())
+        .map(CompartmentRow::into_domain)
+        .transpose()
 }
 
-/// Delete a compartment (owner-scoped; the engine bars non-owners on memory).
-pub async fn delete(store: &Store, tenant: &TenantId, id: &CompartmentId) -> Result<()> {
-    let condition = and_(eq("key", id.as_str()), eq("tenant_id", tenant.as_str()));
-    delete_records(store.client(), COMPARTMENT, Some(&condition))
-        .await
-        .map_err(map)?;
+/// Delete a compartment as a **tombstone** (owner-scoped), so the deletion
+/// propagates across the fleet instead of resurrecting from a replica that still
+/// has the live row. Its memories become invisible at once where the engine ACL
+/// runs (the owner subquery excludes `deleted_at` rows). A no-op if the
+/// compartment is absent or already deleted. `now` stamps the deletion. Use
+/// [`purge_compartments`] to hard-remove tombstones past a grace window.
+pub async fn delete(
+    store: &Store,
+    tenant: &TenantId,
+    id: &CompartmentId,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    if let Some(mut c) = get(store, tenant, id).await? {
+        c.soft_delete(now);
+        create(store, &c).await?;
+    }
     Ok(())
+}
+
+/// Hard-remove compartment tombstones deleted before `older_than` (the grace
+/// window), so they do not accumulate. Run wider than the sync interval so every
+/// replica saw the deletion first (resurrection-safe GC). Returns the count.
+pub async fn purge_compartments(
+    store: &Store,
+    older_than: chrono::DateTime<chrono::Utc>,
+) -> Result<usize> {
+    let query = Query::new().select(None).from_table(COMPARTMENT).map_err(map)?;
+    let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
+    let mut purged = 0;
+    for row in rows {
+        let Some(ts) = row.deleted_at.as_deref() else {
+            continue;
+        };
+        if parse_dt(ts).map(|t| t < older_than).unwrap_or(false) {
+            let condition = and_(eq("key", row.key.as_str()), eq("tenant_id", row.tenant_id.as_str()));
+            delete_records(store.client(), COMPARTMENT, Some(&condition)).await.map_err(map)?;
+            purged += 1;
+        }
+    }
+    Ok(purged)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -302,8 +354,19 @@ mod tests {
         // A different tenant cannot see it.
         assert!(get(&s, &TenantId::new("other"), &c.id).await.unwrap().is_none());
 
-        delete(&s, &t, &c.id).await.unwrap();
+        // Delete is a tombstone: hidden from get/list_owned, but the row remains
+        // (so the deletion can propagate), then a past-grace purge removes it.
+        delete(&s, &t, &c.id, now).await.unwrap();
         assert!(get(&s, &t, &c.id).await.unwrap().is_none());
+        assert!(list_owned(&s, &t, &alice).await.unwrap().is_empty());
+        assert_eq!(
+            crate::repo::sync::list_rows(&s, "compartment").await.unwrap().len(),
+            1,
+            "tombstone row retained for propagation"
+        );
+        delete(&s, &t, &c.id, now).await.unwrap(); // re-delete is a no-op
+        assert_eq!(purge_compartments(&s, now - chrono::Duration::days(1)).await.unwrap(), 0);
+        assert_eq!(purge_compartments(&s, now + chrono::Duration::seconds(1)).await.unwrap(), 1);
     }
 
     #[tokio::test]

@@ -22,7 +22,9 @@ impl TableSpec {
 /// first. Experts/adapters are large on-disk safetensors, not DB rows, so they
 /// are out of scope for store sync.
 pub const PENUMBRA_TABLES: &[TableSpec] = &[
-    TableSpec::new("compartment", "created_at"),
+    // compartment carries `updated_at` (bumped on delete) so a deletion
+    // out-versions a stale live row and propagates under LWW.
+    TableSpec::new("compartment", "updated_at"),
     // grant carries `updated_at` (bumped on revoke) so a revocation out-versions a
     // stale live grant and propagates under LWW.
     TableSpec::new("grant", "updated_at"),

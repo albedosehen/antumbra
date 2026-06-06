@@ -32,9 +32,18 @@ resurfacing from the other side (validated: a tombstone pushes and the trace doe
 not resurrect). Read paths hide tombstones; `memory::purge` hard-removes them past
 a grace window (run wider than the sync interval, so every replica saw the
 tombstone first — resurrection-safe GC, the `gc_grace_seconds` pattern).
-**Known gaps:** compartment/grant/expert deletes are still hard deletes (don't
-propagate — grant *revoke* not propagating is a security follow-up); incremental
-cursors (each cycle scans full tables — fine at penumbra scale).
+**Deletes propagate (memory, grant, compartment):** all three replicated tables
+now soft-delete via tombstones (`deleted_at` + bumped `updated_at`), so a forget /
+revoke / compartment-delete out-versions a stale live row under LWW and cannot
+resurrect; each has a grace-windowed `purge`. A deleted **compartment** also fails
+closed at the engine — its owner subquery in `MEMORY_SELECT_RULE`/`EDGE_LINK_RULE`
+excludes `deleted_at` rows, so its memories go invisible at once. **Expert deletes
+stay hard by design:** experts are not replicated (on-disk adapters, out of DB
+sync), so a tombstone would serve no propagation purpose — the standard rule that
+tombstones are a *replication* concern (Cassandra/Couchbase). If experts ever sync,
+they'd need one then.
+**Remaining gap:** incremental cursors (each cycle scans full tables — fine at
+penumbra scale).
 **Unblocks:** multi-device compartment sharing; the fleet (ADR-0006/0009); R-2.
 **Was deferred on:** a conflict/ordering policy — now decided (LWW).
 
