@@ -15,8 +15,9 @@ use serde_json::Value;
 
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
+use surql::query::expressions::{field, value};
 use surql::query::helpers::VectorDistanceType;
-use surql::types::operators::{and_, eq};
+use surql::types::operators::{and_, eq, is_none};
 use surql::types::RecordID;
 
 use antumbra_core::{
@@ -268,32 +269,46 @@ async fn merge_fields(store: &Store, id: &MemoryId, patch: Value) -> Result<()> 
 }
 
 /// Reinforce a trace (recurrence + confidence bump), tenant-checked. Returns the
-/// updated memory, or `None` if it does not exist for this tenant.
+/// updated memory, or `None` if it does not exist for this tenant or has been
+/// forgotten.
+///
+/// One atomic, tombstone-guarded statement rather than a read-modify-write: the
+/// increment and the confidence bump are computed server-side from the row's
+/// *current* values (`reinforcement = reinforcement + 1`), so concurrent
+/// reinforcements cannot lose an increment, and the `deleted_at IS NONE` guard
+/// means a trace forgotten between any read and this write simply matches no row
+/// -- it can never be resurrected. Mirrors `Memory::reinforce`; the confidence
+/// formula is self-bounding for confidence in `[0, 1]`, so no clamp is needed.
 pub async fn reinforce(
     store: &Store,
     tenant: &TenantId,
     id: &MemoryId,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<Option<Memory>> {
-    match get(store, tenant, id).await? {
-        Some(mut m) => {
-            m.reinforce(now);
-            // Only the reinforcement fields -- never `deleted_at`, so this cannot
-            // resurrect a trace a concurrent forget tombstoned after our read.
-            merge_fields(
-                store,
-                id,
-                serde_json::json!({
-                    "reinforcement": m.reinforcement,
-                    "confidence": m.confidence,
-                    "updated_at": m.updated_at.to_rfc3339(),
-                }),
-            )
-            .await?;
-            Ok(Some(m))
-        }
-        None => Ok(None),
-    }
+    let target = RecordID::<()>::new(TABLE, id.as_str())
+        .map_err(map)?
+        .to_string();
+    // confidence + (1 - confidence) * 0.25
+    let confidence_bump = field("confidence") + (value(1) - field("confidence")) * 0.25;
+    let q = Query::new()
+        .update_set(target)
+        .map_err(map)?
+        .set_expr("reinforcement", field("reinforcement") + 1)
+        .map_err(map)?
+        .set_expr("confidence", confidence_bump)
+        .map_err(map)?
+        .set("updated_at", now.to_rfc3339())
+        .map_err(map)?
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            is_none("deleted_at"),
+        ))
+        .return_after();
+    let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
+    rows.into_iter()
+        .next()
+        .map(MemoryRow::into_domain)
+        .transpose()
 }
 
 /// Record that a trace graduated into the umbra as `expert`, tenant-checked.
@@ -461,13 +476,12 @@ mod tests {
         );
     }
 
-    // The resurrection-safety guarantee behind the field-scoped merge: a
-    // reinforcement write that lands AFTER a concurrent forget (its read predated
-    // the delete, so it carries no tombstone) must not clear `deleted_at`. The
-    // merge writes only the reinforcement fields, so the tombstone survives --
-    // the full-row upsert it replaced would have resurrected the trace.
+    // Reinforcement is one atomic, tombstone-guarded statement: the increment is
+    // computed server-side (so it composes without losing an update), and a
+    // forgotten trace is refused by the `deleted_at IS NONE` guard rather than
+    // resurrected.
     #[tokio::test]
-    async fn a_reinforcement_merge_does_not_resurrect_a_forgotten_trace() {
+    async fn reinforce_is_atomic_and_tombstone_guarded() {
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();
         let tenant = TenantId::new("t");
         let now = chrono::Utc::now();
@@ -475,39 +489,50 @@ mod tests {
             "22222222-0000-0000-0000-000000000002",
             tenant.clone(),
             MemoryNetwork::World,
-            "keep forgotten",
+            "keep me",
             0.5,
             now,
         );
         upsert(&store, &m).await.unwrap();
+
+        // The increment + confidence bump (0.5 -> 0.625) happen in the engine.
+        let r1 = reinforce(&store, &tenant, &m.id, now)
+            .await
+            .unwrap()
+            .expect("a live trace reinforces");
+        assert_eq!(r1.reinforcement, 1);
+        assert!((r1.confidence - 0.625).abs() < 1e-4, "confidence bumped");
+        // Increments compose -- no lost update.
+        let r2 = reinforce(&store, &tenant, &m.id, now)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(r2.reinforcement, 2);
+
+        // A live trace owned by another tenant is not reinforceable (the tenant
+        // guard, isolated here while the row is still live).
+        assert!(
+            reinforce(&store, &TenantId::new("other"), &m.id, now)
+                .await
+                .unwrap()
+                .is_none(),
+            "cross-tenant reinforce is refused"
+        );
+
+        // Forget, then a reinforcement is refused and does NOT resurrect.
         soft_delete(&store, &tenant, &m.id, now).await.unwrap();
-
-        // The racing reinforcement writes only its fields -- exactly the partial
-        // patch reinforce() builds internally.
-        merge_fields(
-            &store,
-            &m.id,
-            serde_json::json!({
-                "reinforcement": 1u32,
-                "confidence": 0.625f32,
-                "updated_at": (now + chrono::Duration::seconds(1)).to_rfc3339(),
-            }),
-        )
-        .await
-        .unwrap();
-
-        // The tombstone survived (no resurrection) and the field still merged.
+        assert!(
+            reinforce(&store, &tenant, &m.id, now)
+                .await
+                .unwrap()
+                .is_none(),
+            "reinforcing a forgotten trace is a no-op"
+        );
         let rid = RecordID::<()>::new(TABLE, m.id.as_str()).unwrap();
-        let value = get_record(store.client(), &rid).await.unwrap().unwrap();
-        let row: MemoryRow = serde_json::from_value(value).unwrap();
-        assert!(
-            row.deleted_at.is_some(),
-            "tombstone must survive a reinforcement that raced the forget"
-        );
-        assert_eq!(row.reinforcement, 1, "the reinforcement field still merged");
-        assert!(
-            get(&store, &tenant, &m.id).await.unwrap().is_none(),
-            "still hidden from every read path"
-        );
+        let row: MemoryRow =
+            serde_json::from_value(get_record(store.client(), &rid).await.unwrap().unwrap())
+                .unwrap();
+        assert!(row.deleted_at.is_some(), "tombstone survives");
+        assert_eq!(row.reinforcement, 2, "no phantom increment after forget");
     }
 }
