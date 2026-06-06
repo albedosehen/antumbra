@@ -99,8 +99,22 @@ outcome). The brain absorbs the scaffold continuously, so the harness shrinks.
 ## Foundational — make the current surface provably work
 
 ### R-3 · Networked MCP end-to-end validation
-**Status:** done in unit form. The JWT core, auth boundary, per-tenant isolation
-(through the real MCP tools), and the authenticated happy-path (a valid token
-verifies → signin → rmcp dispatches `initialize` → 200) are all tested. The one
-remaining checkpoint is a **live multi-tenant deployment** against a real `ws://`
-SurrealDB — a field test, not a unit gap. R-1 and R-2 build on that holding.
+**Status:** DONE — validated live against a real `ws://` SurrealDB v3 (2026-06-05).
+On top of the unit coverage (JWT core, auth boundary, per-tenant isolation through
+the real tools, the authenticated `initialize` happy-path), the **live
+multi-tenant field test** now passes: two JWT tenants drive the real `/mcp` surface
+over the network against a root-authenticated SurrealDB; tenant A stores a memory,
+A sees it, **B does not see it via `list` or `recall`** — engine-enforced isolation
+over the wire. Reproduce with `docs/r3_isolation_probe.py` (recipe in its header).
+
+Two real gaps surfaced and were fixed by doing the live test (not visible on the
+embedded engine):
+- **DB credentials.** `connect` gained `--db-user`/`--db-pass` (env
+  `ANTUMBRA_DB_USER`/`PASS`) so the server can log in to an authenticated remote;
+  it then signs in per request as each tenant on top.
+- **Owner mode on a remote.** `invalidate` drops to *anonymous*, which equals
+  owner only on embedded — on an authenticated `ws://` server it has no
+  permissions, so provisioning failed. New `Store::signin_root` re-signs-in as
+  root on a credentialed remote (and falls back to `invalidate` on embedded); the
+  HTTP layer uses it wherever it needs the cross-tenant owner view (provisioning,
+  the R-2 watcher).

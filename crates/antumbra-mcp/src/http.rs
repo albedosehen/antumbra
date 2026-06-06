@@ -79,15 +79,18 @@ struct HttpState {
 
 /// Serve the networked surface on `addr` over one shared connection to `url`.
 /// Every `/mcp` request must present a JWT this `verifier` accepts.
+#[allow(clippy::too_many_arguments)]
 pub async fn serve(
     addr: String,
     url: String,
+    db_user: Option<String>,
+    db_pass: Option<String>,
     host: String,
     embedder: Arc<dyn Embedder>,
     verifier: JwtVerifier,
     auto_propose: Option<usize>,
 ) -> Result<()> {
-    let store = crate::connect(&url).await?;
+    let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
     let serve = crate::build_serve(&store).await?;
@@ -128,7 +131,7 @@ fn spawn_live_propagation(state: Arc<HttpState>) {
         while let Some(event) = feed.recv().await {
             let change = {
                 let _guard = state.auth.lock().await;
-                if state.store.invalidate().await.is_err() {
+                if state.store.signin_root().await.is_err() {
                     continue; // could not return to owner view; skip this event
                 }
                 antumbra_sync::resolve_change(&state.store, &event).await
@@ -201,7 +204,7 @@ impl HttpState {
         // auth lock in owner mode so it never races a signed-in request.
         let default_compartment = {
             let _guard = self.auth.lock().await;
-            self.store.invalidate().await?; // owner mode for the writes
+            self.store.signin_root().await?; // owner mode for the writes
             crate::provision_identity(&self.store, &tenant, &user).await?
         };
 

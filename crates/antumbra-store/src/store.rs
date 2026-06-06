@@ -1,7 +1,7 @@
 //! The connection handle. Wraps surql-rs's `DatabaseClient` and owns the
 //! configured embedding dimension so repositories and schema agree.
 
-use surql::connection::auth::ScopeCredentials;
+use surql::connection::auth::{RootCredentials, ScopeCredentials};
 use surql::connection::ConnectionConfig;
 use surql::DatabaseClient;
 
@@ -65,6 +65,24 @@ impl Store {
     /// view (full access on the embedded engine).
     pub async fn invalidate(&self) -> Result<()> {
         self.client.invalidate().await.map_err(map)?;
+        Ok(())
+    }
+
+    /// Return to the **owner/root** view for cross-tenant work (provisioning a
+    /// principal, the live-propagation watcher). On an authenticated remote
+    /// (`ws://` with root credentials) this re-signs-in as root, because there
+    /// `invalidate` would drop to *anonymous* — which has no permissions. On an
+    /// embedded/unauthenticated store (no configured credentials) it falls back
+    /// to `invalidate` (anonymous *is* the owner there). Use this, not
+    /// `invalidate`, whenever owner access is required on a real deployment.
+    pub async fn signin_root(&self) -> Result<()> {
+        match (self.client.config().username(), self.client.config().password()) {
+            (Some(user), Some(pass)) => {
+                let creds = RootCredentials::new(user, pass);
+                self.client.signin(&creds).await.map_err(map)?;
+            }
+            _ => self.client.invalidate().await.map_err(map)?,
+        }
         Ok(())
     }
 

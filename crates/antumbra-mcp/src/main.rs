@@ -59,6 +59,15 @@ struct Cli {
     /// Required JWT audience claim (this server's identifier), if set.
     #[arg(long)]
     jwt_audience: Option<String>,
+    /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
+    /// embedded store or an unauthenticated server. The DB credential is the
+    /// server's *own* login (it then signs in per request as each tenant); it is
+    /// distinct from the JWTs that authenticate clients.
+    #[arg(long, env = "ANTUMBRA_DB_USER")]
+    db_user: Option<String>,
+    /// Root password for the remote SurrealDB.
+    #[arg(long, env = "ANTUMBRA_DB_PASS")]
+    db_pass: Option<String>,
     /// Enable the autonomous propose trigger: once a user's unorganized inbox
     /// reaches this many memories, a write auto-clusters it into proposed
     /// compartments (reversible; the user curates). Off when unset.
@@ -66,12 +75,17 @@ struct Cli {
     auto_propose: Option<usize>,
 }
 
-async fn connect(url: &str) -> Result<Store> {
-    let config = ConnectionConfig::builder()
+async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
+    let mut builder = ConnectionConfig::builder()
         .url(url)
         .namespace("antumbra")
-        .database("main")
-        .build()?;
+        .database("main");
+    // Root login for an authenticated remote (`ws://`); embedded/unauthenticated
+    // stores need none. The server signs in per request as each tenant on top.
+    if let (Some(user), Some(pass)) = (db_user, db_pass) {
+        builder = builder.username(user).password(pass);
+    }
+    let config = builder.build()?;
     Ok(Store::connect(config, EMBED_DIM).await?)
 }
 
@@ -126,12 +140,14 @@ pub(crate) async fn provision_identity(
 /// engine is single-writer.)
 async fn build_session(
     url: &str,
+    db_user: Option<&str>,
+    db_pass: Option<&str>,
     tenant: TenantId,
     user: UserId,
     host: String,
     embedder: Arc<dyn Embedder>,
 ) -> Result<McpServer> {
-    let store = connect(url).await?;
+    let store = connect(url, db_user, db_pass).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
     // The `answer` tool serves through the routed expert. Build the engine from
@@ -214,12 +230,24 @@ async fn run() -> Result<()> {
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&cli.jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
-        return http::serve(addr, cli.url, host, embedder, verifier, cli.auto_propose).await;
+        return http::serve(
+            addr,
+            cli.url,
+            cli.db_user,
+            cli.db_pass,
+            host,
+            embedder,
+            verifier,
+            cli.auto_propose,
+        )
+        .await;
     }
 
     // stdio: one fixed identity for the life of the process.
     let mut service = build_session(
         &cli.url,
+        cli.db_user.as_deref(),
+        cli.db_pass.as_deref(),
         TenantId::new(cli.tenant),
         UserId::new(cli.user),
         host,
