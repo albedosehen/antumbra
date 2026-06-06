@@ -48,7 +48,6 @@ pub struct McpServer {
     /// (R-2) can push shared-memory changes to it. `None` = no live delivery
     /// (stdio, route-only, or tests).
     registry: Option<crate::notify::PeerRegistry>,
-    counter: Arc<AtomicU64>,
 }
 
 /// Tuning for the autonomous propose trigger.
@@ -83,7 +82,6 @@ impl McpServer {
             auto_propose: None,
             serve,
             registry: None,
-            counter: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -128,7 +126,7 @@ impl McpServer {
         &self,
         prop: &antumbra_core::ProposedCompartment,
     ) -> antumbra_core::Result<String> {
-        let id = next_id(&self.counter, "comp");
+        let id = next_id("comp");
         let c = Compartment::new(
             id.clone(),
             self.tenant.clone(),
@@ -232,10 +230,13 @@ fn parse_network(s: &str) -> MemoryNetwork {
     }
 }
 
-/// A process-unique, monotonic id with a table prefix (timestamp + counter; no
-/// extra deps).
-fn next_id(counter: &AtomicU64, prefix: &str) -> String {
-    let n = counter.fetch_add(1, Ordering::Relaxed);
+/// A process-unique, monotonic id with a table prefix: a nanosecond timestamp
+/// plus a single process-global counter, so two sessions (even different
+/// tenants) minting their first id in the same nanosecond never collide; no
+/// extra deps.
+fn next_id(prefix: &str) -> String {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let t = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -540,7 +541,7 @@ impl McpServer {
         Parameters(p): Parameters<StoreParams>,
     ) -> Result<Json<StoredOut>, ErrorData> {
         let embedding = self.embedder.embed(&p.content).await.map_err(err)?;
-        let id = next_id(&self.counter, "memory");
+        let id = next_id("memory");
         let compartment = p
             .compartment
             .map(CompartmentId::new)
@@ -791,7 +792,7 @@ impl McpServer {
         }
         let out = serve
             .act(ActRequest {
-                task_id: next_id(&self.counter, "answer"),
+                task_id: next_id("answer"),
                 prompt: p.task,
                 adapters: vec![expert],
             })
@@ -813,7 +814,7 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<CreateCompartmentParams>,
     ) -> Result<Json<CompartmentView>, ErrorData> {
-        let id = next_id(&self.counter, "comp");
+        let id = next_id("comp");
         let c = Compartment::new(
             id.clone(),
             self.tenant.clone(),
@@ -965,6 +966,19 @@ mod tests {
     use antumbra_store::repo::{expert, router};
     use antumbra_store::EMBED_DIM;
     use chrono::Utc;
+
+    // Ids stay unique even minted back-to-back (potentially within one
+    // nanosecond, where the timestamp portion collides): the process-global
+    // counter disambiguates, so two sessions cannot mint the same id.
+    #[test]
+    fn next_id_is_unique_under_a_burst() {
+        let ids: std::collections::HashSet<String> = (0..1000).map(|_| next_id("m")).collect();
+        assert_eq!(
+            ids.len(),
+            1000,
+            "the process-global counter keeps ids unique"
+        );
+    }
 
     async fn server() -> McpServer {
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();

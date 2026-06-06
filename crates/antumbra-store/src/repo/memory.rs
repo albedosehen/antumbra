@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_records, get_record, query_records, upsert_record};
+use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::helpers::VectorDistanceType;
 use surql::types::operators::{and_, eq};
 use surql::types::RecordID;
@@ -252,6 +252,21 @@ pub async fn recall(
         .collect()
 }
 
+/// Merge only the named fields of a memory row (a partial `UPDATE ... MERGE`),
+/// leaving every other field as the engine already holds it. The read-modify-
+/// write mutators below write *just* the fields they change this way rather than
+/// rewriting the whole row, so a concurrent forget's `deleted_at` (set between
+/// the read and this write) is never clobbered back to live — the resurrection-
+/// safe alternative to a full-row upsert. The engine PERMISSIONS still gate the
+/// update, exactly as the upsert did.
+async fn merge_fields(store: &Store, id: &MemoryId, patch: Value) -> Result<()> {
+    let rid = RecordID::<()>::new(TABLE, id.as_str()).map_err(map)?;
+    merge_record(store.client(), &rid, patch)
+        .await
+        .map_err(map)?;
+    Ok(())
+}
+
 /// Reinforce a trace (recurrence + confidence bump), tenant-checked. Returns the
 /// updated memory, or `None` if it does not exist for this tenant.
 pub async fn reinforce(
@@ -263,7 +278,18 @@ pub async fn reinforce(
     match get(store, tenant, id).await? {
         Some(mut m) => {
             m.reinforce(now);
-            upsert(store, &m).await?;
+            // Only the reinforcement fields -- never `deleted_at`, so this cannot
+            // resurrect a trace a concurrent forget tombstoned after our read.
+            merge_fields(
+                store,
+                id,
+                serde_json::json!({
+                    "reinforcement": m.reinforcement,
+                    "confidence": m.confidence,
+                    "updated_at": m.updated_at.to_rfc3339(),
+                }),
+            )
+            .await?;
             Ok(Some(m))
         }
         None => Ok(None),
@@ -281,7 +307,15 @@ pub async fn mark_consolidated(
     match get(store, tenant, id).await? {
         Some(mut m) => {
             m.mark_consolidated(expert, now);
-            upsert(store, &m).await?;
+            merge_fields(
+                store,
+                id,
+                serde_json::json!({
+                    "consolidated_expert": m.consolidated_expert.as_ref().map(ExpertId::as_str),
+                    "updated_at": m.updated_at.to_rfc3339(),
+                }),
+            )
+            .await?;
             Ok(Some(m))
         }
         None => Ok(None),
@@ -303,7 +337,15 @@ pub async fn soft_delete(
     match get(store, tenant, id).await? {
         Some(mut m) => {
             m.soft_delete(now);
-            upsert(store, &m).await?;
+            merge_fields(
+                store,
+                id,
+                serde_json::json!({
+                    "deleted_at": m.deleted_at.map(|t| t.to_rfc3339()),
+                    "updated_at": m.updated_at.to_rfc3339(),
+                }),
+            )
+            .await?;
             Ok(Some(m))
         }
         None => Ok(None),
@@ -416,6 +458,56 @@ mod tests {
                 .unwrap(),
             0,
             "within the grace window: not purged"
+        );
+    }
+
+    // The resurrection-safety guarantee behind the field-scoped merge: a
+    // reinforcement write that lands AFTER a concurrent forget (its read predated
+    // the delete, so it carries no tombstone) must not clear `deleted_at`. The
+    // merge writes only the reinforcement fields, so the tombstone survives --
+    // the full-row upsert it replaced would have resurrected the trace.
+    #[tokio::test]
+    async fn a_reinforcement_merge_does_not_resurrect_a_forgotten_trace() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("t");
+        let now = chrono::Utc::now();
+        let m = Memory::new(
+            "22222222-0000-0000-0000-000000000002",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "keep forgotten",
+            0.5,
+            now,
+        );
+        upsert(&store, &m).await.unwrap();
+        soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+
+        // The racing reinforcement writes only its fields -- exactly the partial
+        // patch reinforce() builds internally.
+        merge_fields(
+            &store,
+            &m.id,
+            serde_json::json!({
+                "reinforcement": 1u32,
+                "confidence": 0.625f32,
+                "updated_at": (now + chrono::Duration::seconds(1)).to_rfc3339(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        // The tombstone survived (no resurrection) and the field still merged.
+        let rid = RecordID::<()>::new(TABLE, m.id.as_str()).unwrap();
+        let value = get_record(store.client(), &rid).await.unwrap().unwrap();
+        let row: MemoryRow = serde_json::from_value(value).unwrap();
+        assert!(
+            row.deleted_at.is_some(),
+            "tombstone must survive a reinforcement that raced the forget"
+        );
+        assert_eq!(row.reinforcement, 1, "the reinforcement field still merged");
+        assert!(
+            get(&store, &tenant, &m.id).await.unwrap().is_none(),
+            "still hidden from every read path"
         );
     }
 }
