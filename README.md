@@ -1,210 +1,235 @@
 # Antumbra
 
-> A private, self-improving AI that grows its own team of small specialists on your own hardware -
-> and learns the *scope* of what each one is good at.
+> A private, self-improving AI that grows a team of small specialists on your own
+> hardware — and learns the **scope** of what each one is good at, so it knows when
+> to answer locally and when to escalate.
+
+Antumbra runs on your own machine and turns the work you repeat into permanent,
+private skills. It is all-Rust, single-process, and keeps your data on your
+hardware. This README describes the system as it is built today.
 
 ---
 
-## What this is, in plain terms
+## What it is
 
-Most "AI assistants" are one enormous model in someone else's data center. You rent it, you send it your
-data, and it is exactly as good tomorrow as it is today - it never actually *learns your work*.
+Most "AI assistants" are one large model in someone else's data center: you rent
+it, you send it your data, and it is exactly as good tomorrow as today — it never
+learns *your* work.
 
-**Antumbra is the opposite.** It runs on your own computer and grows a **population of small, frozen
-specialists** - each good at a narrow, recurring task. When it meets something it can't do well, it spawns a
-temporary *apprentice* that practices until it either **graduates** into a new permanent specialist or is
-**pruned**. Crucially, it learns *where* each specialist is reliable and where it isn't - so it knows when to
-answer locally and when to step back. Over weeks it quietly gets better at *your* work, on *your* machine, with
-*your* data never leaving the building.
+Antumbra is the opposite. It maintains a **population of small, frozen specialists**
+— LoRA adapters over one shared, code-capable base model — each good at a narrow,
+recurring task. When a result is **verified** (a test passes, a command works, a
+schema matches, you accept a draft), that competence is trained into an adapter and
+**frozen** into the population. A **learned router** sends each new task to the
+specialist most likely to handle it, and a **competence boundary** decides whether
+to answer locally or escalate. Over time it gets measurably better at the work you
+do most, on your own machine, with your data never leaving the building.
 
-The name is load-bearing. A shadow cast by an occluder has three regions, and so does this system:
+Two design commitments make this more than a model zoo:
 
-- **Umbra** = the frozen experts - total shadow, full and proven coverage; immutable (immutability is the only
-  guarantee a skill is never forgotten) - *ADR-0001*
-- **Penumbra** = the partial-shadow region: everything soft, editable, and not-yet-frozen. Two facets, both of
-  which deepen into umbra (graduate) or fade (prune): the **shadows-in-training** (trainable adapters, *ADR-0002*)
-  and the **memory store** (raw, editable, reinforced experiences — the bootstrap and training unit, *ADR-0012*;
-  organized into shareable *compartments*, *ADR-0014*). The hippocampus to the umbra's neocortex.
-- **Antumbra** = the keystone - the region beyond the umbra's tip where the geometry *inverts*: the occluder no
-  longer covers the light source and a ring of light breaks through. That inversion is the counterfactual
-  *scope* - the context where a behavior that was right becomes wrong, where local competence gives out and you
-  must escalate - *ADR-0004*
-
-The project is named for that third region: the boundary **is** the thesis. Knowing exactly where your own
-shadow stops covering - and which contextual feature governs the edge - is the whole game.
-
-```mermaid
-flowchart LR
-    PEN["PENUMBRA<br/>shadows-in-training - explore,<br/>then deepen or fade"] -->|"graduate (deepen to full shadow)"| UMB["UMBRA<br/>frozen experts<br/>(adapters over a shared base)"]
-    PEN -->|"prune"| X["dissipated"]
-    UMB -.->|"cast a new shadow"| PEN
-    ANT["ANTUMBRA - the keystone<br/>counterfactual scope:<br/>where coverage inverts,<br/>and when to escalate"] -.->|"gates"| UMB
-    X -.->|"log why + where it failed"| ANT
-```
+- **Frozen experts.** A graduated specialist is immutable. Immutability is the only
+  hard guarantee that a learned skill is never silently forgotten when the system
+  trains something new (ADR-0001).
+- **Scope, not just skill.** Most systems accumulate what *works*. Antumbra's bet is
+  that the neglected, more valuable half is the **boundary** of a rule — learning
+  that a behavior is right in one context and wrong in a neighbouring one, and
+  *which contextual feature governs the switch*. Constraints are scoped, not
+  absolute: "use `deno install`, not `npm install`" is true **in this repo**, not
+  everywhere. That boundary is what the route-locally-vs-escalate decision rests on
+  (ADR-0004).
 
 ---
 
-## Who is it for? (a concrete example)
+## How it learns (not distillation)
 
-> **Maya is a marketing specialist.** Half her week is banal: reformatting campaign numbers into the same
-> weekly deck, drafting routine emails in her company's voice, triaging the inbox, cleaning spreadsheets. A
-> cloud AI could help - but her company's data can't leave the building, and the generic local model she tried
-> is mediocre at *her* formats and tone.
->
-> Antumbra runs on the workstation under her desk. The first week it is average. But every time it gets one of her
-> recurring tasks right - *verified*: the numbers reconcile, the schema matches, the draft survives her edit -
-> that competence is **frozen into a specialist**. A month later it has a "weekly-deck" expert, a "brand-voice
-> draft" expert, an "inbox-triage" expert: small, private, and genuinely good at the banal 50% of her job.
+Antumbra learns from **verifiable outcomes in your environment**, not by imitating a
+teacher's text:
 
----
+- **The environment is the truth.** For coding over your repos: the test that
+  passes, the command that runs, the build that goes green. That is the reward
+  (RAFT — reward-ranked fine-tuning over verified completions, ADR-0010).
+- **A critic turns a failure into a diagnostic signal** — "`npm install` failed
+  because this is a Deno project; use `deno install`" — and names the *governing
+  feature* of the boundary. That is counterfactual scope extraction (ADR-0004).
+- **Training is on the verified outcome, not the critic's words.** That keeps
+  learning grounded in your data, and clear of "trained on a provider's outputs." A
+  frontier model, if used at all, is an optional cold-start accelerator — your own
+  repos are a more authoritative teacher about *your* conventions than any model.
 
-## How it pays for itself
+This makes **coding over your own repos the ideal first domain**: maximally
+verifiable (you can *run* it), maximally context-scoped (per-repo conventions are
+textbook boundaries), and the data is yours.
 
-You don't replace the expensive model overnight - you **harvest it, then wean off it.** The paid frontier model
-is a *teacher* you consult less and less:
+### How it pays for itself
 
-1. **Route through Antumbra.** Keep using the expensive model, but every task + context + result is logged.
-2. **Verify & capture.** When a result passes a check (tests, schema, or *you accept the draft*), it becomes a
-   training example you already paid for once.
-3. **Graduate a local specialist** that reproduces that behavior on *that one narrow recurring task*.
-4. **Route local, escalate only out-of-scope.** Once the local expert passes the same verification reliably
-   *within its scope*, Antumbra serves that task for **$0** and only calls the expensive model when the
-   **boundary** says "out of scope / not confident" - and that call becomes the next training example.
+You don't replace an expensive model overnight — you harvest it, then wean off it:
 
-So you **amortize your bill toward zero on the work you repeat**, while keeping the frontier model on retainer
-for genuinely novel tasks. The keystone (ADR-0004) is what makes this *safe*: knowing the scope of what you can
-do locally is precisely the "answer-locally vs pay-the-expensive-model" decision.
+1. **Route through Antumbra**, still using the expensive model, logging every
+   task + context + result.
+2. **Verify and capture.** A result that passes a check becomes a training example
+   you already paid for once.
+3. **Graduate a local specialist** that reproduces that behavior on that one narrow
+   task.
+4. **Route local, escalate only out of scope.** Once the local expert passes the
+   same verification reliably *within its scope*, that task is served for $0; the
+   expensive model is called only when the boundary says "out of scope," and that
+   call becomes the next training example.
 
-*Honest caveats:* there's an investment period (you pay while teaching); you trade API bills for a GPU + your
-time (pays off at volume, not light use); some hard/novel tasks never graduate and stay on the paid model; and
-training on a provider's *outputs* can run into their terms - which is why Antumbra grounds truth in **your own
-data + real execution**, not the flagship's text (see below).
-
----
-
-## Why this is deeper than "yet another agent harness"
-
-Most agent frameworks are **orchestration harnesses**: prompt-routing and tool-calling *on top of a frozen
-brain*. The brain never changes; only the choreography does.
-
-Antumbra's core thesis is more fundamental: **modeling the *counterfactual boundary of its own competence.*** Most
-systems accumulate what *works* (skill libraries). Antumbra's bet is that the more valuable, neglected half is the
-**scope** of a rule - learning that a behavior is **right in one context and wrong in a neighbouring one**, and
-*which contextual feature governs the switch.* Constraints are scoped, not absolute: *"use `deno task`, not `npm
-install`"* is true **in this repo**, not everywhere. Capturing that scope is a form of **world modeling** - and
-it is the same thing as knowing when to trust a local expert vs escalate. Everything else (frozen experts,
-shadows, critic, gate) is the apparatus that serves this. We will ship a harness too - but here it is the
-*surface*, not the substance.
+You amortize the bill toward zero on the work you repeat, keeping the frontier model
+on retainer for genuinely novel tasks. *Honest caveats:* there is an investment
+period (you pay while teaching); you trade API bills for a GPU plus your time (it
+pays off at volume, not light use); and some hard, novel tasks never graduate.
 
 ---
 
-## How it learns (and why it's not just distillation)
+## Memory, multi-tenancy, and sharing
 
-Antumbra learns from **verifiable outcomes in your environment**, not by imitating a teacher's text:
+Antumbra includes its own first-class memory and runtime, rather than running
+alongside a separate agent engine.
 
-- The **environment is the truth.** For a coding agent on your repos: the test that passes, the command that
-  actually works, the build that goes green. That is the reward.
-- A **critic** (which *may* be a flagship model, or your own verifiers) turns a raw failure into a dense,
-  *diagnostic* signal - *"`npm install` failed because this is a Deno project; use `deno task`"* - and names the
-  **governing feature** of the boundary (Deno-vs-npm). That is counterfactual scope extraction (ADR-0004).
-- You **train on the verified outcome, not the critic's words.** That keeps the learning grounded in your data
-  (and clear of "trained on a provider's outputs"). The flagship, if used, is an *accelerator for cold-start* -
-  optional, because your own repos are a more authoritative teacher about *your* conventions than any model.
+- **Memory store** (ADR-0012) — a tenant-scoped store with three networks
+  (`world` facts, `bank` experiences, `opinion` judgments), HNSW vector recall,
+  reinforcement counts, and per-memory provenance (who wrote it, on which device).
+  It is both the **bootstrap** (existing memories seed the population with no cold
+  start) and the **consolidation source**: an offline pass scores memories
+  (recurrence × verifiability × stability), graduates the trusted ones into experts
+  with an interleaved **replay** buffer that resists catastrophic forgetting, and
+  retires an expert when a consolidated memory is later contradicted. Forgetting is
+  a **soft-delete tombstone**, so a deletion is retained long enough to propagate
+  and is not silently resurrected by another replica.
 
-This makes **coding-over-your-own-repos the ideal first domain**: maximally verifiable (you can *run* it),
-maximally context-scoped (per-repo conventions are textbook boundaries), and the data is yours.
+- **Engine-enforced isolation** (ADR-0013) — multi-tenancy lives in the SurrealDB
+  engine, not in handler code. Record-access binds `(tenant, user)` to `$auth`, and
+  table permissions (`WHERE tenant_id = $auth.tenant`, plus compartment ownership
+  and grant subqueries) filter every row at the engine — so a forgotten app-side
+  filter cannot leak. Validated live against a real `ws://` server, including the
+  fix (R-6) that makes requests run on a scoped, non-root connection so the engine
+  ACL is genuinely enforced over the network.
 
----
+- **Compartments** (ADR-0014) — named, ownable spaces of memory: the unit of
+  organization, deletion, and sharing. A user grants another user `reference` or
+  `link` capability on a compartment (engine-enforced); a private compartment
+  consolidates into a *private* expert. Antumbra can also *propose* compartments by
+  clustering unorganized memory. **Revocation is a tombstone** that fails closed
+  immediately at the engine and propagates across devices — a revoked grantee
+  cannot be kept in by a stale copy elsewhere.
 
-## Memory, tenants, and the runtime surface
+## The runtime surface
 
-Antumbra absorbs the memory and runtime role of a separate agent engine, rather than running alongside one.
+- **MCP server** (`antumbra-mcp`, ADR-0015) — a Rust Model Context Protocol server
+  exposing memory, graph, compartment, routing, and `answer` tools. Two transports:
+  - **stdio** for a single local identity, and
+  - a **networked, multi-tenant HTTP** surface where each request carries a signed
+    JWT whose `(tenant, user)` claims become the engine's `$auth`. Runs in
+    streamable-HTTP **stateful (SSE)** mode so the server can push notifications.
 
-- **Penumbra memory** (*ADR-0012*) — a first-class, tenant-scoped memory store (`world`/`bank`/`opinion`
-  networks, HNSW recall, reinforcement, provenance). It is the **bootstrap** (existing memories seed the
-  population without a cold start, via *memory-import*) and the **consolidation source**: an offline "sleep"
-  scores memories (recurrence × verifiability × stability), graduates the trusted ones into experts with an
-  interleaved **replay** buffer, and **retires** an expert when a consolidated memory is later contradicted. The
-  store + population become one circulatory system: memory → weights → forgetting.
-- **Engine-enforced multi-tenancy** (*ADR-0013*) — isolation lives in the SurrealDB engine (record access +
-  `PERMISSIONS WHERE tenant_id = $auth.tenant`), not in handler code: a forgotten filter cannot leak. `$auth`
-  carries `(tenant, user)`; the population (experts/router) is the **shared umbra**, memory is the **private
-  penumbra**, and an owner role can read across tenants to profile and train.
-- **Compartments** (*ADR-0014*) — named, ownable "latent-spaces" of memory: the unit of organization, deletion,
-  sharing (`reference`/`link` grants, user-to-user, engine-enforced), and the natural **training unit** — a
-  private compartment consolidates into a *private* expert. The **antumbra** itself can *propose* compartments by
-  clustering the penumbra (the same boundary machinery that does routing). Every memory carries who/which-machine
-  provenance.
-- **MCP server** (*ADR-0015*) — `antumbra-mcp`, a Rust Model Context Protocol server (12 tools: memory, graph,
-  compartments, `route`), each engine-isolated to the bound `(tenant, user)`. The surface an agent talks to.
+- **Live propagation** — when a shared compartment changes, a SurrealDB `LIVE`
+  subscription resolves the change's audience (owner + grantees) and pushes a
+  notification to each recipient's open SSE stream, so an agent learns of new or
+  forgotten memories without polling. Validated end-to-end over the wire.
 
-## Status & shape (honest)
-
-- **Research project, not a product.** Every milestone is a falsifiable experiment with a kill criterion.
-- **All-Rust, single process.** Data in SurrealDB via `surql-rs`; training (QLoRA adapters **and** the gate)
-  via a DIY `candle` path; inference via `llama-cpp-2` / `mistral.rs` (a seam, not yet wired).
-- **v0 = shared-base adapters on one RTX 3090 Ti (24 GB):** one frozen, code-capable base + a growing library of
-  frozen LoRA experts + a boundary-conditioned **coverage** gate (the learned latent mixer is the north star).
-
-**Validated so far (toy scale, 2026-06-03):**
-
-- The trainer **learns** on a real GPU: RAFT lifts pass-rate to 1.0 under both a convention reward and a verifier
-  that *executes* the generated code (`0.38 -> 1.00`).
-- A real candle BERT embedder drives a gate that **routes** to the right specialist and **escalates
-  out-of-scope** queries - using relative coverage, not an absolute similarity floor.
-- Expert capability vectors are **learned from evaluated behavior** (the tasks an expert provably solved), not
-  hand-written labels - shown with three GPU-trained specialists in one population.
-- The **keystone** (ADR-0004) composes end-to-end: counterfactual search recovers C', the actionable boundary
-  persists, and the gate inhibits routing **inside the failure scope only**.
-
-**Not yet:** small corpora / few experts (no generalization or forgetting test); the real `AcceptabilityProbe`
-and serving engine; the learned latent gate; GRPO and 4-bit quantized training; heterogeneous composition.
-
-**North star = a heterogeneous composed model** (genuinely separate frozen experts wired by learned
-cross-attention bridges) - *ADR-0009*. The v0 gate, boundary engine, loop, and substrate all carry over; only
-the composition substrate changes.
+- **Collector / sync** (`antumbra-sync`) — keeps an edge device's local embedded
+  store and a remote authoritative store in agreement by periodic **bidirectional
+  last-write-wins** reconciliation (compared by each row's version timestamp, in
+  Rust, so the flow converges and self-terminates). This is the multi-device story:
+  a user's memories — and the grants and revocations that govern them — become
+  visible across a fleet through one source of truth. CLI: `antumbra sync`.
 
 ---
 
-## Build & run (v0)
+## Status (honest)
 
-The substrate, critic, gate, boundary engine, and the durable generational loop are implemented and tested in
-Rust against **surql-rs** on the SurrealDB 3.x driver (builder-only - no hand-written SurrealQL). The real
-candle **Qwen2.5-Coder + LoRA trainer** (RAFT over verified outcomes, ADR-0010) is implemented behind a `models`
-feature; the default loop runs with a demo trainer so everything is exercisable without a GPU.
+A research project, not a product: every milestone is a falsifiable experiment with
+a kill criterion. All-Rust, single process; data in SurrealDB via `surql-rs`
+(builder-only — no hand-written SurrealQL); training and serving via `candle`.
+
+**v0 substrate:** one frozen, code-capable base (Qwen2.5-Coder-1.5B-Instruct) on a
+single 24 GB GPU, a growing library of frozen LoRA experts, and a
+boundary-conditioned coverage gate. The real candle trainer/server is behind a
+`models` feature; the default build runs a CPU demo trainer so the orchestration is
+exercisable without a GPU.
+
+**Validated (toward 2026-06):**
+
+- **Training works on a real GPU.** RAFT lifts pass-rate to 1.0 under both a
+  convention reward and a verifier that *executes* generated code. The
+  generation-quality recipe is dialed in (instruct base + chat template, a decode
+  policy of repetition penalty + no-repeat-n-gram + nucleus, shuffled SFT, tuned
+  learning rate, and optional gradient accumulation): a small corpus trains an
+  expert that emits correct, *generalizing* output — including held-out inputs.
+- **Consolidation closes the loop:** memories score through the gate and graduate
+  into a specialist that internalizes the skill; a private compartment consolidates
+  into a private, owner-scoped expert.
+- **Routing + boundary:** a real embedder drives a gate that routes to the right
+  specialist and escalates out-of-scope queries by *relative coverage*, not an
+  absolute similarity floor; the counterfactual boundary composes end-to-end.
+- **Networked multi-tenancy is engine-enforced over `ws://`,** validated live
+  against a real SurrealDB v3 server: cross-tenant isolation and intra-tenant
+  compartment privacy both hold; grant makes a shared memory visible and revoke
+  fails closed — over the wire.
+- **Multi-device:** bidirectional LWW sync converges; deletes and grant
+  revocations propagate as tombstones with no resurrection; live SSE notifications
+  reach grantees end-to-end.
+
+**Not yet:** large corpora and many experts (the real generalization-and-forgetting
+test at scale); the learned latent-mixing gate (the north star beyond the coverage
+gate); GRPO and 4-bit quantized training; heterogeneous composition (genuinely
+separate experts wired by learned cross-attention bridges, ADR-0009) — for which the
+v0 gate, boundary engine, loop, and substrate all carry over.
+
+---
+
+## Build & run
 
 ```bash
-cargo test                                   # whole workspace, green (incl. the keystone test)
+cargo test                      # whole workspace, green
 
-# no-GPU demo: drive the durable loop with the fake trainer, then inspect
-cargo run -p antumbra-cli -- schema                              # print generated DDL
+# No-GPU demo: drive the durable loop with the CPU trainer, then inspect.
+cargo run -p antumbra-cli -- schema                                  # print generated DDL
 cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv loop --generations 3
 cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv status
 
-# real training + routing (needs a CUDA GPU + ~3 GB Qwen weights, and python for
-# exec verifiers) - see the guide below. Train a specialist, then route to it.
+# Real training + serving (CUDA GPU + the Qwen weights; python for exec verifiers).
 cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
   train --corpus corpora/arith.json --run arith --generations 1
 cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
-  route "add two integers and return the sum"   # routes to the specialist, or escalates if out of scope
-cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
   ask "Write a Python function add(a, b) that returns their sum."   # route -> load adapter -> generate
+
+# Bidirectional sync between this store and a remote authoritative SurrealDB.
+cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv \
+  sync --remote ws://host:8000/rpc --remote-user root --remote-pass <pw>
 ```
 
-See [architecture §7](docs/architecture.md#7-repo-structure-greenfield) for per-crate status and
-**[Running the trainer](docs/running-the-trainer.md)** for the GPU run.
+The networked MCP server (`antumbra-mcp --http 0.0.0.0:8081 --url ws://... --db-user
+root --db-pass <pw>`, with a JWT secret) and its live multi-tenant validation are
+reproducible with the probes under `docs/` (run against a SurrealDB v3 server, e.g.
+`docker run -p 8000:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root
+memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUDA
+GPU recipe and the validated generation-quality settings.
 
 ---
 
-## Documentation map
+## Documentation
 
-- **[Architecture](docs/architecture.md)** - system, substrate, decision chain, training/data flow, schema.
-- **[Technical Reference](docs/technical-reference.md)** - crate map, domain model, the port seams, the
-  algorithms as coded, the build matrix, and validation results.
-- **[Diagram Atlas](docs/diagrams.md)** - every diagram in one place: concept, system, flow, schema, per-ADR.
-- **[Glossary](docs/glossary.md)** - every ADR-0010 acronym, with a diagram each, and why it is called candle.
-- **[Running the trainer](docs/running-the-trainer.md)** - the CUDA-13 / Windows GPU recipe.
-- **[Experiment Ledger](experiments/README.md)** - every falsifiable validation: claim, method, result, kill
-  criterion, reproduce command.
-- **[Architecture Decision Records](docs/adr/README.md)** - every load-bearing decision, ADR-0001 … ADR-0015
-  (incl. Penumbra memory, tenant isolation, compartments, and the MCP runtime surface).
+- **[Architecture](docs/architecture.md)** — system, substrate, decision chain,
+  training and data flow, schema.
+- **[Technical Reference](docs/technical-reference.md)** — crate map, domain model,
+  port seams, algorithms as coded, build matrix, validation results.
+- **[Roadmap](docs/roadmap.md)** — what is built and what is queued, with status
+  per item (sync, live propagation, networked validation, the security fixes).
+- **[Running the trainer](docs/running-the-trainer.md)** — the CUDA GPU recipe and
+  the validated generation-quality recipe.
+- **[Architecture Decision Records](docs/adr/README.md)** — every load-bearing
+  decision, ADR-0001 … ADR-0015.
+- **[Experiment Ledger](experiments/README.md)** — each falsifiable validation:
+  claim, method, result, kill criterion, reproduce command.
+
+### Crates
+
+`antumbra-core` (domain types, ports) · `antumbra-store` (SurrealDB persistence via
+surql-rs) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary`
+(counterfactual scope) · `antumbra-critic` (verifiers + credit assignment) ·
+`antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident
+multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync`
+(collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked)
+· `antumbra-cli` · `antumbra-tui`.
