@@ -25,8 +25,16 @@ builders only — `list_rows`/`put_row`/`row_id`, reusing the record-id target
 verbatim to dodge v3 escaping). End-to-end: bidirectional seed (1 push / 1 pull),
 convergence (0/0), and LWW propagation (1/0) all verified through the CLI on two
 persistent `surrealkv://` stores.
-**Known gaps:** delete propagation (needs tombstones); incremental cursors (today
-each cycle scans full tables — fine at penumbra scale).
+**Delete propagation (done for memory):** `forget` now **soft-deletes** — a memory
+becomes a tombstone (`deleted_at` set, `updated_at` bumped) rather than vanishing,
+so the deletion is the trace's newest version and propagates under LWW instead of
+resurfacing from the other side (validated: a tombstone pushes and the trace does
+not resurrect). Read paths hide tombstones; `memory::purge` hard-removes them past
+a grace window (run wider than the sync interval, so every replica saw the
+tombstone first — resurrection-safe GC, the `gc_grace_seconds` pattern).
+**Known gaps:** compartment/grant/expert deletes are still hard deletes (don't
+propagate — grant *revoke* not propagating is a security follow-up); incremental
+cursors (each cycle scans full tables — fine at penumbra scale).
 **Unblocks:** multi-device compartment sharing; the fleet (ADR-0006/0009); R-2.
 **Was deferred on:** a conflict/ordering policy — now decided (LWW).
 
@@ -62,8 +70,10 @@ initialized → GET SSE) as a grantee, has another user write into the shared
 compartment, and asserts the `antumbra/memory_changed` notification arrives on the
 grantee's SSE stream — exercising the actual transport, peer capture, watcher, and
 push (no real socket / external client needed).
-**Known gaps:** deletes are not routed (the notification payload carries no
-compartment on delete) — same tombstone gap as R-1.
+**Deletes now routed:** because a `forget` is a soft-delete (an *update* carrying
+`deleted_at`), the change still has the compartment, so `propagate::resolve_change`
+resolves its audience and relabels the action `Delete` — grantees are notified of
+forgets, not just writes (validated end-to-end).
 
 ## GPU-gated wiring
 

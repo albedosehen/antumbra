@@ -152,6 +152,12 @@ pub struct Memory {
     pub status: MemoryStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When set, this trace is a **tombstone**: forgotten, but retained so the
+    /// deletion propagates (last-write-wins sync, R-1) and is routed to grantees
+    /// (R-2) instead of silently resurfacing from another replica. Read paths
+    /// hide tombstones; a grace-windowed purge removes them for good. `None` for a
+    /// live trace.
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 impl Memory {
@@ -181,6 +187,7 @@ impl Memory {
             status: MemoryStatus::Committed,
             created_at: now,
             updated_at: now,
+            deleted_at: None,
         }
     }
 
@@ -230,6 +237,20 @@ impl Memory {
     pub fn mark_consolidated(&mut self, expert: ExpertId, now: DateTime<Utc>) {
         self.consolidated_expert = Some(expert);
         self.updated_at = now;
+    }
+
+    /// Forget this trace as a **tombstone**: mark it deleted at `now` (also
+    /// stamping `updated_at`, so the deletion is the trace's newest version and
+    /// wins under last-write-wins). The row is kept, not dropped, so the deletion
+    /// propagates and routes rather than resurfacing from another replica.
+    pub fn soft_delete(&mut self, now: DateTime<Utc>) {
+        self.deleted_at = Some(now);
+        self.updated_at = now;
+    }
+
+    /// `true` if this trace is a tombstone (forgotten).
+    pub fn is_deleted(&self) -> bool {
+        self.deleted_at.is_some()
     }
 
     /// Whether the trace has already hardened into the umbra.

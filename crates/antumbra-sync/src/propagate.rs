@@ -79,8 +79,16 @@ pub async fn resolve_change(store: &Store, event: &ChangeEvent) -> Option<Memory
     let compartment = CompartmentId::new(row.get("compartment")?.as_str()?);
     let memory = MemoryId::new(row.get("key")?.as_str()?);
     let recipients = audience(store, &tenant, &compartment).await.ok()?;
+    // A forget is a tombstone write (an update carrying `deleted_at`), which still
+    // has the compartment -- so unlike a hard delete it routes. Surface it to the
+    // agent as a delete rather than the raw update action.
+    let action = if row.get("deleted_at").and_then(|v| v.as_str()).is_some() {
+        ChangeAction::Delete
+    } else {
+        event.action
+    };
     Some(MemoryChange {
-        action: event.action,
+        action,
         tenant,
         compartment,
         memory,
@@ -156,5 +164,71 @@ mod tests {
         let names: Vec<&str> = change.recipients.iter().map(UserId::as_str).collect();
         assert!(names.contains(&"alice"), "owner notified: {names:?}");
         assert!(names.contains(&"bob"), "grantee notified: {names:?}");
+    }
+
+    // A forget on a shared memory routes a *Delete* change to the audience -- the
+    // tombstone update still carries the compartment, so unlike a hard delete it
+    // is routable.
+    #[tokio::test]
+    async fn a_forget_routes_a_delete_to_the_audience() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("t");
+        let comp = CompartmentId::new("comp-2");
+        let now = chrono::Utc::now();
+        compartment::create(
+            &store,
+            &Compartment {
+                id: comp.clone(),
+                tenant: tenant.clone(),
+                owner: UserId::new("alice"),
+                name: "shared".into(),
+                origin: Origin::User,
+                created_at: now,
+            },
+        )
+        .await
+        .unwrap();
+        compartment::grant(
+            &store,
+            &Grant {
+                tenant: tenant.clone(),
+                compartment: comp.clone(),
+                grantee: UserId::new("bob"),
+                capability: Capability::Reference,
+                granted_by: UserId::new("alice"),
+                created_at: now,
+            },
+        )
+        .await
+        .unwrap();
+
+        let mut rx = watch_shared_memories(&store).await.unwrap();
+        let m = Memory::new(
+            "eeeeeeee-0000-0000-0000-00000000000e",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "to be forgotten",
+            0.9,
+            now,
+        )
+        .in_compartment(comp.clone());
+        memory::upsert(&store, &m).await.unwrap();
+        memory::soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+
+        // The create then the delete arrive; read until the Delete is seen.
+        let deleted = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while let Some(change) = rx.recv().await {
+                if change.action == ChangeAction::Delete {
+                    return Some(change);
+                }
+            }
+            None
+        })
+        .await
+        .expect("a change arrives before timeout")
+        .expect("a delete change is routed");
+        assert_eq!(deleted.memory.as_str(), "eeeeeeee-0000-0000-0000-00000000000e");
+        let names: Vec<&str> = deleted.recipients.iter().map(UserId::as_str).collect();
+        assert!(names.contains(&"alice") && names.contains(&"bob"), "{names:?}");
     }
 }

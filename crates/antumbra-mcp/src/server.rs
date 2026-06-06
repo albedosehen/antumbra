@@ -611,10 +611,19 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<Json<ForgetOut>, ErrorData> {
-        memory::delete(&self.store, &self.tenant, &MemoryId::new(p.memory_id))
-            .await
-            .map_err(err)?;
-        Ok(Json(ForgetOut { forgotten: true }))
+        // Soft-delete (tombstone): hidden from reads here, and the deletion
+        // propagates across the fleet (R-1) and routes to grantees (R-2) instead
+        // of resurfacing from another replica.
+        let forgotten = memory::soft_delete(
+            &self.store,
+            &self.tenant,
+            &MemoryId::new(p.memory_id),
+            Utc::now(),
+        )
+        .await
+        .map_err(err)?
+        .is_some();
+        Ok(Json(ForgetOut { forgotten }))
     }
 
     /// List this tenant's memories (optionally one network).

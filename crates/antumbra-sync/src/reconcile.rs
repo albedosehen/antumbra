@@ -188,4 +188,37 @@ mod tests {
         assert_eq!(on_local.content, "fresh", "local took the newer version");
         assert_eq!(on_remote.content, "fresh", "remote unchanged");
     }
+
+    // A forget (tombstone) is a newer version, so it propagates to the other side
+    // and the trace does not resurrect; the pass then converges.
+    #[tokio::test]
+    async fn a_tombstone_propagates_and_does_not_resurrect() {
+        let (local, remote) = (mem_store().await, mem_store().await);
+        let tenant = TenantId::new("t");
+        let id = "dddddddd-0000-0000-0000-000000000004";
+        let mid = MemoryId::new(id);
+        let t0 = Utc::now();
+
+        // Both sides hold the live trace.
+        memory::upsert(&local, &mem(id, &tenant, "live", t0)).await.unwrap();
+        memory::upsert(&remote, &mem(id, &tenant, "live", t0)).await.unwrap();
+
+        // Local forgets it (a tombstone, newer than remote's live copy).
+        memory::soft_delete(&local, &tenant, &mid, t0 + ChronoDuration::seconds(5))
+            .await
+            .unwrap();
+
+        let stats = reconcile_table(&local, &remote, MEMORY).await.unwrap();
+        assert_eq!(stats, ReconcileStats { pushed: 1, pulled: 0 }, "tombstone pushed");
+
+        // Forgotten on both sides; the live copy did not resurrect it on local.
+        assert!(memory::get(&remote, &tenant, &mid).await.unwrap().is_none());
+        assert!(memory::get(&local, &tenant, &mid).await.unwrap().is_none());
+
+        // Converged.
+        assert_eq!(
+            reconcile_table(&local, &remote, MEMORY).await.unwrap(),
+            ReconcileStats::default()
+        );
+    }
 }

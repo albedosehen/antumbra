@@ -59,6 +59,10 @@ struct MemoryRow {
     status: MemoryStatus,
     created_at: String,
     updated_at: String,
+    // Tombstone marker. Absent (NONE) for a live trace so read paths can test it
+    // cheaply; an RFC3339 timestamp once forgotten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deleted_at: Option<String>,
 }
 
 impl MemoryRow {
@@ -80,6 +84,7 @@ impl MemoryRow {
             status: m.status,
             created_at: m.created_at.to_rfc3339(),
             updated_at: m.updated_at.to_rfc3339(),
+            deleted_at: m.deleted_at.map(|t| t.to_rfc3339()),
         }
     }
 
@@ -101,6 +106,7 @@ impl MemoryRow {
             status: self.status,
             created_at: parse_dt(&self.created_at)?,
             updated_at: parse_dt(&self.updated_at)?,
+            deleted_at: self.deleted_at.as_deref().map(parse_dt).transpose()?,
         })
     }
 }
@@ -120,7 +126,8 @@ pub async fn get(store: &Store, tenant: &TenantId, id: &MemoryId) -> Result<Opti
     match get_record(store.client(), &rid).await.map_err(map)? {
         Some(value) => {
             let row: MemoryRow = serde_json::from_value(value)?;
-            if row.tenant_id != tenant.as_str() {
+            // Another tenant's trace, or a tombstone, reads as absent.
+            if row.tenant_id != tenant.as_str() || row.deleted_at.is_some() {
                 return Ok(None);
             }
             Ok(Some(row.into_domain()?))
@@ -137,7 +144,10 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
         .map_err(map)?
         .where_(eq("tenant_id", tenant.as_str()));
     let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().map(MemoryRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .map(MemoryRow::into_domain)
+        .collect()
 }
 
 /// Every memory across all tenants, with NO tenant filter. As an owner/root
@@ -148,7 +158,10 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
 pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
     let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
     let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().map(MemoryRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .map(MemoryRow::into_domain)
+        .collect()
 }
 
 /// A compartment's memories (the corpus for per-compartment consolidation,
@@ -168,7 +181,10 @@ pub async fn list_by_compartment(
             eq("compartment", compartment.as_str()),
         ));
     let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().map(MemoryRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .map(MemoryRow::into_domain)
+        .collect()
 }
 
 /// A tenant's memories in one network (tenant + network filtered).
@@ -186,7 +202,10 @@ pub async fn list_by_network(
             eq("network", network.as_str()),
         ));
     let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
-    rows.into_iter().map(MemoryRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .map(MemoryRow::into_domain)
+        .collect()
 }
 
 /// Semantic recall: the `k` nearest memories to `query` *within* `tenant` (and
@@ -212,7 +231,10 @@ pub async fn recall(
         .vector_search("embedding", vector, k as i64, VectorDistanceType::Cosine, None)
         .map_err(map)?;
     let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
-    rows.into_iter().map(MemoryRow::into_domain).collect()
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .map(MemoryRow::into_domain)
+        .collect()
 }
 
 /// Reinforce a trace (recurrence + confidence bump), tenant-checked. Returns the
@@ -251,12 +273,116 @@ pub async fn mark_consolidated(
     }
 }
 
-/// Delete a trace, but only within the caller's tenant (the `tenant_id`
-/// predicate is ANDed onto the key, so no cross-tenant delete).
+/// Forget a trace as a **tombstone** (the deletion that propagates and routes):
+/// mark it `deleted_at = now` and persist, so read paths hide it while sync (R-1)
+/// and live propagation (R-2) carry the deletion to other replicas/grantees
+/// instead of it resurfacing. Tenant-checked via `get`; a no-op (returns `None`)
+/// if the trace is absent or already a tombstone. Use [`purge`] to hard-remove
+/// tombstones once the propagation grace window has passed.
+pub async fn soft_delete(
+    store: &Store,
+    tenant: &TenantId,
+    id: &MemoryId,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Option<Memory>> {
+    match get(store, tenant, id).await? {
+        Some(mut m) => {
+            m.soft_delete(now);
+            upsert(store, &m).await?;
+            Ok(Some(m))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Hard-remove tombstones forgotten before `older_than` (the grace window), so
+/// they do not accumulate forever. Run it on a cadence with a window wider than
+/// the sync interval, so every replica has seen the tombstone before it is
+/// purged (resurrection-safe garbage collection). Returns how many were purged.
+pub async fn purge(store: &Store, older_than: chrono::DateTime<chrono::Utc>) -> Result<usize> {
+    let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
+    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    let mut purged = 0;
+    for row in rows {
+        let Some(ts) = row.deleted_at.as_deref() else {
+            continue; // live trace
+        };
+        if parse_dt(ts).map(|t| t < older_than).unwrap_or(false) {
+            let condition = and_(eq("key", row.key.as_str()), eq("tenant_id", row.tenant_id.as_str()));
+            delete_records(store.client(), TABLE, Some(&condition)).await.map_err(map)?;
+            purged += 1;
+        }
+    }
+    Ok(purged)
+}
+
+/// Hard-delete a trace, but only within the caller's tenant (the `tenant_id`
+/// predicate is ANDed onto the key, so no cross-tenant delete). Bypasses the
+/// tombstone path -- prefer [`soft_delete`] for user-facing forgets so the
+/// deletion propagates; this is for purges and internal cleanup.
 pub async fn delete(store: &Store, tenant: &TenantId, id: &MemoryId) -> Result<()> {
     let condition = and_(eq("key", id.as_str()), eq("tenant_id", tenant.as_str()));
     delete_records(store.client(), TABLE, Some(&condition))
         .await
         .map_err(map)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repo::sync as rows;
+    use crate::schema::EMBED_DIM;
+
+    // Forgetting hides the trace from every read path, but the row is RETAINED as
+    // a tombstone (so sync can carry the deletion); a grace-windowed purge then
+    // removes it for good.
+    #[tokio::test]
+    async fn soft_delete_hides_the_trace_then_purge_removes_it() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("t");
+        let now = chrono::Utc::now();
+        let m = Memory::new(
+            "11111111-0000-0000-0000-000000000001",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "remember me",
+            0.8,
+            now,
+        );
+        upsert(&store, &m).await.unwrap();
+        assert_eq!(list(&store, &tenant).await.unwrap().len(), 1);
+
+        // Forget: hidden from list + get, but the raw row stays (for propagation).
+        assert!(soft_delete(&store, &tenant, &m.id, now).await.unwrap().is_some());
+        assert!(list(&store, &tenant).await.unwrap().is_empty(), "hidden from list");
+        assert!(
+            get(&store, &tenant, &m.id).await.unwrap().is_none(),
+            "hidden from get"
+        );
+        assert_eq!(
+            rows::list_rows(&store, "memory").await.unwrap().len(),
+            1,
+            "tombstone row retained so the deletion can propagate"
+        );
+
+        // Re-forget is a no-op (already a tombstone).
+        assert!(soft_delete(&store, &tenant, &m.id, now).await.unwrap().is_none());
+
+        // Purge with a cutoff after the deletion removes it for good.
+        let purged = purge(&store, now + chrono::Duration::seconds(1)).await.unwrap();
+        assert_eq!(purged, 1);
+        assert!(
+            rows::list_rows(&store, "memory").await.unwrap().is_empty(),
+            "purged"
+        );
+        // A purge before the cutoff leaves live-window tombstones alone.
+        upsert(&store, &m).await.unwrap();
+        soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+        assert_eq!(
+            purge(&store, now - chrono::Duration::days(1)).await.unwrap(),
+            0,
+            "within the grace window: not purged"
+        );
+    }
 }
