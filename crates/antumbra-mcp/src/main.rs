@@ -89,6 +89,19 @@ async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Res
     Ok(Store::connect(config, EMBED_DIM).await?)
 }
 
+/// A credential-less **serving** connection to an already-provisioned remote: it
+/// connects without applying the schema and only ever holds a per-request record
+/// session, so the engine ACL is enforced (a root connection would bypass it,
+/// R-6). Used by the networked HTTP surface for the actual request work.
+pub(crate) async fn connect_serving(url: &str) -> Result<Store> {
+    let config = ConnectionConfig::builder()
+        .url(url)
+        .namespace("antumbra")
+        .database("main")
+        .build()?;
+    Ok(Store::connect_without_schema(config, EMBED_DIM).await?)
+}
+
 /// The real candle BERT embedder under `--features models`, else the
 /// byte-histogram fake. Both produce `EMBED_DIM`-wide vectors.
 #[cfg(feature = "models")]

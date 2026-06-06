@@ -862,6 +862,18 @@ impl ServerHandler for McpServer {
         &self,
         context: rmcp::service::NotificationContext<rmcp::service::RoleServer>,
     ) {
+        // Bind THIS session's connection to its identity. rmcp builds one server
+        // (and, on a remote, one DB connection) per session, so the binding must
+        // happen here -- the HTTP layer's signin runs on a different handle and a
+        // cloned remote connection does not share it. Signing in as the record
+        // scopes the engine ACL for every tool call in this session (R-6).
+        if let Err(e) = self.store.signin(&self.tenant, &self.user).await {
+            eprintln!(
+                "antumbra-mcp: session signin failed for {}/{}: {e}",
+                self.tenant.as_str(),
+                self.user.as_str()
+            );
+        }
         if let Some(registry) = &self.registry {
             let identity = crate::auth::Identity {
                 tenant: self.tenant.as_str().to_string(),

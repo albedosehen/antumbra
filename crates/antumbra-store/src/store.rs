@@ -34,18 +34,31 @@ impl Store {
     /// Connect to a configured database (remote `ws://` or embedded
     /// `surrealkv://`) and apply the schema.
     pub async fn connect(config: ConnectionConfig, embed_dim: usize) -> Result<Self> {
+        let store = Self::connect_without_schema(config, embed_dim).await?;
+        store.ensure_schema().await?;
+        Ok(store)
+    }
+
+    /// Connect **without** applying the schema. For a second, credential-less
+    /// *serving* connection to an authenticated remote whose schema a root
+    /// connection has already applied: an anonymous session cannot run `DEFINE`,
+    /// and only needs to sign in per request as a record (which then scopes the
+    /// engine ACL correctly — unlike a root connection, which bypasses it). See
+    /// the R-6 fix in the MCP HTTP layer.
+    pub async fn connect_without_schema(
+        config: ConnectionConfig,
+        embed_dim: usize,
+    ) -> Result<Self> {
         let namespace = config.namespace().to_string();
         let database = config.database().to_string();
         let client = DatabaseClient::new(config).map_err(map)?;
         client.connect().await.map_err(map)?;
-        let store = Store {
+        Ok(Store {
             client,
             embed_dim,
             namespace,
             database,
-        };
-        store.ensure_schema().await?;
-        Ok(store)
+        })
     }
 
     /// Authenticate this session as `(tenant, user)` via the record-access

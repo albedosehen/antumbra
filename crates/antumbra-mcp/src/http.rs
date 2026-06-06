@@ -55,9 +55,17 @@ use crate::server::McpServer;
 type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
 
 struct HttpState {
-    /// The one shared connection. Embedded is single-writer, so every tenant is
-    /// served over this; `auth` serializes the signed-in section.
+    /// The **root/owner** connection: schema, per-identity provisioning, and the
+    /// owner-view R-2 watcher run here. On a remote it is root-authenticated.
     store: Store,
+    /// The **scoped serving** connection: every request signs in on this one as
+    /// its `(tenant, user)` record, so the engine ACL is enforced. On an
+    /// authenticated remote it is a *separate, credential-less* connection —
+    /// a root session bypasses row-level permissions and cannot be scoped
+    /// (surrealdb#6259), so requests must NOT run on the root connection (R-6).
+    /// On embedded (single-writer) it is the same connection as `store`, which
+    /// already scopes correctly on record signin.
+    serve_store: Store,
     host: String,
     verifier: JwtVerifier,
     embedder: Arc<dyn Embedder>,
@@ -91,11 +99,21 @@ pub async fn serve(
     auto_propose: Option<usize>,
 ) -> Result<()> {
     let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
+    // The scoped serving connection. On an authenticated remote, requests must run
+    // on a NON-root connection or the engine ACL is bypassed (R-6): open a second,
+    // credential-less connection (schema already applied by `store`). On embedded
+    // there are no credentials and only one connection is possible, so serving
+    // reuses `store` — record signin scopes correctly there.
+    let serve_store = match (db_user.as_deref(), db_pass.as_deref()) {
+        (Some(_), Some(_)) => crate::connect_serving(&url).await?,
+        _ => store.clone(),
+    };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
     let serve = crate::build_serve(&store).await?;
     let state = Arc::new(HttpState {
         store,
+        serve_store,
         host,
         verifier,
         embedder,
@@ -177,8 +195,10 @@ async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Resp
     // Serialize the authenticated section over the single shared connection: bind
     // this identity, run the request, then release so the next request re-binds.
     let _guard = state.auth.lock().await;
+    // Bind the SERVING connection to this identity's record (engine-scoped), not
+    // the root `store`.
     if let Err(e) = state
-        .store
+        .serve_store
         .signin(&TenantId::new(&identity.tenant), &UserId::new(&identity.user))
         .await
     {
@@ -208,8 +228,11 @@ impl HttpState {
             crate::provision_identity(&self.store, &tenant, &user).await?
         };
 
+        // The server's tools run on the SCOPED serving connection so the engine
+        // ACL is enforced per request (not the root `store`, which would bypass
+        // it on a remote — R-6).
         let mut mcp = McpServer::new(
-            self.store.clone(),
+            self.serve_store.clone(),
             self.embedder.clone(),
             tenant,
             user,
@@ -268,8 +291,10 @@ mod tests {
     use tower::ServiceExt; // oneshot
 
     async fn state() -> Arc<HttpState> {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
         Arc::new(HttpState {
-            store: Store::connect_memory(EMBED_DIM).await.unwrap(),
+            serve_store: store.clone(),
+            store,
             host: "test".into(),
             verifier: JwtVerifier::hs256(b"test-secret"),
             embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),

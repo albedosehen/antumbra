@@ -7,12 +7,8 @@ Reuses the R-3 setup (docker surrealdb v3 + antumbra-mcp --http ... --url ws://.
 --db-user root --db-pass root, JWT secret 'test-secret'). Stdlib only.
 
   python docs/grant_revoke_probe.py
-
-NOTE (2026-06-06): this currently FAILS over ws:// because of R-6 (the root
-connection bypasses the engine ACL on a remote — see docs/roadmap.md). The
-grant-revoke tombstone logic itself is correct (the embedded grant-ACL test fails
-closed after revoke); this probe will pass once R-6 lands a non-root serving
-connection. It is kept as the R-6 reproduction.
+Expected: "RESULT: PASS - revoke fails closed over ws://" (since R-6 landed the
+scoped, non-root per-session serving connection that makes the engine ACL enforce).
 """
 import base64, hashlib, hmac, json, time, urllib.request
 

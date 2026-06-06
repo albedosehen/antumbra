@@ -119,12 +119,13 @@ embedded engine):
   HTTP layer uses it wherever it needs the cross-tenant owner view (provisioning,
   the R-2 watcher).
 
-> **Correction (2026-06-06):** R-3's "isolation over the wire" is *cross-tenant*,
-> and it holds because `list`/`recall` filter by the session's tenant **app-side**
-> (plus the engine rule's `tenant_id = $auth.tenant` clause). The **engine** ACL's
-> *intra-tenant compartment* enforcement does **not** hold on `ws://` today — see
-> the security item R-6 below. Cross-tenant isolation is safe; compartment privacy
-> between users of the same tenant is not yet engine-enforced on a remote.
+> **Correction + resolution (2026-06-06):** R-3's first pass enforced cross-tenant
+> isolation only app-side (the `tenant_id` filter); the **engine** ACL was bypassed
+> on `ws://` because requests ran on the root connection. **R-6 (below) fixes this**
+> — requests now run on a scoped, non-root per-session connection, so the engine
+> enforces both cross-tenant AND intra-tenant compartment isolation on a remote
+> (validated: `docs/r3_isolation_probe.py` and `docs/grant_revoke_probe.py` both
+> pass over docker `ws://`).
 
 ## Security
 
@@ -140,24 +141,34 @@ valid during the propagation window (AWS IAM persistence abuse); a *hard delete 
 never propagates* is strictly worse. Validated: the embedded grant-ACL test still
 fails closed after revoke, and a reconcile test shows the revocation propagating
 without resurrection. `compartment::purge_grants` GCs tombstones past a grace
-window. **Caveat:** fully effective on `ws://` only once R-6 lands (below).
+window. Now enforced on `ws://` too (R-6 landed).
 
-### R-6 · Engine permission enforcement on `ws://` (CRITICAL)
-**Discovered 2026-06-06 while validating grant-revoke over a real `ws://` server.**
-The networked server holds **one root-authenticated connection** and signs in per
-request as each `(tenant, user)` record. But **a root session bypasses row-level
-permissions**, and SurrealDB has no way to run a permission-scoped query from a
-root/system session ([surrealdb#6259](https://github.com/surrealdb/surrealdb/issues/6259));
-signing in as a record from a root connection does not downgrade enforcement. So on
-`ws://` the engine ACL is effectively **not enforced** — intra-tenant compartment
-privacy (and therefore grant/revoke) is unprotected at the engine. It works on
-**embedded** because that connection is owner/anonymous (not authenticated root), so
-the per-request record signin scopes correctly (proven by the embedded ACL tests).
-This is a **pre-existing** hole the grant-revoke validation surfaced, not a
-regression. **Fix (architecture):** serve requests over a **non-root** connection —
-e.g. a second, credential-less serving connection that only ever holds the
-per-request record session (scoped, enforced), while the root connection is reserved
-for provisioning and the owner-view watcher. (`ws://` permits multiple connections;
-embedded keeps its single connection, which already enforces.) Until then, networked
-multi-tenant **compartment** isolation must not be relied on; cross-tenant isolation
-is safe (app-side tenant filter).
+### R-6 · Engine permission enforcement on `ws://` (CRITICAL) — DONE
+**Discovered + fixed 2026-06-06 while validating grant-revoke over a real `ws://`
+server.** The networked server held **one root-authenticated connection** and
+signed in per request as each `(tenant, user)` record — but **a root session
+bypasses row-level permissions**, and SurrealDB cannot run a permission-scoped
+query from a root/system session ([surrealdb#6259](https://github.com/surrealdb/surrealdb/issues/6259)).
+So on `ws://` the engine ACL was effectively **not enforced**: a user saw another
+user's private-compartment memories. (It always worked on **embedded**, whose
+connection is owner/anonymous, so record signin scopes.) A pre-existing hole the
+grant-revoke validation surfaced, not a regression.
+**Fix (two parts):**
+1. **Non-root serving connection.** `HttpState` now holds a separate `serve_store`
+   — on an authenticated remote, a second, credential-less connection
+   (`Store::connect_without_schema`; the root `store` already applied the schema)
+   that only ever holds record sessions; the root `store` is reserved for
+   provisioning + the owner-view R-2 watcher. On embedded it is the same single
+   connection (which already scopes).
+2. **Per-session signin in `on_initialized`.** rmcp builds one server (and, on a
+   remote, one cloned DB connection) per session, and a cloned remote connection
+   does **not** share the HTTP layer's signin. So each session binds **its own**
+   connection to its identity at `on_initialized` — scoping the engine ACL for every
+   tool call in that session.
+**Validated** over docker `ws://`: cross-tenant isolation, intra-tenant compartment
+privacy, grant visibility, and fail-closed revoke all hold (`r3_isolation_probe.py`,
+`grant_revoke_probe.py`). Embedded unchanged (31 suites green).
+**Follow-up (perf, not correctness):** on `ws://` each session has its own scoped
+connection, so the per-request auth lock + the HTTP-layer signin are now redundant
+there (harmless overhead) — they could be skipped on the remote path to lift the
+serialized-section bottleneck.
