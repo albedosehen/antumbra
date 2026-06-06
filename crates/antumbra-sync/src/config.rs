@@ -78,6 +78,12 @@ pub struct SyncConfig {
     /// Reconnect backoff bounds after a lost connection.
     pub min_backoff: Duration,
     pub max_backoff: Duration,
+    /// The incremental-cursor lookback window (the CDC "delay"): each cycle re-
+    /// includes rows whose version is within this much of the watermark, so a
+    /// write stamped slightly in the past (clock skew, a late commit) is not
+    /// skipped. Re-reconciling settled rows is a no-op, so this only costs a small
+    /// overlapping fetch. Keep it well under `interval`.
+    pub lookback: Duration,
 }
 
 impl SyncConfig {
@@ -88,6 +94,7 @@ impl SyncConfig {
             interval: Duration::from_secs(15),
             min_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
+            lookback: Duration::from_secs(5),
         }
     }
 
@@ -140,6 +147,7 @@ mod tests {
         assert_eq!(cfg.interval, Duration::from_secs(15));
         assert_eq!(cfg.min_backoff, Duration::from_millis(500));
         assert_eq!(cfg.max_backoff, Duration::from_secs(30));
+        assert_eq!(cfg.lookback, Duration::from_secs(5));
         let cfg = cfg.with_interval(Duration::from_secs(2));
         assert_eq!(cfg.interval, Duration::from_secs(2));
     }

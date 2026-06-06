@@ -9,12 +9,23 @@
 //! Convergence and loopback: a write is only propagated when it is *strictly*
 //! newer than the target's copy. After one pass both sides hold the same version,
 //! so the next pass finds them equal and does nothing -- the bidirectional flow
-//! settles instead of echoing. Deletes are not propagated in this cut (no
-//! tombstones); a row removed on one side is re-seeded from the other.
+//! settles instead of echoing. Deletes propagate as tombstones (a soft-delete is
+//! the newest version of its row, see [`crate::table`]); the grace-windowed purge
+//! is what finally removes them.
+//!
+//! Incremental cursors: a long-running collector tracks a per-table high-water
+//! mark ([`Cursors`]) and each cycle fetches only rows past it (minus a small
+//! lookback window), instead of scanning the whole table. The asymmetry that
+//! makes this correct: a row appearing in only one side's window is necessarily
+//! newer than the other side's copy (which is at or below the window floor), so
+//! it wins without a cross-side comparison; rows changed on both sides land in
+//! both windows and are compared directly. The one-shot [`reconcile_all`] stays a
+//! full scan.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use antumbra_core::Result;
 use antumbra_store::repo::sync as row_repo;
@@ -64,17 +75,66 @@ fn is_newer(candidate: &Value, current: &Value, spec: &TableSpec) -> bool {
     }
 }
 
-/// Reconcile one table across both stores, last-write-wins. Returns what moved.
-pub async fn reconcile_table(
+/// Per-table high-water marks for incremental reconciliation: the newest row
+/// version (an RFC3339 string) reconciled so far on each table. A long-running
+/// collector holds one across cycles, so each cycle fetches only rows past the
+/// mark. It is reset (empty) on a reconnect -- which triggers one full scan, the
+/// backstop that re-syncs anything that changed while disconnected.
+#[derive(Debug, Default, Clone)]
+pub struct Cursors {
+    hwm: BTreeMap<String, String>,
+}
+
+impl Cursors {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The current watermark for `table` (empty until its first pass).
+    fn get(&self, table: &str) -> String {
+        self.hwm.get(table).cloned().unwrap_or_default()
+    }
+
+    /// Advance the watermark for `table` to `candidate` if it is the newer string.
+    fn advance(&mut self, table: &str, candidate: String) {
+        let entry = self.hwm.entry(table.to_string()).or_default();
+        if candidate > *entry {
+            *entry = candidate;
+        }
+    }
+}
+
+/// Lower a watermark by `lookback` (the CDC "delay" window): the next cycle re-
+/// includes rows within `lookback` of the mark, so a write that landed with a
+/// slightly stale timestamp (clock skew, a late commit) is not skipped. Re-
+/// reconciling already-settled rows is a harmless no-op under idempotent LWW. An
+/// empty or unparseable mark stays empty (a full scan).
+fn lookback_floor(hwm: &str, lookback: Duration) -> String {
+    if hwm.is_empty() {
+        return String::new();
+    }
+    match (DateTime::parse_from_rfc3339(hwm), ChronoDuration::from_std(lookback)) {
+        (Ok(ts), Ok(delta)) => ts
+            .with_timezone(&Utc)
+            .checked_sub_signed(delta)
+            .map(|t| t.to_rfc3339())
+            .unwrap_or_else(|| hwm.to_string()),
+        _ => hwm.to_string(),
+    }
+}
+
+/// The last-write-wins pass over two already-indexed row sets (the shared core of
+/// the full and incremental paths). A row only one side has is seeded the other
+/// way; a shared row's strictly-newer version wins on both.
+async fn reconcile_indexed(
     local: &Store,
     remote: &Store,
     spec: &TableSpec,
+    local_rows: &BTreeMap<String, Value>,
+    remote_rows: &BTreeMap<String, Value>,
 ) -> Result<ReconcileStats> {
-    let local_rows = index_by_id(row_repo::list_rows(local, spec.name).await?);
-    let remote_rows = index_by_id(row_repo::list_rows(remote, spec.name).await?);
     let mut stats = ReconcileStats::default();
-
-    for (id, lrow) in &local_rows {
+    for (id, lrow) in local_rows {
         match remote_rows.get(id) {
             None => {
                 if row_repo::put_row(remote, lrow).await? {
@@ -92,7 +152,7 @@ pub async fn reconcile_table(
             }
         }
     }
-    for (id, rrow) in &remote_rows {
+    for (id, rrow) in remote_rows {
         if !local_rows.contains_key(id) && row_repo::put_row(local, rrow).await? {
             stats.pulled += 1;
         }
@@ -100,7 +160,52 @@ pub async fn reconcile_table(
     Ok(stats)
 }
 
-/// Reconcile every table, in the given order.
+/// Reconcile one table starting from watermark `cursor` (empty = full scan), with
+/// a `lookback` delay window. Returns what moved and the new watermark: the newest
+/// version seen on either side this pass, never below `cursor`.
+async fn reconcile_table_since(
+    local: &Store,
+    remote: &Store,
+    spec: &TableSpec,
+    cursor: &str,
+    lookback: Duration,
+) -> Result<(ReconcileStats, String)> {
+    let since = lookback_floor(cursor, lookback);
+    let local_rows =
+        index_by_id(row_repo::list_rows_since(local, spec.name, spec.version_field, &since).await?);
+    let remote_rows = index_by_id(
+        row_repo::list_rows_since(remote, spec.name, spec.version_field, &since).await?,
+    );
+    let stats = reconcile_indexed(local, remote, spec, &local_rows, &remote_rows).await?;
+
+    let mut hwm = cursor.to_string();
+    for rows in [&local_rows, &remote_rows] {
+        for row in rows.values() {
+            if let Some(v) = row.get(spec.version_field).and_then(Value::as_str) {
+                if v > hwm.as_str() {
+                    hwm = v.to_string();
+                }
+            }
+        }
+    }
+    Ok((stats, hwm))
+}
+
+/// Reconcile one table across both stores, last-write-wins (a full scan). Returns
+/// what moved. For the incremental, cursor-tracked path the collector runs, see
+/// [`reconcile_all_since`].
+pub async fn reconcile_table(
+    local: &Store,
+    remote: &Store,
+    spec: &TableSpec,
+) -> Result<ReconcileStats> {
+    Ok(reconcile_table_since(local, remote, spec, "", Duration::ZERO)
+        .await?
+        .0)
+}
+
+/// Reconcile every table, in the given order (a full scan over each). The one-shot
+/// `sync --once` path.
 pub async fn reconcile_all(
     local: &Store,
     remote: &Store,
@@ -109,6 +214,27 @@ pub async fn reconcile_all(
     let mut stats = ReconcileStats::default();
     for spec in tables {
         stats.add(reconcile_table(local, remote, spec).await?);
+    }
+    Ok(stats)
+}
+
+/// Reconcile every table incrementally: each is fetched from its watermark in
+/// `cursors` (minus the `lookback` window) and its watermark advanced past what
+/// was seen. The first call (empty cursors) is a full scan; later calls move only
+/// what changed since. Returns what moved this pass.
+pub async fn reconcile_all_since(
+    local: &Store,
+    remote: &Store,
+    tables: &[TableSpec],
+    cursors: &mut Cursors,
+    lookback: Duration,
+) -> Result<ReconcileStats> {
+    let mut stats = ReconcileStats::default();
+    for spec in tables {
+        let cursor = cursors.get(spec.name);
+        let (s, hwm) = reconcile_table_since(local, remote, spec, &cursor, lookback).await?;
+        cursors.advance(spec.name, hwm);
+        stats.add(s);
     }
     Ok(stats)
 }
@@ -274,6 +400,93 @@ mod tests {
             reconcile_table(&local, &remote, GRANT).await.unwrap(),
             ReconcileStats::default()
         );
+    }
+
+    // Incremental cursors: the first pass (empty cursors) is a full scan that
+    // seeds the remote and sets the watermark; a later write past the watermark is
+    // the only thing the next pass fetches and pushes, and the pass then settles.
+    #[tokio::test]
+    async fn incremental_pass_moves_only_what_changed_since_the_watermark() {
+        let (local, remote) = (mem_store().await, mem_store().await);
+        let tenant = TenantId::new("t");
+        let t0 = Utc::now();
+        let t1 = t0 + ChronoDuration::seconds(30);
+        let mut cursors = Cursors::new();
+        let tables = &[*MEMORY];
+
+        // First pass: a full scan seeds A onto the remote.
+        memory::upsert(&local, &mem("aaaaaaaa-0000-0000-0000-0000000000a1", &tenant, "A", t0))
+            .await
+            .unwrap();
+        let s = reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(s, ReconcileStats { pushed: 1, pulled: 0 });
+
+        // A new local write past the watermark is the only row the next pass moves.
+        memory::upsert(&local, &mem("bbbbbbbb-0000-0000-0000-0000000000b2", &tenant, "B", t1))
+            .await
+            .unwrap();
+        let s = reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(s, ReconcileStats { pushed: 1, pulled: 0 }, "only B moved");
+        assert_eq!(memory::list(&remote, &tenant).await.unwrap().len(), 2);
+
+        // Converged: nothing new past the watermark.
+        let s = reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(s, ReconcileStats::default());
+    }
+
+    // The asymmetry that keeps incremental reconcile correct: a row updated on
+    // ONLY the remote past the watermark appears in just the remote's window, yet
+    // is still pulled to the local (its copy sits at or below the floor, so the
+    // remote's is provably newer -- no cross-side compare needed).
+    #[tokio::test]
+    async fn an_update_on_one_side_only_still_propagates_under_a_cursor() {
+        let (local, remote) = (mem_store().await, mem_store().await);
+        let tenant = TenantId::new("t");
+        let id = "cccccccc-0000-0000-0000-0000000000c3";
+        let mid = MemoryId::new(id);
+        let t0 = Utc::now();
+        let t2 = t0 + ChronoDuration::seconds(30);
+        let mut cursors = Cursors::new();
+        let tables = &[*MEMORY];
+
+        // Seed A on both sides, advancing the watermark to t0.
+        memory::upsert(&local, &mem(id, &tenant, "v0", t0)).await.unwrap();
+        reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
+            .await
+            .unwrap();
+
+        // The remote alone updates A past the watermark.
+        memory::upsert(&remote, &mem(id, &tenant, "v2", t2)).await.unwrap();
+        let s = reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
+            .await
+            .unwrap();
+        assert_eq!(s, ReconcileStats { pushed: 0, pulled: 1 }, "remote-only update pulled");
+        assert_eq!(
+            memory::get(&local, &tenant, &mid).await.unwrap().unwrap().content,
+            "v2"
+        );
+    }
+
+    // The lookback window lowers the query floor (so a slightly-stale write is not
+    // skipped) but never raises it; an empty or bad mark stays a full scan.
+    #[test]
+    fn lookback_floor_subtracts_the_window() {
+        let t = "2026-06-05T12:00:30+00:00";
+        let lowered = lookback_floor(t, Duration::from_secs(5));
+        let expected = DateTime::parse_from_rfc3339(t).unwrap().with_timezone(&Utc)
+            - ChronoDuration::seconds(5);
+        assert_eq!(lowered, expected.to_rfc3339());
+        assert!(lowered.as_str() < t, "the floor is below the mark");
+        // No window: the mark is unchanged. Empty/garbage: a full scan.
+        assert_eq!(lookback_floor(t, Duration::ZERO), t);
+        assert_eq!(lookback_floor("", Duration::from_secs(5)), "");
+        assert_eq!(lookback_floor("not-a-date", Duration::from_secs(5)), "not-a-date");
     }
 
     // A compartment deletion (tombstone) propagates and does not resurrect from a

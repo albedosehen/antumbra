@@ -42,8 +42,23 @@ stay hard by design:** experts are not replicated (on-disk adapters, out of DB
 sync), so a tombstone would serve no propagation purpose — the standard rule that
 tombstones are a *replication* concern (Cassandra/Couchbase). If experts ever sync,
 they'd need one then.
-**Remaining gap:** incremental cursors (each cycle scans full tables — fine at
-penumbra scale).
+**Incremental cursors (done):** a long-running collector now tracks a per-table
+high-water mark (`reconcile::Cursors`) and each cycle fetches only rows past it
+via an engine-side `updated_at > since` (string `>`, no datetime in the query —
+chrono's uniform-UTC RFC3339 is lexicographically monotonic with time), instead
+of scanning the whole table. A small **lookback window** (`SyncConfig.lookback`,
+the CDC "delay") re-includes the boundary so a slightly-stale write is not skipped;
+re-reconciling settled rows is a no-op under idempotent LWW. The correctness rests
+on an asymmetry: a row in only one side's window is necessarily newer than the
+other side's copy (≤ the floor), so it wins without a cross-side compare. The
+watermarks reset on reconnect (one full scan = the backstop that re-syncs anything
+missed while disconnected); `reconcile_all` (the one-shot `sync --once`) stays a
+full scan. Version-field indexes (`*_updated_at_idx`, `memory_edge_created_at_idx`)
+back the range filter engine-side. Research-corroborated (Kafka Connect JDBC
+timestamp-mode watermark + delay window). Validated over docker `ws://`
+(`crates/antumbra-sync/tests/ws_incremental.rs`, gated on `ANTUMBRA_SYNC_WS`): the
+real v3 engine's string `>` converges (seed → incremental push → remote-only pull
+→ settle).
 **Unblocks:** multi-device compartment sharing; the fleet (ADR-0006/0009); R-2.
 **Was deferred on:** a conflict/ordering policy — now decided (LWW).
 

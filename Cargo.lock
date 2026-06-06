@@ -184,6 +184,7 @@ dependencies = [
  "antumbra-loop",
  "antumbra-serve",
  "antumbra-store",
+ "antumbra-sync",
  "antumbra-train",
  "anyhow",
  "chrono",
@@ -242,10 +243,12 @@ dependencies = [
  "antumbra-core",
  "antumbra-serve",
  "antumbra-store",
+ "antumbra-sync",
  "anyhow",
  "axum",
  "chrono",
  "clap",
+ "futures",
  "jsonwebtoken 9.3.1",
  "rmcp",
  "serde",
@@ -280,11 +283,24 @@ dependencies = [
  "antumbra-gate",
  "async-trait",
  "chrono",
+ "futures",
  "oneiriq-surql",
  "serde",
  "serde_json",
  "surrealdb",
  "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "antumbra-sync"
+version = "0.0.0"
+dependencies = [
+ "antumbra-core",
+ "antumbra-store",
+ "chrono",
+ "oneiriq-surql",
+ "serde_json",
  "tokio",
 ]
 

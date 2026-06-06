@@ -10,7 +10,7 @@ use antumbra_core::Result;
 use antumbra_store::Store;
 
 use crate::config::SyncConfig;
-use crate::reconcile::{reconcile_all, ReconcileStats};
+use crate::reconcile::{reconcile_all, reconcile_all_since, Cursors, ReconcileStats};
 use crate::table::PENUMBRA_TABLES;
 
 /// Connect both endpoints and run one reconcile pass over every penumbra table.
@@ -50,9 +50,14 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
         };
         backoff = cfg.min_backoff; // connected: reset the backoff
 
+        // Fresh watermarks per connection: the first pass after (re)connecting is
+        // a full scan -- the backstop that re-syncs anything changed while down --
+        // then later passes move only what changed.
+        let mut cursors = Cursors::new();
+
         // Reconcile on the cadence until a cycle fails or shutdown is requested.
         loop {
-            match reconcile_all(&local, &remote, PENUMBRA_TABLES).await {
+            match reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, cfg.lookback).await {
                 Ok(stats) if stats.total() > 0 => {
                     eprintln!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
                 }

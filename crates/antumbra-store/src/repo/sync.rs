@@ -14,6 +14,7 @@ use serde_json::Value;
 use surql::connection::streaming::LiveQuery;
 use surql::query::builder::Query;
 use surql::query::crud::{query_records, upsert_record_target};
+use surql::types::operators::gt;
 use surrealdb::types::Action;
 use tokio::sync::mpsc;
 
@@ -26,6 +27,36 @@ use crate::store::Store;
 /// `id`, which [`row_id`] reads back and [`put_row`] writes to the other store.
 pub async fn list_rows(store: &Store, table: &str) -> Result<Vec<Value>> {
     let query = Query::new().select(None).from_table(table).map_err(map)?;
+    let rows: Vec<Value> = query_records(store.client(), &query).await.map_err(map)?;
+    Ok(rows)
+}
+
+/// The rows of `table` whose `version_field` is **strictly greater** than
+/// `since` (an RFC3339 string), for the collector's incremental cursor: each
+/// cycle fetches only what changed past its high-water mark instead of the whole
+/// table. An empty `since` matches everything, so it degrades to [`list_rows`] (a
+/// full scan) -- the first cycle, and the path that also returns rows with no
+/// version field at all.
+///
+/// The comparison is a plain SurrealQL string `>` (the field is stored as an
+/// RFC3339 string; the bound literal is a quoted string), so no datetime crosses
+/// into the query. That is correct ordering because chrono's `to_rfc3339()` over
+/// uniform-UTC stamps is lexicographically monotonic with time (fixed-width
+/// fields; the fraction's `+` terminator sorts below any digit). Builders only.
+pub async fn list_rows_since(
+    store: &Store,
+    table: &str,
+    version_field: &str,
+    since: &str,
+) -> Result<Vec<Value>> {
+    if since.is_empty() {
+        return list_rows(store, table).await;
+    }
+    let query = Query::new()
+        .select(None)
+        .from_table(table)
+        .map_err(map)?
+        .where_(gt(version_field, since));
     let rows: Vec<Value> = query_records(store.client(), &query).await.map_err(map)?;
     Ok(rows)
 }
@@ -181,6 +212,42 @@ mod tests {
         let got = got.expect("replicated memory is readable by the typed repo");
         assert_eq!(got.content, "deno install lodash");
         assert_eq!(got.confidence, 0.9);
+    }
+
+    // The incremental cursor fetch returns only rows newer than the watermark
+    // (string `>` on the RFC3339 version field), and an empty watermark returns
+    // everything -- the full-scan bootstrap path.
+    #[tokio::test]
+    async fn list_rows_since_filters_by_version() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("t");
+        let t0 = chrono::Utc::now();
+        let t1 = t0 + chrono::Duration::seconds(10);
+        let older = mem("00000000-0000-0000-0000-0000000000a1", &tenant, "older", t0);
+        let newer = mem("00000000-0000-0000-0000-0000000000a2", &tenant, "newer", t1);
+        memory::upsert(&store, &older).await.unwrap();
+        memory::upsert(&store, &newer).await.unwrap();
+
+        // Empty watermark: a full scan returns both.
+        assert_eq!(
+            list_rows_since(&store, "memory", "updated_at", "").await.unwrap().len(),
+            2
+        );
+        // Watermark at the older row's timestamp: only the strictly-newer row.
+        let rows = list_rows_since(&store, "memory", "updated_at", &t0.to_rfc3339())
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1, "only the row newer than the watermark");
+        assert_eq!(rows[0].get("content").and_then(Value::as_str), Some("newer"));
+        // Watermark at or past the newest: nothing changed.
+        assert!(list_rows_since(&store, "memory", "updated_at", &t1.to_rfc3339())
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    fn mem(id: &str, tenant: &TenantId, content: &str, at: chrono::DateTime<chrono::Utc>) -> Memory {
+        Memory::new(id, tenant.clone(), MemoryNetwork::World, content, 0.8, at)
     }
 
     // The change-feed watcher delivers a write made after the subscription is

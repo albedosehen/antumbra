@@ -165,6 +165,9 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_indexes([
                 unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
                 index("memory_tenant_network_idx", ["tenant_id", "network"]),
+                // Supports the collector's incremental watermark filter
+                // (`updated_at > since`) as a range scan (R-1).
+                index("memory_updated_at_idx", ["updated_at"]),
                 hnsw_index(
                     "memory_embedding_hnsw",
                     "embedding",
@@ -191,6 +194,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_indexes([
                 index("memory_edge_from_idx", ["tenant_id", "from_id"]),
                 index("memory_edge_to_idx", ["tenant_id", "to_id"]),
+                index("memory_edge_created_at_idx", ["created_at"]),
             ]),
         // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
         // subqueries resolve; ownership/sharing is carried in the rows (owner +
@@ -201,6 +205,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_indexes([
                 unique_index("compartment_key_uq", ["tenant_id", "key"]),
                 index("compartment_owner_idx", ["tenant_id", "owner"]),
+                index("compartment_updated_at_idx", ["updated_at"]),
             ]),
         // Capability grants (intra-tenant, user-to-user). Tenant-readable so the
         // memory ACL can resolve `grantee = $auth.user`.
@@ -210,6 +215,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_indexes([
                 index("grant_grantee_idx", ["tenant_id", "grantee"]),
                 index("grant_compartment_idx", ["tenant_id", "compartment"]),
+                index("grant_updated_at_idx", ["updated_at"]),
             ]),
         // Principals: one record per (tenant, user). The record-access SIGNIN
         // resolves a principal so `$auth` carries both `$auth.tenant` (the hard
