@@ -22,7 +22,6 @@ async fn grows_population_and_resumes_after_restart() {
     let cfg = LoopConfig {
         graduate_threshold: 0.5,
         base_model: "code-base".into(),
-        max_steps: 4,
     };
     let run = RunId::new("run:loop");
 

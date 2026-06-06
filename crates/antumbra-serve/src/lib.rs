@@ -99,6 +99,12 @@ impl MultiAdapterServe {
 #[cfg(feature = "models")]
 #[async_trait]
 impl Serve for MultiAdapterServe {
+    /// Servable iff the expert's adapter was registered (this engine snapshots the
+    /// population at build time), so a route to an unregistered expert escalates.
+    fn can_serve(&self, expert: &antumbra_core::ExpertId) -> bool {
+        self.registry.contains_key(expert)
+    }
+
     async fn act(
         &self,
         req: antumbra_core::ports::ActRequest,

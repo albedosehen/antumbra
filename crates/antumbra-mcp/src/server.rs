@@ -176,6 +176,14 @@ impl McpServer {
     /// Rank the experts covering an embedded task: shared experts via the learned
     /// router, plus the user's own private experts by centroid. Top-`k`, best
     /// first. The expert ACL already scopes `expert::list` to shared + own-private.
+    ///
+    /// NOTE (deferred, paired with actionable boundaries): unlike the CLI's
+    /// learned-route path, this does NOT subtract `FailureBoundary` inhibition. It
+    /// is a no-op today — the loop only logs *open* (non-actionable) boundaries,
+    /// which never inhibit (ADR-0004) — but when actionable boundaries are produced
+    /// (they need a C'-recovery probe, deferred there too), the served path must
+    /// gate on inhibition like the CLI, or the two front doors diverge. Wire it
+    /// then, not before (avoids a per-route `boundary::list` query for zero effect).
     async fn ranked_routes(&self, v: &[f32], k: usize) -> antumbra_core::Result<Vec<RouteHit>> {
         let mut routes: Vec<RouteHit> = Vec::new();
         if let Some(router) = router::load(&self.store).await? {
@@ -769,11 +777,23 @@ impl McpServer {
             }));
         };
         let expert_id = top.expert_id.clone();
+        let expert = ExpertId::new(expert_id.clone());
+        // The serving engine snapshots its adapter population at startup; a route
+        // to an expert it can't serve (e.g. one minted afterward) escalates cleanly
+        // rather than surfacing a "no adapter registered" error.
+        if !serve.can_serve(&expert) {
+            return Ok(Json(AnswerOut {
+                answer: String::new(),
+                expert_id: Some(expert_id),
+                escalate: true,
+                note: Some("covering expert not resident in the serving engine; escalate".into()),
+            }));
+        }
         let out = serve
             .act(ActRequest {
                 task_id: next_id(&self.counter, "answer"),
                 prompt: p.task,
-                adapters: vec![ExpertId::new(expert_id.clone())],
+                adapters: vec![expert],
             })
             .await
             .map_err(err)?;
@@ -1437,6 +1457,62 @@ mod tests {
         assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
         // EchoServe serves the prompt straight back — proves route -> serve wiring.
         assert_eq!(out.0.answer, "add two numbers");
+    }
+
+    // A serving engine that doesn't have the routed expert's adapter must make
+    // `answer` ESCALATE, not error -- and never call `act` (F4).
+    struct Unservable;
+    #[async_trait::async_trait]
+    impl antumbra_core::ports::Serve for Unservable {
+        async fn act(
+            &self,
+            _req: ActRequest,
+        ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
+            panic!("act must not be called when the expert is unservable");
+        }
+        fn can_serve(&self, _expert: &ExpertId) -> bool {
+            false
+        }
+    }
+
+    #[tokio::test]
+    async fn answer_escalates_when_the_routed_expert_is_not_servable() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        router::save(
+            &store,
+            &LearnedRouter {
+                weights: vec![1.0; EMBED_DIM],
+                experts: vec![RouterExpert {
+                    id: ExpertId::new("expert:adder"),
+                    centroid: vec![0.0; EMBED_DIM],
+                }],
+                temperature: 0.1,
+                floor: -1.0,
+            },
+        )
+        .await
+        .unwrap();
+        let s = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "h".into(),
+            CompartmentId::new("comp:test:default"),
+            Some(Arc::new(Unservable)),
+        );
+        let out = s
+            .answer(Parameters(AnswerParams {
+                task: "add two numbers".into(),
+            }))
+            .await
+            .unwrap();
+        assert!(
+            out.0.escalate,
+            "an unservable routed expert escalates, not errors"
+        );
+        assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
+        assert!(out.0.answer.is_empty());
     }
 
     #[tokio::test]

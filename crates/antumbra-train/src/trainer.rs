@@ -203,7 +203,6 @@ mod tests {
             shadow: ShadowId::new("shadow:g0"),
             base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
             corpus_task_ids: vec![],
-            max_steps: 4,
         };
         let out = trainer.train_shadow(req).await.unwrap();
         assert!(out.final_fitness > 0.0);

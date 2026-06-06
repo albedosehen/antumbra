@@ -35,6 +35,8 @@ jsonwebtoken = "10"
 tower = { version = "0.5", features = ["util"] }
 # Read the SSE response body incrementally in the live-notification round-trip test.
 futures = "0.3"
+# Implement a fake `Serve` (can_serve=false) to test the answer-escalate path.
+async-trait.workspace = true
 
 [features]
 default = []

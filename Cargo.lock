@@ -247,6 +247,7 @@ dependencies = [
  "antumbra-store",
  "antumbra-sync",
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
  "clap",

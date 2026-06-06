@@ -39,6 +39,15 @@ pub struct ActOutput {
 #[async_trait]
 pub trait Serve: Send + Sync {
     async fn act(&self, req: ActRequest) -> Result<ActOutput>;
+
+    /// Whether this engine can serve `expert` right now (its adapter is resident /
+    /// registered). The `answer` tool checks this so a routed-but-unservable expert
+    /// — e.g. a private expert minted after the engine snapshotted its population —
+    /// escalates cleanly instead of surfacing a "no adapter registered" error.
+    /// Defaults to `true` for engines that pin a single adapter or echo any input.
+    fn can_serve(&self, _expert: &ExpertId) -> bool {
+        true
+    }
 }
 
 /// The optional flagship escalation tier (ADR-0005): consulted only when the
@@ -55,7 +64,6 @@ pub struct TrainRequest {
     pub shadow: ShadowId,
     pub base_model: String,
     pub corpus_task_ids: Vec<String>,
-    pub max_steps: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -609,7 +609,6 @@ async fn run() -> anyhow::Result<()> {
                 let loop_cfg = LoopConfig {
                     graduate_threshold: 0.3,
                     base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
-                    max_steps: 8,
                 };
                 let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
                 let reports = lp.run_until(&RunId::new(run), generations).await?;
@@ -719,7 +718,6 @@ async fn run() -> anyhow::Result<()> {
                 let loop_cfg = LoopConfig {
                     graduate_threshold: 0.3,
                     base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
-                    max_steps: 8,
                 };
                 let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
                 let reports = lp.run_until(&RunId::new(run), generations).await?;

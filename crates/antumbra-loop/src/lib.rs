@@ -30,8 +30,6 @@ pub struct LoopConfig {
     pub graduate_threshold: f32,
     /// The shared base every adapter rides on (ADR-0001).
     pub base_model: String,
-    /// Cap on shadow training steps per generation.
-    pub max_steps: u32,
 }
 
 impl Default for LoopConfig {
@@ -39,7 +37,6 @@ impl Default for LoopConfig {
         Self {
             graduate_threshold: 0.5,
             base_model: "code-base".into(),
-            max_steps: 8,
         }
     }
 }
@@ -133,7 +130,6 @@ impl<'a> GenerationLoop<'a> {
                 shadow: shadow_id.clone(),
                 base_model: self.cfg.base_model.clone(),
                 corpus_task_ids: Vec::new(),
-                max_steps: self.cfg.max_steps,
             })
             .await?;
         sh.adapter_uri = Some(outcome.adapter_uri.clone());
