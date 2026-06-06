@@ -199,7 +199,10 @@ async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Resp
     // the root `store`.
     if let Err(e) = state
         .serve_store
-        .signin(&TenantId::new(&identity.tenant), &UserId::new(&identity.user))
+        .signin(
+            &TenantId::new(&identity.tenant),
+            &UserId::new(&identity.user),
+        )
         .await
     {
         eprintln!("antumbra-mcp: signin failed for {}: {e}", identity.tenant);
@@ -280,7 +283,11 @@ fn unauthorized() -> Response {
 }
 
 fn internal_error() -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, "session initialization failed").into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "session initialization failed",
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -391,7 +398,9 @@ mod tests {
             .unwrap();
         let resp = router(state().await).oneshot(req).await.unwrap();
         let status = resp.status();
-        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert_eq!(status, StatusCode::OK, "reached service? body: {text}");
         // Stateless mode may answer as JSON or a single SSE `data:` line; either
@@ -423,8 +432,12 @@ mod tests {
         let now = chrono::Utc::now();
 
         // Owner-mode setup: both principals, a compartment alice owns, bob granted.
-        principal::provision(&state.store, &tenant, &alice).await.unwrap();
-        principal::provision(&state.store, &tenant, &bob).await.unwrap();
+        principal::provision(&state.store, &tenant, &alice)
+            .await
+            .unwrap();
+        principal::provision(&state.store, &tenant, &bob)
+            .await
+            .unwrap();
         compartment::create(
             &state.store,
             &Compartment {

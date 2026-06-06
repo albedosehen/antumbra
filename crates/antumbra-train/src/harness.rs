@@ -43,7 +43,12 @@ fn first_str(v: &Value, keys: &[&str]) -> Option<String> {
 fn str_array(v: &Value, key: &str) -> Vec<String> {
     v.get(key)
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -64,8 +69,11 @@ impl HarnessStep {
         Self {
             goal: first_str(v, &["goal", "prompt", "name", "label", "description"])
                 .unwrap_or_default(),
-            solution: first_str(v, &["solution", "outcome", "result", "output", "final_output"])
-                .unwrap_or_default(),
+            solution: first_str(
+                v,
+                &["solution", "outcome", "result", "output", "final_output"],
+            )
+            .unwrap_or_default(),
             marker: first_str(v, &["marker"]),
             forbid: str_array(v, "forbid"),
         }
@@ -125,19 +133,21 @@ impl HarnessTrace {
         Self {
             id: first_str(v, &["id", "trace_id", "task_id", "run_id"]),
             goal: first_str(v, &["goal", "prompt", "task", "objective"]).unwrap_or_default(),
-            solution: first_str(v, &["solution", "outcome", "result", "final_output", "answer"])
-                .unwrap_or_default(),
+            solution: first_str(
+                v,
+                &["solution", "outcome", "result", "final_output", "answer"],
+            )
+            .unwrap_or_default(),
             kind: first_str(v, &["kind", "type", "source"]),
             marker: first_str(v, &["marker"]),
             forbid: str_array(v, "forbid"),
-            success: v
-                .get("success")
-                .and_then(Value::as_bool)
-                .or_else(|| match first_str(v, &["status", "state"]).as_deref() {
+            success: v.get("success").and_then(Value::as_bool).or_else(|| {
+                match first_str(v, &["status", "state"]).as_deref() {
                     Some("success" | "succeeded" | "completed" | "passed" | "ok") => Some(true),
                     Some("failed" | "failure" | "error" | "aborted") => Some(false),
                     _ => None,
-                }),
+                }
+            }),
             recurrence: v
                 .get("recurrence")
                 .or_else(|| v.get("count"))
@@ -157,7 +167,10 @@ impl HarnessTrace {
     /// The trace's skill kind and base id (synthesizing a stable id when absent).
     fn identity(&self, index: usize) -> (String, String) {
         let kind = self.kind.clone().unwrap_or_else(|| "task".to_string());
-        let id = self.id.clone().unwrap_or_else(|| format!("harness-{kind}-{index}"));
+        let id = self
+            .id
+            .clone()
+            .unwrap_or_else(|| format!("harness-{kind}-{index}"));
         (kind, id)
     }
 }
@@ -186,7 +199,8 @@ impl Default for MetabolizePolicy {
 /// Parse a normalized harness-trace export. Accepts a JSON array of trace objects
 /// or an object wrapping the array (see [`traces_from_kushtaka`]).
 pub fn parse_traces(bytes: &[u8]) -> Result<Vec<HarnessTrace>> {
-    let v: Value = serde_json::from_slice(bytes).map_err(|e| AntumbraError::other(e.to_string()))?;
+    let v: Value =
+        serde_json::from_slice(bytes).map_err(|e| AntumbraError::other(e.to_string()))?;
     Ok(traces_from_kushtaka(&v))
 }
 
@@ -308,7 +322,10 @@ mod tests {
         // min_recurrence 2 keeps only t1 (recurrence 4); the recurrence-1 trace drops.
         let out = metabolize(
             &traces(),
-            &MetabolizePolicy { min_recurrence: 2, include_steps: true },
+            &MetabolizePolicy {
+                min_recurrence: 2,
+                include_steps: true,
+            },
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "t1");
@@ -344,7 +361,11 @@ mod tests {
                 {"name": "bare branch with no outcome"}
             ]
         }));
-        assert_eq!(trace.steps.len(), 2, "the empty (outcome-less) node is dropped");
+        assert_eq!(
+            trace.steps.len(),
+            2,
+            "the empty (outcome-less) node is dropped"
+        );
 
         let out = metabolize(&[trace], &MetabolizePolicy::default());
         // whole + 2 steps.
@@ -367,7 +388,10 @@ mod tests {
         }));
         let out = metabolize(
             &[trace],
-            &MetabolizePolicy { min_recurrence: 1, include_steps: false },
+            &MetabolizePolicy {
+                min_recurrence: 1,
+                include_steps: false,
+            },
         );
         assert_eq!(out.len(), 1, "only the collapsed whole");
         assert_eq!(out[0].id, "g1");
@@ -395,7 +419,10 @@ mod tests {
         }));
         assert_eq!(done.success, Some(true));
         assert_eq!(failed.success, Some(false));
-        assert_eq!(metabolize(&[done, failed], &MetabolizePolicy::default()).len(), 1);
+        assert_eq!(
+            metabolize(&[done, failed], &MetabolizePolicy::default()).len(),
+            1
+        );
     }
 
     // The normalizer accepts every harness-tool envelope: a bare array, an object

@@ -33,7 +33,12 @@ impl PeerRegistry {
 
     /// Record a freshly-initialized session's peer for an identity.
     pub async fn register(&self, identity: Identity, peer: Peer<RoleServer>) {
-        self.peers.lock().await.entry(identity).or_default().push(peer);
+        self.peers
+            .lock()
+            .await
+            .entry(identity)
+            .or_default()
+            .push(peer);
     }
 
     /// Push `change` to every live session of each of its recipients, as a

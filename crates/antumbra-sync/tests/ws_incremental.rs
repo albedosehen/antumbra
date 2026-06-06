@@ -36,7 +36,10 @@ async fn incremental_cursors_converge_over_ws() {
     let pass = std::env::var("ANTUMBRA_SYNC_WS_PASS").unwrap_or_else(|_| "root".into());
 
     let local = Endpoint::embedded("mem://").connect().await.unwrap();
-    let remote = Endpoint::authoritative(&url, user, pass).connect().await.unwrap();
+    let remote = Endpoint::authoritative(&url, user, pass)
+        .connect()
+        .await
+        .unwrap();
     let tenant = TenantId::new("ws:sync");
     let mut cursors = Cursors::new();
     let t0 = chrono::Utc::now();
@@ -45,34 +48,67 @@ async fn incremental_cursors_converge_over_ws() {
     let lookback = Duration::from_secs(5);
 
     // First pass (empty cursors): a full scan seeds A onto the networked remote.
-    memory::upsert(&local, &mem("ffffffff-0000-0000-0000-0000000000f1", &tenant, "A", t0))
-        .await
-        .unwrap();
+    memory::upsert(
+        &local,
+        &mem("ffffffff-0000-0000-0000-0000000000f1", &tenant, "A", t0),
+    )
+    .await
+    .unwrap();
     let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
         .await
         .unwrap();
-    assert_eq!(s, ReconcileStats { pushed: 1, pulled: 0 }, "first pass seeds A to ws://");
+    assert_eq!(
+        s,
+        ReconcileStats {
+            pushed: 1,
+            pulled: 0
+        },
+        "first pass seeds A to ws://"
+    );
 
     // A local write past the watermark is the only thing the incremental query
     // (engine-side string `>` over the network) fetches and pushes.
-    memory::upsert(&local, &mem("ffffffff-0000-0000-0000-0000000000f2", &tenant, "B", t1))
-        .await
-        .unwrap();
+    memory::upsert(
+        &local,
+        &mem("ffffffff-0000-0000-0000-0000000000f2", &tenant, "B", t1),
+    )
+    .await
+    .unwrap();
     let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
         .await
         .unwrap();
-    assert_eq!(s, ReconcileStats { pushed: 1, pulled: 0 }, "only B moves on the incremental pass");
+    assert_eq!(
+        s,
+        ReconcileStats {
+            pushed: 1,
+            pulled: 0
+        },
+        "only B moves on the incremental pass"
+    );
 
     // An update on the remote alone past the watermark is pulled back (the
     // asymmetry: it sits only in the remote's window, provably newer).
     let aid = MemoryId::new("ffffffff-0000-0000-0000-0000000000f1");
-    memory::upsert(&remote, &mem(aid.as_str(), &tenant, "A2", t2)).await.unwrap();
+    memory::upsert(&remote, &mem(aid.as_str(), &tenant, "A2", t2))
+        .await
+        .unwrap();
     let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
         .await
         .unwrap();
-    assert_eq!(s, ReconcileStats { pushed: 0, pulled: 1 }, "remote-only update pulls back");
     assert_eq!(
-        memory::get(&local, &tenant, &aid).await.unwrap().unwrap().content,
+        s,
+        ReconcileStats {
+            pushed: 0,
+            pulled: 1
+        },
+        "remote-only update pulls back"
+    );
+    assert_eq!(
+        memory::get(&local, &tenant, &aid)
+            .await
+            .unwrap()
+            .unwrap()
+            .content,
         "A2",
         "the local took the remote's newer version"
     );
@@ -81,6 +117,10 @@ async fn incremental_cursors_converge_over_ws() {
     let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
         .await
         .unwrap();
-    assert_eq!(s, ReconcileStats::default(), "incremental reconcile settled over ws://");
+    assert_eq!(
+        s,
+        ReconcileStats::default(),
+        "incremental reconcile settled over ws://"
+    );
     eprintln!("RESULT: PASS - incremental cursors converge over ws://");
 }

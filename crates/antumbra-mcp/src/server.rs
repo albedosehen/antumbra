@@ -116,8 +116,7 @@ impl McpServer {
             .await?
             .into_iter()
             .filter(|m| {
-                m.compartment.is_none()
-                    || m.compartment.as_ref() == Some(&self.default_compartment)
+                m.compartment.is_none() || m.compartment.as_ref() == Some(&self.default_compartment)
             })
             .collect())
     }
@@ -525,7 +524,9 @@ struct ProposalsOut {
 #[tool_router]
 impl McpServer {
     /// Store a memory in this tenant's Penumbra.
-    #[tool(description = "Store a memory (content + network) in your workspace's memory. Returns the new memory id.")]
+    #[tool(
+        description = "Store a memory (content + network) in your workspace's memory. Returns the new memory id."
+    )]
     async fn store_memory(
         &self,
         Parameters(p): Parameters<StoreParams>,
@@ -561,7 +562,9 @@ impl McpServer {
     }
 
     /// Semantic recall over this tenant's Penumbra.
-    #[tool(description = "Recall the memories most relevant to a query from your workspace's memory (semantic search).")]
+    #[tool(
+        description = "Recall the memories most relevant to a query from your workspace's memory (semantic search)."
+    )]
     async fn recall_memories(
         &self,
         Parameters(p): Parameters<RecallParams>,
@@ -583,14 +586,21 @@ impl McpServer {
     }
 
     /// Reinforce a memory that proved useful.
-    #[tool(description = "Reinforce a memory (raise its strength and recurrence) when it proves useful.")]
+    #[tool(
+        description = "Reinforce a memory (raise its strength and recurrence) when it proves useful."
+    )]
     async fn reinforce_memory(
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<Json<ReinforceOut>, ErrorData> {
-        match memory::reinforce(&self.store, &self.tenant, &MemoryId::new(p.memory_id), Utc::now())
-            .await
-            .map_err(err)?
+        match memory::reinforce(
+            &self.store,
+            &self.tenant,
+            &MemoryId::new(p.memory_id),
+            Utc::now(),
+        )
+        .await
+        .map_err(err)?
         {
             Some(m) => Ok(Json(ReinforceOut {
                 found: true,
@@ -627,7 +637,9 @@ impl McpServer {
     }
 
     /// List this tenant's memories (optionally one network).
-    #[tool(description = "List your workspace's memories, optionally filtered to one network (world/bank/opinion).")]
+    #[tool(
+        description = "List your workspace's memories, optionally filtered to one network (world/bank/opinion)."
+    )]
     async fn list_memories(
         &self,
         Parameters(p): Parameters<ListParams>,
@@ -644,7 +656,9 @@ impl McpServer {
     }
 
     /// Relate two memories with a typed edge (the Penumbra graph).
-    #[tool(description = "Relate two memories with a typed edge: references/supersedes/contradicts/follows/caused.")]
+    #[tool(
+        description = "Relate two memories with a typed edge: references/supersedes/contradicts/follows/caused."
+    )]
     async fn relate_memories(
         &self,
         Parameters(p): Parameters<RelateParams>,
@@ -662,7 +676,9 @@ impl McpServer {
     }
 
     /// The memories connected from a memory (optionally one edge type).
-    #[tool(description = "Get the memories connected from a memory (optionally filtered to one edge type).")]
+    #[tool(
+        description = "Get the memories connected from a memory (optionally filtered to one edge type)."
+    )]
     async fn get_neighbors(
         &self,
         Parameters(p): Parameters<NeighborsParams>,
@@ -690,8 +706,13 @@ impl McpServer {
     /// Route a task across the shared expert population (the brain). Returns the
     /// covering expert(s) ranked, or escalate when the task is out of
     /// distribution. Pure-arithmetic gate inference (no model load).
-    #[tool(description = "Route a task across the shared population AND your private experts: which expert(s) cover it, ranked, or escalate if none.")]
-    async fn route(&self, Parameters(p): Parameters<RouteParams>) -> Result<Json<RouteOut>, ErrorData> {
+    #[tool(
+        description = "Route a task across the shared population AND your private experts: which expert(s) cover it, ranked, or escalate if none."
+    )]
+    async fn route(
+        &self,
+        Parameters(p): Parameters<RouteParams>,
+    ) -> Result<Json<RouteOut>, ErrorData> {
         let v = self.embedder.embed(&p.task).await.map_err(err)?;
         let routes = self
             .ranked_routes(&v, p.top_k.unwrap_or(3) as usize)
@@ -708,8 +729,13 @@ impl McpServer {
     /// Route a task and serve the answer through the covering expert's adapter
     /// (the full recall→route→serve surface). Escalates when nothing covers it
     /// or when no serving engine is configured.
-    #[tool(description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter. Escalates if nothing covers it.")]
-    async fn answer(&self, Parameters(p): Parameters<AnswerParams>) -> Result<Json<AnswerOut>, ErrorData> {
+    #[tool(
+        description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter. Escalates if nothing covers it."
+    )]
+    async fn answer(
+        &self,
+        Parameters(p): Parameters<AnswerParams>,
+    ) -> Result<Json<AnswerOut>, ErrorData> {
         let Some(serve) = self.serve.clone() else {
             return Ok(Json(AnswerOut {
                 answer: String::new(),
@@ -746,7 +772,9 @@ impl McpServer {
     }
 
     /// Create a private compartment (latent-space) owned by you.
-    #[tool(description = "Create a new compartment (a private latent-space of memory) you own. Store into it via store_memory's compartment arg. Returns its id.")]
+    #[tool(
+        description = "Create a new compartment (a private latent-space of memory) you own. Store into it via store_memory's compartment arg. Returns its id."
+    )]
     async fn create_compartment(
         &self,
         Parameters(p): Parameters<CreateCompartmentParams>,
@@ -768,7 +796,9 @@ impl McpServer {
     }
 
     /// Propose compartments by clustering your uncompartmented memories.
-    #[tool(description = "Have the antumbra propose compartments by clustering your uncompartmented memories into competence-coherent regions. Returns proposals (label, member ids, cohesion). With apply=true it also creates each as a proposed compartment you own and moves its members in (reversible by deleting the compartment).")]
+    #[tool(
+        description = "Have the antumbra propose compartments by clustering your uncompartmented memories into competence-coherent regions. Returns proposals (label, member ids, cohesion). With apply=true it also creates each as a proposed compartment you own and moves its members in (reversible by deleting the compartment)."
+    )]
     async fn propose_compartments(
         &self,
         Parameters(p): Parameters<ProposeCompartmentsParams>,
@@ -790,7 +820,11 @@ impl McpServer {
             };
             views.push(ProposalView {
                 label: prop.label,
-                members: prop.members.iter().map(|m| m.as_str().to_string()).collect(),
+                members: prop
+                    .members
+                    .iter()
+                    .map(|m| m.as_str().to_string())
+                    .collect(),
                 cohesion: prop.cohesion,
                 compartment_id,
             });
@@ -817,7 +851,9 @@ impl McpServer {
     }
 
     /// Share a compartment you own with another user.
-    #[tool(description = "Share one of your compartments with another user: reference (they can recall it) or link (they can also connect to it).")]
+    #[tool(
+        description = "Share one of your compartments with another user: reference (they can recall it) or link (they can also connect to it)."
+    )]
     async fn share_compartment(
         &self,
         Parameters(p): Parameters<ShareParams>,
@@ -835,7 +871,9 @@ impl McpServer {
     }
 
     /// Revoke a user's access to one of your compartments.
-    #[tool(description = "Revoke a user's access to one of your compartments (takes effect immediately).")]
+    #[tool(
+        description = "Revoke a user's access to one of your compartments (takes effect immediately)."
+    )]
     async fn revoke_compartment(
         &self,
         Parameters(p): Parameters<RevokeParams>,
@@ -974,8 +1012,18 @@ mod tests {
             volatile: None,
             compartment: None,
         };
-        let a = s.store_memory(Parameters(store("a deno project"))).await.unwrap().0.id;
-        let b = s.store_memory(Parameters(store("use deno install"))).await.unwrap().0.id;
+        let a = s
+            .store_memory(Parameters(store("a deno project")))
+            .await
+            .unwrap()
+            .0
+            .id;
+        let b = s
+            .store_memory(Parameters(store("use deno install")))
+            .await
+            .unwrap()
+            .0
+            .id;
 
         s.relate_memories(Parameters(RelateParams {
             from_id: a.clone(),
@@ -1073,7 +1121,9 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            r.0.routes.iter().any(|h| h.private && h.expert_id == "expert:mine"),
+            r.0.routes
+                .iter()
+                .any(|h| h.private && h.expert_id == "expert:mine"),
             "the user's private expert must be routable"
         );
     }
@@ -1168,7 +1218,11 @@ mod tests {
             .unwrap();
         assert!(!suggested.0.proposals.is_empty(), "a region is proposed");
         assert!(
-            suggested.0.proposals.iter().all(|p| p.compartment_id.is_none()),
+            suggested
+                .0
+                .proposals
+                .iter()
+                .all(|p| p.compartment_id.is_none()),
             "suggest-only must not persist"
         );
 
@@ -1193,10 +1247,9 @@ mod tests {
             .any(|c| c.id == new_id && c.origin == "proposed"));
 
         // Its members were moved out of the inbox into it (engine round-trip).
-        let moved =
-            memory::list_by_compartment(&s.store, &s.tenant, &CompartmentId::new(new_id))
-                .await
-                .unwrap();
+        let moved = memory::list_by_compartment(&s.store, &s.tenant, &CompartmentId::new(new_id))
+            .await
+            .unwrap();
         assert_eq!(moved.len(), prop.members.len());
         assert!(moved.len() >= 3, "the whole inbox region moved");
     }
@@ -1215,10 +1268,24 @@ mod tests {
         // Provision both identities owner-side (principal + default compartment).
         let comp_a = crate::provision_identity(&store, &ta, &ua).await.unwrap();
         let comp_b = crate::provision_identity(&store, &tb, &ub).await.unwrap();
-        let server_a =
-            McpServer::new(store.clone(), embedder.clone(), ta.clone(), ua.clone(), "h".into(), comp_a, None);
-        let server_b =
-            McpServer::new(store.clone(), embedder.clone(), tb.clone(), ub.clone(), "h".into(), comp_b, None);
+        let server_a = McpServer::new(
+            store.clone(),
+            embedder.clone(),
+            ta.clone(),
+            ua.clone(),
+            "h".into(),
+            comp_a,
+            None,
+        );
+        let server_b = McpServer::new(
+            store.clone(),
+            embedder.clone(),
+            tb.clone(),
+            ub.clone(),
+            "h".into(),
+            comp_b,
+            None,
+        );
 
         // Request 1: bind tenant a, store a memory via a's server.
         store.signin(&ta, &ua).await.unwrap();
@@ -1241,7 +1308,11 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            b_view.0.memories.iter().all(|m| !m.content.contains("alpha")),
+            b_view
+                .0
+                .memories
+                .iter()
+                .all(|m| !m.content.contains("alpha")),
             "tenant b must not see tenant a's memory over the shared connection"
         );
 
@@ -1252,7 +1323,11 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            a_view.0.memories.iter().any(|m| m.content.contains("alpha")),
+            a_view
+                .0
+                .memories
+                .iter()
+                .any(|m| m.content.contains("alpha")),
             "tenant a must see its own memory"
         );
     }
@@ -1286,7 +1361,10 @@ mod tests {
         // The first three writes stay below the threshold: no auto-proposal.
         for n in 0..3 {
             let out = s.store_memory(Parameters(put(n))).await.unwrap();
-            assert!(out.0.auto_proposed.is_empty(), "below threshold: inbox left alone");
+            assert!(
+                out.0.auto_proposed.is_empty(),
+                "below threshold: inbox left alone"
+            );
         }
         // The fourth write reaches the threshold: the antumbra organizes the inbox.
         let out = s.store_memory(Parameters(put(3))).await.unwrap();
@@ -1301,7 +1379,10 @@ mod tests {
 
         // The inbox shrank below the threshold, so the next write does not re-fire.
         let again = s.store_memory(Parameters(put(99))).await.unwrap();
-        assert!(again.0.auto_proposed.is_empty(), "inbox no longer over threshold");
+        assert!(
+            again.0.auto_proposed.is_empty(),
+            "inbox no longer over threshold"
+        );
     }
 
     #[tokio::test]

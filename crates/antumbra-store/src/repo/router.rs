@@ -21,7 +21,9 @@ fn record_id() -> Result<RecordID> {
 pub async fn save(store: &Store, router: &LearnedRouter) -> Result<()> {
     let id = record_id()?;
     let data = serde_json::to_value(router)?;
-    upsert_record(store.client(), &id, data).await.map_err(map)?;
+    upsert_record(store.client(), &id, data)
+        .await
+        .map_err(map)?;
     Ok(())
 }
 

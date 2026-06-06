@@ -254,7 +254,10 @@ mod tests {
             "extract_code": true,
             "contains_all": ["return a + b"],
         });
-        let r = req(spec, "Here you go:\n```python\ndef add(a, b):\n    return a + b\n```");
+        let r = req(
+            spec,
+            "Here you go:\n```python\ndef add(a, b):\n    return a + b\n```",
+        );
         assert!(v.verify(&r).await.unwrap().passed);
     }
 

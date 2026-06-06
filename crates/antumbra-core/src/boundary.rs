@@ -195,7 +195,7 @@ mod tests {
     fn covered_by_an_expert_in_the_failure_region() {
         let mut b = boundary(true, vec![1.0, 0.05, 0.0], 1.0);
         b.ok_context_vec = Some(vec![1.0, 0.0, 0.05]); // C'
-        // An expert whose capability sits on the failure side resolves it.
+                                                       // An expert whose capability sits on the failure side resolves it.
         assert!(b.is_covered_by(&[1.0, 0.1, 0.0]));
         // One sitting on the C' side does not.
         assert!(!b.is_covered_by(&[1.0, 0.0, 0.1]));

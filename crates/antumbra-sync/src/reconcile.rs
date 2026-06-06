@@ -113,7 +113,10 @@ fn lookback_floor(hwm: &str, lookback: Duration) -> String {
     if hwm.is_empty() {
         return String::new();
     }
-    match (DateTime::parse_from_rfc3339(hwm), ChronoDuration::from_std(lookback)) {
+    match (
+        DateTime::parse_from_rfc3339(hwm),
+        ChronoDuration::from_std(lookback),
+    ) {
         (Ok(ts), Ok(delta)) => ts
             .with_timezone(&Utc)
             .checked_sub_signed(delta)
@@ -199,9 +202,11 @@ pub async fn reconcile_table(
     remote: &Store,
     spec: &TableSpec,
 ) -> Result<ReconcileStats> {
-    Ok(reconcile_table_since(local, remote, spec, "", Duration::ZERO)
-        .await?
-        .0)
+    Ok(
+        reconcile_table_since(local, remote, spec, "", Duration::ZERO)
+            .await?
+            .0,
+    )
 }
 
 /// Reconcile every table, in the given order (a full scan over each). The one-shot
@@ -273,15 +278,32 @@ mod tests {
         let (local, remote) = (mem_store().await, mem_store().await);
         let tenant = TenantId::new("t");
         let now = Utc::now();
-        memory::upsert(&local, &mem("aaaaaaaa-0000-0000-0000-000000000001", &tenant, "left", now))
-            .await
-            .unwrap();
-        memory::upsert(&remote, &mem("bbbbbbbb-0000-0000-0000-000000000002", &tenant, "right", now))
-            .await
-            .unwrap();
+        memory::upsert(
+            &local,
+            &mem("aaaaaaaa-0000-0000-0000-000000000001", &tenant, "left", now),
+        )
+        .await
+        .unwrap();
+        memory::upsert(
+            &remote,
+            &mem(
+                "bbbbbbbb-0000-0000-0000-000000000002",
+                &tenant,
+                "right",
+                now,
+            ),
+        )
+        .await
+        .unwrap();
 
         let stats = reconcile_table(&local, &remote, MEMORY).await.unwrap();
-        assert_eq!(stats, ReconcileStats { pushed: 1, pulled: 1 });
+        assert_eq!(
+            stats,
+            ReconcileStats {
+                pushed: 1,
+                pulled: 1
+            }
+        );
 
         // Both stores now hold both memories.
         assert_eq!(memory::list(&local, &tenant).await.unwrap().len(), 2);
@@ -302,11 +324,22 @@ mod tests {
         let t1 = t0 + ChronoDuration::seconds(5);
 
         // Same record, divergent: remote's copy is newer.
-        memory::upsert(&local, &mem(id, &tenant, "stale", t0)).await.unwrap();
-        memory::upsert(&remote, &mem(id, &tenant, "fresh", t1)).await.unwrap();
+        memory::upsert(&local, &mem(id, &tenant, "stale", t0))
+            .await
+            .unwrap();
+        memory::upsert(&remote, &mem(id, &tenant, "fresh", t1))
+            .await
+            .unwrap();
 
         let stats = reconcile_table(&local, &remote, MEMORY).await.unwrap();
-        assert_eq!(stats, ReconcileStats { pushed: 0, pulled: 1 }, "newer remote pulled to local");
+        assert_eq!(
+            stats,
+            ReconcileStats {
+                pushed: 0,
+                pulled: 1
+            },
+            "newer remote pulled to local"
+        );
 
         let mid = MemoryId::new(id);
         let on_local = memory::get(&local, &tenant, &mid).await.unwrap().unwrap();
@@ -326,8 +359,12 @@ mod tests {
         let t0 = Utc::now();
 
         // Both sides hold the live trace.
-        memory::upsert(&local, &mem(id, &tenant, "live", t0)).await.unwrap();
-        memory::upsert(&remote, &mem(id, &tenant, "live", t0)).await.unwrap();
+        memory::upsert(&local, &mem(id, &tenant, "live", t0))
+            .await
+            .unwrap();
+        memory::upsert(&remote, &mem(id, &tenant, "live", t0))
+            .await
+            .unwrap();
 
         // Local forgets it (a tombstone, newer than remote's live copy).
         memory::soft_delete(&local, &tenant, &mid, t0 + ChronoDuration::seconds(5))
@@ -335,7 +372,14 @@ mod tests {
             .unwrap();
 
         let stats = reconcile_table(&local, &remote, MEMORY).await.unwrap();
-        assert_eq!(stats, ReconcileStats { pushed: 1, pulled: 0 }, "tombstone pushed");
+        assert_eq!(
+            stats,
+            ReconcileStats {
+                pushed: 1,
+                pulled: 0
+            },
+            "tombstone pushed"
+        );
 
         // Forgotten on both sides; the live copy did not resurrect it on local.
         assert!(memory::get(&remote, &tenant, &mid).await.unwrap().is_none());
@@ -356,7 +400,10 @@ mod tests {
         use antumbra_core::{Capability, Compartment, CompartmentId, Origin, UserId};
         use antumbra_store::repo::compartment;
 
-        const GRANT: &TableSpec = &TableSpec { name: "grant", version_field: "updated_at" };
+        const GRANT: &TableSpec = &TableSpec {
+            name: "grant",
+            version_field: "updated_at",
+        };
         let (local, remote) = (mem_store().await, mem_store().await);
         let tenant = TenantId::new("t");
         let comp = CompartmentId::new("comp-g");
@@ -374,7 +421,12 @@ mod tests {
             deleted_at: None,
         };
         let grant = antumbra_core::Grant::new(
-            tenant.clone(), comp.clone(), bob.clone(), Capability::Reference, UserId::new("alice"), t0,
+            tenant.clone(),
+            comp.clone(),
+            bob.clone(),
+            Capability::Reference,
+            UserId::new("alice"),
+            t0,
         );
         // Both sides start with the compartment + the live grant.
         for s in [&local, &remote] {
@@ -383,16 +435,32 @@ mod tests {
         }
 
         // Local revokes bob (a newer version than remote's still-live grant).
-        compartment::revoke(&local, &tenant, &comp, &bob, t0 + ChronoDuration::seconds(5))
-            .await
-            .unwrap();
+        compartment::revoke(
+            &local,
+            &tenant,
+            &comp,
+            &bob,
+            t0 + ChronoDuration::seconds(5),
+        )
+        .await
+        .unwrap();
 
         let stats = reconcile_table(&local, &remote, GRANT).await.unwrap();
-        assert_eq!(stats, ReconcileStats { pushed: 1, pulled: 0 }, "revocation pushed");
+        assert_eq!(
+            stats,
+            ReconcileStats {
+                pushed: 1,
+                pulled: 0
+            },
+            "revocation pushed"
+        );
 
         // Remote no longer lists bob as a grantee (revoked everywhere).
         assert!(
-            compartment::list_grants(&remote, &tenant, &comp).await.unwrap().is_empty(),
+            compartment::list_grants(&remote, &tenant, &comp)
+                .await
+                .unwrap()
+                .is_empty(),
             "the revocation reached the remote: bob is no longer a live grantee"
         );
         // And it does not resurrect from the stale side.
@@ -415,22 +483,41 @@ mod tests {
         let tables = &[*MEMORY];
 
         // First pass: a full scan seeds A onto the remote.
-        memory::upsert(&local, &mem("aaaaaaaa-0000-0000-0000-0000000000a1", &tenant, "A", t0))
-            .await
-            .unwrap();
+        memory::upsert(
+            &local,
+            &mem("aaaaaaaa-0000-0000-0000-0000000000a1", &tenant, "A", t0),
+        )
+        .await
+        .unwrap();
         let s = reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
             .await
             .unwrap();
-        assert_eq!(s, ReconcileStats { pushed: 1, pulled: 0 });
+        assert_eq!(
+            s,
+            ReconcileStats {
+                pushed: 1,
+                pulled: 0
+            }
+        );
 
         // A new local write past the watermark is the only row the next pass moves.
-        memory::upsert(&local, &mem("bbbbbbbb-0000-0000-0000-0000000000b2", &tenant, "B", t1))
-            .await
-            .unwrap();
+        memory::upsert(
+            &local,
+            &mem("bbbbbbbb-0000-0000-0000-0000000000b2", &tenant, "B", t1),
+        )
+        .await
+        .unwrap();
         let s = reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
             .await
             .unwrap();
-        assert_eq!(s, ReconcileStats { pushed: 1, pulled: 0 }, "only B moved");
+        assert_eq!(
+            s,
+            ReconcileStats {
+                pushed: 1,
+                pulled: 0
+            },
+            "only B moved"
+        );
         assert_eq!(memory::list(&remote, &tenant).await.unwrap().len(), 2);
 
         // Converged: nothing new past the watermark.
@@ -456,19 +543,34 @@ mod tests {
         let tables = &[*MEMORY];
 
         // Seed A on both sides, advancing the watermark to t0.
-        memory::upsert(&local, &mem(id, &tenant, "v0", t0)).await.unwrap();
+        memory::upsert(&local, &mem(id, &tenant, "v0", t0))
+            .await
+            .unwrap();
         reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
             .await
             .unwrap();
 
         // The remote alone updates A past the watermark.
-        memory::upsert(&remote, &mem(id, &tenant, "v2", t2)).await.unwrap();
+        memory::upsert(&remote, &mem(id, &tenant, "v2", t2))
+            .await
+            .unwrap();
         let s = reconcile_all_since(&local, &remote, tables, &mut cursors, Duration::ZERO)
             .await
             .unwrap();
-        assert_eq!(s, ReconcileStats { pushed: 0, pulled: 1 }, "remote-only update pulled");
         assert_eq!(
-            memory::get(&local, &tenant, &mid).await.unwrap().unwrap().content,
+            s,
+            ReconcileStats {
+                pushed: 0,
+                pulled: 1
+            },
+            "remote-only update pulled"
+        );
+        assert_eq!(
+            memory::get(&local, &tenant, &mid)
+                .await
+                .unwrap()
+                .unwrap()
+                .content,
             "v2"
         );
     }
@@ -486,7 +588,10 @@ mod tests {
         // No window: the mark is unchanged. Empty/garbage: a full scan.
         assert_eq!(lookback_floor(t, Duration::ZERO), t);
         assert_eq!(lookback_floor("", Duration::from_secs(5)), "");
-        assert_eq!(lookback_floor("not-a-date", Duration::from_secs(5)), "not-a-date");
+        assert_eq!(
+            lookback_floor("not-a-date", Duration::from_secs(5)),
+            "not-a-date"
+        );
     }
 
     // A compartment deletion (tombstone) propagates and does not resurrect from a
@@ -496,24 +601,42 @@ mod tests {
         use antumbra_core::{Compartment, CompartmentId, UserId};
         use antumbra_store::repo::compartment;
 
-        const COMPARTMENT: &TableSpec = &TableSpec { name: "compartment", version_field: "updated_at" };
+        const COMPARTMENT: &TableSpec = &TableSpec {
+            name: "compartment",
+            version_field: "updated_at",
+        };
         let (local, remote) = (mem_store().await, mem_store().await);
         let tenant = TenantId::new("t");
         let id = CompartmentId::new("comp-d");
         let t0 = Utc::now();
 
         for s in [&local, &remote] {
-            compartment::create(s, &Compartment::new(id.clone(), tenant.clone(), UserId::new("alice"), "c", t0))
-                .await
-                .unwrap();
+            compartment::create(
+                s,
+                &Compartment::new(id.clone(), tenant.clone(), UserId::new("alice"), "c", t0),
+            )
+            .await
+            .unwrap();
         }
         compartment::delete(&local, &tenant, &id, t0 + ChronoDuration::seconds(5))
             .await
             .unwrap();
 
         let stats = reconcile_table(&local, &remote, COMPARTMENT).await.unwrap();
-        assert_eq!(stats, ReconcileStats { pushed: 1, pulled: 0 });
-        assert!(compartment::get(&remote, &tenant, &id).await.unwrap().is_none(), "deletion reached remote");
+        assert_eq!(
+            stats,
+            ReconcileStats {
+                pushed: 1,
+                pulled: 0
+            }
+        );
+        assert!(
+            compartment::get(&remote, &tenant, &id)
+                .await
+                .unwrap()
+                .is_none(),
+            "deletion reached remote"
+        );
         assert_eq!(
             reconcile_table(&local, &remote, COMPARTMENT).await.unwrap(),
             ReconcileStats::default()

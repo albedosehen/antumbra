@@ -109,7 +109,11 @@ fn argmax(logits: &[f32]) -> u32 {
 /// cumulative mass reaches `top_p`; zero the rest.
 fn nucleus_filter(probs: &mut [f32], top_p: f32) {
     let mut order: Vec<usize> = (0..probs.len()).collect();
-    order.sort_unstable_by(|&a, &b| probs[b].partial_cmp(&probs[a]).unwrap_or(std::cmp::Ordering::Equal));
+    order.sort_unstable_by(|&a, &b| {
+        probs[b]
+            .partial_cmp(&probs[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut cum = 0.0f32;
     let mut keep = vec![false; probs.len()];
     for &i in &order {
@@ -214,7 +218,7 @@ mod tests {
         // though "b" has the top logit.
         let logits = vec![0.0, 0.0, 9.0, 1.0]; // token 2 = "b" highest, token 3 next
         let generated = [2u32, 3, 2]; // last token is 2 ("a"=2 here), 2 was once followed by 3
-        // After "...2,3,2", the bigram prefix is [2]; 2 was followed by 3 before.
+                                      // After "...2,3,2", the bigram prefix is [2]; 2 was followed by 3 before.
         let t = pick_token(logits, &generated, &greedy(0.0, 1.0, 2), &mut rng());
         assert_ne!(t, 3, "the n-gram that would repeat 2->3 is blocked");
     }

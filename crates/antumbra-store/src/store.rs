@@ -89,7 +89,10 @@ impl Store {
     /// to `invalidate` (anonymous *is* the owner there). Use this, not
     /// `invalidate`, whenever owner access is required on a real deployment.
     pub async fn signin_root(&self) -> Result<()> {
-        match (self.client.config().username(), self.client.config().password()) {
+        match (
+            self.client.config().username(),
+            self.client.config().password(),
+        ) {
             (Some(user), Some(pass)) => {
                 let creds = RootCredentials::new(user, pass);
                 self.client.signin(&creds).await.map_err(map)?;

@@ -142,7 +142,12 @@ mod tests {
             exp,
             aud: aud.map(Into::into),
         };
-        encode(&Header::new(Algorithm::HS256), &claims, &EncodingKey::from_secret(SECRET)).unwrap()
+        encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(SECRET),
+        )
+        .unwrap()
     }
 
     fn future() -> u64 {
@@ -207,7 +212,9 @@ mod tests {
     #[test]
     fn audience_must_match_when_required() {
         let v = JwtVerifier::hs256(SECRET).with_audience("antumbra");
-        assert!(v.verify(&mint("ws:1", "user:a", future(), Some("antumbra"))).is_ok());
+        assert!(v
+            .verify(&mint("ws:1", "user:a", future(), Some("antumbra")))
+            .is_ok());
         assert!(matches!(
             v.verify(&mint("ws:1", "user:a", future(), Some("other-service"))),
             Err(AuthError::Invalid(_))
@@ -220,7 +227,10 @@ mod tests {
         let token = mint("ws:1", "user:a", future(), None);
         assert!(v.verify_header(Some(&format!("Bearer {token}"))).is_ok());
         assert!(v.verify_header(Some(&format!("bearer {token}"))).is_ok());
-        assert!(matches!(v.verify_header(Some(&token)), Err(AuthError::Missing)));
+        assert!(matches!(
+            v.verify_header(Some(&token)),
+            Err(AuthError::Missing)
+        ));
         assert!(matches!(v.verify_header(None), Err(AuthError::Missing)));
     }
 }

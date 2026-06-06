@@ -266,7 +266,14 @@ mod tests {
     #[test]
     fn reinforce_raises_confidence_and_count() {
         let now = Utc::now();
-        let mut m = Memory::new("memory:a", "ws:1", MemoryNetwork::World, "use deno", 0.4, now);
+        let mut m = Memory::new(
+            "memory:a",
+            "ws:1",
+            MemoryNetwork::World,
+            "use deno",
+            0.4,
+            now,
+        );
         assert_eq!(m.reinforcement, 0);
         m.reinforce(now);
         assert_eq!(m.reinforcement, 1);
@@ -316,7 +323,14 @@ mod tests {
     #[test]
     fn memory_edge_new_carries_its_fields() {
         let now = Utc::now();
-        let e = MemoryEdge::new("ws:1", "memory:a", "memory:b", EdgeType::Supersedes, 0.9, now);
+        let e = MemoryEdge::new(
+            "ws:1",
+            "memory:a",
+            "memory:b",
+            EdgeType::Supersedes,
+            0.9,
+            now,
+        );
         assert_eq!(e.from_id.as_str(), "memory:a");
         assert_eq!(e.to_id.as_str(), "memory:b");
         assert_eq!(e.edge_type, EdgeType::Supersedes);

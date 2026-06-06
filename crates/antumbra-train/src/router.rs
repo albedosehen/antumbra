@@ -51,7 +51,10 @@ pub fn train_learned_router(
     let (n_experts, dim, n) = (ids.len(), exemplars[0].1.len(), exemplars.len());
     let device = Device::Cpu;
 
-    let xs: Vec<f32> = exemplars.iter().flat_map(|(_, e)| e.iter().copied()).collect();
+    let xs: Vec<f32> = exemplars
+        .iter()
+        .flat_map(|(_, e)| e.iter().copied())
+        .collect();
     let x = Tensor::from_vec(xs, (n, dim), &device).map_err(rce)?;
     let labels: Vec<u32> = exemplars
         .iter()
@@ -85,7 +88,7 @@ pub fn train_learned_router(
         let cents = centroids(&scaled, &class_rows, &device).map_err(rce)?;
         let logits = (scaled.matmul(&cents.t().map_err(rce)?).map_err(rce)?
             * (1.0 / PROJ_TEMP as f64))
-        .map_err(rce)?;
+            .map_err(rce)?;
         let loss = candle_nn::loss::cross_entropy(&logits, &y).map_err(rce)?;
         opt.backward_step(&loss).map_err(rce)?;
     }

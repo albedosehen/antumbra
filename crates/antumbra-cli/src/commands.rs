@@ -168,8 +168,14 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
                 }
                 let name = format!("{run}-{skill}");
                 let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
-                let out = raft_train(&mut model, &verifier, &gtasks, &RunId::new(name.clone()), &cfg)
-                    .await?;
+                let out = raft_train(
+                    &mut model,
+                    &verifier,
+                    &gtasks,
+                    &RunId::new(name.clone()),
+                    &cfg,
+                )
+                .await?;
                 let solved = if out.capability_exemplars.is_empty() {
                     gtasks.iter().map(|t| t.prompt.clone()).collect()
                 } else {
@@ -262,7 +268,9 @@ pub async fn memory_import(url: &str, args: MemoryImportArgs) -> anyhow::Result<
     } = args;
     #[cfg(feature = "models")]
     {
-        use antumbra_train::memory::{import as import_memories, parse_export, ImportPolicy, Intake};
+        use antumbra_train::memory::{
+            import as import_memories, parse_export, ImportPolicy, Intake,
+        };
         use antumbra_train::CorpusTask;
 
         let bytes = std::fs::read(&source)?;
@@ -422,8 +430,7 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
         for gen in 0..max_gens {
             // Load the current capability (warm-started from the prior
             // generation's adapter, or the bare base on gen 0).
-            let mut model =
-                ModelLoader::load(&loader, &cfg.base_model, parent.as_deref()).await?;
+            let mut model = ModelLoader::load(&loader, &cfg.base_model, parent.as_deref()).await?;
             let ev = eval_pass_rate(
                 &mut model,
                 &verifier,
@@ -452,7 +459,11 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
                 .filter(|(_, r)| r.rate() < target)
                 .map(|(t, _)| t.clone())
                 .collect();
-            let gaps = if failing.is_empty() { tasks.clone() } else { failing };
+            let gaps = if failing.is_empty() {
+                tasks.clone()
+            } else {
+                failing
+            };
             let run_id = RunId::new(format!("{run}-g{gen}"));
             println!("  training {} gap task(s)", gaps.len());
             let out = raft_train(&mut model, &verifier, &gaps, &run_id, &cfg).await?;
@@ -508,7 +519,16 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
     }
     #[cfg(not(feature = "models"))]
     {
-        let _ = (url, &corpus, &run, target, max_gens, samples, rounds, max_new_tokens);
+        let _ = (
+            url,
+            &corpus,
+            &run,
+            target,
+            max_gens,
+            samples,
+            rounds,
+            max_new_tokens,
+        );
         anyhow::bail!("`evolve` requires building with --features models (candle + a GPU)")
     }
 }
@@ -566,7 +586,13 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
         match task {
             Some(prompt) => {
                 serve_prompt(
-                    &engine, embedder.as_ref(), &router, &boundaries, &experts, threshold, &prompt,
+                    &engine,
+                    embedder.as_ref(),
+                    &router,
+                    &boundaries,
+                    &experts,
+                    threshold,
+                    &prompt,
                 )
                 .await?;
             }
@@ -580,7 +606,12 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
                         continue;
                     }
                     serve_prompt(
-                        &engine, embedder.as_ref(), &router, &boundaries, &experts, threshold,
+                        &engine,
+                        embedder.as_ref(),
+                        &router,
+                        &boundaries,
+                        &experts,
+                        threshold,
                         prompt,
                     )
                     .await?;
@@ -712,7 +743,10 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
             metabolize as metabolize_traces, parse_harness_traces, HarnessTrace, MetabolizePolicy,
         };
 
-        let policy = MetabolizePolicy { min_recurrence, include_steps: !no_steps };
+        let policy = MetabolizePolicy {
+            min_recurrence,
+            include_steps: !no_steps,
+        };
         let key = api_key.or_else(|| std::env::var("ANTUMBRA_KUSHTAKA_KEY").ok());
         let tool_args: serde_json::Value = match &harness_args {
             Some(s) => serde_json::from_str(s)
@@ -743,8 +777,16 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
         };
 
         // The store + embedder are reused across watch cycles when training.
-        let store = if train { Some(crate::connect(url).await?) } else { None };
-        let embedder = if train { Some(crate::make_embedder()?) } else { None };
+        let store = if train {
+            Some(crate::connect(url).await?)
+        } else {
+            None
+        };
+        let embedder = if train {
+            Some(crate::make_embedder()?)
+        } else {
+            None
+        };
 
         loop {
             let traces = get_traces()?;
@@ -788,12 +830,17 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
             println!("wrote capture corpus -> {out}");
 
             if !train {
-                println!("run `antumbra teach --corpus {out}` to internalize the metabolized traces");
+                println!(
+                    "run `antumbra teach --corpus {out}` to internalize the metabolized traces"
+                );
             } else if tasks.is_empty() {
                 println!("nothing to train: no trace cleared the metabolization gate");
             } else {
                 let store = store.as_ref().expect("store built when train");
-                let embedder = embedder.as_ref().expect("embedder built when train").as_ref();
+                let embedder = embedder
+                    .as_ref()
+                    .expect("embedder built when train")
+                    .as_ref();
                 let cfg = RaftConfig {
                     samples_per_task: samples,
                     rounds,

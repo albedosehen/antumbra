@@ -37,7 +37,6 @@ use antumbra_train::{
     CandleModelLoader, CaptureTrainer, GrpoTrainer, JsonCorpus, RaftConfig, RaftTrainer,
 };
 
-
 async fn connect(url: &str) -> anyhow::Result<Store> {
     let config = ConnectionConfig::builder()
         .url(url)
@@ -157,7 +156,10 @@ async fn run() -> anyhow::Result<()> {
                 let stats = antumbra_sync::worker::run_once(&cfg).await?;
                 println!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
             } else {
-                println!("sync: reconciling {} <-> {} every {interval}s (ctrl-c to stop)", cli.url, remote);
+                println!(
+                    "sync: reconciling {} <-> {} every {interval}s (ctrl-c to stop)",
+                    cli.url, remote
+                );
                 let (tx, rx) = tokio::sync::watch::channel(false);
                 tokio::spawn(async move {
                     let _ = tokio::signal::ctrl_c().await;
@@ -365,18 +367,18 @@ async fn run() -> anyhow::Result<()> {
                             let (name, w) = part.split_once(':').ok_or_else(|| {
                                 anyhow::anyhow!("bad --with `{part}` (want name:weight)")
                             })?;
-                            let s = experts
-                                .iter()
-                                .find(|e| e.name == name.trim())
-                                .ok_or_else(|| {
-                                    anyhow::anyhow!("standing expert `{}` not found", name.trim())
-                                })?;
+                            let s = experts.iter().find(|e| e.name == name.trim()).ok_or_else(
+                                || anyhow::anyhow!("standing expert `{}` not found", name.trim()),
+                            )?;
                             specs.push((s.artifact_uri.clone(), w.trim().parse()?));
                         }
                         let merged = "adapters/_composed.safetensors";
                         let rank = antumbra_train::compose_adapters(&specs, merged)?;
                         let base_scale = RaftConfig::default().lora_scale();
-                        println!("composing with {} standing expert(s) -> rank {rank}", specs.len() - 1);
+                        println!(
+                            "composing with {} standing expert(s) -> rank {rank}",
+                            specs.len() - 1
+                        );
                         let cfg = RaftConfig {
                             lora_rank: rank,
                             lora_alpha: base_scale * rank as f64,
@@ -406,7 +408,15 @@ async fn run() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&task, k, max_new_tokens, threshold, &with, self_weight, temperature);
+                let _ = (
+                    &task,
+                    k,
+                    max_new_tokens,
+                    threshold,
+                    &with,
+                    self_weight,
+                    temperature,
+                );
                 anyhow::bail!("`ask` requires building with --features models (candle + a GPU)");
             }
         }
@@ -642,17 +652,11 @@ async fn run() -> anyhow::Result<()> {
                 let corpus_doc = JsonCorpus::from_file(&corpus)?;
                 let tasks = corpus_doc.tasks(&[]);
                 let loader = CandleModelLoader::new(cfg);
-                let mut model =
-                    ModelLoader::load(&loader, &base_model, adapter.as_deref()).await?;
+                let mut model = ModelLoader::load(&loader, &base_model, adapter.as_deref()).await?;
                 let verifier = antumbra_critic::CommandVerifier;
-                let out = eval_pass_rate(
-                    &mut model,
-                    &verifier,
-                    &tasks,
-                    &RunId::new("eval"),
-                    samples,
-                )
-                .await?;
+                let out =
+                    eval_pass_rate(&mut model, &verifier, &tasks, &RunId::new("eval"), samples)
+                        .await?;
                 println!(
                     "pass-rate {:.2} ({}/{}) — {} on {} ({} tasks)",
                     out.pass_rate,
@@ -765,7 +769,9 @@ async fn run() -> anyhow::Result<()> {
             #[cfg(not(feature = "models"))]
             {
                 let _ = epochs;
-                anyhow::bail!("`gate-train` requires building with --features models (real embedder)");
+                anyhow::bail!(
+                    "`gate-train` requires building with --features models (real embedder)"
+                );
             }
         }
         Command::Compose {
@@ -821,7 +827,9 @@ async fn run() -> anyhow::Result<()> {
             #[cfg(not(feature = "models"))]
             {
                 let _ = (&task, &experts, max_new_tokens);
-                anyhow::bail!("`compose` requires building with --features models (candle + a GPU)");
+                anyhow::bail!(
+                    "`compose` requires building with --features models (candle + a GPU)"
+                );
             }
         }
         Command::Evolve {

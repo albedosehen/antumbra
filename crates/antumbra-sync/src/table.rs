@@ -13,7 +13,10 @@ pub struct TableSpec {
 
 impl TableSpec {
     const fn new(name: &'static str, version_field: &'static str) -> Self {
-        Self { name, version_field }
+        Self {
+            name,
+            version_field,
+        }
     }
 }
 

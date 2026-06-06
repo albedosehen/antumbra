@@ -90,7 +90,10 @@ impl MemoryRecord {
             network: s("network"),
             marker: s("marker"),
             forbid,
-            confidence: v.get("confidence").and_then(Value::as_f64).map(|x| x as f32),
+            confidence: v
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .map(|x| x as f32),
             reinforcement: v
                 .get("reinforcement")
                 .and_then(Value::as_u64)
@@ -255,15 +258,26 @@ mod tests {
 
     #[test]
     fn reinforced_memory_becomes_a_trusted_capture() {
-        let imported = to_task(&record("use deno install", Some(0.9)), 0, &ImportPolicy::default());
+        let imported = to_task(
+            &record("use deno install", Some(0.9)),
+            0,
+            &ImportPolicy::default(),
+        );
         assert_eq!(imported.intake, Intake::Capture);
-        assert_eq!(imported.task.completion.as_deref(), Some("use deno install"));
+        assert_eq!(
+            imported.task.completion.as_deref(),
+            Some("use deno install")
+        );
         assert_eq!(imported.task.skill(), "package-manager");
     }
 
     #[test]
     fn weak_memory_becomes_a_seed_with_no_trusted_completion() {
-        let imported = to_task(&record("use deno install", Some(0.2)), 0, &ImportPolicy::default());
+        let imported = to_task(
+            &record("use deno install", Some(0.2)),
+            0,
+            &ImportPolicy::default(),
+        );
         assert_eq!(imported.intake, Intake::Seed);
         assert!(imported.task.completion.is_none());
         // The check survives so RAFT can verify a discovered sample.
@@ -272,7 +286,11 @@ mod tests {
 
     #[test]
     fn missing_confidence_is_trusted() {
-        let imported = to_task(&record("use deno install", None), 0, &ImportPolicy::default());
+        let imported = to_task(
+            &record("use deno install", None),
+            0,
+            &ImportPolicy::default(),
+        );
         assert_eq!(imported.intake, Intake::Capture);
     }
 
@@ -308,8 +326,15 @@ mod tests {
         assert_eq!(r.reinforcement, Some(3));
         assert_eq!(r.id.as_deref(), Some("memory:x"));
         // And it flows through the consolidation gate.
-        let v = crate::consolidate::score_memory(&r, &crate::consolidate::ConsolidationPolicy::default());
-        assert!(v.graduate, "a reinforced, verifiable compartment memory should graduate: {}", v.reason);
+        let v = crate::consolidate::score_memory(
+            &r,
+            &crate::consolidate::ConsolidationPolicy::default(),
+        );
+        assert!(
+            v.graduate,
+            "a reinforced, verifiable compartment memory should graduate: {}",
+            v.reason
+        );
     }
 
     #[test]

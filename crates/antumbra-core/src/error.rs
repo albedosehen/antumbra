@@ -70,7 +70,11 @@ mod tests {
             "invalid shadow transition: pruned -> graduated"
         );
         assert_eq!(
-            AntumbraError::Dimension { expected: 384, got: 2 }.to_string(),
+            AntumbraError::Dimension {
+                expected: 384,
+                got: 2
+            }
+            .to_string(),
             "dimension mismatch: expected 384, got 2"
         );
     }

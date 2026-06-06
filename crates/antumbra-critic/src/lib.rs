@@ -178,7 +178,10 @@ mod tests {
             &self,
             _req: &VerifyRequest,
         ) -> antumbra_core::Result<antumbra_core::ports::VerifierVerdict> {
-            Ok(antumbra_core::ports::VerifierVerdict { passed: false, value: 0.3 })
+            Ok(antumbra_core::ports::VerifierVerdict {
+                passed: false,
+                value: 0.3,
+            })
         }
     }
 
@@ -193,7 +196,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(signals.len(), 1);
-        assert_eq!(signals[0].value, 0.0, "a failed verdict's partial value is dropped");
+        assert_eq!(
+            signals[0].value, 0.0,
+            "a failed verdict's partial value is dropped"
+        );
     }
 
     #[tokio::test]

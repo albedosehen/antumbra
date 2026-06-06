@@ -75,7 +75,9 @@ pub fn live_call(base_url: &str, api_key: &str, body: Value) -> anyhow::Result<V
 
 /// Fetch traces from a live Kushtaka harness over the real transport.
 pub fn fetch_live(cfg: &KushtakaConfig) -> anyhow::Result<Vec<HarnessTrace>> {
-    fetch_traces_with(cfg, |_tool, body| live_call(&cfg.base_url, &cfg.api_key, body))
+    fetch_traces_with(cfg, |_tool, body| {
+        live_call(&cfg.base_url, &cfg.api_key, body)
+    })
 }
 
 #[cfg(test)]
@@ -105,7 +107,11 @@ mod tests {
     fn fetch_normalizes_a_task_list_envelope_through_the_transport() {
         let traces = fetch_traces_with(&cfg(), |tool, body| {
             assert_eq!(tool, "list_tasks");
-            assert_eq!(body["workspace_id"], json!("ws"), "scope reaches the transport");
+            assert_eq!(
+                body["workspace_id"],
+                json!("ws"),
+                "scope reaches the transport"
+            );
             Ok(json!({
                 "count": 1,
                 "tasks": [

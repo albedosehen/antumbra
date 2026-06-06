@@ -16,27 +16,50 @@ async fn edges_relate_and_neighbors_are_tenant_scoped() {
     // alpha: a -> b (supersedes) and a -> c (references)
     edge::relate(
         &store,
-        &MemoryEdge::new(alpha.clone(), "memory:a", "memory:b", EdgeType::Supersedes, 1.0, now),
+        &MemoryEdge::new(
+            alpha.clone(),
+            "memory:a",
+            "memory:b",
+            EdgeType::Supersedes,
+            1.0,
+            now,
+        ),
     )
     .await
     .unwrap();
     edge::relate(
         &store,
-        &MemoryEdge::new(alpha.clone(), "memory:a", "memory:c", EdgeType::References, 0.5, now),
+        &MemoryEdge::new(
+            alpha.clone(),
+            "memory:a",
+            "memory:c",
+            EdgeType::References,
+            0.5,
+            now,
+        ),
     )
     .await
     .unwrap();
     // beta: a -> z, same `from` key but a different tenant.
     edge::relate(
         &store,
-        &MemoryEdge::new(beta.clone(), "memory:a", "memory:z", EdgeType::References, 1.0, now),
+        &MemoryEdge::new(
+            beta.clone(),
+            "memory:a",
+            "memory:z",
+            EdgeType::References,
+            1.0,
+            now,
+        ),
     )
     .await
     .unwrap();
 
     // alpha sees only its two edges from a; beta's a->z never leaks.
     let from_a = MemoryId::new("memory:a");
-    let n = edge::neighbors(&store, &alpha, &from_a, None).await.unwrap();
+    let n = edge::neighbors(&store, &alpha, &from_a, None)
+        .await
+        .unwrap();
     assert_eq!(n.len(), 2, "cross-tenant edge leak");
     assert!(n.iter().all(|e| e.tenant == alpha));
     assert!(n.iter().any(|e| e.to_id == MemoryId::new("memory:b")));
@@ -56,12 +79,22 @@ async fn edges_relate_and_neighbors_are_tenant_scoped() {
     // Re-relating the same pair/type is idempotent (no duplicate).
     edge::relate(
         &store,
-        &MemoryEdge::new(alpha.clone(), "memory:a", "memory:b", EdgeType::Supersedes, 0.9, now),
+        &MemoryEdge::new(
+            alpha.clone(),
+            "memory:a",
+            "memory:b",
+            EdgeType::Supersedes,
+            0.9,
+            now,
+        ),
     )
     .await
     .unwrap();
     assert_eq!(
-        edge::neighbors(&store, &alpha, &from_a, None).await.unwrap().len(),
+        edge::neighbors(&store, &alpha, &from_a, None)
+            .await
+            .unwrap()
+            .len(),
         2
     );
 }

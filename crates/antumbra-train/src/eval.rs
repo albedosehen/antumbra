@@ -100,9 +100,9 @@ pub async fn eval_pass_rate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::model::SftExample;
     use antumbra_core::testing::MarkerVerifier;
+    use async_trait::async_trait;
 
     /// Emits `skill` passing draws out of `n`; never trains (eval is read-only).
     struct FixedLm {

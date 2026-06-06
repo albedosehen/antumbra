@@ -20,7 +20,8 @@ use surql::types::operators::{and_, eq};
 use surql::types::RecordID;
 
 use antumbra_core::{
-    CompartmentId, ExpertId, Memory, MemoryId, MemoryNetwork, MemoryStatus, Result, TenantId, UserId,
+    CompartmentId, ExpertId, Memory, MemoryId, MemoryNetwork, MemoryStatus, Result, TenantId,
+    UserId,
 };
 
 use crate::dto::parse_dt;
@@ -77,7 +78,10 @@ impl MemoryRow {
             reinforcement: m.reinforcement,
             evidence: m.evidence.clone(),
             volatile: m.volatile,
-            consolidated_expert: m.consolidated_expert.as_ref().map(|e| e.as_str().to_string()),
+            consolidated_expert: m
+                .consolidated_expert
+                .as_ref()
+                .map(|e| e.as_str().to_string()),
             compartment: m.compartment.as_ref().map(|c| c.as_str().to_string()),
             author: m.author.as_ref().map(|u| u.as_str().to_string()),
             author_host: m.author_host.clone(),
@@ -115,7 +119,9 @@ impl MemoryRow {
 pub async fn upsert(store: &Store, memory: &Memory) -> Result<()> {
     let id = RecordID::<()>::new(TABLE, memory.id.as_str()).map_err(map)?;
     let data: Value = serde_json::to_value(MemoryRow::from_domain(memory))?;
-    upsert_record(store.client(), &id, data).await.map_err(map)?;
+    upsert_record(store.client(), &id, data)
+        .await
+        .map_err(map)?;
     Ok(())
 }
 
@@ -220,7 +226,10 @@ pub async fn recall(
 ) -> Result<Vec<Memory>> {
     let vector: Vec<f64> = query.iter().map(|&x| f64::from(x)).collect();
     let condition = match network {
-        Some(net) => and_(eq("tenant_id", tenant.as_str()), eq("network", net.as_str())),
+        Some(net) => and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("network", net.as_str()),
+        ),
         None => eq("tenant_id", tenant.as_str()),
     };
     let q = Query::new()
@@ -228,7 +237,13 @@ pub async fn recall(
         .from_table(TABLE)
         .map_err(map)?
         .where_(condition)
-        .vector_search("embedding", vector, k as i64, VectorDistanceType::Cosine, None)
+        .vector_search(
+            "embedding",
+            vector,
+            k as i64,
+            VectorDistanceType::Cosine,
+            None,
+        )
         .map_err(map)?;
     let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
     rows.into_iter()
@@ -308,8 +323,13 @@ pub async fn purge(store: &Store, older_than: chrono::DateTime<chrono::Utc>) -> 
             continue; // live trace
         };
         if parse_dt(ts).map(|t| t < older_than).unwrap_or(false) {
-            let condition = and_(eq("key", row.key.as_str()), eq("tenant_id", row.tenant_id.as_str()));
-            delete_records(store.client(), TABLE, Some(&condition)).await.map_err(map)?;
+            let condition = and_(
+                eq("key", row.key.as_str()),
+                eq("tenant_id", row.tenant_id.as_str()),
+            );
+            delete_records(store.client(), TABLE, Some(&condition))
+                .await
+                .map_err(map)?;
             purged += 1;
         }
     }
@@ -354,8 +374,14 @@ mod tests {
         assert_eq!(list(&store, &tenant).await.unwrap().len(), 1);
 
         // Forget: hidden from list + get, but the raw row stays (for propagation).
-        assert!(soft_delete(&store, &tenant, &m.id, now).await.unwrap().is_some());
-        assert!(list(&store, &tenant).await.unwrap().is_empty(), "hidden from list");
+        assert!(soft_delete(&store, &tenant, &m.id, now)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(
+            list(&store, &tenant).await.unwrap().is_empty(),
+            "hidden from list"
+        );
         assert!(
             get(&store, &tenant, &m.id).await.unwrap().is_none(),
             "hidden from get"
@@ -367,10 +393,15 @@ mod tests {
         );
 
         // Re-forget is a no-op (already a tombstone).
-        assert!(soft_delete(&store, &tenant, &m.id, now).await.unwrap().is_none());
+        assert!(soft_delete(&store, &tenant, &m.id, now)
+            .await
+            .unwrap()
+            .is_none());
 
         // Purge with a cutoff after the deletion removes it for good.
-        let purged = purge(&store, now + chrono::Duration::seconds(1)).await.unwrap();
+        let purged = purge(&store, now + chrono::Duration::seconds(1))
+            .await
+            .unwrap();
         assert_eq!(purged, 1);
         assert!(
             rows::list_rows(&store, "memory").await.unwrap().is_empty(),
@@ -380,7 +411,9 @@ mod tests {
         upsert(&store, &m).await.unwrap();
         soft_delete(&store, &tenant, &m.id, now).await.unwrap();
         assert_eq!(
-            purge(&store, now - chrono::Duration::days(1)).await.unwrap(),
+            purge(&store, now - chrono::Duration::days(1))
+                .await
+                .unwrap(),
             0,
             "within the grace window: not purged"
         );

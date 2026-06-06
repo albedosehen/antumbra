@@ -25,7 +25,10 @@ fn ok(args: &[&str]) -> String {
 
 #[test]
 fn schema_prints_ddl() {
-    assert!(ok(&["schema"]).contains("DEFINE"), "schema prints generated DDL");
+    assert!(
+        ok(&["schema"]).contains("DEFINE"),
+        "schema prints generated DDL"
+    );
 }
 
 #[test]
@@ -38,8 +41,17 @@ fn no_gpu_commands_run_end_to_end() {
     ok(&["--url", "mem://", "experts"]);
     ok(&["--url", "mem://", "loop", "--generations", "1"]);
     ok(&[
-        "--url", "mem://", "remember", "--tenant", "ws:t", "--user", "user:u",
-        "--compartment", "comp:c", "--content", "deno install left-pad",
+        "--url",
+        "mem://",
+        "remember",
+        "--tenant",
+        "ws:t",
+        "--user",
+        "user:u",
+        "--compartment",
+        "comp:c",
+        "--content",
+        "deno install left-pad",
     ]);
     // Routing with no experts escalates rather than errors.
     ok(&["--url", "mem://", "route", "reverse a string"]);

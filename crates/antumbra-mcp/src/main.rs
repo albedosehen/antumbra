@@ -28,7 +28,11 @@ mod server;
 use server::McpServer;
 
 #[derive(Parser)]
-#[command(name = "antumbra-mcp", about = "Antumbra MCP server over the Penumbra memory store", version)]
+#[command(
+    name = "antumbra-mcp",
+    about = "Antumbra MCP server over the Penumbra memory store",
+    version
+)]
 struct Cli {
     /// SurrealDB url: `surrealkv://./data/antumbra.skv` (persistent),
     /// `mem://` (ephemeral), or `ws://host:8000/rpc`.
@@ -111,7 +115,9 @@ fn make_embedder() -> Result<Box<dyn Embedder>> {
 
 #[cfg(not(feature = "models"))]
 fn make_embedder() -> Result<Box<dyn Embedder>> {
-    Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(EMBED_DIM)))
+    Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
+        EMBED_DIM,
+    )))
 }
 
 /// Owner-side provisioning for an identity: ensure the principal exists and the
@@ -125,8 +131,11 @@ pub(crate) async fn provision_identity(
     user: &UserId,
 ) -> Result<CompartmentId> {
     principal::provision(store, tenant, user).await?;
-    let default_compartment =
-        CompartmentId::new(format!("comp:{}:{}:default", tenant.as_str(), user.as_str()));
+    let default_compartment = CompartmentId::new(format!(
+        "comp:{}:{}:default",
+        tenant.as_str(),
+        user.as_str()
+    ));
     let exists = compartment::list_owned(store, tenant, user)
         .await?
         .iter()

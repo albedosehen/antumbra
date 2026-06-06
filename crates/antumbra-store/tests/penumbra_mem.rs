@@ -21,8 +21,12 @@ async fn list_by_compartment_gathers_only_that_compartment() {
             None => m,
         }
     };
-    memory::upsert(&store, &mk("memory:1", Some("comp:x"))).await.unwrap();
-    memory::upsert(&store, &mk("memory:2", Some("comp:y"))).await.unwrap();
+    memory::upsert(&store, &mk("memory:1", Some("comp:x")))
+        .await
+        .unwrap();
+    memory::upsert(&store, &mk("memory:2", Some("comp:y")))
+        .await
+        .unwrap();
     memory::upsert(&store, &mk("memory:3", None)).await.unwrap();
 
     let got = memory::list_by_compartment(&store, &ws, &CompartmentId::new("comp:x"))
@@ -46,13 +50,25 @@ async fn list_and_recall_are_tenant_scoped() {
     // the query — if isolation leaked, alpha's recall would surface beta's.
     memory::upsert(
         &store,
-        &trace("memory:a1", "ws:alpha", MemoryNetwork::World, "alpha fact", vec![1.0, 0.0, 0.0, 0.0]),
+        &trace(
+            "memory:a1",
+            "ws:alpha",
+            MemoryNetwork::World,
+            "alpha fact",
+            vec![1.0, 0.0, 0.0, 0.0],
+        ),
     )
     .await
     .unwrap();
     memory::upsert(
         &store,
-        &trace("memory:b1", "ws:beta", MemoryNetwork::World, "beta secret", vec![0.95, 0.05, 0.0, 0.0]),
+        &trace(
+            "memory:b1",
+            "ws:beta",
+            MemoryNetwork::World,
+            "beta secret",
+            vec![0.95, 0.05, 0.0, 0.0],
+        ),
     )
     .await
     .unwrap();
@@ -78,7 +94,13 @@ async fn get_by_id_is_tenant_checked() {
     let beta = TenantId::new("ws:beta");
     memory::upsert(
         &store,
-        &trace("memory:owned", "ws:beta", MemoryNetwork::Bank, "beta only", vec![0.0, 1.0, 0.0, 0.0]),
+        &trace(
+            "memory:owned",
+            "ws:beta",
+            MemoryNetwork::Bank,
+            "beta only",
+            vec![0.0, 1.0, 0.0, 0.0],
+        ),
     )
     .await
     .unwrap();
@@ -100,7 +122,13 @@ async fn delete_cannot_cross_tenants() {
     let id = MemoryId::new("memory:keep");
     memory::upsert(
         &store,
-        &trace("memory:keep", "ws:beta", MemoryNetwork::World, "beta keeps this", vec![1.0, 0.0, 0.0, 0.0]),
+        &trace(
+            "memory:keep",
+            "ws:beta",
+            MemoryNetwork::World,
+            "beta keeps this",
+            vec![1.0, 0.0, 0.0, 0.0],
+        ),
     )
     .await
     .unwrap();
@@ -120,20 +148,38 @@ async fn recall_filters_by_network() {
     let ws = TenantId::new("ws:alpha");
     memory::upsert(
         &store,
-        &trace("memory:w", "ws:alpha", MemoryNetwork::World, "a world fact", vec![1.0, 0.0, 0.0, 0.0]),
+        &trace(
+            "memory:w",
+            "ws:alpha",
+            MemoryNetwork::World,
+            "a world fact",
+            vec![1.0, 0.0, 0.0, 0.0],
+        ),
     )
     .await
     .unwrap();
     memory::upsert(
         &store,
-        &trace("memory:o", "ws:alpha", MemoryNetwork::Opinion, "an opinion", vec![1.0, 0.0, 0.0, 0.0]),
+        &trace(
+            "memory:o",
+            "ws:alpha",
+            MemoryNetwork::Opinion,
+            "an opinion",
+            vec![1.0, 0.0, 0.0, 0.0],
+        ),
     )
     .await
     .unwrap();
 
-    let world = memory::recall(&store, &ws, &[1.0, 0.0, 0.0, 0.0], 5, Some(MemoryNetwork::World))
-        .await
-        .unwrap();
+    let world = memory::recall(
+        &store,
+        &ws,
+        &[1.0, 0.0, 0.0, 0.0],
+        5,
+        Some(MemoryNetwork::World),
+    )
+    .await
+    .unwrap();
     assert_eq!(world.len(), 1);
     assert_eq!(world[0].network, MemoryNetwork::World);
 }
@@ -145,7 +191,13 @@ async fn reinforce_and_consolidate_persist() {
     let id = MemoryId::new("memory:r");
     memory::upsert(
         &store,
-        &trace("memory:r", "ws:alpha", MemoryNetwork::World, "reinforce me", vec![1.0, 0.0, 0.0, 0.0]),
+        &trace(
+            "memory:r",
+            "ws:alpha",
+            MemoryNetwork::World,
+            "reinforce me",
+            vec![1.0, 0.0, 0.0, 0.0],
+        ),
     )
     .await
     .unwrap();

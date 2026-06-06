@@ -139,7 +139,10 @@ mod tests {
         ] {
             run.advance_to(to, Utc::now()).unwrap();
         }
-        assert_eq!(run.round, 1, "the Deciding -> Routing loop begins a new round");
+        assert_eq!(
+            run.round, 1,
+            "the Deciding -> Routing loop begins a new round"
+        );
         // A second lap bumps it again; non-loop transitions leave it alone.
         for to in [
             OrchestrationStatus::Executing,

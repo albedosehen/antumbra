@@ -107,8 +107,18 @@ mod tests {
         v[0] = 1.0;
         insert(&s, &expert("expert:a", v.clone())).await.unwrap();
 
-        assert_eq!(get(&s, &ExpertId::new("expert:a")).await.unwrap().unwrap().name, "expert:a");
-        assert!(get(&s, &ExpertId::new("expert:missing")).await.unwrap().is_none());
+        assert_eq!(
+            get(&s, &ExpertId::new("expert:a"))
+                .await
+                .unwrap()
+                .unwrap()
+                .name,
+            "expert:a"
+        );
+        assert!(get(&s, &ExpertId::new("expert:missing"))
+            .await
+            .unwrap()
+            .is_none());
         assert_eq!(list(&s).await.unwrap().len(), 1);
 
         let near = knn_by_capability(&s, &v, 1).await.unwrap();

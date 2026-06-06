@@ -35,7 +35,10 @@ async fn multi_adapter_serve_generates_on_gpu() {
     // Default to the workspace-root adapters dir; `cargo test` runs with the
     // crate dir as CWD, so anchor on CARGO_MANIFEST_DIR (crates/antumbra-serve).
     let adapter = std::env::var("ANTUMBRA_GPU_ADAPTER").unwrap_or_else(|_| {
-        format!("{}/../../adapters/run_train_g0.safetensors", env!("CARGO_MANIFEST_DIR"))
+        format!(
+            "{}/../../adapters/run_train_g0.safetensors",
+            env!("CARGO_MANIFEST_DIR")
+        )
     });
     assert!(
         std::path::Path::new(&adapter).exists(),
@@ -63,7 +66,11 @@ async fn multi_adapter_serve_generates_on_gpu() {
         !out.final_output.trim().is_empty(),
         "the resident base + adapter produced output"
     );
-    assert_eq!(out.steps.len(), 1, "v0 serves the top expert as a single step");
+    assert_eq!(
+        out.steps.len(),
+        1,
+        "v0 serves the top expert as a single step"
+    );
 
     // A second act() to the same expert reuses the resident factors (no reload):
     // proves the hot-path is the O(adapter) swap, not an O(base) reload.

@@ -71,7 +71,9 @@ fn edge_key(e: &MemoryEdge) -> String {
 pub async fn relate(store: &Store, edge: &MemoryEdge) -> Result<()> {
     let rid = RecordID::<()>::new(TABLE, edge_key(edge).as_str()).map_err(map)?;
     let data: Value = serde_json::to_value(EdgeRow::from_domain(edge))?;
-    upsert_record(store.client(), &rid, data).await.map_err(map)?;
+    upsert_record(store.client(), &rid, data)
+        .await
+        .map_err(map)?;
     Ok(())
 }
 
@@ -84,10 +86,16 @@ pub async fn neighbors(
 ) -> Result<Vec<MemoryEdge>> {
     let cond = match edge_type {
         Some(t) => and_(
-            and_(eq("tenant_id", tenant.as_str()), eq("from_id", from.as_str())),
+            and_(
+                eq("tenant_id", tenant.as_str()),
+                eq("from_id", from.as_str()),
+            ),
             eq("edge_type", t.as_str()),
         ),
-        None => and_(eq("tenant_id", tenant.as_str()), eq("from_id", from.as_str())),
+        None => and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("from_id", from.as_str()),
+        ),
     };
     let q = Query::new()
         .select(None)

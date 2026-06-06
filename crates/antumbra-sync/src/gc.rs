@@ -47,11 +47,21 @@ mod tests {
             now,
         );
         memrepo::upsert(&store, &m).await.unwrap();
-        memrepo::soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+        memrepo::soft_delete(&store, &tenant, &m.id, now)
+            .await
+            .unwrap();
 
         // Within the grace window: retained (a replica might not have seen it).
-        assert_eq!(purge_store(&store, now - Duration::days(1)).await.unwrap(), 0);
+        assert_eq!(
+            purge_store(&store, now - Duration::days(1)).await.unwrap(),
+            0
+        );
         // Past the grace window: purged.
-        assert_eq!(purge_store(&store, now + Duration::seconds(1)).await.unwrap(), 1);
+        assert_eq!(
+            purge_store(&store, now + Duration::seconds(1))
+                .await
+                .unwrap(),
+            1
+        );
     }
 }

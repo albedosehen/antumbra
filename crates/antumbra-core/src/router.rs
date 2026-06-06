@@ -53,11 +53,7 @@ impl LearnedRouter {
         if x.len() != self.weights.len() {
             return Vec::new();
         }
-        let scaled: Vec<f32> = x
-            .iter()
-            .zip(&self.weights)
-            .map(|(a, w)| a * w)
-            .collect();
+        let scaled: Vec<f32> = x.iter().zip(&self.weights).map(|(a, w)| a * w).collect();
         let norm = scaled.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-6);
         scaled.iter().map(|v| v / norm).collect()
     }

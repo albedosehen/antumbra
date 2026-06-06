@@ -48,9 +48,12 @@ async fn memory_visibility_follows_compartment_grants() {
     )
     .await
     .unwrap();
-    memory::upsert(&store, &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")))
-        .await
-        .unwrap();
+    memory::upsert(
+        &store,
+        &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
+    )
+    .await
+    .unwrap();
     memory::upsert(&store, &mem("memory:pub", "ws:org", "shared pool", None))
         .await
         .unwrap();
@@ -68,7 +71,14 @@ async fn memory_visibility_follows_compartment_grants() {
     store.invalidate().await.unwrap();
     compartment::grant(
         &store,
-        &Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Reference, ua.clone(), now),
+        &Grant::new(
+            t.clone(),
+            ca.clone(),
+            ub.clone(),
+            Capability::Reference,
+            ua.clone(),
+            now,
+        ),
     )
     .await
     .unwrap();
@@ -76,16 +86,22 @@ async fn memory_visibility_follows_compartment_grants() {
     // userB now sees A's compartment memory (grant took effect immediately).
     store.signin(&t, &ub).await.unwrap();
     assert!(
-        visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        visible_ids(&store)
+            .await
+            .contains(&"memory:priv".to_string()),
         "grant must make A's compartment visible to B"
     );
 
     // Revoke → hidden again.
     store.invalidate().await.unwrap();
-    compartment::revoke(&store, &t, &ca, &ub, now).await.unwrap();
+    compartment::revoke(&store, &t, &ca, &ub, now)
+        .await
+        .unwrap();
     store.signin(&t, &ub).await.unwrap();
     assert!(
-        !visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        !visible_ids(&store)
+            .await
+            .contains(&"memory:priv".to_string()),
         "revoke must hide it again"
     );
 
@@ -108,23 +124,33 @@ async fn deleting_a_compartment_hides_its_memories_from_the_owner() {
     let now = Utc::now();
 
     principal::provision(&store, &t, &ua).await.unwrap();
-    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
-        .await
-        .unwrap();
-    memory::upsert(&store, &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")))
-        .await
-        .unwrap();
+    compartment::create(
+        &store,
+        &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
+    )
+    .await
+    .unwrap();
+    memory::upsert(
+        &store,
+        &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
+    )
+    .await
+    .unwrap();
 
     // The owner sees its compartment memory.
     store.signin(&t, &ua).await.unwrap();
-    assert!(visible_ids(&store).await.contains(&"memory:priv".to_string()));
+    assert!(visible_ids(&store)
+        .await
+        .contains(&"memory:priv".to_string()));
 
     // Delete the compartment (owner mode), then the owner no longer sees it.
     store.invalidate().await.unwrap();
     compartment::delete(&store, &t, &ca, now).await.unwrap();
     store.signin(&t, &ua).await.unwrap();
     assert!(
-        !visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        !visible_ids(&store)
+            .await
+            .contains(&"memory:priv".to_string()),
         "a deleted compartment hides its memories from the owner"
     );
 }
@@ -140,30 +166,56 @@ async fn linking_into_a_compartment_requires_link_capability() {
 
     principal::provision(&store, &t, &ua).await.unwrap();
     principal::provision(&store, &t, &ub).await.unwrap();
-    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
-        .await
-        .unwrap();
-    memory::upsert(&store, &mem("memory:target", "ws:org", "A target", Some("comp:a")))
-        .await
-        .unwrap();
-    memory::upsert(&store, &mem("memory:source", "ws:org", "shared source", None))
-        .await
-        .unwrap();
+    compartment::create(
+        &store,
+        &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
+    )
+    .await
+    .unwrap();
+    memory::upsert(
+        &store,
+        &mem("memory:target", "ws:org", "A target", Some("comp:a")),
+    )
+    .await
+    .unwrap();
+    memory::upsert(
+        &store,
+        &mem("memory:source", "ws:org", "shared source", None),
+    )
+    .await
+    .unwrap();
 
-    let e = MemoryEdge::new(t.clone(), "memory:source", "memory:target", EdgeType::References, 1.0, now);
+    let e = MemoryEdge::new(
+        t.clone(),
+        "memory:source",
+        "memory:target",
+        EdgeType::References,
+        1.0,
+        now,
+    );
     let from = MemoryId::new("memory:source");
 
     // userB with only REFERENCE can read A's target but may not LINK into it.
     compartment::grant(
         &store,
-        &Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Reference, ua.clone(), now),
+        &Grant::new(
+            t.clone(),
+            ca.clone(),
+            ub.clone(),
+            Capability::Reference,
+            ua.clone(),
+            now,
+        ),
     )
     .await
     .unwrap();
     store.signin(&t, &ub).await.unwrap();
     let _ = edge::relate(&store, &e).await; // engine denies the create (no link)
     assert!(
-        edge::neighbors(&store, &t, &from, None).await.unwrap().is_empty(),
+        edge::neighbors(&store, &t, &from, None)
+            .await
+            .unwrap()
+            .is_empty(),
         "reference grant must not permit linking"
     );
 
@@ -171,14 +223,24 @@ async fn linking_into_a_compartment_requires_link_capability() {
     store.invalidate().await.unwrap();
     compartment::grant(
         &store,
-        &Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Link, ua.clone(), now),
+        &Grant::new(
+            t.clone(),
+            ca.clone(),
+            ub.clone(),
+            Capability::Link,
+            ua.clone(),
+            now,
+        ),
     )
     .await
     .unwrap();
     store.signin(&t, &ub).await.unwrap();
     edge::relate(&store, &e).await.unwrap();
     assert_eq!(
-        edge::neighbors(&store, &t, &from, None).await.unwrap().len(),
+        edge::neighbors(&store, &t, &from, None)
+            .await
+            .unwrap()
+            .len(),
         1,
         "link grant must permit linking"
     );
@@ -202,28 +264,46 @@ async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() {
 
     principal::provision(&store, &t, &ua).await.unwrap();
     principal::provision(&store, &t, &ub).await.unwrap();
-    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
-        .await
-        .unwrap();
-    memory::upsert(&store, &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")))
-        .await
-        .unwrap();
+    compartment::create(
+        &store,
+        &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
+    )
+    .await
+    .unwrap();
+    memory::upsert(
+        &store,
+        &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
+    )
+    .await
+    .unwrap();
 
     // B (scoped, non-owner) tries to forge a grant to A's compartment.
     store.signin(&t, &ub).await.unwrap();
-    let forged = Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Reference, ub.clone(), now);
+    let forged = Grant::new(
+        t.clone(),
+        ca.clone(),
+        ub.clone(),
+        Capability::Reference,
+        ub.clone(),
+        now,
+    );
     let _ = compartment::grant(&store, &forged).await; // engine refuses; ignore the result
 
     // The forged grant did not take effect: B still cannot see A's private memory.
     assert!(
-        !visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        !visible_ids(&store)
+            .await
+            .contains(&"memory:priv".to_string()),
         "a forged grant must not unlock a non-owned compartment"
     );
 
     // And no live grant row exists for the compartment (verified in owner mode).
     store.invalidate().await.unwrap();
     assert!(
-        compartment::list_grants(&store, &t, &ca).await.unwrap().is_empty(),
+        compartment::list_grants(&store, &t, &ca)
+            .await
+            .unwrap()
+            .is_empty(),
         "the engine refused to create the forged grant"
     );
 }
@@ -243,18 +323,31 @@ async fn an_owner_can_share_their_own_compartment_while_scoped() {
 
     principal::provision(&store, &t, &ua).await.unwrap();
     principal::provision(&store, &t, &ub).await.unwrap();
-    compartment::create(&store, &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now))
-        .await
-        .unwrap();
-    memory::upsert(&store, &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")))
-        .await
-        .unwrap();
+    compartment::create(
+        &store,
+        &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
+    )
+    .await
+    .unwrap();
+    memory::upsert(
+        &store,
+        &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
+    )
+    .await
+    .unwrap();
 
     // A (scoped, the owner) shares the compartment with B -- must succeed.
     store.signin(&t, &ua).await.unwrap();
     compartment::grant(
         &store,
-        &Grant::new(t.clone(), ca.clone(), ub.clone(), Capability::Reference, ua.clone(), now),
+        &Grant::new(
+            t.clone(),
+            ca.clone(),
+            ub.clone(),
+            Capability::Reference,
+            ua.clone(),
+            now,
+        ),
     )
     .await
     .unwrap();
@@ -262,7 +355,9 @@ async fn an_owner_can_share_their_own_compartment_while_scoped() {
     // B now sees A's compartment memory.
     store.signin(&t, &ub).await.unwrap();
     assert!(
-        visible_ids(&store).await.contains(&"memory:priv".to_string()),
+        visible_ids(&store)
+            .await
+            .contains(&"memory:priv".to_string()),
         "the owner can share their own compartment under a scoped session"
     );
 }

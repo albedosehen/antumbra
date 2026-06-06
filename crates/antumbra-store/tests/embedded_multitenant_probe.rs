@@ -61,8 +61,18 @@ async fn one_connection_serially_isolates_tenants() {
     // Owner provisions both and seeds a row each.
     principal::provision(&store, &alpha, &user_a).await.unwrap();
     principal::provision(&store, &beta, &user_b).await.unwrap();
-    memory::upsert(&store, &trace("memory:a", "ws:alpha", vec![1.0, 0.0, 0.0, 0.0])).await.unwrap();
-    memory::upsert(&store, &trace("memory:b", "ws:beta", vec![0.0, 1.0, 0.0, 0.0])).await.unwrap();
+    memory::upsert(
+        &store,
+        &trace("memory:a", "ws:alpha", vec![1.0, 0.0, 0.0, 0.0]),
+    )
+    .await
+    .unwrap();
+    memory::upsert(
+        &store,
+        &trace("memory:b", "ws:beta", vec![0.0, 1.0, 0.0, 0.0]),
+    )
+    .await
+    .unwrap();
 
     // Request from alpha: bind, serve, see only alpha.
     store.signin(&alpha, &user_a).await.unwrap();

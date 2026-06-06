@@ -88,7 +88,11 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
     for (i, r) in records.iter().enumerate() {
         let v = score_memory(r, &policy);
         let id = r.id.clone().unwrap_or_else(|| format!("mem-{i}"));
-        println!("  {} {id}: {}", if v.graduate { "[grad]" } else { "[stay]" }, v.reason);
+        println!(
+            "  {} {id}: {}",
+            if v.graduate { "[grad]" } else { "[stay]" },
+            v.reason
+        );
         if v.graduate {
             graduates.push((i, r, v.score));
         } else {
@@ -103,7 +107,9 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
     );
 
     // Graduates are always trusted captures (they cleared the gate).
-    let conv = ImportPolicy { capture_threshold: 0.0 };
+    let conv = ImportPolicy {
+        capture_threshold: 0.0,
+    };
     let new_tasks: Vec<CorpusTask> = graduates
         .iter()
         .map(|(i, r, _)| to_task(r, *i, &conv).task)
@@ -116,7 +122,10 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
         Vec::new()
     };
     let mut replay = replay_from_tasks(&prior);
-    println!("replay buffer: {} prior consolidated example(s)", replay.len());
+    println!(
+        "replay buffer: {} prior consolidated example(s)",
+        replay.len()
+    );
 
     if a.train && !new_tasks.is_empty() {
         let store = crate::connect(url).await?;
@@ -296,8 +305,15 @@ pub async fn consolidate_compartment(
     let verifier = antumbra_critic::CommandVerifier;
     let name = format!("expert:{}:{}", a.user, a.compartment);
     let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
-    let out = capture_corrections(&mut model, &verifier, &tasks, &RunId::new(name.clone()), &cfg, &[])
-        .await?;
+    let out = capture_corrections(
+        &mut model,
+        &verifier,
+        &tasks,
+        &RunId::new(name.clone()),
+        &cfg,
+        &[],
+    )
+    .await?;
     let solved = if out.capability_exemplars.is_empty() {
         tasks.iter().map(|t| t.prompt.clone()).collect()
     } else {
@@ -466,7 +482,9 @@ pub async fn retire(url: &str, expert_name: &str) -> anyhow::Result<()> {
 
 #[cfg(not(feature = "models"))]
 pub async fn retire(_url: &str, _expert_name: &str) -> anyhow::Result<()> {
-    anyhow::bail!("`retire` requires building with --features models (real embedder for the router)")
+    anyhow::bail!(
+        "`retire` requires building with --features models (real embedder for the router)"
+    )
 }
 
 /// Arguments for [`remember`].

@@ -4,7 +4,9 @@
 
 use antumbra_core::ports::{ActRequest, Embedder, Serve};
 use antumbra_core::testing::{EchoServe, FixedEmbedder, ScriptedTrainer};
-use antumbra_core::{ClusterConfig, Compartment, CompartmentId, Memory, MemoryNetwork, RunId, TenantId, UserId};
+use antumbra_core::{
+    ClusterConfig, Compartment, CompartmentId, Memory, MemoryNetwork, RunId, TenantId, UserId,
+};
 use antumbra_gate::{route, GateConfig};
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, compartment, expert, memory, principal};
@@ -66,7 +68,9 @@ async fn propose_compartments_pool_filter_and_apply() {
     let user_b = UserId::new("user:b");
     let inbox = CompartmentId::new("comp:ws:e2e:user:a:default");
     let now = Utc::now();
-    principal::provision(&store, &tenant, &user_a).await.unwrap();
+    principal::provision(&store, &tenant, &user_a)
+        .await
+        .unwrap();
 
     // Three inbox memories (user A) that should cluster + move.
     for (id, content) in [
@@ -84,18 +88,32 @@ async fn propose_compartments_pool_filter_and_apply() {
     // One already in a NAMED compartment (filed) -> excluded.
     {
         let v = embedder.embed("deno fmt typescript files").await.unwrap();
-        let m = Memory::new("memory:filed", tenant.clone(), MemoryNetwork::World, "filed", 0.8, now)
-            .with_embedding(v)
-            .by(user_a.clone(), "host")
-            .in_compartment(CompartmentId::new("comp:named"));
+        let m = Memory::new(
+            "memory:filed",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "filed",
+            0.8,
+            now,
+        )
+        .with_embedding(v)
+        .by(user_a.clone(), "host")
+        .in_compartment(CompartmentId::new("comp:named"));
         memory::upsert(&store, &m).await.unwrap();
     }
     // One uncompartmented but authored by ANOTHER user -> excluded.
     {
         let v = embedder.embed("deno lint typescript code").await.unwrap();
-        let m = Memory::new("memory:other", tenant.clone(), MemoryNetwork::World, "other", 0.8, now)
-            .with_embedding(v)
-            .by(user_b.clone(), "host");
+        let m = Memory::new(
+            "memory:other",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "other",
+            0.8,
+            now,
+        )
+        .with_embedding(v)
+        .by(user_b.clone(), "host");
         memory::upsert(&store, &m).await.unwrap();
     }
 
@@ -124,7 +142,14 @@ async fn propose_compartments_pool_filter_and_apply() {
 
     // Apply: create the proposed compartment and move its members in.
     let new_id = CompartmentId::new("comp:ws:e2e:user:a:proposed:region");
-    let c = Compartment::new(new_id.clone(), tenant.clone(), user_a.clone(), &p.label, now).proposed();
+    let c = Compartment::new(
+        new_id.clone(),
+        tenant.clone(),
+        user_a.clone(),
+        &p.label,
+        now,
+    )
+    .proposed();
     compartment::create(&store, &c).await.unwrap();
     for mid in &p.members {
         let mut m = memory::get(&store, &tenant, mid).await.unwrap().unwrap();
@@ -132,11 +157,14 @@ async fn propose_compartments_pool_filter_and_apply() {
         memory::upsert(&store, &m).await.unwrap();
     }
 
-    let moved = memory::list_by_compartment(&store, &tenant, &new_id).await.unwrap();
-    assert_eq!(moved.len(), 3, "the inbox region moved into the proposal");
-    // The filed and other-user memories are untouched.
-    let still_filed = memory::list_by_compartment(&store, &tenant, &CompartmentId::new("comp:named"))
+    let moved = memory::list_by_compartment(&store, &tenant, &new_id)
         .await
         .unwrap();
+    assert_eq!(moved.len(), 3, "the inbox region moved into the proposal");
+    // The filed and other-user memories are untouched.
+    let still_filed =
+        memory::list_by_compartment(&store, &tenant, &CompartmentId::new("comp:named"))
+            .await
+            .unwrap();
     assert_eq!(still_filed.len(), 1);
 }

@@ -56,7 +56,12 @@ impl CompartmentRow {
 
     fn into_domain(self) -> Result<Compartment> {
         let created_at = parse_dt(&self.created_at)?;
-        let updated_at = self.updated_at.as_deref().map(parse_dt).transpose()?.unwrap_or(created_at);
+        let updated_at = self
+            .updated_at
+            .as_deref()
+            .map(parse_dt)
+            .transpose()?
+            .unwrap_or(created_at);
         Ok(Compartment {
             id: CompartmentId::new(self.key),
             tenant: TenantId::new(self.tenant_id),
@@ -79,17 +84,26 @@ pub async fn create(store: &Store, compartment: &Compartment) -> Result<()> {
     let rid = RecordID::<()>::new(COMPARTMENT, sanitize(compartment.id.as_str()).as_str())
         .map_err(map)?;
     let data: Value = serde_json::to_value(CompartmentRow::from_domain(compartment))?;
-    upsert_record(store.client(), &rid, data).await.map_err(map)?;
+    upsert_record(store.client(), &rid, data)
+        .await
+        .map_err(map)?;
     Ok(())
 }
 
 /// The compartments a user owns in a tenant.
-pub async fn list_owned(store: &Store, tenant: &TenantId, owner: &UserId) -> Result<Vec<Compartment>> {
+pub async fn list_owned(
+    store: &Store,
+    tenant: &TenantId,
+    owner: &UserId,
+) -> Result<Vec<Compartment>> {
     let query = Query::new()
         .select(None)
         .from_table(COMPARTMENT)
         .map_err(map)?
-        .where_(and_(eq("tenant_id", tenant.as_str()), eq("owner", owner.as_str())));
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("owner", owner.as_str()),
+        ));
     let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none())
@@ -109,7 +123,10 @@ pub async fn get(
         .select(None)
         .from_table(COMPARTMENT)
         .map_err(map)?
-        .where_(and_(eq("tenant_id", tenant.as_str()), eq("key", id.as_str())));
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("key", id.as_str()),
+        ));
     let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
     rows.into_iter()
         .find(|r| r.deleted_at.is_none())
@@ -143,7 +160,10 @@ pub async fn purge_compartments(
     store: &Store,
     older_than: chrono::DateTime<chrono::Utc>,
 ) -> Result<usize> {
-    let query = Query::new().select(None).from_table(COMPARTMENT).map_err(map)?;
+    let query = Query::new()
+        .select(None)
+        .from_table(COMPARTMENT)
+        .map_err(map)?;
     let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
     let mut purged = 0;
     for row in rows {
@@ -151,8 +171,13 @@ pub async fn purge_compartments(
             continue;
         };
         if parse_dt(ts).map(|t| t < older_than).unwrap_or(false) {
-            let condition = and_(eq("key", row.key.as_str()), eq("tenant_id", row.tenant_id.as_str()));
-            delete_records(store.client(), COMPARTMENT, Some(&condition)).await.map_err(map)?;
+            let condition = and_(
+                eq("key", row.key.as_str()),
+                eq("tenant_id", row.tenant_id.as_str()),
+            );
+            delete_records(store.client(), COMPARTMENT, Some(&condition))
+                .await
+                .map_err(map)?;
             purged += 1;
         }
     }
@@ -193,7 +218,12 @@ impl GrantRow {
 
     fn into_domain(self) -> Result<Grant> {
         let created_at = parse_dt(&self.created_at)?;
-        let updated_at = self.updated_at.as_deref().map(parse_dt).transpose()?.unwrap_or(created_at);
+        let updated_at = self
+            .updated_at
+            .as_deref()
+            .map(parse_dt)
+            .transpose()?
+            .unwrap_or(created_at);
         Ok(Grant {
             tenant: TenantId::new(self.tenant_id),
             compartment: CompartmentId::new(self.compartment),
@@ -221,7 +251,9 @@ fn grant_key(g: &Grant) -> String {
 pub async fn grant(store: &Store, grant: &Grant) -> Result<()> {
     let rid = RecordID::<()>::new(GRANT, grant_key(grant).as_str()).map_err(map)?;
     let data: Value = serde_json::to_value(GrantRow::from_domain(grant))?;
-    upsert_record(store.client(), &rid, data).await.map_err(map)?;
+    upsert_record(store.client(), &rid, data)
+        .await
+        .map_err(map)?;
     Ok(())
 }
 
@@ -257,7 +289,10 @@ async fn live_grant(
         .from_table(GRANT)
         .map_err(map)?
         .where_(and_(
-            and_(eq("tenant_id", tenant.as_str()), eq("compartment", compartment.as_str())),
+            and_(
+                eq("tenant_id", tenant.as_str()),
+                eq("compartment", compartment.as_str()),
+            ),
             eq("grantee", grantee.as_str()),
         ));
     let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
@@ -283,10 +318,15 @@ pub async fn purge_grants(
         };
         if parse_dt(ts).map(|t| t < older_than).unwrap_or(false) {
             let condition = and_(
-                and_(eq("tenant_id", row.tenant_id.as_str()), eq("compartment", row.compartment.as_str())),
+                and_(
+                    eq("tenant_id", row.tenant_id.as_str()),
+                    eq("compartment", row.compartment.as_str()),
+                ),
                 eq("grantee", row.grantee.as_str()),
             );
-            delete_records(store.client(), GRANT, Some(&condition)).await.map_err(map)?;
+            delete_records(store.client(), GRANT, Some(&condition))
+                .await
+                .map_err(map)?;
             purged += 1;
         }
     }
@@ -294,12 +334,19 @@ pub async fn purge_grants(
 }
 
 /// The (live) grants a user has received in a tenant. Revoked grants are hidden.
-pub async fn list_for_grantee(store: &Store, tenant: &TenantId, grantee: &UserId) -> Result<Vec<Grant>> {
+pub async fn list_for_grantee(
+    store: &Store,
+    tenant: &TenantId,
+    grantee: &UserId,
+) -> Result<Vec<Grant>> {
     let query = Query::new()
         .select(None)
         .from_table(GRANT)
         .map_err(map)?
-        .where_(and_(eq("tenant_id", tenant.as_str()), eq("grantee", grantee.as_str())));
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("grantee", grantee.as_str()),
+        ));
     let rows: Vec<GrantRow> = query_records(store.client(), &query).await.map_err(map)?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none())
@@ -352,7 +399,10 @@ mod tests {
         assert_eq!(get(&s, &t, &c.id).await.unwrap().unwrap().owner, alice);
         assert_eq!(list_owned(&s, &t, &alice).await.unwrap().len(), 1);
         // A different tenant cannot see it.
-        assert!(get(&s, &TenantId::new("other"), &c.id).await.unwrap().is_none());
+        assert!(get(&s, &TenantId::new("other"), &c.id)
+            .await
+            .unwrap()
+            .is_none());
 
         // Delete is a tombstone: hidden from get/list_owned, but the row remains
         // (so the deletion can propagate), then a past-grace purge removes it.
@@ -360,13 +410,26 @@ mod tests {
         assert!(get(&s, &t, &c.id).await.unwrap().is_none());
         assert!(list_owned(&s, &t, &alice).await.unwrap().is_empty());
         assert_eq!(
-            crate::repo::sync::list_rows(&s, "compartment").await.unwrap().len(),
+            crate::repo::sync::list_rows(&s, "compartment")
+                .await
+                .unwrap()
+                .len(),
             1,
             "tombstone row retained for propagation"
         );
         delete(&s, &t, &c.id, now).await.unwrap(); // re-delete is a no-op
-        assert_eq!(purge_compartments(&s, now - chrono::Duration::days(1)).await.unwrap(), 0);
-        assert_eq!(purge_compartments(&s, now + chrono::Duration::seconds(1)).await.unwrap(), 1);
+        assert_eq!(
+            purge_compartments(&s, now - chrono::Duration::days(1))
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            purge_compartments(&s, now + chrono::Duration::seconds(1))
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -376,7 +439,14 @@ mod tests {
         let comp = CompartmentId::new("comp:1");
         let bob = UserId::new("bob");
         let now = chrono::Utc::now();
-        let g = Grant::new(t.clone(), comp.clone(), bob.clone(), Capability::Reference, UserId::new("alice"), now);
+        let g = Grant::new(
+            t.clone(),
+            comp.clone(),
+            bob.clone(),
+            Capability::Reference,
+            UserId::new("alice"),
+            now,
+        );
 
         grant(&s, &g).await.unwrap();
         assert_eq!(list_grants(&s, &t, &comp).await.unwrap().len(), 1);
@@ -384,19 +454,44 @@ mod tests {
 
         // Revoke: the live grant is hidden, but the tombstone row remains.
         revoke(&s, &t, &comp, &bob, now).await.unwrap();
-        assert!(list_grants(&s, &t, &comp).await.unwrap().is_empty(), "revoked grant hidden");
+        assert!(
+            list_grants(&s, &t, &comp).await.unwrap().is_empty(),
+            "revoked grant hidden"
+        );
         assert!(list_for_grantee(&s, &t, &bob).await.unwrap().is_empty());
         // Re-revoke is a no-op (no live grant to revoke).
         revoke(&s, &t, &comp, &bob, now).await.unwrap();
 
         // Re-granting un-revokes (a fresh, newer grant overwrites the tombstone).
-        let g2 = Grant::new(t.clone(), comp.clone(), bob.clone(), Capability::Link, UserId::new("alice"), now);
+        let g2 = Grant::new(
+            t.clone(),
+            comp.clone(),
+            bob.clone(),
+            Capability::Link,
+            UserId::new("alice"),
+            now,
+        );
         grant(&s, &g2).await.unwrap();
-        assert_eq!(list_grants(&s, &t, &comp).await.unwrap()[0].capability, Capability::Link);
+        assert_eq!(
+            list_grants(&s, &t, &comp).await.unwrap()[0].capability,
+            Capability::Link
+        );
 
         // Revoke again, then purge past the grace window removes the tombstone.
         revoke(&s, &t, &comp, &bob, now).await.unwrap();
-        assert_eq!(purge_grants(&s, now - chrono::Duration::days(1)).await.unwrap(), 0, "within grace");
-        assert_eq!(purge_grants(&s, now + chrono::Duration::seconds(1)).await.unwrap(), 1, "past grace");
+        assert_eq!(
+            purge_grants(&s, now - chrono::Duration::days(1))
+                .await
+                .unwrap(),
+            0,
+            "within grace"
+        );
+        assert_eq!(
+            purge_grants(&s, now + chrono::Duration::seconds(1))
+                .await
+                .unwrap(),
+            1,
+            "past grace"
+        );
     }
 }

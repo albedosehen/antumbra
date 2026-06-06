@@ -221,7 +221,9 @@ mod tests {
         )
         .in_compartment(comp.clone());
         memory::upsert(&store, &m).await.unwrap();
-        memory::soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+        memory::soft_delete(&store, &tenant, &m.id, now)
+            .await
+            .unwrap();
 
         // The create then the delete arrive; read until the Delete is seen.
         let deleted = tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -235,8 +237,14 @@ mod tests {
         .await
         .expect("a change arrives before timeout")
         .expect("a delete change is routed");
-        assert_eq!(deleted.memory.as_str(), "eeeeeeee-0000-0000-0000-00000000000e");
+        assert_eq!(
+            deleted.memory.as_str(),
+            "eeeeeeee-0000-0000-0000-00000000000e"
+        );
         let names: Vec<&str> = deleted.recipients.iter().map(UserId::as_str).collect();
-        assert!(names.contains(&"alice") && names.contains(&"bob"), "{names:?}");
+        assert!(
+            names.contains(&"alice") && names.contains(&"bob"),
+            "{names:?}"
+        );
     }
 }

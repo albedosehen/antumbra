@@ -26,7 +26,8 @@ pub fn render(f: &mut Frame, app: &App) {
     ])
     .split(f.area());
     header(f, app, rows[0]);
-    let body = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(rows[1]);
+    let body =
+        Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(rows[1]);
     graph(f, app, body[0]);
     detail(f, app, body[1]);
     footer(f, app, rows[2]);
@@ -67,10 +68,16 @@ fn header(f: &mut Frame, app: &App, area: Rect) {
         .max()
         .unwrap_or(0);
     spans.push(Span::styled(
-        format!("   self-improving substrate · {} umbra · gen {}", app.experts.len(), gen),
+        format!(
+            "   self-improving substrate · {} umbra · gen {}",
+            app.experts.len(),
+            gen
+        ),
         Style::default().fg(INK),
     ));
-    let block = Block::bordered().border_type(BorderType::Rounded).border_style(Style::default().fg(DIM));
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(DIM));
     f.render_widget(Paragraph::new(Line::from(spans)).block(block), area);
 }
 
@@ -168,8 +175,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn detail(f: &mut Frame, app: &App, area: Rect) {
-    let rows =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(7)]).split(area);
+    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(7)]).split(area);
 
     // Selected expert.
     let mut lines: Vec<Line> = Vec::new();
@@ -190,7 +196,10 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
             .and_then(|v| v.as_str())
         {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(desc.to_string(), Style::default().fg(INK))));
+            lines.push(Line::from(Span::styled(
+                desc.to_string(),
+                Style::default().fg(INK),
+            )));
         }
         if let Some(ex) = e
             .capability_card
@@ -223,7 +232,11 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     match &app.router {
         Some(r) => g.push(kv(
             "router",
-            &format!("learned · {} experts · OOD floor {:.2}", r.experts.len(), r.floor),
+            &format!(
+                "learned · {} experts · OOD floor {:.2}",
+                r.experts.len(),
+                r.floor
+            ),
         )),
         None => g.push(kv("router", "heuristic (untrained)")),
     }
@@ -243,11 +256,18 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(DIM))
         .title(Span::styled(" gate ", Style::default().fg(INK)));
-    f.render_widget(Paragraph::new(g).block(block).wrap(Wrap { trim: true }), rows[1]);
+    f.render_widget(
+        Paragraph::new(g).block(block).wrap(Wrap { trim: true }),
+        rows[1],
+    );
 }
 
 fn footer(f: &mut Frame, app: &App, area: Rect) {
-    let router = if app.router.is_some() { "learned" } else { "heuristic" };
+    let router = if app.router.is_some() {
+        "learned"
+    } else {
+        "heuristic"
+    };
     let line = Line::from(vec![
         Span::styled(" q ", Style::default().fg(Color::Black).bg(INK)),
         Span::styled(" quit  ", Style::default().fg(INK)),
@@ -256,7 +276,11 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" r ", Style::default().fg(Color::Black).bg(INK)),
         Span::styled(" reload  ", Style::default().fg(INK)),
         Span::styled(
-            format!("   {} umbra · {} antumbra · gate {router}", app.experts.len(), app.boundaries.len()),
+            format!(
+                "   {} umbra · {} antumbra · gate {router}",
+                app.experts.len(),
+                app.boundaries.len()
+            ),
             Style::default().fg(DIM),
         ),
     ]);
@@ -266,6 +290,9 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
 fn kv<'a>(k: &'a str, v: &str) -> Line<'a> {
     Line::from(vec![
         Span::styled(format!("{k:<11}"), Style::default().fg(DIM)),
-        Span::styled(v.to_string(), Style::default().fg(Color::Rgb(180, 200, 215))),
+        Span::styled(
+            v.to_string(),
+            Style::default().fg(Color::Rgb(180, 200, 215)),
+        ),
     ])
 }

@@ -16,7 +16,12 @@ use crate::consolidate::interleave_replay;
 use crate::eval::eval_pass_rate;
 use crate::model::{CausalLm, CorpusTask, SftExample};
 
-fn verify_request(run_id: &RunId, idx: usize, task: &CorpusTask, completion: &str) -> VerifyRequest {
+fn verify_request(
+    run_id: &RunId,
+    idx: usize,
+    task: &CorpusTask,
+    completion: &str,
+) -> VerifyRequest {
     VerifyRequest {
         run_id: run_id.clone(),
         step_idx: idx as u32,
@@ -225,9 +230,16 @@ mod tests {
             replay_ratio: 1.0,
             ..RaftConfig::default()
         };
-        capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cons:g0"), &cfg, &replay)
-            .await
-            .unwrap();
+        capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &RunId::new("cons:g0"),
+            &cfg,
+            &replay,
+        )
+        .await
+        .unwrap();
         let seen = lm.seen.lock().unwrap();
         // Both the new memory and the rehearsed old skill were trained on.
         assert!(seen.iter().any(|p| p == "new project"));

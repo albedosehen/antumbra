@@ -90,7 +90,10 @@ pub fn score_memory(record: &MemoryRecord, policy: &ConsolidationPolicy) -> Verd
     } else if !recurrence_ok {
         (
             false,
-            format!("under-reinforced ({recurrence} < {})", policy.min_recurrence),
+            format!(
+                "under-reinforced ({recurrence} < {})",
+                policy.min_recurrence
+            ),
         )
     } else if !trust_ok {
         let bar = if verifiable {
@@ -102,7 +105,11 @@ pub fn score_memory(record: &MemoryRecord, policy: &ConsolidationPolicy) -> Verd
             false,
             format!(
                 "confidence {confidence:.2} below {bar:.2}{}",
-                if verifiable { "" } else { " (opinion provenance tier)" }
+                if verifiable {
+                    ""
+                } else {
+                    " (opinion provenance tier)"
+                }
             ),
         )
     } else {
@@ -128,7 +135,11 @@ pub fn score_memory(record: &MemoryRecord, policy: &ConsolidationPolicy) -> Verd
 /// round-robin and inserted at evenly spaced positions, so even a small buffer
 /// spreads deterministically across the batch (no RNG, so it is reproducible).
 /// `ratio <= 0` or an empty buffer returns the winners unchanged — replay off.
-pub fn interleave_replay(winners: &[SftExample], replay: &[SftExample], ratio: f64) -> Vec<SftExample> {
+pub fn interleave_replay(
+    winners: &[SftExample],
+    replay: &[SftExample],
+    ratio: f64,
+) -> Vec<SftExample> {
     let n_replay = if ratio > 0.0 {
         ((winners.len() as f64) * ratio).round() as usize
     } else {

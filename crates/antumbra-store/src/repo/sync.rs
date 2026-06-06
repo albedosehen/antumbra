@@ -133,9 +133,7 @@ pub struct ChangeEvent {
 /// (by tenant/compartment) is layered on top by the caller. Requires a live-query
 /// capable connection (`ws://` or embedded; not `http`).
 pub async fn watch_table(store: &Store, table: &str) -> Result<mpsc::Receiver<ChangeEvent>> {
-    let mut live: LiveQuery<Value> = LiveQuery::start(store.client(), table)
-        .await
-        .map_err(map)?;
+    let mut live: LiveQuery<Value> = LiveQuery::start(store.client(), table).await.map_err(map)?;
     let (tx, rx) = mpsc::channel(64);
     // Keep a store handle alive for the task's lifetime so the connection backing
     // the live stream is not dropped out from under it.
@@ -230,7 +228,10 @@ mod tests {
 
         // Empty watermark: a full scan returns both.
         assert_eq!(
-            list_rows_since(&store, "memory", "updated_at", "").await.unwrap().len(),
+            list_rows_since(&store, "memory", "updated_at", "")
+                .await
+                .unwrap()
+                .len(),
             2
         );
         // Watermark at the older row's timestamp: only the strictly-newer row.
@@ -238,15 +239,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows.len(), 1, "only the row newer than the watermark");
-        assert_eq!(rows[0].get("content").and_then(Value::as_str), Some("newer"));
+        assert_eq!(
+            rows[0].get("content").and_then(Value::as_str),
+            Some("newer")
+        );
         // Watermark at or past the newest: nothing changed.
-        assert!(list_rows_since(&store, "memory", "updated_at", &t1.to_rfc3339())
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            list_rows_since(&store, "memory", "updated_at", &t1.to_rfc3339())
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
-    fn mem(id: &str, tenant: &TenantId, content: &str, at: chrono::DateTime<chrono::Utc>) -> Memory {
+    fn mem(
+        id: &str,
+        tenant: &TenantId,
+        content: &str,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Memory {
         Memory::new(id, tenant.clone(), MemoryNetwork::World, content, 0.8, at)
     }
 

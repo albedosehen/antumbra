@@ -91,10 +91,7 @@ impl Cluster {
 pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<ProposedCompartment> {
     // Embedded candidates in a stable id order so the greedy pass (and thus the
     // proposals) is reproducible run to run.
-    let mut candidates: Vec<&Memory> = memories
-        .iter()
-        .filter(|m| m.embedding.is_some())
-        .collect();
+    let mut candidates: Vec<&Memory> = memories.iter().filter(|m| m.embedding.is_some()).collect();
     candidates.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
 
     let mut clusters: Vec<Cluster> = Vec::new();
@@ -136,8 +133,11 @@ pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<Pro
                 .unwrap_or(0);
             let cohesion = sims.iter().sum::<f32>() / sims.len() as f32;
             let label = label_from(&candidates[c.members[medoid_pos]].content, cfg.label_words);
-            let members: Vec<MemoryId> =
-                c.members.iter().map(|&i| candidates[i].id.clone()).collect();
+            let members: Vec<MemoryId> = c
+                .members
+                .iter()
+                .map(|&i| candidates[i].id.clone())
+                .collect();
             ProposedCompartment {
                 label,
                 members,

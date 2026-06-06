@@ -107,13 +107,16 @@ pub fn save_png(buf: &Buffer, path: &str, cell_w: u32, cell_h: u32) -> Result<()
             }
         }
     }
-    img.save(path).map_err(|e| anyhow!("save png {path}: {e}"))?;
+    img.save(path)
+        .map_err(|e| anyhow!("save png {path}: {e}"))?;
     Ok(())
 }
 
 /// `over` blended onto `under` by coverage `c` in `[0,1]`.
 fn blend(under: u8, over: u8, c: f32) -> u8 {
-    (under as f32 * (1.0 - c) + over as f32 * c).round().clamp(0.0, 255.0) as u8
+    (under as f32 * (1.0 - c) + over as f32 * c)
+        .round()
+        .clamp(0.0, 255.0) as u8
 }
 
 /// Map a ratatui colour to RGB, falling back to `default` for `Reset`/unknown.
@@ -174,9 +177,15 @@ mod tests {
         let mut app = demo_app();
         let buf = render(&mut app, 120, 36, 1600.0).unwrap();
         let text = to_text(&buf);
-        assert!(text.contains("ANTUMBRA"), "header wordmark missing:\n{text}");
+        assert!(
+            text.contains("ANTUMBRA"),
+            "header wordmark missing:\n{text}"
+        );
         assert!(text.contains("population"), "graph panel title missing");
-        assert!(text.contains("arith-specialist"), "expert name not rendered");
+        assert!(
+            text.contains("arith-specialist"),
+            "expert name not rendered"
+        );
         assert!(text.contains("gate"), "gate panel title missing");
         assert!(text.contains("0.90"), "selected expert's fitness rendered");
     }

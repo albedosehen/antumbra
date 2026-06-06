@@ -40,7 +40,10 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
         let (local, remote) = match session {
             Ok(pair) => pair,
             Err(e) => {
-                eprintln!("sync: connect failed: {e}; retry in {}ms", backoff.as_millis());
+                eprintln!(
+                    "sync: connect failed: {e}; retry in {}ms",
+                    backoff.as_millis()
+                );
                 if sleep_or_shutdown(backoff, &mut shutdown).await {
                     return Ok(());
                 }
@@ -58,7 +61,9 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
 
         // Reconcile on the cadence until a cycle fails or shutdown is requested.
         loop {
-            match reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, cfg.lookback).await {
+            match reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, cfg.lookback)
+                .await
+            {
                 Ok(stats) if stats.total() > 0 => {
                     eprintln!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
                 }
