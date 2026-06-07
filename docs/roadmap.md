@@ -185,11 +185,17 @@ second source of truth. See [`product.md`](product.md) for the gap analysis and 
 Antumbra *supersedes by metabolizing* vs *must build*.
 
 ### P-1 · Hook auth + REST shim + per-workspace embedder config
-**Status:** queued (unblocks onboarding + bring-your-own-embedder).
+**Status:** (a) DONE; (b)/(c) queued (unblocks onboarding + bring-your-own-embedder).
 Three small pieces that make the lifecycle-hook integration ([`/scripts/hooks`](../scripts/hooks),
 [`integration.md`](integration.md)) work end-to-end against the networked surface:
-(a) a long-lived, scope-bound **hook token** (API-key-style) for non-interactive
-clients, since the surface mints only a per-request JWT today; (b) a **REST
+(a) **DONE** — a long-lived, scope-bound **hook token** (API-key-style) for
+non-interactive clients. The surface is deliberately stateless (the verified token
+*is* the identity, no lookup table), so a hook token is simply a long-lived JWT;
+the offline / self-hosted tier mints one with `antumbra-mcp --mint-token
+--tenant <ws> --user <u> --jwt-secret <s> [--token-ttl-days N]` (HS256, the same
+secret the server verifies with; an RS256 deployment mints via its auth service's
+private key). `exp` stays mandatory, so it is long-lived, never an eternal standing
+key. (b) a **REST
 `/mcp/call` convenience endpoint** (`{tool, arguments}` → result) beside the
 JSON-RPC `/mcp` router, so a shell hook can fetch bootstrap context without the
 initialize→tools/call handshake (the *capture* and *attribution* hooks already work

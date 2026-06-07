@@ -9,8 +9,10 @@
 //! wider. The signer (your auth service) holds the key; this server only
 //! verifies.
 
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
-use serde::Deserialize;
+use jsonwebtoken::{
+    decode, encode, get_current_timestamp, Algorithm, DecodingKey, EncodingKey, Header, Validation,
+};
+use serde::{Deserialize, Serialize};
 
 /// The verified identity carried by a request's bearer token — what becomes
 /// `$auth.tenant` / `$auth.user` for the session.
@@ -26,6 +28,44 @@ pub struct Identity {
 struct Claims {
     tenant: String,
     user: String,
+}
+
+/// The claims a minted hook token carries (the inverse of [`Claims`]).
+#[derive(Debug, Serialize)]
+struct MintClaims<'a> {
+    tenant: &'a str,
+    user: &'a str,
+    exp: u64,
+}
+
+/// Mint a long-lived, scope-bound HS256 token for a non-interactive client (a
+/// lifecycle hook), valid for `ttl` from now. The token **is** the identity — no
+/// lookup table — so it grants exactly `(tenant, user)` and nothing wider, and it
+/// verifies through the same [`JwtVerifier::verify`] path. `ttl` is finite on
+/// purpose: a hook token is long-lived, not a non-expiring standing key (the
+/// verifier requires `exp`). This is the offline / self-hosted mint, signed with
+/// the server's own symmetric secret; an RS256 deployment mints via its auth
+/// service's private key instead.
+pub fn mint_hs256(
+    secret: &[u8],
+    tenant: &str,
+    user: &str,
+    ttl: std::time::Duration,
+) -> Result<String, AuthError> {
+    if tenant.trim().is_empty() || user.trim().is_empty() {
+        return Err(AuthError::Invalid("empty tenant/user".into()));
+    }
+    let claims = MintClaims {
+        tenant,
+        user,
+        exp: get_current_timestamp() + ttl.as_secs(),
+    };
+    encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret),
+    )
+    .map_err(|e| AuthError::Invalid(e.to_string()))
 }
 
 /// Why a token was rejected. Kept coarse on purpose — the wire response should
@@ -121,8 +161,6 @@ impl JwtVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jsonwebtoken::{encode, get_current_timestamp, EncodingKey, Header};
-    use serde::Serialize;
 
     #[derive(Serialize)]
     struct EncClaims {
@@ -217,6 +255,46 @@ mod tests {
             .is_ok());
         assert!(matches!(
             v.verify(&mint("ws:1", "user:a", future(), Some("other-service"))),
+            Err(AuthError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn a_minted_token_verifies_to_its_identity() {
+        let token = mint_hs256(
+            SECRET,
+            "ws:1",
+            "user:a",
+            std::time::Duration::from_secs(3600),
+        )
+        .unwrap();
+        let id = JwtVerifier::hs256(SECRET).verify(&token).unwrap();
+        assert_eq!(
+            id,
+            Identity {
+                tenant: "ws:1".into(),
+                user: "user:a".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_minted_token_is_rejected_by_a_different_secret() {
+        let token = mint_hs256(
+            SECRET,
+            "ws:1",
+            "user:a",
+            std::time::Duration::from_secs(3600),
+        )
+        .unwrap();
+        let other = JwtVerifier::hs256(b"a-different-secret");
+        assert!(matches!(other.verify(&token), Err(AuthError::Invalid(_))));
+    }
+
+    #[test]
+    fn minting_an_empty_scope_is_refused() {
+        assert!(matches!(
+            mint_hs256(SECRET, "ws:1", "  ", std::time::Duration::from_secs(60)),
             Err(AuthError::Invalid(_))
         ));
     }

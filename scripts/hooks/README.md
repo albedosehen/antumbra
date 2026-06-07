@@ -32,9 +32,20 @@ ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)`
-claims become the engine's `$auth` (ADR-0013/0015). For a purely **offline**, single
-identity you can also run the **stdio** server and have your agent connect to it
-directly — then the capture/bootstrap tools are called by the agent in-band and the
+claims become the engine's `$auth` (ADR-0013/0015). On the offline / self-hosted
+tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
+
+```
+antumbra-mcp --mint-token --tenant <workspace> --user <user> \
+             --jwt-secret <secret> --token-ttl-days 365
+```
+
+It prints a bearer JWT signed with the same HS256 secret the server verifies with
+(an RS256 deployment mints via its own auth service's private key instead). The
+token *is* the identity — it grants exactly `(tenant, user)` — and carries a finite
+`exp`, so it is long-lived, never an eternal standing key. For a purely **offline**,
+single identity you can instead run the **stdio** server and have your agent connect
+directly — then the capture/bootstrap tools are called in-band and the
 `SessionStart` script is optional.
 
 ## Wire it (settings.json excerpt)
@@ -70,11 +81,12 @@ to back up.
 
 > **What works today vs P-1.** The **capture** and **strip-attribution** hooks emit
 > hook *decisions* only — they make no call to Antumbra — so they work now against
-> any agent. The **bootstrap** hook fetches context, and Antumbra's networked surface
-> today is JSON-RPC at `/mcp` (no `POST /mcp/call {tool, arguments}` REST shape) and
-> mints only a per-request JWT. So a long-lived **hook token** and a **REST
-> `/mcp/call` convenience endpoint** are tracked as roadmap **P-1** (see
-> [`docs/product.md`](../../docs/product.md)). Until P-1 lands, do the bootstrap by
+> any agent. The long-lived **hook token** is now available (`--mint-token`, above).
+> What remains for the **bootstrap** hook is the transport: Antumbra's networked
+> surface today is JSON-RPC at `/mcp` (no `POST /mcp/call {tool, arguments}` REST
+> shape), so the **REST `/mcp/call` convenience endpoint** is the last P-1 piece
+> tracked in the roadmap (see [`docs/product.md`](../../docs/product.md)). Until it
+> lands, do the bootstrap by
 > having the agent run a `recall_memories` call at the top of its first turn (no
 > SessionStart script needed), or point the script at a local convenience shim. The
 > templates below are written to the target `/mcp/call` shape so they are drop-in

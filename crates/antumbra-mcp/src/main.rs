@@ -77,6 +77,15 @@ struct Cli {
     /// compartments (reversible; the user curates). Off when unset.
     #[arg(long)]
     auto_propose: Option<usize>,
+    /// Print a long-lived hook token for `--tenant`/`--user`, signed with
+    /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
+    /// lifecycle hook presents on the offline / self-hosted tier (the server
+    /// otherwise only verifies, never mints).
+    #[arg(long)]
+    mint_token: bool,
+    /// Validity, in days, of a `--mint-token` token.
+    #[arg(long, default_value_t = 365)]
+    token_ttl_days: u64,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -246,6 +255,24 @@ fn main() -> Result<()> {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    // Mint a hook token and exit -- no DB or embedder needed. HS256 only: the
+    // server holds the symmetric secret; an RS256 deployment mints via its auth
+    // service's private key.
+    if cli.mint_token {
+        let secret = cli.jwt_secret.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "--mint-token needs --jwt-secret (HS256); RS256 tokens are minted by your auth service"
+            )
+        })?;
+        let ttl = std::time::Duration::from_secs(cli.token_ttl_days * 24 * 60 * 60);
+        println!(
+            "{}",
+            auth::mint_hs256(secret.as_bytes(), &cli.tenant, &cli.user, ttl)?
+        );
+        return Ok(());
+    }
+
     let host = default_host(cli.host);
     let embedder: Arc<dyn Embedder> = Arc::from(make_embedder()?);
 
