@@ -72,8 +72,10 @@
 > scope by probing, capture accepts one a human already knows. And the **MCP served path now applies the same
 > inhibition gate as the CLI**: `ranked_routes` escalates when a task falls inside an actionable boundary's
 > failure scope, so the two front doors no longer diverge (the gate was previously CLI-only, deferred while no
-> actionable boundary could reach the served path). Still open: automatic governing-feature discovery on the
-> capture intake (here the correction supplies it), and boundary retirement once an expert covers the scope.
+> actionable boundary could reach the served path). The lifecycle also **closes**: when a shadow graduates, the
+> loop retires every boundary the new expert's capability now covers (`is_covered_by` — closer to C than C'), so a
+> filled gap stops gating routing. Still open: automatic governing-feature discovery on the capture intake (here
+> the correction supplies it).
 
 ## Context
 
