@@ -13,7 +13,7 @@ use crate::overlay;
 use crate::scroll;
 use crate::theme::Theme;
 
-use super::{gauge_row, heading, kv, shadow_color, sparkline_row};
+use super::{gauge_row, gauge_spans, heading, kv, shadow_color, sparkline_row};
 
 /// The modal box rectangle for the active overlay (the size source the open
 /// animation also targets). `None` in the live view.
@@ -128,6 +128,43 @@ fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
                 format!("    {}. {s}", i + 1),
                 Style::default().fg(t.value),
             )));
+        }
+    }
+
+    // Route preview: probe the learned gate with this expert's own capability
+    // vector to show how tasks in its specialty would be routed (no embedder
+    // needed — the vector is already learned).
+    if let (Some(router), Some(vec)) = (&app.router, &e.capability_vec) {
+        l.push(Line::from(""));
+        l.push(section(t, "gate routing · this specialty"));
+        let routed = router.route(vec);
+        if routed.is_empty() {
+            l.push(Line::from(Span::styled(
+                "  escalates · out of distribution",
+                Style::default().fg(t.warning),
+            )));
+        } else {
+            for (id, p) in routed.iter().take(5) {
+                let is_self = id.as_str() == e.id.as_str();
+                let name = app
+                    .experts
+                    .iter()
+                    .find(|x| x.id.as_str() == id.as_str())
+                    .map_or_else(|| id.as_str().to_string(), |x| x.name.clone());
+                let label = Style::default().fg(if is_self { t.accent } else { t.ink });
+                let mut spans = vec![Span::styled(format!("  {name:<20}"), label)];
+                spans.extend(gauge_spans(
+                    t,
+                    *p,
+                    10,
+                    if is_self { t.accent } else { t.value },
+                ));
+                spans.push(Span::styled(
+                    format!(" {:>3.0}%", p * 100.0),
+                    Style::default().fg(t.value),
+                ));
+                l.push(Line::from(spans));
+            }
         }
     }
     (format!("expert · {}", e.name), l)

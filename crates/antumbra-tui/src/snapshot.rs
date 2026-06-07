@@ -508,6 +508,41 @@ mod tests {
         assert!(text.contains("runtime"), "context json rendered");
     }
 
+    // The expert drill-down previews how the gate routes that expert's own
+    // specialty (probing the router with its capability vector — no embedder).
+    #[test]
+    fn drill_down_previews_gate_routing() {
+        use antumbra_core::router::{LearnedRouter, RouterExpert};
+        let mut app = demo_app();
+        let vec = {
+            let mut v = vec![0.0f32; 8];
+            v[1] = 1.0;
+            v
+        };
+        app.experts[0].capability_vec = Some(vec.clone());
+        app.router = Some(LearnedRouter {
+            weights: vec![1.0; 8],
+            experts: vec![RouterExpert {
+                id: ExpertId::new("expert:arith"),
+                centroid: vec,
+            }],
+            temperature: 0.2,
+            floor: 0.0,
+        });
+        app.focus = Focus::Experts;
+        app.open_detail();
+        let text = to_text(&render(&mut app, 110, 36, 1600.0).unwrap());
+        assert!(
+            text.contains("gate routing"),
+            "route preview shown:\n{text}"
+        );
+        assert!(
+            text.contains("100%"),
+            "the sole expert wins its own specialty"
+        );
+        assert!(text.contains("arith-specialist"), "routed expert named");
+    }
+
     // Pressing `?` opens the help overlay over the live view, listing the keys.
     #[test]
     fn help_overlay_lists_the_keybindings() {

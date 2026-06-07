@@ -213,7 +213,15 @@ async fn seed_demo() -> Result<Store> {
         ("regex-smith", 0.63, true),
     ];
     let now = Utc::now();
-    for (name, fitness, frozen) in demo {
+    // Distinct probe vectors (a primary dim plus a small shared component) so the
+    // drill-down's route preview shows a real distribution rather than a tie.
+    let probe = |i: usize| {
+        let mut v = vec![0.0f32; EMBED_DIM];
+        v[i % EMBED_DIM] = 1.0;
+        v[0] += 0.25;
+        v
+    };
+    for (i, (name, fitness, frozen)) in demo.iter().copied().enumerate() {
         expert::insert(
             &store,
             &Expert {
@@ -225,7 +233,7 @@ async fn seed_demo() -> Result<Store> {
                     "description": format!("demo specialist for {name}"),
                     "exemplars": ["ex-1", "ex-2", "ex-3"],
                 }),
-                capability_vec: Some(vec![0.0; EMBED_DIM]),
+                capability_vec: Some(probe(i)),
                 fitness,
                 frozen_at: frozen.then_some(now),
                 generation: Generation::ZERO,
@@ -242,9 +250,10 @@ async fn seed_demo() -> Result<Store> {
             weights: vec![1.0; EMBED_DIM],
             experts: demo
                 .iter()
-                .map(|(n, _, _)| RouterExpert {
+                .enumerate()
+                .map(|(i, (n, _, _))| RouterExpert {
                     id: ExpertId::new(format!("expert:{n}")),
-                    centroid: vec![0.0; EMBED_DIM],
+                    centroid: probe(i),
                 })
                 .collect(),
             temperature: 0.2,
