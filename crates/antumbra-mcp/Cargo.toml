@@ -29,14 +29,18 @@ rmcp = { version = "1.7.0", features = ["server", "macros", "transport-io", "tra
 # bearer token whose claims become $auth (tenant, user).
 axum = "0.8"
 jsonwebtoken = "10"
+# Outbound HTTP for the runtime-configured embeddings endpoint (P-1c). Pure-Rust
+# TLS so it needs no system OpenSSL; `json` for send_json/read_json.
+ureq = { version = "3", features = ["json"] }
+# The `Embedder` port (and the `HttpEmbedder` impl + the answer-escalate test fake)
+# are `#[async_trait]`.
+async-trait.workspace = true
 
 [dev-dependencies]
 # `oneshot` to drive the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
 # Read the SSE response body incrementally in the live-notification round-trip test.
 futures = "0.3"
-# Implement a fake `Serve` (can_serve=false) to test the answer-escalate path.
-async-trait.workspace = true
 
 [features]
 default = []

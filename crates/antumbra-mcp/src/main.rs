@@ -22,6 +22,7 @@ use antumbra_store::repo::{compartment, principal};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
 mod auth;
+mod embed;
 mod http;
 mod notify;
 mod server;
@@ -86,6 +87,17 @@ struct Cli {
     /// Validity, in days, of a `--mint-token` token.
     #[arg(long, default_value_t = 365)]
     token_ttl_days: u64,
+    /// Embed via an OpenAI-compatible `/embeddings` endpoint (e.g. a local
+    /// text-embeddings-inference / Ollama server) instead of the built-in
+    /// embedder. It must return `EMBED_DIM`-wide vectors. Off when unset.
+    #[arg(long, env = "ANTUMBRA_EMBEDDER_URL")]
+    embedder_url: Option<String>,
+    /// Model name sent to `--embedder-url` (must produce the index dimension).
+    #[arg(long, default_value = "all-MiniLM-L6-v2")]
+    embedder_model: String,
+    /// Optional bearer key for `--embedder-url`.
+    #[arg(long, env = "ANTUMBRA_EMBEDDER_KEY")]
+    embedder_key: Option<String>,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -274,7 +286,17 @@ async fn run() -> Result<()> {
     }
 
     let host = default_host(cli.host);
-    let embedder: Arc<dyn Embedder> = Arc::from(make_embedder()?);
+    // A configured endpoint embeds on the tenant's side (P-1c); otherwise the
+    // build-time embedder (candle BERT under `models`, else the byte-histogram
+    // fake). Either way the vectors are EMBED_DIM-wide.
+    let embedder: Arc<dyn Embedder> = match cli.embedder_url {
+        Some(url) => Arc::new(embed::HttpEmbedder::new(
+            url,
+            cli.embedder_model,
+            cli.embedder_key,
+        )),
+        None => Arc::from(make_embedder()?),
+    };
 
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.

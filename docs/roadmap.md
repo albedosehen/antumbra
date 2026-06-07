@@ -185,7 +185,7 @@ second source of truth. See [`product.md`](product.md) for the gap analysis and 
 Antumbra *supersedes by metabolizing* vs *must build*.
 
 ### P-1 · Hook auth + REST shim + per-workspace embedder config
-**Status:** (a)/(b) DONE; (c) queued (unblocks onboarding + bring-your-own-embedder).
+**Status:** (a)/(b) DONE; (c) runtime endpoint DONE, per-workspace registry deferred.
 Three small pieces that make the lifecycle-hook integration ([`/scripts/hooks`](../scripts/hooks),
 [`integration.md`](integration.md)) work end-to-end against the networked surface:
 (a) **DONE** — a long-lived, scope-bound **hook token** (API-key-style) for
@@ -201,10 +201,17 @@ hook fetches bootstrap context with one authenticated POST, no initialize→tool
 handshake. It dispatches the *same* tools (`McpServer::call_tool`) under the *same*
 JWT auth and scoped-connection engine ACL — a thin transport, not a second
 authority (the *capture* and *attribution* hooks already worked — they only emit
-hook decisions; the *bootstrap* hook needed this). And (c) promoting the
-`Embedder` port to a **per-workspace runtime config** (model
-id / local endpoint) instead of a build-time choice, keeping the embedding step on
-the tenant's side with HNSW dims consistent.
+hook decisions; the *bootstrap* hook needed this). And (c) **runtime endpoint
+DONE** — the `Embedder` is no longer a build-time-only choice: `antumbra-mcp
+--embedder-url <openai-compatible /embeddings>` (with `--embedder-model` /
+`--embedder-key`) embeds on the tenant's side via their own server (Ollama,
+text-embeddings-inference, …) instead of the baked-in candle/fake. The endpoint
+**must** return `EMBED_DIM`-wide vectors — the HNSW index is fixed-dimension, so
+bring-your-own is a *model/endpoint* choice, not a dimension one; a mismatch is
+rejected, not silently stored. *Deferred:* making it **per-workspace** (a
+multi-tenant registry keyed by `(tenant)` with each workspace's own endpoint, and
+the re-embed story when a workspace changes models) — the current flag is one
+endpoint per server, which is what the offline / self-hosted tier needs.
 
 ### P-2 · Read-only web dashboard
 **Status:** queued.
