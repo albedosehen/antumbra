@@ -293,7 +293,8 @@ GPU recipe and the validated generation-quality settings.
 ### Crates
 
 `antumbra-core` (domain types, ports) · `antumbra-store` (SurrealDB persistence via
-surql-rs) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary`
+surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) ·
+`antumbra-gate` (router/coverage gate) · `antumbra-boundary`
 (counterfactual scope) · `antumbra-critic` (verifiers + credit assignment) ·
 `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident
 multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync`

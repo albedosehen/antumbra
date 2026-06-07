@@ -174,6 +174,7 @@ antumbra/
   crates/
     antumbra-core/         # domain types: Expert(adapter), Shadow, FailureBoundary, Generation
     antumbra-store/        # surql-rs data layer (schema/migrations/repositories)
+    antumbra-embed/        # ADR-0015: HTTP embedder (OpenAI-compatible /embeddings) behind the Embedder port
     antumbra-gate/         # ADR-0005: boundary-conditioned adapter gate (+ north-star bridge client)
     antumbra-boundary/     # ADR-0004: counterfactual scope engine (keystone)
     antumbra-loop/         # ADR-0008: durable generational loop
@@ -182,11 +183,12 @@ antumbra/
     antumbra-serve/        # embedder (candle BERT) + multi-adapter serving seam
     antumbra-cli/          # operator CLI
     antumbra-mcp/          # ADR-0015: MCP server (memory + graph + compartments + route)
-    antumbra-tui/          # operator console (ratatui)
+    antumbra-sync/         # R-1: last-write-wins penumbra replication (local <-> remote)
+    antumbra-tui/          # interactive operator console (ratatui): route-ask, event stream, drill-downs, actions
   migrations/            # SurrealDB .surql
   corpora/               # verifiable corpora - selected repos for the coding domain
   experiments/           # the falsifiable validations ARE the milestones
-  docs/adr/              # 0001..0015
+  docs/adr/              # 0001..0016
 ```
 
 The Penumbra memory store, engine-enforced multi-tenancy, and compartments (ADR-0012/0013/0014) live in
@@ -196,7 +198,7 @@ record-access auth, and the engine-enforced ACL); `antumbra-train` carries the c
 
 ### v0 implementation status (2026-06-05)
 
-All **eleven crates** exist and compile; the workspace is green (`cargo test`, clippy clean) on your **surql-rs**
+All **thirteen crates** exist and compile; the workspace is green (`cargo test`, clippy clean) on your **surql-rs**
 (`oneiriq-surql`, the local `release/0.28.0` checkout, builder-only — no hand-written SurrealQL) on the SurrealDB
 3.x driver. Since the early snapshots: the trainer is GPU-validated (MT-3, pass-rate to 1.0), the real candle
 BERT embedder + relative-coverage gate are wired, the Penumbra memory store landed with engine-enforced
@@ -209,7 +211,8 @@ tenant/compartment isolation (ADR-0012/0013/0014), and the agent-facing MCP runt
 | serve (ADR-0006) | **implemented + GPU-validated** - `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert); both served a trained adapter on the 3090 Ti (CUDA 13.3). |
 | mcp (ADR-0015) | **implemented + tested** - 14 tools over the Penumbra + population (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`); the antumbra can auto-organize the inbox (`--auto-propose`); stdio (single identity) and networked JWT multi-tenant HTTP (per-request `$auth`, isolation proven on embedded). |
 | cli | `migrate · schema · experts · status · loop · route · seed · ask · serve · train · teach · evolve · populate · memory-import · metabolize · remember · consolidate · consolidate-compartment · propose-compartments · retire · scope · gate-train · compose` |
-| tui (ADR-0005/0009) | operator console (ratatui) over the live population/gate; a headless `snapshot` mode renders to an in-memory buffer and emits a text grid (e2e) + a PNG screenshot. |
+| embed (ADR-0015) | **implemented + tested** - the OpenAI-compatible `HttpEmbedder` (behind the `Embedder` port, dimension-enforced) shared by the MCP server and the TUI, so route/ask/recall embed with the same model the population was built with. |
+| tui (ADR-0005/0009) | **interactive operator console** (ratatui + tachyonfx) over the live population/gate: route-ask through the gate (`--embed-url`), a live event stream of store changes, drill-down inspection, switchable themes/layouts, multi-monitor high-refresh pacing, fuzzy filter/command palette, and operator actions (prune shadow / delete boundary) behind a confirm. A headless `snapshot` mode emits a text grid (e2e) + a PNG screenshot. |
 
 Not yet runtime-validated / built: GPU validation of `MultiAdapterServe`'s swap and a real private-LoRA mint
 (`consolidate-compartment`); a live multi-tenant deployment of the networked MCP against a `ws://` server; the

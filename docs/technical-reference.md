@@ -27,12 +27,14 @@ The candidate context set is still authored, and scale remains untested.
 
 ## 2. Crate map
 
-Eleven crates, single Rust workspace. The default build is light (no ML deps); candle is gated behind `models`.
+Thirteen crates, single Rust workspace. The default build is light (no ML deps); candle is gated behind `models`.
 
 | Crate | ADR | Responsibility | Heavy deps (feature) |
 |---|---|---|---|
 | `antumbra-core` | 0001-0004, 0012-0014 | Domain types (incl. `Memory`, `Compartment`, `Grant`, identity ids), state machines, port traits, `penumbra` clustering (`propose_compartments`), `testing` fakes. No I/O. | - (`testing` feature for fakes) |
 | `antumbra-store` | 0007, 0012-0014 | SurrealDB data layer, **surql-rs builders only** (no hand-written SurrealQL): schema-as-code, repositories, HNSW recall, the Penumbra memory store + graph + **compartments**, record-access auth and the **engine-enforced tenant/compartment ACL**. | `surrealdb` (kv-mem, kv-surrealkv) |
+| `antumbra-embed` | 0015 | HTTP embedder: an OpenAI-compatible `/embeddings` client behind the core `Embedder` port, shared by the MCP server and the operator console so route/ask/recall embed with the *same* model the population was built with (dimension enforced, `EMBED_DIM`). | `ureq` |
+| `antumbra-sync` | - | Collector/sync (R-1): bidirectional last-write-wins replication of the Penumbra between a local embedded store and a remote authoritative one. | - |
 | `antumbra-critic` | 0003 | Verifiers (the reward is the environment): in-process rules + external commands. | - |
 | `antumbra-gate` | 0005 | Boundary-conditioned coverage gate: rank by capability, escalate on relative coverage. | - |
 | `antumbra-boundary` | 0004 | Counterfactual scope engine (keystone). Seam for `C'` recovery. | - |
@@ -41,7 +43,7 @@ Eleven crates, single Rust workspace. The default build is light (no ML deps); c
 | `antumbra-serve` | 0006 | Candle adapter serving: `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert), plus the real candle BERT embedder. | `candle-*`, `candle-transformers`, `antumbra-train` (`models`); `cuda`/`metal` |
 | `antumbra-cli` | - | Operator CLI: `migrate · schema · experts · status · loop · route · ask · serve · train · teach · evolve · populate · memory-import · metabolize · remember · consolidate · consolidate-compartment · propose-compartments · retire`. | pulls `train`/`serve`/`critic` (`models`) |
 | `antumbra-mcp` | 0015 | MCP server over the Penumbra + population: 14 tools (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`), an optional autonomous propose trigger (`--auto-propose`). Two transports: stdio (one bound `(tenant, user)`) and `--http` (networked, multi-tenant per request — JWT claims become `$auth`). | `rmcp`, `axum`, `jsonwebtoken`; `antumbra-serve` (`models`) |
-| `antumbra-tui` | 0005 | Operator console (ratatui): the live population/gate observatory. | `ratatui` |
+| `antumbra-tui` | 0005 | Interactive operator console (ratatui + tachyonfx): the live animated population/gate, with route-ask through the gate, a live event stream of store changes, drill-down inspection, switchable themes/layouts, multi-monitor high-refresh pacing, fuzzy filter/palette, and operator actions (prune shadow / delete boundary) behind a confirm. Headless `snapshot` mode renders an e2e text grid + PNG. | `ratatui`, `tachyonfx`, `antumbra-embed` |
 
 ## 3. Domain model (`antumbra-core`)
 
