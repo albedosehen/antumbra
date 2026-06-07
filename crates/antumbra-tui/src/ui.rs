@@ -331,8 +331,6 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
     let block = panel(&t, Span::styled(" population ", Style::default().fg(t.ink)));
     // Ease the whole graph in over the first 0.8s (intro reveal).
     let intro = (app.clock_ms / 800.0).min(1.0);
-    let link = rgb(t.core, 0.22);
-    let mote = rgb(t.core, 0.85);
     let canvas = Canvas::default()
         .block(block)
         .marker(Marker::Braille)
@@ -340,29 +338,58 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
         .y_bounds([-100.0, 100.0])
         .paint(move |ctx| {
             let n = app.experts.len().max(1);
-            let orbit_r = 64.0;
+            // A tilted ring (squashed vertically) reads as a 3D orbit: depth is
+            // sin(angle) — front nodes sit lower and glow brighter, back nodes
+            // higher and dimmer.
+            let (rx, ry) = (72.0, 34.0);
             let rot = app.clock_ms * 0.00006 * TAU;
+            let angle = |i: usize| rot + (i as f64 / n as f64) * TAU;
 
-            // Each expert: a link from the core with a travelling energy mote,
-            // then the node (size by frozen/selected, colour by fitness/glow).
-            for (i, e) in app.experts.iter().enumerate() {
-                let ang = rot + (i as f64 / n as f64) * TAU;
-                let (ex, ey) = (orbit_r * ang.cos(), orbit_r * ang.sin());
+            // Draw back-to-front so nearer nodes occlude farther ones.
+            let mut order: Vec<usize> = (0..app.experts.len()).collect();
+            order.sort_by(|&a, &b| {
+                angle(a)
+                    .sin()
+                    .partial_cmp(&angle(b).sin())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            for &i in &order {
+                let e = &app.experts[i];
+                let ang = angle(i);
+                let (ex, ey) = (rx * ang.cos(), ry * ang.sin());
+                let front = 0.5 + 0.5 * ang.sin();
+
+                // Link from the core (fainter to the back) and an energy mote
+                // travelling out along it.
                 ctx.draw(&CanvasLine {
                     x1: 0.0,
                     y1: 0.0,
                     x2: ex,
                     y2: ey,
-                    color: link,
+                    color: rgb(t.core, 0.10 + 0.18 * front),
                 });
                 let tt = (app.clock_ms * 0.0006 + i as f64 * 0.37) % 1.0;
                 ctx.print(
                     ex * tt,
                     ey * tt,
-                    Span::styled("·", Style::default().fg(mote)),
+                    Span::styled("·", Style::default().fg(rgb(t.core, 0.4 + 0.5 * front))),
                 );
 
-                let glow = (0.6 + 0.4 * pulse(app.clock_ms, 1500.0, i as f64)) * intro;
+                // A short fading trail behind the node along its orbit.
+                for k in 1..=3 {
+                    let a = ang - k as f64 * 0.05;
+                    let fade = (0.34 - 0.09 * k as f64) * front * intro;
+                    ctx.print(
+                        rx * a.cos(),
+                        ry * a.sin(),
+                        Span::styled("·", Style::default().fg(t.fitness(e.fitness, fade))),
+                    );
+                }
+
+                let glow = (0.4 + 0.6 * front)
+                    * intro
+                    * (0.75 + 0.25 * pulse(app.clock_ms, 1500.0, i as f64));
                 let selected = i == app.selected;
                 let glyph = if selected {
                     "◉"
