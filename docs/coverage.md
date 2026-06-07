@@ -4,18 +4,20 @@ Measured with [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov)
 (source-based LLVM coverage).
 
 ```bash
-# The headline number (excludes binary entrypoints + the TUI render layer; see below):
-cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui/src/ui/|antumbra-tui/src/snapshot\.rs)'
+# The headline number (excludes binary entrypoints + the TUI render layer; see below).
+# The [\\/] char class matches both path separators (CI is unix, Windows uses `\`):
+cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui[\\/]src[\\/]ui[\\/]|antumbra-tui[\\/]src[\\/]snapshot\.rs)'
 
 # Everything, no exclusions:
 cargo llvm-cov --workspace --summary-only
 ```
 
-**Result (2026-06-06):** **92.4% line / 90.3% region / 90.3% function** over the
-measured surface (84.6% line with nothing excluded). The library crates are
-91–100% each. *(This figure predates folding the `antumbra-tui` logic files into
-the surface — re-run the headline command to refresh it now that the console's
-state machine is measured rather than wholly excluded.)*
+**Result (2026-06-07):** **92.4% line / 90.3% region / 90.1% function** over the
+measured surface — which now **includes** the `antumbra-tui` logic (only the TUI
+render layer + binary entrypoints are excluded). The library crates are 88–100%
+each; within the console, `events.rs`/`theme.rs`/`overlay.rs` are ~100%,
+`transition.rs`/`command.rs`/`scroll.rs` ~95–99%, `app.rs` 88%, and `pacing.rs`
+89% (the remainder is Windows-FFI monitor detection that can't run on CI).
 
 ## What is excluded from the headline metric, and why
 
