@@ -452,6 +452,22 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::Char(c) => app.palette_input(c),
                             _ => {}
                         },
+                        Mode::Filter => match key.code {
+                            KeyCode::Esc => app.close_overlay(),
+                            KeyCode::Enter => app.filter_apply(),
+                            KeyCode::Backspace => app.filter_backspace(),
+                            KeyCode::Up => app.filter_move(-1),
+                            KeyCode::Down => app.filter_move(1),
+                            KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                match c {
+                                    'n' => app.filter_move(1),
+                                    'p' => app.filter_move(-1),
+                                    _ => {}
+                                }
+                            }
+                            KeyCode::Char(c) => app.filter_input(c),
+                            _ => {}
+                        },
                         Mode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
@@ -462,6 +478,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::PageUp => app.select_page(-1),
                             KeyCode::Char(':') => {
                                 app.open_palette();
+                                transition = Some(transition::overlay_open());
+                            }
+                            KeyCode::Char('/') => {
+                                app.open_filter();
                                 transition = Some(transition::overlay_open());
                             }
                             KeyCode::Tab => {

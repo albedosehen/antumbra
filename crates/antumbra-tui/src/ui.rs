@@ -34,8 +34,55 @@ pub fn render(f: &mut Frame, app: &App) {
         match app.mode {
             Mode::Help => help_overlay(f, app),
             Mode::Palette => palette_overlay(f, app),
+            Mode::Filter => filter_overlay(f, app),
             Mode::Normal => {}
         }
+    }
+}
+
+/// The focused-list filter (`/`): a query over the focused region's items,
+/// fuzzy-ranked; picking one jumps the selection to it.
+fn filter_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
+    let region = match app.focus {
+        Focus::Experts => "umbra",
+        Focus::Shadows => "penumbra",
+        Focus::Boundaries => "antumbra",
+    };
+    let inner = overlay::modal(f, &t, area, &format!("filter {region}"));
+    let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("/ ", Style::default().fg(t.accent)),
+            Span::styled(app.filter.clone(), Style::default().fg(t.text)),
+            Span::styled("▏", Style::default().fg(t.accent)),
+        ])),
+        rows[0],
+    );
+
+    let matches = app.filtered();
+    if matches.is_empty() {
+        f.render_widget(
+            Paragraph::new(Span::styled("  (no match)", Style::default().fg(t.dim))),
+            rows[1],
+        );
+    } else {
+        let lines: Vec<Line> = matches
+            .iter()
+            .map(|(_, label)| Line::from(Span::styled(label.clone(), Style::default().fg(t.ink))))
+            .collect();
+        scroll::list(
+            f,
+            &t,
+            rows[1],
+            Block::default(),
+            lines,
+            Some(app.filter_selected),
+        );
     }
 }
 
@@ -185,6 +232,10 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
             let listed = app.palette_matches().len().max(1) as u16;
             Some(overlay::centered(frame, 56, listed + 4))
         }
+        Mode::Filter => {
+            let listed = (app.filtered().len() as u16 + 4).min(18);
+            Some(overlay::centered(frame, 50, listed))
+        }
         Mode::Normal => None,
     }
 }
@@ -267,6 +318,7 @@ fn help_overlay(f: &mut Frame, app: &App) {
         bind("a", "follow the active monitor"),
         Line::from(""),
         group("command"),
+        bind("/", "filter the focused list, jump to a match"),
         bind(":", "open the command palette"),
         bind("r", "reload from the store"),
         bind("? esc", "close this help"),

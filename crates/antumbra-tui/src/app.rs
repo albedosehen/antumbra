@@ -20,11 +20,12 @@ pub enum Focus {
 
 /// What the console is showing on top of the population: nothing (the live view),
 /// the keybinding help, or the command palette. Input routing follows the mode.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Normal,
     Help,
     Palette,
+    Filter,
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -77,6 +78,10 @@ pub struct App {
     pub mode: Mode,
     /// The command palette's query and selection (used while `mode == Palette`).
     pub palette: Palette,
+    /// The focused-list filter query (used while `mode == Filter`).
+    pub filter: String,
+    /// The highlighted match within the filter results.
+    pub filter_selected: usize,
     /// Index into [`crate::theme::ALL`] of the active palette.
     pub theme_idx: usize,
     /// The frame-rate cap the loop paces to (Hz), adjustable with `+`/`-`.
@@ -110,6 +115,8 @@ impl App {
             layout: LayoutMode::Focused,
             mode: Mode::Normal,
             palette: Palette::default(),
+            filter: String::new(),
+            filter_selected: 0,
             theme_idx: 0,
             target_fps: 144,
             auto_fps: true,
@@ -273,6 +280,75 @@ impl App {
     /// Focus a specific region (the palette's focus commands).
     pub fn set_focus(&mut self, focus: Focus) {
         self.focus = focus;
+    }
+
+    /// The label every item of the focused list filters/jumps by.
+    fn focused_labels(&self) -> Vec<String> {
+        match self.focus {
+            Focus::Experts => self.experts.iter().map(|e| e.name.clone()).collect(),
+            Focus::Shadows => self
+                .shadows
+                .iter()
+                .map(|s| s.id.as_str().to_string())
+                .collect(),
+            Focus::Boundaries => self.boundaries.iter().map(|b| b.behavior.clone()).collect(),
+        }
+    }
+
+    /// Open the focused-list filter (`/`) with an empty query.
+    pub fn open_filter(&mut self) {
+        self.mode = Mode::Filter;
+        self.filter.clear();
+        self.filter_selected = 0;
+    }
+
+    /// Append a typed character to the filter query (resets the selection).
+    pub fn filter_input(&mut self, c: char) {
+        self.filter.push(c);
+        self.filter_selected = 0;
+    }
+
+    /// Delete the last character of the filter query (resets the selection).
+    pub fn filter_backspace(&mut self) {
+        self.filter.pop();
+        self.filter_selected = 0;
+    }
+
+    /// Move the filter selection by `delta`, wrapping within the matches.
+    pub fn filter_move(&mut self, delta: i32) {
+        let n = self.filtered().len();
+        if n == 0 {
+            self.filter_selected = 0;
+            return;
+        }
+        let cur = self.filter_selected.min(n - 1) as i32;
+        self.filter_selected = (cur + delta).rem_euclid(n as i32) as usize;
+    }
+
+    /// The focused list's items matching the filter query, best first, as
+    /// `(original index, label)` pairs.
+    pub fn filtered(&self) -> Vec<(usize, String)> {
+        let mut scored: Vec<(usize, String, i32)> = self
+            .focused_labels()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, label)| {
+                command::fuzzy_score(&label, &self.filter).map(|score| (i, label, score))
+            })
+            .collect();
+        scored.sort_by_key(|&(_, _, score)| score);
+        scored.into_iter().map(|(i, label, _)| (i, label)).collect()
+    }
+
+    /// Jump the focused selection to the highlighted filter match and close.
+    pub fn filter_apply(&mut self) {
+        let matches = self.filtered();
+        let idx = self.filter_selected.min(matches.len().saturating_sub(1));
+        if let Some(&(target, _)) = matches.get(idx) {
+            self.set_focused_selection(target);
+        }
+        self.mode = Mode::Normal;
+        self.filter.clear();
     }
 
     /// Cycle the body layout: focused -> dashboard -> graph.

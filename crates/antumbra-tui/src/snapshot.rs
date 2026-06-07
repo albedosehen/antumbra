@@ -176,6 +176,8 @@ mod tests {
             layout: LayoutMode::Focused,
             mode: Mode::Normal,
             palette: Palette::default(),
+            filter: String::new(),
+            filter_selected: 0,
             theme_idx: 0,
             target_fps: 144,
             auto_fps: false,
@@ -388,6 +390,42 @@ mod tests {
         );
         // The chosen action matches the filtered selection.
         assert_eq!(app.palette_action(), Some(Action::CycleTheme));
+    }
+
+    // The `/` filter fuzzy-narrows the focused list and jumps the selection to
+    // the chosen match.
+    #[test]
+    fn filter_narrows_and_jumps_the_selection() {
+        let mut app = demo_app();
+        app.shadows = vec![
+            graduated_shadow(),
+            Shadow {
+                id: ShadowId::new("shadow:g7"),
+                parent_expert: None,
+                adapter_uri: None,
+                status: ShadowStatus::Exploring,
+                generation: Generation(7),
+                reward_curve: vec![],
+                created_at: Utc::now(),
+            },
+        ];
+        app.focus = Focus::Shadows;
+        app.open_filter();
+        for c in "g7".chars() {
+            app.filter_input(c);
+        }
+        // Only g7 matches; it is shown in the filter modal.
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(
+            text.contains("filter penumbra"),
+            "filter modal titled:\n{text}"
+        );
+        assert!(text.contains("shadow:g7"), "the match is listed");
+        assert_eq!(app.filtered().len(), 1, "g7 is the only match");
+        // Applying jumps the focused selection to g7 (index 1) and closes.
+        app.filter_apply();
+        assert_eq!(app.selected_shadow, 1, "selection jumped to the match");
+        assert_eq!(app.mode, Mode::Normal, "filter closed after applying");
     }
 
     // Pressing `?` opens the help overlay over the live view, listing the keys.
