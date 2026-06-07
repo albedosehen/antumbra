@@ -19,7 +19,7 @@ use super::{gauge_row, gauge_spans, heading, kv, shadow_color, sparkline_row};
 /// animation also targets). `None` in the live view.
 pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     match app.mode {
-        Mode::Help => Some(overlay::centered(frame, 52, 25)),
+        Mode::Help => Some(overlay::centered(frame, 52, 26)),
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
             Some(overlay::centered(frame, 56, listed + 4))
@@ -40,8 +40,34 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
                 .map_or(1, |r| r.len().clamp(1, 5) as u16);
             Some(overlay::centered(frame, 60, rows + 5))
         }
+        Mode::Confirm => Some(overlay::centered(frame, 58, 6)),
         Mode::Normal => None,
     }
+}
+
+/// The operator-action confirmation (`x`): a yes/no prompt before a store
+/// mutation (prune a shadow, delete a boundary).
+pub(super) fn confirm_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
+    let inner = overlay::modal(f, &t, area, "confirm");
+    let prompt = app.pending_prompt().unwrap_or_default();
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("  {prompt}"),
+            Style::default().fg(t.alert),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" y ", Style::default().fg(Color::Black).bg(t.alert)),
+            Span::styled("  confirm     ", Style::default().fg(t.ink)),
+            Span::styled(" n ", Style::default().fg(Color::Black).bg(t.ink)),
+            Span::styled("  cancel", Style::default().fg(t.ink)),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
 /// The route-ask (`ask` command): a task query embedded and run through the
@@ -416,6 +442,7 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
         bind("/", "filter the focused list, jump to a match"),
         bind(":", "command palette (ask · route a task here)"),
         bind("e", "live event stream of store changes"),
+        bind("x", "act: prune shadow / delete boundary"),
         bind("r", "reload from the store"),
         bind("? esc", "close this help"),
         bind("q", "quit"),

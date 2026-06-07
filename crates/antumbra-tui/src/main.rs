@@ -1,7 +1,8 @@
 //! Antumbra operator console (ADR-0009): a live, animated view of the
 //! population (umbra), boundaries (antumbra), and the learned gate, over the
-//! same SurrealDB store the CLI drives. Read-only observatory for now;
-//! interactive route/ask is the next layer.
+//! same SurrealDB store the CLI drives. Interactive: route-ask through the gate,
+//! a live event stream of store changes, drill-down inspection, and operator
+//! actions (prune / delete) behind a confirm.
 
 mod app;
 mod command;
@@ -24,9 +25,11 @@ use tachyonfx::{Duration as FxDuration, EffectRenderer};
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::FixedEmbedder;
+use antumbra_core::ShadowStatus;
+use antumbra_store::repo::{boundary, shadow};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, Pending};
 use crate::command::Action;
 
 #[derive(Parser)]
@@ -70,7 +73,8 @@ enum Command {
         /// Focused region: experts, shadows, or boundaries.
         #[arg(long, default_value = "experts")]
         focus: String,
-        /// Overlay to render on top: none, help, or palette.
+        /// Overlay to render on top: none, help, palette, events, detail, ask,
+        /// or confirm.
         #[arg(long, default_value = "none")]
         overlay: String,
         /// Render a seeded in-memory demo population instead of reading `--url`.
@@ -133,6 +137,10 @@ async fn app_main() -> Result<()> {
                 "palette" => app.open_palette(),
                 "events" => app.open_events(),
                 "detail" => app.open_detail(),
+                "confirm" => {
+                    app.set_focus(app::Focus::Boundaries);
+                    app.request_action();
+                }
                 "ask" => {
                     app.open_ask();
                     for c in "string handling".chars() {
@@ -140,8 +148,7 @@ async fn app_main() -> Result<()> {
                     }
                     let emb = FixedEmbedder::new(EMBED_DIM);
                     if let Ok(v) = emb.embed(&app.ask_query).await {
-                        let routed =
-                            app.router.as_ref().map(|r| r.route(&v)).unwrap_or_default();
+                        let routed = app.router.as_ref().map(|r| r.route(&v)).unwrap_or_default();
                         app.set_ask_result(&routed);
                     }
                 }
@@ -403,6 +410,36 @@ async fn apply_action(
     Ok(())
 }
 
+/// Carry out the confirmed operator mutation, then reload so the change (and the
+/// event it raises) shows immediately.
+async fn confirm_action(app: &mut App, store: &Store) -> Result<()> {
+    if let Some(pending) = app.pending.take() {
+        match pending {
+            Pending::PruneShadow(id) => {
+                if let Some(s) = app.shadows.iter().find(|s| s.id.as_str() == id.as_str()) {
+                    let mut pruned = s.clone();
+                    pruned.status = ShadowStatus::Pruned;
+                    shadow::upsert(store, &pruned).await?;
+                }
+            }
+            Pending::DeleteBoundary(id) => {
+                let behavior = app
+                    .boundaries
+                    .iter()
+                    .find(|b| b.id.as_str() == id.as_str())
+                    .map(|b| b.behavior.clone());
+                boundary::delete(store, &id).await?;
+                if let Some(behavior) = behavior {
+                    app.operator_event(format!("boundary removed · {behavior}"));
+                }
+            }
+        }
+        app.reload(store).await?;
+    }
+    app.mode = Mode::Normal;
+    Ok(())
+}
+
 /// Embed the ask query and route it through the learned gate, storing the
 /// distribution on the app. A failed embed or an absent router yields an empty
 /// (escalate) result.
@@ -547,6 +584,12 @@ async fn run(
                             KeyCode::Char(c) => app.ask_input(c),
                             _ => {}
                         },
+                        Mode::Confirm => match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                confirm_action(app, store).await?
+                            }
+                            _ => app.cancel_action(),
+                        },
                         Mode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
@@ -570,6 +613,12 @@ async fn run(
                             KeyCode::Char('e') => {
                                 app.open_events();
                                 transition = Some(transition::overlay_open());
+                            }
+                            KeyCode::Char('x') => {
+                                app.request_action();
+                                if app.mode == Mode::Confirm {
+                                    transition = Some(transition::overlay_open());
+                                }
                             }
                             KeyCode::Tab => {
                                 app.toggle_focus();

@@ -1,7 +1,7 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, loaded from the store and ticked for animation.
 
-use antumbra_core::{Expert, FailureBoundary, LearnedRouter, Shadow};
+use antumbra_core::{BoundaryId, Expert, FailureBoundary, LearnedRouter, Shadow, ShadowId};
 use antumbra_store::repo::{boundary, expert, router, shadow};
 use antumbra_store::Store;
 
@@ -32,6 +32,15 @@ pub enum Mode {
     Events,
     Detail,
     Ask,
+    Confirm,
+}
+
+/// An operator mutation awaiting a yes/no confirmation.
+pub enum Pending {
+    /// Mark the shadow pruned (collapse it).
+    PruneShadow(ShadowId),
+    /// Delete the boundary from the antumbra.
+    DeleteBoundary(BoundaryId),
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -94,6 +103,8 @@ pub struct App {
     pub events_scroll: usize,
     /// Scroll offset within the drill-down detail overlay.
     pub detail_scroll: u16,
+    /// An operator mutation awaiting confirmation (used while `mode == Confirm`).
+    pub pending: Option<Pending>,
     /// The route-ask query text (used while `mode == Ask`).
     pub ask_query: String,
     /// The gate's routing for the last ask: `(expert name, probability)` best
@@ -150,6 +161,7 @@ impl App {
             events: Vec::new(),
             events_scroll: 0,
             detail_scroll: 0,
+            pending: None,
             ask_query: String::new(),
             ask_result: None,
             ev_experts: HashMap::new(),
@@ -281,6 +293,51 @@ impl App {
         self.ev_shadows = shadows;
         self.ev_boundaries = boundaries;
         self.ev_router = router;
+    }
+
+    /// Record an operator-initiated event in the stream (immediate feedback).
+    pub fn operator_event(&mut self, text: String) {
+        self.push_event(EventKind::System, text);
+    }
+
+    /// Stage the operator action for the focused selection (`x`), opening the
+    /// confirm prompt. Prune the focused shadow, or delete the focused boundary.
+    pub fn request_action(&mut self) {
+        let pending = match self.focus {
+            Focus::Shadows => self
+                .selected_shadow()
+                .filter(|s| s.status.as_str() != "pruned")
+                .map(|s| Pending::PruneShadow(s.id.clone())),
+            Focus::Boundaries => self
+                .selected_boundary()
+                .map(|b| Pending::DeleteBoundary(b.id.clone())),
+            Focus::Experts => None,
+        };
+        if let Some(pending) = pending {
+            self.pending = Some(pending);
+            self.mode = Mode::Confirm;
+        }
+    }
+
+    /// The confirmation prompt for the staged action, if any.
+    pub fn pending_prompt(&self) -> Option<String> {
+        self.pending.as_ref().map(|p| match p {
+            Pending::PruneShadow(id) => format!("Prune shadow {} ?", id.as_str()),
+            Pending::DeleteBoundary(id) => {
+                let behavior = self
+                    .boundaries
+                    .iter()
+                    .find(|b| b.id.as_str() == id.as_str())
+                    .map_or_else(|| id.as_str().to_string(), |b| b.behavior.clone());
+                format!("Delete boundary \"{behavior}\" ?")
+            }
+        })
+    }
+
+    /// Cancel the staged action.
+    pub fn cancel_action(&mut self) {
+        self.pending = None;
+        self.mode = Mode::Normal;
     }
 
     /// Record an event at the head of the stream (newest first), capped.

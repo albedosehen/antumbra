@@ -181,6 +181,7 @@ mod tests {
             events: Vec::new(),
             events_scroll: 0,
             detail_scroll: 0,
+            pending: None,
             ask_query: String::new(),
             ask_result: None,
             ev_experts: std::collections::HashMap::new(),
@@ -563,6 +564,33 @@ mod tests {
             "routed expert named (id resolved)"
         );
         assert!(text.contains("82%"), "routing probability shown");
+    }
+
+    // `x` on a focused boundary stages a delete behind a confirm prompt; on a
+    // shadow it stages a prune. Cancelling clears it.
+    #[test]
+    fn operator_action_stages_a_confirm_prompt() {
+        let mut app = demo_app();
+        app.boundaries = vec![actionable_boundary()];
+        app.focus = Focus::Boundaries;
+        app.request_action();
+        assert_eq!(app.mode, Mode::Confirm, "confirm prompt opened");
+        let text = to_text(&render(&mut app, 90, 24, 1600.0).unwrap());
+        assert!(text.contains("confirm"), "confirm modal titled:\n{text}");
+        assert!(text.contains("Delete boundary"), "the delete prompt shown");
+        assert!(text.contains("npm install"), "names the boundary");
+        app.cancel_action();
+        assert_eq!(app.mode, Mode::Normal, "cancel returns to the live view");
+        assert!(app.pending.is_none(), "the staged action is cleared");
+
+        // On a shadow, the action prunes.
+        app.shadows = vec![graduated_shadow()];
+        app.focus = Focus::Shadows;
+        app.request_action();
+        assert!(
+            app.pending_prompt().unwrap().contains("Prune"),
+            "shadow action is a prune"
+        );
     }
 
     // Pressing `?` opens the help overlay over the live view, listing the keys.
