@@ -1,7 +1,9 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, loaded from the store and ticked for animation.
 
-use antumbra_core::{BoundaryId, Expert, FailureBoundary, LearnedRouter, Shadow, ShadowId};
+use antumbra_core::{
+    BoundaryId, Expert, FailureBoundary, LearnedRouter, Shadow, ShadowId, ShadowStatus,
+};
 use antumbra_store::repo::{boundary, expert, router, shadow};
 use antumbra_store::Store;
 
@@ -343,6 +345,37 @@ impl App {
     pub fn cancel_action(&mut self) {
         self.pending = None;
         self.mode = Mode::Normal;
+    }
+
+    /// Carry out the staged operator mutation against the store, then reload so
+    /// the change (and the event it raises) shows immediately. Returns to the
+    /// live view whether or not anything was staged.
+    pub async fn apply_pending(&mut self, store: &Store) -> anyhow::Result<()> {
+        if let Some(pending) = self.pending.take() {
+            match pending {
+                Pending::PruneShadow(id) => {
+                    if let Some(s) = self.shadows.iter().find(|s| s.id.as_str() == id.as_str()) {
+                        let mut pruned = s.clone();
+                        pruned.status = ShadowStatus::Pruned;
+                        shadow::upsert(store, &pruned).await?;
+                    }
+                }
+                Pending::DeleteBoundary(id) => {
+                    let behavior = self
+                        .boundaries
+                        .iter()
+                        .find(|b| b.id.as_str() == id.as_str())
+                        .map(|b| b.behavior.clone());
+                    boundary::delete(store, &id).await?;
+                    if let Some(behavior) = behavior {
+                        self.operator_event(format!("boundary removed · {behavior}"));
+                    }
+                }
+            }
+            self.reload(store).await?;
+        }
+        self.mode = Mode::Normal;
+        Ok(())
     }
 
     /// Record an event at the head of the stream (newest first), capped.
@@ -776,5 +809,118 @@ impl App {
 
     pub fn selected_shadow(&self) -> Option<&Shadow> {
         self.shadows.get(self.selected_shadow)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use antumbra_core::Generation;
+    use antumbra_store::EMBED_DIM;
+    use chrono::Utc;
+
+    /// An in-memory store with one exploring shadow and one boundary, loaded into
+    /// a fresh `App` (so reads go through the real `App::load`/`reload` path).
+    async fn seeded() -> (Store, App) {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        shadow::upsert(
+            &store,
+            &Shadow {
+                id: ShadowId::new("shadow:s1"),
+                parent_expert: None,
+                adapter_uri: None,
+                status: ShadowStatus::Exploring,
+                generation: Generation(1),
+                reward_curve: vec![],
+                created_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+        boundary::upsert(
+            &store,
+            &FailureBoundary {
+                id: BoundaryId::new("boundary:b1"),
+                behavior: "do the thing".into(),
+                fail_context: serde_json::json!({}),
+                near_ok_context: None,
+                governing_features: Vec::new(),
+                grain: None,
+                context_vec: None,
+                ok_context_vec: None,
+                confidence: 0.5,
+                generation: Generation::ZERO,
+                created_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+        let app = App::load(&store).await.unwrap();
+        (store, app)
+    }
+
+    #[tokio::test]
+    async fn prune_writes_to_the_store_and_raises_an_event() {
+        let (store, mut app) = seeded().await;
+        app.focus = Focus::Shadows;
+        app.request_action();
+        assert!(matches!(app.pending, Some(Pending::PruneShadow(_))));
+        app.apply_pending(&store).await.unwrap();
+
+        let s = app
+            .shadows
+            .iter()
+            .find(|s| s.id.as_str() == "shadow:s1")
+            .unwrap();
+        assert_eq!(s.status.as_str(), "pruned", "the store reflects the prune");
+        assert!(
+            app.events.iter().any(|e| e.text.contains("pruned")),
+            "the prune surfaced as an event"
+        );
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_removes_the_boundary_and_raises_an_event() {
+        let (store, mut app) = seeded().await;
+        app.focus = Focus::Boundaries;
+        app.request_action();
+        app.apply_pending(&store).await.unwrap();
+
+        assert!(app.boundaries.is_empty(), "the boundary is gone");
+        assert!(
+            app.events
+                .iter()
+                .any(|e| e.text.contains("boundary removed")),
+            "the deletion surfaced as an event"
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_pending_is_a_noop_with_nothing_staged() {
+        let (store, mut app) = seeded().await;
+        app.apply_pending(&store).await.unwrap();
+        assert_eq!(app.shadows.len(), 1);
+        assert_eq!(app.boundaries.len(), 1);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[tokio::test]
+    async fn request_action_skips_a_pruned_shadow_and_experts() {
+        let (_store, mut app) = seeded().await;
+        // Pruned shadow: no action is staged.
+        app.shadows[0].status = ShadowStatus::Pruned;
+        app.focus = Focus::Shadows;
+        app.request_action();
+        assert!(
+            app.pending.is_none(),
+            "no prune on an already-pruned shadow"
+        );
+        assert_eq!(app.mode, Mode::Normal);
+        // Experts focus has no operator action.
+        app.focus = Focus::Experts;
+        app.request_action();
+        assert!(app.pending.is_none());
     }
 }

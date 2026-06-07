@@ -25,12 +25,10 @@ use tachyonfx::{Duration as FxDuration, EffectRenderer};
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::FixedEmbedder;
-use antumbra_core::ShadowStatus;
 use antumbra_embed::HttpEmbedder;
-use antumbra_store::repo::{boundary, shadow};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
-use crate::app::{App, Mode, Pending};
+use crate::app::{App, Mode};
 use crate::command::Action;
 
 #[derive(Parser)]
@@ -428,36 +426,6 @@ async fn apply_action(
     Ok(())
 }
 
-/// Carry out the confirmed operator mutation, then reload so the change (and the
-/// event it raises) shows immediately.
-async fn confirm_action(app: &mut App, store: &Store) -> Result<()> {
-    if let Some(pending) = app.pending.take() {
-        match pending {
-            Pending::PruneShadow(id) => {
-                if let Some(s) = app.shadows.iter().find(|s| s.id.as_str() == id.as_str()) {
-                    let mut pruned = s.clone();
-                    pruned.status = ShadowStatus::Pruned;
-                    shadow::upsert(store, &pruned).await?;
-                }
-            }
-            Pending::DeleteBoundary(id) => {
-                let behavior = app
-                    .boundaries
-                    .iter()
-                    .find(|b| b.id.as_str() == id.as_str())
-                    .map(|b| b.behavior.clone());
-                boundary::delete(store, &id).await?;
-                if let Some(behavior) = behavior {
-                    app.operator_event(format!("boundary removed · {behavior}"));
-                }
-            }
-        }
-        app.reload(store).await?;
-    }
-    app.mode = Mode::Normal;
-    Ok(())
-}
-
 /// Embed the ask query and route it through the learned gate, storing the
 /// distribution on the app. A failed embed or an absent router yields an empty
 /// (escalate) result.
@@ -604,7 +572,7 @@ async fn run(
                         },
                         Mode::Confirm => match key.code {
                             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                                confirm_action(app, store).await?
+                                app.apply_pending(store).await?
                             }
                             _ => app.cancel_action(),
                         },

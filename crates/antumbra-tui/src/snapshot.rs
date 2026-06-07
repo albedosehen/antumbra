@@ -594,6 +594,141 @@ mod tests {
         );
     }
 
+    // Theme, layout, and focus each cycle through their states and wrap.
+    #[test]
+    fn theme_layout_focus_cycle_and_wrap() {
+        let mut app = demo_app();
+        assert_eq!(app.theme().name, "shadow");
+        app.cycle_theme();
+        assert_eq!(app.theme().name, "ember");
+        app.cycle_theme();
+        assert_eq!(app.theme().name, "mono");
+        app.cycle_theme();
+        assert_eq!(app.theme().name, "shadow", "theme wraps");
+
+        assert_eq!(app.layout, LayoutMode::Focused);
+        app.cycle_layout();
+        assert_eq!(app.layout, LayoutMode::Dashboard);
+        app.cycle_layout();
+        assert_eq!(app.layout, LayoutMode::Graph);
+        app.cycle_layout();
+        assert_eq!(app.layout, LayoutMode::Focused, "layout wraps");
+
+        assert_eq!(app.focus, Focus::Experts);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Shadows);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Boundaries);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Experts, "focus wraps");
+    }
+
+    // List selection wraps both ways and is safe on an empty list.
+    #[test]
+    fn selection_wraps_and_empty_is_safe() {
+        let mut app = demo_app();
+        app.shadows = vec![graduated_shadow(), graduated_shadow()];
+        app.focus = Focus::Shadows;
+        app.selected_shadow = 0;
+        app.select_prev();
+        assert_eq!(app.selected_shadow, 1, "prev wraps to the last");
+        app.select_next();
+        assert_eq!(app.selected_shadow, 0, "next wraps to the first");
+        app.shadows.clear();
+        app.select_next();
+        app.select_prev();
+        assert_eq!(
+            app.selected_shadow, 0,
+            "no panic / no move on an empty list"
+        );
+    }
+
+    // Every overlay opener sets its mode, and close/toggle return to Normal.
+    #[test]
+    fn overlays_open_to_their_modes_and_close() {
+        let mut app = demo_app();
+        app.open_palette();
+        assert_eq!(app.mode, Mode::Palette);
+        app.close_overlay();
+        assert_eq!(app.mode, Mode::Normal);
+        app.open_filter();
+        assert_eq!(app.mode, Mode::Filter);
+        app.open_events();
+        assert_eq!(app.mode, Mode::Events);
+        app.open_detail();
+        assert_eq!(app.mode, Mode::Detail);
+        app.open_ask();
+        assert_eq!(app.mode, Mode::Ask);
+        app.close_overlay();
+        app.toggle_help();
+        assert_eq!(app.mode, Mode::Help);
+        app.toggle_help();
+        assert_eq!(app.mode, Mode::Normal, "help toggles closed");
+    }
+
+    // The event stream caps at MAX_EVENTS and keeps the newest first.
+    #[test]
+    fn event_stream_is_capped_and_newest_first() {
+        let mut app = demo_app();
+        let total = crate::events::MAX_EVENTS + 50;
+        for i in 0..total {
+            app.operator_event(format!("ev{i}"));
+        }
+        assert_eq!(app.events.len(), crate::events::MAX_EVENTS, "capped");
+        assert_eq!(
+            app.events[0].text,
+            format!("ev{}", total - 1),
+            "newest first"
+        );
+    }
+
+    // Typing in the ask invalidates the previous routing result.
+    #[test]
+    fn ask_input_invalidates_the_stale_result() {
+        let mut app = demo_app();
+        app.open_ask();
+        app.set_ask_result(&[(ExpertId::new("expert:arith"), 1.0)]);
+        assert!(app.ask_result.is_some());
+        app.ask_input('x');
+        assert!(
+            app.ask_result.is_none(),
+            "a new keystroke clears the result"
+        );
+    }
+
+    // Palette and filter selections wrap within their match lists.
+    #[test]
+    fn palette_and_filter_move_wrap() {
+        let mut app = demo_app();
+        app.open_palette();
+        let n = app.palette_matches().len();
+        assert!(n > 1);
+        app.palette.selected = 0;
+        app.palette_move(-1);
+        assert_eq!(app.palette.selected, n - 1, "palette wraps up");
+        app.palette_move(1);
+        assert_eq!(app.palette.selected, 0, "palette wraps down");
+
+        app.boundaries = vec![actionable_boundary(), actionable_boundary()];
+        app.focus = Focus::Boundaries;
+        app.open_filter();
+        let m = app.filtered().len();
+        assert_eq!(m, 2);
+        app.filter_selected = 0;
+        app.filter_move(-1);
+        assert_eq!(app.filter_selected, m - 1, "filter wraps up");
+    }
+
+    // An out-of-distribution ask (empty routing) renders the escalate hint.
+    #[test]
+    fn escalating_ask_renders_the_hint() {
+        let mut app = demo_app();
+        app.open_ask();
+        app.ask_result = Some(Vec::new());
+        let text = to_text(&render(&mut app, 80, 12, 1600.0).unwrap());
+        assert!(text.contains("escalates"), "escalate hint shown:\n{text}");
+    }
+
     // Pressing `?` opens the help overlay over the live view, listing the keys.
     #[test]
     fn help_overlay_lists_the_keybindings() {
