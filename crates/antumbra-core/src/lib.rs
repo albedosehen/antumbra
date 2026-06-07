@@ -30,7 +30,7 @@ pub mod testing;
 pub use error::{AntumbraError, Result};
 
 // Re-export the load-bearing types at the crate root for ergonomic downstream use.
-pub use boundary::{FailureBoundary, Grain};
+pub use boundary::{BoundaryFinding, FailureBoundary, Grain};
 pub use compartment::{Capability, Compartment, Grant, Origin};
 pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};
 pub use expert::{cosine_similarity, Expert};

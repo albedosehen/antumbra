@@ -17,17 +17,10 @@ use serde_json::Value;
 use antumbra_core::ports::AcceptabilityProbe;
 use antumbra_core::{BoundaryId, FailureBoundary, Generation, Grain, Result};
 
-/// A recovered scope: the governing feature and the nearest context where the
-/// behavior becomes acceptable.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BoundaryFinding {
-    pub behavior: String,
-    pub governing_feature: String,
-    /// C — where the behavior was judged incorrect.
-    pub fail_context: Value,
-    /// C' — the nearest context where it is acceptable.
-    pub near_ok_context: Value,
-}
+// `BoundaryFinding` (the recovered scope: behavior, governing feature, and the
+// C/C' context pair) now lives in `antumbra-core` so a `TrainOutcome` can carry
+// one from the capture path; re-exported here for this crate's call sites.
+pub use antumbra_core::BoundaryFinding;
 
 /// A candidate governing dimension and the alternative values to probe.
 pub type Candidate = (String, Vec<Value>);

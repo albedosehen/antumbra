@@ -7,10 +7,23 @@
 
 use antumbra_core::{AntumbraError, Result};
 
-use crate::model::{Corpus, CorpusTask};
+use crate::model::{Corpus, CorpusTask, TaskScope};
 
 pub struct JsonCorpus {
     tasks: Vec<CorpusTask>,
+}
+
+/// Read a contrastive scope from a task object, when it carries all three of
+/// `governing_feature`, `fail_context`, `near_ok_context` -- so a file-based
+/// correction can assert *where* it applies and become an actionable boundary
+/// once verified (ADR-0004). Absent or partial -> a plain correction.
+fn parse_scope(task: &serde_json::Value) -> Option<TaskScope> {
+    let governing_feature = task.get("governing_feature")?.as_str()?.to_string();
+    Some(TaskScope {
+        governing_feature,
+        fail_context: task.get("fail_context")?.clone(),
+        near_ok_context: task.get("near_ok_context")?.clone(),
+    })
 }
 
 impl JsonCorpus {
@@ -41,6 +54,7 @@ impl JsonCorpus {
                     .and_then(|v| v.as_str())
                     .map(str::to_string),
                 skill: t.get("skill").and_then(|v| v.as_str()).map(str::to_string),
+                scope: parse_scope(t),
             })
             .collect();
         Ok(Self { tasks })

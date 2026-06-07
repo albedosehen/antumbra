@@ -24,6 +24,22 @@ pub struct CorpusTask {
     /// a grown expert is a specialist for a *skill*, not a single task. Defaults
     /// to the task id (see [`CorpusTask::skill`]).
     pub skill: Option<String>,
+    /// When a correction also asserts *where* it applies — the governing feature
+    /// and the contrastive context pair — capture promotes the verified
+    /// correction to an actionable boundary (ADR-0004). `None` for a plain
+    /// correction or a RAFT task.
+    pub scope: Option<TaskScope>,
+}
+
+/// The contrastive scope a correction carries: the governing feature plus the
+/// context where the behavior is incorrect (C) and the nearest one where it is
+/// acceptable (C'). A *verified* correction bearing this becomes a
+/// [`antumbra_core::BoundaryFinding`] in the capture outcome.
+#[derive(Debug, Clone)]
+pub struct TaskScope {
+    pub governing_feature: String,
+    pub fail_context: serde_json::Value,
+    pub near_ok_context: serde_json::Value,
 }
 
 impl CorpusTask {
@@ -34,6 +50,7 @@ impl CorpusTask {
             verify: serde_json::Value::Null,
             completion: None,
             skill: None,
+            scope: None,
         }
     }
 
@@ -44,6 +61,22 @@ impl CorpusTask {
 
     pub fn with_completion(mut self, completion: impl Into<String>) -> Self {
         self.completion = Some(completion.into());
+        self
+    }
+
+    /// Attach the contrastive scope (governing feature + C/C' context pair) that
+    /// turns this correction, once verified, into an actionable boundary.
+    pub fn with_scope(
+        mut self,
+        governing_feature: impl Into<String>,
+        fail_context: serde_json::Value,
+        near_ok_context: serde_json::Value,
+    ) -> Self {
+        self.scope = Some(TaskScope {
+            governing_feature: governing_feature.into(),
+            fail_context,
+            near_ok_context,
+        });
         self
     }
 

@@ -9,6 +9,9 @@ description = "ADR-0008: the durable generational loop. A resumable state-machin
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 antumbra-store = { path = "../antumbra-store" }
+# Promotes a verified correction's BoundaryFinding into a persistable, embedded
+# actionable boundary (ADR-0004).
+antumbra-boundary = { path = "../antumbra-boundary" }
 chrono.workspace = true
 serde_json.workspace = true
 # sha256 of a frozen adapter's bytes = the no-forgetting regression fingerprint

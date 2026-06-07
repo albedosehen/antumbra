@@ -7,7 +7,8 @@ use antumbra_core::generational::LoopState;
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{
-    EvalStatus, EvaluationRun, Expert, ExpertId, Generation, RunId, ShadowStatus, SubjectKind,
+    BoundaryFinding, EvalStatus, EvaluationRun, Expert, ExpertId, Generation, RunId, ShadowStatus,
+    SubjectKind,
 };
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, evaluation, expert, reward, shadow};
@@ -216,4 +217,43 @@ async fn collapsing_shadows_are_pruned_and_logged() {
         .await
         .unwrap();
     assert_eq!(evals.len(), 1);
+}
+
+// A capture run that surfaces a verified correction's contrastive pair persists
+// an ACTIONABLE boundary (ADR-0004): a C' was recovered, and the loop embeds
+// both contexts so the relative-margin inhibition can fire -- unlike the
+// open-negative a prune logs.
+#[tokio::test]
+async fn a_captured_correction_persists_an_actionable_boundary() {
+    let store = Store::connect_memory(8).await.expect("connect");
+    let finding = BoundaryFinding {
+        behavior: "add a dep".into(),
+        governing_feature: "runtime".into(),
+        fail_context: serde_json::json!({ "runtime": "deno" }),
+        near_ok_context: serde_json::json!({ "runtime": "node" }),
+    };
+    let trainer = ScriptedTrainer::graduating_with_boundary(finding);
+    let embedder = FixedEmbedder::new(8);
+    let run = RunId::new("run:cap");
+
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
+    let mut head = lp.resume_or_init(&run).await.unwrap();
+    lp.run_generation(&mut head).await.unwrap();
+
+    let boundaries = boundary::list(&store).await.unwrap();
+    assert_eq!(boundaries.len(), 1);
+    let b = &boundaries[0];
+    assert!(b.is_actionable(), "a recovered C' makes it actionable");
+    assert!(
+        b.context_vec.is_some() && b.ok_context_vec.is_some(),
+        "both contexts embedded, so inhibition can compare against task vectors"
+    );
+    assert_eq!(b.governing_features, vec!["runtime".to_string()]);
+    assert_eq!(
+        b.near_ok_context,
+        Some(serde_json::json!({ "runtime": "node" }))
+    );
+    // The two context embeddings differ (C vs C'), so the relative margin is
+    // meaningful rather than degenerate.
+    assert_ne!(b.context_vec, b.ok_context_vec);
 }

@@ -62,6 +62,7 @@ pub struct ScriptedTrainer {
     pub final_fitness: f32,
     pub curve: Vec<f32>,
     pub capability_exemplars: Vec<String>,
+    pub boundary_findings: Vec<crate::BoundaryFinding>,
 }
 
 impl ScriptedTrainer {
@@ -71,6 +72,7 @@ impl ScriptedTrainer {
             final_fitness: 0.9,
             curve: vec![0.1, 0.4, 0.7, 0.9],
             capability_exemplars: Vec::new(),
+            boundary_findings: Vec::new(),
         }
     }
 
@@ -80,6 +82,7 @@ impl ScriptedTrainer {
             final_fitness: 0.0,
             curve: vec![0.0, 0.0, 0.0],
             capability_exemplars: Vec::new(),
+            boundary_findings: Vec::new(),
         }
     }
 
@@ -88,6 +91,15 @@ impl ScriptedTrainer {
     pub fn graduating_with_exemplars(exemplars: Vec<String>) -> Self {
         Self {
             capability_exemplars: exemplars,
+            ..Self::graduating()
+        }
+    }
+
+    /// A graduating trainer that also surfaces a verified correction's boundary
+    /// finding, so the loop's actionable-boundary persistence can be exercised.
+    pub fn graduating_with_boundary(finding: crate::BoundaryFinding) -> Self {
+        Self {
+            boundary_findings: vec![finding],
             ..Self::graduating()
         }
     }
@@ -101,6 +113,7 @@ impl Trainer for ScriptedTrainer {
             reward_curve: self.curve.clone(),
             final_fitness: self.final_fitness,
             capability_exemplars: self.capability_exemplars.clone(),
+            boundary_findings: self.boundary_findings.clone(),
         })
     }
 }

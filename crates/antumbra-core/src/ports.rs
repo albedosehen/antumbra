@@ -9,6 +9,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::boundary::BoundaryFinding;
 use crate::error::Result;
 use crate::ids::{ExpertId, RunId, ShadowId};
 
@@ -76,6 +77,12 @@ pub struct TrainOutcome {
     /// The expert's capability vector is learned from these evaluated behaviors
     /// rather than a hand-written description (ADR-0004/0005).
     pub capability_exemplars: Vec<String>,
+    /// Actionable boundary findings this run produced: each is a verified
+    /// contrastive context pair (C incorrect / C' acceptable) the loop embeds
+    /// and persists as a scope that gates routing (ADR-0004). The capture path
+    /// surfaces these from corrections; discovery-only runs leave it empty.
+    #[serde(default)]
+    pub boundary_findings: Vec<BoundaryFinding>,
 }
 
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;

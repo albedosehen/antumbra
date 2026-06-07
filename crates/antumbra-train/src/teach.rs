@@ -8,7 +8,7 @@
 //! gated on ground truth, neither trusts unverified teacher text.
 
 use antumbra_core::ports::{TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{Result, RunId};
+use antumbra_core::{BoundaryFinding, Result, RunId};
 use serde_json::json;
 
 use crate::config::RaftConfig;
@@ -54,6 +54,10 @@ pub async fn capture_corrections(
     // A correction we cannot check is not trusted into the population.
     let mut winners: Vec<SftExample> = Vec::new();
     let mut solved: Vec<String> = Vec::new();
+    // A correction that also carries a contrastive scope becomes an actionable
+    // boundary -- but only once verified, so an unchecked "rule" never gates
+    // routing (the same ground-truth gate the population itself sits behind).
+    let mut findings: Vec<BoundaryFinding> = Vec::new();
     for (i, task) in tasks.iter().enumerate() {
         let Some(correction) = task.completion.as_deref() else {
             continue;
@@ -66,6 +70,14 @@ pub async fn capture_corrections(
             });
             if !solved.contains(&task.prompt) {
                 solved.push(task.prompt.clone());
+            }
+            if let Some(scope) = &task.scope {
+                findings.push(BoundaryFinding {
+                    behavior: task.prompt.clone(),
+                    governing_feature: scope.governing_feature.clone(),
+                    fail_context: scope.fail_context.clone(),
+                    near_ok_context: scope.near_ok_context.clone(),
+                });
             }
         }
     }
@@ -106,6 +118,7 @@ pub async fn capture_corrections(
         reward_curve: vec![learned.pass_rate],
         final_fitness: learned.pass_rate,
         capability_exemplars: solved,
+        boundary_findings: findings,
     })
 }
 
@@ -187,6 +200,67 @@ mod tests {
             .unwrap();
         assert_eq!(out.final_fitness, 0.0);
         assert!(out.capability_exemplars.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_verified_correction_with_a_scope_yields_an_actionable_finding() {
+        let mut lm = Learner {
+            taught: AtomicBool::new(false),
+        };
+        let verifier = MarkerVerifier {
+            expect: "deno install".into(),
+        };
+        // The correction verifies AND names where it applies: npm-style installs
+        // are wrong in a deno repo (C), fine in a node repo (C').
+        let tasks = vec![CorpusTask::new("p", "add a dep")
+            .with_completion("deno install")
+            .with_scope(
+                "runtime",
+                serde_json::json!({ "runtime": "deno" }),
+                serde_json::json!({ "runtime": "node" }),
+            )];
+        let cfg = RaftConfig {
+            rounds: 1,
+            samples_per_task: 2,
+            ..RaftConfig::default()
+        };
+        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:b"), &cfg, &[])
+            .await
+            .unwrap();
+        assert_eq!(out.boundary_findings.len(), 1);
+        let f = &out.boundary_findings[0];
+        assert_eq!(f.behavior, "add a dep");
+        assert_eq!(f.governing_feature, "runtime");
+        assert_eq!(f.fail_context["runtime"], serde_json::json!("deno"));
+        assert_eq!(f.near_ok_context["runtime"], serde_json::json!("node"));
+    }
+
+    #[tokio::test]
+    async fn an_unverified_correction_yields_no_boundary() {
+        let mut lm = Learner {
+            taught: AtomicBool::new(false),
+        };
+        // The verifier wants deno; the supplied correction is npm -> rejected, so
+        // even with a scope it is not trusted into a boundary (ground-truth gate).
+        let verifier = MarkerVerifier {
+            expect: "deno install".into(),
+        };
+        let tasks = vec![CorpusTask::new("p", "add a dep")
+            .with_completion("npm install")
+            .with_scope(
+                "runtime",
+                serde_json::json!({ "runtime": "deno" }),
+                serde_json::json!({ "runtime": "node" }),
+            )];
+        let cfg = RaftConfig {
+            rounds: 1,
+            samples_per_task: 2,
+            ..RaftConfig::default()
+        };
+        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:b2"), &cfg, &[])
+            .await
+            .unwrap();
+        assert!(out.boundary_findings.is_empty());
     }
 
     /// Records every prompt it is fine-tuned on, so a test can assert the

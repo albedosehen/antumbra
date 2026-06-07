@@ -204,6 +204,7 @@ pub async fn grpo_train(
         reward_curve,
         final_fitness,
         capability_exemplars,
+        boundary_findings: Vec::new(),
     })
 }
 

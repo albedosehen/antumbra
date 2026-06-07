@@ -24,6 +24,22 @@ pub enum Grain {
     Global,
 }
 
+/// A recovered scope: the behavior held fixed, the governing feature, and the
+/// contrastive context pair (C where the behavior is incorrect, C' the nearest
+/// context where it is acceptable). The output of counterfactual scope search
+/// (`antumbra-boundary`) and the carrier a verified correction surfaces so the
+/// loop can promote it to an actionable [`FailureBoundary`]. Lives in core so
+/// both the search crate and a [`crate::ports::TrainOutcome`] can name it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BoundaryFinding {
+    pub behavior: String,
+    pub governing_feature: String,
+    /// C — where the behavior was judged incorrect.
+    pub fail_context: serde_json::Value,
+    /// C' — the nearest context where it is acceptable.
+    pub near_ok_context: serde_json::Value,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailureBoundary {
     pub id: BoundaryId,

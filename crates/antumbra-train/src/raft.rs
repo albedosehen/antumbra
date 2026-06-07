@@ -86,6 +86,8 @@ pub async fn raft_train(
         reward_curve,
         final_fitness,
         capability_exemplars,
+        // RAFT discovers skills, not scopes; boundaries come from the capture path.
+        boundary_findings: Vec::new(),
     })
 }
 

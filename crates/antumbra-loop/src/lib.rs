@@ -15,14 +15,29 @@
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 
+use antumbra_boundary::finding_to_boundary;
 use antumbra_core::generational::{GenerationHead, LoopState};
 use antumbra_core::ports::{Embedder, TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::{
-    BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Result,
-    RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind,
+    BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Grain,
+    Result, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind,
 };
 use antumbra_store::repo::{boundary, evaluation, expert, generation, reward, shadow};
 use antumbra_store::Store;
+
+/// Confidence stamped on a correction-derived boundary. The context pair is
+/// ground-truth verified, so the scope is trustworthy -- but confidence tempers
+/// the inhibition magnitude (ADR-0004), so it is high, not absolute.
+const CORRECTION_BOUNDARY_CONFIDENCE: f32 = 0.8;
+
+/// Render a behavior placed in a context into the text the embedder turns into a
+/// boundary's context vector. Both C and C' embed through this, so they share
+/// the behavior and differ only by context -- exactly the contrast the
+/// relative-margin inhibition reads to separate near-identical scopes
+/// (ADR-0004/0005). `Value`'s `Display` is compact JSON.
+fn render_scope(behavior: &str, context: &serde_json::Value) -> String {
+    format!("{behavior} | {context}")
+}
 
 #[derive(Debug, Clone)]
 pub struct LoopConfig {
@@ -140,6 +155,10 @@ impl<'a> GenerationLoop<'a> {
         sh.advance_to(ShadowStatus::Scoring)?;
         shadow::upsert(self.store, &sh).await?;
         self.record_rewards(&run_id, &outcome).await?;
+        // Persist any actionable boundaries this run surfaced (capture path); a
+        // no-op for discovery runs.
+        self.persist_correction_boundaries(&run_id, generation, &outcome)
+            .await?;
         let fitness = outcome.final_fitness;
 
         // score -> decide: graduate the winner or prune + log a boundary.
@@ -344,6 +363,48 @@ impl<'a> GenerationLoop<'a> {
         let n = exemplars.len() as f32;
         centroid.iter_mut().for_each(|c| *c /= n);
         Ok(centroid)
+    }
+
+    /// Persist any **actionable** boundaries a capture run surfaced (ADR-0004):
+    /// each is a verified correction's contrastive pair (C incorrect / C'
+    /// acceptable). The loop owns the embedder, so it renders each context into
+    /// the same space task vectors live in and stores both embeddings, letting
+    /// the relative-margin inhibition fire only inside the failure scope. Unlike
+    /// `log_open_boundary`, these gate routing -- a C' was recovered. No-op for
+    /// discovery (RAFT) runs, whose findings list is empty.
+    async fn persist_correction_boundaries(
+        &self,
+        run_id: &RunId,
+        generation: Generation,
+        outcome: &TrainOutcome,
+    ) -> Result<()> {
+        let now = Utc::now();
+        for (i, finding) in outcome.boundary_findings.iter().enumerate() {
+            let fail_vec = self
+                .embedder
+                .embed(&render_scope(&finding.behavior, &finding.fail_context))
+                .await?;
+            let ok_vec = self
+                .embedder
+                .embed(&render_scope(&finding.behavior, &finding.near_ok_context))
+                .await?;
+            let boundary = finding_to_boundary(
+                BoundaryId::new(format!("boundary:{run_id}:g{}:{i}", generation.0)),
+                finding,
+                // A correction names where it applies, not how wide; Project is
+                // the conservative default grain until the scope carries one.
+                Grain::Project,
+                // Ground-truth-verified, so the scope is trustworthy enough to
+                // gate; confidence still tempers the inhibition magnitude.
+                CORRECTION_BOUNDARY_CONFIDENCE,
+                Some(fail_vec),
+                Some(ok_vec),
+                generation,
+                now,
+            );
+            boundary::upsert(self.store, &boundary).await?;
+        }
+        Ok(())
     }
 
     /// On prune, log an **open-negative** boundary (ADR-0004): the failure is
