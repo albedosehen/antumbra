@@ -101,8 +101,11 @@ async fn app_main() -> Result<()> {
 /// content without a live store.
 async fn seed_demo() -> Result<Store> {
     use antumbra_core::router::{LearnedRouter, RouterExpert};
-    use antumbra_core::{BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain};
-    use antumbra_store::repo::{boundary, expert, router};
+    use antumbra_core::{
+        BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain, Shadow, ShadowId,
+        ShadowStatus,
+    };
+    use antumbra_store::repo::{boundary, expert, router, shadow};
     use chrono::Utc;
 
     let store = Store::connect_memory(EMBED_DIM).await?;
@@ -190,6 +193,32 @@ async fn seed_demo() -> Result<Store> {
                 ok_context_vec: None,
                 confidence: if actionable { 0.8 } else { 0.3 },
                 generation: Generation::ZERO,
+                created_at: now,
+            },
+        )
+        .await?;
+    }
+    // A few shadows (the penumbra) across the lifecycle, so the training view has
+    // content: one still exploring, one graduated (rising reward), one collapsed.
+    let shadows = [
+        ("shadow:g4", ShadowStatus::Exploring, vec![0.10, 0.32, 0.55]),
+        (
+            "shadow:g3",
+            ShadowStatus::Graduated,
+            vec![0.20, 0.60, 0.85, 0.93],
+        ),
+        ("shadow:g2", ShadowStatus::Pruned, vec![0.05, 0.04, 0.06]),
+    ];
+    for (i, (id, status, reward_curve)) in shadows.into_iter().enumerate() {
+        shadow::upsert(
+            &store,
+            &Shadow {
+                id: ShadowId::new(id),
+                parent_expert: None,
+                adapter_uri: Some(format!("mem://{id}")),
+                status,
+                generation: Generation(4 - i as u32),
+                reward_curve,
                 created_at: now,
             },
         )

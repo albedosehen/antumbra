@@ -90,3 +90,11 @@ pub async fn list_by_status(store: &Store, status: ShadowStatus) -> Result<Vec<S
     let rows: Vec<ShadowRow> = query_records(store.client(), &query).await.map_err(map)?;
     rows.into_iter().map(ShadowRow::into_domain).collect()
 }
+
+/// Every shadow ever spawned (the penumbra's full lineage, in-flight and retired).
+/// The console reads this to show recent training activity.
+pub async fn list(store: &Store) -> Result<Vec<Shadow>> {
+    let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
+    let rows: Vec<ShadowRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(ShadowRow::into_domain).collect()
+}

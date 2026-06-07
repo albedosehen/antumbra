@@ -141,7 +141,10 @@ fn color_rgb(color: Color, default: [u8; 3]) -> [u8; 3] {
 mod tests {
     use super::*;
     use crate::app::Focus;
-    use antumbra_core::{BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain};
+    use antumbra_core::{
+        BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain, Shadow, ShadowId,
+        ShadowStatus,
+    };
     use chrono::Utc;
 
     fn demo_app() -> App {
@@ -163,13 +166,27 @@ mod tests {
         App {
             experts: vec![expert],
             boundaries: Vec::new(),
+            shadows: Vec::new(),
             router: None,
             selected: 0,
             selected_boundary: 0,
+            selected_shadow: 0,
             focus: Focus::Experts,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             should_quit: false,
+        }
+    }
+
+    fn graduated_shadow() -> Shadow {
+        Shadow {
+            id: ShadowId::new("shadow:g3"),
+            parent_expert: None,
+            adapter_uri: Some("mem://g3".into()),
+            status: ShadowStatus::Graduated,
+            generation: Generation(3),
+            reward_curve: vec![0.2, 0.6, 0.85, 0.93],
+            created_at: Utc::now(),
         }
     }
 
@@ -215,6 +232,24 @@ mod tests {
         app.experts.clear();
         let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
         assert!(text.contains("no experts yet"), "empty-state hint shown");
+    }
+
+    // Tab into the penumbra focus: the training view shows the selected shadow's
+    // status, generation, and reward curve.
+    #[test]
+    fn shadows_focus_shows_the_penumbra() {
+        let mut app = demo_app();
+        app.shadows = vec![graduated_shadow()];
+        app.focus = Focus::Shadows;
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(
+            text.contains("shadows"),
+            "shadows list title missing:\n{text}"
+        );
+        assert!(text.contains("training"), "training detail panel missing");
+        assert!(text.contains("shadow:g3"), "the shadow id is shown");
+        assert!(text.contains("graduated"), "the shadow status is shown");
+        assert!(text.contains("0.93"), "the final reward is shown");
     }
 
     // Tab into the boundaries focus: the inspector replaces the expert detail and

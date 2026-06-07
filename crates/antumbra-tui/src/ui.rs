@@ -32,6 +32,7 @@ pub fn render(f: &mut Frame, app: &App) {
     graph(f, app, body[0]);
     match app.focus {
         Focus::Experts => detail(f, app, body[1]),
+        Focus::Shadows => shadows(f, app, body[1]),
         Focus::Boundaries => boundaries(f, app, body[1]),
     }
     footer(f, app, rows[2]);
@@ -360,6 +361,111 @@ fn boundaries(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+/// The penumbra: shadows in (or recently out of) training, newest first, with the
+/// selected one's lineage — status, generation, final reward, and its reward curve
+/// as a sparkline (the anti-collapse signal, ADR-0002/0003).
+fn shadows(f: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    if app.shadows.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "(no shadows yet — the penumbra is quiet)",
+            Style::default().fg(DIM),
+        )));
+    } else {
+        for (i, s) in app.shadows.iter().enumerate() {
+            let sel = i == app.selected_shadow;
+            let mut style = Style::default().fg(shadow_color(s.status.as_str()));
+            if sel {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            let glyph = match s.status.as_str() {
+                "graduated" => "✦",
+                "pruned" => "×",
+                _ => "◌",
+            };
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "{}{} {} · g{} · {}",
+                    if sel { "▸ " } else { "  " },
+                    glyph,
+                    s.id.as_str(),
+                    s.generation.0,
+                    s.status.as_str()
+                ),
+                style,
+            )));
+        }
+    }
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(DIM))
+        .title(Span::styled(
+            format!(" shadows · {} ", app.shadows.len()),
+            Style::default().fg(INK),
+        ));
+    f.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
+        rows[0],
+    );
+
+    let mut d: Vec<Line> = Vec::new();
+    if let Some(s) = app.selected_shadow() {
+        d.push(Line::from(Span::styled(
+            s.id.as_str().to_string(),
+            Style::default()
+                .fg(Color::Rgb(230, 200, 255))
+                .add_modifier(Modifier::BOLD),
+        )));
+        d.push(Line::from(vec![
+            Span::styled(format!("{:<11}", "status"), Style::default().fg(DIM)),
+            Span::styled(
+                s.status.as_str().to_string(),
+                Style::default().fg(shadow_color(s.status.as_str())),
+            ),
+        ]));
+        d.push(kv("generation", &s.generation.0.to_string()));
+        let final_reward = s.reward_curve.last().copied().unwrap_or(0.0);
+        d.push(kv("final reward", &format!("{final_reward:.2}")));
+        if !s.reward_curve.is_empty() {
+            d.push(kv("reward", &sparkline(&s.reward_curve)));
+        }
+    } else {
+        d.push(Line::from(Span::styled(
+            "(select a shadow with ↑↓)",
+            Style::default().fg(DIM),
+        )));
+    }
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(DIM))
+        .title(Span::styled(" training ", Style::default().fg(INK)));
+    f.render_widget(
+        Paragraph::new(d).block(block).wrap(Wrap { trim: true }),
+        rows[1],
+    );
+}
+
+/// Status colour: graduated = alive cyan-green, pruned = dim, in-flight = amber.
+fn shadow_color(status: &str) -> Color {
+    match status {
+        "graduated" => Color::Rgb(90, 200, 150),
+        "pruned" => DIM,
+        _ => Color::Rgb(210, 190, 90),
+    }
+}
+
+/// A reward curve as block-character bars, each value in `[0,1]` mapped to one of
+/// eight heights.
+fn sparkline(curve: &[f32]) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    curve
+        .iter()
+        .map(|&v| BARS[((v.clamp(0.0, 1.0) * 7.0).round() as usize).min(7)])
+        .collect()
+}
+
 fn footer(f: &mut Frame, app: &App, area: Rect) {
     let router = if app.router.is_some() {
         "learned"
@@ -368,6 +474,7 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
     };
     let focus = match app.focus {
         Focus::Experts => "umbra",
+        Focus::Shadows => "penumbra",
         Focus::Boundaries => "antumbra",
     };
     let actionable = app.boundaries.iter().filter(|b| b.is_actionable()).count();
@@ -382,8 +489,9 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" reload  ", Style::default().fg(INK)),
         Span::styled(
             format!(
-                "   {} umbra · {} antumbra ({actionable} actionable) · gate {router}",
+                "   {} umbra · {} penumbra · {} antumbra ({actionable} actionable) · gate {router}",
                 app.experts.len(),
+                app.shadows.len(),
                 app.boundaries.len()
             ),
             Style::default().fg(DIM),

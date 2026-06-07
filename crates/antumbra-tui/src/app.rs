@@ -1,15 +1,17 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, loaded from the store and ticked for animation.
 
-use antumbra_core::{Expert, FailureBoundary, LearnedRouter};
-use antumbra_store::repo::{boundary, expert, router};
+use antumbra_core::{Expert, FailureBoundary, LearnedRouter, Shadow};
+use antumbra_store::repo::{boundary, expert, router, shadow};
 use antumbra_store::Store;
 
-/// Which list the navigation keys drive, and which detail panel is shown: the
-/// population (umbra) or the boundaries (antumbra, the keystone).
+/// Which list the navigation keys drive, and which detail panel is shown — one
+/// per region of the cast shadow: the population (umbra), the shadows in training
+/// (penumbra), or the boundaries (antumbra, the keystone).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Experts,
+    Shadows,
     Boundaries,
 }
 
@@ -17,12 +19,16 @@ pub enum Focus {
 pub struct App {
     pub experts: Vec<Expert>,
     pub boundaries: Vec<FailureBoundary>,
+    /// Recent shadows in training (the penumbra), newest first.
+    pub shadows: Vec<Shadow>,
     pub router: Option<LearnedRouter>,
     /// Index into `experts` of the highlighted node.
     pub selected: usize,
     /// Index into `boundaries` of the highlighted scope (when focused there).
     pub selected_boundary: usize,
-    /// Whether navigation/detail targets the population or the boundaries.
+    /// Index into `shadows` of the highlighted shadow (when focused there).
+    pub selected_shadow: usize,
+    /// Which list navigation/detail targets (umbra / penumbra / antumbra).
     pub focus: Focus,
     /// Total elapsed animation time (ms), drives orbit/pulse/energy.
     pub clock_ms: f64,
@@ -36,9 +42,11 @@ impl App {
         let mut app = Self {
             experts: Vec::new(),
             boundaries: Vec::new(),
+            shadows: Vec::new(),
             router: None,
             selected: 0,
             selected_boundary: 0,
+            selected_shadow: 0,
             focus: Focus::Experts,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
@@ -51,6 +59,10 @@ impl App {
     pub async fn reload(&mut self, store: &Store) -> anyhow::Result<()> {
         self.experts = expert::list(store).await?;
         self.boundaries = boundary::list(store).await?;
+        self.shadows = shadow::list(store).await?;
+        // Newest first, so the penumbra view leads with current training.
+        self.shadows
+            .sort_by_key(|s| std::cmp::Reverse(s.created_at));
         self.router = router::load(store).await?;
         if !self.experts.is_empty() && self.selected >= self.experts.len() {
             self.selected = self.experts.len() - 1;
@@ -58,14 +70,18 @@ impl App {
         if !self.boundaries.is_empty() && self.selected_boundary >= self.boundaries.len() {
             self.selected_boundary = self.boundaries.len() - 1;
         }
+        if !self.shadows.is_empty() && self.selected_shadow >= self.shadows.len() {
+            self.selected_shadow = self.shadows.len() - 1;
+        }
         self.since_reload_ms = 0.0;
         Ok(())
     }
 
-    /// Switch which list (population / boundaries) the keys drive and detail.
+    /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.
     pub fn toggle_focus(&mut self) {
         self.focus = match self.focus {
-            Focus::Experts => Focus::Boundaries,
+            Focus::Experts => Focus::Shadows,
+            Focus::Shadows => Focus::Boundaries,
             Focus::Boundaries => Focus::Experts,
         };
     }
@@ -89,6 +105,11 @@ impl App {
                     self.selected = (self.selected + 1) % self.experts.len();
                 }
             }
+            Focus::Shadows => {
+                if !self.shadows.is_empty() {
+                    self.selected_shadow = (self.selected_shadow + 1) % self.shadows.len();
+                }
+            }
             Focus::Boundaries => {
                 if !self.boundaries.is_empty() {
                     self.selected_boundary = (self.selected_boundary + 1) % self.boundaries.len();
@@ -102,6 +123,12 @@ impl App {
             Focus::Experts => {
                 if !self.experts.is_empty() {
                     self.selected = (self.selected + self.experts.len() - 1) % self.experts.len();
+                }
+            }
+            Focus::Shadows => {
+                if !self.shadows.is_empty() {
+                    self.selected_shadow =
+                        (self.selected_shadow + self.shadows.len() - 1) % self.shadows.len();
                 }
             }
             Focus::Boundaries => {
@@ -119,5 +146,9 @@ impl App {
 
     pub fn selected_boundary(&self) -> Option<&FailureBoundary> {
         self.boundaries.get(self.selected_boundary)
+    }
+
+    pub fn selected_shadow(&self) -> Option<&Shadow> {
+        self.shadows.get(self.selected_shadow)
     }
 }
