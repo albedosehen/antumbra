@@ -5,12 +5,13 @@ use antumbra_core::{Expert, FailureBoundary, LearnedRouter, Shadow};
 use antumbra_store::repo::{boundary, expert, router, shadow};
 use antumbra_store::Store;
 
+use crate::command::{self, Action, Command};
 use crate::theme::Theme;
 
 /// Which list the navigation keys drive, and which detail panel is shown — one
 /// per region of the cast shadow: the population (umbra), the shadows in training
 /// (penumbra), or the boundaries (antumbra, the keystone).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
     Experts,
     Shadows,
@@ -23,6 +24,15 @@ pub enum Focus {
 pub enum Mode {
     Normal,
     Help,
+    Palette,
+}
+
+/// The command palette's transient state: the typed query and the highlighted
+/// match (an index into the filtered list).
+#[derive(Default)]
+pub struct Palette {
+    pub query: String,
+    pub selected: usize,
 }
 
 /// Everything the console draws, refreshed from the store.
@@ -42,6 +52,8 @@ pub struct App {
     pub focus: Focus,
     /// What's drawn on top of the live view (help / palette / nothing).
     pub mode: Mode,
+    /// The command palette's query and selection (used while `mode == Palette`).
+    pub palette: Palette,
     /// Index into [`crate::theme::ALL`] of the active palette.
     pub theme_idx: usize,
     /// The frame-rate cap the loop paces to (Hz), adjustable with `+`/`-`.
@@ -69,6 +81,7 @@ impl App {
             selected_shadow: 0,
             focus: Focus::Experts,
             mode: Mode::Normal,
+            palette: Palette::default(),
             theme_idx: 0,
             target_fps: 144,
             auto_fps: true,
@@ -183,6 +196,53 @@ impl App {
     /// Dismiss any overlay, returning to the live view.
     pub fn close_overlay(&mut self) {
         self.mode = Mode::Normal;
+    }
+
+    /// Open the command palette with an empty query.
+    pub fn open_palette(&mut self) {
+        self.mode = Mode::Palette;
+        self.palette.query.clear();
+        self.palette.selected = 0;
+    }
+
+    /// Append a typed character to the palette query (resets the selection).
+    pub fn palette_input(&mut self, c: char) {
+        self.palette.query.push(c);
+        self.palette.selected = 0;
+    }
+
+    /// Delete the last character of the palette query (resets the selection).
+    pub fn palette_backspace(&mut self) {
+        self.palette.query.pop();
+        self.palette.selected = 0;
+    }
+
+    /// Move the palette selection by `delta`, wrapping within the matches.
+    pub fn palette_move(&mut self, delta: i32) {
+        let n = self.palette_matches().len();
+        if n == 0 {
+            self.palette.selected = 0;
+            return;
+        }
+        let cur = self.palette.selected.min(n - 1) as i32;
+        self.palette.selected = (cur + delta).rem_euclid(n as i32) as usize;
+    }
+
+    /// The palette commands matching the current query, best first.
+    pub fn palette_matches(&self) -> Vec<&'static Command> {
+        command::matches(&self.palette.query)
+    }
+
+    /// The action of the highlighted palette match, if any.
+    pub fn palette_action(&self) -> Option<Action> {
+        let matches = self.palette_matches();
+        let idx = self.palette.selected.min(matches.len().saturating_sub(1));
+        matches.get(idx).map(|c| c.action)
+    }
+
+    /// Focus a specific region (the palette's focus commands).
+    pub fn set_focus(&mut self, focus: Focus) {
+        self.focus = focus;
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.

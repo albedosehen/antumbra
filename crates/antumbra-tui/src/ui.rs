@@ -35,9 +35,58 @@ pub fn render(f: &mut Frame, app: &App) {
         Focus::Boundaries => boundaries(f, app, body[1]),
     }
     footer(f, app, rows[2]);
-    if app.mode == Mode::Help {
-        help_overlay(f, app);
+    match app.mode {
+        Mode::Help => help_overlay(f, app),
+        Mode::Palette => palette_overlay(f, app),
+        Mode::Normal => {}
     }
+}
+
+/// The command palette: a query line over a fuzzy-ranked command list (`:` opens).
+fn palette_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let matches = app.palette_matches();
+    let listed = matches.len().max(1) as u16;
+    let area = overlay::centered(f.area(), 56, listed + 4);
+    let inner = overlay::modal(f, &t, area, "command");
+    let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
+
+    // Query line with a block cursor.
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("› ", Style::default().fg(t.accent)),
+            Span::styled(app.palette.query.clone(), Style::default().fg(t.text)),
+            Span::styled("▏", Style::default().fg(t.accent)),
+        ])),
+        rows[0],
+    );
+
+    // Ranked matches, the selection marked.
+    let selected = app.palette.selected.min(matches.len().saturating_sub(1));
+    let lines: Vec<Line> = if matches.is_empty() {
+        vec![Line::from(Span::styled(
+            "  (no matching command)",
+            Style::default().fg(t.dim),
+        ))]
+    } else {
+        matches
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let sel = i == selected;
+                let style = if sel {
+                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(t.ink)
+                };
+                Line::from(Span::styled(
+                    format!("{}{}", if sel { "▸ " } else { "  " }, c.label),
+                    style,
+                ))
+            })
+            .collect()
+    };
+    f.render_widget(Paragraph::new(lines), rows[1]);
 }
 
 /// The keybinding reference, a centred modal over the live view (`?` toggles).
@@ -536,6 +585,8 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
         lbl(" reload  ".into()),
         key(" ? "),
         lbl(" help  ".into()),
+        key(" : "),
+        lbl(" palette  ".into()),
         Span::styled(
             format!(
                 "   {} umbra · {} penumbra · {} antumbra ({actionable} actionable) · gate {router}",

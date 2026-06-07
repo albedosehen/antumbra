@@ -140,7 +140,8 @@ fn color_rgb(color: Color, default: [u8; 3]) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{Focus, Mode};
+    use crate::app::{Focus, Mode, Palette};
+    use crate::command::Action;
     use antumbra_core::{
         BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain, Shadow, ShadowId,
         ShadowStatus,
@@ -173,6 +174,7 @@ mod tests {
             selected_shadow: 0,
             focus: Focus::Experts,
             mode: Mode::Normal,
+            palette: Palette::default(),
             theme_idx: 0,
             target_fps: 144,
             auto_fps: false,
@@ -237,6 +239,29 @@ mod tests {
         app.experts.clear();
         let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
         assert!(text.contains("no experts yet"), "empty-state hint shown");
+    }
+
+    // The command palette filters its commands by the typed query and marks the
+    // selection, so a fuzzy query surfaces the matching action.
+    #[test]
+    fn command_palette_filters_to_the_query() {
+        let mut app = demo_app();
+        app.open_palette();
+        for c in "theme".chars() {
+            app.palette_input(c);
+        }
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(text.contains("command"), "palette title shown:\n{text}");
+        assert!(
+            text.contains("› theme"),
+            "the typed query is echoed:\n{text}"
+        );
+        assert!(
+            text.contains("cycle palette"),
+            "the theme command surfaced for the query:\n{text}"
+        );
+        // The chosen action matches the filtered selection.
+        assert_eq!(app.palette_action(), Some(Action::CycleTheme));
     }
 
     // Pressing `?` opens the help overlay over the live view, listing the keys.

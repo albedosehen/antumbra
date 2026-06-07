@@ -4,6 +4,7 @@
 //! interactive route/ask is the next layer.
 
 mod app;
+mod command;
 mod overlay;
 mod pacing;
 mod snapshot;
@@ -15,12 +16,13 @@ use std::time::Instant;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use tachyonfx::{Duration as FxDuration, Effect, EffectRenderer};
 
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
 use crate::app::{App, Mode};
+use crate::command::Action;
 
 #[derive(Parser)]
 #[command(name = "antumbra-tui", about = "Antumbra operator console")]
@@ -250,6 +252,34 @@ async fn connect(url: &str) -> Result<Store> {
     Ok(Store::connect(config, EMBED_DIM).await?)
 }
 
+/// Run a palette-chosen [`Action`], queuing any view transition it implies. The
+/// single place actions take effect, shared by the palette (keybindings call the
+/// same app methods directly).
+async fn apply_action(
+    app: &mut App,
+    store: &Store,
+    transition: &mut Option<Effect>,
+    action: Action,
+) -> Result<()> {
+    match action {
+        Action::Reload => app.reload(store).await?,
+        Action::CycleTheme => {
+            app.cycle_theme();
+            *transition = Some(transition::theme_wash(&app.theme()));
+        }
+        Action::Focus(target) => {
+            app.set_focus(target);
+            *transition = Some(transition::focus_switch());
+        }
+        Action::FpsUp => app.fps_up(),
+        Action::FpsDown => app.fps_down(),
+        Action::FollowMonitor => app.follow_monitor(),
+        Action::Help => app.toggle_help(),
+        Action::Quit => app.should_quit = true,
+    }
+    Ok(())
+}
+
 async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Store) -> Result<()> {
     // Honour sub-16ms frame budgets on Windows (restored on drop).
     let _timer = pacing::TimerResolution::acquire();
@@ -299,10 +329,33 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             }
                             _ => {}
                         },
+                        Mode::Palette => match key.code {
+                            KeyCode::Esc => app.close_overlay(),
+                            KeyCode::Enter => {
+                                let action = app.palette_action();
+                                app.close_overlay();
+                                if let Some(action) = action {
+                                    apply_action(app, store, &mut transition, action).await?;
+                                }
+                            }
+                            KeyCode::Backspace => app.palette_backspace(),
+                            KeyCode::Up => app.palette_move(-1),
+                            KeyCode::Down => app.palette_move(1),
+                            KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                match c {
+                                    'n' => app.palette_move(1),
+                                    'p' => app.palette_move(-1),
+                                    _ => {}
+                                }
+                            }
+                            KeyCode::Char(c) => app.palette_input(c),
+                            _ => {}
+                        },
                         Mode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
                             KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
+                            KeyCode::Char(':') => app.open_palette(),
                             KeyCode::Tab => {
                                 app.toggle_focus();
                                 transition = Some(transition::focus_switch());
