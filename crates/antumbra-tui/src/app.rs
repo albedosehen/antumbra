@@ -88,6 +88,9 @@ pub struct App {
     pub target_fps: u32,
     /// When set, the cap follows the active monitor's refresh rate; `+`/`-` pin it.
     pub auto_fps: bool,
+    /// The terminal window handle captured at launch, so the follow tracks this
+    /// window between monitors (not whatever is focused). `0` = live foreground.
+    pub window: usize,
     /// The measured frame rate (smoothed), shown as a live readout.
     pub fps: f64,
     /// Total elapsed animation time (ms), drives orbit/pulse/energy.
@@ -120,6 +123,7 @@ impl App {
             theme_idx: 0,
             target_fps: 144,
             auto_fps: true,
+            window: 0,
             fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
@@ -174,6 +178,11 @@ impl App {
         self.target_fps = crate::pacing::prev_preset(self.target_fps);
     }
 
+    /// Remember the terminal window (foreground at launch) the follow tracks.
+    pub fn capture_window(&mut self) {
+        self.window = crate::pacing::foreground_window();
+    }
+
     /// Pin the cap to a fixed rate (the `--fps` flag).
     pub fn pin_fps(&mut self, fps: u32) {
         self.auto_fps = false;
@@ -183,7 +192,7 @@ impl App {
     /// Hand the cap back to the active monitor's refresh rate (the `a` key).
     pub fn follow_monitor(&mut self) {
         self.auto_fps = true;
-        if let Some(hz) = crate::pacing::detect_refresh() {
+        if let Some(hz) = crate::pacing::detect_refresh(self.window) {
             self.target_fps = crate::pacing::snap_refresh(hz);
         }
     }
@@ -192,7 +201,7 @@ impl App {
     /// interval so dragging the terminal between monitors retargets the rate).
     pub fn poll_monitor(&mut self) {
         if self.auto_fps {
-            if let Some(hz) = crate::pacing::detect_refresh() {
+            if let Some(hz) = crate::pacing::detect_refresh(self.window) {
                 self.target_fps = crate::pacing::snap_refresh(hz);
             }
         }

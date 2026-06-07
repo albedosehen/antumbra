@@ -142,6 +142,9 @@ async fn app_main() -> Result<()> {
 
     let store = connect(&args.url).await?;
     let mut app = App::load(&store).await?;
+    // Capture the terminal window now, while it's focused, so the follow tracks
+    // this window between monitors rather than re-reading focus each tick.
+    app.capture_window();
     match args.fps {
         Some(fps) => app.pin_fps(fps),
         None => app.follow_monitor(),
@@ -155,7 +158,7 @@ async fn app_main() -> Result<()> {
 /// Print the multi-monitor refresh diagnostic: every display and its rate, the
 /// one the terminal resolves to, and the rate the cap would follow.
 fn print_monitors() {
-    let active = pacing::active_device();
+    let active = pacing::active_device(0);
     let mons = pacing::monitors();
     if mons.is_empty() {
         println!("no displays detected (off Windows, or enumeration unavailable)");
@@ -173,7 +176,7 @@ fn print_monitors() {
             );
         }
     }
-    match pacing::detect_refresh() {
+    match pacing::detect_refresh(0) {
         Some(hz) => println!(
             "\nfollowing the terminal's monitor: {hz} Hz (cap snaps to {})",
             pacing::snap_refresh(hz)

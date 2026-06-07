@@ -181,6 +181,7 @@ mod tests {
             theme_idx: 0,
             target_fps: 144,
             auto_fps: false,
+            window: 0,
             fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,

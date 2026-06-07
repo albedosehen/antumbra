@@ -105,18 +105,44 @@ impl Drop for TimerResolution {
     }
 }
 
-/// The refresh rate (Hz) of the monitor the terminal is currently on, so a
-/// multi-monitor setup can follow the active display. Resolves via the foreground
-/// window — under Windows Terminal / ConPTY the console window is a hidden
-/// pseudo-console parked on the primary, so `GetForegroundWindow` (the focused
-/// terminal) tracks the real position while the console is in use. Returns `None`
-/// off Windows or when the query fails (caller keeps its rate).
+/// The foreground window as an opaque handle value, captured at launch (when the
+/// terminal is focused) so the follow can track *that* window between monitors
+/// instead of re-reading focus each tick. `0` off Windows or when none is focused.
 #[cfg(windows)]
-pub fn detect_refresh() -> Option<u32> {
+pub fn foreground_window() -> usize {
+    // SAFETY: returns the current foreground window handle as an integer.
+    unsafe { GetForegroundWindow() as usize }
+}
+
+#[cfg(not(windows))]
+pub fn foreground_window() -> usize {
+    0
+}
+
+/// Resolve a captured handle to a usable `HWND`, falling back to the live
+/// foreground window when `window` is `0` (e.g. the one-shot diagnostic).
+#[cfg(windows)]
+fn window_handle(window: usize) -> Handle {
+    if window == 0 {
+        // SAFETY: the live foreground window.
+        unsafe { GetForegroundWindow() }
+    } else {
+        window as Handle
+    }
+}
+
+/// The refresh rate (Hz) of the monitor `window` is on, so a multi-monitor setup
+/// can follow the active display. `window` is a handle from [`foreground_window`]
+/// (or `0` for the live foreground). Resolving via the foreground window is
+/// necessary because under Windows Terminal / ConPTY the console window is a
+/// hidden pseudo-console parked on the primary. Returns `None` off Windows or
+/// when the query fails (caller keeps its rate).
+#[cfg(windows)]
+pub fn detect_refresh(window: usize) -> Option<u32> {
     // SAFETY: standard Win32 monitor queries; every buffer is stack-owned and
     // sized through its `cb_size` / `dm_size` field as the API requires.
     unsafe {
-        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
+        let monitor = MonitorFromWindow(window_handle(window), MONITOR_DEFAULTTONEAREST);
         let mut info: MonitorInfoExW = std::mem::zeroed();
         info.cb_size = std::mem::size_of::<MonitorInfoExW>() as u32;
         if GetMonitorInfoW(monitor, &mut info) == 0 {
@@ -135,7 +161,7 @@ pub fn detect_refresh() -> Option<u32> {
 }
 
 #[cfg(not(windows))]
-pub fn detect_refresh() -> Option<u32> {
+pub fn detect_refresh(_window: usize) -> Option<u32> {
     None
 }
 
@@ -195,14 +221,14 @@ pub fn monitors() -> Vec<Monitor> {
     Vec::new()
 }
 
-/// The device name (`\\.\DISPLAYn`) of the display the terminal is on (via the
-/// foreground window), so a diagnostic can show which monitor the follow logic
-/// resolves to.
+/// The device name (`\\.\DISPLAYn`) of the display `window` is on (or the live
+/// foreground when `0`), so a diagnostic can show which monitor the follow
+/// logic resolves to.
 #[cfg(windows)]
-pub fn active_device() -> Option<String> {
+pub fn active_device(window: usize) -> Option<String> {
     // SAFETY: as in `detect_refresh`; a stack MONITORINFOEXW sized via cb_size.
     unsafe {
-        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
+        let monitor = MonitorFromWindow(window_handle(window), MONITOR_DEFAULTTONEAREST);
         let mut info: MonitorInfoExW = std::mem::zeroed();
         info.cb_size = std::mem::size_of::<MonitorInfoExW>() as u32;
         if GetMonitorInfoW(monitor, &mut info) == 0 {
@@ -213,7 +239,7 @@ pub fn active_device() -> Option<String> {
 }
 
 #[cfg(not(windows))]
-pub fn active_device() -> Option<String> {
+pub fn active_device(_window: usize) -> Option<String> {
     None
 }
 
@@ -370,10 +396,11 @@ mod tests {
     #[test]
     fn detect_refresh_never_panics() {
         // Returns Some(real Hz) on a display, None headless/off-Windows — but
-        // must always be safe to call.
-        if let Some(hz) = detect_refresh() {
+        // must always be safe to call, with a captured handle or the live (0) one.
+        if let Some(hz) = detect_refresh(0) {
             assert!(hz > 1);
         }
+        let _ = detect_refresh(foreground_window());
     }
 
     #[test]
@@ -383,6 +410,6 @@ mod tests {
         for m in monitors() {
             assert!(!m.device.is_empty());
         }
-        let _ = active_device();
+        let _ = active_device(0);
     }
 }
