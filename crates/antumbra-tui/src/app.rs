@@ -30,6 +30,7 @@ pub enum Mode {
     Palette,
     Filter,
     Events,
+    Detail,
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -90,6 +91,8 @@ pub struct App {
     pub events: Vec<Event>,
     /// Scroll position within the events overlay.
     pub events_scroll: usize,
+    /// Scroll offset within the drill-down detail overlay.
+    pub detail_scroll: u16,
     /// Per-entity fingerprints from the last reload, to diff the next one.
     pub ev_experts: HashMap<String, bool>,
     pub ev_shadows: HashMap<String, String>,
@@ -140,6 +143,7 @@ impl App {
             filter_selected: 0,
             events: Vec::new(),
             events_scroll: 0,
+            detail_scroll: 0,
             ev_experts: HashMap::new(),
             ev_shadows: HashMap::new(),
             ev_boundaries: HashMap::new(),
@@ -299,6 +303,17 @@ impl App {
         }
         let cur = self.events_scroll.min(n - 1) as i32;
         self.events_scroll = (cur + delta).clamp(0, n as i32 - 1) as usize;
+    }
+
+    /// Open the drill-down detail overlay for the focused selection (Enter).
+    pub fn open_detail(&mut self) {
+        self.mode = Mode::Detail;
+        self.detail_scroll = 0;
+    }
+
+    /// Scroll the detail overlay by `delta` lines (clamped at the top).
+    pub fn detail_move(&mut self, delta: i32) {
+        self.detail_scroll = (self.detail_scroll as i32 + delta).max(0) as u16;
     }
 
     /// The active palette every panel tints from.

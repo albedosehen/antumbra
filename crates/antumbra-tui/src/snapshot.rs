@@ -180,6 +180,7 @@ mod tests {
             filter_selected: 0,
             events: Vec::new(),
             events_scroll: 0,
+            detail_scroll: 0,
             ev_experts: std::collections::HashMap::new(),
             ev_shadows: std::collections::HashMap::new(),
             ev_boundaries: std::collections::HashMap::new(),
@@ -486,6 +487,25 @@ mod tests {
         let text = to_text(&render(&mut app, 100, 24, 1600.0).unwrap());
         assert!(text.contains("events"), "events overlay titled:\n{text}");
         assert!(text.contains("graduated"), "an event is listed");
+    }
+
+    // Enter drills into the selected boundary: a full-detail modal with the
+    // contrastive contexts the summary panel omits.
+    #[test]
+    fn drill_down_shows_full_boundary_detail() {
+        let mut app = demo_app();
+        app.boundaries = vec![actionable_boundary()];
+        app.focus = Focus::Boundaries;
+        app.open_detail();
+        let text = to_text(&render(&mut app, 110, 36, 1600.0).unwrap());
+        assert!(text.contains("boundary ·"), "detail modal titled:\n{text}");
+        assert!(text.contains("fail context"), "the C context section shown");
+        assert!(
+            text.contains("acceptable context"),
+            "the C' context section shown"
+        );
+        // The pretty-printed JSON of the contexts is present.
+        assert!(text.contains("runtime"), "context json rendered");
     }
 
     // Pressing `?` opens the help overlay over the live view, listing the keys.

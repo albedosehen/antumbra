@@ -129,6 +129,7 @@ async fn app_main() -> Result<()> {
                 "help" => app.toggle_help(),
                 "palette" => app.open_palette(),
                 "events" => app.open_events(),
+                "detail" => app.open_detail(),
                 _ => {}
             }
             let buf = snapshot::render(&mut app, width, height, at_ms)?;
@@ -475,10 +476,24 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::Up | KeyCode::Char('k') => app.events_move(-1),
                             _ => {}
                         },
+                        Mode::Detail => match key.code {
+                            KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc => {
+                                app.close_overlay()
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => app.detail_move(1),
+                            KeyCode::Up | KeyCode::Char('k') => app.detail_move(-1),
+                            KeyCode::PageDown => app.detail_move(10),
+                            KeyCode::PageUp => app.detail_move(-10),
+                            _ => {}
+                        },
                         Mode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
                             KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
+                            KeyCode::Enter => {
+                                app.open_detail();
+                                transition = Some(transition::overlay_open());
+                            }
                             KeyCode::Home | KeyCode::Char('g') => app.select_first(),
                             KeyCode::End | KeyCode::Char('G') => app.select_last(),
                             KeyCode::PageDown => app.select_page(1),
