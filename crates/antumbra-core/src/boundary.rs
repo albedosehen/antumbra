@@ -6,10 +6,34 @@
 //! grain of that scope, and the minimal contrastive pair (C incorrect / C'
 //! correct) that evidences it.
 
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{BoundaryId, Generation};
+
+/// Infer the single governing feature that distinguishes a contrastive pair: the
+/// one context key whose value differs between C (the failing context) and C'
+/// (the acceptable one). Returns `None` when zero keys differ (no contrast) or
+/// more than one does (no *single* feature names the scope) -- matching the
+/// open-negative discipline, the caller must not fabricate a governing feature
+/// it cannot derive. Non-object contexts yield `None`.
+pub fn governing_feature_from_pair(
+    fail_context: &serde_json::Value,
+    near_ok_context: &serde_json::Value,
+) -> Option<String> {
+    let (Some(fail), Some(ok)) = (fail_context.as_object(), near_ok_context.as_object()) else {
+        return None;
+    };
+    let keys: BTreeSet<&String> = fail.keys().chain(ok.keys()).collect();
+    let mut differing = keys.into_iter().filter(|k| fail.get(*k) != ok.get(*k));
+    let first = differing.next()?.clone();
+    match differing.next() {
+        Some(_) => None,
+        None => Some(first),
+    }
+}
 
 /// Resolution at which a scope applies. Over-generalizing the grain is exactly
 /// the false-inhibition failure mode ADR-0004 exists to prevent.
@@ -146,6 +170,35 @@ const RELATIVE_SENSITIVITY: f32 = 0.05;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn governing_feature_is_the_one_key_that_differs() {
+        // Exactly one key differs (runtime) -> that is the governing feature.
+        let fail = serde_json::json!({ "runtime": "deno", "task": "install" });
+        let ok = serde_json::json!({ "runtime": "node", "task": "install" });
+        assert_eq!(
+            governing_feature_from_pair(&fail, &ok),
+            Some("runtime".to_string())
+        );
+    }
+
+    #[test]
+    fn governing_feature_is_none_when_zero_or_many_keys_differ() {
+        // Identical -> no contrast.
+        let same = serde_json::json!({ "runtime": "deno" });
+        assert_eq!(governing_feature_from_pair(&same, &same), None);
+        // Two keys differ -> no single feature names the scope.
+        let fail = serde_json::json!({ "runtime": "deno", "task": "install" });
+        let ok = serde_json::json!({ "runtime": "node", "task": "build" });
+        assert_eq!(governing_feature_from_pair(&fail, &ok), None);
+        // A key present on only one side counts as differing.
+        let fail = serde_json::json!({ "runtime": "deno" });
+        let ok = serde_json::json!({ "runtime": "deno", "extra": 1 });
+        assert_eq!(
+            governing_feature_from_pair(&fail, &ok),
+            Some("extra".to_string())
+        );
+    }
 
     fn boundary(actionable: bool, ctx: Vec<f32>, confidence: f32) -> FailureBoundary {
         FailureBoundary {

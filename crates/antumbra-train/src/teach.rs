@@ -8,7 +8,7 @@
 //! gated on ground truth, neither trusts unverified teacher text.
 
 use antumbra_core::ports::{TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{BoundaryFinding, Result, RunId};
+use antumbra_core::{governing_feature_from_pair, BoundaryFinding, Result, RunId};
 use serde_json::json;
 
 use crate::config::RaftConfig;
@@ -72,12 +72,21 @@ pub async fn capture_corrections(
                 solved.push(task.prompt.clone());
             }
             if let Some(scope) = &task.scope {
-                findings.push(BoundaryFinding {
-                    behavior: task.prompt.clone(),
-                    governing_feature: scope.governing_feature.clone(),
-                    fail_context: scope.fail_context.clone(),
-                    near_ok_context: scope.near_ok_context.clone(),
+                // The governing feature is supplied, or inferred from the one key
+                // that differs between C and C'. If it cannot be named (zero or
+                // several keys differ), no boundary is emitted -- the same
+                // open-negative discipline as a search that finds no single scope.
+                let feature = scope.governing_feature.clone().or_else(|| {
+                    governing_feature_from_pair(&scope.fail_context, &scope.near_ok_context)
                 });
+                if let Some(governing_feature) = feature {
+                    findings.push(BoundaryFinding {
+                        behavior: task.prompt.clone(),
+                        governing_feature,
+                        fail_context: scope.fail_context.clone(),
+                        near_ok_context: scope.near_ok_context.clone(),
+                    });
+                }
             }
         }
     }
@@ -233,6 +242,61 @@ mod tests {
         assert_eq!(f.governing_feature, "runtime");
         assert_eq!(f.fail_context["runtime"], serde_json::json!("deno"));
         assert_eq!(f.near_ok_context["runtime"], serde_json::json!("node"));
+    }
+
+    #[tokio::test]
+    async fn an_inferred_scope_names_the_one_differing_feature() {
+        let mut lm = Learner {
+            taught: AtomicBool::new(false),
+        };
+        let verifier = MarkerVerifier {
+            expect: "deno install".into(),
+        };
+        // No governing feature supplied: it is inferred from the one key (runtime)
+        // that differs between C and C'.
+        let tasks = vec![CorpusTask::new("p", "add a dep")
+            .with_completion("deno install")
+            .with_inferred_scope(
+                serde_json::json!({ "runtime": "deno", "task": "install" }),
+                serde_json::json!({ "runtime": "node", "task": "install" }),
+            )];
+        let cfg = RaftConfig {
+            rounds: 1,
+            samples_per_task: 2,
+            ..RaftConfig::default()
+        };
+        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:i"), &cfg, &[])
+            .await
+            .unwrap();
+        assert_eq!(out.boundary_findings.len(), 1);
+        assert_eq!(out.boundary_findings[0].governing_feature, "runtime");
+    }
+
+    #[tokio::test]
+    async fn an_ambiguous_inferred_scope_yields_no_boundary() {
+        let mut lm = Learner {
+            taught: AtomicBool::new(false),
+        };
+        let verifier = MarkerVerifier {
+            expect: "deno install".into(),
+        };
+        // Two keys differ -> no single feature names the scope -> no boundary,
+        // even though the correction itself verifies.
+        let tasks = vec![CorpusTask::new("p", "add a dep")
+            .with_completion("deno install")
+            .with_inferred_scope(
+                serde_json::json!({ "runtime": "deno", "task": "install" }),
+                serde_json::json!({ "runtime": "node", "task": "build" }),
+            )];
+        let cfg = RaftConfig {
+            rounds: 1,
+            samples_per_task: 2,
+            ..RaftConfig::default()
+        };
+        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:i2"), &cfg, &[])
+            .await
+            .unwrap();
+        assert!(out.boundary_findings.is_empty());
     }
 
     #[tokio::test]

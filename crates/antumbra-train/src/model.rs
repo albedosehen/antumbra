@@ -31,13 +31,14 @@ pub struct CorpusTask {
     pub scope: Option<TaskScope>,
 }
 
-/// The contrastive scope a correction carries: the governing feature plus the
-/// context where the behavior is incorrect (C) and the nearest one where it is
-/// acceptable (C'). A *verified* correction bearing this becomes a
+/// The contrastive scope a correction carries: the context where the behavior is
+/// incorrect (C) and the nearest one where it is acceptable (C'), plus the
+/// governing feature -- supplied, or `None` to infer it from the one key that
+/// differs between C and C'. A *verified* correction bearing this becomes a
 /// [`antumbra_core::BoundaryFinding`] in the capture outcome.
 #[derive(Debug, Clone)]
 pub struct TaskScope {
-    pub governing_feature: String,
+    pub governing_feature: Option<String>,
     pub fail_context: serde_json::Value,
     pub near_ok_context: serde_json::Value,
 }
@@ -64,8 +65,8 @@ impl CorpusTask {
         self
     }
 
-    /// Attach the contrastive scope (governing feature + C/C' context pair) that
-    /// turns this correction, once verified, into an actionable boundary.
+    /// Attach the contrastive scope with an explicit governing feature: turns
+    /// this correction, once verified, into an actionable boundary.
     pub fn with_scope(
         mut self,
         governing_feature: impl Into<String>,
@@ -73,7 +74,24 @@ impl CorpusTask {
         near_ok_context: serde_json::Value,
     ) -> Self {
         self.scope = Some(TaskScope {
-            governing_feature: governing_feature.into(),
+            governing_feature: Some(governing_feature.into()),
+            fail_context,
+            near_ok_context,
+        });
+        self
+    }
+
+    /// Attach a contrastive scope whose governing feature is *inferred* from the
+    /// one context key that differs between C and C' (ADR-0004). If zero or
+    /// several keys differ the feature cannot be named, and capture emits no
+    /// boundary for it.
+    pub fn with_inferred_scope(
+        mut self,
+        fail_context: serde_json::Value,
+        near_ok_context: serde_json::Value,
+    ) -> Self {
+        self.scope = Some(TaskScope {
+            governing_feature: None,
             fail_context,
             near_ok_context,
         });
