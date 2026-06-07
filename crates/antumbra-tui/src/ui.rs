@@ -14,7 +14,8 @@ use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, Mode};
+use crate::overlay;
 use crate::theme::{rgb, Theme};
 
 pub fn render(f: &mut Frame, app: &App) {
@@ -34,6 +35,50 @@ pub fn render(f: &mut Frame, app: &App) {
         Focus::Boundaries => boundaries(f, app, body[1]),
     }
     footer(f, app, rows[2]);
+    if app.mode == Mode::Help {
+        help_overlay(f, app);
+    }
+}
+
+/// The keybinding reference, a centred modal over the live view (`?` toggles).
+fn help_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let area = overlay::centered(f.area(), 50, 18);
+    let inner = overlay::modal(f, &t, area, "help");
+
+    let group = |label: &str| {
+        Line::from(Span::styled(
+            label.to_string(),
+            Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+        ))
+    };
+    let bind = |keys: &str, desc: &str| {
+        Line::from(vec![
+            Span::styled(
+                format!("  {keys:<8}"),
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(desc.to_string(), Style::default().fg(t.ink)),
+        ])
+    };
+    let lines = vec![
+        group("navigate"),
+        bind("↑↓ jk", "select in the focused list"),
+        bind("tab", "switch focus: umbra / penumbra / antumbra"),
+        Line::from(""),
+        group("view"),
+        bind("t", "cycle theme: shadow / ember / mono"),
+        Line::from(""),
+        group("frame rate"),
+        bind("+ -", "pin the cap to a refresh rate"),
+        bind("a", "follow the active monitor"),
+        Line::from(""),
+        group("system"),
+        bind("r", "reload from the store"),
+        bind("? esc", "close this help"),
+        bind("q", "quit"),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// `[0,1]` pulse from the animation clock.
@@ -489,6 +534,8 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
         )),
         key(" r "),
         lbl(" reload  ".into()),
+        key(" ? "),
+        lbl(" help  ".into()),
         Span::styled(
             format!(
                 "   {} umbra · {} penumbra · {} antumbra ({actionable} actionable) · gate {router}",

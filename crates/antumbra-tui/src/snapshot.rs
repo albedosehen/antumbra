@@ -140,7 +140,7 @@ fn color_rgb(color: Color, default: [u8; 3]) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::Focus;
+    use crate::app::{Focus, Mode};
     use antumbra_core::{
         BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain, Shadow, ShadowId,
         ShadowStatus,
@@ -172,6 +172,7 @@ mod tests {
             selected_boundary: 0,
             selected_shadow: 0,
             focus: Focus::Experts,
+            mode: Mode::Normal,
             theme_idx: 0,
             target_fps: 144,
             auto_fps: false,
@@ -236,6 +237,21 @@ mod tests {
         app.experts.clear();
         let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
         assert!(text.contains("no experts yet"), "empty-state hint shown");
+    }
+
+    // Pressing `?` opens the help overlay over the live view, listing the keys.
+    #[test]
+    fn help_overlay_lists_the_keybindings() {
+        let mut app = demo_app();
+        app.mode = Mode::Help;
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(text.contains("help"), "help modal title shown:\n{text}");
+        assert!(text.contains("cycle theme"), "theme keybind documented");
+        assert!(
+            text.contains("follow the active monitor"),
+            "fps follow keybind documented"
+        );
+        assert!(text.contains("switch focus"), "focus keybind documented");
     }
 
     // Tab into the penumbra focus: the training view shows the selected shadow's

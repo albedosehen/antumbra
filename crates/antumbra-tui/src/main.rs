@@ -4,6 +4,7 @@
 //! interactive route/ask is the next layer.
 
 mod app;
+mod overlay;
 mod pacing;
 mod snapshot;
 mod theme;
@@ -19,7 +20,7 @@ use tachyonfx::{Duration as FxDuration, Effect, EffectRenderer};
 
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
-use crate::app::App;
+use crate::app::{App, Mode};
 
 #[derive(Parser)]
 #[command(name = "antumbra-tui", about = "Antumbra operator console")]
@@ -291,23 +292,32 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
             }
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                        KeyCode::Down | KeyCode::Char('j') => app.select_next(),
-                        KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
-                        KeyCode::Tab => {
-                            app.toggle_focus();
-                            transition = Some(transition::focus_switch());
-                        }
-                        KeyCode::Char('t') => {
-                            app.cycle_theme();
-                            transition = Some(transition::theme_wash(&app.theme()));
-                        }
-                        KeyCode::Char('+') | KeyCode::Char('=') => app.fps_up(),
-                        KeyCode::Char('-') | KeyCode::Char('_') => app.fps_down(),
-                        KeyCode::Char('a') => app.follow_monitor(),
-                        KeyCode::Char('r') => app.reload(store).await?,
-                        _ => {}
+                    match app.mode {
+                        Mode::Help => match key.code {
+                            KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') => {
+                                app.close_overlay()
+                            }
+                            _ => {}
+                        },
+                        Mode::Normal => match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
+                            KeyCode::Down | KeyCode::Char('j') => app.select_next(),
+                            KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
+                            KeyCode::Tab => {
+                                app.toggle_focus();
+                                transition = Some(transition::focus_switch());
+                            }
+                            KeyCode::Char('t') => {
+                                app.cycle_theme();
+                                transition = Some(transition::theme_wash(&app.theme()));
+                            }
+                            KeyCode::Char('+') | KeyCode::Char('=') => app.fps_up(),
+                            KeyCode::Char('-') | KeyCode::Char('_') => app.fps_down(),
+                            KeyCode::Char('a') => app.follow_monitor(),
+                            KeyCode::Char('r') => app.reload(store).await?,
+                            KeyCode::Char('?') => app.toggle_help(),
+                            _ => {}
+                        },
                     }
                 }
             }

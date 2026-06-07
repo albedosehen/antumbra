@@ -17,6 +17,14 @@ pub enum Focus {
     Boundaries,
 }
 
+/// What the console is showing on top of the population: nothing (the live view),
+/// the keybinding help, or the command palette. Input routing follows the mode.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Normal,
+    Help,
+}
+
 /// Everything the console draws, refreshed from the store.
 pub struct App {
     pub experts: Vec<Expert>,
@@ -32,6 +40,8 @@ pub struct App {
     pub selected_shadow: usize,
     /// Which list navigation/detail targets (umbra / penumbra / antumbra).
     pub focus: Focus,
+    /// What's drawn on top of the live view (help / palette / nothing).
+    pub mode: Mode,
     /// Index into [`crate::theme::ALL`] of the active palette.
     pub theme_idx: usize,
     /// The frame-rate cap the loop paces to (Hz), adjustable with `+`/`-`.
@@ -58,6 +68,7 @@ impl App {
             selected_boundary: 0,
             selected_shadow: 0,
             focus: Focus::Experts,
+            mode: Mode::Normal,
             theme_idx: 0,
             target_fps: 144,
             auto_fps: true,
@@ -159,6 +170,19 @@ impl App {
         } else {
             self.target_fps
         }
+    }
+
+    /// Toggle the keybinding help overlay.
+    pub fn toggle_help(&mut self) {
+        self.mode = match self.mode {
+            Mode::Help => Mode::Normal,
+            _ => Mode::Help,
+        };
+    }
+
+    /// Dismiss any overlay, returning to the live view.
+    pub fn close_overlay(&mut self) {
+        self.mode = Mode::Normal;
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.
