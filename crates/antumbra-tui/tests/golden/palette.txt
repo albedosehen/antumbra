@@ -14,6 +14,7 @@
 │  ask · route a task through the gate                 │
 │  events · live store changes                         │
 │  graduate the selected shadow                        │
+│  freeze · thaw the selected expert                   │
 │  reload from the store                               │
 │  help · keybindings                                  │
 │  quit                                                │

@@ -4,6 +4,8 @@
 //! builder + `crud` for typed reads, and `Query::vector_search` for KNN. No
 //! hand-authored SurrealQL.
 
+use chrono::{DateTime, Utc};
+
 use surql::query::builder::Query;
 use surql::query::crud::{create_record, delete_records, first, query_records};
 use surql::query::helpers::VectorDistanceType;
@@ -34,6 +36,24 @@ pub async fn delete(store: &Store, id: &ExpertId) -> Result<()> {
     delete_records(store.client(), TABLE, Some(&eq("key", id.as_str())))
         .await
         .map_err(map)?;
+    Ok(())
+}
+
+/// Freeze or thaw an expert in place by domain id: re-write the record with
+/// `frozen_at` set (freeze) or cleared (thaw). The population is keyed by `key`
+/// with an engine-assigned record id, so — as when a re-train supersedes an
+/// expert — this replaces by delete-then-insert rather than updating in place.
+/// No-op if the expert is absent.
+pub async fn set_frozen(
+    store: &Store,
+    id: &ExpertId,
+    frozen_at: Option<DateTime<Utc>>,
+) -> Result<()> {
+    if let Some(mut expert) = get(store, id).await? {
+        expert.frozen_at = frozen_at;
+        delete(store, id).await?;
+        insert(store, &expert).await?;
+    }
     Ok(())
 }
 
@@ -127,5 +147,33 @@ mod tests {
 
         delete(&s, &ExpertId::new("expert:a")).await.unwrap();
         assert!(list(&s).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn set_frozen_toggles_in_place_and_ignores_the_absent() {
+        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let mut v = vec![0.0f32; EMBED_DIM];
+        v[0] = 1.0;
+        // Seed an unfrozen expert (override the helper's frozen default).
+        let mut e = expert("expert:f", v);
+        e.frozen_at = None;
+        insert(&s, &e).await.unwrap();
+        let id = ExpertId::new("expert:f");
+
+        // Freeze in place: same record (one row), now frozen.
+        set_frozen(&s, &id, Some(Utc::now())).await.unwrap();
+        let frozen = get(&s, &id).await.unwrap().unwrap();
+        assert!(frozen.is_frozen());
+        assert_eq!(list(&s).await.unwrap().len(), 1, "replaced, not duplicated");
+
+        // Thaw in place.
+        set_frozen(&s, &id, None).await.unwrap();
+        assert!(!get(&s, &id).await.unwrap().unwrap().is_frozen());
+
+        // Absent id is a no-op, not an error.
+        set_frozen(&s, &ExpertId::new("expert:ghost"), Some(Utc::now()))
+            .await
+            .unwrap();
+        assert_eq!(list(&s).await.unwrap().len(), 1);
     }
 }

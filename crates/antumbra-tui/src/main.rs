@@ -421,6 +421,12 @@ async fn apply_action(
                 *transition = Some(transition::overlay_open());
             }
         }
+        Action::FreezeExpert => {
+            app.request_freeze();
+            if app.mode == Mode::Confirm {
+                *transition = Some(transition::overlay_open());
+            }
+        }
         Action::Help => {
             app.toggle_help();
             if app.mode == Mode::Help {

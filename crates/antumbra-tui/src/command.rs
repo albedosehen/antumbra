@@ -18,6 +18,7 @@ pub enum Action {
     Ask,
     Events,
     GraduateShadow,
+    FreezeExpert,
     Help,
     Quit,
 }
@@ -81,6 +82,10 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "graduate the selected shadow",
         action: Action::GraduateShadow,
+    },
+    Command {
+        label: "freeze · thaw the selected expert",
+        action: Action::FreezeExpert,
     },
     Command {
         label: "reload from the store",

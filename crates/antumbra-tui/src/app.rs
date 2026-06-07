@@ -2,10 +2,12 @@
 //! and the learned gate, loaded from the store and ticked for animation.
 
 use antumbra_core::{
-    BoundaryId, Expert, FailureBoundary, LearnedRouter, Shadow, ShadowId, ShadowStatus,
+    BoundaryId, Expert, ExpertId, FailureBoundary, LearnedRouter, Shadow, ShadowId, ShadowStatus,
 };
 use antumbra_store::repo::{boundary, expert, router, shadow};
 use antumbra_store::Store;
+
+use chrono::Utc;
 
 use std::collections::HashMap;
 
@@ -43,6 +45,8 @@ pub enum Pending {
     PruneShadow(ShadowId),
     /// Mark the shadow graduated (promote it into the population).
     GraduateShadow(ShadowId),
+    /// Freeze (`true`) or thaw (`false`) the expert.
+    FreezeExpert(ExpertId, bool),
     /// Delete the boundary from the antumbra.
     DeleteBoundary(BoundaryId),
 }
@@ -256,6 +260,9 @@ impl App {
                     Some(&frozen) if !frozen && e.is_frozen() => {
                         emit.push((EventKind::Freeze, format!("expert {} frozen", e.name)))
                     }
+                    Some(&frozen) if frozen && !e.is_frozen() => {
+                        emit.push((EventKind::Freeze, format!("expert {} thawed", e.name)))
+                    }
                     _ => {}
                 }
             }
@@ -340,11 +347,25 @@ impl App {
         }
     }
 
+    /// Stage freezing the selected expert, or thawing it if already frozen (the
+    /// palette's freeze command toggles on the expert's current state).
+    pub fn request_freeze(&mut self) {
+        if let Some(e) = self.selected_expert() {
+            let freeze = !e.is_frozen();
+            self.pending = Some(Pending::FreezeExpert(e.id.clone(), freeze));
+            self.mode = Mode::Confirm;
+        }
+    }
+
     /// The confirmation prompt for the staged action, if any.
     pub fn pending_prompt(&self) -> Option<String> {
         self.pending.as_ref().map(|p| match p {
             Pending::PruneShadow(id) => format!("Prune shadow {} ?", id.as_str()),
             Pending::GraduateShadow(id) => format!("Graduate shadow {} ?", id.as_str()),
+            Pending::FreezeExpert(id, freeze) => {
+                let verb = if *freeze { "Freeze" } else { "Thaw" };
+                format!("{verb} expert {} ?", id.as_str())
+            }
             Pending::DeleteBoundary(id) => {
                 let behavior = self
                     .boundaries
@@ -381,6 +402,10 @@ impl App {
                         graduated.status = ShadowStatus::Graduated;
                         shadow::upsert(store, &graduated).await?;
                     }
+                }
+                Pending::FreezeExpert(id, freeze) => {
+                    let frozen_at = if freeze { Some(Utc::now()) } else { None };
+                    expert::set_frozen(store, &id, frozen_at).await?;
                 }
                 Pending::DeleteBoundary(id) => {
                     let behavior = self
@@ -951,6 +976,63 @@ mod tests {
         app.focus = Focus::Shadows;
         app.request_graduate();
         assert!(app.pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn freeze_toggles_the_expert_and_raises_events() {
+        let (store, mut app) = seeded().await;
+        let mut v = vec![0.0f32; EMBED_DIM];
+        v[0] = 1.0;
+        expert::insert(
+            &store,
+            &Expert {
+                id: ExpertId::new("expert:e1"),
+                name: "scout".into(),
+                base_model: "base".into(),
+                artifact_uri: "a.safetensors".into(),
+                capability_card: serde_json::json!({}),
+                capability_vec: Some(v),
+                fitness: 1.0,
+                frozen_at: None,
+                generation: Generation::ZERO,
+                owner: None,
+                compartment: None,
+                created_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+        app.reload(&store).await.unwrap();
+        app.focus = Focus::Experts;
+        app.selected = app
+            .experts
+            .iter()
+            .position(|e| e.id.as_str() == "expert:e1")
+            .unwrap();
+
+        // First toggle freezes.
+        app.request_freeze();
+        assert!(matches!(app.pending, Some(Pending::FreezeExpert(_, true))));
+        app.apply_pending(&store).await.unwrap();
+        let frozen = app
+            .experts
+            .iter()
+            .find(|e| e.id.as_str() == "expert:e1")
+            .unwrap();
+        assert!(frozen.is_frozen(), "the store reflects the freeze");
+        assert!(app.events.iter().any(|ev| ev.text.contains("frozen")));
+
+        // Second toggle thaws (the command reads the current state).
+        app.request_freeze();
+        assert!(matches!(app.pending, Some(Pending::FreezeExpert(_, false))));
+        app.apply_pending(&store).await.unwrap();
+        let thawed = app
+            .experts
+            .iter()
+            .find(|e| e.id.as_str() == "expert:e1")
+            .unwrap();
+        assert!(!thawed.is_frozen(), "the store reflects the thaw");
+        assert!(app.events.iter().any(|ev| ev.text.contains("thawed")));
     }
 
     #[tokio::test]
