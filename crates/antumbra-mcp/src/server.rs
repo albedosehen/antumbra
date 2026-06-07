@@ -21,7 +21,7 @@ use antumbra_core::{
     Capability, ClusterConfig, Compartment, CompartmentId, EdgeType, ExpertId, Grant, Memory,
     MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId, UserId,
 };
-use antumbra_store::repo::{compartment, edge, expert, memory, router};
+use antumbra_store::repo::{boundary, compartment, edge, expert, memory, router};
 use antumbra_store::Store;
 
 /// One (tenant, user) MCP session over its Penumbra. `#[tool_handler]` resolves
@@ -175,14 +175,20 @@ impl McpServer {
     /// router, plus the user's own private experts by centroid. Top-`k`, best
     /// first. The expert ACL already scopes `expert::list` to shared + own-private.
     ///
-    /// NOTE (deferred, paired with actionable boundaries): unlike the CLI's
-    /// learned-route path, this does NOT subtract `FailureBoundary` inhibition. It
-    /// is a no-op today — the loop only logs *open* (non-actionable) boundaries,
-    /// which never inhibit (ADR-0004) — but when actionable boundaries are produced
-    /// (they need a C'-recovery probe, deferred there too), the served path must
-    /// gate on inhibition like the CLI, or the two front doors diverge. Wire it
-    /// then, not before (avoids a per-route `boundary::list` query for zero effect).
+    /// Boundary inhibition (ADR-0004): if this task falls inside a known failure
+    /// scope, escalate (return no routes) rather than route confidently — the
+    /// same gate the CLI's learned-route path applies, so the two front doors
+    /// agree. Only *actionable* boundaries inhibit (the relative C/C' margin), so
+    /// this is a no-op until a verified correction has scoped one.
     async fn ranked_routes(&self, v: &[f32], k: usize) -> antumbra_core::Result<Vec<RouteHit>> {
+        let inhibition = boundary::list(&self.store)
+            .await?
+            .iter()
+            .map(|b| b.inhibition_for(v, INHIBITION_RADIUS))
+            .fold(0.0f32, f32::max);
+        if inhibition > BOUNDARY_ESCALATE_THRESHOLD {
+            return Ok(Vec::new());
+        }
         let mut routes: Vec<RouteHit> = Vec::new();
         if let Some(router) = router::load(&self.store).await? {
             if router.covers(v) {
@@ -406,6 +412,17 @@ struct RouteParams {
 /// the shared learned router, so they are matched directly by centroid; a
 /// per-private-expert learned boundary is the eventual refinement).
 const PRIVATE_ROUTE_FLOOR: f32 = 0.3;
+
+/// Inhibition radius for the legacy absolute-scope boundary path; mirrors
+/// `antumbra_gate::GateConfig::default().inhibition_radius`. Correction-derived
+/// boundaries use the relative C/C' margin, which ignores the radius, so this
+/// only bites a hypothetical absolute boundary.
+const INHIBITION_RADIUS: f32 = 0.5;
+
+/// Escalate (route to no one) when a boundary inhibits the task above this,
+/// mirroring the CLI learned-route gate. A task inside a known failure scope is
+/// handed up rather than served by an expert that provably fails there.
+const BOUNDARY_ESCALATE_THRESHOLD: f32 = 0.5;
 
 #[derive(Serialize, schemars::JsonSchema)]
 struct RouteHit {
@@ -962,7 +979,7 @@ mod tests {
     use super::*;
     use antumbra_core::router::{LearnedRouter, RouterExpert};
     use antumbra_core::testing::FixedEmbedder;
-    use antumbra_core::{Expert, ExpertId, Generation};
+    use antumbra_core::{BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain};
     use antumbra_store::repo::{expert, router};
     use antumbra_store::EMBED_DIM;
     use chrono::Utc;
@@ -1173,6 +1190,75 @@ mod tests {
                 .iter()
                 .any(|h| h.private && h.expert_id == "expert:mine"),
             "the user's private expert must be routable"
+        );
+    }
+
+    #[tokio::test]
+    async fn route_escalates_when_a_boundary_inhibits_the_task() {
+        let s = server().await;
+        // A permissive router that would otherwise route the task.
+        router::save(
+            &s.store,
+            &LearnedRouter {
+                weights: vec![1.0; EMBED_DIM],
+                experts: vec![RouterExpert {
+                    id: ExpertId::new("expert:adder"),
+                    centroid: vec![0.0; EMBED_DIM],
+                }],
+                temperature: 0.1,
+                floor: -1.0,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Without a boundary, the task routes.
+        let r = s
+            .route(Parameters(RouteParams {
+                task: "add two numbers".into(),
+                top_k: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert!(r.0.covered && !r.0.escalate);
+
+        // An actionable boundary whose failure context IS this task region: the
+        // task sits closer to C than to C', so inhibition fires (ADR-0004) and
+        // the served path escalates rather than route to an expert that fails here.
+        // C embeds to the task region itself (sim_fail = 1), C' to a far context,
+        // so the relative margin clears the escalate threshold.
+        let emb = FixedEmbedder::new(EMBED_DIM);
+        let fail_vec = emb.embed("add two numbers").await.unwrap();
+        let ok_vec = emb.embed("a poem about gardening").await.unwrap();
+        boundary::upsert(
+            &s.store,
+            &FailureBoundary {
+                id: BoundaryId::new("boundary:b1"),
+                behavior: "add two numbers".into(),
+                fail_context: serde_json::json!({ "domain": "math" }),
+                near_ok_context: Some(serde_json::json!({ "domain": "prose" })),
+                governing_features: vec!["domain".into()],
+                grain: Some(Grain::Project),
+                context_vec: Some(fail_vec),
+                ok_context_vec: Some(ok_vec),
+                confidence: 0.9,
+                generation: Generation::ZERO,
+                created_at: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let r = s
+            .route(Parameters(RouteParams {
+                task: "add two numbers".into(),
+                top_k: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert!(
+            r.0.escalate && r.0.routes.is_empty(),
+            "a task inside a known failure scope escalates"
         );
     }
 
