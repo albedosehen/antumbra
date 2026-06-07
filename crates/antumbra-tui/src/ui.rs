@@ -29,10 +29,13 @@ pub fn render(f: &mut Frame, app: &App) {
     header(f, app, rows[0]);
     body(f, app, rows[1]);
     footer(f, app, rows[2]);
-    match app.mode {
-        Mode::Help => help_overlay(f, app),
-        Mode::Palette => palette_overlay(f, app),
-        Mode::Normal => {}
+    if app.mode != Mode::Normal {
+        overlay::dim_backdrop(f, f.area());
+        match app.mode {
+            Mode::Help => help_overlay(f, app),
+            Mode::Palette => palette_overlay(f, app),
+            Mode::Normal => {}
+        }
     }
 }
 
@@ -113,32 +116,20 @@ fn penumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     } else {
         app.shadows
             .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let sel = focused && i == app.selected_shadow;
-                let mut style = Style::default().fg(shadow_color(&t, s.status.as_str()));
-                if sel {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
+            .map(|s| {
                 let glyph = match s.status.as_str() {
                     "graduated" => "✦",
                     "pruned" => "×",
                     _ => "◌",
                 };
                 Line::from(Span::styled(
-                    format!(
-                        "{}{} {} · {}",
-                        if sel { "▸ " } else { "  " },
-                        glyph,
-                        s.id.as_str(),
-                        s.status.as_str()
-                    ),
-                    style,
+                    format!("{} {} · {}", glyph, s.id.as_str(), s.status.as_str()),
+                    Style::default().fg(shadow_color(&t, s.status.as_str())),
                 ))
             })
             .collect()
     };
-    let selected = if focused { app.selected_shadow } else { 0 };
+    let selected = (focused && !app.shadows.is_empty()).then_some(app.selected_shadow);
     scroll::list(
         f,
         &t,
@@ -160,27 +151,16 @@ fn antumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     } else {
         app.boundaries
             .iter()
-            .enumerate()
-            .map(|(i, b)| {
-                let sel = focused && i == app.selected_boundary;
+            .map(|b| {
                 let actionable = b.is_actionable();
-                let mut style = Style::default().fg(if actionable { t.alert } else { t.dim });
-                if sel {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
                 Line::from(Span::styled(
-                    format!(
-                        "{}{} {}",
-                        if sel { "▸ " } else { "  " },
-                        if actionable { "⛔" } else { "○" },
-                        b.behavior
-                    ),
-                    style,
+                    format!("{} {}", if actionable { "⛔" } else { "○" }, b.behavior),
+                    Style::default().fg(if actionable { t.alert } else { t.dim }),
                 ))
             })
             .collect()
     };
-    let selected = if focused { app.selected_boundary } else { 0 };
+    let selected = (focused && !app.boundaries.is_empty()).then_some(app.selected_boundary);
     scroll::list(
         f,
         &t,
@@ -210,32 +190,23 @@ fn palette_overlay(f: &mut Frame, app: &App) {
         rows[0],
     );
 
-    // Ranked matches, the selection marked.
-    let selected = app.palette.selected.min(matches.len().saturating_sub(1));
-    let lines: Vec<Line> = if matches.is_empty() {
-        vec![Line::from(Span::styled(
-            "  (no matching command)",
-            Style::default().fg(t.dim),
-        ))]
+    // Ranked matches as a list, the selection full-row highlighted.
+    if matches.is_empty() {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                "  (no matching command)",
+                Style::default().fg(t.dim),
+            )),
+            rows[1],
+        );
     } else {
-        matches
+        let lines: Vec<Line> = matches
             .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                let sel = i == selected;
-                let style = if sel {
-                    Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(t.ink)
-                };
-                Line::from(Span::styled(
-                    format!("{}{}", if sel { "▸ " } else { "  " }, c.label),
-                    style,
-                ))
-            })
-            .collect()
-    };
-    f.render_widget(Paragraph::new(lines), rows[1]);
+            .map(|c| Line::from(Span::styled(c.label, Style::default().fg(t.ink))))
+            .collect();
+        let block = Block::default();
+        scroll::list(f, &t, rows[1], block, lines, Some(app.palette.selected));
+    }
 }
 
 /// The keybinding reference, a centred modal over the live view (`?` toggles).
@@ -540,21 +511,11 @@ fn boundaries(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(t.dim),
         )));
     } else {
-        for (i, b) in app.boundaries.iter().enumerate() {
-            let sel = i == app.selected_boundary;
+        for b in &app.boundaries {
             let actionable = b.is_actionable();
-            let mut style = Style::default().fg(if actionable { t.alert } else { t.dim });
-            if sel {
-                style = style.add_modifier(Modifier::BOLD);
-            }
             lines.push(Line::from(Span::styled(
-                format!(
-                    "{}{} {}",
-                    if sel { "▸ " } else { "  " },
-                    if actionable { "⛔" } else { "○" },
-                    b.behavior
-                ),
-                style,
+                format!("{} {}", if actionable { "⛔" } else { "○" }, b.behavior),
+                Style::default().fg(if actionable { t.alert } else { t.dim }),
             )));
         }
     }
@@ -570,7 +531,7 @@ fn boundaries(f: &mut Frame, app: &App, area: Rect) {
             ),
         ),
         lines,
-        app.selected_boundary,
+        (!app.boundaries.is_empty()).then_some(app.selected_boundary),
     );
 
     let mut d: Vec<Line> = Vec::new();
@@ -635,12 +596,7 @@ fn shadows(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(t.dim),
         )));
     } else {
-        for (i, s) in app.shadows.iter().enumerate() {
-            let sel = i == app.selected_shadow;
-            let mut style = Style::default().fg(shadow_color(&t, s.status.as_str()));
-            if sel {
-                style = style.add_modifier(Modifier::BOLD);
-            }
+        for s in &app.shadows {
             let glyph = match s.status.as_str() {
                 "graduated" => "✦",
                 "pruned" => "×",
@@ -648,14 +604,13 @@ fn shadows(f: &mut Frame, app: &App, area: Rect) {
             };
             lines.push(Line::from(Span::styled(
                 format!(
-                    "{}{} {} · g{} · {}",
-                    if sel { "▸ " } else { "  " },
+                    "{} {} · g{} · {}",
                     glyph,
                     s.id.as_str(),
                     s.generation.0,
                     s.status.as_str()
                 ),
-                style,
+                Style::default().fg(shadow_color(&t, s.status.as_str())),
             )));
         }
     }
@@ -671,7 +626,7 @@ fn shadows(f: &mut Frame, app: &App, area: Rect) {
             ),
         ),
         lines,
-        app.selected_shadow,
+        (!app.shadows.is_empty()).then_some(app.selected_shadow),
     );
 
     let mut d: Vec<Line> = Vec::new();

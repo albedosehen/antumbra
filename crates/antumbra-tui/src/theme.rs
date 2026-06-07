@@ -33,6 +33,8 @@ pub struct Theme {
     pub value: Color,
     /// Selection / the tri-node core / headings highlight.
     pub accent: Color,
+    /// The background fill behind the selected list row.
+    pub sel: Color,
     /// Actionable boundary, pruned shadow, error.
     pub alert: Color,
     /// Graduated shadow, success.
@@ -55,6 +57,7 @@ pub const SHADOW: Theme = Theme {
     dim: Color::Rgb(70, 90, 110),
     value: Color::Rgb(180, 200, 215),
     accent: Color::Rgb(120, 220, 255),
+    sel: Color::Rgb(22, 44, 60),
     alert: Color::Rgb(200, 90, 90),
     success: Color::Rgb(90, 200, 150),
     warning: Color::Rgb(210, 190, 90),
@@ -71,6 +74,7 @@ pub const EMBER: Theme = Theme {
     dim: Color::Rgb(105, 80, 60),
     value: Color::Rgb(225, 205, 180),
     accent: Color::Rgb(255, 180, 90),
+    sel: Color::Rgb(58, 36, 18),
     alert: Color::Rgb(235, 95, 70),
     success: Color::Rgb(205, 200, 95),
     warning: Color::Rgb(235, 160, 70),
@@ -87,6 +91,7 @@ pub const MONO: Theme = Theme {
     dim: Color::Rgb(95, 95, 102),
     value: Color::Rgb(200, 200, 208),
     accent: Color::Rgb(150, 200, 255),
+    sel: Color::Rgb(44, 44, 52),
     alert: Color::Rgb(220, 120, 120),
     success: Color::Rgb(195, 210, 195),
     warning: Color::Rgb(220, 210, 160),

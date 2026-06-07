@@ -59,6 +59,12 @@ enum Command {
         /// Body layout to render: focused, dashboard, or graph.
         #[arg(long, default_value = "focused")]
         layout: String,
+        /// Focused region: experts, shadows, or boundaries.
+        #[arg(long, default_value = "experts")]
+        focus: String,
+        /// Overlay to render on top: none, help, or palette.
+        #[arg(long, default_value = "none")]
+        overlay: String,
         /// Render a seeded in-memory demo population instead of reading `--url`.
         #[arg(long)]
         demo: bool,
@@ -94,6 +100,8 @@ async fn app_main() -> Result<()> {
             height,
             at_ms,
             layout,
+            focus,
+            overlay,
             demo,
         }) => {
             let store = if demo {
@@ -107,6 +115,16 @@ async fn app_main() -> Result<()> {
                 "graph" => app::LayoutMode::Graph,
                 _ => app::LayoutMode::Focused,
             });
+            app.set_focus(match focus.as_str() {
+                "shadows" => app::Focus::Shadows,
+                "boundaries" => app::Focus::Boundaries,
+                _ => app::Focus::Experts,
+            });
+            match overlay.as_str() {
+                "help" => app.toggle_help(),
+                "palette" => app.open_palette(),
+                _ => {}
+            }
             let buf = snapshot::render(&mut app, width, height, at_ms)?;
             let text = snapshot::to_text(&buf);
             std::fs::write(format!("{out}.txt"), &text)?;
