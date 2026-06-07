@@ -12,18 +12,22 @@ cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui[\\/]
 cargo llvm-cov --workspace --summary-only
 ```
 
-**Result (2026-06-07):** **92.6% line / 90.5% region / 90.4% function** over the
+**Result (2026-06-07):** **92.7% line / 90.6% region / 90.6% function** over the
 measured surface — which now **includes** the `antumbra-tui` logic (only the TUI
-render layer + binary entrypoints are excluded). The library crates are 88–100%
-each; within the console, `events.rs`/`theme.rs`/`overlay.rs` are ~100%,
-`transition.rs`/`command.rs`/`scroll.rs` ~95–99%, `app.rs` 88%, and `pacing.rs`
-89% (the remainder is Windows-FFI monitor detection that can't run on CI).
+render layer + binary entrypoints are excluded). Most library crates sit at
+89–100%; the low outlier is `antumbra-embed` (~67%), whose live HTTP path is
+network-gated (see below). Within the console, `events.rs`/`theme.rs` are 100%,
+`overlay.rs`/`scroll.rs`/`command.rs` ~98–99%, `transition.rs` 95%, `app.rs`
+~90%, and `pacing.rs` 89% (the remainder is Windows-FFI monitor detection that
+can't run on CI).
 
-The main untested remainders are paths that need a live `ws://` SurrealDB or a
-GPU and so belong to the docker-/`models`-gated suites: the store's `signin_root`
-root-credential branch, the sync worker's push/pull cycle (an in-memory store is
-fresh per connect, so reconcile always moves nothing), and the `models`-gated
-candle trainer code (not compiled in the default build).
+The main untested remainders are paths that need a live `ws://` SurrealDB, a
+remote HTTP endpoint, or a GPU, and so belong to the docker-/network-/`models`-gated
+suites: the store's `signin_root` root-credential branch; the sync worker's
+push/pull cycle (an in-memory store is fresh per connect, so reconcile always
+moves nothing); the `antumbra-embed` HTTP client's live request path (the
+`EmbedTransport` seam is unit-tested, but the real `ureq` call needs a server);
+and the `models`-gated candle trainer code (not compiled in the default build).
 
 ## What is excluded from the headline metric, and why
 
