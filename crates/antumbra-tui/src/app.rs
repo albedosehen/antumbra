@@ -89,6 +89,10 @@ pub struct App {
     pub clock_ms: f64,
     /// Seconds since the last reload, so the view refreshes periodically.
     pub since_reload_ms: f64,
+    /// Time since the last keypress (ms); drives the idle frame-rate throttle.
+    pub since_input_ms: f64,
+    /// Whether the loop is currently eased to the idle rate (no recent input).
+    pub idle: bool,
     pub should_quit: bool,
 }
 
@@ -112,6 +116,8 @@ impl App {
             fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
+            since_input_ms: 0.0,
+            idle: false,
             should_quit: false,
         };
         app.reload(store).await?;
@@ -295,6 +301,22 @@ impl App {
     pub fn tick(&mut self, dt_ms: f64) {
         self.clock_ms += dt_ms;
         self.since_reload_ms += dt_ms;
+        self.since_input_ms += dt_ms;
+    }
+
+    /// Note a keypress: restore full-rate rendering on the next frame.
+    pub fn note_input(&mut self) {
+        self.since_input_ms = 0.0;
+    }
+
+    /// The rate to pace this frame at: the full target while interacting or
+    /// animating, eased to [`crate::pacing::IDLE_FPS`] after an idle spell.
+    pub fn frame_cap(&self, animating: bool) -> u32 {
+        if animating || self.since_input_ms < crate::pacing::IDLE_AFTER_MS {
+            self.target_fps
+        } else {
+            self.target_fps.min(crate::pacing::IDLE_FPS)
+        }
     }
 
     /// Reload from the store roughly every two seconds so the console stays live

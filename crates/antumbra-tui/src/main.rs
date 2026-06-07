@@ -368,6 +368,11 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
             since_monitor_ms = 0.0;
         }
 
+        // Full rate while a transition animates or input is recent; ease to the
+        // idle rate otherwise so a still view doesn't peg a core.
+        let cap = app.frame_cap(transition.is_some());
+        app.idle = cap < app.target_fps;
+
         let tick = FxDuration::from(dt);
         terminal.draw(|f| {
             ui::render(f, app);
@@ -379,15 +384,16 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
             transition = None;
         }
 
-        // Pace to the target rate, spending the rest of the frame budget waiting
-        // on (and draining) input so keys stay responsive at any cap.
-        let budget = pacing::frame_budget(app.target_fps);
+        // Pace to the (possibly idle) cap, spending the rest of the frame budget
+        // waiting on (and draining) input so keys stay responsive at any rate.
+        let budget = pacing::frame_budget(cap);
         while let Some(remaining) = budget.checked_sub(frame_start.elapsed()) {
             if remaining.is_zero() || !event::poll(remaining)? {
                 break;
             }
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
+                    app.note_input();
                     match app.mode {
                         Mode::Help => match key.code {
                             KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') => {

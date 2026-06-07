@@ -334,10 +334,15 @@ fn header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Style::default().fg(t.ink),
     ));
-    // Live frame-rate readout (the cap is set in the footer with `±`) and the
-    // active layout (cycled with `l`).
+    // Live frame-rate readout (the cap is set in the footer with `±`; `idle`
+    // marks the eased rate after a still spell) and the active layout (`l`).
     spans.push(Span::styled(
-        format!("  ·  {} fps  ·  {}", app.shown_fps(), app.layout.name()),
+        format!(
+            "  ·  {} fps{}  ·  {}",
+            app.shown_fps(),
+            if app.idle { " idle" } else { "" },
+            app.layout.name()
+        ),
         Style::default().fg(t.dim),
     ));
     f.render_widget(Paragraph::new(Line::from(spans)).block(panel(&t, "")), area);

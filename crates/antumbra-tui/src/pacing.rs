@@ -14,6 +14,14 @@ pub const MAX_FPS: u32 = 480;
 /// lands exactly on 165 or 244 rather than near it.
 pub const PRESETS: [u32; 9] = [30, 60, 90, 120, 144, 165, 240, 244, 360];
 
+/// After this long without a keypress (and no animation), the loop eases to
+/// [`IDLE_FPS`] so the perpetually-orbiting graph stops pegging a core.
+pub const IDLE_AFTER_MS: f64 = 5000.0;
+
+/// The calm-but-still-smooth rate the loop idles at. Capped by the target, so a
+/// sub-60 target never idles *faster* than it runs.
+pub const IDLE_FPS: u32 = 60;
+
 /// The next preset above `fps` (or `fps` itself if already at the top).
 pub fn next_preset(fps: u32) -> u32 {
     PRESETS

@@ -182,6 +182,8 @@ mod tests {
             fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
+            since_input_ms: 0.0,
+            idle: false,
             should_quit: false,
         }
     }
@@ -240,6 +242,28 @@ mod tests {
         app.experts.clear();
         let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
         assert!(text.contains("no experts yet"), "empty-state hint shown");
+    }
+
+    // The loop runs full-rate while interacting or animating, eases to 60 after
+    // an idle spell, and the header marks the eased state.
+    #[test]
+    fn idle_throttle_eases_the_rate_and_shows_in_header() {
+        let mut app = demo_app();
+        app.target_fps = 244;
+        // Fresh input: full rate.
+        app.note_input();
+        assert_eq!(app.frame_cap(false), 244);
+        // A still spell eases to 60 — unless something is animating.
+        app.tick(10_000.0);
+        assert_eq!(app.frame_cap(true), 244, "animation keeps full rate");
+        assert_eq!(app.frame_cap(false), 60, "an idle, still view eases to 60");
+        // The header reflects the eased state.
+        app.idle = true;
+        let text = to_text(&render(&mut app, 130, 12, 1600.0).unwrap());
+        assert!(
+            text.contains("idle"),
+            "header marks the idle throttle:\n{text}"
+        );
     }
 
     // The dashboard layout shows all three regions at once (umbra, penumbra,
