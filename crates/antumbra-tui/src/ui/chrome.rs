@@ -3,13 +3,33 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, Page};
 use crate::theme::rgb;
 
 use super::{panel, pulse};
+
+/// The top-level tab strip: one numbered tab per [`Page`], active one accented.
+pub(super) fn tabs(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let titles: Vec<Line> = Page::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, p)| Line::from(format!(" {} {} ", i + 1, p.title())))
+        .collect();
+    let tabs = Tabs::new(titles)
+        .select(app.page.index())
+        .style(Style::default().fg(t.dim))
+        .highlight_style(
+            Style::default()
+                .fg(t.accent)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        )
+        .divider(Span::styled("·", Style::default().fg(t.dim)));
+    f.render_widget(tabs, area);
+}
 
 pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
@@ -80,6 +100,8 @@ pub(super) fn footer(f: &mut Frame, app: &App, area: Rect) {
         lbl(" select  ".into()),
         key(" tab "),
         lbl(format!(" focus:{focus}  ")),
+        key(" [] "),
+        lbl(format!(" page:{}  ", app.page.title())),
         key(" t "),
         lbl(format!(" theme:{}  ", t.name)),
         key(" ± "),

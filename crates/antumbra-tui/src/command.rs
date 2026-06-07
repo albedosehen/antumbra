@@ -3,13 +3,14 @@
 //! the typed query. Keybindings and the palette both resolve to an [`Action`] the
 //! loop applies in one place.
 
-use crate::app::{Focus, LayoutMode};
+use crate::app::{Focus, LayoutMode, Page};
 
 /// Something the console can do, triggered by a key or chosen from the palette.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
     Reload,
     CycleTheme,
+    Page(Page),
     Focus(Focus),
     Layout(LayoutMode),
     FpsUp,
@@ -31,6 +32,22 @@ pub struct Command {
 
 /// The palette's full command list, in default (unfiltered) order.
 pub const COMMANDS: &[Command] = &[
+    Command {
+        label: "page · population",
+        action: Action::Page(Page::Population),
+    },
+    Command {
+        label: "page · memory networks",
+        action: Action::Page(Page::Memory),
+    },
+    Command {
+        label: "page · generational loop",
+        action: Action::Page(Page::Loop),
+    },
+    Command {
+        label: "page · evaluations",
+        action: Action::Page(Page::Evals),
+    },
     Command {
         label: "focus umbra · experts",
         action: Action::Focus(Focus::Experts),

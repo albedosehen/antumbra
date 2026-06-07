@@ -7,6 +7,7 @@
 │  tab     switch focus: umbra / penumbra / antumbra   │
 │                                                      │
 │view                                                  │
+│  [ ] 1-4 switch page: population/memory/loop/evals   │
 │  l       cycle layout: focused / dashboard / graph   │
 │  t       cycle theme: shadow / ember / mono          │
 │                                                      │
@@ -18,9 +19,8 @@
 │  /       filter the focused list, jump to a match    │
 │  :       command palette (ask · route a task here)   │
 │  e       live event stream of store changes          │
-│  x       act: prune shadow / delete boundary         │
+│  x       prune/graduate · freeze · delete            │
 │  r       reload from the store                       │
 │  ? esc   close this help                             │
 │  q       quit                                        │
-│                                                      │
 ╰──────────────────────────────────────────────────────╯

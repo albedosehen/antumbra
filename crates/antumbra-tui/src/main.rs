@@ -413,6 +413,10 @@ async fn apply_action(
             app.cycle_theme();
             *transition = Some(transition::theme_wash(&app.theme()));
         }
+        Action::Page(page) => {
+            app.set_page(page);
+            *transition = Some(transition::layout_switch());
+        }
         Action::Focus(target) => {
             app.set_focus(target);
             *transition = Some(transition::focus_switch());
@@ -638,6 +642,18 @@ async fn run(
                             KeyCode::Tab => {
                                 app.toggle_focus();
                                 transition = Some(transition::focus_switch());
+                            }
+                            KeyCode::Char(']') => {
+                                app.cycle_page(1);
+                                transition = Some(transition::layout_switch());
+                            }
+                            KeyCode::Char('[') => {
+                                app.cycle_page(-1);
+                                transition = Some(transition::layout_switch());
+                            }
+                            KeyCode::Char(c @ '1'..='4') => {
+                                app.goto_page(c as usize - '1' as usize);
+                                transition = Some(transition::layout_switch());
                             }
                             KeyCode::Char('l') | KeyCode::Char('L') => {
                                 app.cycle_layout();

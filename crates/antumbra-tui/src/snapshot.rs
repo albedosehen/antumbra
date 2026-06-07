@@ -192,6 +192,7 @@ mod tests {
             selected: 0,
             selected_boundary: 0,
             selected_shadow: 0,
+            page: crate::app::Page::Population,
             focus: Focus::Experts,
             layout: LayoutMode::Focused,
             mode: Mode::Normal,

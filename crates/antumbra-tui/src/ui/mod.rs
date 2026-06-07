@@ -15,13 +15,13 @@ mod panels;
 
 use std::f64::consts::TAU;
 
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType};
+use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
-use crate::app::{App, Focus, LayoutMode, Mode};
+use crate::app::{App, Focus, LayoutMode, Mode, Page};
 use crate::overlay;
 use crate::theme::Theme;
 
@@ -30,13 +30,15 @@ pub use overlays::overlay_area;
 pub fn render(f: &mut Frame, app: &App) {
     let rows = Layout::vertical([
         Constraint::Length(3),
+        Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .split(f.area());
     chrome::header(f, app, rows[0]);
-    body(f, app, rows[1]);
-    chrome::footer(f, app, rows[2]);
+    chrome::tabs(f, app, rows[1]);
+    page_body(f, app, rows[2]);
+    chrome::footer(f, app, rows[3]);
     if app.mode != Mode::Normal {
         overlay::dim_backdrop(f, f.area());
         match app.mode {
@@ -50,6 +52,64 @@ pub fn render(f: &mut Frame, app: &App) {
             Mode::Normal => {}
         }
     }
+}
+
+/// Route the body to the active page. `Population` is the live view; the other
+/// pages surface store subsystems and are placeholders until built out.
+fn page_body(f: &mut Frame, app: &App, area: Rect) {
+    match app.page {
+        Page::Population => body(f, app, area),
+        Page::Memory => placeholder(
+            f,
+            app,
+            area,
+            " memory networks ",
+            "world · bank · opinion  +  contradiction / supersession edge graph",
+        ),
+        Page::Loop => placeholder(
+            f,
+            app,
+            area,
+            " generational loop ",
+            "grow → explore → score → decide → consolidate  ·  generation timeline",
+        ),
+        Page::Evals => placeholder(
+            f,
+            app,
+            area,
+            " evaluations ",
+            "regression tripwire  ·  pass / fail metrics per expert",
+        ),
+    }
+}
+
+/// A page not yet built out: a titled panel naming what it will surface.
+fn placeholder(f: &mut Frame, app: &App, area: Rect, title: &str, blurb: &str) {
+    let t = app.theme();
+    let block = panel(
+        &t,
+        Span::styled(title.to_string(), Style::default().fg(t.ink)),
+    );
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if inner.height < 3 {
+        return;
+    }
+    let lines = vec![
+        Line::from(Span::styled(
+            "— in progress —",
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(blurb, Style::default().fg(t.dim))),
+    ];
+    let mid = Rect {
+        x: inner.x,
+        y: inner.y + inner.height / 2 - 1,
+        width: inner.width,
+        height: 3,
+    };
+    f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), mid);
 }
 
 /// The body between header and footer, arranged per the active layout: graph

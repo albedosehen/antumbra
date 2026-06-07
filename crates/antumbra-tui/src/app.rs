@@ -72,6 +72,42 @@ impl LayoutMode {
     }
 }
 
+/// A top-level page of the console, switched via the tab strip (`[`/`]`, `1`-`4`,
+/// or the palette). `Population` is the live umbra/penumbra/antumbra view; the
+/// others surface subsystems that the store already holds but the console has
+/// not shown before.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Page {
+    /// The living population: experts, shadows, boundaries, and the gate.
+    Population,
+    /// The penumbra memory networks (world / bank / opinion) and their edges.
+    Memory,
+    /// The generational loop state: grow, explore, score, decide, consolidate.
+    Loop,
+    /// Evaluation runs and the regression tripwire.
+    Evals,
+}
+
+impl Page {
+    /// Every page, in tab order.
+    pub const ALL: [Page; 4] = [Page::Population, Page::Memory, Page::Loop, Page::Evals];
+
+    /// The lowercase tab label.
+    pub fn title(self) -> &'static str {
+        match self {
+            Page::Population => "population",
+            Page::Memory => "memory",
+            Page::Loop => "loop",
+            Page::Evals => "evals",
+        }
+    }
+
+    /// Position in [`Page::ALL`] (the tab index).
+    pub fn index(self) -> usize {
+        Self::ALL.iter().position(|&p| p == self).unwrap_or(0)
+    }
+}
+
 /// The command palette's transient state: the typed query and the highlighted
 /// match (an index into the filtered list).
 #[derive(Default)]
@@ -93,6 +129,8 @@ pub struct App {
     pub selected_boundary: usize,
     /// Index into `shadows` of the highlighted shadow (when focused there).
     pub selected_shadow: usize,
+    /// The active top-level page (tab strip).
+    pub page: Page,
     /// Which list navigation/detail targets (umbra / penumbra / antumbra).
     pub focus: Focus,
     /// How the body arranges its panels (focused / dashboard / graph).
@@ -166,6 +204,7 @@ impl App {
             selected: 0,
             selected_boundary: 0,
             selected_shadow: 0,
+            page: Page::Population,
             focus: Focus::Experts,
             layout: LayoutMode::Focused,
             mode: Mode::Normal,
@@ -722,6 +761,25 @@ impl App {
     /// Set the body layout (the palette's layout commands).
     pub fn set_layout(&mut self, layout: LayoutMode) {
         self.layout = layout;
+    }
+
+    /// Jump straight to a page (the palette / tab-number keys).
+    pub fn set_page(&mut self, page: Page) {
+        self.page = page;
+    }
+
+    /// Step the active page by `delta` tabs, wrapping (`[` / `]`).
+    pub fn cycle_page(&mut self, delta: i32) {
+        let n = Page::ALL.len() as i32;
+        let i = (self.page.index() as i32 + delta).rem_euclid(n);
+        self.page = Page::ALL[i as usize];
+    }
+
+    /// Jump to a page by tab index (the `1`-`4` keys); ignored if out of range.
+    pub fn goto_page(&mut self, idx: usize) {
+        if let Some(&page) = Page::ALL.get(idx) {
+            self.page = page;
+        }
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.

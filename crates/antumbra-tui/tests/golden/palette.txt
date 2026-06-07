@@ -1,7 +1,11 @@
 ╭ command ─────────────────────────────────────────────╮
 │› ▏                                                   │
 │                                                      │
-│▸ focus umbra · experts                               │
+│▸ page · population                                   │
+│  page · memory networks                              │
+│  page · generational loop                            │
+│  page · evaluations                                  │
+│  focus umbra · experts                               │
 │  focus penumbra · shadows                            │
 │  focus antumbra · boundaries                         │
 │  theme · cycle palette                               │
