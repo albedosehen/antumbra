@@ -11,6 +11,7 @@
 
 pub mod boundary;
 pub mod compartment;
+pub mod document;
 pub mod error;
 pub mod evaluation;
 pub mod expert;
@@ -32,11 +33,13 @@ pub use error::{AntumbraError, Result};
 // Re-export the load-bearing types at the crate root for ergonomic downstream use.
 pub use boundary::{governing_feature_from_pair, BoundaryFinding, FailureBoundary, Grain};
 pub use compartment::{Capability, Compartment, Grant, Origin};
+pub use document::{chunk_text, DocumentChunk};
 pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};
 pub use expert::{cosine_similarity, Expert};
 pub use generational::{GenerationHead, LoopState};
 pub use ids::{
-    BoundaryId, CompartmentId, ExpertId, Generation, MemoryId, RunId, ShadowId, TenantId, UserId,
+    BoundaryId, CompartmentId, DocumentChunkId, ExpertId, Generation, MemoryId, RunId, ShadowId,
+    TenantId, UserId,
 };
 pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork, MemoryStatus};
 pub use orchestration::{ComposeStrategy, OrchestrationRun, OrchestrationStatus};

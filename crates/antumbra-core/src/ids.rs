@@ -65,6 +65,11 @@ string_id!(
     MemoryId
 );
 string_id!(
+    /// One embedded chunk of an ingested knowledge document (P-3), distinct from
+    /// an episodic [`MemoryId`].
+    DocumentChunkId
+);
+string_id!(
     /// The tenant: the isolation key for the Penumbra (Kushtaka's `workspace_id`
     /// maps onto this). Engine-enforced via `PERMISSIONS ... WHERE tenant_id =
     /// $auth.tenant`; an owner role queries across tenants, and an agent

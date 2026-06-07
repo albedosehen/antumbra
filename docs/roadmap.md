@@ -221,10 +221,17 @@ compartment/`memory_edge` graph (2D first, 3D after). Inherits the engine ACL
 (ADR-0013) — it can see no more than the bound `(tenant, user)`.
 
 ### P-3 · Knowledge documents
-**Status:** queued.
-A first-class `document` type (ingest → chunk → embed → recall) distinct from
-episodic memory, surfaced in recall and the dashboard — the predecessor's knowledge
-docs as a native Antumbra type.
+**Status:** DONE (ingest → chunk → embed → recall); the document *list* surface
+in the dashboard waits on P-2.
+A first-class `document` type distinct from episodic memory — reference material an
+agent was *given* vs. what it *earned*, kept separate so neither drowns the other.
+`antumbra_core::chunk_text` splits a document into overlapping chunks at natural
+boundaries (paragraph → sentence → whitespace); a `document_chunk` table
+(tenant-isolated like `memory`, its own HNSW index) stores each embedded chunk; the
+MCP `ingest_document` (chunk → embed → store) and `recall_documents` (semantic
+search) tools surface it (and over the REST `/mcp/call` shim). v0 identifies a
+document by its title (`document::list_titles` is the document list); a separate
+`document` metadata table is a later refinement.
 
 ### P-4 · Interactive control (expert mixer + agent drive)
 **Status:** queued (after P-2 lands).

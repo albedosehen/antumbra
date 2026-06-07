@@ -227,6 +227,26 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("memory_edge_to_idx", ["tenant_id", "to_id"]),
                 index("memory_edge_created_at_idx", ["created_at"]),
             ]),
+        // Knowledge documents (P-3): a document's embedded chunks, a distinct type
+        // from episodic `memory` but tenant-isolated the same way (engine
+        // PERMISSIONS + the repo filter). HNSW-indexed for semantic recall over
+        // reference material.
+        table_schema("document_chunk")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(TENANT_PERMS)
+            .with_indexes([
+                index("document_chunk_tenant_title_idx", ["tenant_id", "title"]),
+                index("document_chunk_created_at_idx", ["created_at"]),
+                hnsw_index(
+                    "document_chunk_embedding_hnsw",
+                    "embedding",
+                    embed_dim,
+                    HnswDistanceType::Cosine,
+                    MTreeVectorType::F32,
+                    None,
+                    None,
+                ),
+            ]),
         // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
         // subqueries resolve; ownership/sharing is carried in the rows (owner +
         // the grant table) and enforced by the memory rule.

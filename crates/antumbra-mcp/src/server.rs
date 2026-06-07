@@ -18,10 +18,11 @@ use serde::{Deserialize, Serialize};
 
 use antumbra_core::ports::{ActRequest, Embedder};
 use antumbra_core::{
-    Capability, ClusterConfig, Compartment, CompartmentId, EdgeType, ExpertId, Grant, Memory,
-    MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId, UserId,
+    Capability, ClusterConfig, Compartment, CompartmentId, DocumentChunk, DocumentChunkId,
+    EdgeType, ExpertId, Grant, Memory, MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId,
+    UserId,
 };
-use antumbra_store::repo::{boundary, compartment, edge, expert, memory, router};
+use antumbra_store::repo::{boundary, compartment, document, edge, expert, memory, router};
 use antumbra_store::Store;
 
 /// One (tenant, user) MCP session over its Penumbra. `#[tool_handler]` resolves
@@ -352,6 +353,56 @@ struct MemoriesOut {
     memories: Vec<MemoryView>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+struct IngestDocumentParams {
+    /// The document's title (used to group and name its chunks).
+    title: String,
+    /// The full document text to ingest.
+    content: String,
+    /// Where the document came from (path / url / note).
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct IngestedOut {
+    title: String,
+    chunks: u32,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct RecallDocumentsParams {
+    /// What to recall from the ingested documents.
+    query: String,
+    /// How many chunks to return (default 5).
+    top_k: Option<u32>,
+}
+
+/// A document chunk as returned to a caller (without its embedding).
+#[derive(Serialize, schemars::JsonSchema)]
+struct DocumentChunkView {
+    title: String,
+    source: Option<String>,
+    ordinal: u32,
+    content: String,
+}
+
+impl From<&DocumentChunk> for DocumentChunkView {
+    fn from(c: &DocumentChunk) -> Self {
+        DocumentChunkView {
+            title: c.title.clone(),
+            source: c.source.clone(),
+            ordinal: c.ordinal,
+            content: c.content.clone(),
+        }
+    }
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct DocumentChunksOut {
+    chunks: Vec<DocumentChunkView>,
+}
+
 #[derive(Serialize, schemars::JsonSchema)]
 struct ReinforceOut {
     found: bool,
@@ -412,6 +463,13 @@ struct RouteParams {
 /// the shared learned router, so they are matched directly by centroid; a
 /// per-private-expert learned boundary is the eventual refinement).
 const PRIVATE_ROUTE_FLOOR: f32 = 0.3;
+
+/// Document chunking (P-3): target chunk size and inter-chunk overlap, in chars.
+/// ~1200 chars is roughly a paragraph or two — enough context per chunk for the
+/// 384-d model without diluting the embedding; the overlap keeps a fact that
+/// straddles a cut wholly present in one chunk.
+const DOCUMENT_CHUNK_CHARS: usize = 1200;
+const DOCUMENT_CHUNK_OVERLAP: usize = 200;
 
 /// Inhibition radius for the legacy absolute-scope boundary path; mirrors
 /// `antumbra_gate::GateConfig::default().inhibition_radius`. Correction-derived
@@ -608,6 +666,62 @@ impl McpServer {
         .map_err(err)?;
         Ok(Json(MemoriesOut {
             memories: hits.iter().map(MemoryView::from).collect(),
+        }))
+    }
+
+    /// Ingest a knowledge document: chunk, embed, and store it for recall. A
+    /// document is reference material the agent was *given*, kept distinct from
+    /// the episodic memory it *earned* (ADR-0004/0009) so neither drowns the other.
+    #[tool(
+        description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored."
+    )]
+    async fn ingest_document(
+        &self,
+        Parameters(p): Parameters<IngestDocumentParams>,
+    ) -> Result<Json<IngestedOut>, ErrorData> {
+        let now = Utc::now();
+        let mut chunks = Vec::new();
+        for (ordinal, content) in
+            antumbra_core::chunk_text(&p.content, DOCUMENT_CHUNK_CHARS, DOCUMENT_CHUNK_OVERLAP)
+                .into_iter()
+                .enumerate()
+        {
+            let embedding = self.embedder.embed(&content).await.map_err(err)?;
+            chunks.push(DocumentChunk {
+                id: DocumentChunkId::new(next_id("docchunk")),
+                tenant: self.tenant.clone(),
+                title: p.title.clone(),
+                source: p.source.clone(),
+                ordinal: ordinal as u32,
+                content,
+                embedding: Some(embedding),
+                created_at: now,
+            });
+        }
+        let stored = chunks.len() as u32;
+        document::insert_chunks(&self.store, &chunks)
+            .await
+            .map_err(err)?;
+        Ok(Json(IngestedOut {
+            title: p.title,
+            chunks: stored,
+        }))
+    }
+
+    /// Semantic recall over the ingested knowledge documents.
+    #[tool(
+        description = "Recall the document chunks most relevant to a query from your ingested knowledge documents (semantic search, separate from episodic memory recall)."
+    )]
+    async fn recall_documents(
+        &self,
+        Parameters(p): Parameters<RecallDocumentsParams>,
+    ) -> Result<Json<DocumentChunksOut>, ErrorData> {
+        let q = self.embedder.embed(&p.query).await.map_err(err)?;
+        let hits = document::recall(&self.store, &self.tenant, &q, p.top_k.unwrap_or(5) as usize)
+            .await
+            .map_err(err)?;
+        Ok(Json(DocumentChunksOut {
+            chunks: hits.iter().map(DocumentChunkView::from).collect(),
         }))
     }
 
@@ -969,6 +1083,8 @@ impl McpServer {
         match name {
             "store_memory" => dispatch!(StoreParams, store_memory),
             "recall_memories" => dispatch!(RecallParams, recall_memories),
+            "ingest_document" => dispatch!(IngestDocumentParams, ingest_document),
+            "recall_documents" => dispatch!(RecallDocumentsParams, recall_documents),
             "reinforce_memory" => dispatch!(IdParams, reinforce_memory),
             "forget_memory" => dispatch!(IdParams, forget_memory),
             "list_memories" => dispatch!(ListParams, list_memories),
@@ -1335,6 +1451,44 @@ mod tests {
             .call_tool("store_memory", serde_json::json!({ "missing": "content" }))
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn ingest_then_recall_a_knowledge_document() {
+        let s = server().await;
+        let ingested = s
+            .ingest_document(Parameters(IngestDocumentParams {
+                title: "Onboarding".into(),
+                content: "Antumbra keeps knowledge documents separate from episodic memory. \
+                          Ingesting a document chunks it, embeds each chunk, and makes it \
+                          recallable. This project uses the deno runtime."
+                    .into(),
+                source: Some("onboarding.md".into()),
+            }))
+            .await
+            .unwrap();
+        assert!(ingested.0.chunks >= 1);
+        assert_eq!(ingested.0.title, "Onboarding");
+
+        let recalled = s
+            .recall_documents(Parameters(RecallDocumentsParams {
+                query: "what runtime does this project use".into(),
+                top_k: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert!(!recalled.0.chunks.is_empty());
+        assert!(recalled.0.chunks.iter().all(|c| c.title == "Onboarding"));
+
+        // Reachable over the REST dispatcher too.
+        let viarest = s
+            .call_tool(
+                "recall_documents",
+                serde_json::json!({ "query": "runtime", "top_k": 1 }),
+            )
+            .await
+            .unwrap();
+        assert!(viarest.get("chunks").is_some());
     }
 
     #[tokio::test]
