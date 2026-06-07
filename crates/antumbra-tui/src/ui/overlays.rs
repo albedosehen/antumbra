@@ -33,8 +33,63 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
             Some(overlay::centered(frame, 64, listed))
         }
         Mode::Detail => Some(overlay::centered(frame, 74, 30)),
+        Mode::Ask => {
+            let rows = app
+                .ask_result
+                .as_ref()
+                .map_or(1, |r| r.len().clamp(1, 5) as u16);
+            Some(overlay::centered(frame, 60, rows + 5))
+        }
         Mode::Normal => None,
     }
+}
+
+/// The route-ask (`ask` command): a task query embedded and run through the
+/// learned gate, the resulting routing distribution shown as probability gauges.
+pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
+    let inner = overlay::modal(f, &t, area, "ask the gate");
+    let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("ask › ", Style::default().fg(t.accent)),
+            Span::styled(app.ask_query.clone(), Style::default().fg(t.text)),
+            Span::styled("▏", Style::default().fg(t.accent)),
+        ])),
+        rows[0],
+    );
+
+    let lines: Vec<Line> = match &app.ask_result {
+        None => vec![Line::from(Span::styled(
+            "  type a task, Enter to route it through the gate",
+            Style::default().fg(t.dim),
+        ))],
+        Some(r) if r.is_empty() => vec![Line::from(Span::styled(
+            "  escalates · out of distribution",
+            Style::default().fg(t.warning),
+        ))],
+        Some(r) => r
+            .iter()
+            .take(5)
+            .map(|(name, p)| {
+                let mut spans = vec![Span::styled(
+                    format!("  {name:<20}"),
+                    Style::default().fg(t.ink),
+                )];
+                spans.extend(gauge_spans(&t, *p, 10, t.accent));
+                spans.push(Span::styled(
+                    format!(" {:>3.0}%", p * 100.0),
+                    Style::default().fg(t.value),
+                ));
+                Line::from(spans)
+            })
+            .collect(),
+    };
+    f.render_widget(Paragraph::new(lines), rows[1]);
 }
 
 /// A dim, bold section divider within a detail view.
@@ -359,7 +414,7 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
         Line::from(""),
         group("command"),
         bind("/", "filter the focused list, jump to a match"),
-        bind(":", "open the command palette"),
+        bind(":", "command palette (ask · route a task here)"),
         bind("e", "live event stream of store changes"),
         bind("r", "reload from the store"),
         bind("? esc", "close this help"),

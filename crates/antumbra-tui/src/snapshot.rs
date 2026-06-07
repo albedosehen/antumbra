@@ -181,6 +181,8 @@ mod tests {
             events: Vec::new(),
             events_scroll: 0,
             detail_scroll: 0,
+            ask_query: String::new(),
+            ask_result: None,
             ev_experts: std::collections::HashMap::new(),
             ev_shadows: std::collections::HashMap::new(),
             ev_boundaries: std::collections::HashMap::new(),
@@ -541,6 +543,26 @@ mod tests {
             "the sole expert wins its own specialty"
         );
         assert!(text.contains("arith-specialist"), "routed expert named");
+    }
+
+    // The route-ask overlay echoes the query and shows the gate's routing
+    // distribution, resolving expert ids to names.
+    #[test]
+    fn ask_overlay_shows_routing_distribution() {
+        let mut app = demo_app();
+        app.open_ask();
+        for c in "arith".chars() {
+            app.ask_input(c);
+        }
+        app.set_ask_result(&[(ExpertId::new("expert:arith"), 0.82)]);
+        let text = to_text(&render(&mut app, 80, 14, 1600.0).unwrap());
+        assert!(text.contains("ask the gate"), "ask modal titled:\n{text}");
+        assert!(text.contains("ask › arith"), "query echoed");
+        assert!(
+            text.contains("arith-specialist"),
+            "routed expert named (id resolved)"
+        );
+        assert!(text.contains("82%"), "routing probability shown");
     }
 
     // Pressing `?` opens the help overlay over the live view, listing the keys.

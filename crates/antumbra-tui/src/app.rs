@@ -31,6 +31,7 @@ pub enum Mode {
     Filter,
     Events,
     Detail,
+    Ask,
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -93,6 +94,11 @@ pub struct App {
     pub events_scroll: usize,
     /// Scroll offset within the drill-down detail overlay.
     pub detail_scroll: u16,
+    /// The route-ask query text (used while `mode == Ask`).
+    pub ask_query: String,
+    /// The gate's routing for the last ask: `(expert name, probability)` best
+    /// first, or `Some(empty)` when it escalates. `None` before the first ask.
+    pub ask_result: Option<Vec<(String, f32)>>,
     /// Per-entity fingerprints from the last reload, to diff the next one.
     pub ev_experts: HashMap<String, bool>,
     pub ev_shadows: HashMap<String, String>,
@@ -144,6 +150,8 @@ impl App {
             events: Vec::new(),
             events_scroll: 0,
             detail_scroll: 0,
+            ask_query: String::new(),
+            ask_result: None,
             ev_experts: HashMap::new(),
             ev_shadows: HashMap::new(),
             ev_boundaries: HashMap::new(),
@@ -314,6 +322,43 @@ impl App {
     /// Scroll the detail overlay by `delta` lines (clamped at the top).
     pub fn detail_move(&mut self, delta: i32) {
         self.detail_scroll = (self.detail_scroll as i32 + delta).max(0) as u16;
+    }
+
+    /// Open the route-ask overlay (type a task, the gate routes it).
+    pub fn open_ask(&mut self) {
+        self.mode = Mode::Ask;
+        self.ask_query.clear();
+        self.ask_result = None;
+    }
+
+    /// Append a character to the ask query (invalidates the stale result).
+    pub fn ask_input(&mut self, c: char) {
+        self.ask_query.push(c);
+        self.ask_result = None;
+    }
+
+    /// Delete the last character of the ask query (invalidates the result).
+    pub fn ask_backspace(&mut self) {
+        self.ask_query.pop();
+        self.ask_result = None;
+    }
+
+    /// Resolve a routing distribution (over expert ids) to `(name, probability)`,
+    /// looking names up in the population, and store it as the ask result.
+    pub fn set_ask_result(&mut self, routed: &[(antumbra_core::ExpertId, f32)]) {
+        self.ask_result = Some(
+            routed
+                .iter()
+                .map(|(id, p)| {
+                    let name = self
+                        .experts
+                        .iter()
+                        .find(|e| e.id.as_str() == id.as_str())
+                        .map_or_else(|| id.as_str().to_string(), |e| e.name.clone());
+                    (name, *p)
+                })
+                .collect(),
+        );
     }
 
     /// The active palette every panel tints from.

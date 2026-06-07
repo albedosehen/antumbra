@@ -15,6 +15,8 @@ pub enum Action {
     FpsUp,
     FpsDown,
     FollowMonitor,
+    Ask,
+    Events,
     Help,
     Quit,
 }
@@ -66,6 +68,14 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "fps · decrease cap",
         action: Action::FpsDown,
+    },
+    Command {
+        label: "ask · route a task through the gate",
+        action: Action::Ask,
+    },
+    Command {
+        label: "events · live store changes",
+        action: Action::Events,
     },
     Command {
         label: "reload from the store",

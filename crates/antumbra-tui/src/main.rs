@@ -14,6 +14,7 @@ mod theme;
 mod transition;
 mod ui;
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -21,6 +22,8 @@ use clap::{Parser, Subcommand};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use tachyonfx::{Duration as FxDuration, EffectRenderer};
 
+use antumbra_core::ports::Embedder;
+use antumbra_core::testing::FixedEmbedder;
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
 use crate::app::{App, Mode};
@@ -130,6 +133,18 @@ async fn app_main() -> Result<()> {
                 "palette" => app.open_palette(),
                 "events" => app.open_events(),
                 "detail" => app.open_detail(),
+                "ask" => {
+                    app.open_ask();
+                    for c in "string handling".chars() {
+                        app.ask_input(c);
+                    }
+                    let emb = FixedEmbedder::new(EMBED_DIM);
+                    if let Ok(v) = emb.embed(&app.ask_query).await {
+                        let routed =
+                            app.router.as_ref().map(|r| r.route(&v)).unwrap_or_default();
+                        app.set_ask_result(&routed);
+                    }
+                }
                 _ => {}
             }
             let buf = snapshot::render(&mut app, width, height, at_ms)?;
@@ -157,8 +172,11 @@ async fn app_main() -> Result<()> {
         Some(fps) => app.pin_fps(fps),
         None => app.follow_monitor(),
     }
+    // A read-only embedder for the route-ask: the model-free byte-histogram
+    // FixedEmbedder, consistent with the demo (and any FixedEmbedder store).
+    let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal, &mut app, &store).await;
+    let result = run(&mut terminal, &mut app, &store, embedder.as_ref()).await;
     ratatui::restore();
     result
 }
@@ -213,15 +231,15 @@ async fn seed_demo() -> Result<Store> {
         ("regex-smith", 0.63, true),
     ];
     let now = Utc::now();
-    // Distinct probe vectors (a primary dim plus a small shared component) so the
-    // drill-down's route preview shows a real distribution rather than a tie.
-    let probe = |i: usize| {
-        let mut v = vec![0.0f32; EMBED_DIM];
-        v[i % EMBED_DIM] = 1.0;
-        v[0] += 0.25;
-        v
-    };
-    for (i, (name, fitness, frozen)) in demo.iter().copied().enumerate() {
+    // Embed each expert's name for its capability vector and router centroid, so
+    // the route-ask (which embeds the query the same way) routes coherently and
+    // the drill-down's route preview shows a real distribution.
+    let embedder = FixedEmbedder::new(EMBED_DIM);
+    let mut probe = std::collections::HashMap::new();
+    for (name, _, _) in &demo {
+        probe.insert(*name, embedder.embed(name).await?);
+    }
+    for (name, fitness, frozen) in demo.iter().copied() {
         expert::insert(
             &store,
             &Expert {
@@ -233,7 +251,7 @@ async fn seed_demo() -> Result<Store> {
                     "description": format!("demo specialist for {name}"),
                     "exemplars": ["ex-1", "ex-2", "ex-3"],
                 }),
-                capability_vec: Some(probe(i)),
+                capability_vec: Some(probe[name].clone()),
                 fitness,
                 frozen_at: frozen.then_some(now),
                 generation: Generation::ZERO,
@@ -250,10 +268,9 @@ async fn seed_demo() -> Result<Store> {
             weights: vec![1.0; EMBED_DIM],
             experts: demo
                 .iter()
-                .enumerate()
-                .map(|(i, (n, _, _))| RouterExpert {
+                .map(|(n, _, _)| RouterExpert {
                     id: ExpertId::new(format!("expert:{n}")),
-                    centroid: probe(i),
+                    centroid: probe[*n].clone(),
                 })
                 .collect(),
             temperature: 0.2,
@@ -367,6 +384,14 @@ async fn apply_action(
         Action::FpsUp => app.fps_up(),
         Action::FpsDown => app.fps_down(),
         Action::FollowMonitor => app.follow_monitor(),
+        Action::Ask => {
+            app.open_ask();
+            *transition = Some(transition::overlay_open());
+        }
+        Action::Events => {
+            app.open_events();
+            *transition = Some(transition::overlay_open());
+        }
         Action::Help => {
             app.toggle_help();
             if app.mode == Mode::Help {
@@ -378,7 +403,27 @@ async fn apply_action(
     Ok(())
 }
 
-async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Store) -> Result<()> {
+/// Embed the ask query and route it through the learned gate, storing the
+/// distribution on the app. A failed embed or an absent router yields an empty
+/// (escalate) result.
+async fn ask_route(app: &mut App, embedder: &dyn Embedder) {
+    let routed = match embedder.embed(&app.ask_query).await {
+        Ok(vec) => app
+            .router
+            .as_ref()
+            .map(|r| r.route(&vec))
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    app.set_ask_result(&routed);
+}
+
+async fn run(
+    terminal: &mut ratatui::DefaultTerminal,
+    app: &mut App,
+    store: &Store,
+    embedder: &dyn Embedder,
+) -> Result<()> {
     // Honour sub-16ms frame budgets on Windows (restored on drop).
     let _timer = pacing::TimerResolution::acquire();
     let mut last = Instant::now();
@@ -493,6 +538,13 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::Up | KeyCode::Char('k') => app.detail_move(-1),
                             KeyCode::PageDown => app.detail_move(10),
                             KeyCode::PageUp => app.detail_move(-10),
+                            _ => {}
+                        },
+                        Mode::Ask => match key.code {
+                            KeyCode::Esc => app.close_overlay(),
+                            KeyCode::Backspace => app.ask_backspace(),
+                            KeyCode::Enter => ask_route(app, embedder).await,
+                            KeyCode::Char(c) => app.ask_input(c),
                             _ => {}
                         },
                         Mode::Normal => match key.code {
