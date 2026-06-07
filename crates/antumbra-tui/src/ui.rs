@@ -13,10 +13,11 @@ use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{App, Focus};
 
 const INK: Color = Color::Rgb(120, 140, 160);
 const DIM: Color = Color::Rgb(70, 90, 110);
+const ALERT: Color = Color::Rgb(200, 90, 90);
 
 pub fn render(f: &mut Frame, app: &App) {
     let rows = Layout::vertical([
@@ -29,7 +30,10 @@ pub fn render(f: &mut Frame, app: &App) {
     let body =
         Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(rows[1]);
     graph(f, app, body[0]);
-    detail(f, app, body[1]);
+    match app.focus {
+        Focus::Experts => detail(f, app, body[1]),
+        Focus::Boundaries => boundaries(f, app, body[1]),
+    }
     footer(f, app, rows[2]);
 }
 
@@ -262,22 +266,123 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+/// The boundaries inspector (the antumbra, ADR-0004): the learned scopes, with
+/// the selected one's detail — actionable vs open, governing feature, grain,
+/// confidence, and the C -> C' contrast it was recovered from.
+fn boundaries(f: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    if app.boundaries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "(no boundaries yet — the antumbra is empty)",
+            Style::default().fg(DIM),
+        )));
+    } else {
+        for (i, b) in app.boundaries.iter().enumerate() {
+            let sel = i == app.selected_boundary;
+            let actionable = b.is_actionable();
+            let mut style = Style::default().fg(if actionable { ALERT } else { DIM });
+            if sel {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "{}{} {}",
+                    if sel { "▸ " } else { "  " },
+                    if actionable { "⛔" } else { "○" },
+                    b.behavior
+                ),
+                style,
+            )));
+        }
+    }
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(DIM))
+        .title(Span::styled(
+            format!(" boundaries · {} ", app.boundaries.len()),
+            Style::default().fg(INK),
+        ));
+    f.render_widget(
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
+        rows[0],
+    );
+
+    let mut d: Vec<Line> = Vec::new();
+    if let Some(b) = app.selected_boundary() {
+        d.push(Line::from(Span::styled(
+            b.behavior.clone(),
+            Style::default()
+                .fg(Color::Rgb(230, 200, 255))
+                .add_modifier(Modifier::BOLD),
+        )));
+        let (status, sc) = if b.is_actionable() {
+            ("actionable · gates routing", ALERT)
+        } else {
+            ("open · recorded, inert", DIM)
+        };
+        d.push(Line::from(vec![
+            Span::styled(format!("{:<11}", "status"), Style::default().fg(DIM)),
+            Span::styled(status.to_string(), Style::default().fg(sc)),
+        ]));
+        let feat = if b.governing_features.is_empty() {
+            "-".to_string()
+        } else {
+            b.governing_features.join(", ")
+        };
+        d.push(kv("feature", &feat));
+        d.push(kv(
+            "grain",
+            &b.grain
+                .map(|g| format!("{g:?}"))
+                .unwrap_or_else(|| "-".into()),
+        ));
+        d.push(kv("confidence", &format!("{:.2}", b.confidence)));
+        // The contrastive pair that makes it actionable: incorrect in C, fine in C'.
+        if let Some(ok) = &b.near_ok_context {
+            d.push(kv("incorrect", &b.fail_context.to_string()));
+            d.push(kv("acceptable", &ok.to_string()));
+        }
+    } else {
+        d.push(Line::from(Span::styled(
+            "(select a boundary with ↑↓)",
+            Style::default().fg(DIM),
+        )));
+    }
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(DIM))
+        .title(Span::styled(" scope ", Style::default().fg(INK)));
+    f.render_widget(
+        Paragraph::new(d).block(block).wrap(Wrap { trim: true }),
+        rows[1],
+    );
+}
+
 fn footer(f: &mut Frame, app: &App, area: Rect) {
     let router = if app.router.is_some() {
         "learned"
     } else {
         "heuristic"
     };
+    let focus = match app.focus {
+        Focus::Experts => "umbra",
+        Focus::Boundaries => "antumbra",
+    };
+    let actionable = app.boundaries.iter().filter(|b| b.is_actionable()).count();
     let line = Line::from(vec![
         Span::styled(" q ", Style::default().fg(Color::Black).bg(INK)),
         Span::styled(" quit  ", Style::default().fg(INK)),
         Span::styled(" ↑↓ ", Style::default().fg(Color::Black).bg(INK)),
         Span::styled(" select  ", Style::default().fg(INK)),
+        Span::styled(" tab ", Style::default().fg(Color::Black).bg(INK)),
+        Span::styled(format!(" focus:{focus}  "), Style::default().fg(INK)),
         Span::styled(" r ", Style::default().fg(Color::Black).bg(INK)),
         Span::styled(" reload  ", Style::default().fg(INK)),
         Span::styled(
             format!(
-                "   {} umbra · {} antumbra · gate {router}",
+                "   {} umbra · {} antumbra ({actionable} actionable) · gate {router}",
                 app.experts.len(),
                 app.boundaries.len()
             ),

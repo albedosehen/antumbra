@@ -140,7 +140,8 @@ fn color_rgb(color: Color, default: [u8; 3]) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antumbra_core::{Expert, ExpertId, Generation};
+    use crate::app::Focus;
+    use antumbra_core::{BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain};
     use chrono::Utc;
 
     fn demo_app() -> App {
@@ -164,9 +165,27 @@ mod tests {
             boundaries: Vec::new(),
             router: None,
             selected: 0,
+            selected_boundary: 0,
+            focus: Focus::Experts,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             should_quit: false,
+        }
+    }
+
+    fn actionable_boundary() -> FailureBoundary {
+        FailureBoundary {
+            id: BoundaryId::new("boundary:demo-0"),
+            behavior: "run `npm install`".into(),
+            fail_context: serde_json::json!({ "runtime": "deno" }),
+            near_ok_context: Some(serde_json::json!({ "runtime": "node" })),
+            governing_features: vec!["runtime".into()],
+            grain: Some(Grain::Project),
+            context_vec: None,
+            ok_context_vec: None,
+            confidence: 0.8,
+            generation: Generation::ZERO,
+            created_at: Utc::now(),
         }
     }
 
@@ -196,5 +215,26 @@ mod tests {
         app.experts.clear();
         let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
         assert!(text.contains("no experts yet"), "empty-state hint shown");
+    }
+
+    // Tab into the boundaries focus: the inspector replaces the expert detail and
+    // shows the selected scope's behavior, actionable status, and governing feature.
+    #[test]
+    fn boundaries_focus_shows_the_inspector() {
+        let mut app = demo_app();
+        app.boundaries = vec![actionable_boundary()];
+        app.focus = Focus::Boundaries;
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(
+            text.contains("boundaries"),
+            "boundaries list title missing:\n{text}"
+        );
+        assert!(text.contains("scope"), "scope detail panel missing");
+        assert!(
+            text.contains("npm install"),
+            "the boundary's behavior is shown"
+        );
+        assert!(text.contains("actionable"), "actionable status is shown");
+        assert!(text.contains("runtime"), "the governing feature is shown");
     }
 }

@@ -5,6 +5,14 @@ use antumbra_core::{Expert, FailureBoundary, LearnedRouter};
 use antumbra_store::repo::{boundary, expert, router};
 use antumbra_store::Store;
 
+/// Which list the navigation keys drive, and which detail panel is shown: the
+/// population (umbra) or the boundaries (antumbra, the keystone).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Experts,
+    Boundaries,
+}
+
 /// Everything the console draws, refreshed from the store.
 pub struct App {
     pub experts: Vec<Expert>,
@@ -12,6 +20,10 @@ pub struct App {
     pub router: Option<LearnedRouter>,
     /// Index into `experts` of the highlighted node.
     pub selected: usize,
+    /// Index into `boundaries` of the highlighted scope (when focused there).
+    pub selected_boundary: usize,
+    /// Whether navigation/detail targets the population or the boundaries.
+    pub focus: Focus,
     /// Total elapsed animation time (ms), drives orbit/pulse/energy.
     pub clock_ms: f64,
     /// Seconds since the last reload, so the view refreshes periodically.
@@ -26,6 +38,8 @@ impl App {
             boundaries: Vec::new(),
             router: None,
             selected: 0,
+            selected_boundary: 0,
+            focus: Focus::Experts,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             should_quit: false,
@@ -41,8 +55,19 @@ impl App {
         if !self.experts.is_empty() && self.selected >= self.experts.len() {
             self.selected = self.experts.len() - 1;
         }
+        if !self.boundaries.is_empty() && self.selected_boundary >= self.boundaries.len() {
+            self.selected_boundary = self.boundaries.len() - 1;
+        }
         self.since_reload_ms = 0.0;
         Ok(())
+    }
+
+    /// Switch which list (population / boundaries) the keys drive and detail.
+    pub fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::Experts => Focus::Boundaries,
+            Focus::Boundaries => Focus::Experts,
+        };
     }
 
     pub fn tick(&mut self, dt_ms: f64) {
@@ -56,19 +81,43 @@ impl App {
         self.since_reload_ms >= 2000.0
     }
 
+    /// Advance the highlighted item in the focused list (wraps).
     pub fn select_next(&mut self) {
-        if !self.experts.is_empty() {
-            self.selected = (self.selected + 1) % self.experts.len();
+        match self.focus {
+            Focus::Experts => {
+                if !self.experts.is_empty() {
+                    self.selected = (self.selected + 1) % self.experts.len();
+                }
+            }
+            Focus::Boundaries => {
+                if !self.boundaries.is_empty() {
+                    self.selected_boundary = (self.selected_boundary + 1) % self.boundaries.len();
+                }
+            }
         }
     }
 
     pub fn select_prev(&mut self) {
-        if !self.experts.is_empty() {
-            self.selected = (self.selected + self.experts.len() - 1) % self.experts.len();
+        match self.focus {
+            Focus::Experts => {
+                if !self.experts.is_empty() {
+                    self.selected = (self.selected + self.experts.len() - 1) % self.experts.len();
+                }
+            }
+            Focus::Boundaries => {
+                if !self.boundaries.is_empty() {
+                    self.selected_boundary = (self.selected_boundary + self.boundaries.len() - 1)
+                        % self.boundaries.len();
+                }
+            }
         }
     }
 
     pub fn selected_expert(&self) -> Option<&Expert> {
         self.experts.get(self.selected)
+    }
+
+    pub fn selected_boundary(&self) -> Option<&FailureBoundary> {
+        self.boundaries.get(self.selected_boundary)
     }
 }

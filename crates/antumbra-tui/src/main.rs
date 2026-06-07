@@ -101,8 +101,8 @@ async fn app_main() -> Result<()> {
 /// content without a live store.
 async fn seed_demo() -> Result<Store> {
     use antumbra_core::router::{LearnedRouter, RouterExpert};
-    use antumbra_core::{Expert, ExpertId, Generation};
-    use antumbra_store::repo::{expert, router};
+    use antumbra_core::{BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain};
+    use antumbra_store::repo::{boundary, expert, router};
     use chrono::Utc;
 
     let store = Store::connect_memory(EMBED_DIM).await?;
@@ -153,6 +153,48 @@ async fn seed_demo() -> Result<Store> {
         },
     )
     .await?;
+    // A couple of boundaries (the antumbra) so the inspector has content: one
+    // actionable (a recovered C/C' contrast that gates routing) and one open
+    // (recorded from a collapse, not yet scoped).
+    let scopes = [
+        (
+            "run `npm install`",
+            "runtime",
+            serde_json::json!({ "runtime": "deno" }),
+            Some(serde_json::json!({ "runtime": "node" })),
+            true,
+        ),
+        (
+            "approach of shadow:g3",
+            "",
+            serde_json::json!({ "generation": 3 }),
+            None,
+            false,
+        ),
+    ];
+    for (i, (behavior, feature, fail, near_ok, actionable)) in scopes.into_iter().enumerate() {
+        boundary::upsert(
+            &store,
+            &FailureBoundary {
+                id: BoundaryId::new(format!("boundary:demo-{i}")),
+                behavior: behavior.into(),
+                fail_context: fail,
+                near_ok_context: near_ok,
+                governing_features: if feature.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![feature.into()]
+                },
+                grain: actionable.then_some(Grain::Project),
+                context_vec: None,
+                ok_context_vec: None,
+                confidence: if actionable { 0.8 } else { 0.3 },
+                generation: Generation::ZERO,
+                created_at: now,
+            },
+        )
+        .await?;
+    }
     Ok(store)
 }
 
@@ -182,6 +224,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                         KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                         KeyCode::Down | KeyCode::Char('j') => app.select_next(),
                         KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
+                        KeyCode::Tab => app.toggle_focus(),
                         KeyCode::Char('r') => app.reload(store).await?,
                         _ => {}
                     }
