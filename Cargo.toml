@@ -38,12 +38,6 @@ tachyonfx = "0.25"
 # Pure-Rust TLS so CI/Windows builds need no system OpenSSL.
 oneiriq-surql = { version = "0.28", default-features = false, features = ["client-rustls"] }
 
-# Use a local checkout of surql-rs carrying the table-PERMISSIONS rendering fix
-# (the published 0.2.7 emits malformed `DEFINE FIELD PERMISSIONS ...`). Drop this
-# once the fix is released.
-[patch.crates-io]
-oneiriq-surql = { path = "../surql-rs" }
-
 [profile.dev]
 # Faster incremental builds for the heavy dependency graph.
 opt-level = 0
