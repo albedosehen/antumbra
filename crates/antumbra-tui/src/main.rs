@@ -17,7 +17,7 @@ use std::time::Instant;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use tachyonfx::{Duration as FxDuration, Effect, EffectRenderer};
+use tachyonfx::{Duration as FxDuration, EffectRenderer};
 
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
@@ -55,6 +55,9 @@ enum Command {
         /// Animation clock (ms) to freeze the frame at (deterministic output).
         #[arg(long, default_value_t = 1600.0)]
         at_ms: f64,
+        /// Body layout to render: focused, dashboard, or graph.
+        #[arg(long, default_value = "focused")]
+        layout: String,
         /// Render a seeded in-memory demo population instead of reading `--url`.
         #[arg(long)]
         demo: bool,
@@ -83,6 +86,7 @@ async fn app_main() -> Result<()> {
         width,
         height,
         at_ms,
+        layout,
         demo,
     }) = args.command
     {
@@ -92,6 +96,11 @@ async fn app_main() -> Result<()> {
             connect(&args.url).await?
         };
         let mut app = App::load(&store).await?;
+        app.set_layout(match layout.as_str() {
+            "dashboard" => app::LayoutMode::Dashboard,
+            "graph" => app::LayoutMode::Graph,
+            _ => app::LayoutMode::Focused,
+        });
         let buf = snapshot::render(&mut app, width, height, at_ms)?;
         let text = snapshot::to_text(&buf);
         std::fs::write(format!("{out}.txt"), &text)?;
@@ -258,7 +267,7 @@ async fn connect(url: &str) -> Result<Store> {
 async fn apply_action(
     app: &mut App,
     store: &Store,
-    transition: &mut Option<Effect>,
+    transition: &mut Option<transition::Pending>,
     action: Action,
 ) -> Result<()> {
     match action {
@@ -270,6 +279,10 @@ async fn apply_action(
         Action::Focus(target) => {
             app.set_focus(target);
             *transition = Some(transition::focus_switch());
+        }
+        Action::Layout(mode) => {
+            app.set_layout(mode);
+            *transition = Some(transition::layout_switch());
         }
         Action::FpsUp => app.fps_up(),
         Action::FpsDown => app.fps_down(),
@@ -284,9 +297,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
     // Honour sub-16ms frame budgets on Windows (restored on drop).
     let _timer = pacing::TimerResolution::acquire();
     let mut last = Instant::now();
-    // The active view-switch effect, processed against the frame buffer and
-    // cleared when it finishes.
-    let mut transition: Option<Effect> = None;
+    // The active view-switch effect (and the scope it animates), processed
+    // against the frame buffer and cleared when it finishes.
+    let mut transition: Option<transition::Pending> = None;
     // Re-check the active monitor's refresh rate about once a second (cheap).
     let mut since_monitor_ms = 0.0;
     loop {
@@ -305,11 +318,11 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
         let tick = FxDuration::from(dt);
         terminal.draw(|f| {
             ui::render(f, app);
-            if let Some(effect) = transition.as_mut() {
-                f.render_effect(effect, transition::detail_area(f.area()), tick);
+            if let Some((effect, scope)) = transition.as_mut() {
+                f.render_effect(effect, transition::scope_area(scope, f.area()), tick);
             }
         })?;
-        if transition.as_ref().is_some_and(Effect::done) {
+        if transition.as_ref().is_some_and(|(effect, _)| effect.done()) {
             transition = None;
         }
 
@@ -359,6 +372,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::Tab => {
                                 app.toggle_focus();
                                 transition = Some(transition::focus_switch());
+                            }
+                            KeyCode::Char('l') | KeyCode::Char('L') => {
+                                app.cycle_layout();
+                                transition = Some(transition::layout_switch());
                             }
                             KeyCode::Char('t') => {
                                 app.cycle_theme();

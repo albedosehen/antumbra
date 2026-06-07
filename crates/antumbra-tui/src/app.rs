@@ -27,6 +27,27 @@ pub enum Mode {
     Palette,
 }
 
+/// How the body arranges its panels: the graph beside a single focused detail
+/// (`Focused`), the graph beside all three regions at once (`Dashboard`), or the
+/// graph alone, full width (`Graph`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LayoutMode {
+    Focused,
+    Dashboard,
+    Graph,
+}
+
+impl LayoutMode {
+    /// The lowercase name shown in the header.
+    pub fn name(self) -> &'static str {
+        match self {
+            LayoutMode::Focused => "focused",
+            LayoutMode::Dashboard => "dashboard",
+            LayoutMode::Graph => "graph",
+        }
+    }
+}
+
 /// The command palette's transient state: the typed query and the highlighted
 /// match (an index into the filtered list).
 #[derive(Default)]
@@ -50,6 +71,8 @@ pub struct App {
     pub selected_shadow: usize,
     /// Which list navigation/detail targets (umbra / penumbra / antumbra).
     pub focus: Focus,
+    /// How the body arranges its panels (focused / dashboard / graph).
+    pub layout: LayoutMode,
     /// What's drawn on top of the live view (help / palette / nothing).
     pub mode: Mode,
     /// The command palette's query and selection (used while `mode == Palette`).
@@ -80,6 +103,7 @@ impl App {
             selected_boundary: 0,
             selected_shadow: 0,
             focus: Focus::Experts,
+            layout: LayoutMode::Focused,
             mode: Mode::Normal,
             palette: Palette::default(),
             theme_idx: 0,
@@ -243,6 +267,20 @@ impl App {
     /// Focus a specific region (the palette's focus commands).
     pub fn set_focus(&mut self, focus: Focus) {
         self.focus = focus;
+    }
+
+    /// Cycle the body layout: focused -> dashboard -> graph.
+    pub fn cycle_layout(&mut self) {
+        self.layout = match self.layout {
+            LayoutMode::Focused => LayoutMode::Dashboard,
+            LayoutMode::Dashboard => LayoutMode::Graph,
+            LayoutMode::Graph => LayoutMode::Focused,
+        };
+    }
+
+    /// Set the body layout (the palette's layout commands).
+    pub fn set_layout(&mut self, layout: LayoutMode) {
+        self.layout = layout;
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.

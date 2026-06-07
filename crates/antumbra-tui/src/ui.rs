@@ -14,7 +14,7 @@ use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, Focus, Mode};
+use crate::app::{App, Focus, LayoutMode, Mode};
 use crate::overlay;
 use crate::theme::{rgb, Theme};
 
@@ -26,20 +26,158 @@ pub fn render(f: &mut Frame, app: &App) {
     ])
     .split(f.area());
     header(f, app, rows[0]);
-    let body =
-        Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(rows[1]);
-    graph(f, app, body[0]);
-    match app.focus {
-        Focus::Experts => detail(f, app, body[1]),
-        Focus::Shadows => shadows(f, app, body[1]),
-        Focus::Boundaries => boundaries(f, app, body[1]),
-    }
+    body(f, app, rows[1]);
     footer(f, app, rows[2]);
     match app.mode {
         Mode::Help => help_overlay(f, app),
         Mode::Palette => palette_overlay(f, app),
         Mode::Normal => {}
     }
+}
+
+/// The body between header and footer, arranged per the active layout: graph
+/// beside one focused detail, graph beside all three regions, or graph alone.
+fn body(f: &mut Frame, app: &App, area: Rect) {
+    match app.layout {
+        LayoutMode::Graph => graph(f, app, area),
+        LayoutMode::Focused => {
+            let cols = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
+                .split(area);
+            graph(f, app, cols[0]);
+            match app.focus {
+                Focus::Experts => detail(f, app, cols[1]),
+                Focus::Shadows => shadows(f, app, cols[1]),
+                Focus::Boundaries => boundaries(f, app, cols[1]),
+            }
+        }
+        LayoutMode::Dashboard => {
+            let cols = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+                .split(area);
+            graph(f, app, cols[0]);
+            dashboard(f, app, cols[1]);
+        }
+    }
+}
+
+/// All three regions stacked at once, the focused one given more room and an
+/// accent border so the active panel reads at a glance (the dashboard layout).
+fn dashboard(f: &mut Frame, app: &App, area: Rect) {
+    let (u, p, a) = match app.focus {
+        Focus::Experts => (46, 27, 27),
+        Focus::Shadows => (27, 46, 27),
+        Focus::Boundaries => (27, 27, 46),
+    };
+    let rows = Layout::vertical([
+        Constraint::Percentage(u),
+        Constraint::Percentage(p),
+        Constraint::Percentage(a),
+    ])
+    .split(area);
+    umbra_panel(f, app, rows[0], app.focus == Focus::Experts);
+    penumbra_panel(f, app, rows[1], app.focus == Focus::Shadows);
+    antumbra_panel(f, app, rows[2], app.focus == Focus::Boundaries);
+}
+
+/// Compact selected-expert summary (the dashboard's umbra panel).
+fn umbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
+    let t = app.theme();
+    let mut lines: Vec<Line> = Vec::new();
+    if let Some(e) = app.selected_expert() {
+        lines.push(heading(&t, e.name.clone()));
+        lines.push(kv(&t, "fitness", &format!("{:.2}", e.fitness)));
+        lines.push(kv(&t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
+        lines.push(kv(&t, "generation", &e.generation.0.to_string()));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "(no experts yet)",
+            Style::default().fg(t.dim),
+        )));
+    }
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(panel_focused(&t, "umbra · experts", focused))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+/// Compact shadows list (the dashboard's penumbra panel).
+fn penumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
+    let t = app.theme();
+    let lines: Vec<Line> = if app.shadows.is_empty() {
+        vec![Line::from(Span::styled(
+            "(penumbra quiet)",
+            Style::default().fg(t.dim),
+        ))]
+    } else {
+        app.shadows
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let sel = focused && i == app.selected_shadow;
+                let mut style = Style::default().fg(shadow_color(&t, s.status.as_str()));
+                if sel {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                let glyph = match s.status.as_str() {
+                    "graduated" => "✦",
+                    "pruned" => "×",
+                    _ => "◌",
+                };
+                Line::from(Span::styled(
+                    format!(
+                        "{}{} {} · {}",
+                        if sel { "▸ " } else { "  " },
+                        glyph,
+                        s.id.as_str(),
+                        s.status.as_str()
+                    ),
+                    style,
+                ))
+            })
+            .collect()
+    };
+    f.render_widget(
+        Paragraph::new(lines).block(panel_focused(&t, "penumbra · shadows", focused)),
+        area,
+    );
+}
+
+/// Compact boundaries list (the dashboard's antumbra panel).
+fn antumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
+    let t = app.theme();
+    let lines: Vec<Line> = if app.boundaries.is_empty() {
+        vec![Line::from(Span::styled(
+            "(antumbra empty)",
+            Style::default().fg(t.dim),
+        ))]
+    } else {
+        app.boundaries
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let sel = focused && i == app.selected_boundary;
+                let actionable = b.is_actionable();
+                let mut style = Style::default().fg(if actionable { t.alert } else { t.dim });
+                if sel {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                Line::from(Span::styled(
+                    format!(
+                        "{}{} {}",
+                        if sel { "▸ " } else { "  " },
+                        if actionable { "⛔" } else { "○" },
+                        b.behavior
+                    ),
+                    style,
+                ))
+            })
+            .collect()
+    };
+    f.render_widget(
+        Paragraph::new(lines).block(panel_focused(&t, "antumbra · boundaries", focused)),
+        area,
+    );
 }
 
 /// The command palette: a query line over a fuzzy-ranked command list (`:` opens).
@@ -92,7 +230,7 @@ fn palette_overlay(f: &mut Frame, app: &App) {
 /// The keybinding reference, a centred modal over the live view (`?` toggles).
 fn help_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
-    let area = overlay::centered(f.area(), 50, 18);
+    let area = overlay::centered(f.area(), 52, 21);
     let inner = overlay::modal(f, &t, area, "help");
 
     let group = |label: &str| {
@@ -116,13 +254,15 @@ fn help_overlay(f: &mut Frame, app: &App) {
         bind("tab", "switch focus: umbra / penumbra / antumbra"),
         Line::from(""),
         group("view"),
+        bind("l", "cycle layout: focused / dashboard / graph"),
         bind("t", "cycle theme: shadow / ember / mono"),
         Line::from(""),
         group("frame rate"),
         bind("+ -", "pin the cap to a refresh rate"),
         bind("a", "follow the active monitor"),
         Line::from(""),
-        group("system"),
+        group("command"),
+        bind(":", "open the command palette"),
         bind("r", "reload from the store"),
         bind("? esc", "close this help"),
         bind("q", "quit"),
@@ -141,6 +281,20 @@ fn panel<'a>(t: &Theme, title: impl Into<Line<'a>>) -> Block<'a> {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(t.dim))
         .title(title.into())
+}
+
+/// A panel whose border and title brighten to the accent when it holds focus —
+/// the dashboard's active-panel indicator.
+fn panel_focused<'a>(t: &Theme, title: &str, focused: bool) -> Block<'a> {
+    let (border, marker) = if focused {
+        (t.accent, "◆ ")
+    } else {
+        (t.dim, "")
+    };
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border))
+        .title(Line::from(format!(" {marker}{title} ")).style(Style::default().fg(border)))
 }
 
 fn header(f: &mut Frame, app: &App, area: Rect) {
@@ -169,9 +323,10 @@ fn header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Style::default().fg(t.ink),
     ));
-    // Live frame-rate readout (the cap is set in the footer with `±`).
+    // Live frame-rate readout (the cap is set in the footer with `±`) and the
+    // active layout (cycled with `l`).
     spans.push(Span::styled(
-        format!("  ·  {} fps", app.shown_fps()),
+        format!("  ·  {} fps  ·  {}", app.shown_fps(), app.layout.name()),
         Style::default().fg(t.dim),
     ));
     f.render_widget(Paragraph::new(Line::from(spans)).block(panel(&t, "")), area);

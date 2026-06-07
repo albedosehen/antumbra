@@ -140,7 +140,7 @@ fn color_rgb(color: Color, default: [u8; 3]) -> [u8; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{Focus, Mode, Palette};
+    use crate::app::{Focus, LayoutMode, Mode, Palette};
     use crate::command::Action;
     use antumbra_core::{
         BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain, Shadow, ShadowId,
@@ -173,6 +173,7 @@ mod tests {
             selected_boundary: 0,
             selected_shadow: 0,
             focus: Focus::Experts,
+            layout: LayoutMode::Focused,
             mode: Mode::Normal,
             palette: Palette::default(),
             theme_idx: 0,
@@ -239,6 +240,46 @@ mod tests {
         app.experts.clear();
         let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
         assert!(text.contains("no experts yet"), "empty-state hint shown");
+    }
+
+    // The dashboard layout shows all three regions at once (umbra, penumbra,
+    // antumbra), unlike the focused layout that swaps a single detail panel.
+    #[test]
+    fn dashboard_layout_shows_every_region_at_once() {
+        let mut app = demo_app();
+        app.shadows = vec![graduated_shadow()];
+        app.boundaries = vec![actionable_boundary()];
+        app.layout = LayoutMode::Dashboard;
+        let text = to_text(&render(&mut app, 130, 40, 1600.0).unwrap());
+        assert!(
+            text.contains("umbra · experts"),
+            "umbra panel shown:\n{text}"
+        );
+        assert!(text.contains("penumbra · shadows"), "penumbra panel shown");
+        assert!(
+            text.contains("antumbra · boundaries"),
+            "antumbra panel shown"
+        );
+        // All three regions' content is visible together.
+        assert!(text.contains("arith-specialist"), "expert content shown");
+        assert!(text.contains("shadow:g3"), "shadow content shown");
+        assert!(text.contains("npm install"), "boundary content shown");
+        // The header names the active layout.
+        assert!(text.contains("dashboard"), "header names the layout");
+    }
+
+    // The graph layout drops the detail column for a full-width population view.
+    #[test]
+    fn graph_layout_is_full_width() {
+        let mut app = demo_app();
+        app.layout = LayoutMode::Graph;
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(text.contains("population"), "graph panel still shown");
+        // The expert detail column is gone in graph mode.
+        assert!(
+            !text.contains("learned exemplars"),
+            "no detail column:\n{text}"
+        );
     }
 
     // The command palette filters its commands by the typed query and marks the

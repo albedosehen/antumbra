@@ -3,7 +3,7 @@
 //! the typed query. Keybindings and the palette both resolve to an [`Action`] the
 //! loop applies in one place.
 
-use crate::app::Focus;
+use crate::app::{Focus, LayoutMode};
 
 /// Something the console can do, triggered by a key or chosen from the palette.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -11,6 +11,7 @@ pub enum Action {
     Reload,
     CycleTheme,
     Focus(Focus),
+    Layout(LayoutMode),
     FpsUp,
     FpsDown,
     FollowMonitor,
@@ -41,6 +42,18 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "theme · cycle palette",
         action: Action::CycleTheme,
+    },
+    Command {
+        label: "layout · dashboard (all regions)",
+        action: Action::Layout(LayoutMode::Dashboard),
+    },
+    Command {
+        label: "layout · focused (single detail)",
+        action: Action::Layout(LayoutMode::Focused),
+    },
+    Command {
+        label: "layout · graph (full width)",
+        action: Action::Layout(LayoutMode::Graph),
     },
     Command {
         label: "fps · follow active monitor",
