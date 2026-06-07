@@ -16,6 +16,7 @@ use ratatui::Frame;
 
 use crate::app::{App, Focus, LayoutMode, Mode};
 use crate::overlay;
+use crate::scroll;
 use crate::theme::{rgb, Theme};
 
 pub fn render(f: &mut Frame, app: &App) {
@@ -137,9 +138,14 @@ fn penumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
             })
             .collect()
     };
-    f.render_widget(
-        Paragraph::new(lines).block(panel_focused(&t, "penumbra · shadows", focused)),
+    let selected = if focused { app.selected_shadow } else { 0 };
+    scroll::list(
+        f,
+        &t,
         area,
+        panel_focused(&t, "penumbra · shadows", focused),
+        lines,
+        selected,
     );
 }
 
@@ -174,9 +180,14 @@ fn antumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
             })
             .collect()
     };
-    f.render_widget(
-        Paragraph::new(lines).block(panel_focused(&t, "antumbra · boundaries", focused)),
+    let selected = if focused { app.selected_boundary } else { 0 };
+    scroll::list(
+        f,
+        &t,
         area,
+        panel_focused(&t, "antumbra · boundaries", focused),
+        lines,
+        selected,
     );
 }
 
@@ -542,17 +553,19 @@ fn boundaries(f: &mut Frame, app: &App, area: Rect) {
             )));
         }
     }
-    f.render_widget(
-        Paragraph::new(lines)
-            .block(panel(
-                &t,
-                Span::styled(
-                    format!(" boundaries · {} ", app.boundaries.len()),
-                    Style::default().fg(t.ink),
-                ),
-            ))
-            .wrap(Wrap { trim: true }),
+    scroll::list(
+        f,
+        &t,
         rows[0],
+        panel(
+            &t,
+            Span::styled(
+                format!(" boundaries · {} ", app.boundaries.len()),
+                Style::default().fg(t.ink),
+            ),
+        ),
+        lines,
+        app.selected_boundary,
     );
 
     let mut d: Vec<Line> = Vec::new();
@@ -641,17 +654,19 @@ fn shadows(f: &mut Frame, app: &App, area: Rect) {
             )));
         }
     }
-    f.render_widget(
-        Paragraph::new(lines)
-            .block(panel(
-                &t,
-                Span::styled(
-                    format!(" shadows · {} ", app.shadows.len()),
-                    Style::default().fg(t.ink),
-                ),
-            ))
-            .wrap(Wrap { trim: true }),
+    scroll::list(
+        f,
+        &t,
         rows[0],
+        panel(
+            &t,
+            Span::styled(
+                format!(" shadows · {} ", app.shadows.len()),
+                Style::default().fg(t.ink),
+            ),
+        ),
+        lines,
+        app.selected_shadow,
     );
 
     let mut d: Vec<Line> = Vec::new();

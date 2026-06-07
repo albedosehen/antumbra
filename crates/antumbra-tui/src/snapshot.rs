@@ -268,6 +268,36 @@ mod tests {
         assert!(text.contains("dashboard"), "header names the layout");
     }
 
+    // A list longer than its panel scrolls to keep the selection visible: a high
+    // selection shows the tail and hides the head.
+    #[test]
+    fn long_lists_scroll_to_the_selection() {
+        let mut app = demo_app();
+        app.shadows = (0..20)
+            .map(|i| Shadow {
+                id: ShadowId::new(format!("shadow:s{i}")),
+                parent_expert: None,
+                adapter_uri: None,
+                status: ShadowStatus::Exploring,
+                generation: Generation(i),
+                reward_curve: vec![0.1, 0.2],
+                created_at: Utc::now(),
+            })
+            .collect();
+        app.focus = Focus::Shadows;
+        app.selected_shadow = 19;
+        // A short frame so the list panel is smaller than 20 rows.
+        let text = to_text(&render(&mut app, 120, 18, 1600.0).unwrap());
+        assert!(
+            text.contains("shadow:s19"),
+            "the selected tail is visible:\n{text}"
+        );
+        assert!(
+            !text.contains("shadow:s0\n") && !text.contains("shadow:s0 "),
+            "the head has scrolled out of view:\n{text}"
+        );
+    }
+
     // The graph layout drops the detail column for a full-width population view.
     #[test]
     fn graph_layout_is_full_width() {

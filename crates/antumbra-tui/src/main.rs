@@ -7,6 +7,7 @@ mod app;
 mod command;
 mod overlay;
 mod pacing;
+mod scroll;
 mod snapshot;
 mod theme;
 mod transition;
