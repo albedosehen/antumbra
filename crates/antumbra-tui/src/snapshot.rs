@@ -174,6 +174,7 @@ mod tests {
             focus: Focus::Experts,
             theme_idx: 0,
             target_fps: 144,
+            auto_fps: false,
             fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
@@ -284,6 +285,27 @@ mod tests {
         app.fps_up();
         let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
         assert!(text.contains("cap:165"), "cap stepped to 165:\n{text}");
+    }
+
+    // Following the active monitor tags the cap "auto"; a manual `+`/`-` pins it
+    // and drops the tag. (The flag is set directly to keep the test off real
+    // monitor detection.)
+    #[test]
+    fn auto_follow_tags_the_cap_until_pinned() {
+        let mut app = demo_app();
+        app.auto_fps = true;
+        let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+        assert!(
+            text.contains("auto"),
+            "auto-follow tagged on the cap:\n{text}"
+        );
+        app.fps_up();
+        assert!(!app.auto_fps, "a manual adjust pins the cap");
+        let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+        assert!(
+            !text.contains("cap:165 auto"),
+            "a pinned cap shows no auto tag:\n{text}"
+        );
     }
 
     // Tab into the boundaries focus: the inspector replaces the expert detail and

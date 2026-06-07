@@ -482,7 +482,11 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
         key(" t "),
         lbl(format!(" theme:{}  ", t.name)),
         key(" ± "),
-        lbl(format!(" cap:{}  ", app.target_fps)),
+        lbl(format!(
+            " cap:{}{}  ",
+            app.target_fps,
+            if app.auto_fps { " auto" } else { "" }
+        )),
         key(" r "),
         lbl(" reload  ".into()),
         Span::styled(

@@ -36,6 +36,8 @@ pub struct App {
     pub theme_idx: usize,
     /// The frame-rate cap the loop paces to (Hz), adjustable with `+`/`-`.
     pub target_fps: u32,
+    /// When set, the cap follows the active monitor's refresh rate; `+`/`-` pin it.
+    pub auto_fps: bool,
     /// The measured frame rate (smoothed), shown as a live readout.
     pub fps: f64,
     /// Total elapsed animation time (ms), drives orbit/pulse/energy.
@@ -58,6 +60,7 @@ impl App {
             focus: Focus::Experts,
             theme_idx: 0,
             target_fps: 144,
+            auto_fps: true,
             fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
@@ -98,14 +101,40 @@ impl App {
         self.theme_idx = (self.theme_idx + 1) % crate::theme::ALL.len();
     }
 
-    /// Raise the frame-rate cap to the next common refresh rate.
+    /// Raise the frame-rate cap to the next common refresh rate (pins manual).
     pub fn fps_up(&mut self) {
+        self.auto_fps = false;
         self.target_fps = crate::pacing::next_preset(self.target_fps);
     }
 
-    /// Lower the frame-rate cap to the previous common refresh rate.
+    /// Lower the frame-rate cap to the previous common refresh rate (pins manual).
     pub fn fps_down(&mut self) {
+        self.auto_fps = false;
         self.target_fps = crate::pacing::prev_preset(self.target_fps);
+    }
+
+    /// Pin the cap to a fixed rate (the `--fps` flag).
+    pub fn pin_fps(&mut self, fps: u32) {
+        self.auto_fps = false;
+        self.target_fps = fps.clamp(crate::pacing::MIN_FPS, crate::pacing::MAX_FPS);
+    }
+
+    /// Hand the cap back to the active monitor's refresh rate (the `a` key).
+    pub fn follow_monitor(&mut self) {
+        self.auto_fps = true;
+        if let Some(hz) = crate::pacing::detect_refresh() {
+            self.target_fps = crate::pacing::snap_refresh(hz);
+        }
+    }
+
+    /// While following, refresh the cap from the active monitor (called on an
+    /// interval so dragging the terminal between monitors retargets the rate).
+    pub fn poll_monitor(&mut self) {
+        if self.auto_fps {
+            if let Some(hz) = crate::pacing::detect_refresh() {
+                self.target_fps = crate::pacing::snap_refresh(hz);
+            }
+        }
     }
 
     /// Fold this frame's duration into the smoothed FPS readout.

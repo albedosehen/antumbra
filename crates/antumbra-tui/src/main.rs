@@ -27,10 +27,11 @@ struct Args {
     /// SurrealDB url (same store the CLI uses).
     #[arg(long, default_value = "surrealkv://./data/antumbra.skv", global = true)]
     url: String,
-    /// Initial frame-rate cap (Hz); adjust live with `+`/`-`. Match your monitor
-    /// (e.g. 165 or 244) for the smoothest motion.
-    #[arg(long, default_value_t = 144)]
-    fps: u32,
+    /// Pin the frame-rate cap (Hz) to a fixed value. Omit to follow the active
+    /// monitor's refresh rate automatically; adjust live with `+`/`-`, `a` to
+    /// resume following.
+    #[arg(long)]
+    fps: Option<u32>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -99,7 +100,10 @@ async fn app_main() -> Result<()> {
 
     let store = connect(&args.url).await?;
     let mut app = App::load(&store).await?;
-    app.target_fps = args.fps.clamp(pacing::MIN_FPS, pacing::MAX_FPS);
+    match args.fps {
+        Some(fps) => app.pin_fps(fps),
+        None => app.follow_monitor(),
+    }
     let mut terminal = ratatui::init();
     let result = run(&mut terminal, &mut app, &store).await;
     ratatui::restore();
@@ -252,6 +256,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
     // The active view-switch effect, processed against the frame buffer and
     // cleared when it finishes.
     let mut transition: Option<Effect> = None;
+    // Re-check the active monitor's refresh rate about once a second (cheap).
+    let mut since_monitor_ms = 0.0;
     loop {
         let frame_start = Instant::now();
         let dt = frame_start.duration_since(last);
@@ -259,6 +265,11 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
         let dt_ms = dt.as_secs_f64() * 1000.0;
         app.tick(dt_ms);
         app.record_frame(dt_ms);
+        since_monitor_ms += dt_ms;
+        if since_monitor_ms >= 1000.0 {
+            app.poll_monitor();
+            since_monitor_ms = 0.0;
+        }
 
         let tick = FxDuration::from(dt);
         terminal.draw(|f| {
@@ -294,6 +305,7 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                         }
                         KeyCode::Char('+') | KeyCode::Char('=') => app.fps_up(),
                         KeyCode::Char('-') | KeyCode::Char('_') => app.fps_down(),
+                        KeyCode::Char('a') => app.follow_monitor(),
                         KeyCode::Char('r') => app.reload(store).await?,
                         _ => {}
                     }
