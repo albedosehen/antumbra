@@ -5,7 +5,6 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::symbols::Marker;
 use ratatui::text::Span;
 use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::Frame;
@@ -22,7 +21,7 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
     let intro = (app.clock_ms / 800.0).min(1.0);
     let canvas = Canvas::default()
         .block(block)
-        .marker(Marker::Braille)
+        .marker(app.canvas_marker())
         .x_bounds([-100.0, 100.0])
         .y_bounds([-100.0, 100.0])
         .paint(move |ctx| {

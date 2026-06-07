@@ -9,6 +9,7 @@ mod command;
 mod events;
 mod overlay;
 mod pacing;
+mod render;
 mod scroll;
 mod snapshot;
 mod theme;
@@ -58,6 +59,19 @@ struct Args {
     /// Optional bearer token for the embeddings endpoint.
     #[arg(long, env = "ANTUMBRA_EMBED_KEY")]
     embed_key: Option<String>,
+    /// How visuals render: `auto` probes the terminal once and picks the richest
+    /// tier; `canvas` forces the universal Braille/vector path (the safe default
+    /// everywhere); `ascii` forces coarse dot markers for dumb terminals;
+    /// `raster` forces the graphics-protocol image path (needs the `raster`
+    /// build + a capable terminal).
+    #[arg(
+        long,
+        value_enum,
+        env = "ANTUMBRA_RENDER",
+        default_value = "auto",
+        global = true
+    )]
+    render: render::RenderMode,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -186,6 +200,9 @@ async fn app_main() -> Result<()> {
     // this window between monitors rather than re-reading focus each tick.
     app.capture_window();
     app.power_save = args.power_save;
+    // Resolve the render tier once, before the loop (probe-safe: degrades to the
+    // universal Canvas path off-TTY, in a hostile multiplexer, or on Windows).
+    app.render_tier = render::resolve_tier(args.render);
     match args.fps {
         Some(fps) => app.pin_fps(fps),
         None => app.follow_monitor(),

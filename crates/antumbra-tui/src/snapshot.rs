@@ -220,6 +220,7 @@ mod tests {
             since_input_ms: 0.0,
             power_save: false,
             idle: false,
+            render_tier: crate::render::RenderTier::default(),
             should_quit: false,
         }
     }

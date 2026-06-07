@@ -151,6 +151,8 @@ pub struct App {
     pub power_save: bool,
     /// Whether the loop is currently eased to the idle rate (no recent input).
     pub idle: bool,
+    /// The resolved render capability (vector Canvas vs raster), fixed at startup.
+    pub render_tier: crate::render::RenderTier,
     pub should_quit: bool,
 }
 
@@ -192,6 +194,7 @@ impl App {
             since_input_ms: 0.0,
             power_save: false,
             idle: false,
+            render_tier: crate::render::RenderTier::default(),
             should_quit: false,
         };
         app.reload(store).await?;
@@ -844,6 +847,12 @@ impl App {
         }
         let next = (cur as i32 + delta * PAGE).clamp(0, n as i32 - 1);
         self.set_focused_selection(next as usize);
+    }
+
+    /// The Canvas marker for vector drawings, degraded to match the render tier
+    /// (Braille normally, coarse Dot under `--render=ascii`).
+    pub fn canvas_marker(&self) -> ratatui::symbols::Marker {
+        self.render_tier.marker()
     }
 
     pub fn selected_expert(&self) -> Option<&Expert> {

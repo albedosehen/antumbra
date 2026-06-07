@@ -27,3 +27,10 @@ chrono.workspace = true
 # assets/CascadiaMono.LICENSE) so braille / box-drawing / symbols render true.
 image = { version = "0.25", default-features = false, features = ["png"] }
 ab_glyph = "0.2"
+
+[features]
+# Raster image path (sixel/kitty/iTerm2) as a progressive enhancement over the
+# universal Braille/Canvas tier. Empty until the graphics backend is wired with
+# the first raster-worthy visual; declaring it keeps `cfg(feature = "raster")`
+# from tripping the unexpected-cfg lint. The default build stays raster-free.
+raster = []
