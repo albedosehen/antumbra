@@ -186,6 +186,7 @@ mod tests {
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             since_input_ms: 0.0,
+            power_save: false,
             idle: false,
             should_quit: false,
         }
@@ -253,6 +254,7 @@ mod tests {
     fn idle_throttle_eases_the_rate_and_shows_in_header() {
         let mut app = demo_app();
         app.target_fps = 244;
+        app.power_save = true;
         // Fresh input: full rate.
         app.note_input();
         assert_eq!(app.frame_cap(false), 244);
@@ -260,6 +262,9 @@ mod tests {
         app.tick(10_000.0);
         assert_eq!(app.frame_cap(true), 244, "animation keeps full rate");
         assert_eq!(app.frame_cap(false), 60, "an idle, still view eases to 60");
+        // With power-save off (the default), the still view stays at full rate.
+        app.power_save = false;
+        assert_eq!(app.frame_cap(false), 244, "default never throttles");
         // The header reflects the eased state.
         app.idle = true;
         let text = to_text(&render(&mut app, 130, 12, 1600.0).unwrap());

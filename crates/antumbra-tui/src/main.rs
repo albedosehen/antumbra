@@ -36,6 +36,10 @@ struct Args {
     /// resume following.
     #[arg(long)]
     fps: Option<u32>,
+    /// Ease the render rate down to 60fps after a few idle seconds to spare the
+    /// CPU. Off by default so the console runs at the full cap continuously.
+    #[arg(long)]
+    power_save: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -145,6 +149,7 @@ async fn app_main() -> Result<()> {
     // Capture the terminal window now, while it's focused, so the follow tracks
     // this window between monitors rather than re-reading focus each tick.
     app.capture_window();
+    app.power_save = args.power_save;
     match args.fps {
         Some(fps) => app.pin_fps(fps),
         None => app.follow_monitor(),

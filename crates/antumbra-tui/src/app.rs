@@ -99,6 +99,9 @@ pub struct App {
     pub since_reload_ms: f64,
     /// Time since the last keypress (ms); drives the idle frame-rate throttle.
     pub since_input_ms: f64,
+    /// Opt in to easing the rate down after an idle spell (`--power-save`); off by
+    /// default so the console renders at the full cap continuously.
+    pub power_save: bool,
     /// Whether the loop is currently eased to the idle rate (no recent input).
     pub idle: bool,
     pub should_quit: bool,
@@ -128,6 +131,7 @@ impl App {
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             since_input_ms: 0.0,
+            power_save: false,
             idle: false,
             should_quit: false,
         };
@@ -394,13 +398,15 @@ impl App {
         self.since_input_ms = 0.0;
     }
 
-    /// The rate to pace this frame at: the full target while interacting or
-    /// animating, eased to [`crate::pacing::IDLE_FPS`] after an idle spell.
+    /// The rate to pace this frame at: the full target, unless `--power-save` is
+    /// on and the view has been still (no input, no animation), in which case it
+    /// eases to [`crate::pacing::IDLE_FPS`].
     pub fn frame_cap(&self, animating: bool) -> u32 {
-        if animating || self.since_input_ms < crate::pacing::IDLE_AFTER_MS {
-            self.target_fps
-        } else {
+        let still = !animating && self.since_input_ms >= crate::pacing::IDLE_AFTER_MS;
+        if self.power_save && still {
             self.target_fps.min(crate::pacing::IDLE_FPS)
+        } else {
+            self.target_fps
         }
     }
 
