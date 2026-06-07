@@ -2,20 +2,22 @@
 //! command palette, and the focused-list filter.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, Focus, Mode};
+use crate::events::EventKind;
 use crate::overlay;
 use crate::scroll;
+use crate::theme::Theme;
 
 /// The modal box rectangle for the active overlay (the size source the open
 /// animation also targets). `None` in the live view.
 pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     match app.mode {
-        Mode::Help => Some(overlay::centered(frame, 52, 23)),
+        Mode::Help => Some(overlay::centered(frame, 52, 24)),
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
             Some(overlay::centered(frame, 56, listed + 4))
@@ -24,8 +26,66 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
             let listed = (app.filtered().len() as u16 + 4).min(18);
             Some(overlay::centered(frame, 50, listed))
         }
+        Mode::Events => {
+            let listed = (app.events.len() as u16 + 2).clamp(6, 24);
+            Some(overlay::centered(frame, 64, listed))
+        }
         Mode::Normal => None,
     }
+}
+
+/// The theme colour an event renders in, by kind.
+fn event_color(t: &Theme, kind: EventKind) -> Color {
+    match kind {
+        EventKind::Spawn => t.accent,
+        EventKind::Graduate => t.success,
+        EventKind::Prune => t.alert,
+        EventKind::Freeze => t.value,
+        EventKind::Boundary => t.warning,
+        EventKind::System => t.dim,
+    }
+}
+
+/// The live event stream (`e`): store changes newest-first, scrollable, the loop
+/// keeps reloading so it fills while it's open.
+pub(super) fn events_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
+    let inner = overlay::modal(f, &t, area, &format!("events · {}", app.events.len()));
+    if app.events.is_empty() {
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                "  (no changes yet — training elsewhere will show here)",
+                Style::default().fg(t.dim),
+            )),
+            inner,
+        );
+        return;
+    }
+    let now = app.clock_ms;
+    let lines: Vec<Line> = app
+        .events
+        .iter()
+        .map(|e| {
+            let color = event_color(&t, e.kind);
+            let ago = (((now - e.at_ms) / 1000.0).max(0.0)) as u64;
+            Line::from(vec![
+                Span::styled(format!("{} ", e.kind.glyph()), Style::default().fg(color)),
+                Span::styled(e.text.clone(), Style::default().fg(t.ink)),
+                Span::styled(format!("  {ago}s ago"), Style::default().fg(t.dim)),
+            ])
+        })
+        .collect();
+    scroll::list(
+        f,
+        &t,
+        inner,
+        Block::default(),
+        lines,
+        Some(app.events_scroll),
+    );
 }
 
 /// The keybinding reference, a centred modal over the live view (`?` toggles).
@@ -69,6 +129,7 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
         group("command"),
         bind("/", "filter the focused list, jump to a match"),
         bind(":", "open the command palette"),
+        bind("e", "live event stream of store changes"),
         bind("r", "reload from the store"),
         bind("? esc", "close this help"),
         bind("q", "quit"),

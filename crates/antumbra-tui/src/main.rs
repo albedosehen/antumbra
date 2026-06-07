@@ -5,6 +5,7 @@
 
 mod app;
 mod command;
+mod events;
 mod overlay;
 mod pacing;
 mod scroll;
@@ -127,6 +128,7 @@ async fn app_main() -> Result<()> {
             match overlay.as_str() {
                 "help" => app.toggle_help(),
                 "palette" => app.open_palette(),
+                "events" => app.open_events(),
                 _ => {}
             }
             let buf = snapshot::render(&mut app, width, height, at_ms)?;
@@ -465,6 +467,14 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::Char(c) => app.filter_input(c),
                             _ => {}
                         },
+                        Mode::Events => match key.code {
+                            KeyCode::Char('e') | KeyCode::Char('q') | KeyCode::Esc => {
+                                app.close_overlay()
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => app.events_move(1),
+                            KeyCode::Up | KeyCode::Char('k') => app.events_move(-1),
+                            _ => {}
+                        },
                         Mode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
@@ -479,6 +489,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             }
                             KeyCode::Char('/') => {
                                 app.open_filter();
+                                transition = Some(transition::overlay_open());
+                            }
+                            KeyCode::Char('e') => {
+                                app.open_events();
                                 transition = Some(transition::overlay_open());
                             }
                             KeyCode::Tab => {

@@ -5,7 +5,10 @@ use antumbra_core::{Expert, FailureBoundary, LearnedRouter, Shadow};
 use antumbra_store::repo::{boundary, expert, router, shadow};
 use antumbra_store::Store;
 
+use std::collections::HashMap;
+
 use crate::command::{self, Action, Command};
+use crate::events::{Event, EventKind};
 use crate::theme::Theme;
 
 /// Which list the navigation keys drive, and which detail panel is shown — one
@@ -26,6 +29,7 @@ pub enum Mode {
     Help,
     Palette,
     Filter,
+    Events,
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -82,6 +86,17 @@ pub struct App {
     pub filter: String,
     /// The highlighted match within the filter results.
     pub filter_selected: usize,
+    /// The live event stream (store changes), newest first.
+    pub events: Vec<Event>,
+    /// Scroll position within the events overlay.
+    pub events_scroll: usize,
+    /// Per-entity fingerprints from the last reload, to diff the next one.
+    pub ev_experts: HashMap<String, bool>,
+    pub ev_shadows: HashMap<String, String>,
+    pub ev_boundaries: HashMap<String, bool>,
+    pub ev_router: bool,
+    /// Whether the first reload has set the baseline (so it doesn't emit a flood).
+    pub ev_baseline: bool,
     /// Index into [`crate::theme::ALL`] of the active palette.
     pub theme_idx: usize,
     /// The frame-rate cap the loop paces to (Hz), adjustable with `+`/`-`.
@@ -123,6 +138,13 @@ impl App {
             palette: Palette::default(),
             filter: String::new(),
             filter_selected: 0,
+            events: Vec::new(),
+            events_scroll: 0,
+            ev_experts: HashMap::new(),
+            ev_shadows: HashMap::new(),
+            ev_boundaries: HashMap::new(),
+            ev_router: false,
+            ev_baseline: false,
             theme_idx: 0,
             target_fps: 144,
             auto_fps: true,
@@ -156,8 +178,127 @@ impl App {
         if !self.shadows.is_empty() && self.selected_shadow >= self.shadows.len() {
             self.selected_shadow = self.shadows.len() - 1;
         }
+        self.record_events();
         self.since_reload_ms = 0.0;
         Ok(())
+    }
+
+    /// Diff this reload against the last to emit store-change events. The first
+    /// reload just records the baseline (so it doesn't flood with "everything is
+    /// new"); later reloads emit additions and state changes.
+    pub(crate) fn record_events(&mut self) {
+        let experts: HashMap<String, bool> = self
+            .experts
+            .iter()
+            .map(|e| (e.id.as_str().to_string(), e.is_frozen()))
+            .collect();
+        let shadows: HashMap<String, String> = self
+            .shadows
+            .iter()
+            .map(|s| (s.id.as_str().to_string(), s.status.as_str().to_string()))
+            .collect();
+        let boundaries: HashMap<String, bool> = self
+            .boundaries
+            .iter()
+            .map(|b| (b.id.as_str().to_string(), b.is_actionable()))
+            .collect();
+        let router = self.router.is_some();
+
+        let mut emit: Vec<(EventKind, String)> = Vec::new();
+        if !self.ev_baseline {
+            self.ev_baseline = true;
+            emit.push((
+                EventKind::System,
+                format!(
+                    "connected · {} experts · {} shadows · {} boundaries",
+                    self.experts.len(),
+                    self.shadows.len(),
+                    self.boundaries.len()
+                ),
+            ));
+        } else {
+            for e in &self.experts {
+                match self.ev_experts.get(e.id.as_str()) {
+                    None => emit.push((EventKind::Spawn, format!("expert {} emerged", e.name))),
+                    Some(&frozen) if !frozen && e.is_frozen() => {
+                        emit.push((EventKind::Freeze, format!("expert {} frozen", e.name)))
+                    }
+                    _ => {}
+                }
+            }
+            for s in &self.shadows {
+                let status = s.status.as_str();
+                match self.ev_shadows.get(s.id.as_str()) {
+                    None => emit.push((
+                        EventKind::Spawn,
+                        format!("shadow {} spawned ({status})", s.id.as_str()),
+                    )),
+                    Some(prev) if prev != status => {
+                        let kind = match status {
+                            "graduated" => EventKind::Graduate,
+                            "pruned" => EventKind::Prune,
+                            _ => EventKind::System,
+                        };
+                        emit.push((kind, format!("shadow {} {status}", s.id.as_str())));
+                    }
+                    _ => {}
+                }
+            }
+            for b in &self.boundaries {
+                match self.ev_boundaries.get(b.id.as_str()) {
+                    None => emit.push((
+                        EventKind::Boundary,
+                        format!("boundary recorded · {}", b.behavior),
+                    )),
+                    Some(&actionable) if !actionable && b.is_actionable() => emit.push((
+                        EventKind::Boundary,
+                        format!("boundary now gates · {}", b.behavior),
+                    )),
+                    _ => {}
+                }
+            }
+            if router && !self.ev_router {
+                emit.push((EventKind::System, "router trained".to_string()));
+            }
+        }
+
+        for (kind, text) in emit {
+            self.push_event(kind, text);
+        }
+        self.ev_experts = experts;
+        self.ev_shadows = shadows;
+        self.ev_boundaries = boundaries;
+        self.ev_router = router;
+    }
+
+    /// Record an event at the head of the stream (newest first), capped.
+    fn push_event(&mut self, kind: EventKind, text: String) {
+        self.events.insert(
+            0,
+            Event {
+                at_ms: self.clock_ms,
+                kind,
+                text,
+            },
+        );
+        self.events.truncate(crate::events::MAX_EVENTS);
+    }
+
+    /// Open the live event-stream overlay.
+    pub fn open_events(&mut self) {
+        self.mode = Mode::Events;
+        self.events_scroll = 0;
+    }
+
+    /// Scroll the events overlay by `delta` (clamped).
+    pub fn events_move(&mut self, delta: i32) {
+        let n = self.events.len();
+        if n == 0 {
+            self.events_scroll = 0;
+            return;
+        }
+        let cur = self.events_scroll.min(n - 1) as i32;
+        self.events_scroll = (cur + delta).clamp(0, n as i32 - 1) as usize;
     }
 
     /// The active palette every panel tints from.

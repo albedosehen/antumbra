@@ -48,6 +48,13 @@ pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Style::default().fg(t.dim),
     ));
+    // Live event-stream indicator (`e` opens the stream).
+    if !app.events.is_empty() {
+        spans.push(Span::styled(
+            format!("  ·  {} events", app.events.len()),
+            Style::default().fg(t.accent),
+        ));
+    }
     f.render_widget(Paragraph::new(Line::from(spans)).block(panel(&t, "")), area);
 }
 

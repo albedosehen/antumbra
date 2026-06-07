@@ -178,6 +178,13 @@ mod tests {
             palette: Palette::default(),
             filter: String::new(),
             filter_selected: 0,
+            events: Vec::new(),
+            events_scroll: 0,
+            ev_experts: std::collections::HashMap::new(),
+            ev_shadows: std::collections::HashMap::new(),
+            ev_boundaries: std::collections::HashMap::new(),
+            ev_router: false,
+            ev_baseline: false,
             theme_idx: 0,
             target_fps: 144,
             auto_fps: false,
@@ -432,6 +439,53 @@ mod tests {
         app.filter_apply();
         assert_eq!(app.selected_shadow, 1, "selection jumped to the match");
         assert_eq!(app.mode, Mode::Normal, "filter closed after applying");
+    }
+
+    // The event stream diffs successive reloads: a baseline pass records state
+    // silently, then changes (spawn, graduate, boundary) emit events.
+    #[test]
+    fn event_stream_diffs_store_changes() {
+        use crate::events::EventKind;
+        let mut app = demo_app();
+        app.shadows = vec![Shadow {
+            id: ShadowId::new("shadow:x"),
+            parent_expert: None,
+            adapter_uri: None,
+            status: ShadowStatus::Exploring,
+            generation: Generation(1),
+            reward_curve: vec![],
+            created_at: Utc::now(),
+        }];
+        // Baseline: only the "connected" event, no per-entity flood.
+        app.record_events();
+        assert!(app.ev_baseline);
+        assert_eq!(app.events.len(), 1, "baseline emits one connect event");
+        assert_eq!(app.events[0].kind, EventKind::System);
+
+        // The shadow graduates.
+        app.shadows[0].status = ShadowStatus::Graduated;
+        app.record_events();
+        assert!(
+            app.events
+                .iter()
+                .any(|e| e.kind == EventKind::Graduate && e.text.contains("graduated")),
+            "graduation emitted: {:?}",
+            app.events.iter().map(|e| &e.text).collect::<Vec<_>>()
+        );
+
+        // A new boundary is recorded.
+        app.boundaries = vec![actionable_boundary()];
+        app.record_events();
+        assert!(
+            app.events.iter().any(|e| e.kind == EventKind::Boundary),
+            "boundary event emitted"
+        );
+
+        // The overlay renders the stream.
+        app.open_events();
+        let text = to_text(&render(&mut app, 100, 24, 1600.0).unwrap());
+        assert!(text.contains("events"), "events overlay titled:\n{text}");
+        assert!(text.contains("graduated"), "an event is listed");
     }
 
     // Pressing `?` opens the help overlay over the live view, listing the keys.
