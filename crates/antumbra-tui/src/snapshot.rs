@@ -323,6 +323,36 @@ mod tests {
         golden_overlay("events", &mut app, 100, 12);
     }
 
+    /// Golden the focused-layout right detail column (the panels — no animated
+    /// graph, no wall-clock timestamps, so it's stable).
+    fn golden_detail_column(name: &str, app: &mut App, w: u16, h: u16) {
+        let buf = render(app, w, h, 1600.0).unwrap();
+        let rect = crate::transition::detail_area(buf.area);
+        assert_golden(name, &to_text_in(&buf, rect));
+    }
+
+    #[test]
+    fn golden_focused_experts_panel() {
+        let mut app = demo_app();
+        golden_detail_column("focused_experts", &mut app, 120, 36);
+    }
+
+    #[test]
+    fn golden_focused_shadows_panel() {
+        let mut app = demo_app();
+        app.shadows = vec![graduated_shadow()];
+        app.focus = Focus::Shadows;
+        golden_detail_column("focused_shadows", &mut app, 120, 36);
+    }
+
+    #[test]
+    fn golden_focused_boundaries_panel() {
+        let mut app = demo_app();
+        app.boundaries = vec![actionable_boundary()];
+        app.focus = Focus::Boundaries;
+        golden_detail_column("focused_boundaries", &mut app, 120, 36);
+    }
+
     // e2e of the console without a terminal: render a frame and assert on the
     // text grid. The whole layout is exercised (header, graph, detail, gate).
     #[test]
