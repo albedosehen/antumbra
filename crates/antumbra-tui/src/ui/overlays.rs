@@ -19,7 +19,7 @@ use super::{gauge_row, gauge_spans, heading, kv, shadow_color, sparkline_row};
 /// animation also targets). `None` in the live view.
 pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     match app.mode {
-        Mode::Help => Some(overlay::centered(frame, 52, 26)),
+        Mode::Help => Some(overlay::centered(frame, 56, 26)),
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
             Some(overlay::centered(frame, 56, listed + 4))

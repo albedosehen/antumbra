@@ -1,0 +1,19 @@
+╭ command ─────────────────────────────────────────────╮
+│› ▏                                                   │
+│                                                      │
+│▸ focus umbra · experts                               │
+│  focus penumbra · shadows                            │
+│  focus antumbra · boundaries                         │
+│  theme · cycle palette                               │
+│  layout · dashboard (all regions)                    │
+│  layout · focused (single detail)                    │
+│  layout · graph (full width)                         │
+│  fps · follow active monitor                         │
+│  fps · increase cap                                  │
+│  fps · decrease cap                                  │
+│  ask · route a task through the gate                 │
+│  events · live store changes                         │
+│  reload from the store                               │
+│  help · keybindings                                  │
+│  quit                                                │
+╰──────────────────────────────────────────────────────╯

@@ -11,6 +11,8 @@ use anyhow::{anyhow, Result};
 use image::{Rgb, RgbImage};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
+#[cfg(test)]
+use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::Terminal;
 
@@ -42,6 +44,24 @@ pub fn to_text(buf: &Buffer) -> String {
     for y in 0..area.height {
         let mut row = String::with_capacity(area.width as usize);
         for x in 0..area.width {
+            if let Some(cell) = buf.cell((x, y)) {
+                row.push_str(cell.symbol());
+            }
+        }
+        out.push_str(row.trim_end());
+        out.push('\n');
+    }
+    out
+}
+
+/// The text of a sub-region of the buffer (rows trimmed) — for golden-testing a
+/// modal without the animated background behind it.
+#[cfg(test)]
+pub fn to_text_in(buf: &Buffer, area: Rect) -> String {
+    let mut out = String::new();
+    for y in area.top()..area.bottom() {
+        let mut row = String::new();
+        for x in area.left()..area.right() {
             if let Some(cell) = buf.cell((x, y)) {
                 row.push_str(cell.symbol());
             }
@@ -230,6 +250,77 @@ mod tests {
             generation: Generation::ZERO,
             created_at: Utc::now(),
         }
+    }
+
+    /// Compare `actual` against the stored golden `tests/golden/<name>.txt`.
+    /// Re-create/update goldens by running with `ANTUMBRA_BLESS=1`.
+    fn assert_golden(name: &str, actual: &str) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("golden")
+            .join(format!("{name}.txt"));
+        if std::env::var_os("ANTUMBRA_BLESS").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, actual).unwrap();
+            return;
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+            panic!(
+                "missing golden {}; run `ANTUMBRA_BLESS=1 cargo test -p antumbra-tui golden`",
+                path.display()
+            )
+        });
+        assert!(
+            actual == expected,
+            "golden mismatch for `{name}` (re-bless with ANTUMBRA_BLESS=1 if intentional)\
+             \n--- expected ---\n{expected}\n--- actual ---\n{actual}"
+        );
+    }
+
+    /// Render the active overlay's modal box and golden just that region, so the
+    /// animated graph behind it never churns the comparison.
+    fn golden_overlay(name: &str, app: &mut App, w: u16, h: u16) {
+        let buf = render(app, w, h, 1600.0).unwrap();
+        let rect = crate::ui::overlay_area(app, buf.area).expect("an overlay must be open");
+        assert_golden(name, &to_text_in(&buf, rect));
+    }
+
+    // Golden the keybinding help modal exactly — adding/renaming a binding must be
+    // a deliberate re-bless, not a silent drift.
+    #[test]
+    fn golden_help_overlay() {
+        let mut app = demo_app();
+        app.toggle_help();
+        golden_overlay("help", &mut app, 120, 36);
+    }
+
+    // Golden the command palette's full command list.
+    #[test]
+    fn golden_command_palette() {
+        let mut app = demo_app();
+        app.open_palette();
+        golden_overlay("palette", &mut app, 120, 36);
+    }
+
+    // Golden the operator-action confirm prompt.
+    #[test]
+    fn golden_confirm_delete() {
+        let mut app = demo_app();
+        app.boundaries = vec![actionable_boundary()];
+        app.focus = Focus::Boundaries;
+        app.request_action();
+        golden_overlay("confirm_delete", &mut app, 120, 36);
+    }
+
+    // Golden the live event-stream overlay (events stamped at clock 0, frame at
+    // 1600ms → "1s ago", so it's deterministic).
+    #[test]
+    fn golden_event_stream() {
+        let mut app = demo_app();
+        app.operator_event("string-specialist emerged".into());
+        app.operator_event("shadow:g4 graduated".into());
+        app.open_events();
+        golden_overlay("events", &mut app, 100, 12);
     }
 
     // e2e of the console without a terminal: render a frame and assert on the

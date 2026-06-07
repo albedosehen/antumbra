@@ -1,0 +1,26 @@
+╭ help ────────────────────────────────────────────────╮
+│navigate                                              │
+│  ↑↓ jk   select in the focused list                  │
+│  enter   drill into the selected item                │
+│  g G     jump to first / last  (home / end)          │
+│  pgup/dn move by a page                              │
+│  tab     switch focus: umbra / penumbra / antumbra   │
+│                                                      │
+│view                                                  │
+│  l       cycle layout: focused / dashboard / graph   │
+│  t       cycle theme: shadow / ember / mono          │
+│                                                      │
+│frame rate                                            │
+│  + -     pin the cap to a refresh rate               │
+│  a       follow the active monitor                   │
+│                                                      │
+│command                                               │
+│  /       filter the focused list, jump to a match    │
+│  :       command palette (ask · route a task here)   │
+│  e       live event stream of store changes          │
+│  x       act: prune shadow / delete boundary         │
+│  r       reload from the store                       │
+│  ? esc   close this help                             │
+│  q       quit                                        │
+│                                                      │
+╰──────────────────────────────────────────────────────╯
