@@ -368,6 +368,50 @@ impl App {
         }
     }
 
+    /// The `(len, selected)` of the list the navigation keys drive.
+    fn focused_list(&self) -> (usize, usize) {
+        match self.focus {
+            Focus::Experts => (self.experts.len(), self.selected),
+            Focus::Shadows => (self.shadows.len(), self.selected_shadow),
+            Focus::Boundaries => (self.boundaries.len(), self.selected_boundary),
+        }
+    }
+
+    /// Set the highlighted index of the focused list.
+    fn set_focused_selection(&mut self, idx: usize) {
+        match self.focus {
+            Focus::Experts => self.selected = idx,
+            Focus::Shadows => self.selected_shadow = idx,
+            Focus::Boundaries => self.selected_boundary = idx,
+        }
+    }
+
+    /// Jump to the first item of the focused list (Home / `g`).
+    pub fn select_first(&mut self) {
+        if self.focused_list().0 > 0 {
+            self.set_focused_selection(0);
+        }
+    }
+
+    /// Jump to the last item of the focused list (End / `G`).
+    pub fn select_last(&mut self) {
+        let (n, _) = self.focused_list();
+        if n > 0 {
+            self.set_focused_selection(n - 1);
+        }
+    }
+
+    /// Move the selection by a page (PageUp/PageDown), clamped to the ends.
+    pub fn select_page(&mut self, delta: i32) {
+        const PAGE: i32 = 10;
+        let (n, cur) = self.focused_list();
+        if n == 0 {
+            return;
+        }
+        let next = (cur as i32 + delta * PAGE).clamp(0, n as i32 - 1);
+        self.set_focused_selection(next as usize);
+    }
+
     pub fn selected_expert(&self) -> Option<&Expert> {
         self.experts.get(self.selected)
     }

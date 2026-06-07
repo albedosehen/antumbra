@@ -445,6 +445,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
                             KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
+                            KeyCode::Home | KeyCode::Char('g') => app.select_first(),
+                            KeyCode::End | KeyCode::Char('G') => app.select_last(),
+                            KeyCode::PageDown => app.select_page(1),
+                            KeyCode::PageUp => app.select_page(-1),
                             KeyCode::Char(':') => app.open_palette(),
                             KeyCode::Tab => {
                                 app.toggle_focus();

@@ -212,7 +212,7 @@ fn palette_overlay(f: &mut Frame, app: &App) {
 /// The keybinding reference, a centred modal over the live view (`?` toggles).
 fn help_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
-    let area = overlay::centered(f.area(), 52, 21);
+    let area = overlay::centered(f.area(), 52, 23);
     let inner = overlay::modal(f, &t, area, "help");
 
     let group = |label: &str| {
@@ -233,6 +233,8 @@ fn help_overlay(f: &mut Frame, app: &App) {
     let lines = vec![
         group("navigate"),
         bind("↑↓ jk", "select in the focused list"),
+        bind("g G", "jump to first / last  (home / end)"),
+        bind("pgup/dn", "move by a page"),
         bind("tab", "switch focus: umbra / penumbra / antumbra"),
         Line::from(""),
         group("view"),

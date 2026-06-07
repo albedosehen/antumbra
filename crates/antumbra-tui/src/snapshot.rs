@@ -266,6 +266,37 @@ mod tests {
         );
     }
 
+    // Home/End/PageUp/PageDown drive the focused list, clamped to the ends.
+    #[test]
+    fn page_and_jump_navigation_clamps_to_the_list() {
+        let mut app = demo_app();
+        app.shadows = (0..25)
+            .map(|i| Shadow {
+                id: ShadowId::new(format!("shadow:s{i}")),
+                parent_expert: None,
+                adapter_uri: None,
+                status: ShadowStatus::Exploring,
+                generation: Generation(i),
+                reward_curve: vec![],
+                created_at: Utc::now(),
+            })
+            .collect();
+        app.focus = Focus::Shadows;
+        app.select_last();
+        assert_eq!(app.selected_shadow, 24, "End jumps to the last item");
+        app.select_page(-1);
+        assert_eq!(app.selected_shadow, 14, "PageUp moves up a page of 10");
+        app.select_first();
+        assert_eq!(app.selected_shadow, 0, "Home jumps to the first item");
+        app.select_page(-1);
+        assert_eq!(app.selected_shadow, 0, "PageUp clamps at the top");
+        app.select_page(99);
+        assert_eq!(
+            app.selected_shadow, 24,
+            "a big page jump clamps at the bottom"
+        );
+    }
+
     // The dashboard layout shows all three regions at once (umbra, penumbra,
     // antumbra), unlike the focused layout that swaps a single detail panel.
     #[test]
