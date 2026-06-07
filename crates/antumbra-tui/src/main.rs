@@ -153,7 +153,7 @@ async fn app_main() -> Result<()> {
 }
 
 /// Print the multi-monitor refresh diagnostic: every display and its rate, the
-/// one the console window resolves to, and the rate the cap would follow.
+/// one the terminal resolves to, and the rate the cap would follow.
 fn print_monitors() {
     let active = pacing::active_device();
     let mons = pacing::monitors();
@@ -169,27 +169,16 @@ fn print_monitors() {
                 m.device,
                 m.hz,
                 if m.primary { "  primary" } else { "" },
-                if here { "  <- console window" } else { "" },
+                if here { "  <- terminal" } else { "" },
             );
         }
     }
     match pacing::detect_refresh() {
         Some(hz) => println!(
-            "\nfollowing the console window's monitor: {hz} Hz (cap snaps to {})",
+            "\nfollowing the terminal's monitor: {hz} Hz (cap snaps to {})",
             pacing::snap_refresh(hz)
         ),
         None => println!("\ndetection failed; the cap keeps its default value"),
-    }
-    let on_primary = active
-        .as_deref()
-        .and_then(|a| mons.iter().find(|m| m.device == a))
-        .is_some_and(|m| m.primary);
-    if on_primary && mons.len() > 1 {
-        println!(
-            "note: the console window resolved to the PRIMARY display. If you ran this on a\n      \
-             non-primary monitor, your terminal (ConPTY) is masking the window's real position;\n      \
-             pin the rate with `--fps <hz>` or the +/- keys instead of auto-follow."
-        );
     }
 }
 

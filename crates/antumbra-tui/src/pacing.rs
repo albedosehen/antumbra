@@ -105,17 +105,18 @@ impl Drop for TimerResolution {
     }
 }
 
-/// The refresh rate (Hz) of the monitor the console window is currently on, so a
-/// multi-monitor setup can follow the active display. Best-effort: resolving the
-/// window's monitor depends on `GetConsoleWindow`, which under Windows Terminal /
-/// ConPTY may report the primary monitor rather than the one the window sits on.
-/// Returns `None` off Windows or when the query fails (caller keeps its rate).
+/// The refresh rate (Hz) of the monitor the terminal is currently on, so a
+/// multi-monitor setup can follow the active display. Resolves via the foreground
+/// window — under Windows Terminal / ConPTY the console window is a hidden
+/// pseudo-console parked on the primary, so `GetForegroundWindow` (the focused
+/// terminal) tracks the real position while the console is in use. Returns `None`
+/// off Windows or when the query fails (caller keeps its rate).
 #[cfg(windows)]
 pub fn detect_refresh() -> Option<u32> {
     // SAFETY: standard Win32 monitor queries; every buffer is stack-owned and
     // sized through its `cb_size` / `dm_size` field as the API requires.
     unsafe {
-        let monitor = MonitorFromWindow(GetConsoleWindow(), MONITOR_DEFAULTTONEAREST);
+        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
         let mut info: MonitorInfoExW = std::mem::zeroed();
         info.cb_size = std::mem::size_of::<MonitorInfoExW>() as u32;
         if GetMonitorInfoW(monitor, &mut info) == 0 {
@@ -194,13 +195,14 @@ pub fn monitors() -> Vec<Monitor> {
     Vec::new()
 }
 
-/// The device name (`\\.\DISPLAYn`) of the display the console window is on, so a
-/// diagnostic can show which monitor the follow logic resolves to.
+/// The device name (`\\.\DISPLAYn`) of the display the terminal is on (via the
+/// foreground window), so a diagnostic can show which monitor the follow logic
+/// resolves to.
 #[cfg(windows)]
 pub fn active_device() -> Option<String> {
     // SAFETY: as in `detect_refresh`; a stack MONITORINFOEXW sized via cb_size.
     unsafe {
-        let monitor = MonitorFromWindow(GetConsoleWindow(), MONITOR_DEFAULTTONEAREST);
+        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
         let mut info: MonitorInfoExW = std::mem::zeroed();
         info.cb_size = std::mem::size_of::<MonitorInfoExW>() as u32;
         if GetMonitorInfoW(monitor, &mut info) == 0 {
@@ -235,14 +237,9 @@ const DISPLAY_DEVICE_ATTACHED_TO_DESKTOP: u32 = 0x1;
 const DISPLAY_DEVICE_PRIMARY_DEVICE: u32 = 0x4;
 
 #[cfg(windows)]
-#[link(name = "kernel32")]
-extern "system" {
-    fn GetConsoleWindow() -> Handle;
-}
-
-#[cfg(windows)]
 #[link(name = "user32")]
 extern "system" {
+    fn GetForegroundWindow() -> Handle;
     fn MonitorFromWindow(hwnd: Handle, flags: u32) -> Handle;
     fn GetMonitorInfoW(monitor: Handle, info: *mut MonitorInfoExW) -> i32;
     fn EnumDisplaySettingsW(device: *const u16, mode_num: u32, mode: *mut DevModeW) -> i32;
