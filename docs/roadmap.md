@@ -185,7 +185,7 @@ second source of truth. See [`product.md`](product.md) for the gap analysis and 
 Antumbra *supersedes by metabolizing* vs *must build*.
 
 ### P-1 · Hook auth + REST shim + per-workspace embedder config
-**Status:** (a) DONE; (b)/(c) queued (unblocks onboarding + bring-your-own-embedder).
+**Status:** (a)/(b) DONE; (c) queued (unblocks onboarding + bring-your-own-embedder).
 Three small pieces that make the lifecycle-hook integration ([`/scripts/hooks`](../scripts/hooks),
 [`integration.md`](integration.md)) work end-to-end against the networked surface:
 (a) **DONE** — a long-lived, scope-bound **hook token** (API-key-style) for
@@ -195,12 +195,14 @@ the offline / self-hosted tier mints one with `antumbra-mcp --mint-token
 --tenant <ws> --user <u> --jwt-secret <s> [--token-ttl-days N]` (HS256, the same
 secret the server verifies with; an RS256 deployment mints via its auth service's
 private key). `exp` stays mandatory, so it is long-lived, never an eternal standing
-key. (b) a **REST
-`/mcp/call` convenience endpoint** (`{tool, arguments}` → result) beside the
-JSON-RPC `/mcp` router, so a shell hook can fetch bootstrap context without the
-initialize→tools/call handshake (the *capture* and *attribution* hooks already work
-— they only emit hook decisions; the *bootstrap* hook is the one that needs this);
-and (c) promoting the `Embedder` port to a **per-workspace runtime config** (model
+key. (b) **DONE** — a **REST `/mcp/call` convenience endpoint** (`POST {tool,
+arguments}` → the tool's JSON result) beside the JSON-RPC `/mcp` router, so a shell
+hook fetches bootstrap context with one authenticated POST, no initialize→tools/call
+handshake. It dispatches the *same* tools (`McpServer::call_tool`) under the *same*
+JWT auth and scoped-connection engine ACL — a thin transport, not a second
+authority (the *capture* and *attribution* hooks already worked — they only emit
+hook decisions; the *bootstrap* hook needed this). And (c) promoting the
+`Embedder` port to a **per-workspace runtime config** (model
 id / local endpoint) instead of a build-time choice, keeping the embedding step on
 the tenant's side with HNSW dims consistent.
 

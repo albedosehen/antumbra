@@ -38,8 +38,8 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::any;
-use axum::Router;
+use axum::routing::{any, post};
+use axum::{Json, Router};
 use tokio::sync::Mutex;
 
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -168,7 +168,10 @@ fn spawn_live_propagation(state: Arc<HttpState>) {
 /// The `/mcp` router. Extracted so the auth boundary can be exercised with
 /// `oneshot` (no socket) in tests.
 fn router(state: Arc<HttpState>) -> Router {
-    Router::new().route("/mcp", any(handle)).with_state(state)
+    Router::new()
+        .route("/mcp", any(handle))
+        .route("/mcp/call", post(handle_call))
+        .with_state(state)
 }
 
 async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Response {
@@ -224,20 +227,39 @@ impl HttpState {
         if let Some(s) = self.sessions.lock().await.get(identity) {
             return Ok(s.clone());
         }
+        // The SSE service registers each session's peer for live propagation (R-2).
+        let mcp = self
+            .mcp_for(identity)
+            .await?
+            .with_registry(self.registry.clone());
+        // The factory clones the (store-sharing) server for each MCP exchange.
+        let service = StreamableHttpService::new(
+            move || Ok(mcp.clone()),
+            Arc::new(LocalSessionManager::default()),
+            server_config(),
+        );
+        self.sessions
+            .lock()
+            .await
+            .insert(identity.clone(), service.clone());
+        Ok(service)
+    }
+
+    /// Provision (owner-side) and build the per-identity [`McpServer`] — the base
+    /// the JSON-RPC SSE service wraps, and the one the REST `/mcp/call` shim drives
+    /// directly. Its tools run on the SCOPED serving connection so the engine ACL
+    /// is enforced per request (not the root `store`, which would bypass it on a
+    /// remote — R-6).
+    async fn mcp_for(&self, identity: &Identity) -> Result<McpServer> {
         let tenant = TenantId::new(&identity.tenant);
         let user = UserId::new(&identity.user);
-
-        // Provision owner-side (principal + default compartment). Done under the
-        // auth lock in owner mode so it never races a signed-in request.
+        // Provision owner-side (principal + default compartment), under the auth
+        // lock in owner mode so it never races a signed-in request.
         let default_compartment = {
             let _guard = self.auth.lock().await;
-            self.store.signin_root().await?; // owner mode for the writes
+            self.store.signin_root().await?;
             crate::provision_identity(&self.store, &tenant, &user).await?
         };
-
-        // The server's tools run on the SCOPED serving connection so the engine
-        // ACL is enforced per request (not the root `store`, which would bypass
-        // it on a remote — R-6).
         let mut mcp = McpServer::new(
             self.serve_store.clone(),
             self.embedder.clone(),
@@ -250,18 +272,7 @@ impl HttpState {
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
         }
-        mcp = mcp.with_registry(self.registry.clone());
-        // The factory clones the (store-sharing) server for each MCP exchange.
-        let service = StreamableHttpService::new(
-            move || Ok(mcp.clone()),
-            Arc::new(LocalSessionManager::default()),
-            server_config(),
-        );
-        self.sessions
-            .lock()
-            .await
-            .insert(identity.clone(), service.clone());
-        Ok(service)
+        Ok(mcp)
     }
 }
 
@@ -292,6 +303,89 @@ fn internal_error() -> Response {
         "session initialization failed",
     )
         .into_response()
+}
+
+fn bad_request(msg: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": msg })),
+    )
+        .into_response()
+}
+
+/// The body of a `POST /mcp/call`: a tool name and its arguments.
+#[derive(serde::Deserialize)]
+struct RestCall {
+    tool: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+}
+
+/// REST convenience surface (P-1b): `POST /mcp/call {tool, arguments}` returns the
+/// tool's JSON result, so a one-shot client (a lifecycle hook fetching bootstrap
+/// context) can call a tool without the JSON-RPC initialize -> tools/call
+/// handshake. Same JWT auth and scoped-connection engine ACL as `/mcp` -- a thin
+/// transport over the identical tools, not a second authority.
+async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Response {
+    let header_val = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+    let identity = match state.verifier.verify_header(header_val) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("antumbra-mcp: rejected /mcp/call: {e}");
+            return unauthorized();
+        }
+    };
+
+    let body = match axum::body::to_bytes(req.into_body(), 64 * 1024).await {
+        Ok(b) => b,
+        Err(_) => return bad_request("request body unreadable or too large"),
+    };
+    let call: RestCall = match serde_json::from_slice(&body) {
+        Ok(c) => c,
+        Err(e) => return bad_request(&format!("invalid JSON body: {e}")),
+    };
+
+    let mcp = match state.mcp_for(&identity).await {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "antumbra-mcp: /mcp/call init failed for {}/{}: {e}",
+                identity.tenant, identity.user
+            );
+            return internal_error();
+        }
+    };
+
+    // Bind the scoped connection to this identity, then dispatch -- the same
+    // serialized authenticated section as a /mcp request.
+    let result = {
+        let _guard = state.auth.lock().await;
+        if let Err(e) = state
+            .serve_store
+            .signin(
+                &TenantId::new(&identity.tenant),
+                &UserId::new(&identity.user),
+            )
+            .await
+        {
+            eprintln!(
+                "antumbra-mcp: /mcp/call signin failed for {}: {e}",
+                identity.tenant
+            );
+            return internal_error();
+        }
+        mcp.call_tool(&call.tool, call.arguments).await
+    };
+
+    match result {
+        Ok(value) => Json(value).into_response(),
+        // A tool error (unknown tool, bad arguments, not found) is the caller's
+        // fault -> 400 with the tool's message; auth/ACL failures returned above.
+        Err(e) => bad_request(e.message.as_ref()),
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +465,64 @@ mod tests {
 
     fn valid_token() -> String {
         token("ws:t", "user:t")
+    }
+
+    fn call_request(tok: Option<&str>, body: &str) -> Request<Body> {
+        let mut b = Request::builder().method("POST").uri("/mcp/call");
+        if let Some(t) = tok {
+            b = b.header(header::AUTHORIZATION, format!("Bearer {t}"));
+        }
+        b.body(Body::from(body.to_owned())).unwrap()
+    }
+
+    // The REST shim (P-1b): a single POST dispatches a tool under the caller's JWT
+    // identity -- no initialize handshake -- with the same auth + engine ACL.
+    #[tokio::test]
+    async fn rest_call_dispatches_a_tool_then_reads_it_back() {
+        let st = state().await;
+        let tok = token("ws:rest", "user:rest");
+
+        // Store a memory through POST /mcp/call.
+        let store = call_request(
+            Some(&tok),
+            r#"{"tool":"store_memory","arguments":{"content":"the deno runtime"}}"#,
+        );
+        let resp = router(st.clone()).oneshot(store).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Read it back the same way; the result carries the stored content.
+        let list = call_request(Some(&tok), r#"{"tool":"list_memories","arguments":{}}"#);
+        let resp = router(st.clone()).oneshot(list).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("deno"));
+
+        // No token -> 401 (auth before any work).
+        let resp = router(st.clone())
+            .oneshot(call_request(
+                None,
+                r#"{"tool":"list_memories","arguments":{}}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Unknown tool / malformed body -> 400 (the caller's fault, not a panic).
+        let resp = router(st.clone())
+            .oneshot(call_request(
+                Some(&tok),
+                r#"{"tool":"nope","arguments":{}}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let resp = router(st)
+            .oneshot(call_request(Some(&tok), "not json"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     // The happy path: a valid token verifies, the shared connection signs in as

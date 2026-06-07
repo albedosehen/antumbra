@@ -79,15 +79,10 @@ Disabling the agent's built-in file memory (`autoMemoryEnabled: false` + the den
 rule) makes Antumbra the **single source of truth** — one store, one ACL, one thing
 to back up.
 
-> **What works today vs P-1.** The **capture** and **strip-attribution** hooks emit
-> hook *decisions* only — they make no call to Antumbra — so they work now against
-> any agent. The long-lived **hook token** is now available (`--mint-token`, above).
-> What remains for the **bootstrap** hook is the transport: Antumbra's networked
-> surface today is JSON-RPC at `/mcp` (no `POST /mcp/call {tool, arguments}` REST
-> shape), so the **REST `/mcp/call` convenience endpoint** is the last P-1 piece
-> tracked in the roadmap (see [`docs/product.md`](../../docs/product.md)). Until it
-> lands, do the bootstrap by
-> having the agent run a `recall_memories` call at the top of its first turn (no
-> SessionStart script needed), or point the script at a local convenience shim. The
-> templates below are written to the target `/mcp/call` shape so they are drop-in
-> once P-1 ships.
+> **What works today.** The **capture** and **strip-attribution** hooks emit hook
+> *decisions* only — they make no call to Antumbra — so they work against any agent.
+> The long-lived **hook token** is mintable with `--mint-token` (above), and the
+> **bootstrap** hook's transport is now live: `POST /mcp/call {tool, arguments}`
+> returns the tool's JSON result under your bearer token, no initialize→tools/call
+> handshake — so the templates below are drop-in. (The remaining P-1 item is the
+> per-workspace embedder config, P-1c, which the hooks don't need.)

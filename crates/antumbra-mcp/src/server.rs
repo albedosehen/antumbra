@@ -943,6 +943,56 @@ impl McpServer {
     }
 }
 
+impl McpServer {
+    /// Dispatch a tool by name with raw JSON `arguments`, returning its result as
+    /// JSON. This is the same set of tools `#[tool_router]` exposes over JSON-RPC,
+    /// reached directly so a one-shot caller (the REST `/mcp/call` shim, P-1b) can
+    /// invoke one without an MCP session/handshake. The bound `(tenant, user)` and
+    /// the engine ACL apply exactly as they do over `/mcp` -- this is a transport,
+    /// not a second authority.
+    pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, ErrorData> {
+        // Deserialize `arguments` into the tool's params, call it, and serialize
+        // the result -- one arm per tool, mirroring the `#[tool]` methods.
+        macro_rules! dispatch {
+            ($params:ty, $method:ident) => {{
+                let p: $params = serde_json::from_value(arguments)
+                    .map_err(|e| ErrorData::invalid_params(format!("bad arguments: {e}"), None))?;
+                let Json(out) = self.$method(Parameters(p)).await?;
+                serde_json::to_value(out)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+            }};
+        }
+        match name {
+            "store_memory" => dispatch!(StoreParams, store_memory),
+            "recall_memories" => dispatch!(RecallParams, recall_memories),
+            "reinforce_memory" => dispatch!(IdParams, reinforce_memory),
+            "forget_memory" => dispatch!(IdParams, forget_memory),
+            "list_memories" => dispatch!(ListParams, list_memories),
+            "relate_memories" => dispatch!(RelateParams, relate_memories),
+            "get_neighbors" => dispatch!(NeighborsParams, get_neighbors),
+            "route" => dispatch!(RouteParams, route),
+            "answer" => dispatch!(AnswerParams, answer),
+            "create_compartment" => dispatch!(CreateCompartmentParams, create_compartment),
+            "propose_compartments" => dispatch!(ProposeCompartmentsParams, propose_compartments),
+            "list_compartments" => {
+                let Json(out) = self.list_compartments().await?;
+                serde_json::to_value(out)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+            }
+            "share_compartment" => dispatch!(ShareParams, share_compartment),
+            "revoke_compartment" => dispatch!(RevokeParams, revoke_compartment),
+            other => Err(ErrorData::invalid_params(
+                format!("unknown tool: {other}"),
+                None,
+            )),
+        }
+    }
+}
+
 #[tool_handler]
 impl ServerHandler for McpServer {
     /// On initialize, record this session's peer under its (tenant, user) identity
@@ -1260,6 +1310,31 @@ mod tests {
             r.0.escalate && r.0.routes.is_empty(),
             "a task inside a known failure scope escalates"
         );
+    }
+
+    #[tokio::test]
+    async fn call_tool_dispatches_a_named_tool() {
+        let s = server().await;
+        // Store, then list, both through the by-name dispatcher (the REST path).
+        let stored = s
+            .call_tool(
+                "store_memory",
+                serde_json::json!({ "content": "the deno runtime" }),
+            )
+            .await
+            .unwrap();
+        assert!(stored.is_object());
+        let listed = s
+            .call_tool("list_memories", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(listed.to_string().contains("deno"));
+        // Unknown tool and malformed arguments are errors, not panics.
+        assert!(s.call_tool("nope", serde_json::json!({})).await.is_err());
+        assert!(s
+            .call_tool("store_memory", serde_json::json!({ "missing": "content" }))
+            .await
+            .is_err());
     }
 
     #[tokio::test]

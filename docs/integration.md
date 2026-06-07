@@ -52,10 +52,11 @@ relevant to this project. No cold start — the agent already knows "this repo u
 
 The script fetches the bootstrap memory and returns it as `additionalContext`.
 (See the [`scripts/hooks/`](../scripts/hooks/) templates.) *Today:* the capture + attribution hooks
-work as-is (they emit hook decisions, no Antumbra call), and the long-lived **hook
-token** the bootstrap fetch needs is now mintable with `antumbra-mcp --mint-token`
-(roadmap P-1a). What remains is the **REST `/mcp/call` convenience endpoint** (P-1b) —
-until it lands, have the agent run `recall_memories` at the top of its first turn instead.
+work as-is (they emit hook decisions, no Antumbra call), the long-lived **hook
+token** is mintable with `antumbra-mcp --mint-token` (P-1a), and the bootstrap
+fetch's transport — `POST /mcp/call {tool, arguments}` — is now live (P-1b), so the
+SessionStart script works end-to-end. (Alternatively, have the agent run
+`recall_memories` at the top of its first turn with no SessionStart script at all.)
 
 ### 2. Capture on stop / before compaction (nothing learned is lost)
 
