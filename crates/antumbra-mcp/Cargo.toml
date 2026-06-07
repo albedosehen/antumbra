@@ -15,6 +15,7 @@ path = "src/main.rs"
 # runs without a GPU; the real BERT embedder lands under `models`.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-embed = { path = "../antumbra-embed" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal", "net", "sync"] }
@@ -29,11 +30,7 @@ rmcp = { version = "1.7.0", features = ["server", "macros", "transport-io", "tra
 # bearer token whose claims become $auth (tenant, user).
 axum = "0.8"
 jsonwebtoken = "10"
-# Outbound HTTP for the runtime-configured embeddings endpoint (P-1c). Pure-Rust
-# TLS so it needs no system OpenSSL; `json` for send_json/read_json.
-ureq = { version = "3", features = ["json"] }
-# The `Embedder` port (and the `HttpEmbedder` impl + the answer-escalate test fake)
-# are `#[async_trait]`.
+# The `Embedder` port (and the answer-escalate test fake) are `#[async_trait]`.
 async-trait.workspace = true
 
 [dev-dependencies]

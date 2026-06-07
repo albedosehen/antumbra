@@ -110,6 +110,10 @@ pub struct App {
     /// The gate's routing for the last ask: `(expert name, probability)` best
     /// first, or `Some(empty)` when it escalates. `None` before the first ask.
     pub ask_result: Option<Vec<(String, f32)>>,
+    /// Whether a real embedding endpoint backs the ask (`--embed-url`). When
+    /// false, the ask uses the demo embedder and warns it's only coherent on a
+    /// demo store.
+    pub real_embedder: bool,
     /// Per-entity fingerprints from the last reload, to diff the next one.
     pub ev_experts: HashMap<String, bool>,
     pub ev_shadows: HashMap<String, String>,
@@ -164,6 +168,7 @@ impl App {
             pending: None,
             ask_query: String::new(),
             ask_result: None,
+            real_embedder: false,
             ev_experts: HashMap::new(),
             ev_shadows: HashMap::new(),
             ev_boundaries: HashMap::new(),

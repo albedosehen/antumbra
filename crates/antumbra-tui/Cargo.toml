@@ -13,11 +13,12 @@ path = "src/main.rs"
 [dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-embed = { path = "../antumbra-embed" }
 ratatui.workspace = true
 tachyonfx.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 serde_json.workspace = true
 chrono.workspace = true
 # Headless snapshots (ADR-0009): render a frame to an in-memory buffer and emit

@@ -26,6 +26,7 @@ use tachyonfx::{Duration as FxDuration, EffectRenderer};
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::FixedEmbedder;
 use antumbra_core::ShadowStatus;
+use antumbra_embed::HttpEmbedder;
 use antumbra_store::repo::{boundary, shadow};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
@@ -47,6 +48,18 @@ struct Args {
     /// CPU. Off by default so the console runs at the full cap continuously.
     #[arg(long)]
     power_save: bool,
+    /// Embeddings endpoint (OpenAI-compatible `/embeddings`) for the route-ask, so
+    /// it embeds queries with the SAME model the population was built with. Omit
+    /// to use the model-free demo embedder (only coherent on a demo/FixedEmbedder
+    /// store).
+    #[arg(long, env = "ANTUMBRA_EMBED_URL")]
+    embed_url: Option<String>,
+    /// The model name sent to the embeddings endpoint.
+    #[arg(long, env = "ANTUMBRA_EMBED_MODEL", default_value = "all-MiniLM-L6-v2")]
+    embed_model: String,
+    /// Optional bearer token for the embeddings endpoint.
+    #[arg(long, env = "ANTUMBRA_EMBED_KEY")]
+    embed_key: Option<String>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -179,9 +192,14 @@ async fn app_main() -> Result<()> {
         Some(fps) => app.pin_fps(fps),
         None => app.follow_monitor(),
     }
-    // A read-only embedder for the route-ask: the model-free byte-histogram
-    // FixedEmbedder, consistent with the demo (and any FixedEmbedder store).
-    let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
+    // The route-ask embedder. With `--embed-url`, the same OpenAI-compatible
+    // endpoint the population was built with, so routing is meaningful on real
+    // data; otherwise the model-free byte-histogram FixedEmbedder (demo only).
+    app.real_embedder = args.embed_url.is_some();
+    let embedder: Arc<dyn Embedder> = match args.embed_url {
+        Some(url) => Arc::new(HttpEmbedder::new(url, args.embed_model, args.embed_key)),
+        None => Arc::new(FixedEmbedder::new(EMBED_DIM)),
+    };
     let mut terminal = ratatui::init();
     let result = run(&mut terminal, &mut app, &store, embedder.as_ref()).await;
     ratatui::restore();

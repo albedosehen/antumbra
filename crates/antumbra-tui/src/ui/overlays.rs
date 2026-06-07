@@ -77,17 +77,26 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, "ask the gate");
+    let title = if app.real_embedder {
+        "ask the gate".to_string()
+    } else {
+        "ask the gate · demo embedder".to_string()
+    };
+    let inner = overlay::modal(f, &t, area, &title);
     let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
 
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("ask › ", Style::default().fg(t.accent)),
-            Span::styled(app.ask_query.clone(), Style::default().fg(t.text)),
-            Span::styled("▏", Style::default().fg(t.accent)),
-        ])),
-        rows[0],
-    );
+    let mut head = vec![Line::from(vec![
+        Span::styled("ask › ", Style::default().fg(t.accent)),
+        Span::styled(app.ask_query.clone(), Style::default().fg(t.text)),
+        Span::styled("▏", Style::default().fg(t.accent)),
+    ])];
+    if !app.real_embedder {
+        head.push(Line::from(Span::styled(
+            "  byte-histogram · pass --embed-url to match your model",
+            Style::default().fg(t.warning),
+        )));
+    }
+    f.render_widget(Paragraph::new(head), rows[0]);
 
     let lines: Vec<Line> = match &app.ask_result {
         None => vec![Line::from(Span::styled(

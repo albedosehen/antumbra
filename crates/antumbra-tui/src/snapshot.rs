@@ -184,6 +184,7 @@ mod tests {
             pending: None,
             ask_query: String::new(),
             ask_result: None,
+            real_embedder: false,
             ev_experts: std::collections::HashMap::new(),
             ev_shadows: std::collections::HashMap::new(),
             ev_boundaries: std::collections::HashMap::new(),

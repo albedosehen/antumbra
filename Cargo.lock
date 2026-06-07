@@ -224,6 +224,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "antumbra-embed"
+version = "0.0.0"
+dependencies = [
+ "antumbra-core",
+ "antumbra-store",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
 name = "antumbra-gate"
 version = "0.0.0"
 dependencies = [
@@ -250,6 +262,7 @@ name = "antumbra-mcp"
 version = "0.0.0"
 dependencies = [
  "antumbra-core",
+ "antumbra-embed",
  "antumbra-serve",
  "antumbra-store",
  "antumbra-sync",
@@ -265,7 +278,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
- "ureq",
 ]
 
 [[package]]
@@ -340,6 +352,7 @@ version = "0.0.0"
 dependencies = [
  "ab_glyph",
  "antumbra-core",
+ "antumbra-embed",
  "antumbra-store",
  "anyhow",
  "chrono",
