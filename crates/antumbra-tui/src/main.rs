@@ -358,7 +358,12 @@ async fn apply_action(
         Action::FpsUp => app.fps_up(),
         Action::FpsDown => app.fps_down(),
         Action::FollowMonitor => app.follow_monitor(),
-        Action::Help => app.toggle_help(),
+        Action::Help => {
+            app.toggle_help();
+            if app.mode == Mode::Help {
+                *transition = Some(transition::overlay_open());
+            }
+        }
         Action::Quit => app.should_quit = true,
     }
     Ok(())
@@ -395,7 +400,13 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
         terminal.draw(|f| {
             ui::render(f, app);
             if let Some((effect, scope)) = transition.as_mut() {
-                f.render_effect(effect, transition::scope_area(scope, f.area()), tick);
+                let area = match scope {
+                    transition::Scope::Overlay => ui::overlay_area(app, f.area()),
+                    fixed => Some(transition::scope_area(fixed, f.area())),
+                };
+                if let Some(area) = area {
+                    f.render_effect(effect, area, tick);
+                }
             }
         })?;
         if transition.as_ref().is_some_and(|(effect, _)| effect.done()) {
@@ -449,7 +460,10 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::End | KeyCode::Char('G') => app.select_last(),
                             KeyCode::PageDown => app.select_page(1),
                             KeyCode::PageUp => app.select_page(-1),
-                            KeyCode::Char(':') => app.open_palette(),
+                            KeyCode::Char(':') => {
+                                app.open_palette();
+                                transition = Some(transition::overlay_open());
+                            }
                             KeyCode::Tab => {
                                 app.toggle_focus();
                                 transition = Some(transition::focus_switch());
@@ -466,7 +480,12 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             KeyCode::Char('-') | KeyCode::Char('_') => app.fps_down(),
                             KeyCode::Char('a') => app.follow_monitor(),
                             KeyCode::Char('r') => app.reload(store).await?,
-                            KeyCode::Char('?') => app.toggle_help(),
+                            KeyCode::Char('?') => {
+                                app.toggle_help();
+                                if app.mode == Mode::Help {
+                                    transition = Some(transition::overlay_open());
+                                }
+                            }
                             _ => {}
                         },
                     }

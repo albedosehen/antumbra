@@ -21,6 +21,9 @@ pub enum Scope {
     Detail,
     /// The whole body between header and footer (a layout change).
     Body,
+    /// The active overlay's modal box (resolved by the caller via the app's
+    /// current mode, since the palette's size depends on its matches).
+    Overlay,
 }
 
 /// A queued effect and the part of the frame it animates.
@@ -44,11 +47,13 @@ pub fn detail_area(frame: Rect) -> Rect {
         [1]
 }
 
-/// Resolve a [`Scope`] to the rectangle it animates within `frame`.
+/// Resolve a fixed [`Scope`] to the rectangle it animates within `frame`.
+/// [`Scope::Overlay`] is resolved by the caller (it needs the app's mode) and
+/// falls back to the body here.
 pub fn scope_area(scope: &Scope, frame: Rect) -> Rect {
     match scope {
         Scope::Detail => detail_area(frame),
-        Scope::Body => body(frame),
+        Scope::Body | Scope::Overlay => body(frame),
     }
 }
 
@@ -77,5 +82,13 @@ pub fn layout_switch() -> Pending {
     (
         fx::coalesce(EffectTimer::from((320u32, Interpolation::QuadOut))),
         Scope::Body,
+    )
+}
+
+/// An overlay opened (`?` / `:`): its modal box coalesces into view.
+pub fn overlay_open() -> Pending {
+    (
+        fx::coalesce(EffectTimer::from((200u32, Interpolation::QuadOut))),
+        Scope::Overlay,
     )
 }

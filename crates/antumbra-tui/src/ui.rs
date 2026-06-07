@@ -176,12 +176,26 @@ fn antumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     );
 }
 
+/// The modal box rectangle for the active overlay (the size source the open
+/// animation also targets). `None` in the live view.
+pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
+    match app.mode {
+        Mode::Help => Some(overlay::centered(frame, 52, 23)),
+        Mode::Palette => {
+            let listed = app.palette_matches().len().max(1) as u16;
+            Some(overlay::centered(frame, 56, listed + 4))
+        }
+        Mode::Normal => None,
+    }
+}
+
 /// The command palette: a query line over a fuzzy-ranked command list (`:` opens).
 fn palette_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
     let matches = app.palette_matches();
-    let listed = matches.len().max(1) as u16;
-    let area = overlay::centered(f.area(), 56, listed + 4);
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
     let inner = overlay::modal(f, &t, area, "command");
     let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
 
@@ -217,7 +231,9 @@ fn palette_overlay(f: &mut Frame, app: &App) {
 /// The keybinding reference, a centred modal over the live view (`?` toggles).
 fn help_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
-    let area = overlay::centered(f.area(), 52, 23);
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
     let inner = overlay::modal(f, &t, area, "help");
 
     let group = |label: &str| {
