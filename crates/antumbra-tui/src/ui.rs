@@ -88,7 +88,12 @@ fn umbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
         lines.push(heading(&t, e.name.clone()));
-        lines.push(kv(&t, "fitness", &format!("{:.2}", e.fitness)));
+        lines.push(gauge_row(
+            &t,
+            "fitness",
+            e.fitness,
+            t.fitness(e.fitness, 1.0),
+        ));
         lines.push(kv(&t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
         lines.push(kv(&t, "generation", &e.generation.0.to_string()));
     } else {
@@ -419,7 +424,12 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
         lines.push(heading(&t, e.name.clone()));
-        lines.push(kv(&t, "fitness", &format!("{:.2}", e.fitness)));
+        lines.push(gauge_row(
+            &t,
+            "fitness",
+            e.fitness,
+            t.fitness(e.fitness, 1.0),
+        ));
         lines.push(kv(&t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
         lines.push(kv(&t, "generation", &e.generation.0.to_string()));
         lines.push(kv(&t, "base", &e.base_model));
@@ -561,7 +571,7 @@ fn boundaries(f: &mut Frame, app: &App, area: Rect) {
                 .map(|g| format!("{g:?}"))
                 .unwrap_or_else(|| "-".into()),
         ));
-        d.push(kv(&t, "confidence", &format!("{:.2}", b.confidence)));
+        d.push(gauge_row(&t, "confidence", b.confidence, t.accent));
         // The contrastive pair that makes it actionable: incorrect in C, fine in C'.
         if let Some(ok) = &b.near_ok_context {
             d.push(kv(&t, "incorrect", &b.fail_context.to_string()));
@@ -643,9 +653,14 @@ fn shadows(f: &mut Frame, app: &App, area: Rect) {
         ]));
         d.push(kv(&t, "generation", &s.generation.0.to_string()));
         let final_reward = s.reward_curve.last().copied().unwrap_or(0.0);
-        d.push(kv(&t, "final reward", &format!("{final_reward:.2}")));
+        d.push(gauge_row(
+            &t,
+            "final reward",
+            final_reward,
+            t.fitness(final_reward, 1.0),
+        ));
         if !s.reward_curve.is_empty() {
-            d.push(kv(&t, "reward", &sparkline(&s.reward_curve)));
+            d.push(sparkline_row(&t, "reward", &s.reward_curve));
         }
     } else {
         d.push(Line::from(Span::styled(
@@ -671,16 +686,6 @@ fn shadow_color(t: &Theme, status: &str) -> Color {
         "pruned" => t.dim,
         _ => t.warning,
     }
-}
-
-/// A reward curve as block-character bars, each value in `[0,1]` mapped to one of
-/// eight heights.
-fn sparkline(curve: &[f32]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    curve
-        .iter()
-        .map(|&v| BARS[((v.clamp(0.0, 1.0) * 7.0).round() as usize).min(7)])
-        .collect()
 }
 
 fn footer(f: &mut Frame, app: &App, area: Rect) {
@@ -745,4 +750,53 @@ fn kv<'a>(t: &Theme, k: &'a str, v: &str) -> Line<'a> {
         Span::styled(format!("{k:<11}"), Style::default().fg(t.dim)),
         Span::styled(v.to_string(), Style::default().fg(t.value)),
     ])
+}
+
+/// A horizontal gauge for a `[0,1]` value: `width` cells filled to eighth-of-a-
+/// cell resolution in `color`, the remaining track dim.
+fn gauge_spans<'a>(t: &Theme, value: f32, width: u16, color: Color) -> Vec<Span<'a>> {
+    const EIGHTHS: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+    let v = (value.clamp(0.0, 1.0) as f64) * width as f64;
+    let mut full = v.floor() as usize;
+    let mut rem = ((v - full as f64) * 8.0).round() as usize;
+    if rem == 8 {
+        full += 1;
+        rem = 0;
+    }
+    let mut filled = "█".repeat(full);
+    let cells = full + usize::from(rem > 0);
+    if rem > 0 {
+        filled.push_str(EIGHTHS[rem]);
+    }
+    let track = "─".repeat((width as usize).saturating_sub(cells));
+    vec![
+        Span::styled(filled, Style::default().fg(color)),
+        Span::styled(track, Style::default().fg(t.dim)),
+    ]
+}
+
+/// A `key  ▆▆▆▍──  0.62` row: a labelled gauge with its numeric value.
+fn gauge_row<'a>(t: &Theme, k: &'a str, value: f32, color: Color) -> Line<'a> {
+    let mut spans = vec![Span::styled(format!("{k:<11}"), Style::default().fg(t.dim))];
+    spans.extend(gauge_spans(t, value, 12, color));
+    spans.push(Span::styled(
+        format!(" {value:.2}"),
+        Style::default().fg(t.value),
+    ));
+    Line::from(spans)
+}
+
+/// A reward curve as block bars, each bar coloured along the fitness gradient by
+/// its own value, so a rising (or collapsing) trajectory reads at a glance.
+fn sparkline_row<'a>(t: &Theme, k: &'a str, curve: &[f32]) -> Line<'a> {
+    const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+    let mut spans = vec![Span::styled(format!("{k:<11}"), Style::default().fg(t.dim))];
+    for &v in curve {
+        let level = (v.clamp(0.0, 1.0) * 7.0).round() as usize;
+        spans.push(Span::styled(
+            BARS[level.min(7)].to_string(),
+            Style::default().fg(t.fitness(v, 1.0)),
+        ));
+    }
+    Line::from(spans)
 }
