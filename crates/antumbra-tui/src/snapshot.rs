@@ -840,6 +840,53 @@ mod tests {
         assert_eq!(app.filter_selected, m - 1, "filter wraps up");
     }
 
+    // Frame-rate and scroll controls clamp/pin correctly.
+    #[test]
+    fn fps_and_scroll_controls_clamp() {
+        let mut app = demo_app();
+        app.auto_fps = true;
+        app.target_fps = 144;
+        app.fps_up();
+        assert!(!app.auto_fps, "fps_up pins manual");
+        assert_eq!(app.target_fps, 165);
+        app.fps_down();
+        assert_eq!(app.target_fps, 144);
+        app.pin_fps(99_999);
+        assert_eq!(
+            app.target_fps,
+            crate::pacing::MAX_FPS,
+            "pin clamps to the max"
+        );
+
+        app.detail_scroll = 0;
+        app.detail_move(-5);
+        assert_eq!(app.detail_scroll, 0, "detail scroll clamps at the top");
+        app.detail_move(3);
+        assert_eq!(app.detail_scroll, 3);
+
+        app.events.clear();
+        app.events_move(1);
+        assert_eq!(app.events_scroll, 0, "empty event scroll stays at 0");
+        app.operator_event("a".into());
+        app.operator_event("b".into());
+        app.events_scroll = 0;
+        app.events_move(5);
+        assert_eq!(
+            app.events_scroll, 1,
+            "event scroll clamps to the last index"
+        );
+    }
+
+    // The monitor-follow methods are safe to call (FFI on Windows, no-op elsewhere).
+    #[test]
+    fn monitor_methods_are_safe_to_call() {
+        let mut app = demo_app();
+        app.capture_window();
+        app.follow_monitor();
+        app.poll_monitor();
+        assert!(app.auto_fps, "follow_monitor re-enables auto");
+    }
+
     // An out-of-distribution ask (empty routing) renders the escalate hint.
     #[test]
     fn escalating_ask_renders_the_hint() {

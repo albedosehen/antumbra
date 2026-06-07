@@ -44,3 +44,22 @@ impl EventKind {
 
 /// The most events the stream retains.
 pub const MAX_EVENTS: usize = 200;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_kind_has_a_glyph() {
+        for kind in [
+            EventKind::Spawn,
+            EventKind::Graduate,
+            EventKind::Prune,
+            EventKind::Freeze,
+            EventKind::Boundary,
+            EventKind::System,
+        ] {
+            assert!(!kind.glyph().is_empty(), "{kind:?} has a glyph");
+        }
+    }
+}

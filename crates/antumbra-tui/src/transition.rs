@@ -92,3 +92,36 @@ pub fn overlay_open() -> Pending {
         Scope::Overlay,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme;
+
+    #[test]
+    fn each_transition_targets_the_right_scope() {
+        assert!(matches!(focus_switch().1, Scope::Detail));
+        assert!(matches!(theme_wash(&theme::SHADOW).1, Scope::Detail));
+        assert!(matches!(layout_switch().1, Scope::Body));
+        assert!(matches!(overlay_open().1, Scope::Overlay));
+    }
+
+    #[test]
+    fn scope_area_resolves_within_the_frame() {
+        let frame = Rect::new(0, 0, 120, 40);
+        let detail = scope_area(&Scope::Detail, frame);
+        let body = scope_area(&Scope::Body, frame);
+        // The detail column is the right slice of the body, inside the frame.
+        assert!(detail.width > 0 && detail.height > 0);
+        assert!(detail.right() <= frame.right());
+        assert!(
+            detail.left() > frame.left(),
+            "detail is the right-hand column"
+        );
+        // The body spans the full width between header and footer.
+        assert_eq!(body.width, frame.width);
+        assert!(body.top() >= 3 && body.bottom() < frame.bottom());
+        // Overlay falls back to the body (the caller resolves it precisely).
+        assert_eq!(scope_area(&Scope::Overlay, frame), body);
+    }
+}
