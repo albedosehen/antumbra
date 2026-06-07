@@ -415,6 +415,12 @@ async fn apply_action(
             app.open_events();
             *transition = Some(transition::overlay_open());
         }
+        Action::GraduateShadow => {
+            app.request_graduate();
+            if app.mode == Mode::Confirm {
+                *transition = Some(transition::overlay_open());
+            }
+        }
         Action::Help => {
             app.toggle_help();
             if app.mode == Mode::Help {

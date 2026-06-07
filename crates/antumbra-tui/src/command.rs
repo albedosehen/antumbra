@@ -17,6 +17,7 @@ pub enum Action {
     FollowMonitor,
     Ask,
     Events,
+    GraduateShadow,
     Help,
     Quit,
 }
@@ -76,6 +77,10 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "events · live store changes",
         action: Action::Events,
+    },
+    Command {
+        label: "graduate the selected shadow",
+        action: Action::GraduateShadow,
     },
     Command {
         label: "reload from the store",

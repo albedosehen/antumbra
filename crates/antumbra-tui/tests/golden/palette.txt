@@ -13,6 +13,7 @@
 │  fps · decrease cap                                  │
 │  ask · route a task through the gate                 │
 │  events · live store changes                         │
+│  graduate the selected shadow                        │
 │  reload from the store                               │
 │  help · keybindings                                  │
 │  quit                                                │

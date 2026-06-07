@@ -41,6 +41,8 @@ pub enum Mode {
 pub enum Pending {
     /// Mark the shadow pruned (collapse it).
     PruneShadow(ShadowId),
+    /// Mark the shadow graduated (promote it into the population).
+    GraduateShadow(ShadowId),
     /// Delete the boundary from the antumbra.
     DeleteBoundary(BoundaryId),
 }
@@ -326,10 +328,23 @@ impl App {
         }
     }
 
+    /// Stage graduating the selected shadow (the palette's graduate command):
+    /// promote it into the population, unless it already graduated.
+    pub fn request_graduate(&mut self) {
+        if let Some(s) = self
+            .selected_shadow()
+            .filter(|s| s.status.as_str() != "graduated")
+        {
+            self.pending = Some(Pending::GraduateShadow(s.id.clone()));
+            self.mode = Mode::Confirm;
+        }
+    }
+
     /// The confirmation prompt for the staged action, if any.
     pub fn pending_prompt(&self) -> Option<String> {
         self.pending.as_ref().map(|p| match p {
             Pending::PruneShadow(id) => format!("Prune shadow {} ?", id.as_str()),
+            Pending::GraduateShadow(id) => format!("Graduate shadow {} ?", id.as_str()),
             Pending::DeleteBoundary(id) => {
                 let behavior = self
                     .boundaries
@@ -358,6 +373,13 @@ impl App {
                         let mut pruned = s.clone();
                         pruned.status = ShadowStatus::Pruned;
                         shadow::upsert(store, &pruned).await?;
+                    }
+                }
+                Pending::GraduateShadow(id) => {
+                    if let Some(s) = self.shadows.iter().find(|s| s.id.as_str() == id.as_str()) {
+                        let mut graduated = s.clone();
+                        graduated.status = ShadowStatus::Graduated;
+                        shadow::upsert(store, &graduated).await?;
                     }
                 }
                 Pending::DeleteBoundary(id) => {
@@ -895,6 +917,40 @@ mod tests {
                 .any(|e| e.text.contains("boundary removed")),
             "the deletion surfaced as an event"
         );
+    }
+
+    #[tokio::test]
+    async fn graduate_writes_to_the_store_and_raises_an_event() {
+        let (store, mut app) = seeded().await;
+        app.focus = Focus::Shadows;
+        app.request_graduate();
+        assert!(matches!(app.pending, Some(Pending::GraduateShadow(_))));
+        app.apply_pending(&store).await.unwrap();
+
+        let s = app
+            .shadows
+            .iter()
+            .find(|s| s.id.as_str() == "shadow:s1")
+            .unwrap();
+        assert_eq!(
+            s.status.as_str(),
+            "graduated",
+            "the store reflects the promotion"
+        );
+        assert!(
+            app.events.iter().any(|e| e.text.contains("graduated")),
+            "the graduation surfaced as an event"
+        );
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[tokio::test]
+    async fn request_graduate_skips_an_already_graduated_shadow() {
+        let (_store, mut app) = seeded().await;
+        app.shadows[0].status = ShadowStatus::Graduated;
+        app.focus = Focus::Shadows;
+        app.request_graduate();
+        assert!(app.pending.is_none());
     }
 
     #[tokio::test]
