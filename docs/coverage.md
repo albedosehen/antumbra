@@ -12,12 +12,18 @@ cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui[\\/]
 cargo llvm-cov --workspace --summary-only
 ```
 
-**Result (2026-06-07):** **92.4% line / 90.3% region / 90.1% function** over the
+**Result (2026-06-07):** **92.6% line / 90.5% region / 90.4% function** over the
 measured surface — which now **includes** the `antumbra-tui` logic (only the TUI
 render layer + binary entrypoints are excluded). The library crates are 88–100%
 each; within the console, `events.rs`/`theme.rs`/`overlay.rs` are ~100%,
 `transition.rs`/`command.rs`/`scroll.rs` ~95–99%, `app.rs` 88%, and `pacing.rs`
 89% (the remainder is Windows-FFI monitor detection that can't run on CI).
+
+The main untested remainders are paths that need a live `ws://` SurrealDB or a
+GPU and so belong to the docker-/`models`-gated suites: the store's `signin_root`
+root-credential branch, the sync worker's push/pull cycle (an in-memory store is
+fresh per connect, so reconcile always moves nothing), and the `models`-gated
+candle trainer code (not compiled in the default build).
 
 ## What is excluded from the headline metric, and why
 
