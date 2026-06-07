@@ -5,6 +5,8 @@ use antumbra_core::{Expert, FailureBoundary, LearnedRouter, Shadow};
 use antumbra_store::repo::{boundary, expert, router, shadow};
 use antumbra_store::Store;
 
+use crate::theme::Theme;
+
 /// Which list the navigation keys drive, and which detail panel is shown — one
 /// per region of the cast shadow: the population (umbra), the shadows in training
 /// (penumbra), or the boundaries (antumbra, the keystone).
@@ -30,6 +32,8 @@ pub struct App {
     pub selected_shadow: usize,
     /// Which list navigation/detail targets (umbra / penumbra / antumbra).
     pub focus: Focus,
+    /// Index into [`crate::theme::ALL`] of the active palette.
+    pub theme_idx: usize,
     /// Total elapsed animation time (ms), drives orbit/pulse/energy.
     pub clock_ms: f64,
     /// Seconds since the last reload, so the view refreshes periodically.
@@ -48,6 +52,7 @@ impl App {
             selected_boundary: 0,
             selected_shadow: 0,
             focus: Focus::Experts,
+            theme_idx: 0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             should_quit: false,
@@ -75,6 +80,16 @@ impl App {
         }
         self.since_reload_ms = 0.0;
         Ok(())
+    }
+
+    /// The active palette every panel tints from.
+    pub fn theme(&self) -> Theme {
+        crate::theme::ALL[self.theme_idx % crate::theme::ALL.len()]
+    }
+
+    /// Advance to the next palette (wraps): shadow -> ember -> mono.
+    pub fn cycle_theme(&mut self) {
+        self.theme_idx = (self.theme_idx + 1) % crate::theme::ALL.len();
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.

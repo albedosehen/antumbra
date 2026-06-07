@@ -5,6 +5,8 @@
 
 mod app;
 mod snapshot;
+mod theme;
+mod transition;
 mod ui;
 
 use std::time::{Duration, Instant};
@@ -12,6 +14,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use tachyonfx::{Duration as FxDuration, Effect, EffectRenderer};
 
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
@@ -238,22 +241,43 @@ async fn connect(url: &str) -> Result<Store> {
 
 async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Store) -> Result<()> {
     let mut last = Instant::now();
+    // The active view-switch effect, processed against the frame buffer and
+    // cleared when it finishes.
+    let mut transition: Option<Effect> = None;
     loop {
         let now = Instant::now();
-        app.tick(now.duration_since(last).as_secs_f64() * 1000.0);
+        let dt = now.duration_since(last);
+        app.tick(dt.as_secs_f64() * 1000.0);
         last = now;
 
-        terminal.draw(|f| ui::render(f, app))?;
+        let tick = FxDuration::from(dt);
+        terminal.draw(|f| {
+            ui::render(f, app);
+            if let Some(effect) = transition.as_mut() {
+                f.render_effect(effect, transition::detail_area(f.area()), tick);
+            }
+        })?;
+        if transition.as_ref().is_some_and(Effect::done) {
+            transition = None;
+        }
 
-        // Poll paces the loop (~25 fps) and reads input when present.
-        if event::poll(Duration::from_millis(40))? {
+        // A running effect wants smoother frames; otherwise pace at ~25 fps.
+        let timeout = if transition.is_some() { 16 } else { 40 };
+        if event::poll(Duration::from_millis(timeout))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                         KeyCode::Down | KeyCode::Char('j') => app.select_next(),
                         KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
-                        KeyCode::Tab => app.toggle_focus(),
+                        KeyCode::Tab => {
+                            app.toggle_focus();
+                            transition = Some(transition::focus_switch());
+                        }
+                        KeyCode::Char('t') => {
+                            app.cycle_theme();
+                            transition = Some(transition::theme_wash(&app.theme()));
+                        }
                         KeyCode::Char('r') => app.reload(store).await?,
                         _ => {}
                     }

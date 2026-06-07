@@ -14,6 +14,7 @@ path = "src/main.rs"
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
 ratatui.workspace = true
+tachyonfx.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 clap.workspace = true

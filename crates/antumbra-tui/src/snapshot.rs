@@ -172,6 +172,7 @@ mod tests {
             selected_boundary: 0,
             selected_shadow: 0,
             focus: Focus::Experts,
+            theme_idx: 0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             should_quit: false,
@@ -250,6 +251,21 @@ mod tests {
         assert!(text.contains("shadow:g3"), "the shadow id is shown");
         assert!(text.contains("graduated"), "the shadow status is shown");
         assert!(text.contains("0.93"), "the final reward is shown");
+    }
+
+    // The footer shows the active theme, and `t` cycles to the next palette,
+    // which the footer reflects (shadow -> ember).
+    #[test]
+    fn cycling_theme_updates_the_footer() {
+        let mut app = demo_app();
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(
+            text.contains("theme:shadow"),
+            "default theme shown:\n{text}"
+        );
+        app.cycle_theme();
+        let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+        assert!(text.contains("theme:ember"), "cycled theme shown:\n{text}");
     }
 
     // Tab into the boundaries focus: the inspector replaces the expert detail and
