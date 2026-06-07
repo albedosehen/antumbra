@@ -160,6 +160,34 @@ mod tests {
             .unwrap();
     }
 
+    // The GC cadence: every `gc_every` cycles it purges tombstones on both stores
+    // (here there are none, so it's a no-op); a non-multiple cycle is skipped, and
+    // `gc_every == 0` disables it entirely. The default `gc_every` (240) is why the
+    // cadence tests above never reach this path.
+    #[tokio::test]
+    async fn collect_garbage_honours_the_gc_cadence() {
+        let local = Endpoint::embedded("mem://").connect().await.unwrap();
+        let remote = Endpoint::embedded("mem://").connect().await.unwrap();
+
+        let on = SyncConfig {
+            gc_every: 1,
+            ..mem_cfg()
+        };
+        collect_garbage(&on, &local, &remote, 1).await; // 1 % 1 == 0 → runs
+
+        let every_two = SyncConfig {
+            gc_every: 2,
+            ..mem_cfg()
+        };
+        collect_garbage(&every_two, &local, &remote, 1).await; // 1 % 2 != 0 → skipped
+
+        let off = SyncConfig {
+            gc_every: 0,
+            ..mem_cfg()
+        };
+        collect_garbage(&off, &local, &remote, 1).await; // disabled
+    }
+
     // A failing remote sends the supervisor into the backoff path; shutdown during
     // backoff still exits cleanly.
     #[tokio::test]

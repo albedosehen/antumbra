@@ -121,3 +121,21 @@ impl Store {
 }
 
 pub const DEFAULT_EMBED_DIM: usize = EMBED_DIM;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn embedded_store_reports_its_dim_and_owner_access_falls_back() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        assert_eq!(store.embed_dim(), EMBED_DIM);
+        // On an embedded store there are no configured credentials, so owner
+        // access (`signin_root`) takes the `invalidate` fallback — anonymous *is*
+        // the owner there. Both are no-ops here but must not error.
+        store.signin_root().await.unwrap();
+        store.invalidate().await.unwrap();
+        // Schema application is idempotent — safe to re-run.
+        store.ensure_schema().await.unwrap();
+    }
+}

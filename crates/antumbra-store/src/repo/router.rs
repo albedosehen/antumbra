@@ -38,3 +38,48 @@ pub async fn load(store: &Store) -> Result<Option<LearnedRouter>> {
         Err(e) => Err(map(e)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::EMBED_DIM;
+    use antumbra_core::router::{LearnedRouter, RouterExpert};
+    use antumbra_core::ExpertId;
+
+    fn router() -> LearnedRouter {
+        LearnedRouter {
+            weights: vec![1.0; EMBED_DIM],
+            experts: vec![RouterExpert {
+                id: ExpertId::new("expert:a"),
+                centroid: vec![0.0; EMBED_DIM],
+            }],
+            temperature: 0.2,
+            floor: 0.1,
+        }
+    }
+
+    #[tokio::test]
+    async fn load_before_save_is_none() {
+        // The singleton table does not exist until the first save (gate-train);
+        // load returns None, not an error.
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        assert!(load(&store).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn save_then_load_round_trips_and_upserts() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        save(&store, &router()).await.unwrap();
+        let loaded = load(&store).await.unwrap().expect("a router was saved");
+        assert_eq!(loaded.experts.len(), 1);
+        assert_eq!(loaded.experts[0].id.as_str(), "expert:a");
+        assert_eq!(loaded.temperature, 0.2);
+        assert_eq!(loaded.floor, 0.1);
+
+        // Saving again replaces the single active router (upsert, not append).
+        let mut next = router();
+        next.floor = 0.5;
+        save(&store, &next).await.unwrap();
+        assert_eq!(load(&store).await.unwrap().unwrap().floor, 0.5);
+    }
+}
