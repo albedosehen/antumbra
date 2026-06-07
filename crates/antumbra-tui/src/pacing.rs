@@ -130,6 +130,90 @@ pub fn detect_refresh() -> Option<u32> {
     None
 }
 
+/// A detected display and its current refresh rate (for the `monitors` diagnostic).
+pub struct Monitor {
+    /// The device name, e.g. `\\.\DISPLAY1`.
+    pub device: String,
+    /// Whether this is the primary display.
+    pub primary: bool,
+    /// The current vertical refresh rate (Hz).
+    pub hz: u32,
+}
+
+/// Every attached display and its current refresh rate. Empty off Windows or if
+/// enumeration fails.
+#[cfg(windows)]
+pub fn monitors() -> Vec<Monitor> {
+    let mut out = Vec::new();
+    let mut i = 0u32;
+    loop {
+        // SAFETY: a stack DISPLAY_DEVICEW sized through its `cb` field; iDevNum
+        // walks adapters until the call reports no more.
+        let mut device: DisplayDeviceW = unsafe { std::mem::zeroed() };
+        device.cb = std::mem::size_of::<DisplayDeviceW>() as u32;
+        if unsafe { EnumDisplayDevicesW(std::ptr::null(), i, &mut device, 0) } == 0 {
+            break;
+        }
+        i += 1;
+        if device.state_flags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP == 0 {
+            continue;
+        }
+        let mut mode: DevModeW = unsafe { std::mem::zeroed() };
+        mode.dm_size = std::mem::size_of::<DevModeW>() as u16;
+        let hz = if unsafe {
+            EnumDisplaySettingsW(
+                device.device_name.as_ptr(),
+                ENUM_CURRENT_SETTINGS,
+                &mut mode,
+            )
+        } != 0
+        {
+            mode.dm_display_frequency
+        } else {
+            0
+        };
+        out.push(Monitor {
+            device: wide_to_string(&device.device_name),
+            primary: device.state_flags & DISPLAY_DEVICE_PRIMARY_DEVICE != 0,
+            hz,
+        });
+    }
+    out
+}
+
+#[cfg(not(windows))]
+pub fn monitors() -> Vec<Monitor> {
+    Vec::new()
+}
+
+/// The device name (`\\.\DISPLAYn`) of the display the console window is on, so a
+/// diagnostic can show which monitor the follow logic resolves to.
+#[cfg(windows)]
+pub fn active_device() -> Option<String> {
+    // SAFETY: as in `detect_refresh`; a stack MONITORINFOEXW sized via cb_size.
+    unsafe {
+        let monitor = MonitorFromWindow(GetConsoleWindow(), MONITOR_DEFAULTTONEAREST);
+        let mut info: MonitorInfoExW = std::mem::zeroed();
+        info.cb_size = std::mem::size_of::<MonitorInfoExW>() as u32;
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return None;
+        }
+        Some(wide_to_string(&info.sz_device))
+    }
+}
+
+#[cfg(not(windows))]
+pub fn active_device() -> Option<String> {
+    None
+}
+
+/// A NUL-terminated wide (UTF-16) buffer as a `String`.
+#[cfg(windows)]
+fn wide_to_string(w: &[u16]) -> String {
+    let end = w.iter().position(|&c| c == 0).unwrap_or(w.len());
+    String::from_utf16_lossy(&w[..end])
+}
+
 #[cfg(windows)]
 type Handle = *mut std::ffi::c_void;
 
@@ -137,6 +221,10 @@ type Handle = *mut std::ffi::c_void;
 const MONITOR_DEFAULTTONEAREST: u32 = 2;
 #[cfg(windows)]
 const ENUM_CURRENT_SETTINGS: u32 = 0xFFFF_FFFF;
+#[cfg(windows)]
+const DISPLAY_DEVICE_ATTACHED_TO_DESKTOP: u32 = 0x1;
+#[cfg(windows)]
+const DISPLAY_DEVICE_PRIMARY_DEVICE: u32 = 0x4;
 
 #[cfg(windows)]
 #[link(name = "kernel32")]
@@ -150,6 +238,25 @@ extern "system" {
     fn MonitorFromWindow(hwnd: Handle, flags: u32) -> Handle;
     fn GetMonitorInfoW(monitor: Handle, info: *mut MonitorInfoExW) -> i32;
     fn EnumDisplaySettingsW(device: *const u16, mode_num: u32, mode: *mut DevModeW) -> i32;
+    fn EnumDisplayDevicesW(
+        device: *const u16,
+        index: u32,
+        display: *mut DisplayDeviceW,
+        flags: u32,
+    ) -> i32;
+}
+
+/// `DISPLAY_DEVICEW`: enumerated per adapter; `device_name` keys `EnumDisplaySettings`.
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct DisplayDeviceW {
+    cb: u32,
+    device_name: [u16; 32],
+    device_string: [u16; 128],
+    state_flags: u32,
+    device_id: [u16; 128],
+    device_key: [u16; 128],
 }
 
 /// `RECT` (four `LONG`s).
@@ -262,5 +369,15 @@ mod tests {
         if let Some(hz) = detect_refresh() {
             assert!(hz > 1);
         }
+    }
+
+    #[test]
+    fn monitor_enumeration_never_panics() {
+        // Safe to call anywhere; on a real desktop each monitor reports a rate,
+        // headless/off-Windows it's empty.
+        for m in monitors() {
+            assert!(!m.device.is_empty());
+        }
+        let _ = active_device();
     }
 }

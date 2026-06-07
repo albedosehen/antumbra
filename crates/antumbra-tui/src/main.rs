@@ -63,6 +63,11 @@ enum Command {
         #[arg(long)]
         demo: bool,
     },
+    /// Diagnose the multi-monitor refresh detection: list every display and its
+    /// rate, mark the one the console window resolves to (what the cap follows),
+    /// and show the rate it would snap to. Run it on each monitor to confirm the
+    /// active display is tracked (vs. pinned to the primary under ConPTY).
+    Monitors,
 }
 
 fn main() -> Result<()> {
@@ -82,33 +87,39 @@ fn main() -> Result<()> {
 
 async fn app_main() -> Result<()> {
     let args = Args::parse();
-    if let Some(Command::Snapshot {
-        out,
-        width,
-        height,
-        at_ms,
-        layout,
-        demo,
-    }) = args.command
-    {
-        let store = if demo {
-            seed_demo().await?
-        } else {
-            connect(&args.url).await?
-        };
-        let mut app = App::load(&store).await?;
-        app.set_layout(match layout.as_str() {
-            "dashboard" => app::LayoutMode::Dashboard,
-            "graph" => app::LayoutMode::Graph,
-            _ => app::LayoutMode::Focused,
-        });
-        let buf = snapshot::render(&mut app, width, height, at_ms)?;
-        let text = snapshot::to_text(&buf);
-        std::fs::write(format!("{out}.txt"), &text)?;
-        snapshot::save_png(&buf, &format!("{out}.png"), 13, 26)?;
-        print!("{text}");
-        eprintln!("wrote {out}.txt ({width}x{height}) and {out}.png");
-        return Ok(());
+    match args.command {
+        Some(Command::Snapshot {
+            out,
+            width,
+            height,
+            at_ms,
+            layout,
+            demo,
+        }) => {
+            let store = if demo {
+                seed_demo().await?
+            } else {
+                connect(&args.url).await?
+            };
+            let mut app = App::load(&store).await?;
+            app.set_layout(match layout.as_str() {
+                "dashboard" => app::LayoutMode::Dashboard,
+                "graph" => app::LayoutMode::Graph,
+                _ => app::LayoutMode::Focused,
+            });
+            let buf = snapshot::render(&mut app, width, height, at_ms)?;
+            let text = snapshot::to_text(&buf);
+            std::fs::write(format!("{out}.txt"), &text)?;
+            snapshot::save_png(&buf, &format!("{out}.png"), 13, 26)?;
+            print!("{text}");
+            eprintln!("wrote {out}.txt ({width}x{height}) and {out}.png");
+            return Ok(());
+        }
+        Some(Command::Monitors) => {
+            print_monitors();
+            return Ok(());
+        }
+        None => {}
     }
 
     let store = connect(&args.url).await?;
@@ -121,6 +132,47 @@ async fn app_main() -> Result<()> {
     let result = run(&mut terminal, &mut app, &store).await;
     ratatui::restore();
     result
+}
+
+/// Print the multi-monitor refresh diagnostic: every display and its rate, the
+/// one the console window resolves to, and the rate the cap would follow.
+fn print_monitors() {
+    let active = pacing::active_device();
+    let mons = pacing::monitors();
+    if mons.is_empty() {
+        println!("no displays detected (off Windows, or enumeration unavailable)");
+    } else {
+        println!("displays:");
+        for m in &mons {
+            let here = active.as_deref() == Some(m.device.as_str());
+            println!(
+                "  {} {:<14} {:>3} Hz{}{}",
+                if here { ">" } else { " " },
+                m.device,
+                m.hz,
+                if m.primary { "  primary" } else { "" },
+                if here { "  <- console window" } else { "" },
+            );
+        }
+    }
+    match pacing::detect_refresh() {
+        Some(hz) => println!(
+            "\nfollowing the console window's monitor: {hz} Hz (cap snaps to {})",
+            pacing::snap_refresh(hz)
+        ),
+        None => println!("\ndetection failed; the cap keeps its default value"),
+    }
+    let on_primary = active
+        .as_deref()
+        .and_then(|a| mons.iter().find(|m| m.device == a))
+        .is_some_and(|m| m.primary);
+    if on_primary && mons.len() > 1 {
+        println!(
+            "note: the console window resolved to the PRIMARY display. If you ran this on a\n      \
+             non-primary monitor, your terminal (ConPTY) is masking the window's real position;\n      \
+             pin the rate with `--fps <hz>` or the +/- keys instead of auto-follow."
+        );
+    }
 }
 
 /// A seeded in-memory population so the headless snapshot (and its e2e test) has
