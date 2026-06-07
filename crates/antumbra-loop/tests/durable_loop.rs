@@ -7,8 +7,8 @@ use antumbra_core::generational::LoopState;
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{
-    BoundaryFinding, EvalStatus, EvaluationRun, Expert, ExpertId, Generation, RunId, ShadowStatus,
-    SubjectKind,
+    BoundaryFinding, BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary,
+    Generation, Grain, RunId, ShadowStatus, SubjectKind,
 };
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, evaluation, expert, reward, shadow};
@@ -217,6 +217,56 @@ async fn collapsing_shadows_are_pruned_and_logged() {
         .await
         .unwrap();
     assert_eq!(evals.len(), 1);
+}
+
+// A graduating expert retires the boundaries it now covers (ADR-0004 lifecycle):
+// by its capability vector it sits inside the failure region a scope marked, so
+// the gap is filled and the boundary must stop gating routing. A boundary it does
+// not cover is left intact.
+#[tokio::test]
+async fn a_graduating_expert_retires_the_boundaries_it_covers() {
+    let store = Store::connect_memory(8).await.expect("connect");
+    let embedder = FixedEmbedder::new(8);
+    let exemplar = "reverse a string";
+    let cap = embedder.embed(exemplar).await.unwrap();
+    let far = embedder.embed("unrelated gardening prose").await.unwrap();
+    let now = Utc::now();
+
+    // Covered: the expert's capability == this boundary's failure context (and is
+    // far from C'), so it sits closer to C than C' -> resolved -> retired.
+    let covered = FailureBoundary {
+        id: BoundaryId::new("boundary:covered"),
+        behavior: "reverse".into(),
+        fail_context: serde_json::json!({ "x": 1 }),
+        near_ok_context: Some(serde_json::json!({ "x": 2 })),
+        governing_features: vec!["x".into()],
+        grain: Some(Grain::Project),
+        context_vec: Some(cap.clone()),
+        ok_context_vec: Some(far.clone()),
+        confidence: 0.9,
+        generation: Generation::ZERO,
+        created_at: now,
+    };
+    // Uncovered: capability is closer to C' than to C -> not covered -> retained.
+    let uncovered = FailureBoundary {
+        id: BoundaryId::new("boundary:uncovered"),
+        context_vec: Some(far.clone()),
+        ok_context_vec: Some(cap.clone()),
+        ..covered.clone()
+    };
+    boundary::upsert(&store, &covered).await.unwrap();
+    boundary::upsert(&store, &uncovered).await.unwrap();
+
+    // Graduate an expert whose capability vector is the centroid of `exemplar`.
+    let trainer = ScriptedTrainer::graduating_with_exemplars(vec![exemplar.to_string()]);
+    let run = RunId::new("run:retire");
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
+    let mut head = lp.resume_or_init(&run).await.unwrap();
+    lp.run_generation(&mut head).await.unwrap();
+
+    let remaining = boundary::list(&store).await.unwrap();
+    assert_eq!(remaining.len(), 1, "the covered boundary was retired");
+    assert_eq!(remaining[0].id.as_str(), "boundary:uncovered");
 }
 
 // A capture run that surfaces a verified correction's contrastive pair persists

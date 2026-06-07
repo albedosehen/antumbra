@@ -300,7 +300,32 @@ impl<'a> GenerationLoop<'a> {
             regression_fingerprint: Some(fingerprint(adapter_uri)),
             created_at: now,
         };
-        evaluation::insert(self.store, &baseline).await
+        evaluation::insert(self.store, &baseline).await?;
+        // A new expert may resolve the failure region of an open scope: retire
+        // every actionable boundary its capability now covers (ADR-0004). The
+        // gap the boundary marked is filled, so it should stop gating routing.
+        self.retire_covered_boundaries(&expert).await?;
+        Ok(())
+    }
+
+    /// Retire every boundary whose failure region this expert now covers: by its
+    /// capability vector it sits closer to the failure context than to C', so the
+    /// scope it marked is resolved and must no longer inhibit routing (ADR-0004's
+    /// boundary lifecycle). Returns how many were retired. A no-op for an expert
+    /// with no capability vector or against open boundaries (which lack the
+    /// embedded contrastive pair `is_covered_by` needs).
+    async fn retire_covered_boundaries(&self, expert: &Expert) -> Result<usize> {
+        let Some(cap) = expert.capability_vec.as_deref() else {
+            return Ok(0);
+        };
+        let mut retired = 0;
+        for b in boundary::list(self.store).await? {
+            if b.is_covered_by(cap) {
+                boundary::delete(self.store, &b.id).await?;
+                retired += 1;
+            }
+        }
+        Ok(retired)
     }
 
     /// The no-forgetting tripwire (ADR-0001/0002): re-fingerprint every frozen
