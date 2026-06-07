@@ -74,8 +74,12 @@
 > failure scope, so the two front doors no longer diverge (the gate was previously CLI-only, deferred while no
 > actionable boundary could reach the served path). The lifecycle also **closes**: when a shadow graduates, the
 > loop retires every boundary the new expert's capability now covers (`is_covered_by` — closer to C than C'), so a
-> filled gap stops gating routing. Still open: automatic governing-feature discovery on the capture intake (here
-> the correction supplies it).
+> filled gap stops gating routing. The capture intake also **infers its own governing feature** when the
+> correction omits one — the single context key whose value differs between C and C' — and emits no boundary when
+> zero or several differ (no single feature can name the scope). So the full lifecycle — create (discovery *or*
+> capture), name, apply (both front doors), retire — runs without a human in the loop except to supply the
+> correction itself. Still open: scale, and widening the in-scope margin on a correction-derived boundary so
+> same-generation coverage is reliable.
 
 ## Context
 
