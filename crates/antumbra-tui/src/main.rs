@@ -4,12 +4,13 @@
 //! interactive route/ask is the next layer.
 
 mod app;
+mod pacing;
 mod snapshot;
 mod theme;
 mod transition;
 mod ui;
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -26,6 +27,10 @@ struct Args {
     /// SurrealDB url (same store the CLI uses).
     #[arg(long, default_value = "surrealkv://./data/antumbra.skv", global = true)]
     url: String,
+    /// Initial frame-rate cap (Hz); adjust live with `+`/`-`. Match your monitor
+    /// (e.g. 165 or 244) for the smoothest motion.
+    #[arg(long, default_value_t = 144)]
+    fps: u32,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -94,6 +99,7 @@ async fn app_main() -> Result<()> {
 
     let store = connect(&args.url).await?;
     let mut app = App::load(&store).await?;
+    app.target_fps = args.fps.clamp(pacing::MIN_FPS, pacing::MAX_FPS);
     let mut terminal = ratatui::init();
     let result = run(&mut terminal, &mut app, &store).await;
     ratatui::restore();
@@ -240,15 +246,19 @@ async fn connect(url: &str) -> Result<Store> {
 }
 
 async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Store) -> Result<()> {
+    // Honour sub-16ms frame budgets on Windows (restored on drop).
+    let _timer = pacing::TimerResolution::acquire();
     let mut last = Instant::now();
     // The active view-switch effect, processed against the frame buffer and
     // cleared when it finishes.
     let mut transition: Option<Effect> = None;
     loop {
-        let now = Instant::now();
-        let dt = now.duration_since(last);
-        app.tick(dt.as_secs_f64() * 1000.0);
-        last = now;
+        let frame_start = Instant::now();
+        let dt = frame_start.duration_since(last);
+        last = frame_start;
+        let dt_ms = dt.as_secs_f64() * 1000.0;
+        app.tick(dt_ms);
+        app.record_frame(dt_ms);
 
         let tick = FxDuration::from(dt);
         terminal.draw(|f| {
@@ -261,9 +271,13 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
             transition = None;
         }
 
-        // A running effect wants smoother frames; otherwise pace at ~25 fps.
-        let timeout = if transition.is_some() { 16 } else { 40 };
-        if event::poll(Duration::from_millis(timeout))? {
+        // Pace to the target rate, spending the rest of the frame budget waiting
+        // on (and draining) input so keys stay responsive at any cap.
+        let budget = pacing::frame_budget(app.target_fps);
+        while let Some(remaining) = budget.checked_sub(frame_start.elapsed()) {
+            if remaining.is_zero() || !event::poll(remaining)? {
+                break;
+            }
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
@@ -278,6 +292,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, store: &Sto
                             app.cycle_theme();
                             transition = Some(transition::theme_wash(&app.theme()));
                         }
+                        KeyCode::Char('+') | KeyCode::Char('=') => app.fps_up(),
+                        KeyCode::Char('-') | KeyCode::Char('_') => app.fps_down(),
                         KeyCode::Char('r') => app.reload(store).await?,
                         _ => {}
                     }

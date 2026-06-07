@@ -34,6 +34,10 @@ pub struct App {
     pub focus: Focus,
     /// Index into [`crate::theme::ALL`] of the active palette.
     pub theme_idx: usize,
+    /// The frame-rate cap the loop paces to (Hz), adjustable with `+`/`-`.
+    pub target_fps: u32,
+    /// The measured frame rate (smoothed), shown as a live readout.
+    pub fps: f64,
     /// Total elapsed animation time (ms), drives orbit/pulse/energy.
     pub clock_ms: f64,
     /// Seconds since the last reload, so the view refreshes periodically.
@@ -53,6 +57,8 @@ impl App {
             selected_shadow: 0,
             focus: Focus::Experts,
             theme_idx: 0,
+            target_fps: 144,
+            fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             should_quit: false,
@@ -90,6 +96,40 @@ impl App {
     /// Advance to the next palette (wraps): shadow -> ember -> mono.
     pub fn cycle_theme(&mut self) {
         self.theme_idx = (self.theme_idx + 1) % crate::theme::ALL.len();
+    }
+
+    /// Raise the frame-rate cap to the next common refresh rate.
+    pub fn fps_up(&mut self) {
+        self.target_fps = crate::pacing::next_preset(self.target_fps);
+    }
+
+    /// Lower the frame-rate cap to the previous common refresh rate.
+    pub fn fps_down(&mut self) {
+        self.target_fps = crate::pacing::prev_preset(self.target_fps);
+    }
+
+    /// Fold this frame's duration into the smoothed FPS readout.
+    pub fn record_frame(&mut self, dt_ms: f64) {
+        if dt_ms <= 0.0 {
+            return;
+        }
+        let instant = 1000.0 / dt_ms;
+        // Exponential moving average so the readout is steady, not jittery.
+        self.fps = if self.fps <= 0.0 {
+            instant
+        } else {
+            self.fps * 0.9 + instant * 0.1
+        };
+    }
+
+    /// The rate to display: the measured FPS once warmed, else the target (so a
+    /// fresh frame — e.g. a headless snapshot — shows a stable number).
+    pub fn shown_fps(&self) -> u32 {
+        if self.fps >= 1.0 {
+            self.fps.round() as u32
+        } else {
+            self.target_fps
+        }
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.

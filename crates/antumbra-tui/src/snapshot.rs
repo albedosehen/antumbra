@@ -173,6 +173,8 @@ mod tests {
             selected_shadow: 0,
             focus: Focus::Experts,
             theme_idx: 0,
+            target_fps: 144,
+            fps: 0.0,
             clock_ms: 0.0,
             since_reload_ms: 0.0,
             should_quit: false,
@@ -266,6 +268,22 @@ mod tests {
         app.cycle_theme();
         let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
         assert!(text.contains("theme:ember"), "cycled theme shown:\n{text}");
+    }
+
+    // The header shows a live FPS readout and the footer the adjustable cap; the
+    // cap steps through common refresh rates (144 -> 165).
+    #[test]
+    fn header_and_footer_show_the_frame_rate() {
+        let mut app = demo_app();
+        let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+        assert!(
+            text.contains("144 fps"),
+            "header fps readout shown:\n{text}"
+        );
+        assert!(text.contains("cap:144"), "footer fps cap shown:\n{text}");
+        app.fps_up();
+        let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+        assert!(text.contains("cap:165"), "cap stepped to 165:\n{text}");
     }
 
     // Tab into the boundaries focus: the inspector replaces the expert detail and

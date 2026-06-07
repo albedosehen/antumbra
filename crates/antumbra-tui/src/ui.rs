@@ -75,6 +75,11 @@ fn header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Style::default().fg(t.ink),
     ));
+    // Live frame-rate readout (the cap is set in the footer with `±`).
+    spans.push(Span::styled(
+        format!("  ·  {} fps", app.shown_fps()),
+        Style::default().fg(t.dim),
+    ));
     f.render_widget(Paragraph::new(Line::from(spans)).block(panel(&t, "")), area);
 }
 
@@ -476,6 +481,8 @@ fn footer(f: &mut Frame, app: &App, area: Rect) {
         lbl(format!(" focus:{focus}  ")),
         key(" t "),
         lbl(format!(" theme:{}  ", t.name)),
+        key(" ± "),
+        lbl(format!(" cap:{}  ", app.target_fps)),
         key(" r "),
         lbl(" reload  ".into()),
         Span::styled(
