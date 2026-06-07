@@ -403,6 +403,31 @@ struct DocumentChunksOut {
     chunks: Vec<DocumentChunkView>,
 }
 
+/// One expert in the visible population (read-only view, no embedding/adapter).
+#[derive(Serialize, schemars::JsonSchema)]
+struct ExpertView {
+    id: String,
+    name: String,
+    generation: u32,
+    fitness: f32,
+    /// True if this is the caller's own private expert (else a shared one).
+    private: bool,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct PopulationOut {
+    experts: Vec<ExpertView>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct StatsOut {
+    memories: u32,
+    documents: u32,
+    experts: u32,
+    boundaries: u32,
+    compartments: u32,
+}
+
 #[derive(Serialize, schemars::JsonSchema)]
 struct ReinforceOut {
     found: bool,
@@ -722,6 +747,56 @@ impl McpServer {
             .map_err(err)?;
         Ok(Json(DocumentChunksOut {
             chunks: hits.iter().map(DocumentChunkView::from).collect(),
+        }))
+    }
+
+    /// The expert population visible to this session (read-only observability for
+    /// a dashboard / status view, P-2). The expert ACL already scopes the list to
+    /// shared experts plus this user's own private ones.
+    #[tool(
+        description = "List the expert population visible to you (shared experts plus your own private ones), each with its generation and fitness."
+    )]
+    async fn population(&self) -> Result<Json<PopulationOut>, ErrorData> {
+        let experts = expert::list(&self.store).await.map_err(err)?;
+        Ok(Json(PopulationOut {
+            experts: experts
+                .iter()
+                .map(|e| ExpertView {
+                    id: e.id.as_str().to_string(),
+                    name: e.name.clone(),
+                    generation: e.generation.0,
+                    fitness: e.fitness,
+                    private: e.owner.as_ref() == Some(&self.user),
+                })
+                .collect(),
+        }))
+    }
+
+    /// At-a-glance counts for this workspace (read-only, ACL-scoped).
+    #[tool(
+        description = "At-a-glance counts for your workspace: memories, knowledge documents, visible experts, boundaries, and your compartments."
+    )]
+    async fn workspace_stats(&self) -> Result<Json<StatsOut>, ErrorData> {
+        let memories = memory::list(&self.store, &self.tenant)
+            .await
+            .map_err(err)?
+            .len() as u32;
+        let documents = document::list_titles(&self.store, &self.tenant)
+            .await
+            .map_err(err)?
+            .len() as u32;
+        let experts = expert::list(&self.store).await.map_err(err)?.len() as u32;
+        let boundaries = boundary::list(&self.store).await.map_err(err)?.len() as u32;
+        let compartments = compartment::list_owned(&self.store, &self.tenant, &self.user)
+            .await
+            .map_err(err)?
+            .len() as u32;
+        Ok(Json(StatsOut {
+            memories,
+            documents,
+            experts,
+            boundaries,
+            compartments,
         }))
     }
 
@@ -1096,6 +1171,16 @@ impl McpServer {
             "propose_compartments" => dispatch!(ProposeCompartmentsParams, propose_compartments),
             "list_compartments" => {
                 let Json(out) = self.list_compartments().await?;
+                serde_json::to_value(out)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+            }
+            "population" => {
+                let Json(out) = self.population().await?;
+                serde_json::to_value(out)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+            }
+            "workspace_stats" => {
+                let Json(out) = self.workspace_stats().await?;
                 serde_json::to_value(out)
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))
             }
@@ -1489,6 +1574,39 @@ mod tests {
             .await
             .unwrap();
         assert!(viarest.get("chunks").is_some());
+    }
+
+    #[tokio::test]
+    async fn population_and_stats_report_the_workspace() {
+        let s = server().await;
+        // A fresh workspace has no experts.
+        assert!(s.population().await.unwrap().0.experts.is_empty());
+        assert_eq!(s.workspace_stats().await.unwrap().0.experts, 0);
+
+        // Seed a memory and a document through the dispatcher.
+        s.call_tool(
+            "store_memory",
+            serde_json::json!({ "content": "remember this" }),
+        )
+        .await
+        .unwrap();
+        s.call_tool(
+            "ingest_document",
+            serde_json::json!({ "title": "Doc", "content": "some reference text" }),
+        )
+        .await
+        .unwrap();
+
+        let stats = s.workspace_stats().await.unwrap();
+        assert!(stats.0.memories >= 1);
+        assert_eq!(stats.0.documents, 1);
+
+        // The stats tool is reachable over the REST dispatcher too.
+        let via = s
+            .call_tool("workspace_stats", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert!(via.get("memories").is_some());
     }
 
     #[tokio::test]
