@@ -63,6 +63,18 @@
 > throughout — the probe returned "stays open" rather than fabricating a scope. Still open: scale, and a
 > stronger actor would widen the in-scope margin further.
 
+> **Corrections as scopes; both front doors gate (2026-06-06).** A second intake now reaches an actionable
+> boundary without a live probe: a **verified correction** that carries its contrastive pair (governing feature +
+> C/C') is promoted directly. `CorpusTask` gains an optional scope (also parsed from a JSON corpus); the capture
+> path emits a `BoundaryFinding` only for corrections that **pass the verifier** (the same ground-truth gate the
+> population sits behind), and the generational loop — which owns the embedder — renders and embeds both contexts
+> and persists the actionable boundary. This complements the `scope`-command discovery path: discovery infers a
+> scope by probing, capture accepts one a human already knows. And the **MCP served path now applies the same
+> inhibition gate as the CLI**: `ranked_routes` escalates when a task falls inside an actionable boundary's
+> failure scope, so the two front doors no longer diverge (the gate was previously CLI-only, deferred while no
+> actionable boundary could reach the served path). Still open: automatic governing-feature discovery on the
+> capture intake (here the correction supplies it), and boundary retirement once an expert covers the scope.
+
 ## Context
 
 The thesis at full strength: **a continual learner becomes capable by modeling the *counterfactual boundary* of
