@@ -1,9 +1,9 @@
-//! # antumbra-gate — ADR-0005 (v0 heuristic)
+//! # antumbra-gate, ADR-0005 (v0 heuristic)
 //!
 //! A learned, boundary-conditioned latent mixer is the north-star gate. v0
 //! ships the honest fallback that ADR-0005 names "coverage routing (still
 //! useful)": score each expert by capability similarity to the task, subtract
-//! the in-scope inhibition any boundary imposes (ADR-0004), take the top-k —
+//! the in-scope inhibition any boundary imposes (ADR-0004), take the top-k,
 //! and **escalate** when nothing clears the in-scope bar. The learned mixer
 //! plugs in behind the same `route` signature later.
 //!
@@ -21,12 +21,12 @@
 //! - Relative Mahalanobis Distance (arXiv:2106.09022) shows near-OOD fails
 //!   because non-discriminative dimensions make in- and out-of-domain look
 //!   equidistant; the cure is to cancel that shared background. RMD does it with
-//!   a class-agnostic Gaussian (covariance whitening) — infeasible here, where
+//!   a class-agnostic Gaussian (covariance whitening), infeasible here, where
 //!   one vector per expert cannot estimate a covariance.
 //! - The valid cosine-space realization is the **difference of the two nearest
 //!   prototypes**: `coverage = cos(task, e₁) − cos(task, e₂)` (top-1 minus
 //!   top-2). The shared "generic-code" direction contributes near-equally to
-//!   both terms and cancels, leaving only discriminative signal — exactly RMD's
+//!   both terms and cancels, leaving only discriminative signal, exactly RMD's
 //!   intent. (Subtracting the *centroid* instead does **not** work: the centroid
 //!   absorbs the shared direction, so `cos(task, centroid) ≈ cos(task, e₁)` and
 //!   coverage collapses to ~0 for in- and out-of-scope alike. This was measured,
@@ -38,7 +38,7 @@
 //!
 //! A confident boundary (ADR-0004) is subtracted from coverage, so it can force
 //! escalation independently. Known v0 limitation: a task served *equally well*
-//! by two experts has a small margin and will escalate — the prototype-margin
+//! by two experts has a small margin and will escalate; the prototype-margin
 //! conflates "ambiguous between in-scope experts" with "out of scope". Escalating
 //! such cases is safe for coverage routing; north-star composition (ADR-0009),
 //! which blends adapters, dissolves it.
@@ -90,8 +90,8 @@ pub struct GateDecision {
 ///
 /// Ranking is `score(e) = cosine(e.capability_vec, task) -
 /// max_boundary_inhibition(task)` (experts without a capability vector are
-/// skipped). The escalation decision uses **relative coverage** — the
-/// top-1-minus-top-2 capability margin, less boundary inhibition — so it is not
+/// skipped). The escalation decision uses **relative coverage**: the
+/// top-1-minus-top-2 capability margin, less boundary inhibition, so it is not
 /// fooled by the compressed near-OOD cosine band (see module docs).
 pub fn route(
     task_vec: &[f32],

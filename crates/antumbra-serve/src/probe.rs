@@ -19,7 +19,7 @@ use antumbra_core::{Result, RunId};
 /// Generation is stochastic, so a single sample is a noisy acceptability test (a
 /// model that *can* satisfy a context still fails on some draws). The probe is
 /// therefore **best-of-K**: a context is acceptable if any of `samples` served
-/// completions verifies. This is the kill-criterion fix from ADR-0004 — raise
+/// completions verifies. This is the kill-criterion fix from ADR-0004: raise
 /// `samples` until single-draw noise stops flipping the boundary.
 pub struct GenerateVerifyProbe<S: Serve, V: Verifier> {
     serve: S,

@@ -1,4 +1,4 @@
-//! Loop-control repository — the out-of-band command an operator writes to
+//! Loop-control repository: the out-of-band command an operator writes to
 //! cooperatively stop a running loop (ADR-0008). A singleton-per-run row keyed
 //! by the run id (mirroring the generation head); the runner polls it at each
 //! generation boundary. Built on surql-rs `crud`; no raw SurrealQL.
@@ -20,7 +20,7 @@ fn record_id(run_id: &RunId) -> Result<RecordID> {
     RecordID::<()>::new(TABLE, run_id.as_str()).map_err(map)
 }
 
-/// Set the control command for a run (upsert) — what an operator writes to ask a
+/// Set the control command for a run (upsert): what an operator writes to ask a
 /// running loop to stop.
 pub async fn set(store: &Store, run_id: &RunId, command: LoopCommand) -> Result<()> {
     let id = record_id(run_id)?;
@@ -36,7 +36,7 @@ pub async fn set(store: &Store, run_id: &RunId, command: LoopCommand) -> Result<
     Ok(())
 }
 
-/// The current command for a run — [`LoopCommand::Run`] when no control is set.
+/// The current command for a run, [`LoopCommand::Run`] when no control is set.
 pub async fn load(store: &Store, run_id: &RunId) -> Result<LoopCommand> {
     let id = record_id(run_id)?;
     match get_record(store.client(), &id).await.map_err(map)? {

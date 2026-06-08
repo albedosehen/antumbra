@@ -1,27 +1,27 @@
-# ADR-0011 — v1 efficiency: GRPO, 4-bit QLoRA training, and serving throughput
+# ADR-0011: v1 efficiency: GRPO, 4-bit QLoRA training, and serving throughput
 
-**Status:** Accepted — GRPO validated, 4-bit validated, #4 hardened (2026-06-03) · **Date:** 2026-06-03 · **Related:** 0010 (the trainer — this details its v1/MT-4), 0002 (shadow plasticity), 0003 (verified reward), 0006 (serving — concurrency lives here), 0009 (north star — where 4-bit pays off)
+**Status:** Accepted (GRPO validated, 4-bit validated, #4 hardened, 2026-06-03) · **Date:** 2026-06-03 · **Related:** 0010 (the trainer, this details its v1/MT-4), 0002 (shadow plasticity), 0003 (verified reward), 0006 (serving, concurrency lives here), 0009 (north star, where 4-bit pays off)
 
-> **4-bit validated — the first OOM was a generation-tracking bug, not a backward limitation (2026-06-03).**
+> **4-bit validated: the first OOM was a generation-tracking bug, not a backward limitation (2026-06-03).**
 > Implemented as `BaseWeight::Dense | Quantized` with a `quantize_base` walk (Q4_K via `QTensor::quantize_onto`)
 > and dequant-in-forward (`train --quantize-base`). The first A/B OOM'd, and the cause was misdiagnosed as a
 > retained-dequant-for-`grad_x` problem. The **real** cause: **generation ran with autograd tracking on.** The
 > LoRA factors are `Var`s, so every sampled token's forward was tracked, and the **KV cache retained the whole
 > growing generation graph** across all `max_new_tokens` steps. With an f16 base the base weight is shared and
 > cheap; with a Q4_K base **each token re-dequantizes the full ~3 GB of weights and all of them were retained**
-> in that graph — 32 tokens × 3 GB → OOM. *Training* (`train_one`: one forward, then `backward_step` frees it)
+> in that graph: 32 tokens × 3 GB → OOM. *Training* (`train_one`: one forward, then `backward_step` frees it)
 > was never the problem; *sampling* was. **Fix:** a `grad` flag on `LoraLinear` that **detaches the LoRA factors
 > during generation** (`sample_one`/`sample_one_with_logprobs` set it off; `train_one`/`forward_logits` set it
-> on) — same values, untracked, nothing retained between tokens. With that, the GPU A/B (arith, samples 4 /
+> on): same values, untracked, nothing retained between tokens. With that, the GPU A/B (arith, samples 4 /
 > rounds 3, max-new-tokens 32) gives **4-bit `0.12 -> 0.38 -> 1.00` = f16 `0.12 -> 0.38 -> 1.00`**, both
 > graduated, no OOM. So Q4_K dequant-in-forward trains a LoRA at f16 quality, the resident base is ~1/4, and the
-> per-token re-dequant is the only added cost. (The detach also makes f16 generation/serving leaner — it no
+> per-token re-dequant is the only added cost. (The detach also makes f16 generation/serving leaner: it no
 > longer retains a graph it never backprops.)
 
 > **GRPO validated (2026-06-03).** Implemented as `grpo.rs` (CPU-tested core) + `QwenCausalLm: GrpoLm` (GPU) +
 > `GrpoTrainer` behind the `Trainer` port, selectable via `train --algo grpo`. The design bets held: reference =
 > base with LoRA toggled off (no second model), group size = `K`. GPU A/B on the arith corpus (same knobs,
-> samples 6 / rounds 3): **RAFT `0.08 -> 0.25 -> 1.00`, GRPO `0.33 -> 0.92 -> 1.00`** — GRPO climbs much faster
+> samples 6 / rounds 3): **RAFT `0.08 -> 0.25 -> 1.00`, GRPO `0.33 -> 0.92 -> 1.00`**: GRPO climbs much faster
 > (0.92 by round 1 vs 0.25), clearing the sample-efficiency kill criterion on this run. One implementation
 > correction: a combined-group backward OOMs the card because candle retains the base-forward activations for the
 > LoRA backward (memory scales with `G`), so `grpo_step` steps **per group member** (one forward alive at a time),
@@ -36,7 +36,7 @@
 ## Context
 
 ADR-0010 named GRPO as the v1 algorithm and GGUF-Q4 as MT-4, but flagged a load-bearing unknown: candle's
-quantization is GGUF (Q4_K), not bitsandbytes NF4, and `QMatMul` is inference-only with no backward — it called
+quantization is GGUF (Q4_K), not bitsandbytes NF4, and `QMatMul` is inference-only with no backward; it called
 true 4-bit QLoRA a "DIY quantized backward." That framing turns out to be wrong in a way that makes 4-bit
 *easier* than feared. Separately, ADR-0006's `CandleServe` now caches its model but runs candle's synchronous
 generation on the async runtime thread, which is fine for one stream and not for many. This ADR settles all
@@ -57,23 +57,23 @@ D_KL    = π_ref/π_θ − log(π_ref/π_θ) − 1                              
 
 It is critic-free (the group mean is the baseline). What it needs over RAFT:
 
-- **per-token log-probs** of the policy — we already compute logits in the forward; `log_softmax` + gather.
-- **old-policy log-probs** `π_{θ_old}` — capture the per-token log-probs *at sampling time* (the policy that
+- **per-token log-probs** of the policy: we already compute logits in the forward; `log_softmax` + gather.
+- **old-policy log-probs** `π_{θ_old}`: capture the per-token log-probs *at sampling time* (the policy that
   generated the sample); store them with each sample.
 - **a frozen reference** `π_ref` for the KL term.
-- **group rewards** — already produced (RAFT samples `K` and verifies each; reuse as the group).
+- **group rewards**: already produced (RAFT samples `K` and verifies each; reuse as the group).
 
 **Candle feasibility (favorable).** No new candle capability is required: the policy log-probs come from the
 same LoRA forward whose gradients we already take; the PPO ratio, clip, and KL are elementwise tensor math the
 autograd handles. The reference model needs **no second base copy**: since `policy = base + LoRA`, `π_ref` is
-`base + (frozen LoRA snapshot)` — for GRPO-from-scratch that is the base with LoRA disabled; for refining an
+`base + (frozen LoRA snapshot)`: for GRPO-from-scratch that is the base with LoRA disabled; for refining an
 existing expert it is the starting adapter cloned and frozen. One extra forward with the LoRA toggled, not a
 second 3 GB model. Old-policy log-probs are likewise just the LoRA state at sampling time.
 
-### 4-bit QLoRA in candle — dequantize-in-forward, *not* a quantized backward
+### 4-bit QLoRA in candle: dequantize-in-forward, *not* a quantized backward
 
 `candle_core::quantized::QTensor::dequantize(&self, device) -> Result<Tensor>` exists and returns an ordinary
-`Tensor`. `QTensor`/`QMatMul` have no backward — **but QLoRA never backpropagates into the frozen base.** The
+`Tensor`. `QTensor`/`QMatMul` have no backward, **but QLoRA never backpropagates into the frozen base.** The
 training graph is:
 
 ```
@@ -99,7 +99,7 @@ term.** The "inference-only `QMatMul` / no-backward `QTensor`" limitation is irr
 
 `CandleServe::act` holds a `tokio::Mutex` over the cached model and runs candle's **synchronous** generation on
 the runtime thread. For a single request stream (the v1 reality) this only parks one worker and is harmless.
-True concurrency — many adapters answering at once — is the S-LoRA multi-adapter serving ADR-0006 already
+True concurrency (many adapters answering at once) is the S-LoRA multi-adapter serving ADR-0006 already
 defers, and needs a real inference scheduler, not a `spawn_blocking` patch. Minimal hardening (`block_in_place`,
 or a dedicated inference thread/actor) is only warranted once a concurrent path exists.
 

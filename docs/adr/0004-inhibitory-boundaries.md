@@ -3,7 +3,7 @@
 **Status:** Accepted - **keystone / central thesis** · **Date:** 2026-05-30
 **Related:** 0001 (substrate), 0002 (probes), 0003 (measurement), 0005 (consumer), 0008 (refiner)
 
-> This is the ADR the project is *for*. ADRs 0001–0003, 0005, and 0008 describe the **apparatus**; this one
+> This is the ADR the project is *for*. ADRs 0001 through 0003, 0005, and 0008 describe the **apparatus**; this one
 > describes what the apparatus is *for*. It is also the least-proven part - there is no prior art - and we build
 > it **first-class and head-on, not staged.** The project succeeds or fails here.
 
@@ -21,7 +21,7 @@
 
 > **Real probe (2026-06-03).** The `AcceptabilityProbe` is no longer only a fake. `GenerateVerifyProbe`
 > (`antumbra-serve`) realizes **generate-then-verify**: hold the behavior fixed, render it for a candidate
-> context, **serve** a completion, and let a **verifier** judge it — generic over the `Serve` and `Verifier`
+> context, **serve** a completion, and let a **verifier** judge it, generic over the `Serve` and `Verifier`
 > ports, so production composes `CandleServe` (ADR-0006) with `CommandVerifier` (ADR-0003), and tests use
 > deterministic fakes. Unit tests prove acceptability is decided by serving-and-checking, and that `find_scope`
 > drives the real probe to recover the governing feature and C' (the convert-direction case). Swapping the fakes
@@ -30,23 +30,23 @@
 
 > **Live GPU run (2026-06-03).** The probe was run end-to-end on the GPU via the CLI `scope` command
 > (generate-then-verify, best-of-K over `CandleServe` + `CommandVerifier`). On the v0 base
-> (Qwen2.5-Coder-1.5B, **no expert adapter**) it did **not** recover the test boundaries — both a strict
+> (Qwen2.5-Coder-1.5B, **no expert adapter**) it did **not** recover the test boundaries: both a strict
 > python-exec spec (`scope-convert`) and a robust in-process `contains_all` spec (`scope-greeting`) stayed open
 > across K=8. The small base does not reliably follow terse context hints in free-form generation (it scored
 > only ~0.38 on trivial add/reverse before any training). **The integrity point holds:** the probe returned
-> "boundary stays open" rather than fabricating a scope — exactly the open-negative discipline ADR-0004 demands.
+> "boundary stays open" rather than fabricating a scope, exactly the open-negative discipline ADR-0004 demands.
 > So the mechanism is sound and unit-proven; reliable *live* recovery needs a stronger actor (a graduated expert
 > as the generator, or a larger base) or more-elicitable checks, not a change to the keystone path. (The K=8
-> convert draws also produced identical errors, hinting at low generation diversity — a temperature knob on
-> generation is a likely follow-up, since best-of-K only helps if the draws differ.)
+> convert draws also produced identical errors, hinting at low generation diversity (a temperature knob on
+> generation is a likely follow-up, since best-of-K only helps if the draws differ).
 
-> **Live recovery achieved (2026-06-03).** Probing with **the expert's own adapter** (the faithful design — the
+> **Live recovery achieved (2026-06-03).** Probing with **the expert's own adapter** (the faithful design, since the
 > keystone maps a *specific expert's* competence, not the base's) succeeds where base-only failed. A narrow
 > **adder** expert was trained (add only; `[0.38, 1.00, 1.00]`, graduated) and `scope --expert adder-g0`
 > (`find_scope_over_contexts` over whole candidate contexts, each with its own verifier) probed its boundary:
 > the adder **passed** the `op=add` context (clean `def add`, `add(2,3)==5`) and **failed** the `op=multiply`
 > context (it emits no `multiply`), so the search recovered governing feature `op` and C' `{op: add}` and stored
-> an **actionable** boundary — `status` then reports `boundaries (antumbra): 1 (1 actionable, 0 open)`. This is
+> an **actionable** boundary; `status` then reports `boundaries (antumbra): 1 (1 actionable, 0 open)`. This is
 > the keystone **fully live**: a real trained expert → real generation (`CandleServe`) → real execution (python
 > verifier) → counterfactual recovery → a persisted, actionable boundary. No fake remains in this path. Still
 > open: automatic discovery of the candidate governing features (here they are authored), and scale.
@@ -55,29 +55,29 @@
 > input: instead of being *told* the governing feature, the system probes a pool of contexts, partitions them by
 > pass/fail, and infers the feature whose value alone separates the two (`scope --discover`). On the GPU,
 > `scope --expert adder-g0 --discover` **inferred** governing feature `op` and C' `{op: add}` and stored an
-> actionable boundary — nothing supplied but the candidate contexts. Reaching reliable live recovery flushed out
+> actionable boundary, with nothing supplied but the candidate contexts. Reaching reliable live recovery flushed out
 > three real bugs (each fixed): best-of-K re-seeded the RNG identically so the K draws were one completion
 > (per-call generation nonce); the server reloaded the multi-GB model every `act` (cache it once); and the
 > verifier ran untrusted generated code with no timeout, so a runaway draw hung the whole run (null stdin + a
 > hard kill timeout). The earlier "stochastic" reading was those bugs, not actor weakness. Integrity held
-> throughout — the probe returned "stays open" rather than fabricating a scope. Still open: scale, and a
+> throughout: the probe returned "stays open" rather than fabricating a scope. Still open: scale, and a
 > stronger actor would widen the in-scope margin further.
 
 > **Corrections as scopes; both front doors gate (2026-06-06).** A second intake now reaches an actionable
 > boundary without a live probe: a **verified correction** that carries its contrastive pair (governing feature +
 > C/C') is promoted directly. `CorpusTask` gains an optional scope (also parsed from a JSON corpus); the capture
 > path emits a `BoundaryFinding` only for corrections that **pass the verifier** (the same ground-truth gate the
-> population sits behind), and the generational loop — which owns the embedder — renders and embeds both contexts
+> population sits behind), and the generational loop (which owns the embedder) renders and embeds both contexts
 > and persists the actionable boundary. This complements the `scope`-command discovery path: discovery infers a
 > scope by probing, capture accepts one a human already knows. And the **MCP served path now applies the same
 > inhibition gate as the CLI**: `ranked_routes` escalates when a task falls inside an actionable boundary's
 > failure scope, so the two front doors no longer diverge (the gate was previously CLI-only, deferred while no
 > actionable boundary could reach the served path). The lifecycle also **closes**: when a shadow graduates, the
-> loop retires every boundary the new expert's capability now covers (`is_covered_by` — closer to C than C'), so a
+> loop retires every boundary the new expert's capability now covers (`is_covered_by`, closer to C than C'), so a
 > filled gap stops gating routing. The capture intake also **infers its own governing feature** when the
-> correction omits one — the single context key whose value differs between C and C' — and emits no boundary when
-> zero or several differ (no single feature can name the scope). So the full lifecycle — create (discovery *or*
-> capture), name, apply (both front doors), retire — runs without a human in the loop except to supply the
+> correction omits one (the single context key whose value differs between C and C') and emits no boundary when
+> zero or several differ (no single feature can name the scope). So the full lifecycle, create (discovery *or*
+> capture), name, apply (both front doors), retire, runs without a human in the loop except to supply the
 > correction itself. Still open: scale, and widening the in-scope margin on a correction-derived boundary so
 > same-generation coverage is reliable.
 

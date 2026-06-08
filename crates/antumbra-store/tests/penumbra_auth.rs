@@ -1,6 +1,6 @@
 //! Engine-enforced tenant isolation (Stage 2): with a per-tenant record-access
 //! session bound (`$auth.tenant`), the SurrealDB engine itself refuses another
-//! tenant's rows — even on an unfiltered `SELECT` with no app-side WHERE. This
+//! tenant's rows, even on an unfiltered `SELECT` with no app-side WHERE. This
 //! is the structural guarantee the app-side filter only approximates.
 
 use chrono::Utc;
@@ -124,7 +124,7 @@ async fn engine_enforces_tenant_isolation_under_record_auth() {
     // Bind a tenant session: $auth.tenant = ws:alpha, engine PERMISSIONS active.
     store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
 
-    // The SAME unfiltered query now returns ONLY alpha's row — the engine hides
+    // The SAME unfiltered query now returns ONLY alpha's row; the engine hides
     // beta's, with no app-side WHERE involved. This is the structural guarantee.
     let seen = memory::all_unscoped(&store).await.unwrap();
     assert_eq!(

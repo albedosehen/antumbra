@@ -671,7 +671,7 @@ async fn run() -> anyhow::Result<()> {
                     eval_pass_rate(&mut model, &verifier, &tasks, &RunId::new("eval"), samples)
                         .await?;
                 println!(
-                    "pass-rate {:.2} ({}/{}) — {} on {} ({} tasks)",
+                    "pass-rate {:.2} ({}/{}): {} on {} ({} tasks)",
                     out.pass_rate,
                     out.passed,
                     out.total,

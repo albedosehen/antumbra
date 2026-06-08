@@ -2,7 +2,7 @@
 //!
 //! Every tool operates on a single bound tenant (the workspace this server was
 //! started for); the Store session is signed in as that tenant, so reads are
-//! engine-enforced — the server cannot serve another tenant's memory even if a
+//! engine-enforced: the server cannot serve another tenant's memory even if a
 //! tool's filter were wrong. This mirrors the `ai_memory` MCP surface: store,
 //! recall (semantic), reinforce, forget, list.
 
@@ -96,7 +96,7 @@ impl McpServer {
 
     /// Enable the autonomous propose trigger: once the unorganized inbox reaches
     /// `threshold` memories, a write auto-clusters it into `Origin::Proposed`
-    /// compartments (reversible — the user curates). Off by default.
+    /// compartments (reversible, the user curates). Off by default.
     #[must_use]
     pub fn with_auto_propose(mut self, threshold: usize) -> Self {
         self.auto_propose = Some(AutoProposeConfig {
@@ -108,7 +108,7 @@ impl McpServer {
     }
 
     /// The *unorganized* memory pool: the inbox (default compartment) plus
-    /// anything uncompartmented. Deliberately-filed compartments are left alone —
+    /// anything uncompartmented. Deliberately-filed compartments are left alone;
     /// the antumbra proposes structure only over what the user has not organized.
     async fn inbox_pool(&self) -> antumbra_core::Result<Vec<Memory>> {
         Ok(memory::list(&self.store, &self.tenant)
@@ -177,7 +177,7 @@ impl McpServer {
     /// first. The expert ACL already scopes `expert::list` to shared + own-private.
     ///
     /// Boundary inhibition (ADR-0004): if this task falls inside a known failure
-    /// scope, escalate (return no routes) rather than route confidently — the
+    /// scope, escalate (return no routes) rather than route confidently; the
     /// same gate the CLI's learned-route path applies, so the two front doors
     /// agree. Only *actionable* boundaries inhibit (the relative C/C' margin), so
     /// this is a no-op until a verified correction has scoped one.
@@ -308,7 +308,7 @@ struct StoredOut {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct RecallParams {
-    /// What to recall — embedded and matched by semantic similarity.
+    /// What to recall, embedded and matched by semantic similarity.
     query: String,
     /// How many to return (default 5).
     top_k: Option<u32>,
@@ -484,13 +484,13 @@ struct RouteParams {
 }
 
 /// Minimum cosine similarity for one of the user's *private* experts to be
-/// offered as a route candidate (a heuristic floor — private experts are not in
+/// offered as a route candidate (a heuristic floor; private experts are not in
 /// the shared learned router, so they are matched directly by centroid; a
 /// per-private-expert learned boundary is the eventual refinement).
 const PRIVATE_ROUTE_FLOOR: f32 = 0.3;
 
 /// Document chunking (P-3): target chunk size and inter-chunk overlap, in chars.
-/// ~1200 chars is roughly a paragraph or two — enough context per chunk for the
+/// ~1200 chars is roughly a paragraph or two: enough context per chunk for the
 /// 384-d model without diluting the embedding; the overlap keeps a fact that
 /// straddles a cut wholly present in one chunk.
 const DOCUMENT_CHUNK_CHARS: usize = 1200;
@@ -520,7 +520,7 @@ struct RouteHit {
 struct RouteOut {
     /// Whether the population covers this task (vs out-of-distribution).
     covered: bool,
-    /// `true` when no expert covers it — defer to the generalist.
+    /// `true` when no expert covers it: defer to the generalist.
     escalate: bool,
     routes: Vec<RouteHit>,
 }
@@ -618,7 +618,7 @@ struct ProposalView {
     label: String,
     /// The memory ids grouped into this proposed region.
     members: Vec<String>,
-    /// Mean cosine of members to the centroid — rank proposals by this.
+    /// Mean cosine of members to the centroid; rank proposals by this.
     cohesion: f32,
     /// Set when `apply` was true: the id of the created proposed compartment.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1902,7 +1902,7 @@ mod tests {
             .unwrap();
         assert!(!out.0.escalate, "the population covers the task");
         assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
-        // EchoServe serves the prompt straight back — proves route -> serve wiring.
+        // EchoServe serves the prompt straight back, proving route -> serve wiring.
         assert_eq!(out.0.answer, "add two numbers");
     }
 

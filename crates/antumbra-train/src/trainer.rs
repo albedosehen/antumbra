@@ -1,4 +1,4 @@
-//! `RaftTrainer` — the [`Trainer`] port realized as the RAFT loop (ADR-0010).
+//! `RaftTrainer`: the [`Trainer`] port realized as the RAFT loop (ADR-0010).
 //!
 //! It owns the config, a model loader (the candle base+LoRA factory), a corpus
 //! resolver, and the verifier (ground truth, ADR-0003). `train_shadow` loads a

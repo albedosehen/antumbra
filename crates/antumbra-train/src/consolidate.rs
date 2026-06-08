@@ -3,7 +3,7 @@
 //!
 //! The capture path (`teach`/`memory-import`) internalizes a memory in
 //! isolation. Consolidating *many* memories into a shared base risks clobbering
-//! skills already learned — catastrophic interference. The complementary-
+//! skills already learned (catastrophic interference). The complementary-
 //! learning-systems answer is not to train new traces alone but to **replay**
 //! them interleaved with rehearsal of what is already known, so the gradient
 //! mixes old and new and the shared representation does not drift off the old
@@ -16,7 +16,7 @@ use crate::model::{CorpusTask, SftExample};
 
 /// The gate that decides whether a memory graduates from the store into the
 /// weights (EXP-021). A memory consolidates only when it clears all three
-/// signals — the rest stay in the store (the cold-fact / volatile long tail):
+/// signals; the rest stay in the store (the cold-fact / volatile long tail):
 ///   - **recurrence**: reinforced enough to be worth baking in;
 ///   - **stability**: not a fact that changes over time;
 ///   - **verifiability**: a behavior we can check internalized. Opinions carry
@@ -134,7 +134,7 @@ pub fn score_memory(record: &MemoryRecord, policy: &ConsolidationPolicy) -> Verd
 /// interference). `ratio` is rehearsal examples per winner; the buffer is drawn
 /// round-robin and inserted at evenly spaced positions, so even a small buffer
 /// spreads deterministically across the batch (no RNG, so it is reproducible).
-/// `ratio <= 0` or an empty buffer returns the winners unchanged — replay off.
+/// `ratio <= 0` or an empty buffer returns the winners unchanged (replay off).
 pub fn interleave_replay(
     winners: &[SftExample],
     replay: &[SftExample],
@@ -169,8 +169,8 @@ pub fn interleave_replay(
     out
 }
 
-/// Build a rehearsal buffer from capture tasks that carry a verified completion
-/// — the `prompt -> behavior` pairs of already-consolidated memories. Tasks
+/// Build a rehearsal buffer from capture tasks that carry a verified completion,
+/// the `prompt -> behavior` pairs of already-consolidated memories. Tasks
 /// without a trusted completion (RAFT seeds) contribute nothing to rehearse.
 pub fn replay_from_tasks(tasks: &[CorpusTask]) -> Vec<SftExample> {
     tasks

@@ -54,7 +54,7 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
         }
     } else {
         lines.push(Line::from(Span::styled(
-            "(no experts yet — grow some with `antumbra train`/`teach`)",
+            "(no experts yet; grow some with `antumbra train`/`teach`)",
             Style::default().fg(t.dim),
         )));
     }
@@ -107,7 +107,7 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// The boundaries inspector (the antumbra, ADR-0004): the learned scopes, with
-/// the selected one's detail — actionable vs open, governing feature, grain,
+/// the selected one's detail: actionable vs open, governing feature, grain,
 /// confidence, and the C -> C' contrast it was recovered from.
 pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
@@ -116,7 +116,7 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     if app.boundaries.is_empty() {
         lines.push(Line::from(Span::styled(
-            "(no boundaries yet — the antumbra is empty)",
+            "(no boundaries yet; the antumbra is empty)",
             Style::default().fg(t.dim),
         )));
     } else {
@@ -192,7 +192,7 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// The penumbra: shadows in (or recently out of) training, newest first, with the
-/// selected one's lineage — status, generation, final reward, and its reward curve
+/// selected one's lineage: status, generation, final reward, and its reward curve
 /// as a sparkline (the anti-collapse signal, ADR-0002/0003).
 pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
@@ -206,7 +206,7 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     if app.shadows.is_empty() {
         lines.push(Line::from(Span::styled(
-            "(no shadows yet — the penumbra is quiet)",
+            "(no shadows yet; the penumbra is quiet)",
             Style::default().fg(t.dim),
         )));
     } else {
@@ -284,7 +284,7 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     reward_chart(f, app, rows[2], curve);
 }
 
-/// The selected shadow's reward curve as a line chart over training steps — the
+/// The selected shadow's reward curve as a line chart over training steps: the
 /// trajectory that decides graduation vs collapse.
 fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32]) {
     let t = app.theme();

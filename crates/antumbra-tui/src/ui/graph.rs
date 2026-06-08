@@ -27,7 +27,7 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
         .paint(move |ctx| {
             let n = app.experts.len().max(1);
             // A tilted ring (squashed vertically) reads as a 3D orbit: depth is
-            // sin(angle) — front nodes sit lower and glow brighter, back nodes
+            // sin(angle): front nodes sit lower and glow brighter, back nodes
             // higher and dimmer.
             let (rx, ry) = (72.0, 34.0);
             let rot = app.clock_ms * 0.00006 * TAU;

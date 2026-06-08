@@ -2,28 +2,28 @@
 
 > A research project exploring one question: can a coding agent's **verified**
 > work be metabolized into a growing population of small, frozen, on-device
-> specialists — so the system gets measurably better at the work you repeat, and
+> specialists, so the system gets measurably better at the work you repeat, and
 > learns the **scope** of what each specialist is good at (when to answer locally,
 > when to escalate)?
 
-Antumbra started as a research project and remains one — an independent, all-Rust
+Antumbra started as a research project and remains one: an independent, all-Rust
 exploration, not a product. The idea under test: a private substrate that plugs
 into a coding agent you already use (Claude Code, Cursor, any MCP client) and,
-instead of merely *remembering*, **gets better** — training verified outcomes
+instead of merely *remembering*, **gets better** by training verified outcomes
 into frozen LoRA adapters over a shared base, and learning a competence boundary
 for each. Every milestone is a falsifiable experiment with a kill criterion; the
-sections below are the bets and what has — and hasn't — held up so far.
+sections below are the bets and what has (and hasn't) held up so far.
 
 ---
 
 ## The premise
 
 Most "AI assistants" are one large model in someone else's data center: you rent
-it, you send it your data, and it is exactly as good tomorrow as today — it never
+it, you send it your data, and it is exactly as good tomorrow as today. It never
 learns *your* work.
 
 The bet Antumbra explores is the opposite. It maintains a **population of small,
-frozen specialists** — LoRA adapters over one shared, code-capable base model —
+frozen specialists** (LoRA adapters over one shared, code-capable base model),
 each good at a narrow, recurring task. When a result is **verified** (a test
 passes, a command works, a schema matches, you accept a draft), that competence
 is trained into an adapter and **frozen** into the population. A **learned
@@ -38,7 +38,7 @@ Two design commitments are the heart of the experiment:
   only hard guarantee that a learned skill is never silently forgotten when the
   system trains something new (ADR-0001).
 - **Scope, not just skill.** Most systems accumulate what *works*. The bet here is
-  that the neglected, more valuable half is the **boundary** of a rule — learning
+  that the neglected, more valuable half is the **boundary** of a rule: learning
   that a behavior is right in one context and wrong in a neighbouring one, and
   *which contextual feature governs the switch*. Constraints are scoped, not
   absolute: "use `deno install`, not `npm install`" is true **in this repo**, not
@@ -49,11 +49,13 @@ Two design commitments are the heart of the experiment:
 
 ## How it's exercised
 
-Antumbra isn't an app you open — it's driven through a real coding agent over MCP
-plus three lifecycle hooks, which is how the loop gets fed verified data:
+Antumbra has a CLI and a ratatui operator console you run directly, for driving
+the loop and inspecting the population, gate, and memory. Its everyday role,
+though, is as the brain a coding agent plugs into over MCP, fed by three lifecycle
+hooks, which is how the loop gets its verified data:
 
 1. **Bootstrap on session start.** A hook pulls standing conventions and the
-   memory relevant to this project into the agent's opening context — no cold
+   memory relevant to this project into the agent's opening context. There is no cold
    start; it already knows "this repo uses `deno`."
 2. **Route or answer.** The agent calls the `answer`/`route` tools: a task goes to
    the frozen expert most likely to cover it, or escalates when out of scope.
@@ -66,7 +68,7 @@ Hook templates (PowerShell + bash, Windows/macOS/Linux) live in
 Antumbra](docs/integration.md)**.
 
 The same engine runs two ways, both implemented to test the substrate rather than
-to ship: **offline** (embedded store, stdio or loopback MCP, one identity —
+to ship: **offline** (embedded store, stdio or loopback MCP, one identity, so
 nothing leaves the machine) and **networked** (HTTP/SSE, a signed JWT per
 request, engine-enforced multi-tenancy, device sync). Neither is a service on
 offer; they're the two halves of the design being validated.
@@ -79,10 +81,10 @@ Antumbra learns from **verifiable outcomes in an environment**, not by imitating
 teacher's text:
 
 - **The environment is the truth.** For coding over repos: the test that passes,
-  the command that runs, the build that goes green. That is the reward (RAFT —
+  the command that runs, the build that goes green. That is the reward (RAFT,
   reward-ranked fine-tuning over verified completions, ADR-0010).
-- **A critic turns a failure into a diagnostic signal** — "`npm install` failed
-  because this is a Deno project; use `deno install`" — and names the *governing
+- **A critic turns a failure into a diagnostic signal**, such as "`npm install` failed
+  because this is a Deno project; use `deno install`", and names the *governing
   feature* of the boundary. That is counterfactual scope extraction (ADR-0004).
 - **Training is on the verified outcome, not the critic's words.** That keeps
   learning grounded in real data, and clear of "trained on a provider's outputs."
@@ -99,7 +101,7 @@ textbook boundaries), and the data is yours.
 Antumbra carries its own first-class memory and runtime rather than running
 alongside a separate agent engine.
 
-- **Memory store** (ADR-0012) — a tenant-scoped store with three networks
+- **Memory store** (ADR-0012): a tenant-scoped store with three networks
   (`world` facts, `bank` experiences, `opinion` judgments), HNSW vector recall,
   reinforcement counts, and per-memory provenance. It is both the **bootstrap**
   (existing memories seed the population with no cold start) and the
@@ -111,14 +113,14 @@ alongside a separate agent engine.
   resurrected by another replica. The embedder is pluggable behind the `Embedder`
   port, so the embedding step that touches your content stays on your side.
 
-- **Engine-enforced isolation** (ADR-0013) — multi-tenancy lives in the SurrealDB
+- **Engine-enforced isolation** (ADR-0013): multi-tenancy lives in the SurrealDB
   engine, not in handler code. Record-access binds `(tenant, user)` to `$auth`,
   and table permissions (`WHERE tenant_id = $auth.tenant`, plus compartment
-  ownership and grant subqueries) filter every row at the engine — so a forgotten
+  ownership and grant subqueries) filter every row at the engine, so a forgotten
   app-side filter cannot leak. Validated live against a real `ws://` server,
   including the fix (R-6) that runs each request on a scoped, non-root connection.
 
-- **Compartments** (ADR-0014) — named, ownable spaces of memory: the unit of
+- **Compartments** (ADR-0014): named, ownable spaces of memory, the unit of
   organization, deletion, and sharing. A user grants another `reference` or `link`
   capability (engine-enforced); a private compartment consolidates into a private
   expert. **Revocation is a tombstone** that fails closed immediately at the
@@ -126,18 +128,18 @@ alongside a separate agent engine.
 
 ## The runtime surface
 
-- **MCP server** (`antumbra-mcp`, ADR-0015) — a Rust Model Context Protocol server
+- **MCP server** (`antumbra-mcp`, ADR-0015): a Rust Model Context Protocol server
   exposing memory, graph, compartment, routing, and `answer` tools, over **stdio**
   (one local identity) or a **networked, multi-tenant HTTP** surface where each
   request's signed JWT `(tenant, user)` claims become the engine's `$auth`
   (streamable-HTTP stateful/SSE, so the server can push notifications).
 
-- **Live propagation** — when a shared compartment changes, a SurrealDB `LIVE`
+- **Live propagation**: when a shared compartment changes, a SurrealDB `LIVE`
   subscription resolves the audience (owner + grantees) and pushes a notification
   to each open SSE stream, so an agent learns of new or forgotten memories without
   polling. Validated end-to-end over the wire.
 
-- **Collector / sync** (`antumbra-sync`) — keeps a local embedded store and a
+- **Collector / sync** (`antumbra-sync`): keeps a local embedded store and a
   remote authoritative store in agreement by periodic **bidirectional
   last-write-wins** reconciliation (by each row's version timestamp), so memories,
   grants, and revocations become visible across a fleet. CLI: `antumbra sync`.
@@ -148,7 +150,7 @@ alongside a separate agent engine.
 
 A research project, not a product: every milestone is a falsifiable experiment
 with a kill criterion. All-Rust, single process; data in SurrealDB via `surql-rs`
-(builder-only — no hand-written SurrealQL); training and serving via `candle`.
+(builder-only, with no hand-written SurrealQL); training and serving via `candle`.
 
 **v0 substrate:** one frozen, code-capable base (Qwen2.5-Coder-1.5B-Instruct) on a
 single 24 GB GPU, a growing library of frozen LoRA experts, and a
@@ -169,7 +171,7 @@ is exercisable without a GPU.
   absolute floor; the counterfactual boundary composes end-to-end.
 - **Networked multi-tenancy is engine-enforced over `ws://`** (real SurrealDB v3):
   cross-tenant isolation and intra-tenant compartment privacy both hold; grant
-  makes a shared memory visible and revoke fails closed — over the wire.
+  makes a shared memory visible and revoke fails closed, all over the wire.
 - **Multi-device:** bidirectional LWW sync converges; deletes and revocations
   propagate as tombstones with no resurrection; live SSE notifications reach
   grantees end-to-end.
@@ -221,21 +223,21 @@ recipe and the validated generation-quality settings.
 
 ## Documentation
 
-- **[Antumbra, explained for anyone](docs/antumbra-explained.md)** — a
+- **[Antumbra, explained for anyone](docs/antumbra-explained.md)**: a
   plain-English tour with diagrams and analogies (no ML background needed).
-- **[Using Antumbra](docs/integration.md)** — wire it into a coding agent (the
+- **[Using Antumbra](docs/integration.md)**: wire it into a coding agent (the
   bootstrap/capture lifecycle hooks), offline vs networked. Start here.
-- **[Architecture](docs/architecture.md)** — system, substrate, decision chain,
+- **[Architecture](docs/architecture.md)**: system, substrate, decision chain,
   training and data flow, schema.
-- **[Technical Reference](docs/technical-reference.md)** — crate map, domain
+- **[Technical Reference](docs/technical-reference.md)**: crate map, domain
   model, port seams, algorithms as coded, build matrix, validation results.
-- **[Security posture](docs/security.md)** — the trust model, engine-enforced
+- **[Security posture](docs/security.md)**: the trust model, engine-enforced
   isolation, and the threat-model conclusions of the security review.
-- **[Roadmap](docs/roadmap.md)** — what is built and what is queued, per item.
-- **[Running the trainer](docs/running-the-trainer.md)** — the CUDA GPU recipe.
-- **[Architecture Decision Records](docs/adr/README.md)** — every load-bearing
+- **[Roadmap](docs/roadmap.md)**: what is built and what is queued, per item.
+- **[Running the trainer](docs/running-the-trainer.md)**: the CUDA GPU recipe.
+- **[Architecture Decision Records](docs/adr/README.md)**: every load-bearing
   decision, ADR-0001 … ADR-0016.
-- **[Experiment Ledger](experiments/README.md)** — each falsifiable validation:
+- **[Experiment Ledger](experiments/README.md)**: each falsifiable validation:
   claim, method, result, kill criterion, reproduce command.
 
 ### Crates

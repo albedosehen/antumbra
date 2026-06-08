@@ -1,9 +1,9 @@
-//! Port traits — the seams where Antumbra meets the GPU and the outside world.
+//! Port traits: the seams where Antumbra meets the GPU and the outside world.
 //!
 //! The domain core (loop, gate, boundary, critic aggregation) is written
 //! entirely against these traits, so it is exercisable with in-memory fakes
-//! (see [`crate::testing`]) and the heavy implementations — candle QLoRA
-//! training (ADR-0002), llama.cpp / mistral.rs serving (ADR-0006) — drop in
+//! (see [`crate::testing`]) and the heavy implementations (candle QLoRA
+//! training (ADR-0002), llama.cpp / mistral.rs serving (ADR-0006)) drop in
 //! later as the only changed pieces.
 
 use async_trait::async_trait;
@@ -43,7 +43,7 @@ pub trait Serve: Send + Sync {
 
     /// Whether this engine can serve `expert` right now (its adapter is resident /
     /// registered). The `answer` tool checks this so a routed-but-unservable expert
-    /// — e.g. a private expert minted after the engine snapshotted its population —
+    /// (e.g. a private expert minted after the engine snapshotted its population)
     /// escalates cleanly instead of surfacing a "no adapter registered" error.
     /// Defaults to `true` for engines that pin a single adapter or echo any input.
     fn can_serve(&self, _expert: &ExpertId) -> bool {

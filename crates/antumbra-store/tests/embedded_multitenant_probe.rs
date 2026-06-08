@@ -1,11 +1,11 @@
-//! How multi-tenant isolation works on an **embedded** SurrealDB engine — the
+//! How multi-tenant isolation works on an **embedded** SurrealDB engine: the
 //! edge/IoT case where there is no separate database server.
 //!
 //! Two facts, each a regression:
 //!   1. Embedded `surrealkv` is **single-writer**: a second connection to the
 //!      same on-disk datastore is refused. So a server must multiplex tenants
 //!      over ONE connection, not open one connection per identity.
-//!   2. Over that one connection, signing in per request isolates tenants —
+//!   2. Over that one connection, signing in per request isolates tenants:
 //!      the engine hides other tenants' rows even on an unfiltered query. So the
 //!      security guarantee holds on embedded, no network required.
 
@@ -35,7 +35,7 @@ async fn embedded_surrealkv_is_single_writer() {
 
     // The first connection owns the datastore.
     let _s1 = Store::connect(cfg(), 4).await.unwrap();
-    // A second connection to the same path is refused — this is why a server
+    // A second connection to the same path is refused; this is why a server
     // holds ONE connection and multiplexes tenants over it (see the next test),
     // rather than opening a connection per identity.
     let second = Store::connect(cfg(), 4).await;

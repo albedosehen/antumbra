@@ -1,4 +1,4 @@
-//! Modal overlays drawn on top of the console — the centred, cleared box the
+//! Modal overlays drawn on top of the console: the centred, cleared box the
 //! help screen and command palette render into. Hand-rolled on ratatui core
 //! (`Clear` + a centred `Rect`) to keep the dependency tree small.
 

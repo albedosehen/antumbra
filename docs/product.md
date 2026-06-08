@@ -2,12 +2,12 @@
 
 This document answers two questions: **who uses Antumbra and why**, and **what is
 still missing** for it to fully supersede a separate agent-memory engine (the
-control plane — dashboard, knowledge documents, onboarding — that a hosted product
+control plane: dashboard, knowledge documents, onboarding, which a hosted product
 needs but the engine itself does not).
 
 ## Positioning: the memory layer that *learns*
 
-The "memory for AI agents" category — Mem0, Letta (MemGPT), Zep, Cognee — are
+The "memory for AI agents" category (Mem0, Letta (MemGPT), Zep, Cognee) are
 **retrieval/context layers**: they store facts and inject them back into a frozen
 model's context window. They make a static model *remember*; they do not make it
 *better*. Every run re-pays the prompt/loop/lookup cost against the same frozen base.
@@ -16,9 +16,9 @@ Antumbra is a different layer. It **metabolizes verified outcomes into weights**
 recurring task you've completed and checked becomes a frozen LoRA expert in a local
 population, routed to automatically next time. The orchestration scaffold (loops,
 behavior graphs, prompts, memory lookups) shrinks into the model as competence
-accrues. This is the established anti-forgetting pattern — a population of frozen
+accrues. This is the established anti-forgetting pattern: a population of frozen
 LoRA experts with routing (Mixture-of-LoRA-Experts), served S-LoRA-style so hundreds
-of adapters run on one GPU — combined with trajectory distillation (Structured Agent
+of adapters run on one GPU, combined with trajectory distillation (Structured Agent
 Distillation, arXiv:2505.13820) to turn *behavior* into *weights*.
 
 **Where Antumbra is genuinely distinct:**
@@ -27,16 +27,16 @@ Distillation, arXiv:2505.13820) to turn *behavior* into *weights*.
   scaffold cost every run.
 - **The scaffolding shrinks.** Loops/graphs/prompts get absorbed; the opposite of a
   memory layer, where orchestration cost is permanent overhead.
-- **A governed population of experts**, not one adapter — frozen, so a learned skill
+- **A governed population of experts**, not one adapter, and frozen, so a learned skill
   is never silently overwritten.
 - **Memory + skill in one private engine**, with **engine-enforced** multi-tenant
   ACL the incumbents have no equivalent of.
-- **Privacy is structural, not a setting** — fully offline or hosted-but-private,
+- **Privacy is structural, not a setting**: fully offline or hosted-but-private,
   bring-your-own-embedder, data and learned skills never leave your boundary.
 
 **Honest caveats (when *not* to use it):** it wants a local GPU (real CapEx vs a
 cloud API call); there is an investment period where experts are immature; and the
-bet — small frozen experts matching a frontier model *within scope* — holds for
+bet (small frozen experts matching a frontier model *within scope*) holds for
 repetitive, bounded, verifiable work and **breaks on open-ended novelty**. Antumbra
 is a compounding specialist engine, not a general-purpose oracle.
 
@@ -50,7 +50,7 @@ is a compounding specialist engine, not a general-purpose oracle.
    multi-tenancy, device sync, live propagation. Hosted by us; each consumer's data
    and experts are isolated in the engine.
 3. **Bespoke contract.** Businesses that want this but want it *implemented and
-   operated for them* — the engine plus integration into their repos, verifiers,
+   operated for them*: the engine plus integration into their repos, verifiers,
    and compliance boundary.
 
 The engine is identical across all three; only transport, identity, and who runs
@@ -62,26 +62,26 @@ A predecessor agent engine (Kushtakas) exposed memory, code intelligence, planni
 behavior graphs (a composable "behavior mixer"), an evaluation harness, autonomous
 loops, per-workspace embedders, and a web dashboard (2D/3D memory views, stats,
 knowledge documents, remote agent control, onboarding). Antumbra does **not** clone
-all of it — its thesis is to *absorb* the orchestration and *build* the control plane.
+all of it; its thesis is to *absorb* the orchestration and *build* the control plane.
 
-### Absorbed — superseded by metabolizing (not re-implemented as runtime scaffold)
+### Absorbed: superseded by metabolizing (not re-implemented as runtime scaffold)
 
-- **Behavior graphs / the behavior mixer → a population of metabolized experts.**
+- **Behavior graphs / the behavior mixer become a population of metabolized experts.**
   Where the predecessor *executes* a composed graph every time, Antumbra metabolizes
   a successful, recurrent graph (including its step decomposition) into weights via
   `antumbra metabolize`, and composes experts at serve time (ADR-0009 is the learned
   cross-attention end state; a linear adapter blend is the precursor today). The
   composition surface a user wants becomes an **expert mixer**, not a graph mixer.
-- **Autonomous loops / planning → the generational training loop + the `answer`
+- **Autonomous loops / planning become the generational training loop + the `answer`
   tool.** The agent's learned competence replaces hand-built iteration where it can;
   out-of-scope tasks escalate.
-- **Multi-tenancy → engine-enforced ACL** (ADR-0013) — stronger than app-side
+- **Multi-tenancy becomes engine-enforced ACL** (ADR-0013), stronger than app-side
   scoping, validated over the wire.
-- **Evaluation harness → the experiment ledger + `evaluation_run`** (ADR-0007).
+- **Evaluation harness becomes the experiment ledger + `evaluation_run`** (ADR-0007).
 
-### To build — the control plane and product surface (the real gap)
+### To build: the control plane and product surface (the real gap)
 
-These are about the **user's ability to see, steer, and onboard** — they are not
+These are about the **user's ability to see, steer, and onboard**; they are not
 orchestration scaffold, so metabolization does not provide them. They are what a
 hosted product needs:
 
@@ -103,7 +103,7 @@ The engine never ships an opinionated embedder. Recall quality and the privacy o
 the embedding step both belong to the user: the `Embedder` port already abstracts it
 (a local candle BERT today, a fake for tests). The parity step is to make it a
 **per-workspace runtime config** (model id / local endpoint) instead of a build-time
-feature, so each tenant controls — and keeps local — the model that touches their
+feature, so each tenant controls (and keeps local) the model that touches their
 content. Dimensions stay consistent with the HNSW index the store provisions.
 
 ## Phased plan to close the gap
@@ -111,18 +111,18 @@ content. Dimensions stay consistent with the HNSW index the store provisions.
 Tracked as roadmap items (see [`roadmap.md`](roadmap.md)); decision recorded in
 [ADR-0016](adr/0016-control-plane-and-product-surface.md).
 
-1. **Hook auth + REST shim + per-workspace embedder config** — a hook token, a REST
+1. **Hook auth + REST shim + per-workspace embedder config**: a hook token, a REST
    `/mcp/call` convenience endpoint for shell hooks, and runtime BYO-embedder;
    unblocks real onboarding.
-2. **Read-only web dashboard** over the MCP surface — population, experts, fitness,
+2. **Read-only web dashboard** over the MCP surface: population, experts, fitness,
    memory recall, the compartment/edge graph (2D first, 3D after). Pure observability.
-3. **Knowledge documents** — a `document` type and ingest pipeline distinct from
+3. **Knowledge documents**: a `document` type and ingest pipeline distinct from
    episodic memory, surfaced in recall and the dashboard.
-4. **Interactive control** — the expert mixer (compose + save serve profiles) and
+4. **Interactive control**: the expert mixer (compose + save serve profiles) and
    driving a connected agent's `answer`/`route` from the dashboard.
-5. **Hosted onboarding** — signup, tenant provisioning, the setup flow that wraps
+5. **Hosted onboarding**: signup, tenant provisioning, the setup flow that wraps
    the `scripts/hooks/` templates; billing for the SaaS tier.
 
 The engine is built; this is the surface that makes it *usable by a non-operator and
-sellable as a product* — without competing with the predecessor, which winds down as
+sellable as a product*, without competing with the predecessor, which winds down as
 Antumbra proves superior.

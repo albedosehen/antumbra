@@ -1,6 +1,6 @@
 //! Metabolize the harness (ADR-0001).
 //!
-//! An agent harness — loops, behavior graphs, task execution, code-intel — is
+//! An agent harness (loops, behavior graphs, task execution, code-intel) is
 //! orchestration layered *on top of* a frozen brain. Antumbra's thesis is to
 //! absorb that orchestration into weights, not to clone it: the population
 //! should learn to do in one shot what the harness did in many steps, so the
@@ -9,7 +9,7 @@
 //! This module adapts a harness's **successful orchestration traces** (a loop
 //! run, a behavior-graph evaluation, a task execution) into the same
 //! [`CorpusTask`]s the capture loop ([`crate::teach::capture_corrections`])
-//! internalizes — the goal becomes the prompt, the collapsed outcome becomes the
+//! internalizes: the goal becomes the prompt, the collapsed outcome becomes the
 //! completion. Only **successful, sufficiently-recurrent** traces metabolize: a
 //! one-off or failed orchestration is not a competence worth freezing into the
 //! weights (the same verifiability × recurrence gate the consolidation path
@@ -17,7 +17,7 @@
 //! hand so the serde derive stays out of the default (non-`models`) build.
 //!
 //! **Structure-aware metabolization.** A behavior graph (or a loop run) is not
-//! just its collapsed answer — it is a *decomposition* into sub-goals. When a
+//! just its collapsed answer; it is a *decomposition* into sub-goals. When a
 //! trace carries its steps, each step is metabolized as its own capture task
 //! alongside the whole, so the expert learns the intermediate sub-skills, not
 //! only the final output. This turns the trace's *outcome* supervision into
@@ -52,7 +52,7 @@ fn str_array(v: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// One step of a structured orchestration — a behavior-graph node, a loop
+/// One step of a structured orchestration: a behavior-graph node, a loop
 /// iteration, or a sub-task: its own goal and the outcome it produced.
 /// Metabolizing these alongside the collapsed whole turns the trace's *outcome*
 /// supervision into *process* supervision, so the expert learns the decomposition.
@@ -80,7 +80,7 @@ impl HarnessStep {
     }
 
     /// A step is metabolizable only when it carries both a sub-goal and an outcome
-    /// (an empty node — a bare branch/marker — is scaffolding, not a sub-skill).
+    /// (an empty node, a bare branch/marker, is scaffolding, not a sub-skill).
     fn is_metabolizable(&self) -> bool {
         !self.goal.is_empty() && !self.solution.is_empty()
     }
@@ -93,12 +93,12 @@ impl HarnessStep {
 pub struct HarnessTrace {
     /// Stable id; synthesized from the kind + index when absent.
     pub id: Option<String>,
-    /// The goal the harness pursued — becomes the task prompt.
+    /// The goal the harness pursued; becomes the task prompt.
     pub goal: String,
-    /// The collapsed outcome the orchestration produced (the final answer/code)
-    /// — what the expert should learn to emit in one shot.
+    /// The collapsed outcome the orchestration produced (the final answer/code):
+    /// what the expert should learn to emit in one shot.
     pub solution: String,
-    /// What kind of orchestration produced it (`loop` / `graph` / `task`) — the
+    /// What kind of orchestration produced it (`loop` / `graph` / `task`): the
     /// skill group, so metabolized traces cluster per kind. Defaults to `task`.
     pub kind: Option<String>,
     /// Substring the emitted completion must contain to count as internalized.
@@ -109,7 +109,7 @@ pub struct HarnessTrace {
     /// Whether the harness verified this trace as successful. Only successes
     /// metabolize. Absent is treated as `true` (an emitted trace is a success).
     pub success: Option<bool>,
-    /// How many times this orchestration pattern recurred — the recurrence
+    /// How many times this orchestration pattern recurred: the recurrence
     /// signal the gate scores. Absent is treated as 1 (observed once).
     pub recurrence: Option<u32>,
     /// The orchestration's decomposition (graph nodes / loop iterations / sub-
@@ -182,7 +182,7 @@ pub struct MetabolizePolicy {
     /// (raise above 1 to require a *repeated* orchestration, not a one-off).
     pub min_recurrence: u32,
     /// Also metabolize each trace's steps (its decomposition) as their own capture
-    /// tasks — process supervision, not just the collapsed outcome. On by default;
+    /// tasks (process supervision, not just the collapsed outcome). On by default;
     /// disable to learn only the one-shot collapse.
     pub include_steps: bool,
 }
@@ -258,7 +258,7 @@ fn step_task(step: &HarnessStep, kind: &str, base_id: &str, n: usize) -> CorpusT
 
 /// Metabolize the traces that clear the gate into capture tasks (per-kind
 /// skilled, carrying trusted completions). Failed and one-off traces are
-/// dropped — nothing unverified or non-recurrent is fine-tuned into the weights.
+/// dropped; nothing unverified or non-recurrent is fine-tuned into the weights.
 /// For a trace that carries its decomposition, the whole is metabolized *plus*
 /// each step (process supervision), unless [`MetabolizePolicy::include_steps`] is
 /// off.
@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(out[0].id, "g1");
     }
 
-    // A failed trace contributes nothing — neither its whole nor its steps are
+    // A failed trace contributes nothing; neither its whole nor its steps are
     // frozen (you don't internalize the decomposition of a broken orchestration).
     #[test]
     fn a_failed_trace_metabolizes_neither_whole_nor_steps() {

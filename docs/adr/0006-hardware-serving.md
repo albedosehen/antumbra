@@ -13,8 +13,8 @@
 
 > **Resident multi-adapter engine (2026-06-04).** `antumbra-serve::MultiAdapterServe` now implements the S-LoRA
 > hot-swap directly on the candle path: it loads the shared base **once** (neutral zero LoRA factors) and, per
-> request, `load_adapter`s the routed expert's factors into the resident model — an O(adapter) swap, not an
-> O(base) reload — skipping the swap when consecutive routes name the same expert. A registered
+> request, `load_adapter`s the routed expert's factors into the resident model (an O(adapter) swap, not an
+> O(base) reload), skipping the swap when consecutive routes name the same expert. A registered
 > `ExpertId -> adapter-path` map resolves the gate's selections; resolution failures (empty request, unregistered
 > expert) error *before* any device load, so that logic is unit-tested on CPU, and the candle generation path is
 > type-checked under `--features models`. v0 serves the single top-ranked adapter; a true latent blend of >1
@@ -22,14 +22,14 @@
 >
 > Its long-running caller landed the same day: `antumbra serve` registers every expert's adapter into one
 > resident `MultiAdapterServe`, then routes a single `--task` or a stream of stdin prompts through the learned
-> router and answers from the resident engine — a stream pays the base load only on the first prompt and reuses
+> router and answers from the resident engine; a stream pays the base load only on the first prompt and reuses
 > the loaded factors when consecutive prompts route to the same expert.
 >
 > **GPU-validated (2026-06-05).** On the RTX 3090 Ti (CUDA 13.3): `train` learned a LoRA on `smoke.json`
-> (graduated, pass-rate 1.0), then both serving paths answered through it — `ask` (`CandleServe`: routed to the
+> (graduated, pass-rate 1.0), then both serving paths answered through it: `ask` (`CandleServe`: routed to the
 > expert, cold-loaded `adapters/run_train_g0.safetensors`, generated) and `serve` (`MultiAdapterServe`: registered
 > the adapter, loaded the base once, hot-swapped, and served). So the candle forward/backward/save and the
-> S-LoRA hot-swap are proven on real hardware, not just type-checked. (Generation quality is untuned — the smoke
+> S-LoRA hot-swap are proven on real hardware, not just type-checked. (Generation quality is untuned: the smoke
 > corpus uses a trivial always-pass verifier; this validated the *pipeline*, not the model's answers.)
 
 ## Context
@@ -43,7 +43,7 @@ shared-base-adapter design (ADR-0001) that fits one card comfortably.
 ### v0 - one base, many adapters, all-Rust
 
 1. **Serve one shared base + a library of LoRA adapters** via `llama-cpp-2` (GGUF + LoRA hot-swap) or
-   `mistral.rs` (candle, ISQ). This is **S-LoRA-style multi-adapter serving**: a 7–8 B base at Q4 ≈ 5 GB, plus
+   `mistral.rs` (candle, ISQ). This is **S-LoRA-style multi-adapter serving**: a 7 to 8 B base at Q4 ≈ 5 GB, plus
    many adapters of a few MB each - dozens fit on 24 GB. vLLM is dropped (Python, unjustified for one GPU).
 2. **Train on the same GPU** via the DIY `candle` path (adapters + gate, ADR-0002/0005).
 3. **Base model is code-capable** (Qwen-Coder-class or code-tuned OLMo 3) for the coding-over-repos first domain.
@@ -82,7 +82,7 @@ flowchart TB
 The live question - *"use many tiny native-ternary models (Bonsai / BitNet) as the population instead of
 shared-base adapters?"* - is **rejected for v0** and **retained as a candidate density mechanism for the
 heterogeneous north star (ADR-0009).** Ternary optimizes static weight memory, which is **not v0's binding
-constraint** (a 7–8 B code base at Q4 ≈ 5 GB leaves the 24 GB card ample room). It regresses the axes v0 *is*
+constraint** (a 7 to 8 B code base at Q4 ≈ 5 GB leaves the 24 GB card ample room). It regresses the axes v0 *is*
 built on:
 
 | Axis | Shared-base adapters (v0) | Many native-ternary models |

@@ -23,10 +23,10 @@ Schema is authored as `surql-rs` migrations with drift detection (the dpbg patte
 (all-MiniLM-L6-v2 convention; the embedder choice moved to MiniLM, see ADR-0005).
 
 > **Rule:** schema, reads, writes, and KNN go through `surql-rs` abstractions (the schema builders, the
-> `Query` builder, the `crud` helpers) — no hand-authored SurrealQL for data access. The **one** exception is
+> `Query` builder, the `crud` helpers); no hand-authored SurrealQL for data access. The **one** exception is
 > the engine-enforced **table PERMISSIONS predicates** (the ACL subqueries in `schema.rs`, ADR-0013/0014):
 > SurrealQL expression strings rendered onto the builder-generated `DEFINE TABLE`, because the row-level ACL
-> has no builder representation. Those predicates are the deliberate, reviewed exception — not a data path.
+> has no builder representation. Those predicates are the deliberate, reviewed exception, not a data path.
 
 ### Implementation note (v0, 2026-06-02)
 

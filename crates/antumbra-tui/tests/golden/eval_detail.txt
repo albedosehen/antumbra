@@ -7,7 +7,7 @@
 │                                                                        │
 │regression  (vs previous run for this subject)                          │
 │  this      ffffffff                                                    │
-│  previous  a1b2c3d4   → DRIFTED — no-forgetting tripwire               │
+│  previous  a1b2c3d4   → DRIFTED: no-forgetting tripwire                │
 │                                                                        │
 │history  ·  2 runs                                                      │
 │ ▸ FAIL    ffffffff      task:arith                                     │

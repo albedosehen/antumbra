@@ -1,4 +1,4 @@
-//! # antumbra-train — ADR-0002 / ADR-0010
+//! # antumbra-train (ADR-0002 / ADR-0010)
 //!
 //! The DIY `candle` path that trains shadow adapters from **verified outcomes**
 //! via RAFT-style reward-ranked LoRA fine-tuning.
@@ -97,8 +97,8 @@ impl GrpoLm for PendingModel {
 }
 
 /// Loads the candle Qwen2.5-Coder base + a fresh LoRA adapter (MT-1, GPU-
-/// validated). The real body — candle-transformers + hf-hub + tokenizers + LoRA
-/// injection — is behind the `models` feature; without it this is a CPU stub.
+/// validated). The real body (candle-transformers + hf-hub + tokenizers + LoRA
+/// injection) is behind the `models` feature; without it this is a CPU stub.
 pub struct CandleModelLoader {
     pub config: RaftConfig,
 }
@@ -153,7 +153,7 @@ impl GrpoModelLoader for CandleModelLoader {
 
     async fn load(&self, _base: &str, _parent: Option<&str>) -> Result<PendingModel> {
         Err(AntumbraError::Unimplemented(
-            "candle GRPO load — build antumbra-train with --features models",
+            "candle GRPO load requires antumbra-train built with --features models",
         ))
     }
 }
@@ -165,7 +165,7 @@ impl ModelLoader for CandleModelLoader {
 
     async fn load(&self, _base_model: &str, _parent_adapter: Option<&str>) -> Result<PendingModel> {
         Err(AntumbraError::Unimplemented(
-            "candle Qwen2.5-Coder load — build antumbra-train with --features models",
+            "candle Qwen2.5-Coder load requires antumbra-train built with --features models",
         ))
     }
 }

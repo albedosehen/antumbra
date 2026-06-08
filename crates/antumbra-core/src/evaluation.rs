@@ -1,4 +1,4 @@
-//! Evaluation runs — one row per measured run (the reuse of kushtaka's
+//! Evaluation runs: one row per measured run (the reuse of kushtaka's
 //! strongest idea). ADR-0007. The `regression_fingerprint` is what makes the
 //! ADR-0001/0002 no-forgetting invariant *checkable*: a frozen expert's
 //! fingerprint on its corpus must not change when the population grows.
@@ -57,7 +57,7 @@ pub struct EvaluationRun {
     pub status: EvalStatus,
     #[serde(default)]
     pub metrics: Option<serde_json::Value>,
-    /// `sha256(canonical output)` — the no-forgetting tripwire.
+    /// `sha256(canonical output)`, the no-forgetting tripwire.
     #[serde(default)]
     pub regression_fingerprint: Option<String>,
     pub created_at: DateTime<Utc>,

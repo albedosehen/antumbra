@@ -1,11 +1,11 @@
-//! Compartments — named "latent-spaces" of memory within a tenant.
+//! Compartments: named "latent-spaces" of memory within a tenant.
 //!
 //! A compartment is the unit of organization, sharing, deletion, and
 //! reference-scope. It is owned by a [`UserId`] and lives inside a [`TenantId`]
 //! (the hard isolation boundary). Compartments come into being two ways: a user
 //! creates one explicitly, or the antumbra *proposes* one by clustering the
 //! penumbra into a competence-coherent region (the user then keeps / names /
-//! shares it). A mature compartment is the natural training unit — it
+//! shares it). A mature compartment is the natural training unit; it
 //! consolidates into a private expert.
 //!
 //! Sharing is a capability **grant** between users *within the same tenant*
@@ -47,7 +47,7 @@ impl Capability {
     }
 }
 
-/// How a compartment came to exist — for surfacing the antumbra's proposals
+/// How a compartment came to exist, for surfacing the antumbra's proposals
 /// distinctly from user-created spaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -137,7 +137,7 @@ pub struct Grant {
     pub granted_by: UserId,
     pub created_at: DateTime<Utc>,
     /// Bumped whenever the grant changes (notably on revoke), so a revocation is
-    /// the grant's newest version and wins under last-write-wins sync — a stale
+    /// the grant's newest version and wins under last-write-wins sync; a stale
     /// live copy on another device cannot out-rank it.
     pub updated_at: DateTime<Utc>,
     /// When set, the grant is **revoked** (a tombstone): the engine ACL excludes

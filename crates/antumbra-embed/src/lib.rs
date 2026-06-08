@@ -12,10 +12,10 @@
 //!
 //! Security: the endpoint URL and bearer key are **operator-configured**
 //! (`--embed-url` / `ANTUMBRA_EMBED_URL` / `ANTUMBRA_EMBED_KEY`) and are never
-//! derived from tenant or stored data, so this is not an SSRF sink — if a future
+//! derived from tenant or stored data, so this is not an SSRF sink. If a future
 //! feature ever lets a request choose the URL, validate it against
 //! localhost/private ranges first. The key rides the `Authorization` header
-//! (never the URL, never logged — transport errors carry only the URL), and
+//! (never the URL, never logged; transport errors carry only the URL), and
 //! [`HttpEmbedder`] deliberately has no `Debug` impl, so the key cannot leak
 //! through `{:?}`.
 

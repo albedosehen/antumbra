@@ -199,7 +199,7 @@ record-access auth, and the engine-enforced ACL); `antumbra-train` carries the c
 ### v0 implementation status (2026-06-05)
 
 All **thirteen crates** exist and compile; the workspace is green (`cargo test`, clippy clean) on your **surql-rs**
-(`oneiriq-surql`, the local `release/0.28.0` checkout, builder-only — no hand-written SurrealQL) on the SurrealDB
+(`oneiriq-surql`, the local `release/0.28.0` checkout, builder-only, with no hand-written SurrealQL) on the SurrealDB
 3.x driver. Since the early snapshots: the trainer is GPU-validated (MT-3, pass-rate to 1.0), the real candle
 BERT embedder + relative-coverage gate are wired, the Penumbra memory store landed with engine-enforced
 tenant/compartment isolation (ADR-0012/0013/0014), and the agent-facing MCP runtime surface (ADR-0015) is up.

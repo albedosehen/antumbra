@@ -152,7 +152,7 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
             }
 
             // Cluster the gap tasks by *skill* and grow a dedicated
-            // specialist for each — a narrow frozen expert per skill, not
+            // specialist for each: a narrow frozen expert per skill, not
             // one generalist over all gaps (the umbra ideal, ADR-0001).
             let mut groups: Vec<(String, Vec<CorpusTask>)> = Vec::new();
             for t in &gaps {

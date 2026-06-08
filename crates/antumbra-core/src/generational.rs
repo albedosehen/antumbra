@@ -133,7 +133,7 @@ impl LoopCommand {
 }
 
 /// The persisted control row for a run (one per run id). Writing it is how an
-/// operator cooperatively stops a running loop without killing the process — the
+/// operator cooperatively stops a running loop without killing the process; the
 /// runner consumes it at the next generation boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoopControl {

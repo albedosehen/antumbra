@@ -1,4 +1,4 @@
-//! Schema as code (ADR-0007), defined entirely with surql-rs schema builders —
+//! Schema as code (ADR-0007), defined entirely with surql-rs schema builders;
 //! no hand-authored SurrealQL. v0 keeps tables `SCHEMALESS` and leans on
 //! explicit unique + HNSW indexes; the DDL is *generated* by surql-rs.
 //!
@@ -21,8 +21,8 @@ use crate::error::map;
 pub const EMBED_DIM: usize = 384;
 
 /// Permissions for the shared-population tables (the umbra: experts, the learned
-/// router, boundaries). Any authenticated tenant session may READ them — the
-/// brain is shared across tenants — but only the owner/root may WRITE (a record
+/// router, boundaries). Any authenticated tenant session may READ them (the
+/// brain is shared across tenants), but only the owner/root may WRITE (a record
 /// session is denied; the rootful owner connection bypasses the clause).
 /// `WHERE true` / `WHERE false` are the always / never predicates. Private
 /// per-tenant data (`memory`, `memory_edge`) uses tenant-scoped permissions
@@ -86,7 +86,7 @@ const MEMORY_SELECT_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NO
      OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE))";
 
 /// The write rule for `memory` (create/update). A session may write a memory only
-/// into a compartment it may contribute to — the shared pool (un-compartmentalized),
+/// into a compartment it may contribute to: the shared pool (un-compartmentalized),
 /// a compartment it owns, or one granted to it with the **`link`** capability (not
 /// mere `reference`, which is read-only). Without this, the create rule would only
 /// check the tenant, letting any tenant member inject a memory into another user's
@@ -97,7 +97,7 @@ const MEMORY_WRITE_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NON
      OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
 
 /// The link-capability gate for `memory_edge` create/update: you may create an
-/// edge only when its *target* memory is in a compartment you may LINK into —
+/// edge only when its *target* memory is in a compartment you may LINK into:
 /// the shared pool (un-compartmentalized), a compartment you own, or one granted
 /// to you with the `link` capability (not mere `reference`). Read visibility of
 /// the target is already enforced when an edge is resolved back to a memory.
@@ -165,7 +165,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // Out-of-band loop control (operator graceful-stop signal). ADR-0008.
         table_schema("loop_control").with_mode(TableMode::Schemaless),
         // Hosted-onboarding control plane (ADR-0016). No PERMISSIONS clause, so
-        // both default to deny for record/tenant sessions — only the control
+        // both default to deny for record/tenant sessions; only the control
         // plane's owner connection reads/writes them (an account row maps a login
         // to a tenant and must never be tenant-readable).
         table_schema("invite_code").with_mode(TableMode::Schemaless),
@@ -189,7 +189,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // isolated the way the data-plane design intends: a `tenant_id` on every
         // row and an engine-enforced row-level `PERMISSIONS` clause comparing it
         // to `$auth.tenant`, so a handler that forgets its filter still cannot
-        // leak — the engine refuses the read. The repo also carries an explicit
+        // leak; the engine refuses the read. The repo also carries an explicit
         // `WHERE tenant_id = ...` as the documented second layer. The clause
         // becomes load-bearing once a per-tenant `ScopeCredentials` session binds
         // `$auth.tenant`; a rootful schema/migration session bypasses it.

@@ -1,7 +1,7 @@
 //! Concrete verifiers (ADR-0003): the environment is the reward.
 //!
 //! [`CommandVerifier`] runs an external command and treats exit-code 0 as a
-//! pass — a test suite that goes green, a build that succeeds, an exec check
+//! pass: a test suite that goes green, a build that succeeds, an exec check
 //! that returns clean. The command/args/cwd come from the request's `verify`
 //! artifact (supplied per corpus task); the candidate completion is exposed to
 //! the command via the `ANTUMBRA_COMPLETION` environment variable. This is the
@@ -25,7 +25,7 @@ const VERIFY_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct CommandVerifier;
 
 /// Resolve a verifier `program` to an executable. `python`/`python3` honor the
-/// `ANTUMBRA_PYTHON` env var when it is set and non-empty — so a verifier that
+/// `ANTUMBRA_PYTHON` env var when it is set and non-empty, so a verifier that
 /// shells out to `python` works even when a shadowing interpreter is first on
 /// `PATH` (e.g. the Windows Store `python.exe` alias, which is not a real
 /// interpreter). Everything else is passed through unchanged.

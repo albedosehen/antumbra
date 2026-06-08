@@ -59,7 +59,7 @@ Qwen2). `mistral.rs` (X-LoRA inference) is the reference for ADR-0005/serve.
 bitsandbytes **NF4**, and `QMatMul` is **inference-only - no backward**. So **f16 base + LoRA comes first** (full
 candle autograd, works today); the quantized base is a later, isolable lift - exactly the de-risking order
 ADR-0002 already prescribed ("plain LoRA over a bf16 base first; add NF4 once it works"). *(Correction, studied
-in [ADR-0011](0011-v1-efficiency.md): 4-bit needs no "quantized backward" at all — QLoRA never backprops into
+in [ADR-0011](0011-v1-efficiency.md): 4-bit needs no "quantized backward" at all, since QLoRA never backprops into
 the frozen base, so `QTensor::dequantize` in the forward + the normal LoRA backward suffices.)*
 
 ## Decision

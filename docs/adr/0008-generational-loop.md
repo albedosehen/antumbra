@@ -4,7 +4,7 @@
 
 ## Context
 
-ADRs 0001–0005 describe *parts*; something has to drive them as one continuous process: grow shadows, let them
+ADRs 0001 through 0005 describe *parts*; something has to drive them as one continuous process: grow shadows, let them
 explore, score them, graduate the winners, prune the losers, consolidate failures, repeat - unattended, across
 reboots. kushtaka's loop is *task-centric* (one task at a time); Antumbra's must be **population-aware** (it
 manages a growing population across generations) and **durable** (it survives crashes by treating persisted

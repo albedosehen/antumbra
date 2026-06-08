@@ -85,7 +85,7 @@ pub async fn upsert(store: &Store, boundary: &FailureBoundary) -> Result<()> {
     Ok(())
 }
 
-/// Remove a boundary — e.g. retired once a captured expert resolves its region.
+/// Remove a boundary, e.g. retired once a captured expert resolves its region.
 pub async fn delete(store: &Store, id: &BoundaryId) -> Result<()> {
     let rid = RecordID::<()>::new(TABLE, id.as_str()).map_err(map)?;
     delete_record(store.client(), &rid).await.map_err(map)?;

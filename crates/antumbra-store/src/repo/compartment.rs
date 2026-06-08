@@ -3,7 +3,7 @@
 //! Tenant-isolated like the rest of the Penumbra. The fine-grained read ACL on
 //! *memory* (own + granted compartments) is enforced by the engine via the
 //! `memory` table's permission rule, which reads these two tables; here we just
-//! provide tenant-scoped CRUD. No raw SurrealQL — surql-rs builders only.
+//! provide tenant-scoped CRUD. No raw SurrealQL; surql-rs builders only.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -260,7 +260,7 @@ pub async fn grant(store: &Store, grant: &Grant) -> Result<()> {
 /// Revoke a user's grant on a compartment as a **tombstone** (not a hard delete),
 /// so the revocation propagates across the fleet instead of leaving a stale grant
 /// that keeps the grantee in (the security gap). Access ends at once where the
-/// engine ACL runs — its grant subquery already excludes `deleted_at` rows. A
+/// engine ACL runs; its grant subquery already excludes `deleted_at` rows. A
 /// no-op if there is no live grant. `now` stamps the revocation.
 pub async fn revoke(
     store: &Store,

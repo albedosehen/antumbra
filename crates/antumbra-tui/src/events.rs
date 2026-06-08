@@ -3,7 +3,7 @@
 //! shows. Because the loop reloads every couple of seconds, the stream fills as
 //! the population is trained from another process.
 
-/// What kind of change an [`Event`] records — drives its glyph and colour.
+/// What kind of change an [`Event`] records; drives its glyph and colour.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EventKind {
     /// A new expert or shadow appeared.
@@ -22,7 +22,7 @@ pub enum EventKind {
 
 /// A single change on the store's timeline.
 pub struct Event {
-    /// The animation clock (ms) when it was noticed — for relative timestamps.
+    /// The animation clock (ms) when it was noticed, for relative timestamps.
     pub at_ms: f64,
     pub kind: EventKind,
     pub text: String,

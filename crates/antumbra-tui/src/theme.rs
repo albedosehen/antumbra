@@ -1,5 +1,5 @@
-//! The console's switchable semantic palette. Every panel — chrome, status, and
-//! the animated population graph — tints from a [`Theme`], so cycling a theme
+//! The console's switchable semantic palette. Every panel (chrome, status, and
+//! the animated population graph) tints from a [`Theme`], so cycling a theme
 //! recolours the whole console while the umbra/penumbra/antumbra identity holds.
 //! Hand-rolled (no theme crate) to keep the bespoke look and a tiny dep tree.
 
@@ -66,7 +66,7 @@ pub const SHADOW: Theme = Theme {
     core: (120.0, 220.0, 255.0),
 };
 
-/// Warm: ambers and oranges — the population glowing like embers.
+/// Warm: ambers and oranges, the population glowing like embers.
 pub const EMBER: Theme = Theme {
     name: "ember",
     text: Color::Rgb(245, 225, 200),

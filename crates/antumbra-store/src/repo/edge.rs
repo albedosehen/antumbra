@@ -1,4 +1,4 @@
-//! Penumbra graph repository — tenant-isolated typed edges between memories.
+//! Penumbra graph repository: tenant-isolated typed edges between memories.
 //!
 //! Same isolation contract as `memory`: engine-enforced `PERMISSIONS` plus the
 //! explicit `WHERE tenant_id = ...` second layer. Edges are keyed by
@@ -77,7 +77,7 @@ pub async fn relate(store: &Store, edge: &MemoryEdge) -> Result<()> {
     Ok(())
 }
 
-/// Every edge across all tenants — the owner/console view of the whole Penumbra
+/// Every edge across all tenants: the owner/console view of the whole Penumbra
 /// graph (parallels [`crate::repo::memory::all_unscoped`]). For the operator
 /// console, which reads the store as owner; not for tenant-scoped paths.
 pub async fn all_unscoped(store: &Store) -> Result<Vec<MemoryEdge>> {

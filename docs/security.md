@@ -20,7 +20,7 @@ Isolation is **engine-enforced**, defence-in-depth:
 
 - Every tenant-scoped table carries row-level `PERMISSIONS WHERE tenant_id =
   $auth.tenant` (`antumbra-store/src/schema.rs`), bound at signin via SurrealDB
-  record-access. This holds even for an app query with no `WHERE` — verified by
+  record-access. This holds even for an app query with no `WHERE`, verified by
   `crates/antumbra-store/tests/penumbra_auth.rs` (a record session sees only its
   tenant).
 - Repos add a second app-layer `WHERE tenant_id = …` as backup.
@@ -41,27 +41,27 @@ Isolation is **engine-enforced**, defence-in-depth:
   (a non-expiring token is a standing key). HS256 (shared secret, self-hosted)
   or RS256 (against an auth service). Audience is required so a token minted for
   another verifier is rejected.
-- The verified token **is** the identity — there is no token→identity table, so a
+- The verified token **is** the identity; there is no token→identity table, so a
   leaked token grants exactly its claimed `(tenant, user)` scope and nothing
   more.
 - Each request signs the shared connection in as its identity, serialised by an
-  auth lock — no session reuse or confused-deputy across tenants.
+  auth lock: no session reuse or confused-deputy across tenants.
 
 ## Trust boundaries / operator-supplied inputs
 
 - **Verifier command execution** (`antumbra-critic` `CommandVerifier`): runs the
   `{program, args, cwd}` from a corpus task's `verify` spec. This spec comes
-  **only** from an operator-supplied `--corpus` JSON file — it is **not stored in
+  **only** from an operator-supplied `--corpus` JSON file. It is **not stored in
   the database, not writable by any tenant or MCP request**, and the
   trace-ingestion path (`antumbra-train` `harness.rs`) uses in-process marker
   checks (`contains_all`), never a command. So a corpus file is **executable
-  config**, like a Makefile or CI step — treat it as trusted. It is `Command::new`
+  config**, like a Makefile or CI step, so treat it as trusted. It is `Command::new`
   + explicit args (no shell), so there is no shell-string injection. If you ever
   run corpora from a shared/community source, sandbox the verifier and/or
   allowlist the program first.
 - **Embeddings endpoint** (`antumbra-embed`): the URL and bearer key are
   operator-configured (`--embed-url` / `ANTUMBRA_EMBED_URL` / `ANTUMBRA_EMBED_KEY`),
-  never derived from tenant or stored data — not an SSRF sink. If a future
+  never derived from tenant or stored data, so not an SSRF sink. If a future
   feature lets a request choose the URL, validate it against localhost/private
   ranges first.
 - **Artifact paths**: the loop's regression fingerprint reads `adapter_uri` from
@@ -82,7 +82,7 @@ Isolation is **engine-enforced**, defence-in-depth:
 
 ## SurrealQL injection
 
-None. Every query goes through the surql-rs builders / `crud` helpers — there is
+None. Every query goes through the surql-rs builders / `crud` helpers; there is
 **no hand-authored, string-interpolated SurrealQL** anywhere in antumbra's code
 (the only exception is the schema `PERMISSIONS` predicates, which are static and
 contain no user input).

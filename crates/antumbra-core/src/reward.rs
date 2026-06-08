@@ -2,7 +2,7 @@
 //!
 //! The discipline of ADR-0003 is encoded in the type: every signal is tagged
 //! with its [`RewardSource`], verifiers are primary and trusted, and the critic
-//! can only *densify* between verifier checkpoints — it can never override one.
+//! can only *densify* between verifier checkpoints; it can never override one.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

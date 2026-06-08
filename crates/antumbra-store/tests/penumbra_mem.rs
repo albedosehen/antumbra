@@ -1,6 +1,6 @@
 //! Penumbra memory tenant-isolation regression (mirrors the data-plane POC's
 //! `test_regression_tenant_isolation`): no workspace may recall, list, read by
-//! id, or delete another workspace's traces — even when the other tenant's
+//! id, or delete another workspace's traces, even when the other tenant's
 //! trace is the nearest vector match.
 
 use chrono::Utc;
@@ -47,7 +47,7 @@ async fn list_and_recall_are_tenant_scoped() {
     let beta = TenantId::new("ws:beta");
 
     // Alpha owns one trace; beta owns a trace whose embedding is the CLOSEST to
-    // the query — if isolation leaked, alpha's recall would surface beta's.
+    // the query; if isolation leaked, alpha's recall would surface beta's.
     memory::upsert(
         &store,
         &trace(
@@ -78,7 +78,7 @@ async fn list_and_recall_are_tenant_scoped() {
     assert_eq!(memory::list(&store, &beta).await.unwrap().len(), 1);
 
     // recall for alpha, with a query nearest to beta's trace, must return ONLY
-    // alpha's trace — beta's closer vector is never a candidate.
+    // alpha's trace; beta's closer vector is never a candidate.
     let hits = memory::recall(&store, &alpha, &[0.95, 0.05, 0.0, 0.0], 5, None)
         .await
         .unwrap();

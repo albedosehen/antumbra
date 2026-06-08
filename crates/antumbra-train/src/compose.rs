@@ -6,7 +6,7 @@
 //! sum of their deltas is **exact** as a rank-concatenated adapter: stack the
 //! `sqrt(w_i)`-scaled `A`/`B` factors so block `i` contributes `w_i * delta_i`,
 //! and the model's existing single-adapter forward serves the blend at the
-//! higher rank. No weight-space interference, no model surgery — linear
+//! higher rank. No weight-space interference, no model surgery: linear
 //! composition of independently-grown, verified experts.
 
 use std::collections::HashMap;

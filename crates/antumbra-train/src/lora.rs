@@ -3,21 +3,21 @@
 //! `y = x · Wᵀ + scale · (x · Aᵀ) · Bᵀ`, where `W` is the frozen base (no
 //! gradient) and `A`, `B` are the trainable low-rank factors. `B` starts at
 //! zero (the LoRA convention), so a freshly attached adapter is a no-op until
-//! it learns. Gradients flow only into `A`/`B`, never the base — the ADR-0001
+//! it learns. Gradients flow only into `A`/`B`, never the base: the ADR-0001
 //! freeze, by construction.
 //!
 //! This is a **standalone reference layer**: its CPU test (`lora_adapter_trains_on_cpu`)
 //! is the workspace's GPU-free proof that the candle LoRA-training stack works
 //! (gradients reach the adapter, the base is untouched). The production trainer
-//! integrates an equivalent LoRA directly into the model — see the private
-//! `LoraLinear` in [`crate::models`]'s Qwen — rather than using this layer.
+//! integrates an equivalent LoRA directly into the model (see the private
+//! `LoraLinear` in [`crate::models`]'s Qwen) rather than using this layer.
 
 use candle_core::{Result, Tensor};
 use candle_nn::init::Init;
 use candle_nn::VarBuilder;
 
 pub struct LoraLinear {
-    /// Frozen base weight, shape `(out, in)`. Not a `Var` — carries no gradient.
+    /// Frozen base weight, shape `(out, in)`. Not a `Var`, so it carries no gradient.
     base_w: Tensor,
     /// Trainable `(rank, in)`.
     a: Tensor,

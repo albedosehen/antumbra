@@ -3,7 +3,7 @@
 //! reward at each step maps to a shade glyph + the fitness colour ramp. Drawn
 //! with shade characters (not just background colour) so it reads in a text
 //! snapshot and in a monochrome terminal, then tints by the same fitness ramp as
-//! the rest of the console — the universal path. (Raster fidelity, where a
+//! the rest of the console, the universal path. (Raster fidelity, where a
 //! terminal supports it, is the `raster`-feature enhancement; see `render.rs`.)
 
 use ratatui::layout::Rect;
@@ -41,7 +41,7 @@ pub(super) fn reward_heatmap(f: &mut Frame, app: &App, area: Rect) {
     if app.shadows.is_empty() || w == 0 {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "(no shadows — the penumbra is quiet)",
+                "(no shadows, the penumbra is quiet)",
                 Style::default().fg(t.dim),
             ))),
             inner,

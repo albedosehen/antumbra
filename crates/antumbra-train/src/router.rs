@@ -1,7 +1,7 @@
 //! Train the learned router's metric (ADR-0009). Prototypical: learn a
 //! per-dimension weighting of the frozen sentence embedding so each expert's
 //! exemplars cluster tightest around their own centroid in the reweighted
-//! space. Labels are free — an expert's solved exemplars are its positives.
+//! space. Labels are free: an expert's solved exemplars are its positives.
 //! CPU-only (a tiny model over a few hundred vectors), so it runs anywhere.
 
 use candle_core::{DType, Device, Result as CResult, Tensor, D};

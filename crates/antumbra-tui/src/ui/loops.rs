@@ -1,5 +1,5 @@
-//! The Loop page (ADR-0008): the generational loop as a pipeline —
-//! grow → explore → score → decide → consolidate → (grow) — with the current
+//! The Loop page (ADR-0008): the generational loop as a pipeline,
+//! grow → explore → score → decide → consolidate → (grow), with the current
 //! stage lit, the generation counter, and the run it belongs to. The loop state
 //! is the durable checkpoint, so this is a live view of where the substrate is
 //! in its self-improvement cycle.
@@ -59,7 +59,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     let Some(head) = app.loop_heads.first() else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "loop not started — no checkpoint yet",
+                "loop not started; no checkpoint yet",
                 Style::default().fg(t.dim),
             ))),
             inner,
@@ -114,7 +114,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     if head.state == LoopState::Paused {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "  ‖ paused — resumes into grow",
+            "  ‖ paused; resumes into grow",
             Style::default().fg(t.warning),
         )));
     }
@@ -129,7 +129,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
     if app.loop_halt_pending {
         lines.push(Line::from(Span::styled(
-            "  ⚠ halt requested — the loop will stop at the next generation",
+            "  ⚠ halt requested; the loop will stop at the next generation",
             Style::default().fg(t.warning).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(

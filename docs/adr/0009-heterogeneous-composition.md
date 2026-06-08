@@ -3,14 +3,14 @@
 **Status:** North star (deferred) · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0004 (boundary), 0005 (gate), 0006 (hardware)
 
 > **Adapter-level stepping stone realized (2026-06-04).** The four parts below now have a working, shared-base
-> realization in LoRA-space (EXP-013–017), ahead of the cross-attention-bridge version this ADR ultimately
-> wants: (1) **sparse selection** = the learned router (EXP-013) — a trained per-dimension metric over the
+> realization in LoRA-space (EXP-013 through 017), ahead of the cross-attention-bridge version this ADR ultimately
+> wants: (1) **sparse selection** = the learned router (EXP-013), a trained per-dimension metric over the
 > population's exemplars, with OOD abstention (EXP-017); (2) **composition** = exact rank-concatenation of the
 > selected frozen experts' deltas (EXP-014), the merge being exact because they share base rank/scale; the
 > complementary multiplier (a project tool ⊕ a standing convention → `bun add X --save-exact`, neither expert
-> alone) is shown in EXP-015; (3) **modular additive growth** holds — experts are frozen and independently
+> alone) is shown in EXP-015; (3) **modular additive growth** holds: experts are frozen and independently
 > grown, the router auto-retrains on each addition (self-maintaining), no retraining of others; (4) **boundary
-> as latent gating** — the counterfactual boundary (ADR-0004) gates the served decision (EXP-016 closed loop;
+> as latent gating** = the counterfactual boundary (ADR-0004) gates the served decision (EXP-016 closed loop;
 > the gate escalates on OOD or boundary inhibition). What remains for *this* ADR proper: composition across
 > *different bases/sizes* via learned cross-attention bridges (not shared-base adapter blending), and *per-token*
 > bridge gain (the LD-MoLE direction, 2509.25684) instead of one weight per generation. Compass for the realized

@@ -1,4 +1,4 @@
-//! `antumbra-mcp` — the Model Context Protocol server that exposes Antumbra's
+//! `antumbra-mcp`: the Model Context Protocol server that exposes Antumbra's
 //! Penumbra memory to an agent. The runtime surface that lets a client (Claude
 //! Code, any MCP host) talk to Antumbra instead of a separate memory service.
 //!
@@ -184,7 +184,7 @@ pub(crate) async fn provision_identity(
 
 /// Build a signed-in stdio session: one connection, provisioned and bound as
 /// `(tenant, user)` for the life of the process. (The HTTP transport instead
-/// shares one connection across identities — see [`http`] — because an embedded
+/// shares one connection across identities (see [`http`]) because an embedded
 /// engine is single-writer.)
 async fn build_session(
     url: &str,
@@ -199,7 +199,7 @@ async fn build_session(
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
     // The `answer` tool serves through the routed expert. Build the engine from
-    // the session's visible population (one connection — embedded is single-writer).
+    // the session's visible population (one connection; embedded is single-writer).
     let serve = build_serve(&store).await?;
     Ok(McpServer::new(
         store,

@@ -1,4 +1,4 @@
-//! The counterfactual boundary — the antumbra, the keystone. ADR-0004.
+//! The counterfactual boundary: the antumbra, the keystone. ADR-0004.
 //!
 //! A boundary is a *context-scoped conditional*, never a negation of the goal.
 //! It holds a behavior fixed and records the region of context where that
@@ -44,7 +44,7 @@ pub enum Grain {
     Project,
     Client,
     Session,
-    /// Scope spans everything — the most dangerous claim; assert it rarely.
+    /// Scope spans everything, the most dangerous claim; assert it rarely.
     Global,
 }
 
@@ -58,9 +58,9 @@ pub enum Grain {
 pub struct BoundaryFinding {
     pub behavior: String,
     pub governing_feature: String,
-    /// C — where the behavior was judged incorrect.
+    /// C: where the behavior was judged incorrect.
     pub fail_context: serde_json::Value,
-    /// C' — the nearest context where it is acceptable.
+    /// C': the nearest context where it is acceptable.
     pub near_ok_context: serde_json::Value,
 }
 
@@ -83,7 +83,7 @@ pub struct FailureBoundary {
     #[serde(default)]
     pub context_vec: Option<Vec<f32>>,
     /// Embedded C' (the acceptable context). When present, inhibition is
-    /// *relative* — closer to the failure than to C' — which separates
+    /// *relative* (closer to the failure than to C'), which separates
     /// near-identical contexts an absolute radius cannot (ADR-0004).
     #[serde(default)]
     pub ok_context_vec: Option<Vec<f32>>,
@@ -95,7 +95,7 @@ pub struct FailureBoundary {
 }
 
 impl FailureBoundary {
-    /// A boundary is only *actionable* once the contrastive pair is closed —
+    /// A boundary is only *actionable* once the contrastive pair is closed,
     /// i.e. we have found a C' where the same behavior is acceptable. Until
     /// then it is an open negative, not yet a scope, and must not gate routing
     /// (doing so would risk global, over-generalized inhibition).
@@ -110,7 +110,7 @@ impl FailureBoundary {
     /// is the "inhibit only within the incorrect scope" rule of ADR-0004 made
     /// concrete: outside the scope the penalty is exactly zero.
     /// True when an expert (by capability vector) covers this boundary's
-    /// failure region — it sits closer to the failure context than to C', the
+    /// failure region: it sits closer to the failure context than to C', the
     /// same relative test the inhibition uses. A captured correction that lands
     /// here *resolves* the boundary, so the lifecycle can retire it (ADR-0004).
     pub fn is_covered_by(&self, expert_vec: &[f32]) -> bool {
@@ -137,8 +137,8 @@ impl FailureBoundary {
             // closer to the failure context than to the acceptable one (C').
             // The shared background cancels in the difference, so contexts that
             // differ only slightly (same task, different project) separate by
-            // the *sign* of the margin — the gate's top-1-minus-top-2 idea,
-            // applied to the boundary (ADR-0004; an absolute radius cannot).
+            // the *sign* of the margin (the gate's top-1-minus-top-2 idea,
+            // applied to the boundary; ADR-0004; an absolute radius cannot).
             Some(ok) => {
                 let sim_ok = crate::expert::cosine_similarity(ok, candidate_vec);
                 let margin = sim_fail - sim_ok;
@@ -245,11 +245,11 @@ mod tests {
     /// Relative scope separates near-identical contexts an absolute radius
     /// cannot: with a fail and a C' that are *both* highly similar to two
     /// candidates, inhibition fires for the one nearer the failure and is zero
-    /// for the one nearer C' — by the sign of the margin.
+    /// for the one nearer C', by the sign of the margin.
     #[test]
     fn relative_scope_fires_only_nearer_the_failure() {
         let mut b = boundary(true, vec![1.0, 0.05, 0.0], 1.0);
-        b.ok_context_vec = Some(vec![1.0, 0.0, 0.05]); // C' — same background, tilted
+        b.ok_context_vec = Some(vec![1.0, 0.0, 0.05]); // C', same background, tilted
 
         // Candidate tilted toward the failure axis -> positive margin -> inhibit.
         let near_fail = b.inhibition_for(&[1.0, 0.1, 0.0], 0.5);

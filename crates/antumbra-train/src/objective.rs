@@ -9,9 +9,9 @@ use candle_nn::ops::log_softmax;
 
 /// Causal-LM masked cross-entropy.
 ///
-/// - `logits`: `(batch, seq, vocab)` — position `t` predicts token `t+1`.
-/// - `input_ids`: `(batch, seq)` u32 — the full prompt+completion token ids.
-/// - `completion_mask`: `(batch, seq)` f32 — `1.0` on completion tokens, `0.0`
+/// - `logits`: `(batch, seq, vocab)`, where position `t` predicts token `t+1`.
+/// - `input_ids`: `(batch, seq)` u32, the full prompt+completion token ids.
+/// - `completion_mask`: `(batch, seq)` f32, `1.0` on completion tokens, `0.0`
 ///   on prompt (and padding) tokens.
 ///
 /// Gradients flow into whatever produced `logits` (the LoRA adapter); the mask

@@ -63,14 +63,14 @@ pub enum Command {
         #[arg(long, default_value_t = 0.08)]
         threshold: f32,
         /// Standing experts always composed onto the routed one (your conventions),
-        /// `name:weight,...` — the Kushtaka rule layer, internalized (ADR-0009).
+        /// `name:weight,...`, the Kushtaka rule layer, internalized (ADR-0009).
         #[arg(long)]
         with: Option<String>,
         /// Blend weight for the task-routed (contextual) expert when composing
         /// with standing experts.
         #[arg(long, default_value_t = 0.4)]
         self_weight: f32,
-        /// Sampling temperature. 0 = greedy (deterministic, the learned mode —
+        /// Sampling temperature. 0 = greedy (deterministic, the learned mode,
         /// the right default for serving); raise for diverse draws.
         #[arg(long, default_value_t = 0.0)]
         temperature: f64,
@@ -79,7 +79,7 @@ pub enum Command {
     /// hot-swap each routed expert's adapter per prompt, instead of cold-loading
     /// a model per call. Reads prompts from stdin (one per line) or a single
     /// --task, routes each via the learned router, and serves the answer from the
-    /// resident engine — so a stream of prompts pays the base load only once.
+    /// resident engine, so a stream of prompts pays the base load only once.
     /// Needs --features models + a GPU.
     Serve {
         /// Answer this one prompt and exit; omit to stream prompts from stdin.
@@ -183,7 +183,7 @@ pub enum Command {
         #[arg(long)]
         corpus: String,
         /// Saved adapter to load over the base before scoring. Omit to score
-        /// the bare base — the prior floor (EXP-011's load-bearing check).
+        /// the bare base: the prior floor (EXP-011's load-bearing check).
         #[arg(long)]
         adapter: Option<String>,
         #[arg(long, default_value = "Qwen/Qwen2.5-Coder-1.5B")]
@@ -266,7 +266,7 @@ pub enum Command {
     },
     /// Autonomous population growth: route each task across the population, and
     /// grow a NEW specialist for the cluster the gate cannot cover, until
-    /// coverage meets target or the expert budget runs out. Additive — existing
+    /// coverage meets target or the expert budget runs out. Additive: existing
     /// experts are kept. Needs --features models + a GPU.
     Populate {
         /// JSON corpus of verifiable tasks ({id,prompt,verify}).
@@ -372,7 +372,7 @@ pub enum Command {
     },
     /// Seed a memory into a user's compartment from the CLI (the owner/admin
     /// path; agents write via the MCP `store_memory` tool). No embedding is
-    /// attached — consolidation gathers a compartment by membership. Pair with
+    /// attached; consolidation gathers a compartment by membership. Pair with
     /// `consolidate-compartment` to mint the compartment into a private expert.
     Remember {
         #[arg(long)]
@@ -381,7 +381,7 @@ pub enum Command {
         user: String,
         #[arg(long)]
         compartment: String,
-        /// The memory content — the behavior/fact to internalize on consolidation.
+        /// The memory content: the behavior/fact to internalize on consolidation.
         #[arg(long)]
         content: String,
         #[arg(long, default_value = "world")]
@@ -419,7 +419,7 @@ pub enum Command {
     },
     /// Metabolize a harness (ADR-0001): adapt a harness's successful
     /// orchestration traces (loop runs, behavior-graph evaluations, task
-    /// executions) into capture tasks the population internalizes — so the brain
+    /// executions) into capture tasks the population internalizes, so the brain
     /// learns to do in one shot what the harness did in many steps. Only
     /// successful, recurrent traces metabolize. Writes the converted corpus; with
     /// --train, internalizes it. Needs --features models.
@@ -452,7 +452,7 @@ pub enum Command {
         /// Recurrence floor: only patterns seen at least this often metabolize.
         #[arg(long, default_value_t = 1)]
         min_recurrence: u32,
-        /// Do NOT metabolize each trace's decomposition (its steps) — learn only
+        /// Do NOT metabolize each trace's decomposition (its steps); learn only
         /// the collapsed one-shot outcome, not the process. Steps are on by default.
         #[arg(long, default_value_t = false)]
         no_steps: bool,
@@ -478,7 +478,7 @@ pub enum Command {
     },
     /// Have the antumbra propose compartments (ADR-0014) by clustering a user's
     /// unorganized memory (their inbox compartment + anything they authored
-    /// uncompartmented) into competence-coherent regions. Needs no model — it
+    /// uncompartmented) into competence-coherent regions. Needs no model: it
     /// clusters the embeddings already stored on each memory. With --apply it
     /// creates each proposal as an `Origin::Proposed` compartment and moves its
     /// members in (reversible by deleting the compartment).

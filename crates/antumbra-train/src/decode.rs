@@ -31,7 +31,7 @@ pub struct DecodePolicy {
     pub no_repeat_ngram_size: usize,
 }
 
-/// Apply the policy to one step's `logits` (given the tokens generated so far —
+/// Apply the policy to one step's `logits` (given the tokens generated so far,
 /// the continuation only, *not* the prompt, so legitimately echoing prompt
 /// tokens is never penalized) and pick the next token.
 pub fn pick_token(

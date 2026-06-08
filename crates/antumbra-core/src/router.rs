@@ -1,4 +1,4 @@
-//! A learned router (ADR-0009 — the north-star gate, in its routing form).
+//! A learned router (ADR-0009: the north-star gate, in its routing form).
 //!
 //! The v0 gate routes by raw cosine to each expert's capability centroid. Frozen
 //! sentence embeddings compress general and specific experts into the same band,
@@ -58,7 +58,7 @@ impl LearnedRouter {
         scaled.iter().map(|v| v / norm).collect()
     }
 
-    /// The nearest-centroid similarity in the learned space — the absolute
+    /// The nearest-centroid similarity in the learned space: the absolute
     /// confidence that *some* expert covers this task (unlike the softmax,
     /// which is purely relative and always picks a max). A dim mismatch yields
     /// `f32::MIN` (no expert matched), so `covers` reports out-of-distribution.

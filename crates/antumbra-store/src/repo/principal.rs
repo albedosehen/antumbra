@@ -1,4 +1,4 @@
-//! Tenant principals — the records the `tenant` record-access SIGNIN resolves so
+//! Tenant principals: the records the `tenant` record-access SIGNIN resolves so
 //! a session's `$auth.tenant` is bound (enabling engine-enforced PERMISSIONS).
 //!
 //! A principal is provisioned by the owner/root; the access SIGNIN matches on

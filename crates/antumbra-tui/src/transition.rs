@@ -29,7 +29,7 @@ pub enum Scope {
 /// A queued effect and the part of the frame it animates.
 pub type Pending = (Effect, Scope);
 
-/// The body row — the same chrome split [`crate::ui::render`] uses: a 3-row
+/// The body row, the same chrome split [`crate::ui::render`] uses: a 3-row
 /// header, the 1-row tab strip, the 1-row metric strip, the body, then the
 /// 1-row footer.
 fn body(frame: Rect) -> Rect {
@@ -43,7 +43,7 @@ fn body(frame: Rect) -> Rect {
     .split(frame)[3]
 }
 
-/// The detail column (right body panel) a focus-switch effect plays over — the
+/// The detail column (right body panel) a focus-switch effect plays over: the
 /// same split [`crate::ui::render`] uses, so the effect lands on the panel that
 /// actually changed.
 pub fn detail_area(frame: Rect) -> Rect {

@@ -1,4 +1,4 @@
-//! # antumbra-serve — ADR-0006
+//! # antumbra-serve (ADR-0006)
 //!
 //! S-LoRA-style serving: one shared base resident on a single device plus a
 //! library of frozen LoRA adapters hot-swapped per request. [`CandleServe`]
@@ -34,7 +34,7 @@ pub use antumbra_train::RaftConfig;
 
 /// Multi-adapter server over a shared base. Loads the base once (with neutral
 /// zero LoRA factors), then [`load_adapter`](antumbra_train::models::QwenCausalLm::load_adapter)s
-/// the routed expert's weights into the resident model — an O(adapter) swap, not
+/// the routed expert's weights into the resident model: an O(adapter) swap, not
 /// an O(base) reload. A `register`ed map resolves the gate's `ExpertId`s to
 /// adapter files; the currently-resident adapter is tracked so repeated routes
 /// to the same expert skip the swap.
@@ -115,7 +115,7 @@ impl Serve for MultiAdapterServe {
 
         // The gate selects experts in rank order; v0 serves the top one. A true
         // latent blend of several adapters (ADR-0005) needs `compose_adapters`,
-        // which changes the LoRA rank and so a differently-shaped base — that is
+        // which changes the LoRA rank and so a differently-shaped base. That is
         // the `ask --with` path, not an in-place swap, and is deferred here.
         let target = req.adapters.first().cloned().ok_or_else(|| {
             AntumbraError::other(
@@ -150,7 +150,7 @@ impl Serve for MultiAdapterServe {
                     st.current = None;
                 }
                 // Hot-swap only when the routed expert differs from the resident
-                // one — repeated routes to the same expert reuse the loaded factors.
+                // one; repeated routes to the same expert reuse the loaded factors.
                 if st.current.as_ref() != Some(&target) {
                     st.model
                         .as_mut()
@@ -209,7 +209,7 @@ impl Serve for MultiAdapterServe {
         _req: antumbra_core::ports::ActRequest,
     ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
         Err(antumbra_core::AntumbraError::Unimplemented(
-            "multi-adapter serving — build antumbra-serve with --features models",
+            "multi-adapter serving requires antumbra-serve built with --features models",
         ))
     }
 }

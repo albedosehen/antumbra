@@ -1,7 +1,7 @@
-//! Invite codes — the signup gate for hosted onboarding (ADR-0016). An operator
+//! Invite codes: the signup gate for hosted onboarding (ADR-0016). An operator
 //! mints a single-use code; a signup redeems it (consumed by deletion). Keyed by
 //! the code. Owner-only: the `invite_code` table has no `PERMISSIONS`, so a
-//! tenant session is denied — only the control plane's owner connection touches
+//! tenant session is denied; only the control plane's owner connection touches
 //! it. Built on surql-rs `crud`; no raw SurrealQL.
 
 use chrono::{DateTime, Utc};

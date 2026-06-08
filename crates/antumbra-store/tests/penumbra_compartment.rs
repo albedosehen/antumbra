@@ -1,6 +1,6 @@
 //! Engine-enforced compartment ACL (Phase 1b): a memory in a private
 //! compartment is invisible to another user until its compartment is granted,
-//! and hidden again on revoke — enforced by the engine via the memory rule's
+//! and hidden again on revoke, enforced by the engine via the memory rule's
 //! grant-graph subquery, on an unfiltered `SELECT` (no app-side WHERE).
 
 use chrono::Utc;

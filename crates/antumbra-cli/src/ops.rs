@@ -376,7 +376,7 @@ pub struct ProposeCompartmentsArgs {
 /// The antumbra proposes compartments by clustering a user's **unorganized**
 /// memory (the inbox compartment plus anything they authored uncompartmented)
 /// into competence-coherent regions (ADR-0014). This is the owner/offline
-/// surface mirroring the MCP `propose_compartments` tool — cron-able, and the
+/// surface mirroring the MCP `propose_compartments` tool: cron-able, and the
 /// path toward proposing autonomously as the penumbra grows. It needs no model:
 /// clustering runs over the embeddings already stored on each memory, so this is
 /// available in the default build. Runs as owner (mints compartments / reassigns
@@ -457,7 +457,7 @@ pub async fn propose_compartments(url: &str, a: ProposeCompartmentsArgs) -> anyh
     Ok(())
 }
 
-/// Supersede an expert by name and refresh the router — population-level
+/// Supersede an expert by name and refresh the router: population-level
 /// forgetting. Wire a store's `report_contradiction` against a *consolidated*
 /// memory to this: a contradiction retires the expert that memory produced, so
 /// the gate stops routing to it (ADR-0004 retire-on-correction at the

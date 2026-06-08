@@ -1,4 +1,4 @@
-//! Magic-link authentication (ADR-0016) — a passwordless login. The control
+//! Magic-link authentication (ADR-0016): a passwordless login. The control
 //! plane signs a short-lived one-time link carrying the email, sends it via a
 //! [`Mailer`] seam, and on click verifies the signature → a [`VerifiedIdentity`]
 //! (`email:<addr>`). The sign + verify are pure (testable offline); only the

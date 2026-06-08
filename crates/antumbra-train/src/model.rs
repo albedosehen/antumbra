@@ -24,8 +24,8 @@ pub struct CorpusTask {
     /// a grown expert is a specialist for a *skill*, not a single task. Defaults
     /// to the task id (see [`CorpusTask::skill`]).
     pub skill: Option<String>,
-    /// When a correction also asserts *where* it applies — the governing feature
-    /// and the contrastive context pair — capture promotes the verified
+    /// When a correction also asserts *where* it applies (the governing feature
+    /// and the contrastive context pair), capture promotes the verified
     /// correction to an actionable boundary (ADR-0004). `None` for a plain
     /// correction or a RAFT task.
     pub scope: Option<TaskScope>,

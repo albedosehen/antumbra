@@ -1,8 +1,8 @@
-//! Capture — internalize a *given, verified* correction (ADR-0004/0009).
+//! Capture: internalize a *given, verified* correction (ADR-0004/0009).
 //!
 //! RAFT (`raft.rs`) discovers a skill from the model's own verified-correct
 //! samples. Capture is the other intake path into the same population: a
-//! correction supplied from outside — a human's "no, this project uses deno" —
+//! correction supplied from outside (a human's "no, this project uses deno")
 //! is checked by the verifier and, if it holds, fine-tuned into a frozen expert.
 //! Discovery and capture are two ways competence enters the brain; both are
 //! gated on ground truth, neither trusts unverified teacher text.
@@ -37,7 +37,7 @@ fn verify_request(
 
 /// Verify each supplied correction, fine-tune the adapter on the ones that hold
 /// for `cfg.rounds` epochs, then measure whether the expert now reproduces them.
-/// `final_fitness` is that internalized pass-rate — the honest "did it stick".
+/// `final_fitness` is that internalized pass-rate: the honest "did it stick".
 ///
 /// `replay` is a rehearsal buffer of already-consolidated `prompt -> behavior`
 /// pairs (EXP-021): when `cfg.replay_ratio > 0` it is interleaved into every SFT
@@ -139,7 +139,7 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    /// Emits the base prior until it is taught, then emits the correction —
+    /// Emits the base prior until it is taught, then emits the correction,
     /// so the post-capture eval reflects the internalized behavior.
     struct Learner {
         taught: AtomicBool,

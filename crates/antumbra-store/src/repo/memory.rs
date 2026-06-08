@@ -1,10 +1,10 @@
-//! Penumbra memory repository — tenant-isolated traces (the consolidation
+//! Penumbra memory repository: tenant-isolated traces (the consolidation
 //! source). ADR-0004/0009.
 //!
 //! Isolation is engine-enforced: the `memory` table carries a row-level
 //! `PERMISSIONS ... WHERE tenant_id = $auth.tenant` clause, so once a per-tenant
 //! `ScopeCredentials` session binds `$auth.tenant`, the engine refuses any read
-//! whose `tenant_id` does not match — a forgotten filter cannot leak. This repo
+//! whose `tenant_id` does not match; a forgotten filter cannot leak. This repo
 //! *also* applies an explicit `WHERE tenant_id = ...` as the documented second
 //! layer (defense-in-depth), and re-checks `tenant_id` on a point read by id (so
 //! another tenant's trace reads as absent). Built on surql-rs builders + `crud`;
@@ -126,7 +126,7 @@ pub async fn upsert(store: &Store, memory: &Memory) -> Result<()> {
     Ok(())
 }
 
-/// Fetch one memory by id, but only if it belongs to `tenant` — a trace owned by
+/// Fetch one memory by id, but only if it belongs to `tenant`; a trace owned by
 /// another tenant reads as absent (the defensive isolation re-check).
 pub async fn get(store: &Store, tenant: &TenantId, id: &MemoryId) -> Result<Option<Memory>> {
     let rid = RecordID::<()>::new(TABLE, id.as_str()).map_err(map)?;
@@ -160,7 +160,7 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
 /// Every memory across all tenants, with NO tenant filter. As an owner/root
 /// session this is the cross-tenant view (profiling / training across tenants);
 /// as a tenant-authenticated session the engine's row-level PERMISSIONS still
-/// scope the result to that tenant — which is precisely the engine-enforcement
+/// scope the result to that tenant, which is precisely the engine-enforcement
 /// guarantee (isolation holds even with no app-side WHERE).
 pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
     let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
@@ -257,7 +257,7 @@ pub async fn recall(
 /// leaving every other field as the engine already holds it. The read-modify-
 /// write mutators below write *just* the fields they change this way rather than
 /// rewriting the whole row, so a concurrent forget's `deleted_at` (set between
-/// the read and this write) is never clobbered back to live — the resurrection-
+/// the read and this write) is never clobbered back to live: the resurrection-
 /// safe alternative to a full-row upsert. The engine PERMISSIONS still gate the
 /// update, exactly as the upsert did.
 async fn merge_fields(store: &Store, id: &MemoryId, patch: Value) -> Result<()> {

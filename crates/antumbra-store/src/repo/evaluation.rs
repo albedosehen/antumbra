@@ -1,4 +1,4 @@
-//! Evaluation-run repository — one row per measured run. ADR-0007.
+//! Evaluation-run repository: one row per measured run. ADR-0007.
 //! `EvaluationRun` has no reserved `id` field, so it persists directly.
 
 use surql::query::builder::Query;
@@ -52,7 +52,7 @@ pub async fn latest_for_subject(
     first(store.client(), &query).await.map_err(map)
 }
 
-/// The most recent runs across all subjects, newest first — the owner/console
+/// The most recent runs across all subjects, newest first: the owner/console
 /// view (parallels [`crate::repo::memory::all_unscoped`]).
 pub async fn recent_unscoped(store: &Store) -> Result<Vec<EvaluationRun>> {
     let query = Query::new()

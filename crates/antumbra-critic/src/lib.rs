@@ -1,4 +1,4 @@
-//! # antumbra-critic — ADR-0003
+//! # antumbra-critic (ADR-0003)
 //!
 //! Verifiable signals are the primary reward; the critic is a secondary
 //! *densifier* that interpolates per-step credit between verifier checkpoints

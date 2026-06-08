@@ -1,6 +1,6 @@
 //! Newtype identifiers and the generation counter.
 //!
-//! Ids are strings (SurrealDB record ids serialize cleanly as such) — this also
+//! Ids are strings (SurrealDB record ids serialize cleanly as such); this also
 //! sidesteps the documented u64 round-trip loss in the SurrealDB serde codec by
 //! never modelling an identity as a large native integer.
 
@@ -77,13 +77,13 @@ string_id!(
     TenantId
 );
 string_id!(
-    /// A user (person) within a tenant — the actor that owns and shares
+    /// A user (person) within a tenant: the actor that owns and shares
     /// compartments. `$auth.user` carries this; an agent acts as a user and
     /// stamps provenance, but is not itself an ownership boundary.
     UserId
 );
 string_id!(
-    /// A compartment (a named "latent-space" of memories) — the unit of
+    /// A compartment (a named "latent-space" of memories): the unit of
     /// organization, sharing, deletion, and reference-scope within a tenant.
     CompartmentId
 );

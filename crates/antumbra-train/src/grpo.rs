@@ -1,4 +1,4 @@
-//! GRPO — group-relative policy optimization (ADR-0011), the v1 upgrade over
+//! GRPO: group-relative policy optimization (ADR-0011), the v1 upgrade over
 //! RAFT. Same sample -> verify loop, but instead of SFT on the winners it takes
 //! a clipped policy-gradient step weighted by each sample's *group-relative*
 //! advantage, with a KL leash to a frozen reference. Critic-free: the group

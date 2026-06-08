@@ -329,7 +329,7 @@ flowchart TB
     BR --> OUT["composed output"]
 ```
 
-### 16. ADR-0012–0015 - memory, tenancy, compartments, MCP
+### 16. ADR-0012 through 0015: memory, tenancy, compartments, MCP
 
 The newer subsystems carry their diagrams inline in their ADRs, to avoid drift:
 

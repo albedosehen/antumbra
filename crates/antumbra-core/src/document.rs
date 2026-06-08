@@ -1,5 +1,5 @@
 //! Knowledge documents (P-3): a *document* is ingested as chunked, embedded,
-//! recallable text — a first-class type **distinct** from an episodic
+//! recallable text: a first-class type **distinct** from an episodic
 //! [`crate::memory::Memory`]. Episodic memory is what an agent learned by doing;
 //! a document is reference material it was given. Both are embedded and recalled
 //! semantically, but they are stored and surfaced separately so one does not
@@ -36,8 +36,8 @@ pub struct DocumentChunk {
 /// Split `text` into chunks of at most `max_chars` characters, each overlapping
 /// the previous by about `overlap` characters so a fact straddling a cut is still
 /// wholly present in one chunk (the standard retrieval-chunking trick). Cuts
-/// prefer a natural boundary — paragraph break, then sentence end, then
-/// whitespace — searching backward from the hard limit so a chunk does not end
+/// prefer a natural boundary (paragraph break, then sentence end, then
+/// whitespace), searching backward from the hard limit so a chunk does not end
 /// mid-word. Whitespace-only input yields no chunks.
 ///
 /// Counting is by `char`, not byte, so the cuts are always on UTF-8 boundaries.

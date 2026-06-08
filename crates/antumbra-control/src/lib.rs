@@ -1,4 +1,4 @@
-//! The hosted-onboarding control plane (ADR-0016) — the **issuer** side of the
+//! The hosted-onboarding control plane (ADR-0016): the **issuer** side of the
 //! `antumbra-auth` token contract. It gates signup behind invite codes,
 //! provisions a fresh tenant for each new account, and issues the RS256 JWT the
 //! MCP server verifies (with its matching public key). The offline tier is
@@ -99,7 +99,7 @@ pub async fn signup(
         .is_some()
     {
         return Err(AntumbraError::other(
-            "identity already registered — log in instead",
+            "identity already registered; log in instead",
         ));
     }
     let now = Utc::now();
@@ -131,7 +131,7 @@ pub async fn signup(
 pub async fn login(store: &Store, identity: &VerifiedIdentity, issuer: &Issuer) -> Result<String> {
     let account = account::get_by_subject(store, &identity.subject)
         .await?
-        .ok_or_else(|| AntumbraError::other("no account for this identity — sign up first"))?;
+        .ok_or_else(|| AntumbraError::other("no account for this identity; sign up first"))?;
     issuer.mint(&account.tenant, &account.user)
 }
 

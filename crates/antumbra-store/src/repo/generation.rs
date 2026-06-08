@@ -1,4 +1,4 @@
-//! Generation-head repository — the durable loop checkpoint. ADR-0008.
+//! Generation-head repository: the durable loop checkpoint. ADR-0008.
 //!
 //! A singleton-per-run row, addressed by a stable record id (`RecordID` auto-
 //! escapes the run key), upserted via surql-rs's `crud` helpers. No raw
@@ -39,7 +39,7 @@ pub async fn load_head(store: &Store, run_id: &RunId) -> Result<Option<Generatio
     }
 }
 
-/// Every loop head across all runs — the owner/console view (parallels
+/// Every loop head across all runs: the owner/console view (parallels
 /// [`crate::repo::memory::all_unscoped`]). The operator console reads as owner.
 pub async fn all_heads(store: &Store) -> Result<Vec<GenerationHead>> {
     let query = Query::new().select(None).from_table(TABLE).map_err(map)?;

@@ -1,11 +1,11 @@
 //! Penumbra clustering: the antumbra *proposes* compartments by grouping a
 //! user's uncompartmented memories into competence-coherent regions (ADR-0014).
 //!
-//! This is the "second part of the antumbra" — beyond drawing competence
+//! This is the "second part of the antumbra": beyond drawing competence
 //! boundaries (ADR-0004), it surfaces structure in the penumbra so the user can
 //! organize, share, and ultimately consolidate a region into a private expert.
-//! It is pure analysis over the embeddings already stored on each [`Memory`] —
-//! no model, no IO — so the whole proposal pass is deterministic and testable on
+//! It is pure analysis over the embeddings already stored on each [`Memory`]
+//! (no model, no IO), so the whole proposal pass is deterministic and testable on
 //! CPU. The antumbra only *suggests*; the user curates (keep / name / share),
 //! exactly as `Origin::Proposed` records.
 
@@ -19,7 +19,7 @@ pub struct ClusterConfig {
     /// Cosine at/above which a memory joins an existing cluster (measured
     /// against the cluster's running centroid).
     pub similarity_threshold: f32,
-    /// Smallest cluster worth proposing — singletons and pairs are noise.
+    /// Smallest cluster worth proposing; singletons and pairs are noise.
     pub min_size: usize,
     /// How many leading words of the medoid's content to use as a label.
     pub label_words: usize,
@@ -38,7 +38,7 @@ impl Default for ClusterConfig {
 /// A proposed compartment: a coherent cluster of the user's memories the
 /// antumbra suggests grouping. `members` are the memory ids; `label` is a
 /// heuristic name derived from the cluster's most central memory (the user
-/// renames it); `cohesion` is the mean cosine of members to the centroid — a
+/// renames it); `cohesion` is the mean cosine of members to the centroid, a
 /// confidence the user can rank proposals by.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProposedCompartment {
@@ -80,7 +80,7 @@ impl Cluster {
 /// Cluster a pool of memories into proposed compartments.
 ///
 /// This is policy-free: it clusters every memory in the slice that carries an
-/// embedding. **Choosing the pool is the caller's job** — the caller passes the
+/// embedding. **Choosing the pool is the caller's job**: the caller passes the
 /// *unorganized* memories (those in the inbox / default compartment, or with no
 /// compartment) and leaves deliberately-filed memory out, since the core cannot
 /// know which compartment is the inbox. Clustering is a single deterministic
@@ -115,7 +115,7 @@ pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<Pro
         // always has its seed member) and would only emit singleton noise.
         .filter(|c| c.members.len() >= cfg.min_size.max(1))
         .map(|c| {
-            // Medoid: the member nearest the centroid — its content names the
+            // Medoid: the member nearest the centroid. Its content names the
             // region, and its cosine anchors the cohesion average.
             let sims: Vec<f32> = c
                 .members
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn clustering_is_policy_free_over_the_given_pool() {
-        // The core clusters whatever it is handed — pool selection (skipping
+        // The core clusters whatever it is handed; pool selection (skipping
         // already-filed memory) is the caller's job, not this function's.
         let memories = vec![
             mem("m:1", "a one", vec![1.0, 0.0], Some("comp:x")),

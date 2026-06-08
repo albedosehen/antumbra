@@ -5,7 +5,7 @@
 > **Learned gate realized (2026-06-04).** The relative-coverage heuristic below is now backed by a *learned*
 > boundary-conditioned gate (ADR-0009's mixer in routing form), validated in EXP-013/017. A per-dimension metric,
 > trained on the population's own solved exemplars (prototypical cross-entropy, `antumbra-train::router`),
-> amplifies the directions that separate experts — turning the compressed cosine band into clean separation: a
+> amplifies the directions that separate experts, turning the compressed cosine band into clean separation: a
 > specialist the heuristic margin *escalated* (0.051) now routes at p=1.000, and it generalizes to held-out
 > tasks. Out-of-distribution is caught by an **absolute floor** on the nearest-centroid similarity in the learned
 > space (calibrated `mean-2σ` over in-distribution exemplars): "capital of France" escalates (sim 0.41 < floor
@@ -111,7 +111,7 @@ flowchart TB
 
 ## Validation
 
-3–4 adapters, none solving task T alone. (a) The gate blends them to complete T (composition works). (b) On
+3 to 4 adapters, none solving task T alone. (a) The gate blends them to complete T (composition works). (b) On
 out-of-scope tasks it **escalates** rather than guessing, and the escalation rate **falls** as experts graduate.
 *Kill criterion:* the gate can't beat single-adapter routing on composed tasks, or never reduces escalation →
 stay on coverage routing (still useful) and revisit composition.

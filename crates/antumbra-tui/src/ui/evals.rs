@@ -1,4 +1,4 @@
-//! The Evals page (ADR-0007): the evaluation runs as a table — subject, corpus
+//! The Evals page (ADR-0007): the evaluation runs as a table of subject, corpus
 //! task, status, and the regression fingerprint. A `FAIL` on a frozen expert is
 //! the ADR-0001 no-forgetting tripwire firing, so failures are alert-coloured.
 
@@ -53,7 +53,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(block, area);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "no evaluation runs yet — the tripwire is quiet",
+                "no evaluation runs yet; the tripwire is quiet",
                 Style::default().fg(t.dim),
             ))),
             inner,
@@ -75,7 +75,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
             .regression_fingerprint
             .as_deref()
             .map(|s| s.chars().take(8).collect::<String>())
-            .unwrap_or_else(|| "—".to_string());
+            .unwrap_or_else(|| "n/a".to_string());
         Row::new(vec![
             Cell::from(Span::styled(
                 e.subject_id.clone(),

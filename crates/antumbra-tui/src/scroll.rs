@@ -1,6 +1,6 @@
 //! Scrolling for the one-row-per-item lists (shadows, boundaries): a
-//! selection-following viewport — the selected row stays centred once a list
-//! outgrows its panel — plus a slim scrollbar for a sense of position.
+//! selection-following viewport (the selected row stays centred once a list
+//! outgrows its panel), plus a slim scrollbar for a sense of position.
 //! Hand-rolled on ratatui core.
 
 use ratatui::layout::{Margin, Rect};

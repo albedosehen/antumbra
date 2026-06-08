@@ -4,7 +4,7 @@
 //! control plane) and the **verifier** (the MCP server). A client proves its
 //! identity with a signed JWT whose claims carry the `tenant` and `user`; the
 //! server verifies the signature (and expiry) and binds those claims as `$auth`
-//! — the same `(tenant, user)` the engine's record-access `SIGNIN` expects.
+//! binding the same `(tenant, user)` the engine's record-access `SIGNIN` expects.
 //! There is no token-to-identity lookup table: the verified token *is* the
 //! identity, so a leaked token grants exactly its claimed scope and nothing
 //! wider. The signer holds the key (a symmetric secret for HS256, or the auth
@@ -15,7 +15,7 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 
-/// The verified identity carried by a request's bearer token — what becomes
+/// The verified identity carried by a request's bearer token: what becomes
 /// `$auth.tenant` / `$auth.user` for the session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Identity {
@@ -44,8 +44,8 @@ struct MintClaims<'a> {
 }
 
 /// Mint a long-lived, scope-bound HS256 token for a non-interactive client (a
-/// lifecycle hook), valid for `ttl` from now. The token **is** the identity — no
-/// lookup table — so it grants exactly `(tenant, user)` and nothing wider, and it
+/// lifecycle hook), valid for `ttl` from now. The token **is** the identity (no
+/// lookup table), so it grants exactly `(tenant, user)` and nothing wider, and it
 /// verifies through the same [`JwtVerifier::verify`] path. `ttl` is finite on
 /// purpose: a hook token is long-lived, not a non-expiring standing key (the
 /// verifier requires `exp`). This is the offline / self-hosted mint, signed with
@@ -75,7 +75,7 @@ pub fn mint_hs256(
 }
 
 /// Mint a scope-bound **RS256** token signed with the auth service's RSA private
-/// key — the asymmetric, hosted counterpart to [`mint_hs256`] (ADR-0015/0016).
+/// key: the asymmetric, hosted counterpart to [`mint_hs256`] (ADR-0015/0016).
 /// The control plane (the issuer) holds the private key and mints on signup /
 /// login; the MCP server only ever verifies, with the matching public key
 /// ([`JwtVerifier::rs256_pem`]). Pass the server's `audience` so a token minted
@@ -103,7 +103,7 @@ pub fn mint_rs256(
         .map_err(|e| AuthError::Invalid(e.to_string()))
 }
 
-/// Why a token was rejected. Kept coarse on purpose — the wire response should
+/// Why a token was rejected. Kept coarse on purpose: the wire response should
 /// not reveal which check failed.
 #[derive(Debug)]
 pub enum AuthError {
@@ -133,7 +133,7 @@ pub struct JwtVerifier {
 }
 
 impl JwtVerifier {
-    /// HS256 with a shared secret (symmetric — the simplest deployment; the
+    /// HS256 with a shared secret (symmetric, the simplest deployment; the
     /// signer and verifier share the secret).
     pub fn hs256(secret: &[u8]) -> Self {
         let mut validation = Validation::new(Algorithm::HS256);
@@ -148,7 +148,7 @@ impl JwtVerifier {
         }
     }
 
-    /// RS256 with a PEM-encoded RSA public key (asymmetric — the signer holds
+    /// RS256 with a PEM-encoded RSA public key (asymmetric, the signer holds
     /// the private key, this server only ever verifies).
     pub fn rs256_pem(pem: &[u8]) -> anyhow::Result<Self> {
         let key = DecodingKey::from_rsa_pem(pem)?;
@@ -249,7 +249,7 @@ mod tests {
 
     // A throwaway RSA-2048 keypair for the asymmetric mint↔verify round-trip:
     // the control plane (issuer) signs with the private key, the MCP server
-    // verifies with the public key. Test-only — never a real credential.
+    // verifies with the public key. Test-only, never a real credential.
     const RS_PRIV: &[u8] = b"-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDMRax89LGXOtI6
 2/wNDH9gV2AvSTetDqsPIAX0JsCVRWt/XqWm/F/mJrfbgsmjlLVWy8PJWl0+hdtu

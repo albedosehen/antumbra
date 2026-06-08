@@ -6,7 +6,7 @@
 //!
 //! The tier is resolved ONCE at startup and never re-probed, so the frame loop
 //! just reads it. Vector visuals (the orbit graph, line charts, gauges) stay on
-//! the Canvas path at every tier — Braille's sub-cell resolution looks identical
+//! the Canvas path at every tier; Braille's sub-cell resolution looks identical
 //! at terminal scale and is strictly more robust than rasterizing them. Raster
 //! is a progressive enhancement behind the `raster` cargo feature; the default
 //! build carries no graphics dependency and ships on the Canvas tier.
@@ -68,8 +68,8 @@ impl RenderTier {
 }
 
 /// Resolve the capability tier once, at startup. Short-circuits to a safe vector
-/// tier when there is no TTY (pipes/CI) or a hostile multiplexer — BEFORE any
-/// (potentially multi-second) graphics probe — so the frame loop is never touched.
+/// tier when there is no TTY (pipes/CI) or a hostile multiplexer, BEFORE any
+/// (potentially multi-second) graphics probe, so the frame loop is never touched.
 pub fn resolve_tier(mode: RenderMode) -> RenderTier {
     match mode {
         RenderMode::Canvas => return RenderTier::Canvas,

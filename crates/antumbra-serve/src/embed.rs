@@ -1,6 +1,6 @@
 //! Real candle BERT sentence embedder (ADR-0005 routing-as-retrieval).
 //!
-//! all-MiniLM-L6-v2 produces 384-d normalized sentence vectors — the
+//! all-MiniLM-L6-v2 produces 384-d normalized sentence vectors: the
 //! capability/context space the gate routes in. Runs on CPU: the model is tiny
 //! (~23M params) and we keep the GPU free for the trainer and server. This is
 //! the real implementation behind the [`Embedder`] port that, until now, only

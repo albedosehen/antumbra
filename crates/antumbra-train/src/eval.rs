@@ -1,8 +1,8 @@
-//! Eval — an adapter's pass-rate on a corpus, with no training (ADR-0010).
+//! Eval: an adapter's pass-rate on a corpus, with no training (ADR-0010).
 //!
 //! This is one RAFT measurement round without the SFT step or the save: sample
 //! `K` per task, verify each, report the fraction that pass. EXP-010 uses it to
-//! detect catastrophic forgetting — a monolithic adapter continually fine-tuned
+//! detect catastrophic forgetting: a monolithic adapter continually fine-tuned
 //! on a new skill is re-scored on the old one, and the drop is the forgetting.
 
 use serde_json::json;
@@ -41,7 +41,7 @@ pub struct EvalOutcome {
 }
 
 /// Sample `samples` completions per task, verify each, and return the pass-rate
-/// across all `(task, sample)` pairs — the same denominator RAFT reports, so an
+/// across all `(task, sample)` pairs, the same denominator RAFT reports, so an
 /// eval score is directly comparable to a training reward curve.
 pub async fn eval_pass_rate(
     model: &mut (dyn CausalLm + Send),

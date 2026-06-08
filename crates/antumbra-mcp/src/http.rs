@@ -1,30 +1,30 @@
 //! The networked multi-tenant HTTP transport (ADR-0015).
 //!
 //! Each request carries a signed JWT; its verified `tenant`/`user` claims become
-//! `$auth`, so the engine enforces isolation **per request** — one server, many
+//! `$auth`, so the engine enforces isolation **per request**: one server, many
 //! tenants, no app-side filtering. A leaked token grants exactly its claimed
 //! scope and nothing wider.
 //!
-//! ## One connection, serialized — works on embedded too
+//! ## One connection, serialized: works on embedded too
 //!
 //! An embedded SurrealDB (`surrealkv://`, the edge/IoT case) is **single-writer**:
 //! only one connection may open the datastore. So the server holds **one** shared
-//! connection and multiplexes tenants over it — it does *not* open a connection
+//! connection and multiplexes tenants over it; it does *not* open a connection
 //! per identity. Because `signin` binds the whole connection, each request takes
 //! a lock, signs the shared connection in as its identity, runs, and releases;
 //! the next request re-signs-in. The engine then hides other tenants' rows even
 //! on an unfiltered query (proven in `antumbra-store`'s embedded tests). The cost
-//! is serialization of the authenticated section — fine for an edge device; a
+//! is serialization of the authenticated section: fine for an edge device; a
 //! high-concurrency deployment points `--url` at a real `ws://` server.
 //!
 //! ## Stateful (SSE) mode for live propagation (R-2)
 //!
 //! The transport runs in rmcp's stateful mode so a client can hold an open
-//! GET/SSE stream that carries **server-initiated** notifications — the only
+//! GET/SSE stream that carries **server-initiated** notifications: the only
 //! channel the MCP spec defines for push. That does not reintroduce the lock
 //! concern: the auth lock is held only while `handle` *builds* a response, and an
 //! SSE stream is MCP transport state (a channel + cache) that does no DB work and
-//! streams *after* the handler returns — it never holds the DB connection. Live
+//! streams *after* the handler returns; it never holds the DB connection. Live
 //! delivery is wired in [`spawn_live_propagation`]: one owner-mode `LIVE`
 //! subscription (registered at startup) feeds the change watcher, audience is
 //! resolved under the auth lock in owner mode, and the change is pushed to each
@@ -60,8 +60,8 @@ struct HttpState {
     store: Store,
     /// The **scoped serving** connection: every request signs in on this one as
     /// its `(tenant, user)` record, so the engine ACL is enforced. On an
-    /// authenticated remote it is a *separate, credential-less* connection —
-    /// a root session bypasses row-level permissions and cannot be scoped
+    /// authenticated remote it is a *separate, credential-less* connection,
+    /// because a root session bypasses row-level permissions and cannot be scoped
     /// (surrealdb#6259), so requests must NOT run on the root connection (R-6).
     /// On embedded (single-writer) it is the same connection as `store`, which
     /// already scopes correctly on record signin.
@@ -103,7 +103,7 @@ pub async fn serve(
     // on a NON-root connection or the engine ACL is bypassed (R-6): open a second,
     // credential-less connection (schema already applied by `store`). On embedded
     // there are no credentials and only one connection is possible, so serving
-    // reuses `store` — record signin scopes correctly there.
+    // reuses `store`; record signin scopes correctly there.
     let serve_store = match (db_user.as_deref(), db_pass.as_deref()) {
         (Some(_), Some(_)) => crate::connect_serving(&url).await?,
         _ => store.clone(),
@@ -245,11 +245,11 @@ impl HttpState {
         Ok(service)
     }
 
-    /// Provision (owner-side) and build the per-identity [`McpServer`] — the base
+    /// Provision (owner-side) and build the per-identity [`McpServer`]: the base
     /// the JSON-RPC SSE service wraps, and the one the REST `/mcp/call` shim drives
     /// directly. Its tools run on the SCOPED serving connection so the engine ACL
     /// is enforced per request (not the root `store`, which would bypass it on a
-    /// remote — R-6).
+    /// remote; R-6).
     async fn mcp_for(&self, identity: &Identity) -> Result<McpServer> {
         let tenant = TenantId::new(&identity.tenant);
         let user = UserId::new(&identity.user);
@@ -526,7 +526,7 @@ mod tests {
     }
 
     // The happy path: a valid token verifies, the shared connection signs in as
-    // the identity, and rmcp dispatches `initialize` to the McpServer — proving
+    // the identity, and rmcp dispatches `initialize` to the McpServer, proving
     // the full auth -> signin -> handle wiring end to end (provisioning the
     // identity on first contact). No socket: the router is driven via oneshot.
     #[tokio::test]

@@ -147,7 +147,7 @@ fn json_lines<'a>(t: &Theme, value: &serde_json::Value) -> Vec<Line<'a>> {
 }
 
 /// The gate (router) inspector (`gate` command): the learned per-dimension
-/// weight profile, the gate scalars, and a self-routing health check — each
+/// weight profile, the gate scalars, and a self-routing health check: each
 /// expert's own centroid routed through the gate should come back to itself.
 pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
@@ -166,7 +166,7 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "routing falls back to heuristic KNN — no learned metric yet",
+                    "routing falls back to heuristic KNN; no learned metric yet",
                     Style::default().fg(t.dim),
                 )),
             ])
@@ -196,7 +196,7 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
     // The weight profile as a shade strip across the inner width.
     if router.weights.is_empty() {
         l.push(Line::from(Span::styled(
-            "  (uniform — no reweighting)",
+            "  (uniform, no reweighting)",
             Style::default().fg(t.dim),
         )));
     } else {
@@ -243,7 +243,7 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
         let (top_id, prob) = routed
             .first()
             .map(|(id, p)| (id.as_str().to_string(), *p))
-            .unwrap_or_else(|| ("—".to_string(), 0.0));
+            .unwrap_or_else(|| ("n/a".to_string(), 0.0));
         let healthy = top_id == e.id.as_str();
         let name =
             e.id.as_str()
@@ -278,7 +278,7 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
 }
 
 /// The drill-down detail of the focused selection (Enter): everything the summary
-/// panels omit — full capability card, reward curve, and contrastive contexts.
+/// panels omit: full capability card, reward curve, and contrastive contexts.
 pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
     let Some(area) = overlay_area(app, f.area()) else {
@@ -304,7 +304,7 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
 
 /// The evaluation drill-down: the run's fields, the regression comparison
 /// against the previous run for the same subject (the ADR-0001 no-forgetting
-/// tripwire), and the subject's run history — all from the loaded set.
+/// tripwire), and the subject's run history, all from the loaded set.
 fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     let Some(run) = app.evals.get(app.selected_eval) else {
         return (
@@ -323,7 +323,7 @@ fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     };
     let short = |fp: Option<&str>| {
         fp.map(|s| s.chars().take(12).collect::<String>())
-            .unwrap_or_else(|| "—".to_string())
+            .unwrap_or_else(|| "n/a".to_string())
     };
 
     let mut l = vec![heading(t, run.subject_id.clone())];
@@ -343,7 +343,7 @@ fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
         Span::styled(
             run.regression_fingerprint
                 .as_deref()
-                .unwrap_or("—")
+                .unwrap_or("n/a")
                 .to_string(),
             Style::default().fg(t.value),
         ),
@@ -371,8 +371,8 @@ fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
         Some(p) => {
             let (verdict, color) = match (&run.regression_fingerprint, &p.regression_fingerprint) {
                 (Some(_), Some(_)) if run.fingerprint_matches(p) => ("stable", t.success),
-                (Some(_), Some(_)) => ("DRIFTED — no-forgetting tripwire", t.alert),
-                _ => ("n/a — no fingerprint", t.dim),
+                (Some(_), Some(_)) => ("DRIFTED: no-forgetting tripwire", t.alert),
+                _ => ("n/a (no fingerprint)", t.dim),
             };
             l.push(Line::from(vec![
                 Span::styled("  this      ", Style::default().fg(t.dim)),
@@ -479,7 +479,7 @@ fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
 
     // Route preview: probe the learned gate with this expert's own capability
     // vector to show how tasks in its specialty would be routed (no embedder
-    // needed — the vector is already learned).
+    // needed, the vector is already learned).
     if let (Some(router), Some(vec)) = (&app.router, &e.capability_vec) {
         l.push(Line::from(""));
         l.push(section(t, "gate routing · this specialty"));
@@ -633,7 +633,7 @@ pub(super) fn events_overlay(f: &mut Frame, app: &App) {
     if app.events.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
-                "  (no changes yet — training elsewhere will show here)",
+                "  (no changes yet; training elsewhere will show here)",
                 Style::default().fg(t.dim),
             )),
             inner,

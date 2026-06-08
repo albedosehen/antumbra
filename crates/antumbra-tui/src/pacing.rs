@@ -1,6 +1,6 @@
 //! Frame pacing for high-refresh terminals. The console paces to a target FPS
 //! (adjustable live with `+`/`-`), and on Windows raises the multimedia timer
-//! resolution to 1ms so short frame budgets are actually honoured — the default
+//! resolution to 1ms so short frame budgets are actually honoured; the default
 //! ~15.6ms scheduler tick would otherwise cap the loop near 64fps however short
 //! the budget, so 144/165/244Hz monitors would never be fed.
 
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn presets_snap_to_common_refresh_rates() {
-        // Stepping up off 144 lands exactly on 165, then 240/244 — not near them.
+        // Stepping up off 144 lands exactly on 165, then 240/244, not near them.
         assert_eq!(next_preset(144), 165);
         assert_eq!(next_preset(165), 240);
         assert_eq!(next_preset(240), 244);
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn detect_refresh_never_panics() {
-        // Returns Some(real Hz) on a display, None headless/off-Windows — but
+        // Returns Some(real Hz) on a display, None headless/off-Windows, but
         // must always be safe to call, with a captured handle or the live (0) one.
         if let Some(hz) = detect_refresh(0) {
             assert!(hz > 1);

@@ -2,7 +2,7 @@
 //! edge graph beside the selected trace's detail. Memories cluster by network on
 //! a hand-rolled Canvas; edges colour by kind (contradiction/supersession are the
 //! consolidation→retire signal). This is the soft store the population graduates
-//! from — the hippocampus to the umbra's neocortex.
+//! from: the hippocampus to the umbra's neocortex.
 
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, TAU};
@@ -151,7 +151,7 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     let Some(m) = app.selected_memory() else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "penumbra is empty — no memory traces",
+                "penumbra is empty; no memory traces",
                 Style::default().fg(t.dim),
             ))),
             inner,

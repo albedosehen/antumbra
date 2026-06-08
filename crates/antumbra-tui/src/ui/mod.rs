@@ -1,4 +1,4 @@
-//! Rendering: the living population graph (umbra orbiting the tri-node core —
+//! Rendering: the living population graph (umbra orbiting the tri-node core of
 //! umbra/penumbra/antumbra, three linked minds), with detail and gate panels.
 //! Orbit, pulse, and link-energy are hand-rolled from the animation clock so the
 //! motion is fully under control. Every colour tints from the active [`Theme`],
@@ -114,7 +114,7 @@ fn panel<'a>(t: &Theme, title: impl Into<Line<'a>>) -> Block<'a> {
         .title(title.into())
 }
 
-/// A panel whose border and title brighten to the accent when it holds focus —
+/// A panel whose border and title brighten to the accent when it holds focus:
 /// the dashboard's active-panel indicator.
 fn panel_focused<'a>(t: &Theme, title: &str, focused: bool) -> Block<'a> {
     let (border, marker) = if focused {

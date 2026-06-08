@@ -1,4 +1,4 @@
-//! Penumbra — the soft, editable memory store (the partial shadow).
+//! Penumbra: the soft, editable memory store (the partial shadow).
 //!
 //! A memory is a trace that has not yet hardened into the umbra (a frozen
 //! expert). It is fast to write, editable, reinforced over use, and tenant-
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CompartmentId, ExpertId, MemoryId, TenantId, UserId};
 
-/// Which network a memory belongs to — the coarse skill/kind it carries.
+/// Which network a memory belongs to: the coarse skill/kind it carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryNetwork {
@@ -37,7 +37,7 @@ impl MemoryNetwork {
     }
 }
 
-/// Whether a memory is a committed trace or a *planned* one — an announced
+/// Whether a memory is a committed trace or a *planned* one: an announced
 /// intent that other agents can see before it is acted on (the "planned
 /// changes" awareness signal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -122,7 +122,7 @@ impl MemoryEdge {
 pub struct Memory {
     /// Globally-unique id (the SurrealDB record key).
     pub id: MemoryId,
-    /// The owning tenant — the isolation key (engine-enforced via `tenant_id =
+    /// The owning tenant, the isolation key (engine-enforced via `tenant_id =
     /// $auth.tenant`; the repo also filters on it as the second layer).
     pub tenant: TenantId,
     pub network: MemoryNetwork,
@@ -131,10 +131,10 @@ pub struct Memory {
     pub embedding: Option<Vec<f32>>,
     /// Confidence / strength in `[0, 1]`; rises as the trace is reinforced.
     pub confidence: f32,
-    /// How many times the trace has been reinforced/accessed — the recurrence
+    /// How many times the trace has been reinforced/accessed: the recurrence
     /// signal the consolidation gate scores.
     pub reinforcement: u32,
-    /// Provenance — the sources/evidence that justify the trace.
+    /// Provenance: the sources/evidence that justify the trace.
     pub evidence: Vec<String>,
     /// `true` if the fact changes over time; volatile traces never graduate.
     pub volatile: bool,

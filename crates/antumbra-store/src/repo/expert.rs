@@ -41,8 +41,8 @@ pub async fn delete(store: &Store, id: &ExpertId) -> Result<()> {
 
 /// Freeze or thaw an expert in place by domain id: re-write the record with
 /// `frozen_at` set (freeze) or cleared (thaw). The population is keyed by `key`
-/// with an engine-assigned record id, so — as when a re-train supersedes an
-/// expert — this replaces by delete-then-insert rather than updating in place.
+/// with an engine-assigned record id, so (as when a re-train supersedes an
+/// expert) this replaces by delete-then-insert rather than updating in place.
 /// No-op if the expert is absent.
 pub async fn set_frozen(
     store: &Store,

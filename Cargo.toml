@@ -47,7 +47,7 @@ opt-level = 0
 
 # Workaround: rustc 1.96 segfaults (STATUS_ACCESS_VIOLATION) optimizing the
 # huge SurrealDB crates at release opt-level 3 on Windows MSVC. Build them at
-# opt-level 1 — their speed is irrelevant (the candle hot path stays at 3).
+# opt-level 1; their speed is irrelevant (the candle hot path stays at 3).
 [profile.release.package.surrealdb-core]
 opt-level = 1
 

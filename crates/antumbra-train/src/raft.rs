@@ -1,8 +1,8 @@
-//! RAFT — reward-ranked fine-tuning over verified outcomes (ADR-0010).
+//! RAFT: reward-ranked fine-tuning over verified outcomes (ADR-0010).
 //!
 //! Each round: sample `K` completions per task, **verify** each (the ADR-0003
 //! verifier is ground truth), keep the winners, and SFT the LoRA adapter on
-//! them. The model learns from its *own verified-correct* generations — not a
+//! them. The model learns from its *own verified-correct* generations, not a
 //! teacher's text (ADR-0002/0003). The per-round pass-rate is the reward curve.
 
 use serde_json::json;

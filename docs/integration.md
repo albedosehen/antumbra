@@ -3,7 +3,7 @@
 This is the practical answer to *"how do I actually use this, and what do I get?"*
 
 Antumbra is not a chatbot you open. It is the **persistent brain** your existing
-coding agent (Claude Code, Cursor, any MCP client) plugs into — and unlike a plain
+coding agent (Claude Code, Cursor, any MCP client) plugs into. Unlike a plain
 memory layer, it **gets better at your work over time** by turning verified outcomes
 into permanent local skills. You keep your agent; Antumbra gives it memory,
 identity, multi-tenant boundaries, and a growing population of specialists, all on
@@ -11,7 +11,7 @@ your hardware.
 
 The whole integration is three touchpoints on your agent's lifecycle, plus an MCP
 connection. Once wired, every session **boots smarter and ends by depositing what
-it learned** — and the successful work is metabolized into weights so the scaffold
+it learned**; the successful work is metabolized into weights so the scaffold
 shrinks.
 
 ```
@@ -35,7 +35,7 @@ let you run a command at lifecycle events. Antumbra uses three:
 
 A **SessionStart** hook calls Antumbra and injects the result as the session's
 opening context: the agent's standing conventions, device config, and the memory
-relevant to this project. No cold start — the agent already knows "this repo uses
+relevant to this project. No cold start: the agent already knows "this repo uses
 `deno`, not `npm`," who you are, and what it learned last time.
 
 ```jsonc
@@ -54,7 +54,7 @@ The script fetches the bootstrap memory and returns it as `additionalContext`.
 (See the [`scripts/hooks/`](../scripts/hooks/) templates.) *Today:* the capture + attribution hooks
 work as-is (they emit hook decisions, no Antumbra call), the long-lived **hook
 token** is mintable with `antumbra-mcp --mint-token` (P-1a), and the bootstrap
-fetch's transport — `POST /mcp/call {tool, arguments}` — is now live (P-1b), so the
+fetch's transport (`POST /mcp/call {tool, arguments}`) is now live (P-1b), so the
 SessionStart script works end-to-end. (Alternatively, have the agent run
 `recall_memories` at the top of its first turn with no SessionStart script at all.)
 
@@ -63,7 +63,7 @@ SessionStart script works end-to-end. (Alternatively, have the agent run
 A **Stop** hook (and a **PreCompact** hook, for when the context window is about to
 be summarized) nudges the agent to deposit non-obvious observations back into
 Antumbra before the turn ends. A sentinel file makes it fire once, not in a loop.
-This is the write half of memory — and the raw successful traces it leaves are what
+This is the write half of memory, and the raw successful traces it leaves are what
 `antumbra metabolize` later turns into a trained expert.
 
 ```jsonc
@@ -93,7 +93,7 @@ Two settings make the agent defer to Antumbra instead of its built-ins:
 ```
 
 Template scripts for all of the above live under
-[`scripts/hooks/`](../scripts/hooks/) for **both platforms** — PowerShell (`.ps1`,
+[`scripts/hooks/`](../scripts/hooks/) for **both platforms**: PowerShell (`.ps1`,
 Windows) and POSIX `bash` (`.sh`, macOS/Linux; needs `jq` + `curl`). Use the pair
 for your OS. They are thin: read stdin JSON, call Antumbra's `/mcp/call`
 (or the stdio server), emit the hook's JSON response. Point them at your endpoint
@@ -110,7 +110,7 @@ ANTUMBRA_HOST_ID=<this-device>         # provenance stamp on what it writes
 
 ## Two ways to run it
 
-Antumbra is the **same engine** in both modes — only the transport and identity
+Antumbra is the **same engine** in both modes; only the transport and identity
 differ.
 
 | | **Offline / private** | **Hosted (still private to you)** |
@@ -122,7 +122,7 @@ differ.
 | Best for | a solo dev, an air-gapped box, regulated data | a team/fleet sharing one brain; org infra you'd rather not run |
 
 Offline is the default and the privacy floor: nothing leaves the building. The
-hosted surface adds multi-tenant sharing, device sync, and live propagation — the
+hosted surface adds multi-tenant sharing, device sync, and live propagation. The
 ACL is enforced **in the database engine**, so a tenant can never see another
 tenant's rows even if a handler forgets a filter.
 
@@ -133,17 +133,17 @@ tenant's rows even if a handler forgets a filter.
 Retrieval-memory tools (give the agent a vector store to recall from) make the
 agent *remember*. Antumbra makes it **learn**:
 
-1. **Bootstrap** — the agent starts the session already carrying your conventions
+1. **Bootstrap**: the agent starts the session already carrying your conventions
    and history (memory + identity).
-2. **Route or answer** — the `answer` tool sends a task to the frozen expert most
+2. **Route or answer**: the `answer` tool sends a task to the frozen expert most
    likely to cover it, or escalates when it is out of scope. A served task costs
    you nothing; only genuine novelty hits the expensive model.
-3. **Capture** — verified outcomes and observations are written back.
-4. **Metabolize** — `antumbra metabolize` turns the successful, recurrent traces
+3. **Capture**: verified outcomes and observations are written back.
+4. **Metabolize**: `antumbra metabolize` turns the successful, recurrent traces
    (and their step-by-step decomposition) into a trained LoRA expert, frozen into
    the population so it is never forgotten.
 
-Next session, step 1 includes a skill that did not exist before — and the work it
+Next session, step 1 includes a skill that did not exist before, and the work it
 covers is now served locally for free. The scaffolding (loops, prompts, lookups)
 shrinks into weights. A memory layer is static; Antumbra compounds.
 

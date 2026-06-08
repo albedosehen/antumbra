@@ -1,0 +1,7 @@
+# Pin the toolchain so rustfmt/clippy/rustc are identical on every machine and in
+# CI -- no more "works locally, fails in CI" version skew. Bump this deliberately
+# (and re-run `cargo fmt --all`) to move to a newer Rust; CI reads the same file.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

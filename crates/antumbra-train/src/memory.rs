@@ -1,6 +1,6 @@
 //! Bootstrap from an existing memory corpus (the capture intake, ADR-0004/0009).
 //!
-//! People already hold verified competence in their agents' memory stores —
+//! People already hold verified competence in their agents' memory stores:
 //! Kushtaka, a qdrant collection, a json file, surrealdb. A memory earned its
 //! place by working in production and being reinforced; that reinforcement is
 //! the reward signal RLVR would otherwise have to rediscover from a cold start.
@@ -12,15 +12,15 @@
 //! Trust is tiered by the memory's own confidence, mirroring the two intake
 //! paths:
 //!   - a reinforced memory (`confidence >= capture_threshold`) becomes a
-//!     **capture** — provenance is its verifier, and the loop still checks the
+//!     **capture**, where provenance is its verifier, and the loop still checks the
 //!     behavior actually stuck;
-//!   - a weak memory becomes a RAFT **seed** — a hypothesis to be confirmed by
+//!   - a weak memory becomes a RAFT **seed**, a hypothesis to be confirmed by
 //!     experience (it carries no trusted `completion`, only the prompt + check),
 //!     so nothing unverified is fine-tuned into the weights.
 //!
 //! A memory's `scope`/`network` becomes the expert **skill**, so imported
 //! memories cluster into per-skill specialists the same way `populate` grows
-//! them — the rule/fact duality of a memory store maps onto the standing /
+//! them: the rule/fact duality of a memory store maps onto the standing /
 //! contextual expert split.
 
 use antumbra_core::{AntumbraError, Result};
@@ -34,7 +34,7 @@ use crate::model::CorpusTask;
 /// serde derive out of the default (non-`models`) build.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryRecord {
-    /// The behavior or fact to internalize — what the expert should emit.
+    /// The behavior or fact to internalize: what the expert should emit.
     pub content: String,
     /// The situation/cue that should elicit `content`. Synthesized from
     /// `content` when absent.
@@ -47,18 +47,18 @@ pub struct MemoryRecord {
     /// Substring the emitted completion must contain to count as internalized.
     /// Defaults to the whole `content` (an exact-recall check).
     pub marker: Option<String>,
-    /// Substrings the completion must NOT contain — typically the base prior
+    /// Substrings the completion must NOT contain, typically the base prior
     /// this memory corrects (e.g. forbid `npm` when teaching `deno`).
     pub forbid: Vec<String>,
     /// The memory's own confidence / reinforcement strength in `[0, 1]`. Drives
     /// the capture-vs-seed tier. Absent is treated as fully trusted (1.0): a
     /// store that does not track confidence is taken at its word.
     pub confidence: Option<f32>,
-    /// How many times the memory was reinforced / accessed — the *recurrence*
+    /// How many times the memory was reinforced / accessed: the *recurrence*
     /// signal the consolidation gate scores (EXP-021). Absent is treated as 0.
     pub reinforcement: Option<u32>,
     /// `true` if the fact changes over time (current branch, today's deploy
-    /// state). Volatile memories never graduate into frozen weights — they stay
+    /// state). Volatile memories never graduate into frozen weights; they stay
     /// in the store. Absent is treated as stable.
     pub volatile: Option<bool>,
     /// Explicit verifiability override for the consolidation gate. Absent lets
@@ -143,7 +143,7 @@ impl Default for ImportPolicy {
 /// Which intake path a record was routed to, for honest reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intake {
-    /// Trusted on import — fine-tuned directly (carries a `completion`).
+    /// Trusted on import: fine-tuned directly (carries a `completion`).
     Capture,
     /// A hypothesis to be discovered/confirmed by RAFT (no trusted completion).
     Seed,
@@ -167,7 +167,7 @@ pub fn parse_export(bytes: &[u8]) -> Result<Vec<MemoryRecord>> {
 /// Build a self-consistency verifier: pass when the completion contains
 /// `marker` and none of `forbid`, compared case-insensitively. The marker and
 /// forbid list are JSON-encoded into the python source, which is also valid
-/// python literal syntax — so arbitrary memory text cannot break or inject the
+/// python literal syntax, so arbitrary memory text cannot break or inject the
 /// check. This is the same marker check the teach corpora use; it confirms the
 /// expert *internalized* the memory, not that the memory is true (the store's
 /// reinforcement already settled truth).

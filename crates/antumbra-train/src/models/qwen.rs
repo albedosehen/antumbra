@@ -1,4 +1,4 @@
-//! candle Qwen2.5-Coder + LoRA — the real [`CausalLm`] (ADR-0010, MT-1).
+//! candle Qwen2.5-Coder + LoRA: the real [`CausalLm`] (ADR-0010, MT-1).
 //!
 //! Architecture vendored from candle-transformers' `qwen2` (GQA attention,
 //! RoPE, RMSNorm, KV cache) with the seven projection linears per layer swapped
@@ -88,7 +88,7 @@ fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 
 /// The frozen base weight: a dense tensor, or a 4-bit Q4_K `QTensor` that is
 /// dequantized in the forward (QLoRA-proper, ADR-0011). Either way it is a
-/// constant — gradients only reach the LoRA factors.
+/// constant; gradients only reach the LoRA factors.
 enum BaseWeight {
     Dense(Tensor),
     Quantized(QTensor),
@@ -104,7 +104,7 @@ struct LoraLinear {
     enabled: bool,
     /// When false the LoRA factors are detached so the forward is *not* tracked
     /// (generation). Without this, sampling retains the whole autograd graph in
-    /// the KV cache — and with a quantized base, every token's re-materialized
+    /// the KV cache, and with a quantized base, every token's re-materialized
     /// weights are retained too, OOMing the card.
     grad: bool,
 }
@@ -738,7 +738,7 @@ impl QwenCausalLm {
         // Train in f32: keeps the frozen base, the LoRA factors, and the loss in
         // one precision (candle autograd flows through the f32 base matmuls into
         // the LoRA factors; the base, not being a Var, gets no gradient). On CPU
-        // force f32 regardless of config — f16/bf16 only pay off on a GPU.
+        // force f32 regardless of config; f16/bf16 only pay off on a GPU.
         let dtype = if matches!(device, Device::Cpu) {
             DType::F32
         } else {
@@ -1125,7 +1125,7 @@ impl CausalLm for QwenCausalLm {
         }
         // Each example is one SGD step (batch-of-1). Shuffle the order every call
         // so no single example is consistently trained *last* and dominates the
-        // LoRA — otherwise the adapter collapses to the final example instead of
+        // LoRA; otherwise the adapter collapses to the final example instead of
         // learning the prompt-conditioned mapping. The nonce varies the shuffle
         // per round.
         let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1191,7 +1191,7 @@ impl GrpoLm for QwenCausalLm {
         let prompt_ids = self.encode(&self.wrap_prompt(prompt))?;
         let plen = prompt_ids.len();
         // One backward step per group member (as RAFT steps per winner), so only
-        // a single forward graph is alive at a time — a combined-group backward
+        // a single forward graph is alive at a time; a combined-group backward
         // holds G forwards and OOMs the card.
         let (mut total, mut steps) = (0.0f32, 0usize);
         for exp in group {

@@ -19,7 +19,7 @@ use crate::command::{self, Action, Command};
 use crate::events::{Event, EventKind};
 use crate::theme::Theme;
 
-/// Which list the navigation keys drive, and which detail panel is shown — one
+/// Which list the navigation keys drive, and which detail panel is shown: one
 /// per region of the cast shadow: the population (umbra), the shadows in training
 /// (penumbra), or the boundaries (antumbra, the keystone).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -629,7 +629,7 @@ impl App {
     }
 
     /// Every run for the same subject as `run` (newest first), from the already-
-    /// loaded set — the subject's evaluation history for the drill-down.
+    /// loaded set: the subject's evaluation history for the drill-down.
     pub fn eval_history<'a>(&'a self, run: &EvaluationRun) -> Vec<&'a EvaluationRun> {
         self.evals
             .iter()
@@ -745,7 +745,7 @@ impl App {
     }
 
     /// The rate to display: the measured FPS once warmed, else the target (so a
-    /// fresh frame — e.g. a headless snapshot — shows a stable number).
+    /// fresh frame, e.g. a headless snapshot, shows a stable number).
     pub fn shown_fps(&self) -> u32 {
         if self.fps >= 1.0 {
             self.fps.round() as u32
@@ -1060,7 +1060,7 @@ impl App {
         }
     }
 
-    /// The `(len, selected)` of the list the navigation keys drive — the Memory
+    /// The `(len, selected)` of the list the navigation keys drive: the Memory
     /// page's trace list, else the focused population region.
     fn focused_list(&self) -> (usize, usize) {
         if self.page == Page::Memory {
@@ -1141,7 +1141,7 @@ impl App {
         self.memories.get(self.selected_memory)
     }
 
-    /// The KPI strip: five `[0,1]` quality ratios across the substrate — mean
+    /// The KPI strip: five `[0,1]` quality ratios across the substrate, namely mean
     /// population fitness, the frozen ratio, the shadow graduation rate, the
     /// share of boundaries actively gating, and mean memory strength. Always
     /// rendered above the body, so every page carries the same health readout.
@@ -1192,7 +1192,7 @@ impl App {
         ]
     }
 
-    /// Edges touching `id`, as `(edge, is_outgoing)` — the selected trace's links.
+    /// Edges touching `id`, as `(edge, is_outgoing)`: the selected trace's links.
     pub fn memory_edges(&self, id: &str) -> Vec<(&MemoryEdge, bool)> {
         self.edges
             .iter()

@@ -1,6 +1,6 @@
 //! Learned-router repository (ADR-0009). A singleton per store: the gate's
 //! trained metric + centroids, retrained whenever the population changes. No
-//! raw SurrealQL — surql-rs `crud` helpers only.
+//! raw SurrealQL; surql-rs `crud` helpers only.
 
 use surql::query::crud::{get_record, upsert_record};
 use surql::types::RecordID;

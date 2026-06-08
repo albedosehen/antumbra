@@ -57,7 +57,7 @@ stateDiagram-v2
 | Risk | Mitigation |
 |---|---|
 | 4-bit QLoRA backprop is hand-rolled in candle | De-risk with **plain LoRA over a bf16 base** first; add NF4 once it works. |
-| Memory training a 7–8 B base | Gradient checkpointing + paged optimizer (DIY); smaller base if needed. |
+| Memory training a 7 to 8 B base | Gradient checkpointing + paged optimizer (DIY); smaller base if needed. |
 | Cold-start: tiny model flails, no signal | Flagship critic accelerates early exploration (ADR-0003); wean off as experts graduate. |
 | candle QLoRA stalls the project | Thin Python Unsloth trainer behind a clean interface - explicitly the *fallback*, not the plan. |
 

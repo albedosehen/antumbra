@@ -2,7 +2,7 @@
 //! buffer (no terminal) so the console can be e2e-tested and screenshotted.
 //!
 //! - [`to_text`] preserves every cell's glyph (braille graph, box-drawing,
-//!   symbols), so it reads back exactly — for assertions and plain inspection.
+//!   symbols), so it reads back exactly, for assertions and plain inspection.
 //! - [`save_png`] adds the RGB colours for true visual fidelity, rasterizing the
 //!   embedded Cascadia Mono (OFL; see `assets/CascadiaMono.LICENSE`).
 
@@ -19,7 +19,7 @@ use ratatui::Terminal;
 use crate::app::App;
 use crate::ui;
 
-/// Cascadia Mono (OFL) — rasterized for the PNG snapshot so braille / box-drawing
+/// Cascadia Mono (OFL), rasterized for the PNG snapshot so braille / box-drawing
 /// / symbol glyphs render true.
 const FONT: &[u8] = include_bytes!("../assets/CascadiaMono.ttf");
 
@@ -54,7 +54,7 @@ pub fn to_text(buf: &Buffer) -> String {
     out
 }
 
-/// The text of a sub-region of the buffer (rows trimmed) — for golden-testing a
+/// The text of a sub-region of the buffer (rows trimmed), for golden-testing a
 /// modal without the animated background behind it.
 #[cfg(test)]
 pub fn to_text_in(buf: &Buffer, area: Rect) -> String {
@@ -407,7 +407,7 @@ mod tests {
         assert_golden(name, &to_text_in(&buf, rect));
     }
 
-    // Golden the keybinding help modal exactly — adding/renaming a binding must be
+    // Golden the keybinding help modal exactly; adding/renaming a binding must be
     // a deliberate re-bless, not a silent drift.
     #[test]
     fn golden_help_overlay() {
@@ -505,7 +505,7 @@ mod tests {
     }
 
     // Golden the Loop page: the generational pipeline with the current stage lit
-    // (deterministic — no animated graph, no wall-clock fields shown).
+    // (deterministic: no animated graph, no wall-clock fields shown).
     #[test]
     fn golden_loop_page() {
         let mut app = demo_app();
@@ -525,7 +525,7 @@ mod tests {
     }
 
     // Golden the Evals page: the evaluation-run table with a regression failure
-    // (deterministic — fixed runs, no timestamps shown).
+    // (deterministic: fixed runs, no timestamps shown).
     #[test]
     fn golden_evals_page() {
         let mut app = demo_app();
@@ -599,7 +599,7 @@ mod tests {
         golden_overlay("events", &mut app, 100, 12);
     }
 
-    /// Golden the focused-layout right detail column (the panels — no animated
+    /// Golden the focused-layout right detail column (the panels, no animated
     /// graph, no wall-clock timestamps, so it's stable).
     fn golden_detail_column(name: &str, app: &mut App, w: u16, h: u16) {
         let buf = render(app, w, h, 1600.0).unwrap();
@@ -667,7 +667,7 @@ mod tests {
         // Fresh input: full rate.
         app.note_input();
         assert_eq!(app.frame_cap(false), 244);
-        // A still spell eases to 60 — unless something is animating.
+        // A still spell eases to 60, unless something is animating.
         app.tick(10_000.0);
         assert_eq!(app.frame_cap(true), 244, "animation keeps full rate");
         assert_eq!(app.frame_cap(false), 60, "an idle, still view eases to 60");
@@ -910,7 +910,7 @@ mod tests {
     }
 
     // The expert drill-down previews how the gate routes that expert's own
-    // specialty (probing the router with its capability vector — no embedder).
+    // specialty (probing the router with its capability vector, no embedder).
     #[test]
     fn drill_down_previews_gate_routing() {
         use antumbra_core::router::{LearnedRouter, RouterExpert};

@@ -404,7 +404,7 @@ async fn seed_demo() -> Result<Store> {
     }
     // Penumbra memory traces (the Memory page) across the three networks, with one
     // consolidated into an expert, plus edges including a contradiction and a
-    // supersession — the native consolidation→retire signal.
+    // supersession; the native consolidation→retire signal.
     let tenant = "ws:demo";
     let mems = [
         (

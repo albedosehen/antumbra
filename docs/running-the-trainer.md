@@ -7,11 +7,11 @@ first real run is where model-specific behaviour gets tuned.
 ## Prerequisites
 
 - An NVIDIA GPU + CUDA toolkit (candle's `cuda` feature links it). On Windows
-  with CUDA 13.x see the dedicated build section below — the toolkit version
+  with CUDA 13.x see the dedicated build section below; the toolkit version
   needs handling.
 - Rust 1.90+.
 - A real `python` on `PATH` *only* for corpora whose `verify` calls it (the
-  Windows Store alias is not a real Python — see "No Python?" below).
+  Windows Store alias is not a real Python; see "No Python?" below).
 - Network access for the *first* run (downloads Qwen2.5-Coder-1.5B, ~3 GB, into
   the Hugging Face cache; already cached here).
 
@@ -124,7 +124,7 @@ rewards, and a proper eval harness (pass@k at low temperature, not a single
 - **Verifier safety:** `verify` runs real commands - point it at a sandboxed
   corpus, not arbitrary input.
 
-## Building for CUDA on Windows (CUDA 13.3 + MSVC) — validated 2026-06-05
+## Building for CUDA on Windows (CUDA 13.3 + MSVC): validated 2026-06-05
 
 candle 0.10 compiles its CUDA kernels with `nvcc` (which needs the MSVC host
 compiler) and pins **cudarc 0.19**, whose build script only knows CUDA toolkits
@@ -134,7 +134,7 @@ compiler) and pins **cudarc 0.19**, whose build script only knows CUDA toolkits
    probe runs bare `nvcc` (found via `PATH`) and panics on an unknown version.
    The `cudarc/fallback-latest` feature (wired into `antumbra-train`'s `cuda`
    feature) makes it fall back to its newest supported version (13.2, ABI-
-   compatible with the 13.3 libs) — but *only when the `nvcc` probe fails to
+   compatible with the 13.3 libs), but *only when the `nvcc` probe fails to
    run*. So **keep `nvcc` off `PATH` at build time**; candle-kernels still finds
    it via `CUDA_PATH`.
 2. **CCCL preprocessor error** (`C1189: MSVC/cl.exe with traditional
@@ -177,7 +177,7 @@ for exactly this.) Two fixes:
 
 - Point the verifier straight at a real interpreter with **`ANTUMBRA_PYTHON`**
   (the `CommandVerifier` substitutes it for `python`/`python3`), e.g.
-  `set "ANTUMBRA_PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"` —
+  `set "ANTUMBRA_PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"`,
   more robust than fighting `PATH` order.
 - Or, to validate the GPU path with no Python at all, use a corpus whose `verify`
   is `cmd /C exit 0` (e.g. `corpora/smoke.json`): RAFT treats every completion as
