@@ -6,9 +6,10 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "antumbra", about = "Antumbra operator CLI", version)]
 pub struct Cli {
-    /// SurrealDB url: `mem://` (ephemeral), `surrealkv://./data/antumbra.skv`
-    /// (persistent), or `ws://host:8000/rpc`.
-    #[arg(long, global = true, default_value = "mem://")]
+    /// SurrealDB url. Defaults to a persistent on-disk store shared with the
+    /// operator console (`antumbra-tui`), so state carries across commands. Use
+    /// `mem://` for an ephemeral run, or `ws://host:8000/rpc` for a remote server.
+    #[arg(long, global = true, default_value = "surrealkv://./data/antumbra.skv")]
     pub url: String,
     #[command(subcommand)]
     pub command: Command,

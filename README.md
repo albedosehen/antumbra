@@ -222,14 +222,15 @@ training and serving are a feature-gated source build (see Run, below).
 # Operator console (ratatui): a live view of the population, gate, loop, and memory.
 antumbra-tui
 
-# Drive the durable loop with the CPU trainer, then inspect it.
-antumbra --url surrealkv://./data/a.skv schema            # print the generated DDL
-antumbra --url surrealkv://./data/a.skv loop --generations 3
-antumbra --url surrealkv://./data/a.skv status
+# Drive the durable loop with the CPU trainer, then inspect it. The CLI and the
+# operator console share one persistent on-disk store by default, so state from
+# one command is there for the next (and shows up live in antumbra-tui).
+antumbra schema            # print the generated DDL
+antumbra loop --generations 3
+antumbra status
 
-# Bidirectional sync between this store and a remote authoritative SurrealDB.
-antumbra --url surrealkv://./data/a.skv \
-  sync --remote ws://host:8000/rpc --remote-user root --remote-pass <pw>
+# Bidirectional sync between this local store and a remote authoritative SurrealDB.
+antumbra sync --remote ws://host:8000/rpc --remote-user root --remote-pass <pw>
 ```
 
 Real training and serving need the GPU build (a CUDA GPU and the Qwen weights, plus
@@ -237,9 +238,9 @@ Real training and serving need the GPU build (a CUDA GPU and the Qwen weights, p
 features:
 
 ```bash
-cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
+cargo run -p antumbra-cli --features models,cuda -- \
   train --corpus corpora/arith.json --run arith --generations 1
-cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
+cargo run -p antumbra-cli --features models,cuda -- \
   ask "Write a Python function add(a, b) that returns their sum."   # route -> load adapter -> generate
 ```
 
