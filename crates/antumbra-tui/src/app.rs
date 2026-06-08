@@ -239,6 +239,9 @@ pub struct App {
     pub idle: bool,
     /// The resolved render capability (vector Canvas vs raster), fixed at startup.
     pub render_tier: crate::render::RenderTier,
+    /// Launched with `--demo`: a throwaway seeded store, shown as a badge so the
+    /// operator knows nothing persists.
+    pub demo: bool,
     pub should_quit: bool,
 }
 
@@ -290,10 +293,22 @@ impl App {
             power_save: false,
             idle: false,
             render_tier: crate::render::RenderTier::default(),
+            demo: false,
             should_quit: false,
         };
         app.reload(store).await?;
         Ok(app)
+    }
+
+    /// True when the store holds nothing to show yet: a fresh install before any
+    /// seed, loop run, or captured memory. Drives the first-run hint.
+    pub fn is_empty(&self) -> bool {
+        self.experts.is_empty()
+            && self.boundaries.is_empty()
+            && self.shadows.is_empty()
+            && self.memories.is_empty()
+            && self.loop_heads.is_empty()
+            && self.evals.is_empty()
     }
 
     pub async fn reload(&mut self, store: &Store) -> anyhow::Result<()> {

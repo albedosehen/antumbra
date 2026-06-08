@@ -342,6 +342,7 @@ mod tests {
             power_save: false,
             idle: false,
             render_tier: crate::render::RenderTier::default(),
+            demo: false,
             should_quit: false,
         }
     }
@@ -655,6 +656,35 @@ mod tests {
         app.experts.clear();
         let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
         assert!(text.contains("no experts yet"), "empty-state hint shown");
+    }
+
+    #[test]
+    fn fully_empty_store_shows_the_first_run_card() {
+        let mut app = demo_app();
+        app.experts.clear();
+        app.boundaries.clear();
+        app.shadows.clear();
+        app.memories.clear();
+        app.edges.clear();
+        app.loop_heads.clear();
+        app.evals.clear();
+        assert!(app.is_empty(), "a store with nothing in it reads as empty");
+        let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
+        assert!(
+            text.contains("store is empty"),
+            "the first-run card is shown"
+        );
+        assert!(
+            text.contains("antumbra seed"),
+            "the card points the way to seed"
+        );
+        // The card belongs to the live view only; an open overlay replaces it.
+        app.mode = Mode::Help;
+        let over = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
+        assert!(
+            !over.contains("store is empty"),
+            "a modal supersedes the card"
+        );
     }
 
     // The loop runs full-rate while interacting or animating, eases to 60 after

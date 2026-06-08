@@ -46,6 +46,11 @@ pub fn render(f: &mut Frame, app: &App) {
     chrome::metrics(f, app, rows[2]);
     page_body(f, app, rows[3]);
     chrome::footer(f, app, rows[4]);
+    // A fresh, empty store would otherwise render as inert panels; the first-run
+    // hint explains how to populate it. Only in the live view (not over a modal).
+    if app.mode == Mode::Normal && app.is_empty() {
+        overlays::first_run_hint(f, app);
+    }
     if app.mode != Mode::Normal {
         overlay::dim_backdrop(f, f.area());
         match app.mode {

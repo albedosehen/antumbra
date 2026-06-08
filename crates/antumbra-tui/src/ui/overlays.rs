@@ -47,6 +47,53 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     }
 }
 
+/// The first-run hint: a centered card shown over an empty store so a fresh
+/// install explains how to populate itself instead of looking inert. Drawn in
+/// the live view (not a modal), so keys still work underneath.
+pub(super) fn first_run_hint(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let area = overlay::centered(f.area(), 64, 11);
+    let inner = overlay::modal(f, &t, area, "antumbra");
+    let dim = Style::default().fg(t.dim);
+    let key = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
+    let chip = Style::default().fg(Color::Black).bg(t.ink);
+    let lines = vec![
+        Line::from(Span::styled(
+            "  The store is empty: no experts, memory, or loop runs yet.",
+            Style::default().fg(t.value),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Populate it from another terminal, then press r to reload:",
+            dim,
+        )),
+        Line::from(vec![
+            Span::styled("    antumbra seed", key),
+            Span::styled("                 seed demo specialists", dim),
+        ]),
+        Line::from(vec![
+            Span::styled("    antumbra loop --generations 3", key),
+            Span::styled("  grow + boundaries", dim),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Or relaunch with ", dim),
+            Span::styled("antumbra-tui --demo", key),
+            Span::styled(" for a throwaway population.", dim),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" ? ", chip),
+            Span::styled(" keys    ", dim),
+            Span::styled(" : ", chip),
+            Span::styled(" commands    ", dim),
+            Span::styled(" q ", chip),
+            Span::styled(" quit", dim),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
 /// The operator-action confirmation (`x`): a yes/no prompt before a store
 /// mutation (prune a shadow, delete a boundary).
 pub(super) fn confirm_overlay(f: &mut Frame, app: &App) {

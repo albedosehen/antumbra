@@ -72,6 +72,11 @@ struct Args {
         global = true
     )]
     render: render::RenderMode,
+    /// Launch against a seeded in-memory demo population instead of reading
+    /// `--url`, so a fresh install shows the console alive immediately. Nothing
+    /// persists; it is a throwaway store for exploring the interface.
+    #[arg(long)]
+    demo: bool,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -206,8 +211,15 @@ async fn app_main() -> Result<()> {
         None => {}
     }
 
-    let store = connect(&args.url).await?;
+    // `--demo` seeds a throwaway in-memory population so a fresh install shows the
+    // console alive without a populated store; otherwise read the configured store.
+    let store = if args.demo {
+        seed_demo().await?
+    } else {
+        connect(&args.url).await?
+    };
     let mut app = App::load(&store).await?;
+    app.demo = args.demo;
     // Capture the terminal window now, while it's focused, so the follow tracks
     // this window between monitors rather than re-reading focus each tick.
     app.capture_window();

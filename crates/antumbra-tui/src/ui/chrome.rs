@@ -69,6 +69,16 @@ pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
         "  ANTUMBRA",
         Style::default().fg(t.text).add_modifier(Modifier::BOLD),
     ));
+    // A throwaway `--demo` store gets a badge so the operator knows nothing persists.
+    if app.demo {
+        spans.push(Span::styled(
+            "  DEMO ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(t.warning)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     let gen = app
         .experts
         .iter()
