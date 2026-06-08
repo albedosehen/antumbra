@@ -11,6 +11,7 @@
 !/.gitignore
 !/Cargo.toml
 !/Cargo.lock
+!/LICENSE
 !/README.md
 !/corpora/
 !/crates/
