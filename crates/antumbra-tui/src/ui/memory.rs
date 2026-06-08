@@ -1,0 +1,215 @@
+//! The Memory page (the penumbra): the world/bank/opinion networks as a typed
+//! edge graph beside the selected trace's detail. Memories cluster by network on
+//! a hand-rolled Canvas; edges colour by kind (contradiction/supersession are the
+//! consolidation→retire signal). This is the soft store the population graduates
+//! from — the hippocampus to the umbra's neocortex.
+
+use std::collections::HashMap;
+use std::f64::consts::{FRAC_PI_2, TAU};
+
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
+use ratatui::widgets::Paragraph;
+use ratatui::Frame;
+
+use antumbra_core::{EdgeType, MemoryNetwork};
+
+use crate::app::App;
+use crate::theme::Theme;
+
+use super::{gauge_row, heading, kv, panel};
+
+/// The three networks and where their clusters anchor on the canvas.
+const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
+    (MemoryNetwork::World, (0.0, 62.0)),
+    (MemoryNetwork::Bank, (-60.0, -38.0)),
+    (MemoryNetwork::Opinion, (60.0, -38.0)),
+];
+
+pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
+    let cols =
+        Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).split(area);
+    graph(f, app, cols[0]);
+    detail(f, app, cols[1]);
+}
+
+/// Colour an edge by its kind: contradiction/supersession (the retire signal)
+/// stand out; reference/follows/caused are quieter.
+fn edge_color(t: &Theme, e: EdgeType) -> Color {
+    match e {
+        EdgeType::Contradicts => t.alert,
+        EdgeType::Supersedes => t.warning,
+        EdgeType::Caused => t.value,
+        EdgeType::Follows => t.accent,
+        EdgeType::References => t.dim,
+    }
+}
+
+/// The penumbra graph: memories clustered by network, edges drawn between them.
+fn graph(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let block = panel(
+        &t,
+        Span::styled(" penumbra · memory networks ", Style::default().fg(t.ink)),
+    );
+    let canvas = Canvas::default()
+        .block(block)
+        .marker(app.canvas_marker())
+        .x_bounds([-100.0, 100.0])
+        .y_bounds([-100.0, 100.0])
+        .paint(move |ctx| {
+            // Lay each network's traces on a ring around its anchor.
+            let mut pos: HashMap<&str, (f64, f64)> = HashMap::new();
+            for (net, (ax, ay)) in ANCHORS {
+                let mems: Vec<&_> = app.memories.iter().filter(|m| m.network == net).collect();
+                let n = mems.len();
+                for (j, m) in mems.iter().enumerate() {
+                    let p = if n <= 1 {
+                        (ax, ay)
+                    } else {
+                        let ang = (j as f64 / n as f64) * TAU - FRAC_PI_2;
+                        (ax + 24.0 * ang.cos(), ay + 24.0 * ang.sin())
+                    };
+                    pos.insert(m.id.as_str(), p);
+                }
+            }
+            // Edges first, under the nodes.
+            for e in &app.edges {
+                if let (Some(&(x1, y1)), Some(&(x2, y2))) =
+                    (pos.get(e.from_id.as_str()), pos.get(e.to_id.as_str()))
+                {
+                    ctx.draw(&CanvasLine {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        color: edge_color(&t, e.edge_type),
+                    });
+                }
+            }
+            // Nodes: confidence tints the glyph; the selected trace is accented,
+            // a consolidated one is filled.
+            for (i, m) in app.memories.iter().enumerate() {
+                if let Some(&(x, y)) = pos.get(m.id.as_str()) {
+                    let selected = i == app.selected_memory;
+                    let glyph = if selected {
+                        "◉"
+                    } else if m.is_consolidated() {
+                        "●"
+                    } else {
+                        "○"
+                    };
+                    let col = if selected {
+                        t.accent
+                    } else {
+                        t.fitness(m.confidence, 0.9)
+                    };
+                    ctx.print(x, y, Span::styled(glyph, Style::default().fg(col)));
+                }
+            }
+            // Network labels under each cluster.
+            for (net, (ax, ay)) in ANCHORS {
+                ctx.print(
+                    ax - 3.0,
+                    ay - 30.0,
+                    Span::styled(
+                        net.as_str(),
+                        Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+                    ),
+                );
+            }
+        });
+    f.render_widget(canvas, area);
+}
+
+/// A bold, dim section label.
+fn group<'a>(t: &Theme, label: String) -> Line<'a> {
+    Line::from(Span::styled(
+        label,
+        Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+    ))
+}
+
+/// Clip `s` to `max` columns, ending in an ellipsis when cut.
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// The selected trace: its fields, evidence, and the edges touching it.
+fn detail(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let block = panel(&t, Span::styled(" memory ", Style::default().fg(t.ink)));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let Some(m) = app.selected_memory() else {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "penumbra is empty — no memory traces",
+                Style::default().fg(t.dim),
+            ))),
+            inner,
+        );
+        return;
+    };
+    let w = inner.width.saturating_sub(1) as usize;
+
+    let mut lines = vec![
+        heading(&t, clip(&m.content, w)),
+        Line::from(""),
+        kv(&t, "network", m.network.as_str()),
+        kv(&t, "status", m.status.as_str()),
+        gauge_row(&t, "confidence", m.confidence, t.fitness(m.confidence, 1.0)),
+        kv(&t, "reinforce", &m.reinforcement.to_string()),
+        kv(&t, "volatile", if m.volatile { "yes" } else { "no" }),
+    ];
+    if let Some(exp) = &m.consolidated_expert {
+        lines.push(kv(&t, "expert", exp.as_str()));
+    }
+    if let Some(author) = &m.author {
+        let host = m.author_host.as_deref().unwrap_or("-");
+        lines.push(kv(&t, "author", &format!("{} · {host}", author.as_str())));
+    }
+
+    if !m.evidence.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(group(&t, "evidence".into()));
+        for ev in &m.evidence {
+            lines.push(Line::from(Span::styled(
+                format!("  · {}", clip(ev, w.saturating_sub(4))),
+                Style::default().fg(t.value),
+            )));
+        }
+    }
+
+    let edges = app.memory_edges(m.id.as_str());
+    lines.push(Line::from(""));
+    lines.push(group(&t, format!("edges ({})", edges.len())));
+    for (e, outgoing) in &edges {
+        let arrow = if *outgoing { "→" } else { "←" };
+        let other = if *outgoing {
+            e.to_id.as_str()
+        } else {
+            e.from_id.as_str()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {arrow} "), Style::default().fg(t.dim)),
+            Span::styled(
+                format!("{:<12}", e.edge_type.as_str()),
+                Style::default().fg(edge_color(&t, e.edge_type)),
+            ),
+            Span::styled(
+                clip(other, w.saturating_sub(17)),
+                Style::default().fg(t.ink),
+            ),
+        ]));
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
+}

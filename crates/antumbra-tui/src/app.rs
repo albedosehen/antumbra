@@ -2,9 +2,10 @@
 //! and the learned gate, loaded from the store and ticked for animation.
 
 use antumbra_core::{
-    BoundaryId, Expert, ExpertId, FailureBoundary, LearnedRouter, Shadow, ShadowId, ShadowStatus,
+    BoundaryId, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory, MemoryEdge, Shadow,
+    ShadowId, ShadowStatus,
 };
-use antumbra_store::repo::{boundary, expert, router, shadow};
+use antumbra_store::repo::{boundary, edge, expert, memory, router, shadow};
 use antumbra_store::Store;
 
 use chrono::Utc;
@@ -122,6 +123,12 @@ pub struct App {
     pub boundaries: Vec<FailureBoundary>,
     /// Recent shadows in training (the penumbra), newest first.
     pub shadows: Vec<Shadow>,
+    /// Penumbra memory traces (world / bank / opinion), for the Memory page.
+    pub memories: Vec<Memory>,
+    /// Typed edges between memories (references / supersedes / contradicts / …).
+    pub edges: Vec<MemoryEdge>,
+    /// Index into `memories` of the highlighted trace (Memory page).
+    pub selected_memory: usize,
     pub router: Option<LearnedRouter>,
     /// Index into `experts` of the highlighted node.
     pub selected: usize,
@@ -200,6 +207,9 @@ impl App {
             experts: Vec::new(),
             boundaries: Vec::new(),
             shadows: Vec::new(),
+            memories: Vec::new(),
+            edges: Vec::new(),
+            selected_memory: 0,
             router: None,
             selected: 0,
             selected_boundary: 0,
@@ -247,6 +257,16 @@ impl App {
         // Newest first, so the penumbra view leads with current training.
         self.shadows
             .sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        // Penumbra memory networks + their edges (the Memory page). Grouped by
+        // network then strongest first, so each network leads with its anchors.
+        self.memories = memory::all_unscoped(store).await?;
+        self.memories.sort_by(|a, b| {
+            a.network
+                .as_str()
+                .cmp(b.network.as_str())
+                .then(b.confidence.total_cmp(&a.confidence))
+        });
+        self.edges = edge::all_unscoped(store).await?;
         self.router = router::load(store).await?;
         if !self.experts.is_empty() && self.selected >= self.experts.len() {
             self.selected = self.experts.len() - 1;
@@ -256,6 +276,9 @@ impl App {
         }
         if !self.shadows.is_empty() && self.selected_shadow >= self.shadows.len() {
             self.selected_shadow = self.shadows.len() - 1;
+        }
+        if !self.memories.is_empty() && self.selected_memory >= self.memories.len() {
+            self.selected_memory = self.memories.len() - 1;
         }
         self.record_events();
         self.since_reload_ms = 0.0;
@@ -361,6 +384,10 @@ impl App {
     /// Stage the operator action for the focused selection (`x`), opening the
     /// confirm prompt. Prune the focused shadow, or delete the focused boundary.
     pub fn request_action(&mut self) {
+        // Operator actions target the population regions, not the Memory page.
+        if self.page != Page::Population {
+            return;
+        }
         let pending = match self.focus {
             Focus::Shadows => self
                 .selected_shadow()
@@ -499,6 +526,11 @@ impl App {
 
     /// Open the drill-down detail overlay for the focused selection (Enter).
     pub fn open_detail(&mut self) {
+        // The Memory page shows its detail inline; the drill-down overlay is for
+        // the population regions only.
+        if self.page != Page::Population {
+            return;
+        }
         self.mode = Mode::Detail;
         self.detail_scroll = 0;
     }
@@ -822,6 +854,12 @@ impl App {
 
     /// Advance the highlighted item in the focused list (wraps).
     pub fn select_next(&mut self) {
+        if self.page == Page::Memory {
+            if !self.memories.is_empty() {
+                self.selected_memory = (self.selected_memory + 1) % self.memories.len();
+            }
+            return;
+        }
         match self.focus {
             Focus::Experts => {
                 if !self.experts.is_empty() {
@@ -842,6 +880,13 @@ impl App {
     }
 
     pub fn select_prev(&mut self) {
+        if self.page == Page::Memory {
+            if !self.memories.is_empty() {
+                let n = self.memories.len();
+                self.selected_memory = (self.selected_memory + n - 1) % n;
+            }
+            return;
+        }
         match self.focus {
             Focus::Experts => {
                 if !self.experts.is_empty() {
@@ -863,8 +908,12 @@ impl App {
         }
     }
 
-    /// The `(len, selected)` of the list the navigation keys drive.
+    /// The `(len, selected)` of the list the navigation keys drive — the Memory
+    /// page's trace list, else the focused population region.
     fn focused_list(&self) -> (usize, usize) {
+        if self.page == Page::Memory {
+            return (self.memories.len(), self.selected_memory);
+        }
         match self.focus {
             Focus::Experts => (self.experts.len(), self.selected),
             Focus::Shadows => (self.shadows.len(), self.selected_shadow),
@@ -874,6 +923,10 @@ impl App {
 
     /// Set the highlighted index of the focused list.
     fn set_focused_selection(&mut self, idx: usize) {
+        if self.page == Page::Memory {
+            self.selected_memory = idx;
+            return;
+        }
         match self.focus {
             Focus::Experts => self.selected = idx,
             Focus::Shadows => self.selected_shadow = idx,
@@ -924,12 +977,32 @@ impl App {
     pub fn selected_shadow(&self) -> Option<&Shadow> {
         self.shadows.get(self.selected_shadow)
     }
+
+    pub fn selected_memory(&self) -> Option<&Memory> {
+        self.memories.get(self.selected_memory)
+    }
+
+    /// Edges touching `id`, as `(edge, is_outgoing)` — the selected trace's links.
+    pub fn memory_edges(&self, id: &str) -> Vec<(&MemoryEdge, bool)> {
+        self.edges
+            .iter()
+            .filter_map(|e| {
+                if e.from_id.as_str() == id {
+                    Some((e, true))
+                } else if e.to_id.as_str() == id {
+                    Some((e, false))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antumbra_core::Generation;
+    use antumbra_core::{EdgeType, Generation, MemoryNetwork};
     use antumbra_store::EMBED_DIM;
     use chrono::Utc;
 
@@ -1100,6 +1173,58 @@ mod tests {
             .unwrap();
         assert!(!thawed.is_frozen(), "the store reflects the thaw");
         assert!(app.events.iter().any(|ev| ev.text.contains("thawed")));
+    }
+
+    #[tokio::test]
+    async fn memories_and_edges_load_and_drive_the_memory_page() {
+        let (store, mut app) = seeded().await;
+        assert!(app.memories.is_empty(), "no memory traces in the base seed");
+        let now = Utc::now();
+        memory::upsert(
+            &store,
+            &Memory::new("memory:a", "ws:1", MemoryNetwork::World, "alpha", 0.5, now),
+        )
+        .await
+        .unwrap();
+        memory::upsert(
+            &store,
+            &Memory::new("memory:b", "ws:1", MemoryNetwork::Bank, "beta", 0.9, now),
+        )
+        .await
+        .unwrap();
+        edge::relate(
+            &store,
+            &MemoryEdge::new(
+                "ws:1",
+                "memory:a",
+                "memory:b",
+                EdgeType::References,
+                0.5,
+                now,
+            ),
+        )
+        .await
+        .unwrap();
+        app.reload(&store).await.unwrap();
+
+        assert_eq!(app.memories.len(), 2);
+        assert_eq!(app.edges.len(), 1);
+
+        // On the Memory page, navigation drives the trace selection and wraps.
+        app.page = Page::Memory;
+        app.selected_memory = 0;
+        let id = app.selected_memory().unwrap().id.as_str().to_string();
+        assert_eq!(app.memory_edges(&id).len(), 1, "the selected trace's edge");
+        app.select_next();
+        assert_eq!(app.selected_memory, 1);
+        app.select_next();
+        assert_eq!(app.selected_memory, 0, "selection wraps");
+
+        // Operator actions and the drill-down overlay are inert on the Memory page.
+        app.request_action();
+        assert!(app.pending.is_none());
+        app.open_detail();
+        assert_eq!(app.mode, Mode::Normal);
     }
 
     #[tokio::test]

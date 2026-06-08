@@ -163,10 +163,64 @@ mod tests {
     use crate::app::{Focus, LayoutMode, Mode, Palette};
     use crate::command::Action;
     use antumbra_core::{
-        BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain, Shadow, ShadowId,
-        ShadowStatus,
+        BoundaryId, EdgeType, Expert, ExpertId, FailureBoundary, Generation, Grain, Memory,
+        MemoryEdge, MemoryNetwork, Shadow, ShadowId, ShadowStatus,
     };
     use chrono::Utc;
+
+    /// Three demo traces (one per network) and two edges, for the Memory page.
+    fn demo_memories(now: chrono::DateTime<Utc>) -> Vec<Memory> {
+        let mut deno = Memory::new(
+            "memory:deno",
+            "ws:demo",
+            MemoryNetwork::World,
+            "prefer deno over node for new scripts",
+            0.86,
+            now,
+        )
+        .with_evidence(vec!["session-log".into()]);
+        deno.reinforcement = 4;
+        let mut incident = Memory::new(
+            "memory:incident",
+            "ws:demo",
+            MemoryNetwork::Bank,
+            "npm install failed under the deno runtime",
+            0.70,
+            now,
+        );
+        incident.reinforcement = 2;
+        incident.volatile = true;
+        let terse = Memory::new(
+            "memory:terse",
+            "ws:demo",
+            MemoryNetwork::Opinion,
+            "keep operator docs terse, no emojis",
+            0.80,
+            now,
+        );
+        vec![deno, incident, terse]
+    }
+
+    fn demo_edges(now: chrono::DateTime<Utc>) -> Vec<MemoryEdge> {
+        vec![
+            MemoryEdge::new(
+                "ws:demo",
+                "memory:incident",
+                "memory:deno",
+                EdgeType::Contradicts,
+                0.8,
+                now,
+            ),
+            MemoryEdge::new(
+                "ws:demo",
+                "memory:deno",
+                "memory:incident",
+                EdgeType::Caused,
+                0.6,
+                now,
+            ),
+        ]
+    }
 
     fn demo_app() -> App {
         let now = Utc::now();
@@ -188,6 +242,9 @@ mod tests {
             experts: vec![expert],
             boundaries: Vec::new(),
             shadows: Vec::new(),
+            memories: demo_memories(now),
+            edges: demo_edges(now),
+            selected_memory: 0,
             router: None,
             selected: 0,
             selected_boundary: 0,
@@ -302,6 +359,17 @@ mod tests {
         let mut app = demo_app();
         app.open_palette();
         golden_overlay("palette", &mut app, 120, 36);
+    }
+
+    // Golden the Memory page: the penumbra edge graph (memories clustered by
+    // network, type-coloured edges) beside the selected trace's detail. The graph
+    // is statically laid out (no animation clock), so the full frame is stable.
+    #[test]
+    fn golden_memory_page() {
+        let mut app = demo_app();
+        app.set_page(crate::app::Page::Memory);
+        let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+        assert_golden("memory_page", &to_text(&buf));
     }
 
     // Golden the operator-action confirm prompt.

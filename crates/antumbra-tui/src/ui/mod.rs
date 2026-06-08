@@ -10,6 +10,7 @@
 
 mod chrome;
 mod graph;
+mod memory;
 mod overlays;
 mod panels;
 
@@ -59,13 +60,7 @@ pub fn render(f: &mut Frame, app: &App) {
 fn page_body(f: &mut Frame, app: &App, area: Rect) {
     match app.page {
         Page::Population => body(f, app, area),
-        Page::Memory => placeholder(
-            f,
-            app,
-            area,
-            " memory networks ",
-            "world · bank · opinion  +  contradiction / supersession edge graph",
-        ),
+        Page::Memory => memory::page(f, app, area),
         Page::Loop => placeholder(
             f,
             app,

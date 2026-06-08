@@ -92,6 +92,9 @@ enum Command {
         /// Animation clock (ms) to freeze the frame at (deterministic output).
         #[arg(long, default_value_t = 1600.0)]
         at_ms: f64,
+        /// Top-level page to render: population, memory, loop, or evals.
+        #[arg(long, default_value = "population")]
+        page: String,
         /// Body layout to render: focused, dashboard, or graph.
         #[arg(long, default_value = "focused")]
         layout: String,
@@ -136,6 +139,7 @@ async fn app_main() -> Result<()> {
             width,
             height,
             at_ms,
+            page,
             layout,
             focus,
             overlay,
@@ -147,6 +151,12 @@ async fn app_main() -> Result<()> {
                 connect(&args.url).await?
             };
             let mut app = App::load(&store).await?;
+            app.set_page(match page.as_str() {
+                "memory" => app::Page::Memory,
+                "loop" => app::Page::Loop,
+                "evals" => app::Page::Evals,
+                _ => app::Page::Population,
+            });
             app.set_layout(match layout.as_str() {
                 "dashboard" => app::LayoutMode::Dashboard,
                 "graph" => app::LayoutMode::Graph,
@@ -256,10 +266,10 @@ fn print_monitors() {
 async fn seed_demo() -> Result<Store> {
     use antumbra_core::router::{LearnedRouter, RouterExpert};
     use antumbra_core::{
-        BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain, Shadow, ShadowId,
-        ShadowStatus,
+        BoundaryId, EdgeType, Expert, ExpertId, FailureBoundary, Generation, Grain, Memory,
+        MemoryEdge, MemoryNetwork, Shadow, ShadowId, ShadowStatus,
     };
-    use antumbra_store::repo::{boundary, expert, router, shadow};
+    use antumbra_store::repo::{boundary, edge, expert, memory, router, shadow};
     use chrono::Utc;
 
     let store = Store::connect_memory(EMBED_DIM).await?;
@@ -383,6 +393,101 @@ async fn seed_demo() -> Result<Store> {
                 reward_curve,
                 created_at: now,
             },
+        )
+        .await?;
+    }
+    // Penumbra memory traces (the Memory page) across the three networks, with one
+    // consolidated into an expert, plus edges including a contradiction and a
+    // supersession — the native consolidation→retire signal.
+    let tenant = "ws:demo";
+    let mems = [
+        (
+            "memory:deno",
+            MemoryNetwork::World,
+            "prefer deno over node for new scripts",
+            0.86,
+            4u32,
+            false,
+            false,
+        ),
+        (
+            "memory:surql",
+            MemoryNetwork::World,
+            "use surql-rs builders, never raw SurrealQL",
+            0.93,
+            7,
+            false,
+            true,
+        ),
+        (
+            "memory:node-incident",
+            MemoryNetwork::Bank,
+            "npm install failed under the deno runtime",
+            0.70,
+            2,
+            true,
+            false,
+        ),
+        (
+            "memory:retry",
+            MemoryNetwork::Bank,
+            "retrying the flaky step fixed the test",
+            0.58,
+            1,
+            true,
+            false,
+        ),
+        (
+            "memory:terse",
+            MemoryNetwork::Opinion,
+            "keep operator docs terse, no emojis",
+            0.80,
+            3,
+            false,
+            false,
+        ),
+        (
+            "memory:canvas",
+            MemoryNetwork::Opinion,
+            "canvas-first rendering beats raster over SSH",
+            0.75,
+            2,
+            false,
+            false,
+        ),
+    ];
+    for (id, network, content, confidence, reinforcement, volatile, consolidated) in mems {
+        let mut m = Memory::new(id, tenant, network, content, confidence, now)
+            .by("user:operator", "windows")
+            .volatile(volatile)
+            .with_evidence(vec!["session-log".into()]);
+        m.reinforcement = reinforcement;
+        if consolidated {
+            m.mark_consolidated(ExpertId::new("expert:json-shaper"), now);
+        }
+        memory::upsert(&store, &m).await?;
+    }
+    let edges = [
+        (
+            "memory:node-incident",
+            "memory:deno",
+            EdgeType::Contradicts,
+            0.8,
+        ),
+        ("memory:deno", "memory:node-incident", EdgeType::Caused, 0.6),
+        (
+            "memory:retry",
+            "memory:node-incident",
+            EdgeType::Follows,
+            0.5,
+        ),
+        ("memory:surql", "memory:deno", EdgeType::References, 0.4),
+        ("memory:terse", "memory:canvas", EdgeType::Supersedes, 0.5),
+    ];
+    for (from, to, edge_type, weight) in edges {
+        edge::relate(
+            &store,
+            &MemoryEdge::new(tenant, from, to, edge_type, weight, now),
         )
         .await?;
     }
