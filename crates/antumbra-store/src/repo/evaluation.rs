@@ -51,3 +51,61 @@ pub async fn latest_for_subject(
         .map_err(map)?;
     first(store.client(), &query).await.map_err(map)
 }
+
+/// The most recent runs across all subjects, newest first — the owner/console
+/// view (parallels [`crate::repo::memory::all_unscoped`]).
+pub async fn recent_unscoped(store: &Store) -> Result<Vec<EvaluationRun>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(TABLE)
+        .map_err(map)?
+        .order_by("created_at", "DESC")
+        .map_err(map)?;
+    query_records(store.client(), &query).await.map_err(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::EMBED_DIM;
+    use antumbra_core::evaluation::EvalStatus;
+    use antumbra_core::RunId;
+    use chrono::Utc;
+
+    fn make(id: &str, status: EvalStatus, at: chrono::DateTime<Utc>) -> EvaluationRun {
+        EvaluationRun {
+            run_id: RunId::new(id),
+            subject_kind: SubjectKind::Expert,
+            subject_id: "expert:1".into(),
+            corpus_task_id: "task:1".into(),
+            status,
+            metrics: None,
+            regression_fingerprint: None,
+            created_at: at,
+        }
+    }
+
+    #[tokio::test]
+    async fn recent_unscoped_reads_all_newest_first() {
+        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let now = Utc::now();
+        insert(
+            &s,
+            &make(
+                "run:old",
+                EvalStatus::Success,
+                now - chrono::Duration::seconds(60),
+            ),
+        )
+        .await
+        .unwrap();
+        insert(&s, &make("run:new", EvalStatus::Failure, now))
+            .await
+            .unwrap();
+
+        let runs = recent_unscoped(&s).await.unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].run_id.as_str(), "run:new", "newest first");
+        assert_eq!(runs[0].status, EvalStatus::Failure);
+    }
+}

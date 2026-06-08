@@ -265,12 +265,16 @@ fn print_monitors() {
 /// A seeded in-memory population so the headless snapshot (and its e2e test) has
 /// content without a live store.
 async fn seed_demo() -> Result<Store> {
+    use antumbra_core::generational::{GenerationHead, LoopState};
     use antumbra_core::router::{LearnedRouter, RouterExpert};
     use antumbra_core::{
-        BoundaryId, EdgeType, Expert, ExpertId, FailureBoundary, Generation, Grain, Memory,
-        MemoryEdge, MemoryNetwork, Shadow, ShadowId, ShadowStatus,
+        BoundaryId, EdgeType, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary,
+        Generation, Grain, Memory, MemoryEdge, MemoryNetwork, RunId, Shadow, ShadowId,
+        ShadowStatus, SubjectKind,
     };
-    use antumbra_store::repo::{boundary, edge, expert, memory, router, shadow};
+    use antumbra_store::repo::{
+        boundary, edge, evaluation, expert, generation, memory, router, shadow,
+    };
     use chrono::Utc;
 
     let store = Store::connect_memory(EMBED_DIM).await?;
@@ -489,6 +493,59 @@ async fn seed_demo() -> Result<Store> {
         edge::relate(
             &store,
             &MemoryEdge::new(tenant, from, to, edge_type, weight, now),
+        )
+        .await?;
+    }
+    // The generational loop head (mid-cycle) for the Loop page.
+    let mut head = GenerationHead::new(RunId::new("run:demo"), now);
+    head.generation = Generation(4);
+    head.state = LoopState::Score;
+    generation::save_head(&store, &head).await?;
+    // A few evaluation runs across subjects/statuses for the Evals page (one
+    // failure = the regression tripwire firing).
+    let runs = [
+        (
+            "run:e1",
+            SubjectKind::Expert,
+            "expert:arith-specialist",
+            EvalStatus::Success,
+            Some("a1b2c3d4"),
+        ),
+        (
+            "run:e2",
+            SubjectKind::Expert,
+            "expert:json-shaper",
+            EvalStatus::Success,
+            Some("9f8e7d6c"),
+        ),
+        (
+            "run:e3",
+            SubjectKind::Shadow,
+            "shadow:g3",
+            EvalStatus::Failure,
+            None,
+        ),
+        (
+            "run:e4",
+            SubjectKind::Router,
+            "router",
+            EvalStatus::Running,
+            None,
+        ),
+    ];
+    for (id, kind, subject, status, fp) in runs {
+        evaluation::insert(
+            &store,
+            &EvaluationRun {
+                run_id: RunId::new(id),
+                subject_kind: kind,
+                subject_id: subject.into(),
+                corpus_task_id: "task:arith".into(),
+                status,
+                metrics: None,
+                regression_fingerprint: fp.map(str::to_string),
+                created_at: now,
+            },
         )
         .await?;
     }

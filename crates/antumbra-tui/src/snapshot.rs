@@ -162,12 +162,59 @@ mod tests {
     use super::*;
     use crate::app::{Focus, LayoutMode, Mode, Palette};
     use crate::command::Action;
+    use antumbra_core::generational::{GenerationHead, LoopState};
     use antumbra_core::{
-        BoundaryId, EdgeType, Expert, ExpertId, FailureBoundary, Generation, Grain, Memory,
-        MemoryEdge, MemoryNetwork, Shadow, ShadowId, ShadowStatus,
+        BoundaryId, EdgeType, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary,
+        Generation, Grain, Memory, MemoryEdge, MemoryNetwork, RunId, Shadow, ShadowId,
+        ShadowStatus, SubjectKind,
     };
     use chrono::Utc;
     use ratatui::layout::{Constraint, Layout};
+
+    /// One loop head, mid-cycle (the Loop page).
+    fn demo_loop_heads(now: chrono::DateTime<Utc>) -> Vec<GenerationHead> {
+        let mut head = GenerationHead::new(RunId::new("run:demo"), now);
+        head.generation = Generation(4);
+        head.state = LoopState::Score;
+        vec![head]
+    }
+
+    /// A few evaluation runs across subjects and statuses (the Evals page).
+    fn demo_evals(now: chrono::DateTime<Utc>) -> Vec<EvaluationRun> {
+        let mk = |id: &str, kind, subj: &str, status, fp: Option<&str>| EvaluationRun {
+            run_id: RunId::new(id),
+            subject_kind: kind,
+            subject_id: subj.into(),
+            corpus_task_id: "task:arith".into(),
+            status,
+            metrics: None,
+            regression_fingerprint: fp.map(str::to_string),
+            created_at: now,
+        };
+        vec![
+            mk(
+                "run:1",
+                SubjectKind::Expert,
+                "expert:arith-specialist",
+                EvalStatus::Success,
+                Some("a1b2c3d4"),
+            ),
+            mk(
+                "run:2",
+                SubjectKind::Shadow,
+                "shadow:g3",
+                EvalStatus::Failure,
+                None,
+            ),
+            mk(
+                "run:3",
+                SubjectKind::Router,
+                "router",
+                EvalStatus::Running,
+                None,
+            ),
+        ]
+    }
 
     /// Three demo traces (one per network) and two edges, for the Memory page.
     fn demo_memories(now: chrono::DateTime<Utc>) -> Vec<Memory> {
@@ -246,6 +293,9 @@ mod tests {
             memories: demo_memories(now),
             edges: demo_edges(now),
             selected_memory: 0,
+            loop_heads: demo_loop_heads(now),
+            evals: demo_evals(now),
+            selected_eval: 0,
             router: None,
             selected: 0,
             selected_boundary: 0,
@@ -441,6 +491,26 @@ mod tests {
         let strip =
             Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(chrome[3])[1];
         assert_golden("reward_heatmap", &to_text_in(&buf, strip));
+    }
+
+    // Golden the Loop page: the generational pipeline with the current stage lit
+    // (deterministic — no animated graph, no wall-clock fields shown).
+    #[test]
+    fn golden_loop_page() {
+        let mut app = demo_app();
+        app.set_page(crate::app::Page::Loop);
+        let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+        assert_golden("loop_page", &to_text(&buf));
+    }
+
+    // Golden the Evals page: the evaluation-run table with a regression failure
+    // (deterministic — fixed runs, no timestamps shown).
+    #[test]
+    fn golden_evals_page() {
+        let mut app = demo_app();
+        app.set_page(crate::app::Page::Evals);
+        let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+        assert_golden("evals_page", &to_text(&buf));
     }
 
     // Golden the operator-action confirm prompt.

@@ -9,8 +9,10 @@
 //! filter modals). The small shared widget helpers live here.
 
 mod chrome;
+mod evals;
 mod graph;
 mod heatmap;
+mod loops;
 mod memory;
 mod overlays;
 mod panels;
@@ -18,10 +20,10 @@ mod table;
 
 use std::f64::consts::TAU;
 
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Paragraph};
+use ratatui::widgets::{Block, BorderType};
 use ratatui::Frame;
 
 use crate::app::{App, Focus, LayoutMode, Mode, Page};
@@ -65,50 +67,9 @@ fn page_body(f: &mut Frame, app: &App, area: Rect) {
     match app.page {
         Page::Population => body(f, app, area),
         Page::Memory => memory::page(f, app, area),
-        Page::Loop => placeholder(
-            f,
-            app,
-            area,
-            " generational loop ",
-            "grow → explore → score → decide → consolidate  ·  generation timeline",
-        ),
-        Page::Evals => placeholder(
-            f,
-            app,
-            area,
-            " evaluations ",
-            "regression tripwire  ·  pass / fail metrics per expert",
-        ),
+        Page::Loop => loops::page(f, app, area),
+        Page::Evals => evals::page(f, app, area),
     }
-}
-
-/// A page not yet built out: a titled panel naming what it will surface.
-fn placeholder(f: &mut Frame, app: &App, area: Rect, title: &str, blurb: &str) {
-    let t = app.theme();
-    let block = panel(
-        &t,
-        Span::styled(title.to_string(), Style::default().fg(t.ink)),
-    );
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if inner.height < 3 {
-        return;
-    }
-    let lines = vec![
-        Line::from(Span::styled(
-            "— in progress —",
-            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(blurb, Style::default().fg(t.dim))),
-    ];
-    let mid = Rect {
-        x: inner.x,
-        y: inner.y + inner.height / 2 - 1,
-        width: inner.width,
-        height: 3,
-    };
-    f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), mid);
 }
 
 /// The body between header and footer, arranged per the active layout: graph

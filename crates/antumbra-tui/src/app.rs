@@ -1,11 +1,14 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, loaded from the store and ticked for animation.
 
+use antumbra_core::generational::GenerationHead;
 use antumbra_core::{
-    BoundaryId, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory, MemoryEdge, Shadow,
-    ShadowId, ShadowStatus,
+    BoundaryId, EvaluationRun, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory,
+    MemoryEdge, Shadow, ShadowId, ShadowStatus,
 };
-use antumbra_store::repo::{boundary, edge, expert, memory, router, shadow};
+use antumbra_store::repo::{
+    boundary, edge, evaluation, expert, generation, memory, router, shadow,
+};
 use antumbra_store::Store;
 
 use chrono::Utc;
@@ -153,6 +156,12 @@ pub struct App {
     pub edges: Vec<MemoryEdge>,
     /// Index into `memories` of the highlighted trace (Memory page).
     pub selected_memory: usize,
+    /// The generational loop heads (one per run), for the Loop page.
+    pub loop_heads: Vec<GenerationHead>,
+    /// Recent evaluation runs (newest first), for the Evals page.
+    pub evals: Vec<EvaluationRun>,
+    /// Index into `evals` of the highlighted run (Evals page).
+    pub selected_eval: usize,
     pub router: Option<LearnedRouter>,
     /// Index into `experts` of the highlighted node.
     pub selected: usize,
@@ -236,6 +245,9 @@ impl App {
             memories: Vec::new(),
             edges: Vec::new(),
             selected_memory: 0,
+            loop_heads: Vec::new(),
+            evals: Vec::new(),
+            selected_eval: 0,
             router: None,
             selected: 0,
             selected_boundary: 0,
@@ -295,6 +307,9 @@ impl App {
                 .then(b.confidence.total_cmp(&a.confidence))
         });
         self.edges = edge::all_unscoped(store).await?;
+        // The generational loop heads and recent evaluation runs (Loop / Evals).
+        self.loop_heads = generation::all_heads(store).await?;
+        self.evals = evaluation::recent_unscoped(store).await?;
         self.router = router::load(store).await?;
         if !self.experts.is_empty() && self.selected >= self.experts.len() {
             self.selected = self.experts.len() - 1;
@@ -307,6 +322,9 @@ impl App {
         }
         if !self.memories.is_empty() && self.selected_memory >= self.memories.len() {
             self.selected_memory = self.memories.len() - 1;
+        }
+        if !self.evals.is_empty() && self.selected_eval >= self.evals.len() {
+            self.selected_eval = self.evals.len() - 1;
         }
         self.record_events();
         self.since_reload_ms = 0.0;
@@ -925,6 +943,12 @@ impl App {
             }
             return;
         }
+        if self.page == Page::Evals {
+            if !self.evals.is_empty() {
+                self.selected_eval = (self.selected_eval + 1) % self.evals.len();
+            }
+            return;
+        }
         match self.focus {
             Focus::Experts => {
                 if !self.experts.is_empty() {
@@ -949,6 +973,13 @@ impl App {
             if !self.memories.is_empty() {
                 let n = self.memories.len();
                 self.selected_memory = (self.selected_memory + n - 1) % n;
+            }
+            return;
+        }
+        if self.page == Page::Evals {
+            if !self.evals.is_empty() {
+                let n = self.evals.len();
+                self.selected_eval = (self.selected_eval + n - 1) % n;
             }
             return;
         }
@@ -979,6 +1010,9 @@ impl App {
         if self.page == Page::Memory {
             return (self.memories.len(), self.selected_memory);
         }
+        if self.page == Page::Evals {
+            return (self.evals.len(), self.selected_eval);
+        }
         match self.focus {
             Focus::Experts => (self.experts.len(), self.selected),
             Focus::Shadows => (self.shadows.len(), self.selected_shadow),
@@ -990,6 +1024,10 @@ impl App {
     fn set_focused_selection(&mut self, idx: usize) {
         if self.page == Page::Memory {
             self.selected_memory = idx;
+            return;
+        }
+        if self.page == Page::Evals {
+            self.selected_eval = idx;
             return;
         }
         match self.focus {
@@ -1118,7 +1156,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antumbra_core::{EdgeType, Generation, MemoryNetwork};
+    use antumbra_core::generational::LoopState;
+    use antumbra_core::{EdgeType, EvalStatus, Generation, MemoryNetwork, RunId, SubjectKind};
     use antumbra_store::EMBED_DIM;
     use chrono::Utc;
 
@@ -1343,6 +1382,46 @@ mod tests {
             "gamma",
             "newest gen first"
         );
+    }
+
+    #[tokio::test]
+    async fn loop_and_evals_load_for_their_pages() {
+        let (store, mut app) = seeded().await;
+        assert!(app.loop_heads.is_empty());
+        assert!(app.evals.is_empty());
+        let now = Utc::now();
+
+        let mut head = GenerationHead::new(RunId::new("run:x"), now);
+        head.state = LoopState::Decide;
+        generation::save_head(&store, &head).await.unwrap();
+        evaluation::insert(
+            &store,
+            &EvaluationRun {
+                run_id: RunId::new("run:e"),
+                subject_kind: SubjectKind::Expert,
+                subject_id: "expert:a".into(),
+                corpus_task_id: "task:a".into(),
+                status: EvalStatus::Failure,
+                metrics: None,
+                regression_fingerprint: None,
+                created_at: now,
+            },
+        )
+        .await
+        .unwrap();
+        app.reload(&store).await.unwrap();
+
+        assert_eq!(app.loop_heads.len(), 1);
+        assert_eq!(app.loop_heads[0].state, LoopState::Decide);
+        assert_eq!(app.evals.len(), 1);
+        assert_eq!(app.evals[0].status, EvalStatus::Failure);
+
+        // The Evals page drives the run selection (and is inert for mutations).
+        app.page = Page::Evals;
+        app.select_next();
+        assert_eq!(app.selected_eval, 0, "single run, selection holds");
+        app.request_action();
+        assert!(app.pending.is_none());
     }
 
     #[tokio::test]
