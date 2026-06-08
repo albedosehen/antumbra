@@ -791,7 +791,7 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
             let traces = get_traces()?;
             let tasks = metabolize_traces(&traces, &policy);
 
-            // Cluster by kind (loop / graph / task) for an honest report.
+            // Cluster by kind (loop / graph / task) for report.
             let mut kinds: Vec<(String, usize)> = Vec::new();
             for t in &tasks {
                 let k = t.skill();

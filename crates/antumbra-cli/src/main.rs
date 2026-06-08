@@ -265,7 +265,7 @@ async fn run() -> anyhow::Result<()> {
                     .iter()
                     .map(|b| b.inhibition_for(&task_vec, GateConfig::default().inhibition_radius))
                     .fold(0.0f32, f32::max);
-                // Be honest about the flag: the learned router abstains by its own
+                // The learned router abstains by its own
                 // OOD floor; --threshold governs only the heuristic fallback below.
                 println!(
                     "note: --threshold ({threshold:.3}) applies to the heuristic gate; the learned router abstains by its OOD floor {:.3}",

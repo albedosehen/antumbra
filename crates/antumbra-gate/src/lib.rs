@@ -1,7 +1,7 @@
 //! # antumbra-gate: the boundary-conditioned gate (v0 heuristic)
 //!
 //! A learned, boundary-conditioned latent mixer is the north-star gate. v0
-//! ships the honest fallback we call "coverage routing (still
+//! ships the fallback we call "coverage routing (still
 //! useful)": score each expert by capability similarity to the task, subtract
 //! the in-scope inhibition any counterfactual boundary imposes, take the top-k,
 //! and **escalate** when nothing clears the in-scope bar. The learned mixer

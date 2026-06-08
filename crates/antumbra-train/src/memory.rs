@@ -140,7 +140,7 @@ impl Default for ImportPolicy {
     }
 }
 
-/// Which intake path a record was routed to, for honest reporting.
+/// Which intake path a record was routed to, for reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intake {
     /// Trusted on import: fine-tuned directly (carries a `completion`).

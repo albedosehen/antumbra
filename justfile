@@ -29,6 +29,12 @@ lint:
 fmt:
     cargo fmt --all
 
+# Format the Markdown docs: unwrap prose so each paragraph is one soft-wrapping
+# line (readable raw, clean diffs). Leaves code and Mermaid blocks alone. Needs
+# `dprint` on PATH (cargo install dprint).
+fmt-md:
+    dprint fmt
+
 # Preview the release artifacts cargo-dist would build for the current commit.
 # Requires `dist` (cargo-dist) on PATH.
 dist-plan:

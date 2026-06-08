@@ -1,42 +1,30 @@
 # Using Antumbra: wire it into your coding agent
 
-This is the practical answer to *"how do I actually use this, and what do I get?"*
+This is the practical answer to _"how do I actually use this, and what do I get?"_
 
-Antumbra is not a chatbot you open. It is the **persistent brain** your existing
-coding agent (Claude Code, Cursor, any MCP client) plugs into. Unlike a plain
-memory layer, it **gets better at your work over time** by turning verified outcomes
-into permanent local skills. You keep your agent; Antumbra gives it memory,
-identity, multi-tenant boundaries, and a growing population of specialists, all on
-your hardware.
+Antumbra is not a chatbot you open. It is the **persistent brain** your existing coding agent (Claude Code, Cursor, any MCP client) plugs into. Unlike a plain memory layer, it **gets better at your work over time** by turning verified outcomes into permanent local skills. You keep your agent; Antumbra gives it memory, identity, multi-tenant boundaries, and a growing population of specialists, all on your hardware.
 
-The whole integration is three touchpoints on your agent's lifecycle, plus an MCP
-connection. Once wired, every session **boots smarter and ends by depositing what
-it learned**; the successful work is metabolized into weights so the scaffold
-shrinks.
+The whole integration is three touchpoints on your agent's lifecycle, plus an MCP connection. Once wired, every session **boots smarter and ends by depositing what it learned**; the successful work is metabolized into weights so the scaffold shrinks.
 
 ```
-                      ┌──────────────────────────── Antumbra ───────────────────────────┐
-  session starts ───▶ │ bootstrap: identity + conventions + relevant memory             │
-                      │   (memory store · compartments · engine-enforced ACL)           │
-   agent does work ◀─▶│ tools: recall / store / route / answer / graph / compartment    │
-                      │   (the answer tool routes to a frozen expert, or escalates)      │
-  session stops  ───▶ │ capture: write observations back  ──▶  metabolize ──▶ experts   │
-                      └──────────────────────────────────────────────────────────────────┘
+                    ┌──────────────────────────── Antumbra ───────────────────────────┐
+session starts ───▶ │ bootstrap: identity + conventions + relevant memory             │
+                    │   (memory store · compartments · engine-enforced ACL)           │
+ agent does work ◀─▶│ tools: recall / store / route / answer / graph / compartment    │
+                    │   (the answer tool routes to a frozen expert, or escalates)      │
+session stops  ───▶ │ capture: write observations back  ──▶  metabolize ──▶ experts   │
+                    └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## The three touchpoints
 
-Most agent runtimes (Claude Code's `settings.json` hooks are the reference shape)
-let you run a command at lifecycle events. Antumbra uses three:
+Most agent runtimes (Claude Code's `settings.json` hooks are the reference shape) let you run a command at lifecycle events. Antumbra uses three:
 
 ### 1. Bootstrap on session start (the agent boots knowing your world)
 
-A **SessionStart** hook calls Antumbra and injects the result as the session's
-opening context: the agent's standing conventions, device config, and the memory
-relevant to this project. No cold start: the agent already knows "this repo uses
-`deno`, not `npm`," who you are, and what it learned last time.
+A **SessionStart** hook calls Antumbra and injects the result as the session's opening context: the agent's standing conventions, device config, and the memory relevant to this project. No cold start: the agent already knows "this repo uses `deno`, not `npm`," who you are, and what it learned last time.
 
 ```jsonc
 // settings.json (Claude Code shape; adapt the event names to your runtime)
@@ -50,21 +38,11 @@ relevant to this project. No cold start: the agent already knows "this repo uses
 }
 ```
 
-The script fetches the bootstrap memory and returns it as `additionalContext`.
-(See the [`scripts/hooks/`](../scripts/hooks/) templates.) *Today:* the capture + attribution hooks
-work as-is (they emit hook decisions, no Antumbra call), the long-lived **hook
-token** is mintable with `antumbra-mcp --mint-token` (P-1a), and the bootstrap
-fetch's transport (`POST /mcp/call {tool, arguments}`) is now live (P-1b), so the
-SessionStart script works end-to-end. (Alternatively, have the agent run
-`recall_memories` at the top of its first turn with no SessionStart script at all.)
+The script fetches the bootstrap memory and returns it as `additionalContext`. (See the [`scripts/hooks/`](../scripts/hooks/) templates.) _Today:_ the capture + attribution hooks work as-is (they emit hook decisions, no Antumbra call), the long-lived **hook token** is mintable with `antumbra-mcp --mint-token` (P-1a), and the bootstrap fetch's transport (`POST /mcp/call {tool, arguments}`) is now live (P-1b), so the SessionStart script works end-to-end. (Alternatively, have the agent run `recall_memories` at the top of its first turn with no SessionStart script at all.)
 
 ### 2. Capture on stop / before compaction (nothing learned is lost)
 
-A **Stop** hook (and a **PreCompact** hook, for when the context window is about to
-be summarized) nudges the agent to deposit non-obvious observations back into
-Antumbra before the turn ends. A sentinel file makes it fire once, not in a loop.
-This is the write half of memory, and the raw successful traces it leaves are what
-`antumbra metabolize` later turns into a trained expert.
+A **Stop** hook (and a **PreCompact** hook, for when the context window is about to be summarized) nudges the agent to deposit non-obvious observations back into Antumbra before the turn ends. A sentinel file makes it fire once, not in a loop. This is the write half of memory, and the raw successful traces it leaves are what `antumbra metabolize` later turns into a trained expert.
 
 ```jsonc
 "Stop":       [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
@@ -75,11 +53,8 @@ This is the write half of memory, and the raw successful traces it leaves are wh
 
 Two settings make the agent defer to Antumbra instead of its built-ins:
 
-- **Disable the agent's built-in file memory** so *all* memory flows through
-  Antumbra (one store, one ACL, one thing to back up). In Claude Code that is
-  `"autoMemoryEnabled": false` plus a `permissions.deny` on the local memory path.
-- **Strip vendor attribution** from commits/PRs with a `PreToolUse` deny hook on
-  `git`/`gh`, so the work is attributed to you, not the model vendor.
+- **Disable the agent's built-in file memory** so _all_ memory flows through Antumbra (one store, one ACL, one thing to back up). In Claude Code that is `"autoMemoryEnabled": false` plus a `permissions.deny` on the local memory path.
+- **Strip vendor attribution** from commits/PRs with a `PreToolUse` deny hook on `git`/`gh`, so the work is attributed to you, not the model vendor.
 
 ```jsonc
 "autoMemoryEnabled": false,
@@ -92,12 +67,7 @@ Two settings make the agent defer to Antumbra instead of its built-ins:
 ]}]}
 ```
 
-Template scripts for all of the above live under
-[`scripts/hooks/`](../scripts/hooks/) for **both platforms**: PowerShell (`.ps1`,
-Windows) and POSIX `bash` (`.sh`, macOS/Linux; needs `jq` + `curl`). Use the pair
-for your OS. They are thin: read stdin JSON, call Antumbra's `/mcp/call`
-(or the stdio server), emit the hook's JSON response. Point them at your endpoint
-with four env vars:
+Template scripts for all of the above live under [`scripts/hooks/`](../scripts/hooks/) for **both platforms**: PowerShell (`.ps1`, Windows) and POSIX `bash` (`.sh`, macOS/Linux; needs `jq` + `curl`). Use the pair for your OS. They are thin: read stdin JSON, call Antumbra's `/mcp/call` (or the stdio server), emit the hook's JSON response. Point them at your endpoint with four env vars:
 
 ```
 ANTUMBRA_URL=http://127.0.0.1:8081     # the MCP engine (omit for stdio/offline)
@@ -110,44 +80,29 @@ ANTUMBRA_HOST_ID=<this-device>         # provenance stamp on what it writes
 
 ## Two ways to run it
 
-Antumbra is the **same engine** in both modes; only the transport and identity
-differ.
+Antumbra is the **same engine** in both modes; only the transport and identity differ.
 
-| | **Offline / private** | **Hosted (still private to you)** |
-|---|---|---|
-| Transport | stdio MCP, single local identity | networked HTTP/SSE, JWT per request |
-| Store | embedded `surrealkv://` on your disk | authoritative SurrealDB, multi-tenant |
-| Who sees data | only this machine | only your tenant (engine-enforced ACL) |
-| Embedder | yours, local | yours, per workspace (bring-your-own) |
-| Best for | a solo dev, an air-gapped box, regulated data | a team/fleet sharing one brain; org infra you'd rather not run |
+|               | **Offline / private**                         | **Hosted (still private to you)**                              |
+| ------------- | --------------------------------------------- | -------------------------------------------------------------- |
+| Transport     | stdio MCP, single local identity              | networked HTTP/SSE, JWT per request                            |
+| Store         | embedded `surrealkv://` on your disk          | authoritative SurrealDB, multi-tenant                          |
+| Who sees data | only this machine                             | only your tenant (engine-enforced ACL)                         |
+| Embedder      | yours, local                                  | yours, per workspace (bring-your-own)                          |
+| Best for      | a solo dev, an air-gapped box, regulated data | a team/fleet sharing one brain; org infra you'd rather not run |
 
-Offline is the default and the privacy floor: nothing leaves the building. The
-hosted surface adds multi-tenant sharing, device sync, and live propagation. The
-ACL is enforced **in the database engine**, so a tenant can never see another
-tenant's rows even if a handler forgets a filter.
+Offline is the default and the privacy floor: nothing leaves the building. The hosted surface adds multi-tenant sharing, device sync, and live propagation. The ACL is enforced **in the database engine**, so a tenant can never see another tenant's rows even if a handler forgets a filter.
 
 ---
 
 ## Why this beats a plain memory layer
 
-Retrieval-memory tools (give the agent a vector store to recall from) make the
-agent *remember*. Antumbra makes it **learn**:
+Retrieval-memory tools (give the agent a vector store to recall from) make the agent _remember_. Antumbra makes it **learn**:
 
-1. **Bootstrap**: the agent starts the session already carrying your conventions
-   and history (memory + identity).
-2. **Route or answer**: the `answer` tool sends a task to the frozen expert most
-   likely to cover it, or escalates when it is out of scope. A served task costs
-   you nothing; only genuine novelty hits the expensive model.
+1. **Bootstrap**: the agent starts the session already carrying your conventions and history (memory + identity).
+2. **Route or answer**: the `answer` tool sends a task to the frozen expert most likely to cover it, or escalates when it is out of scope. A served task costs you nothing; only genuine novelty hits the expensive model.
 3. **Capture**: verified outcomes and observations are written back.
-4. **Metabolize**: `antumbra metabolize` turns the successful, recurrent traces
-   (and their step-by-step decomposition) into a trained LoRA expert, frozen into
-   the population so it is never forgotten.
+4. **Metabolize**: `antumbra metabolize` turns the successful, recurrent traces (and their step-by-step decomposition) into a trained LoRA expert, frozen into the population so it is never forgotten.
 
-Next session, step 1 includes a skill that did not exist before, and the work it
-covers is now served locally for free. The scaffolding (loops, prompts, lookups)
-shrinks into weights. A memory layer is static; Antumbra compounds.
+Next session, step 1 includes a skill that did not exist before, and the work it covers is now served locally for free. The scaffolding (loops, prompts, lookups) shrinks into weights. A memory layer is static; Antumbra compounds.
 
-See **[Architecture](architecture.md)** for the engine, **[Roadmap](roadmap.md)**
-for what is built vs queued, and **[Product surface](product.md)** for the control
-plane (dashboard, knowledge documents, onboarding) and how Antumbra supersedes a
-separate agent-memory engine.
+See **[Architecture](architecture.md)** for the engine, **[Roadmap](roadmap.md)** for what is built vs queued, and **[Product surface](product.md)** for the control plane (dashboard, knowledge documents, onboarding) and how Antumbra supersedes a separate agent-memory engine.

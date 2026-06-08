@@ -458,7 +458,7 @@ impl<'a> GenerationLoop<'a> {
     /// On prune, log an **open-negative** counterfactual boundary: the failure is
     /// recorded, but it is *not actionable* until counterfactual search
     /// recovers a C', which needs the (still-stubbed) serving probe. Storing
-    /// it open is honest: an un-scoped negative must never gate routing.
+    /// it open: an un-scoped negative must never gate routing.
     async fn log_open_boundary(&self, generation: Generation, shadow_id: &ShadowId) -> Result<()> {
         let b = FailureBoundary {
             id: BoundaryId::new(format!("boundary:{shadow_id}")),

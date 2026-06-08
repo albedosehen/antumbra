@@ -1,28 +1,18 @@
 # Agent hooks: wire your coding agent into Antumbra
 
-These are template lifecycle hooks that turn Antumbra into your agent's persistent,
-self-improving brain. They are written for **Claude Code's `settings.json` hook
-shape**; the same three touchpoints exist (under different event names) in Cursor,
-Gemini CLI, OpenCode, Codex, and Copilot, so adapt the event keys, keep the bodies.
+These are template lifecycle hooks that turn Antumbra into your agent's persistent, self-improving brain. They are written for **Claude Code's `settings.json` hook shape**; the same three touchpoints exist (under different event names) in Cursor, Gemini CLI, OpenCode, Codex, and Copilot, so adapt the event keys, keep the bodies.
 
-| Script | Hook event | What it does |
-|---|---|---|
-| `antumbra-session-start` | `SessionStart` | **Bootstrap**: pull the agent's standing conventions + relevant memory from Antumbra and inject them as opening context. |
-| `antumbra-capture` | `Stop`, `PreCompact` | **Capture**: nudge the agent to write non-obvious observations back via `store_memory` before the turn ends or context is compacted (sentinel = fire once). |
-| `strip-attribution` | `PreToolUse` (git/gh) | **Override**: deny commits/PRs that embed model-vendor attribution, so work is attributed to you. |
+| Script                   | Hook event            | What it does                                                                                                                                                |
+| ------------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `antumbra-session-start` | `SessionStart`        | **Bootstrap**: pull the agent's standing conventions + relevant memory from Antumbra and inject them as opening context.                                    |
+| `antumbra-capture`       | `Stop`, `PreCompact`  | **Capture**: nudge the agent to write non-obvious observations back via `store_memory` before the turn ends or context is compacted (sentinel = fire once). |
+| `strip-attribution`      | `PreToolUse` (git/gh) | **Override**: deny commits/PRs that embed model-vendor attribution, so work is attributed to you.                                                           |
 
-**Both platforms are provided.** Each hook ships as a `.ps1` (Windows / PowerShell)
-and a `.sh` (macOS / Linux, POSIX `bash`) sibling with identical behavior; use the
-one for your OS. The `.sh` scripts need **`jq`** and **`curl`** (preinstalled on most
-macOS/Linux dev machines; `brew install jq` / `apt install jq` otherwise). The
-bodies are ~20 lines: read the hook JSON on stdin, optionally call the MCP surface,
-emit the hook's JSON response.
+**Both platforms are provided.** Each hook ships as a `.ps1` (Windows / PowerShell) and a `.sh` (macOS / Linux, POSIX `bash`) sibling with identical behavior; use the one for your OS. The `.sh` scripts need **`jq`** and **`curl`** (preinstalled on most macOS/Linux dev machines; `brew install jq` / `apt install jq` otherwise). The bodies are ~20 lines: read the hook JSON on stdin, optionally call the MCP surface, emit the hook's JSON response.
 
 ## Connect (four env vars)
 
-Hooks talk to a running Antumbra **MCP HTTP surface**, either a local one you
-start for yourself (`antumbra-mcp --http 127.0.0.1:8081 --url surrealkv://./data.skv`)
-or your hosted tenant. Either way:
+Hooks talk to a running Antumbra **MCP HTTP surface**, either a local one you start for yourself (`antumbra-mcp --http 127.0.0.1:8081 --url surrealkv://./data.skv`) or your hosted tenant. Either way:
 
 ```sh
 ANTUMBRA_URL=http://127.0.0.1:8081     # the antumbra-mcp engine
@@ -31,32 +21,20 @@ ANTUMBRA_TOKEN=<bearer-jwt>            # Authorization: Bearer <token>
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
 ```
 
-The networked surface authenticates each call with a JWT whose `(tenant, user)`
-claims become the engine's `$auth`. On the offline / self-hosted
-tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
+The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
 
 ```sh
 antumbra-mcp --mint-token --tenant <workspace> --user <user> \
              --jwt-secret <secret> --token-ttl-days 365
 ```
 
-It prints a bearer JWT signed with the same HS256 secret the server verifies with
-(an RS256 deployment mints via its own auth service's private key instead). The
-token *is* the identity (it grants exactly `(tenant, user)`) and carries a finite
-`exp`, so it is long-lived, never an eternal standing key. For a purely **offline**,
-single identity you can instead run the **stdio** server and have your agent connect
-directly; then the capture/bootstrap tools are called in-band and the
-`SessionStart` script is optional.
+It prints a bearer JWT signed with the same HS256 secret the server verifies with (an RS256 deployment mints via its own auth service's private key instead). The token _is_ the identity (it grants exactly `(tenant, user)`) and carries a finite `exp`, so it is long-lived, never an eternal standing key. For a purely **offline**, single identity you can instead run the **stdio** server and have your agent connect directly; then the capture/bootstrap tools are called in-band and the `SessionStart` script is optional.
 
 ## Why disable built-in and additional external memory?
 
-Disabling an agent's built-in file memory (`autoMemoryEnabled: false` + the deny
-rule) makes Antumbra the **single source of truth**: one store, one ACL, one thing
-to back up. You should disable any other external memory the agent has access to outside
-of Antumbra as well to reduce side-effects or unintended poisoning/corruption of context.
+Disabling an agent's built-in file memory (`autoMemoryEnabled: false` + the deny rule) makes Antumbra the **single source of truth**: one store, one ACL, one thing to back up. You should disable any other external memory the agent has access to outside of Antumbra as well to reduce side-effects or unintended poisoning/corruption of context.
 
-Pick the block for your OS. Both wire the same three touchpoints; they differ only
-in how the command is launched (`bash` + the `.sh` script, or `pwsh` + the `.ps1`).
+Pick the block for your OS. Both wire the same three touchpoints; they differ only in how the command is launched (`bash` + the `.sh` script, or `pwsh` + the `.ps1`).
 
 ### macOS / Linux (bash) settings.json (claude code)
 
@@ -79,8 +57,7 @@ in how the command is launched (`bash` + the `.sh` script, or `pwsh` + the `.ps1
 }
 ```
 
-The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev
-machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubuntu).
+The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubuntu).
 
 ### Windows (PowerShell) settings.json (claude code)
 
@@ -103,5 +80,4 @@ machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubunt
 }
 ```
 
-Note: (`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is
-cross-platform too; the `.sh` siblings are the native, dependency-light option.)
+Note: (`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is cross-platform too; the `.sh` siblings are the native, dependency-light option.)

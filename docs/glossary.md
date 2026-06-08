@@ -1,7 +1,6 @@
 # Antumbra - Glossary (trainer vocabulary)
 
-Plain-English definitions plus a diagram for every trainer acronym. Read alongside
-[the candle QLoRA trainer](adr/0010-candle-qlora-trainer.md) and the [diagram atlas](diagrams.md).
+Plain-English definitions plus a diagram for every trainer acronym. Read alongside [the candle QLoRA trainer](adr/0010-candle-qlora-trainer.md) and the [diagram atlas](diagrams.md).
 
 - Naming: [why "candle"](#why-candle)
 - Learning algorithm: [RLVR](#rlvr---reinforcement-learning-with-verifiable-rewards) · [RAFT](#raft---reward-ranked-finetuning) · [GRPO](#grpo---group-relative-policy-optimization)
@@ -14,11 +13,7 @@ Plain-English definitions plus a diagram for every trainer acronym. Read alongsi
 
 ## Why "candle"
 
-`candle` is Hugging Face's minimalist ML framework for Rust (tensors, autograd, CUDA/Metal) - a proper name,
-not an acronym. It riffs on PyTorch's "torch": a torch is a big, heavy flame (a large framework that pulls in
-all of Python); a **candle** is a small, lightweight light. That captures the pitch - a tiny, Python-free
-runtime shippable as one Rust binary, which is exactly why Antumbra uses it (single-process, one GPU,
-hardware-adaptive serving over the SurrealDB substrate).
+`candle` is Hugging Face's minimalist ML framework for Rust (tensors, autograd, CUDA/Metal) - a proper name, not an acronym. It riffs on PyTorch's "torch": a torch is a big, heavy flame (a large framework that pulls in all of Python); a **candle** is a small, lightweight light. That captures the pitch - a tiny, Python-free runtime shippable as one Rust binary, which is exactly why Antumbra uses it (single-process, one GPU, hardware-adaptive serving over the SurrealDB substrate).
 
 ---
 
@@ -26,8 +21,7 @@ hardware-adaptive serving over the SurrealDB substrate).
 
 ### RLVR - Reinforcement Learning with Verifiable Rewards
 
-The reward is an objective, checkable signal (a test passes, output matches a rule) - not a human-preference or
-learned reward model. This is Antumbra's reward philosophy: the environment is the truth.
+The reward is an objective, checkable signal (a test passes, output matches a rule) - not a human-preference or learned reward model. This is Antumbra's reward philosophy: the environment is the truth.
 
 ```mermaid
 flowchart LR
@@ -39,8 +33,7 @@ flowchart LR
 
 ### RAFT - Reward-rAnked FineTuning
 
-The simplest way to *do* RLVR (a.k.a. RFT / rejection-sampling fine-tuning): sample K candidates, verify each,
-keep the winners, SFT on them, repeat. No policy-gradient machinery. This is Antumbra v0.
+The simplest way to _do_ RLVR (a.k.a. RFT / rejection-sampling fine-tuning): sample K candidates, verify each, keep the winners, SFT on them, repeat. No policy-gradient machinery. This is Antumbra v0.
 
 ```mermaid
 flowchart LR
@@ -53,9 +46,7 @@ flowchart LR
 
 ### GRPO - Group Relative Policy Optimization
 
-The v1 upgrade (DeepSeek): score a *group* of K outputs per prompt and push each up or down by its
-**advantage = (reward - group mean) / group std**, with a KL leash to a reference model. More sample-efficient,
-more machinery - and critic-free (the group baseline replaces a value network).
+The v1 upgrade (DeepSeek): score a _group_ of K outputs per prompt and push each up or down by its **advantage = (reward - group mean) / group std**, with a KL leash to a reference model. More sample-efficient, more machinery - and critic-free (the group baseline replaces a value network).
 
 ```mermaid
 flowchart LR
@@ -81,9 +72,7 @@ flowchart TB
 
 ### LoRA - Low-Rank Adaptation
 
-A weight update to a matrix `W` (out x in) is approximated by two skinny matrices `B*A` of rank `r` much smaller
-than in/out. Freeze `W`, train only `A` and `B`. One trained `A,B` pair is one frozen expert.
-`y = Wx + (alpha/r) * B(Ax)`.
+A weight update to a matrix `W` (out x in) is approximated by two skinny matrices `B*A` of rank `r` much smaller than in/out. Freeze `W`, train only `A` and `B`. One trained `A,B` pair is one frozen expert. `y = Wx + (alpha/r) * B(Ax)`.
 
 ```mermaid
 flowchart LR
@@ -97,9 +86,7 @@ flowchart LR
 
 ### QLoRA - Quantized LoRA
 
-LoRA, but the frozen base is stored in 4-bit to save memory; adapters stay full precision; gradients flow
-through the dequantized base into the adapters. Antumbra v0 uses an f16/bf16 base - true 4-bit is the deferred
-MT-4 step.
+LoRA, but the frozen base is stored in 4-bit to save memory; adapters stay full precision; gradients flow through the dequantized base into the adapters. Antumbra v0 uses an f16/bf16 base - true 4-bit is the deferred MT-4 step.
 
 ```mermaid
 flowchart LR
@@ -115,15 +102,11 @@ flowchart LR
 
 ### NF4 - 4-bit NormalFloat
 
-The specific 4-bit number format QLoRA introduced: a quantization grid that is information-theoretically optimal
-for normally-distributed weights. candle does not use NF4 - it uses the llama.cpp quant types (see GGUF), which
-the trainer's notes call arguably a better fit.
+The specific 4-bit number format QLoRA introduced: a quantization grid that is information-theoretically optimal for normally-distributed weights. candle does not use NF4 - it uses the llama.cpp quant types (see GGUF), which the trainer's notes call arguably a better fit.
 
 ### GGUF
 
-The llama.cpp model file format (quantized weights such as `Q4_K`, plus metadata). candle and `llama-cpp-2`
-load and serve these, so a graduated adapter is serveable without re-quantizing. (Originally an acronym,
-"GPT-Generated Unified Format"; now effectively just the format name.)
+The llama.cpp model file format (quantized weights such as `Q4_K`, plus metadata). candle and `llama-cpp-2` load and serve these, so a graduated adapter is serveable without re-quantizing. (Originally an acronym, "GPT-Generated Unified Format"; now effectively just the format name.)
 
 ---
 
@@ -131,8 +114,7 @@ load and serve these, so a graduated adapter is serveable without re-quantizing.
 
 ### SFT - Supervised Fine-Tuning
 
-Train the model to *produce* a target via next-token cross-entropy, masked to the completion only (do not train
-it to re-emit the prompt). In RAFT the targets are the model's own verified-correct generations.
+Train the model to _produce_ a target via next-token cross-entropy, masked to the completion only (do not train it to re-emit the prompt). In RAFT the targets are the model's own verified-correct generations.
 
 ```mermaid
 flowchart LR
@@ -143,9 +125,7 @@ flowchart LR
 
 ### KV cache - Key/Value cache
 
-During generation, the attention keys/values for past tokens are cached, so each new token only computes its own
-position instead of re-reading the whole prefix - the difference between quadratic re-encoding and incremental
-decoding.
+During generation, the attention keys/values for past tokens are cached, so each new token only computes its own position instead of re-reading the whole prefix - the difference between quadratic re-encoding and incremental decoding.
 
 ```mermaid
 flowchart LR
@@ -175,9 +155,7 @@ flowchart LR
 
 ## How they compose
 
-The whole trainer in one picture: **RAFT** (the loop) drives **SFT** on **PEFT/LoRA** adapters over a
-frozen base, rewarded by **RLVR** verifiers, on **candle** - with **GRPO** and **QLoRA/NF4/GGUF** as the
-labeled upgrade path.
+The whole trainer in one picture: **RAFT** (the loop) drives **SFT** on **PEFT/LoRA** adapters over a frozen base, rewarded by **RLVR** verifiers, on **candle** - with **GRPO** and **QLoRA/NF4/GGUF** as the labeled upgrade path.
 
 ```mermaid
 flowchart TD
@@ -194,9 +172,4 @@ flowchart TD
 
 ## The result
 
-MT-3 runtime validated on an RTX 3090 Ti (2026-06-03), two ways. On the type-hint-convention corpus
-(`corpora/learn.json`, in-process `contains_all` reward), the per-round pass-rate over four RAFT rounds rose
-**0.06 -> 0.25 -> 0.88 -> 1.00**. On `corpora/example-tasks.json` with the real **exec verifier** - the
-generated function is executed and its behavior asserted - it rose **0.38 -> 1.00 -> 1.00 -> 1.00**. Both
-graduated and froze a real bf16 adapter. The adapter learns from verified outcomes, including outcomes verified
-by actually running the code - the loop closes and improves.
+MT-3 runtime validated on an RTX 3090 Ti (2026-06-03), two ways. On the type-hint-convention corpus (`corpora/learn.json`, in-process `contains_all` reward), the per-round pass-rate over four RAFT rounds rose **0.06 -> 0.25 -> 0.88 -> 1.00**. On `corpora/example-tasks.json` with the real **exec verifier** - the generated function is executed and its behavior asserted - it rose **0.38 -> 1.00 -> 1.00 -> 1.00**. Both graduated and froze a real bf16 adapter. The adapter learns from verified outcomes, including outcomes verified by actually running the code - the loop closes and improves.

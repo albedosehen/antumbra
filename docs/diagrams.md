@@ -1,16 +1,12 @@
 # Antumbra - Diagram Atlas
 
-Every load-bearing diagram in one place. Each is reproduced from its source-of-truth document; follow the link
-in the caption to read the surrounding decision. Grouped: **concept → system → flow → schema → mechanism → north star.**
+Every load-bearing diagram in one place. Each is reproduced from its source-of-truth document; follow the link in the caption to read the surrounding decision. Grouped: **concept → system → flow → schema → mechanism → north star.**
 
 - Concept: [the shadow](#1-the-shadow-umbra--penumbra--antumbra) · [decision chain](#2-the-keystone-decision-chain)
 - System: [v0 architecture](#3-v0-system-architecture) · [v0 vs north star](#5-v0-vs-north-star)
 - Flow: [training & data](#4-training--data-flow)
 - Schema: [entities](#6-schema---entities) · [substrate](#13-surrealdb-substrate)
-- Per-mechanism: [0001](#7-umbra-the-frozen-population) · [0002](#8-penumbra-the-shadow-lifecycle) ·
-  [0003](#9-criticverifier-credit) · [0004](#10-the-boundary-engine-keystone) ·
-  [0005](#11-the-boundary-conditioned-gate) · [0006](#12-single-gpu-serving) ·
-  [0008](#14-the-generational-loop) · [0009](#15-heterogeneous-composition)
+- Per-mechanism: [0001](#7-umbra-the-frozen-population) · [0002](#8-penumbra-the-shadow-lifecycle) · [0003](#9-criticverifier-credit) · [0004](#10-the-boundary-engine-keystone) · [0005](#11-the-boundary-conditioned-gate) · [0006](#12-single-gpu-serving) · [0008](#14-the-generational-loop) · [0009](#15-heterogeneous-composition)
 
 ---
 
@@ -18,9 +14,7 @@ in the caption to read the surrounding decision. Grouped: **concept → system �
 
 ### 1. The shadow: umbra · penumbra · antumbra
 
-The name is the model. A cast shadow has three regions and so does the system: the **umbra** is the proven
-frozen experts; the **penumbra** is the shadows-in-training; the **antumbra** is the keystone boundary where
-coverage *inverts* and the system must escalate. Source: [README](../README.md).
+The name is the model. A cast shadow has three regions and so does the system: the **umbra** is the proven frozen experts; the **penumbra** is the shadows-in-training; the **antumbra** is the keystone boundary where coverage _inverts_ and the system must escalate. Source: [README](../README.md).
 
 ```mermaid
 flowchart LR
@@ -33,8 +27,7 @@ flowchart LR
 
 ### 2. The keystone decision chain
 
-Read conceptually, the architecture radiates from the counterfactual boundary of competence (the keystone); the foundational decisions are numbered 0001 through 0009 in the opposite
-(build-dependency) order. Source: [architecture §1](architecture.md#1-the-thesis-and-the-two-readings-of-the-chain).
+Read conceptually, the architecture radiates from the counterfactual boundary of competence (the keystone); the foundational decisions are numbered 0001 through 0009 in the opposite (build-dependency) order. Source: [architecture §1](architecture.md#1-the-thesis-and-the-two-readings-of-the-chain).
 
 ```mermaid
 flowchart TD
@@ -53,8 +46,7 @@ flowchart TD
 
 ### 3. v0 system architecture
 
-One frozen code-capable base + a library of frozen LoRA experts + a learned, boundary-conditioned gate, all in
-a single-plane Rust process on one GPU. Source: [architecture §2](architecture.md#2-system-architecture-v0---shared-base-adapters-single-plane-rust).
+One frozen code-capable base + a library of frozen LoRA experts + a learned, boundary-conditioned gate, all in a single-plane Rust process on one GPU. Source: [architecture §2](architecture.md#2-system-architecture-v0---shared-base-adapters-single-plane-rust).
 
 ```mermaid
 flowchart TB
@@ -86,8 +78,7 @@ flowchart TB
 
 ### 5. v0 vs north star
 
-What carries over (gate, boundary engine, loop, substrate) and what changes (only the composition substrate).
-Source: [architecture §4](architecture.md#4-v0-scope-vs-the-north-star).
+What carries over (gate, boundary engine, loop, substrate) and what changes (only the composition substrate). Source: [architecture §4](architecture.md#4-v0-scope-vs-the-north-star).
 
 ```mermaid
 flowchart TB
@@ -110,8 +101,7 @@ flowchart TB
 
 ### 4. Training & data flow
 
-The environment is the truth; the critic only densifies; you train on the verified outcome, never the critic's
-text. Source: [architecture §3](architecture.md#3-training--data-flow-verifiable-outcomes-not-imitation).
+The environment is the truth; the critic only densifies; you train on the verified outcome, never the critic's text. Source: [architecture §3](architecture.md#3-training--data-flow-verifiable-outcomes-not-imitation).
 
 ```mermaid
 flowchart LR
@@ -130,8 +120,7 @@ flowchart LR
 
 ### 6. Schema - entities
 
-Conceptual ER view; full DDL is in [the SurrealDB substrate decision](adr/0007-surrealdb-substrate.md). Source:
-[architecture §5](architecture.md#5-schema-surrealdb---summary).
+Conceptual ER view; full DDL is in [the SurrealDB substrate decision](adr/0007-surrealdb-substrate.md). Source: [architecture §5](architecture.md#5-schema-surrealdb---summary).
 
 ```mermaid
 erDiagram
@@ -162,8 +151,7 @@ erDiagram
 
 ### 7. Umbra: the frozen population
 
-A base + a growing library of frozen adapters, mixed in latent space by the gate. Source:
-[the frozen-experts decision](adr/0001-frozen-experts.md).
+A base + a growing library of frozen adapters, mixed in latent space by the gate. Source: [the frozen-experts decision](adr/0001-frozen-experts.md).
 
 ```mermaid
 flowchart LR
@@ -181,8 +169,7 @@ flowchart LR
 
 ### 8. Penumbra: the shadow lifecycle
 
-Plasticity lives only in short-lived shadows: spawn → explore → score → graduate (deepen to umbra) or prune.
-Source: [the shadow-plasticity decision](adr/0002-shadow-plasticity.md).
+Plasticity lives only in short-lived shadows: spawn → explore → score → graduate (deepen to umbra) or prune. Source: [the shadow-plasticity decision](adr/0002-shadow-plasticity.md).
 
 ```mermaid
 stateDiagram-v2
@@ -198,8 +185,7 @@ stateDiagram-v2
 
 ### 9. Critic/verifier credit
 
-Verifiers are primary ground truth; the critic only interpolates dense per-step credit between them and can
-never override a verifier. Source: [the critic credit-assignment decision](adr/0003-critic-credit-assignment.md).
+Verifiers are primary ground truth; the critic only interpolates dense per-step credit between them and can never override a verifier. Source: [the critic credit-assignment decision](adr/0003-critic-credit-assignment.md).
 
 ```mermaid
 flowchart LR
@@ -213,8 +199,7 @@ flowchart LR
 
 ### 10. The boundary engine (keystone)
 
-The antumbra made mechanical: hold behavior fixed, vary context until acceptability flips, recover the governing
-feature + grain, then inhibit *only in-scope* and steer. Source: [the inhibitory-boundaries decision](adr/0004-inhibitory-boundaries.md).
+The antumbra made mechanical: hold behavior fixed, vary context until acceptability flips, recover the governing feature + grain, then inhibit _only in-scope_ and steer. Source: [the inhibitory-boundaries decision](adr/0004-inhibitory-boundaries.md).
 
 ```mermaid
 flowchart TB
@@ -236,8 +221,7 @@ flowchart TB
 
 ### 11. The boundary-conditioned gate
 
-A learned in-model mixer: score adapters, let the scope gate/steer, blend in-scope experts in latent space, or
-escalate out-of-scope (which becomes the next training example). Source: [the orchestrator/router decision](adr/0005-orchestrator-router.md).
+A learned in-model mixer: score adapters, let the scope gate/steer, blend in-scope experts in latent space, or escalate out-of-scope (which becomes the next training example). Source: [the orchestrator/router decision](adr/0005-orchestrator-router.md).
 
 ```mermaid
 flowchart TB
@@ -254,8 +238,7 @@ flowchart TB
 
 ### 12. Single-GPU serving
 
-v0 is one base + an adapter library (S-LoRA-style) served and trained on one RTX 3090 Ti; the fleet, ternary
-tier, and heterogeneous composition all defer. Source: [the hardware-serving decision](adr/0006-hardware-serving.md).
+v0 is one base + an adapter library (S-LoRA-style) served and trained on one RTX 3090 Ti; the fleet, ternary tier, and heterogeneous composition all defer. Source: [the hardware-serving decision](adr/0006-hardware-serving.md).
 
 ```mermaid
 flowchart TB
@@ -275,8 +258,7 @@ flowchart TB
 
 ### 13. SurrealDB substrate
 
-One multi-model engine is every store + vector index + graph + durable flow state, reached only through
-`surql-rs`. Full DDL lives in the linked source document. Source: [the SurrealDB substrate decision](adr/0007-surrealdb-substrate.md).
+One multi-model engine is every store + vector index + graph + durable flow state, reached only through `surql-rs`. Full DDL lives in the linked source document. Source: [the SurrealDB substrate decision](adr/0007-surrealdb-substrate.md).
 
 ```mermaid
 flowchart TB
@@ -295,8 +277,7 @@ flowchart TB
 
 ### 14. The generational loop
 
-A resumable state-machine-in-DB: grow → explore → score → graduate/prune → consolidate, restartable from the
-persisted `status` checkpoint. Source: [the generational-loop decision](adr/0008-generational-loop.md).
+A resumable state-machine-in-DB: grow → explore → score → graduate/prune → consolidate, restartable from the persisted `status` checkpoint. Source: [the generational-loop decision](adr/0008-generational-loop.md).
 
 ```mermaid
 stateDiagram-v2
@@ -313,9 +294,7 @@ stateDiagram-v2
 
 ### 15. Heterogeneous composition
 
-The north star: sparse top-k selection over genuinely separate frozen experts wired by learned, per-expert
-cross-attention bridges, with the scope gating both selection and bridge gain. Source:
-[the heterogeneous-composition decision](adr/0009-heterogeneous-composition.md).
+The north star: sparse top-k selection over genuinely separate frozen experts wired by learned, per-expert cross-attention bridges, with the scope gating both selection and bridge gain. Source: [the heterogeneous-composition decision](adr/0009-heterogeneous-composition.md).
 
 ```mermaid
 flowchart TB
@@ -332,10 +311,7 @@ flowchart TB
 
 The newer subsystems carry their diagrams inline in their source documents, to avoid drift:
 
-- **[Penumbra, the memory store](adr/0012-penumbra-memory.md)** - the consolidation arc (penumbra memory → score → capture+replay
-  → umbra; contradiction → retire).
-- **[Multi-tenant isolation and identity](adr/0013-tenant-isolation-identity.md)** - the identity hierarchy and the engine `PERMISSIONS`
-  boundary (tenant org → user → compartment → agent; shared umbra, private penumbra).
-- **[Compartments, latent-spaces of memory](adr/0014-compartments.md)** - penumbra → antumbra-clustered compartments → (share / consolidate
-  into a private expert).
+- **[Penumbra, the memory store](adr/0012-penumbra-memory.md)** - the consolidation arc (penumbra memory → score → capture+replay → umbra; contradiction → retire).
+- **[Multi-tenant isolation and identity](adr/0013-tenant-isolation-identity.md)** - the identity hierarchy and the engine `PERMISSIONS` boundary (tenant org → user → compartment → agent; shared umbra, private penumbra).
+- **[Compartments, latent-spaces of memory](adr/0014-compartments.md)** - penumbra → antumbra-clustered compartments → (share / consolidate into a private expert).
 - **[The MCP runtime surface](adr/0015-mcp-runtime-surface.md)** - the 14-tool MCP surface over the bound `(tenant, user)`.

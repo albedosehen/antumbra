@@ -37,10 +37,10 @@ fn verify_request(
 
 /// Verify each supplied correction, fine-tune the adapter on the ones that hold
 /// for `cfg.rounds` epochs, then measure whether the expert now reproduces them.
-/// `final_fitness` is that internalized pass-rate: the honest "did it stick".
+/// `final_fitness` is that internalized pass-rate: the "did it stick".
 ///
 /// `replay` is a rehearsal buffer of already-consolidated `prompt -> behavior`
-/// pairs (EXP-021): when `cfg.replay_ratio > 0` it is interleaved into every SFT
+/// pairs: when `cfg.replay_ratio > 0` it is interleaved into every SFT
 /// round so consolidating new memories does not clobber old skills. Plain
 /// capture passes an empty buffer (replay off).
 pub async fn capture_corrections(
@@ -115,7 +115,7 @@ pub async fn capture_corrections(
         }
     }
 
-    // Honest fitness: does the expert now generate the correction on its own?
+    // Fitness: does the expert now generate the correction on its own?
     let learned = eval_pass_rate(model, verifier, tasks, run_id, cfg.samples_per_task).await?;
 
     let safe = run_id.as_str().replace([':', '/', '\\'], "_");

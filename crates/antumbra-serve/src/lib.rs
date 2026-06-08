@@ -178,7 +178,7 @@ impl Serve for MultiAdapterServe {
     }
 }
 
-// --- non-models stub: keeps the default build light and the seam honest ----
+// --- non-models stub for default build ----
 
 /// Multi-adapter server seam (non-models build). The real engine needs candle;
 /// without `--features models` it reports `Unimplemented`.
