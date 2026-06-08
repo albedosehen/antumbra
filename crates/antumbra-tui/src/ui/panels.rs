@@ -4,13 +4,13 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{App, Focus};
 use crate::scroll;
 
-use super::{gauge_row, heading, kv, panel, panel_focused, shadow_color, sparkline_row};
+use super::{gauge_row, heading, kv, panel, panel_focused, shadow_color};
 
 /// The selected expert's detail plus the gate summary (the umbra focus).
 pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
@@ -196,7 +196,12 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
 /// as a sparkline (the anti-collapse signal, ADR-0002/0003).
 pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(area);
+    let rows = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(6),
+        Constraint::Length(9),
+    ])
+    .split(area);
 
     let mut lines: Vec<Line> = Vec::new();
     if app.shadows.is_empty() {
@@ -256,9 +261,6 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
             final_reward,
             t.fitness(final_reward, 1.0),
         ));
-        if !s.reward_curve.is_empty() {
-            d.push(sparkline_row(&t, "reward", &s.reward_curve));
-        }
     } else {
         d.push(Line::from(Span::styled(
             "(select a shadow with ↑↓)",
@@ -274,6 +276,58 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
             .wrap(Wrap { trim: true }),
         rows[1],
     );
+
+    let curve = app
+        .selected_shadow()
+        .map(|s| s.reward_curve.as_slice())
+        .unwrap_or(&[]);
+    reward_chart(f, app, rows[2], curve);
+}
+
+/// The selected shadow's reward curve as a line chart over training steps — the
+/// trajectory that decides graduation vs collapse.
+fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32]) {
+    let t = app.theme();
+    let block = panel(
+        &t,
+        Span::styled(" reward · over steps ", Style::default().fg(t.ink)),
+    );
+    if curve.is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "(no reward signal yet)",
+                Style::default().fg(t.dim),
+            )))
+            .block(block),
+            area,
+        );
+        return;
+    }
+    let data: Vec<(f64, f64)> = curve
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| (i as f64, v as f64))
+        .collect();
+    let last = curve.len().saturating_sub(1).max(1) as f64;
+    let datasets = vec![Dataset::default()
+        .marker(app.canvas_marker())
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(t.accent))
+        .data(&data)];
+    let chart = Chart::new(datasets)
+        .block(block)
+        .x_axis(
+            Axis::default()
+                .style(Style::default().fg(t.dim))
+                .bounds([0.0, last]),
+        )
+        .y_axis(
+            Axis::default()
+                .style(Style::default().fg(t.dim))
+                .bounds([0.0, 1.0])
+                .labels(["0.0", "1.0"]),
+        );
+    f.render_widget(chart, area);
 }
 
 /// All three regions stacked at once, the focused one given more room and an
