@@ -19,6 +19,7 @@
 │  fps · decrease cap                                  │
 │  ask · route a task through the gate                 │
 │  events · live store changes                         │
+│  gate · inspect the router (weights · self-routing)  │
 │  graduate the selected shadow                        │
 │  freeze · thaw the selected expert                   │
 │  reload from the store                               │

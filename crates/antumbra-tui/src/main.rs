@@ -172,6 +172,7 @@ async fn app_main() -> Result<()> {
                 "help" => app.toggle_help(),
                 "palette" => app.open_palette(),
                 "events" => app.open_events(),
+                "gate" => app.open_gate(),
                 "detail" => app.open_detail(),
                 "confirm" => {
                     app.set_focus(app::Focus::Boundaries);
@@ -600,6 +601,10 @@ async fn apply_action(
             app.open_events();
             *transition = Some(transition::overlay_open());
         }
+        Action::Gate => {
+            app.open_gate();
+            *transition = Some(transition::overlay_open());
+        }
         Action::GraduateShadow => {
             app.request_graduate();
             if app.mode == Mode::Confirm {
@@ -751,6 +756,16 @@ async fn run(
                             _ => {}
                         },
                         Mode::Detail => match key.code {
+                            KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc => {
+                                app.close_overlay()
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => app.detail_move(1),
+                            KeyCode::Up | KeyCode::Char('k') => app.detail_move(-1),
+                            KeyCode::PageDown => app.detail_move(10),
+                            KeyCode::PageUp => app.detail_move(-10),
+                            _ => {}
+                        },
+                        Mode::Gate => match key.code {
                             KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc => {
                                 app.close_overlay()
                             }

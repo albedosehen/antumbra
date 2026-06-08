@@ -34,6 +34,7 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
             Some(overlay::centered(frame, 64, listed))
         }
         Mode::Detail => Some(overlay::centered(frame, 74, 30)),
+        Mode::Gate => Some(overlay::centered(frame, 72, 24)),
         Mode::Ask => {
             let rows = app
                 .ask_result
@@ -143,6 +144,137 @@ fn json_lines<'a>(t: &Theme, value: &serde_json::Value) -> Vec<Line<'a>> {
         .lines()
         .map(|s| Line::from(Span::styled(format!("  {s}"), Style::default().fg(t.value))))
         .collect()
+}
+
+/// The gate (router) inspector (`gate` command): the learned per-dimension
+/// weight profile, the gate scalars, and a self-routing health check — each
+/// expert's own centroid routed through the gate should come back to itself.
+pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
+    let inner = overlay::modal(f, &t, area, "gate · router");
+    let w = inner.width as usize;
+
+    let Some(router) = app.router.as_ref() else {
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "gate untrained",
+                    Style::default().fg(t.warning).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "routing falls back to heuristic KNN — no learned metric yet",
+                    Style::default().fg(t.dim),
+                )),
+            ])
+            .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    };
+
+    let mut l = vec![
+        heading(
+            &t,
+            format!("learned gate · {} experts", router.experts.len()),
+        ),
+        Line::from(vec![
+            Span::styled("temperature ", Style::default().fg(t.dim)),
+            Span::styled(
+                format!("{:.2}", router.temperature),
+                Style::default().fg(t.value),
+            ),
+        ]),
+        kv(&t, "floor", &format!("{:.2}", router.floor)),
+        Line::from(""),
+        section(&t, "metric weights  (learned per-dimension emphasis)"),
+    ];
+
+    // The weight profile as a shade strip across the inner width.
+    if router.weights.is_empty() {
+        l.push(Line::from(Span::styled(
+            "  (uniform — no reweighting)",
+            Style::default().fg(t.dim),
+        )));
+    } else {
+        let n = router.weights.len();
+        let maxw = router
+            .weights
+            .iter()
+            .cloned()
+            .fold(f32::MIN, f32::max)
+            .max(1e-6);
+        let spans: Vec<Span> = (0..w.saturating_sub(2).max(1))
+            .map(|c| {
+                let cols = w.saturating_sub(2).max(1);
+                let idx = if cols <= 1 {
+                    0
+                } else {
+                    c * (n - 1) / (cols - 1)
+                };
+                let ratio = (router.weights[idx.min(n - 1)] / maxw).clamp(0.0, 1.0);
+                Span::styled(
+                    super::heatmap::heat_cell(ratio).to_string(),
+                    Style::default().fg(t.fitness(ratio, 1.0)),
+                )
+            })
+            .collect();
+        let mut row = vec![Span::raw("  ")];
+        row.extend(spans);
+        l.push(Line::from(row));
+    }
+
+    l.push(Line::from(""));
+    l.push(section(
+        &t,
+        "self-routing  (each centroid routed → should pick itself)",
+    ));
+    if router.experts.is_empty() {
+        l.push(Line::from(Span::styled(
+            "  (no experts in the gate)",
+            Style::default().fg(t.dim),
+        )));
+    }
+    for e in &router.experts {
+        let routed = router.route(&e.centroid);
+        let (top_id, prob) = routed
+            .first()
+            .map(|(id, p)| (id.as_str().to_string(), *p))
+            .unwrap_or_else(|| ("—".to_string(), 0.0));
+        let healthy = top_id == e.id.as_str();
+        let name =
+            e.id.as_str()
+                .strip_prefix("expert:")
+                .unwrap_or(e.id.as_str());
+        let top = top_id.strip_prefix("expert:").unwrap_or(&top_id);
+        let (mark, color) = if healthy {
+            ("✓", t.success)
+        } else {
+            ("✗", t.alert)
+        };
+        l.push(Line::from(vec![
+            Span::styled(format!("  {name:<22}→ "), Style::default().fg(t.dim)),
+            Span::styled(format!("{top:<22}"), Style::default().fg(t.value)),
+            Span::styled(
+                format!("{:>3.0}%  ", prob * 100.0),
+                Style::default().fg(t.value),
+            ),
+            Span::styled(
+                mark,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
+
+    f.render_widget(
+        Paragraph::new(l)
+            .scroll((app.detail_scroll, 0))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
 }
 
 /// The drill-down detail of the focused selection (Enter): everything the summary

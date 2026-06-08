@@ -19,6 +19,7 @@ pub enum Action {
     FollowMonitor,
     Ask,
     Events,
+    Gate,
     GraduateShadow,
     FreezeExpert,
     Help,
@@ -104,6 +105,10 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "events · live store changes",
         action: Action::Events,
+    },
+    Command {
+        label: "gate · inspect the router (weights · self-routing)",
+        action: Action::Gate,
     },
     Command {
         label: "graduate the selected shadow",

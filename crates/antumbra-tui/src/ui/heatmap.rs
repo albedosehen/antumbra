@@ -19,8 +19,8 @@ use super::panel;
 /// Shade ramp from cold/empty to hot/full reward.
 const RAMP: [char; 5] = ['·', '░', '▒', '▓', '█'];
 
-/// The shade glyph for a `[0,1]` reward.
-fn heat_cell(v: f32) -> char {
+/// The shade glyph for a `[0,1]` value (reused by the gate weight profile).
+pub(super) fn heat_cell(v: f32) -> char {
     let idx = (v.clamp(0.0, 1.0) * (RAMP.len() - 1) as f32).round() as usize;
     RAMP[idx.min(RAMP.len() - 1)]
 }

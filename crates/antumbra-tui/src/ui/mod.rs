@@ -54,6 +54,7 @@ pub fn render(f: &mut Frame, app: &App) {
             Mode::Filter => overlays::filter_overlay(f, app),
             Mode::Events => overlays::events_overlay(f, app),
             Mode::Detail => overlays::detail_overlay(f, app),
+            Mode::Gate => overlays::gate_overlay(f, app),
             Mode::Ask => overlays::ask_overlay(f, app),
             Mode::Confirm => overlays::confirm_overlay(f, app),
             Mode::Normal => {}

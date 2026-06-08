@@ -163,6 +163,7 @@ mod tests {
     use crate::app::{Focus, LayoutMode, Mode, Palette};
     use crate::command::Action;
     use antumbra_core::generational::{GenerationHead, LoopState};
+    use antumbra_core::router::{LearnedRouter, RouterExpert};
     use antumbra_core::{
         BoundaryId, EdgeType, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary,
         Generation, Grain, Memory, MemoryEdge, MemoryNetwork, RunId, Shadow, ShadowId,
@@ -531,6 +532,39 @@ mod tests {
         app.selected_eval = 0; // the drifted arith run
         app.open_detail();
         golden_overlay("eval_detail", &mut app, 120, 36);
+    }
+
+    // Golden the gate (router) inspector: the weight profile + self-routing
+    // health (a healthy gate routes each centroid back to itself).
+    #[test]
+    fn golden_gate_inspector() {
+        let onehot = |n: usize, i: usize| {
+            let mut v = vec![0.0f32; n];
+            v[i] = 1.0;
+            v
+        };
+        let mut app = demo_app();
+        app.router = Some(LearnedRouter {
+            weights: vec![0.2, 0.6, 1.0, 1.6, 2.0, 1.4, 0.8, 0.3],
+            experts: vec![
+                RouterExpert {
+                    id: ExpertId::new("expert:arith-specialist"),
+                    centroid: onehot(8, 2),
+                },
+                RouterExpert {
+                    id: ExpertId::new("expert:string-specialist"),
+                    centroid: onehot(8, 4),
+                },
+                RouterExpert {
+                    id: ExpertId::new("expert:json-shaper"),
+                    centroid: onehot(8, 6),
+                },
+            ],
+            temperature: 0.2,
+            floor: 0.1,
+        });
+        app.open_gate();
+        golden_overlay("gate_inspector", &mut app, 120, 36);
     }
 
     // Golden the operator-action confirm prompt.

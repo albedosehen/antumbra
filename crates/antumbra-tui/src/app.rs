@@ -39,6 +39,8 @@ pub enum Mode {
     Filter,
     Events,
     Detail,
+    /// The gate (router) inspector: learned weights + self-routing health.
+    Gate,
     Ask,
     Confirm,
 }
@@ -571,6 +573,12 @@ impl App {
     }
 
     /// Open the drill-down detail overlay for the focused selection (Enter).
+    /// Open the gate (router) inspector overlay.
+    pub fn open_gate(&mut self) {
+        self.mode = Mode::Gate;
+        self.detail_scroll = 0;
+    }
+
     pub fn open_detail(&mut self) {
         // The population regions and the Evals rows have a drill-down overlay;
         // Memory shows its detail inline, and the Loop page has none.
