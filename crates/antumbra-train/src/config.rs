@@ -64,10 +64,10 @@ pub struct RaftConfig {
     /// dequantized in the forward. A capacity lever for larger bases.
     pub quantize_base: bool,
     /// Warm-start the LoRA from this saved adapter instead of fresh factors, so
-    /// training *continues* a prior expert. `None` trains from scratch. EXP-010
-    /// uses it for the monolithic continual-fine-tune arm.
+    /// training *continues* a prior expert. `None` trains from scratch.
+    /// Used for the monolithic continual-fine-tune arm.
     pub parent_adapter: Option<String>,
-    /// Rehearsal examples per winner interleaved into capture SFT (EXP-021).
+    /// Rehearsal examples per winner interleaved into capture SFT.
     /// `0.0` is replay off (plain capture); consolidating many memories at once
     /// sets it `> 0` to rehearse already-consolidated skills and resist
     /// catastrophic interference (the complementary-learning-systems fix).

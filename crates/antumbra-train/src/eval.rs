@@ -1,7 +1,7 @@
 //! Eval: an adapter's pass-rate on a corpus, with no training.
 //!
 //! This is one RAFT measurement round without the SFT step or the save: sample
-//! `K` per task, verify each, report the fraction that pass. EXP-010 uses it to
+//! `K` per task, verify each, report the fraction that pass. Used to
 //! detect catastrophic forgetting: a monolithic adapter continually fine-tuned
 //! on a new skill is re-scored on the old one, and the drop is the forgetting.
 

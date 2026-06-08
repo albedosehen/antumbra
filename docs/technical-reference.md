@@ -10,7 +10,7 @@ Antumbra grows a population of small, frozen LoRA experts (the **umbra**) by spa
 
 | Pillar                                                     | Claim                   | Status                                                                                |
 | ---------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------- |
-| 1. Improve a small expert from verified outcomes alone     | engine                  | **demonstrated** (toy scale) - RAFT lifts pass-rate to 1.0 on GPU                     |
+| 1. Improve a small expert from verified outcomes alone     | engine                  | **demonstrated** (small scale) - RAFT lifts pass-rate to 1.0 on GPU                     |
 | 2. Know each expert's scope: route in, refuse/escalate out | keystone (routing half) | **demonstrated** - relative-coverage gate, capability vectors from evaluated behavior |
 | 3. Compose a growing population without forgetting         | payoff                  | **partial** - population grows + routes; composition and forgetting tests are future  |
 
@@ -75,7 +75,7 @@ Fakes: `ScriptedTrainer` (graduating / collapsing / `graduating_with_exemplars`)
 
 A resumable state machine in the database: `grow -> explore -> score -> decide -> consolidate -> grow`. The `GenerationHead` is persisted after **every** transition, so the state value _is_ the checkpoint - kill the process and a fresh loop resumes from the substrate (validated on `surrealkv://`).
 
-Each generation writes its full lineage: the shadow and its status transitions, source-tagged reward signals, an evaluation run, and then either a **graduated `Expert`** (fitness >= `graduate_threshold`) or, on prune, an **open-negative `FailureBoundary`** (recorded but not actionable - honest, because nothing should gate routing on an un-scoped negative until counterfactual search recovers a near-OK `C'`).
+Each generation writes its full lineage: the shadow and its status transitions, source-tagged reward signals, an evaluation run, and then either a **graduated `Expert`** (fitness >= `graduate_threshold`) or, on prune, an **open-negative `FailureBoundary`** (recorded but not actionable, because nothing should gate routing on an un-scoped negative until counterfactual search recovers a near-OK `C'`).
 
 `GenerationReport { generation, shadow, fitness, graduated, reward_curve }` is returned per generation.
 
@@ -162,7 +162,7 @@ CUDA 13 on Windows needs a specific env (vcvars, `CUDARC_CUDA_VERSION`, `NVCC_PR
 
 ## 14. What is proven, and what is not
 
-**Proven (toy scale):** an adapter learns from verified outcomes; the loop is durable and resumable; capability vectors are derived from evaluated behavior; the gate routes to the right specialist and refuses out-of-scope queries.
+**Proven (small scale):** an adapter learns from verified outcomes; the loop is durable and resumable; capability vectors are derived from evaluated behavior; the gate routes to the right specialist and refuses out-of-scope queries.
 
 The failure-boundary `C'` recovery - the deepest keystone claim - composes end-to-end (search -> actionable boundary -> persistence -> scoped inhibition), and the `AcceptabilityProbe` is now a real generate-then-verify mechanism (`GenerateVerifyProbe`) rather than a fake.
 

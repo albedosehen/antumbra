@@ -7,7 +7,7 @@
 //! This module adapts a *normalized* memory export into the same [`CorpusTask`]s
 //! the capture loop ([`crate::teach::capture_corrections`]) internalizes, so a
 //! population can start from lived experience instead of the high-variance RAFT
-//! discovery (the bootstrap problem of EXP-019).
+//! discovery.
 //!
 //! Trust is tiered by the memory's own confidence, mirroring the two intake
 //! paths:
@@ -55,7 +55,7 @@ pub struct MemoryRecord {
     /// store that does not track confidence is taken at its word.
     pub confidence: Option<f32>,
     /// How many times the memory was reinforced / accessed: the *recurrence*
-    /// signal the consolidation gate scores (EXP-021). Absent is treated as 0.
+    /// signal the consolidation gate scores. Absent is treated as 0.
     pub reinforcement: Option<u32>,
     /// `true` if the fact changes over time (current branch, today's deploy
     /// state). Volatile memories never graduate into frozen weights; they stay

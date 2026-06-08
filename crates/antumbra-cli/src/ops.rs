@@ -1,5 +1,5 @@
 //! Heavier command handlers kept out of `main.rs` (which is already large):
-//! `consolidate` (EXP-021, graduate trusted memories into the population with
+//! `consolidate` (graduate trusted memories into the population with
 //! replay) and `retire` (population-level forgetting, the contradiction hook).
 //!
 //! These reuse `main.rs`'s `connect` / `make_embedder` / `refresh_router`

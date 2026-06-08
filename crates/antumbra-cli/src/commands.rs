@@ -1,6 +1,6 @@
 //! The two heaviest growth handlers kept out of `main.rs`: `populate` (grow a
-//! population until it covers a corpus, EXP-007) and `memory_import` (bootstrap
-//! from an existing memory export, EXP-020). Both reuse `main.rs`'s
+//! population until it covers a corpus) and `memory_import` (bootstrap
+//! from an existing memory export). Both reuse `main.rs`'s
 //! `connect` / `make_embedder` / `refresh_router` helpers via `crate::`, so no
 //! infrastructure is duplicated (the same pattern `ops.rs` uses).
 
@@ -250,7 +250,7 @@ pub struct MemoryImportArgs {
     pub lr: f64,
 }
 
-/// Bootstrap from an existing memory export (EXP-020): adapt normalized
+/// Bootstrap from an existing memory export: adapt normalized
 /// memories into capture tasks (reinforced ones trusted on import, weak ones
 /// kept as RAFT seeds), write the converted corpus, and with `train` internalize
 /// the captures through the capture loop.
@@ -396,7 +396,7 @@ pub struct EvolveArgs {
     pub max_new_tokens: usize,
 }
 
-/// Self-improvement loop (EXP-006): generation over generation, eval the current
+/// Self-improvement loop: generation over generation, eval the current
 /// capability, train only the failing tasks warm-started from the prior
 /// adapter, and once converged persist the result as a routable expert.
 pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {

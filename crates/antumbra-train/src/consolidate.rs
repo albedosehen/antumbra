@@ -1,4 +1,4 @@
-//! Consolidation (EXP-021): graduate trusted memories into the population the
+//! Consolidation: graduate trusted memories into the population the
 //! way the neocortex consolidates hippocampal traces during sleep.
 //!
 //! The capture path (`teach`/`memory-import`) internalizes a memory in
@@ -15,7 +15,7 @@ use crate::memory::MemoryRecord;
 use crate::model::{CorpusTask, SftExample};
 
 /// The gate that decides whether a memory graduates from the store into the
-/// weights (EXP-021). A memory consolidates only when it clears all three
+/// weights. A memory consolidates only when it clears all three
 /// signals; the rest stay in the store (the cold-fact / volatile long tail):
 ///   - **recurrence**: reinforced enough to be worth baking in;
 ///   - **stability**: not a fact that changes over time;

@@ -60,7 +60,7 @@ pub enum Command {
         #[arg(long, default_value_t = 128)]
         max_new_tokens: usize,
         /// Abstention threshold on relative coverage. Adjacent experts compress
-        /// the margin; lower it to serve rather than escalate (EXP-004/011).
+        /// the margin; lower it to serve rather than escalate.
         #[arg(long, default_value_t = 0.08)]
         threshold: f32,
         /// Standing experts always composed onto the routed one (your conventions),
@@ -166,25 +166,25 @@ pub enum Command {
         /// Max tokens generated per completion.
         #[arg(long, default_value_t = 256)]
         max_new_tokens: usize,
-        /// Algorithm: `raft` (reward-ranked SFT) or `grpo` (the v1 efficiency path).
+        /// Algorithm: `raft` (reward-ranked SFT) or `grpo`.
         #[arg(long, default_value = "raft")]
         algo: String,
-        /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, v1 efficiency).
+        /// Quantize the frozen base to 4-bit Q4_K (QLoRA).
         #[arg(long)]
         quantize_base: bool,
         /// Warm-start the LoRA from this saved adapter (continual fine-tune)
-        /// instead of fresh factors. EXP-010's monolithic arm (v1 efficiency).
+        /// instead of fresh factors. Monolithic arm.
         #[arg(long)]
         parent: Option<String>,
     },
-    /// Score a saved adapter's pass-rate on a corpus, with no training (the
-    /// EXP-010 forgetting probe). Needs --features models + a GPU + python.
+    /// Score a saved adapter's pass-rate on a corpus, with no training.
+    /// Needs --features models + a GPU + python.
     Eval {
         /// Path to the JSON corpus of verifiable tasks ({id,prompt,verify}).
         #[arg(long)]
         corpus: String,
         /// Saved adapter to load over the base before scoring. Omit to score
-        /// the bare base: the prior floor (EXP-011's load-bearing check).
+        /// the bare base: the prior floor.
         #[arg(long)]
         adapter: Option<String>,
         #[arg(long, default_value = "Qwen/Qwen2.5-Coder-1.5B")]
@@ -319,7 +319,7 @@ pub enum Command {
         #[arg(long, default_value_t = 3e-4)]
         lr: f64,
     },
-    /// Consolidation (EXP-021): score a normalized memory export against the
+    /// Consolidation: score a normalized memory export against the
     /// graduation gate (recurrence x verifiability x stability), graduate the
     /// survivors into per-skill specialists rehearsing already-consolidated
     /// skills (replay, the catastrophic-interference fix), and append them to

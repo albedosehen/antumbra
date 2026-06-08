@@ -16,8 +16,6 @@ Antumbra is a different layer. It **metabolizes verified outcomes into weights**
 - **Memory + skill in one private engine**, with **engine-enforced** multi-tenant ACL the incumbents have no equivalent of.
 - **Privacy is structural, not a setting**: fully offline or hosted-but-private, bring-your-own-embedder, data and learned skills never leave your boundary.
 
-**Caveats (when _not_ to use it):** it wants a local GPU (real CapEx vs a cloud API call); there is an investment period where experts are immature; and the bet (small frozen experts matching a frontier model _within scope_) holds for repetitive, bounded, verifiable work and **breaks on open-ended novelty**. Antumbra is a compounding specialist engine, not a general-purpose oracle.
-
 ## Who it's for, and the three ways to run it
 
 1. **Offline / private (the floor).** A solo developer or an air-gapped, regulated box. Embedded `surrealkv://` store, stdio or loopback MCP, one identity. Nothing leaves the machine. This is the default and the privacy guarantee.

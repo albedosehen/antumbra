@@ -1,8 +1,7 @@
 //! A learned router (the north-star gate, in its routing form).
 //!
 //! The v0 gate routes by raw cosine to each expert's capability centroid. Frozen
-//! sentence embeddings compress general and specific experts into the same band,
-//! so a specialist barely outscores a generalist (EXP-012: a 0.020 margin). This
+//! sentence embeddings compress general and specif (a 0.020 margin). This
 //! applies a **learned per-dimension metric** that amplifies the directions which
 //! actually separate experts, then routes by cosine to per-expert centroids in
 //! that reweighted space. The metric is trained on the population's own solved

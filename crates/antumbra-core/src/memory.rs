@@ -3,7 +3,7 @@
 //! A memory is a trace that has not yet hardened into the umbra (a frozen
 //! expert). It is fast to write, editable, reinforced over use, and tenant-
 //! scoped to a [`WorkspaceId`]. Memories are the *consolidation source*: a
-//! reinforced, stable, verifiable trace graduates store→weights (EXP-021); a
+//! reinforced, stable, verifiable trace graduates store→weights. A
 //! contradicted one retires the expert it produced. This is the hippocampus to
 //! the population's neocortex.
 //!

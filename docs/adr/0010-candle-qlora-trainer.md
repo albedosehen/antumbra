@@ -71,7 +71,7 @@ flowchart TB
 
 ## Alternatives considered
 
-- **GRPO first.** Rejected for v0: more machinery and harder to get right hand-rolled; RAFT reaches a trained adapter sooner and is the honest minimum. GRPO is the v1 sample-efficiency upgrade.
+- **GRPO first.** Rejected for v0: more machinery and harder to get right hand-rolled; RAFT reaches a trained adapter sooner and is the minimum. GRPO is the v1 sample-efficiency upgrade.
 - **Imitation SFT on a teacher's text.** Rejected by ADR-0002/0003 (ToS-sensitive, ungrounded). The winners we SFT on are the model's _own_ verified-correct outputs.
 - **A thin Python Unsloth trainer behind the port.** Remains the explicit _fallback_ if the candle path stalls (ADR-0002's risk table), not the plan.
 - **bitsandbytes NF4 in v0.** Not available in candle; GGUF-Q4 is the candle-native quant, and only at MT-4.

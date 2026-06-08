@@ -28,7 +28,7 @@ A memory store keeps two things RAG conflates: a **behavioral prior** (how to ac
 ## Consequences
 
 - **Positive:** lived experience seeds the population without a cold start; the store + population become one circulatory system (memory→weights on consolidate, state→store on graduation, correction→retirement on contradiction); private data becomes private owned weights.
-- **Negative:** consolidation is only sound for **verifiable** behavior; opinions/preferences have no executable check and graduate only on the weaker provenance tier; forgetting-at-scale is still toy-probed (EXP-010); the end-to-end memory→weights consolidation is GPU-validated only in part.
+- **Negative:** consolidation is only sound for **verifiable** behavior; opinions/preferences have no executable check and graduate only on the weaker provenance tier; forgetting-at-scale is still small-probed (EXP-010); the end-to-end memory→weights consolidation is GPU-validated only in part.
 - **Neutral:** the embedder is the same BERT path the gate uses (a pluggable Ollama path is deferred).
 
 ## Alternatives considered
