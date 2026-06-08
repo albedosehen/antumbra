@@ -124,11 +124,12 @@ You don’t talk to Antumbra directly like a chatbot. You **bolt it onto the AI 
 
 ---
 
-## What it’s _not_ (so no one’s oversold)
+## What to expect
 
-- It’s **not magic, and not free to start.** It wants a decent graphics card (the kind used for games/AI) and a learning-in period before the specialists are any good.
-- It’s **not a know-it-all oracle.** It shines on **repeating, checkable** work you do a lot. For wildly open-ended, never-seen-before problems, you still lean on the big outside brain.
-- The bet is simple: **small, well-trained in-house specialists beat a giant generalist _for your specific repeated work_**, and you own them.
+- **You bring the generalist; Antumbra is the private layer under it.** There is always a capable general assistant in the loop, the one you bolt Antumbra onto. So Antumbra never has to be a know-it-all oracle: its job is to make that assistant _yours_, with private memory and specialists grown from your own verified work. “Is it as broad as a frontier model?” is the wrong question, because you already have one driving.
+- **The Logbook earns its keep from day one.** Even before a single specialist is trained, the private memory means every session boots already knowing your conventions and history, and it is the very material the specialists later graduate from. Useful immediately, and it compounds with use.
+- **Private and secure by design.** Your conventions, history, and learned skills stay on your hardware (or inside your own private tenant); the data that trains your specialists never leaves your boundary. That is the whole point, not a setting you switch on.
+- **It’s not magic.** Training specialists wants a capable GPU (or a decent Apple-silicon Mac). CPU-only works but is slow, best for trying it out.
 
 ---
 

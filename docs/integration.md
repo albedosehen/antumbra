@@ -2,7 +2,7 @@
 
 This is the practical answer to _"how do I actually use this, and what do I get?"_
 
-Antumbra is not a chatbot you open. It is the **persistent brain** your existing coding agent (Claude Code, Cursor, any MCP client) plugs into. Unlike a plain memory layer, it **gets better at your work over time** by turning verified outcomes into permanent local skills. You keep your agent; Antumbra gives it memory, identity, multi-tenant boundaries, and a growing population of specialists, all on your hardware.
+You don't chat with Antumbra directly. It is the **private, persistent brain** your existing coding agent (Claude Code, Cursor, any MCP client) plugs into: a memory layer that compounds. It is useful from the first session, because your agent boots already knowing your conventions and history, and it **gets better at your work over time** by turning verified outcomes into permanent local skills. You keep your agent; Antumbra gives it private memory, identity, multi-tenant boundaries, and a growing population of specialists, all on your hardware.
 
 The whole integration is three touchpoints on your agent's lifecycle, plus an MCP connection. Once wired, every session **boots smarter and ends by depositing what it learned**; the successful work is metabolized into weights so the scaffold shrinks.
 
