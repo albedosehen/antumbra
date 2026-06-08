@@ -1,7 +1,8 @@
-//! The live event stream: store changes detected by diffing successive reloads
-//! (no SurrealDB LIVE query needed), kept as a capped ring the events overlay
-//! shows. Because the loop reloads every couple of seconds, the stream fills as
-//! the population is trained from another process.
+//! The live event stream: store changes detected by diffing successive reloads,
+//! kept as a capped ring the events overlay shows. A reload runs on a live-query
+//! notification (see [`crate::live`]) so an external write surfaces within a
+//! frame, with a periodic reload every couple of seconds as the fallback, so the
+//! stream fills as the population is trained from another process.
 
 /// What kind of change an [`Event`] records; drives its glyph and colour.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

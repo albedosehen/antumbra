@@ -7,6 +7,7 @@
 mod app;
 mod command;
 mod events;
+mod live;
 mod overlay;
 mod pacing;
 mod render;
@@ -675,6 +676,11 @@ async fn run(
 ) -> Result<()> {
     // Honour sub-16ms frame budgets on Windows (restored on drop).
     let _timer = pacing::TimerResolution::acquire();
+    // Live store watchers: an external write (a captured memory, a graduated
+    // expert) triggers an immediate reload instead of waiting for the periodic
+    // tick. Best-effort, so the console runs unchanged where live queries are
+    // unavailable; the watchers stop when these receivers drop at return.
+    let mut live = live::watch_store(store).await;
     let mut last = Instant::now();
     // The active view-switch effect (and the scope it animates), processed
     // against the frame buffer and cleared when it finishes.
@@ -897,7 +903,8 @@ async fn run(
                 }
             }
         }
-        if app.wants_reload() {
+        // Reload on a live store change (instant) or the periodic fallback tick.
+        if live::drained_change(&mut live) || app.wants_reload() {
             app.reload(store).await?;
         }
         if app.should_quit {
