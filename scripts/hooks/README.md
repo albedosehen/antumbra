@@ -50,6 +50,35 @@ directly; then the capture/bootstrap tools are called in-band and the
 
 ## Wire it (settings.json excerpt)
 
+Pick the block for your OS. Both wire the same three touchpoints; they differ only
+in how the command is launched (`bash` + the `.sh` script, or `pwsh` + the `.ps1`).
+
+### macOS / Linux (bash)
+
+```json
+{
+  "autoMemoryEnabled": false,
+  "permissions": { "deny": ["Write(**/.agent/memory/**)", "Edit(**/.agent/memory/**)"] },
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command",
+      "command": "bash ./scripts/hooks/antumbra-session-start.sh", "timeout": 10 }]}],
+    "Stop": [{ "hooks": [{ "type": "command",
+      "command": "bash ./scripts/hooks/antumbra-capture.sh", "timeout": 5 }]}],
+    "PreCompact": [{ "hooks": [{ "type": "command",
+      "command": "bash ./scripts/hooks/antumbra-capture.sh", "timeout": 5 }]}],
+    "PreToolUse": [{ "matcher": "Bash", "hooks": [
+      { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(git *)" },
+      { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(gh *)" }
+    ]}]
+  }
+}
+```
+
+The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev
+machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubuntu).
+
+### Windows (PowerShell)
+
 ```json
 {
   "autoMemoryEnabled": false,
@@ -69,11 +98,8 @@ directly; then the capture/bootstrap tools are called in-band and the
 }
 ```
 
-The example uses the Windows form (`pwsh … .ps1`). **On macOS/Linux**, replace each
-`pwsh -NonInteractive -File ./scripts/hooks/<name>.ps1` with
-`bash ./scripts/hooks/<name>.sh`; same hooks, same behavior. (`pwsh` also runs on
-macOS/Linux if you install PowerShell, so the `.ps1` form works cross-platform too;
-the `.sh` siblings are the native, dependency-light option.)
+(`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is
+cross-platform too; the `.sh` siblings are the native, dependency-light option.)
 
 Disabling the agent's built-in file memory (`autoMemoryEnabled: false` + the deny
 rule) makes Antumbra the **single source of truth**: one store, one ACL, one thing
