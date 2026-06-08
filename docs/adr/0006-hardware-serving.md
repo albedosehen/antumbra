@@ -56,7 +56,7 @@ The live question - _"use many tiny native-ternary models (Bonsai / BitNet) as t
 | Code-capable verified signal (ADR-0002/0004) | strong shared code base acts well enough to pass tests           | no strong code-capable ternary today (Bonsai ~0.5 B general; BitNet 2B4T non-coder) → **cold-start collapse**       |
 | Composition                                  | latent-space adapter mixing over one base (ADR-0005), no bridges | separate models → inherits ADR-0009 cross-attention bridges + representation alignment                              |
 
-**Why it still lives in this ADR:** ternary shrinks **weights only** - not KV-cache, activations, or the bridges - so it _softens_ the ADR-0009 memory wall rather than removing it. That is precisely its right role: prove the science on shared-base adapters first, then reach for ternary to make _N genuinely-separate frozen experts_ resident at once when ADR-0009 wakes. A ternary **shared base** (keeping the adapter architecture) is also rejected - it trades away the code-capability the keystone (ADR-0004) needs to solve a density problem v0 does not have.
+**Why it still lives in this ADR:** ternary shrinks **weights only** - not KV-cache, activations, or the bridges - so it _softens_ the ADR-0009 memory wall rather than removing it. That is precisely its right role: prove the science on shared-base adapters first, then reach for ternary to make _N genuinely-separate frozen experts_ resident at once when ADR-0009 wakes. A ternary **shared base** (keeping the adapter architecture) is also rejected - it trades away the code-capability the antumbra (ADR-0004) needs to solve a density problem v0 does not have.
 
 ## Consequences
 

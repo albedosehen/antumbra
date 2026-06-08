@@ -23,7 +23,7 @@ Compose genuinely separate frozen experts via **learned cross-attention bridges*
 1. **Sparse selection.** You cannot run a whole population in one forward pass; a gate (ADR-0005, generalized) selects the **top-k in-scope experts** per task and composes only those.
 2. **Learned cross-attention bridges** let the selected experts attend into each other's intermediate representations. Only the bridges train (no-forgetting preserved - experts stay frozen).
 3. **Modular, per-expert bridges** so adding an expert adds its bridge _without_ retraining the others - additive growth, consistent with ADR-0001.
-4. **The boundary as latent gating** (the keystone, ADR-0004): the counterfactual scope gates _both_ the selection (only compose in-scope experts) _and_ the bridge gain (attend to expert E ∝ `P(E correct |
+4. **The boundary as latent gating** (the antumbra, ADR-0004): the counterfactual scope gates _both_ the selection (only compose in-scope experts) _and_ the bridge gain (attend to expert E ∝ `P(E correct |
    context)`). ADR-0004 becomes a modulator inside the forward pass.
 
 ```mermaid

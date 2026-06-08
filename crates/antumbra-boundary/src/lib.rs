@@ -1,13 +1,12 @@
-//! # antumbra-boundary: the counterfactual boundary of competence (the keystone)
-//!
 //! Counterfactual scope search. The behavior **B** is held fixed; the context
 //! is varied along candidate governing dimensions; the frozen population is
 //! re-probed (via the [`AcceptabilityProbe`] port) until B's acceptability
 //! *flips*. The payload is the governing dimension and the nearest in-scope
 //! context **C'** (*where and why* the rule applies), never a negated goal.
 //!
-//! This is job #1 of the keystone. Building the persisted [`FailureBoundary`] from
-//! a finding (job #2's store side) is [`finding_to_boundary`].
+//! This has two jobs:
+//!   - job #1 Building the persisted [`FailureBoundary`] from Job#2's findings
+//!   - job #2 Discover [`finding_to_boundary`] the scope of a failure and the governing feature
 
 use std::collections::BTreeSet;
 
@@ -87,13 +86,14 @@ fn value_set(contexts: &[&Value], key: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// **Discover** the governing feature, rather than being told it. Probe every
-/// context, partition into pass/fail, then find the context key whose value
-/// alone separates the two (its passing-values are disjoint from its
+/// **Discover** the governing feature autonomously, rather than being told it.
+/// The system autonomously names *its own* governing feature from evaluated behavior
+/// by probing every context, partitioning into pass/fail, then finding the context key
+/// whose value alone separates the two (its passing-values are disjoint from its
 /// failing-values), preferring the simplest such key (fewest distinct values).
+///
 /// Returns `None` when no boundary exists (all pass or all fail) or no single
-/// feature explains the split. This is the autonomous half of the keystone: the
-/// system names *its own* governing feature from evaluated behavior.
+/// feature explains the split. T
 pub async fn discover_boundary(
     behavior: &str,
     contexts: &[Value],

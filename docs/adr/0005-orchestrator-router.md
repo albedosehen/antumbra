@@ -1,6 +1,6 @@
 # ADR-0005 - From router to an in-model, boundary-conditioned gate
 
-**Status:** Accepted · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundary keystone), 0006 (serving), 0009 (north star)
+**Status:** Accepted · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundary antumbra), 0006 (serving), 0009 (north star)
 
 > **Learned gate realized (2026-06-04).** The relative-coverage heuristic below is now backed by a _learned_ boundary-conditioned gate (ADR-0009's mixer in routing form), validated in EXP-013/017. A per-dimension metric, trained on the population's own solved exemplars (prototypical cross-entropy, `antumbra-train::router`), amplifies the directions that separate experts, turning the compressed cosine band into clean separation: a specialist the heuristic margin _escalated_ (0.051) now routes at p=1.000, and it generalizes to held-out tasks. Out-of-distribution is caught by an **absolute floor** on the nearest-centroid similarity in the learned space (calibrated `mean-2σ` over in-distribution exemplars): "capital of France" escalates (sim 0.41 < floor 0.53) where the softmax was overconfident (p=0.98). The router is **self-maintaining** (auto-retrained on every `train`/`teach` once ≥2 experts) and **unified with boundaries** (route by the learned metric, but escalate on OOD _or_ boundary inhibition). The heuristic gate stays the fallback (<2 experts / no router). Recurring principle, proven three times now (this gate EXP-002, the boundary, the router EXP-017): on compressed sentence embeddings use _relative/learned_ separation + an _absolute_ OOD floor, never a raw similarity cutoff. Compass: RMD (2106.09022), DynMoLE entropy gating (2504.00661), selective prediction (1705.08500).
 
@@ -21,7 +21,7 @@ Something has to select and combine experts. Earlier this was framed as a _route
 ## Decision
 
 1. **The gate is a learned, in-model mixer over the adapter library.** Capability vectors (learned from evaluated behavior, ADR-0004's measurement) seed it; it is trained on accumulated traces with the critic's per-step reward (ADR-0003). It is itself a trainable component on the shadow lifecycle (ADR-0002).
-2. **The gate is boundary-conditioned (the keystone in the forward pass).** It does not weight adapters by capability-similarity alone - the counterfactual scope (ADR-0004) **gates and steers** it: down-weight out-of-scope experts, prefer in-scope ones. The boundary is an inductive bias _inside_ the model, not an external penalty.
+2. **The gate is boundary-conditioned (the antumbra in the forward pass).** It does not weight adapters by capability-similarity alone - the counterfactual scope (ADR-0004) **gates and steers** it: down-weight out-of-scope experts, prefer in-scope ones. The boundary is an inductive bias _inside_ the model, not an external penalty.
 3. **The gate also makes the escalate-or-answer decision.** When the boundary says _out-of-scope / low confidence_, the gate **escalates to the optional flagship tier** (ADR-0003/0006) instead of guessing - and that escalation becomes a training example, so the escalation set shrinks over time. This is the mechanism behind "how it pays for itself."
 4. **Composition is a durable flow.** Multi-step tasks persist state in `orchestration_run` so a crash resumes mid-task - same engine as the generational loop (ADR-0008).
 5. **North-star continuity (ADR-0009).** When experts become separate models, the gate generalizes from adapter-mixing to **selecting top-k experts + driving learned cross-attention bridges** - same role, heavier substrate. v0's gate logic carries over.
@@ -48,7 +48,7 @@ flowchart TB
 ## Alternatives considered
 
 - **Text router over separate models.** Rejected for v0: lossy, no cross-expert gradient. (It survives only as the _interface_ to the optional flagship escalation tier.)
-- **Capability-only gate (no boundary).** Rejected: routes confidently out-of-scope; the keystone exists precisely to prevent this.
+- **Capability-only gate (no boundary).** Rejected: routes confidently out-of-scope; the antumbra exists precisely to prevent this.
 - **A big LLM as the gate.** Rejected as default: violates the small-model thesis and the single-GPU budget.
 
 ## Validation

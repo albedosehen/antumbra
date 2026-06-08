@@ -2,11 +2,11 @@
 
 Every load-bearing diagram in one place. Each is reproduced from its source-of-truth document; follow the link in the caption to read the surrounding decision. Grouped: **concept → system → flow → schema → mechanism → north star.**
 
-- Concept: [the shadow](#1-the-shadow-umbra--penumbra--antumbra) · [decision chain](#2-the-keystone-decision-chain)
+- Concept: [the shadow](#1-the-shadow-umbra--penumbra--antumbra) · [decision chain](#2-the-antumbra-decision-chain)
 - System: [v0 architecture](#3-v0-system-architecture) · [v0 vs north star](#5-v0-vs-north-star)
 - Flow: [training & data](#4-training--data-flow)
 - Schema: [entities](#6-schema---entities) · [substrate](#13-surrealdb-substrate)
-- Per-mechanism: [0001](#7-umbra-the-frozen-population) · [0002](#8-penumbra-the-shadow-lifecycle) · [0003](#9-criticverifier-credit) · [0004](#10-the-boundary-engine-keystone) · [0005](#11-the-boundary-conditioned-gate) · [0006](#12-single-gpu-serving) · [0008](#14-the-generational-loop) · [0009](#15-heterogeneous-composition)
+- Per-mechanism: [0001](#7-umbra-the-frozen-population) · [0002](#8-penumbra-the-shadow-lifecycle) · [0003](#9-criticverifier-credit) · [0004](#10-the-boundary-engine-antumbra) · [0005](#11-the-boundary-conditioned-gate) · [0006](#12-single-gpu-serving) · [0008](#14-the-generational-loop) · [0009](#15-heterogeneous-composition)
 
 ---
 
@@ -14,24 +14,24 @@ Every load-bearing diagram in one place. Each is reproduced from its source-of-t
 
 ### 1. The shadow: umbra · penumbra · antumbra
 
-The name is the model. A cast shadow has three regions and so does the system: the **umbra** is the proven frozen experts; the **penumbra** is the shadows-in-training; the **antumbra** is the keystone boundary where coverage _inverts_ and the system must escalate. Source: [README](../README.md).
+The name is the model. A cast shadow has three regions and so does the system: the **umbra** is the proven frozen experts; the **penumbra** is the shadows-in-training; the **antumbra** is the antumbra boundary where coverage _inverts_ and the system must escalate. Source: [README](../README.md).
 
 ```mermaid
 flowchart LR
     PEN["PENUMBRA<br/>shadows-in-training - explore,<br/>then deepen or fade"] -->|"graduate (deepen to full shadow)"| UMB["UMBRA<br/>frozen experts<br/>(adapters over a shared base)"]
     PEN -->|"prune"| X["dissipated"]
     UMB -.->|"cast a new shadow"| PEN
-    ANT["ANTUMBRA - the keystone<br/>counterfactual scope:<br/>where coverage inverts,<br/>and when to escalate"] -.->|"gates"| UMB
+    ANT["ANTUMBRA - the antumbra<br/>counterfactual scope:<br/>where coverage inverts,<br/>and when to escalate"] -.->|"gates"| UMB
     X -.->|"log why + where it failed"| ANT
 ```
 
-### 2. The keystone decision chain
+### 2. The antumbra decision chain
 
-Read conceptually, the architecture radiates from the counterfactual boundary of competence (the keystone); the foundational decisions are numbered 0001 through 0009 in the opposite (build-dependency) order. Source: [architecture §1](architecture.md#1-the-thesis-and-the-two-readings-of-the-chain).
+Read conceptually, the architecture radiates from the counterfactual boundary of competence (the antumbra); the foundational decisions are numbered 0001 through 0009 in the opposite (build-dependency) order. Source: [architecture §1](architecture.md#1-the-thesis-and-the-two-readings-of-the-chain).
 
 ```mermaid
 flowchart TD
-    T["KEYSTONE<br/>counterfactual scope of competence<br/>right-here / wrong-there + governing feature"]
+    T["antumbra<br/>counterfactual scope of competence<br/>right-here / wrong-there + governing feature"]
     T --> N1["needs a STABLE substrate<br/>frozen experts"]
     T --> N2["needs PROBES near the edge<br/>shadows"]
     T --> N3["needs to MEASURE correctness<br/>critic + verifiers"]
@@ -197,7 +197,7 @@ flowchart LR
     V -. "bounds the critic - <br/>it cannot unilaterally steer" .-> C
 ```
 
-### 10. The boundary engine (keystone)
+### 10. The boundary engine (antumbra)
 
 The antumbra made mechanical: hold behavior fixed, vary context until acceptability flips, recover the governing feature + grain, then inhibit _only in-scope_ and steer. Source: [the inhibitory-boundaries decision](adr/0004-inhibitory-boundaries.md).
 

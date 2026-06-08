@@ -48,5 +48,5 @@ metal = ["models", "candle-core/metal", "candle-nn/metal", "candle-transformers/
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
-# The keystone search drives the real probe in tests (depends only on core).
+# Counterfactual search drives the real probe in tests (depends only on core).
 antumbra-boundary = { path = "../antumbra-boundary" }

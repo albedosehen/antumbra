@@ -1,13 +1,13 @@
 //! # antumbra-core
 //!
-//! The storage-agnostic domain heart of Antumbra: typed entities, their
+//! The storage-agnostic domain for typed entities, their
 //! lifecycle state machines, and the port traits that seam off serving and
 //! training so the rest of the system is exercisable without a GPU.
 //!
-//! Metaphor map (a cast shadow has three regions):
+//! Metaphor map in case you need it:
 //! - **umbra** = frozen experts ([`expert`])
 //! - **penumbra** = shadows-in-training ([`shadow`])
-//! - **antumbra** = the counterfactual boundary, the keystone ([`boundary`])
+//! - **antumbra** = the counterfactual boundary, the ([`boundary`])
 
 pub mod boundary;
 pub mod compartment;

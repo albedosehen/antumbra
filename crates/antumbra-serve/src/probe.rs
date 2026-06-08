@@ -1,10 +1,9 @@
 //! The real `AcceptabilityProbe` (the counterfactual boundary of competence): **generate-then-verify**.
 //!
 //! Hold a behavior fixed, render it for a candidate context, **serve** a
-//! completion, and let a **verifier** judge it. This retires the keystone's
-//! last fake: acceptability is decided by actually producing the behavior and
-//! checking it against the environment, not asserted. It is generic over the
-//! `Serve` and `Verifier` ports, so it composes the candle server
+//! completion, and let a **verifier** judge it.
+//!
+//! It is generic over the `Serve` and `Verifier` ports, so it composes the candle server
 //! (`CandleServe`) with the environment verifier (`CommandVerifier`) in
 //! production, and deterministic fakes in tests.
 
@@ -152,7 +151,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn keystone_search_recovers_c_prime_with_the_real_probe() {
+    async fn antumbra_search_recovers_c_prime_with_the_real_probe() {
         // find_scope drives the real probe: hold the behavior fixed, vary the
         // governing feature, and recover the context where serving passes.
         let probe = GenerateVerifyProbe::new(ConvertServe, C2fVerifier);

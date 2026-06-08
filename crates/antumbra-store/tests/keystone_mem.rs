@@ -1,4 +1,4 @@
-//! The keystone, the counterfactual boundary of competence, end-to-end.
+//! The counterfactual boundary of competence, end-to-end.
 //! Counterfactual search recovers C', the
 //! boundary persists as actionable through surql-rs, and the gate inhibits
 //! routing inside the failure scope, and only inside it. The single fake is
@@ -42,7 +42,7 @@ async fn actionable_boundary_inhibits_routing_inside_its_scope_only() {
         .await
         .unwrap();
 
-    // Keystone job #1: hold the behavior fixed, vary the context, re-probe until
+    // Antumbra job #1: hold the behavior fixed, vary the context, re-probe until
     // acceptability flips. `npm install` is wrong under deno (C), right under
     // node (C'); the governing feature is the runtime.
     let probe = FeatureProbe {

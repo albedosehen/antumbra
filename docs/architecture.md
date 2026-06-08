@@ -6,11 +6,11 @@ Technical companion to the [README](../README.md): the **single-plane Rust** arc
 
 ## 1. The thesis, and the two readings of the chain
 
-**Modeling the counterfactual boundary of the agent's own competence is the keystone.** It is the reason the project exists; everything else is apparatus. Read _conceptually_, the architecture radiates from it:
+**Modeling the counterfactual boundary of the agent's own competence is the antumbra.** It is the reason the project exists; everything else is apparatus. Read _conceptually_, the architecture radiates from it:
 
 ```mermaid
 flowchart TD
-    T["KEYSTONE<br/>counterfactual scope of competence<br/>right-here / wrong-there + governing feature"]
+    T["Antumbra<br/>counterfactual scope of competence<br/>right-here / wrong-there + governing feature"]
     T --> N1["needs a STABLE substrate<br/>frozen experts"]
     T --> N2["needs PROBES near the edge<br/>shadows"]
     T --> N3["needs to MEASURE correctness<br/>critic + verifiers"]
@@ -157,7 +157,7 @@ antumbra/
     antumbra-store/        # surql-rs data layer (schema/migrations/repositories)
     antumbra-embed/        # the MCP runtime surface: HTTP embedder (OpenAI-compatible /embeddings) behind the Embedder port
     antumbra-gate/         # the boundary-conditioned gate: adapter gate (+ north-star bridge client)
-    antumbra-boundary/     # the counterfactual boundary: scope engine (keystone)
+    antumbra-boundary/     # the counterfactual boundary: scope engine (antumbra)
     antumbra-loop/         # the durable generational loop
     antumbra-critic/       # the critic for credit assignment: verifiers + optional flagship-as-critic
     antumbra-train/        # shadow plasticity: candle QLoRA + gate training; consolidation (Penumbra memory store)
@@ -199,7 +199,7 @@ Not yet runtime-validated / built: GPU validation of `MultiAdapterServe`'s swap 
 | Population of frozen experts (adapters) | core                                |
 | Shadow plasticity (DIY candle QLoRA)    | core                                |
 | Critic / verifiable rewards             | core                                |
-| Counterfactual boundary                 | **keystone, first-class**           |
+| Counterfactual boundary                 | **antumbra, first-class**           |
 | Router to an in-model gate              | core                                |
 | Hardware-adaptive serving               | **scoped to 1 GPU; fleet deferred** |
 | SurrealDB substrate                     | core                                |

@@ -10,14 +10,14 @@ GPU experiments need the CUDA-13 / Windows environment in [running-the-trainer.m
 | [EXP-002](#exp-002-the-gate-routes-in-scope-and-refuses-out-of-scope)       | Gate routes in-scope, refuses out-of-scope                                          | 2        | **passed**                                         |
 | [EXP-003](#exp-003-capability-vectors-from-evaluated-behavior)              | Capability vectors come from evaluated behavior                                     | 2        | **passed**                                         |
 | [EXP-004](#exp-004-a-multi-expert-population-routes)                        | A multi-expert population routes correctly                                          | 3        | **passed** (GPU)                                   |
-| [EXP-005](#exp-005-an-actionable-boundary-inhibits-routing-in-scope-only)   | An actionable boundary inhibits routing, in-scope only                              | keystone | **passed**                                         |
+| [EXP-005](#exp-005-an-actionable-boundary-inhibits-routing-in-scope-only)   | An actionable boundary inhibits routing, in-scope only                              | antumbra | **passed**                                         |
 | [EXP-006](#exp-006-experts-answer-serving)                                  | A graduated expert serves a real answer                                             | 1        | **passed** (GPU)                                   |
-| [EXP-007](#exp-007-live-counterfactual-boundary-recovery)                   | Live counterfactual boundary recovery + autonomous discovery                        | keystone | **passed** (GPU)                                   |
+| [EXP-007](#exp-007-live-counterfactual-boundary-recovery)                   | Live counterfactual boundary recovery + autonomous discovery                        | antumbra | **passed** (GPU)                                   |
 | [EXP-008](#exp-008-grpo-vs-raft)                                            | GRPO is more sample-efficient than RAFT                                             | 1        | **passed, single run** (GPU)                       |
 | [EXP-009](#exp-009-4-bit-qlora-training-memory)                             | 4-bit base trains a LoRA at f16 quality, ~1/4 resident base                         | 1        | **passed** (GPU)                                   |
 | [EXP-010](#exp-010-catastrophic-forgetting-frozen-population-vs-monolithic) | Frozen population retains skills a monolith forgets                                 | 3        | **inconclusive** (no forgetting at small scale, GPU) |
 | [EXP-011](#exp-011-durable-correction-against-a-strong-prior)               | A one-time correction is captured + routed across a context reset                   | 1,2      | **passed** (GPU)                                   |
-| [EXP-012](#exp-012-the-self-improvement-lifecycle-end-to-end)               | Fail -> bound -> capture -> retire -> route to the fix, in one loop                 | keystone | **passed** (GPU)                                   |
+| [EXP-012](#exp-012-the-self-improvement-lifecycle-end-to-end)               | Fail -> bound -> capture -> retire -> route to the fix, in one loop                 | antumbra | **passed** (GPU)                                   |
 | [EXP-013](#exp-013-the-learned-router)                                      | A learned router separates specialists from generalists                             | 2        | **passed** (GPU)                                   |
 | [EXP-014](#exp-014-adapter-composition)                                     | Experts compose into one served adapter; behavior is dialable                       | 3        | **passed** (GPU)                                   |
 | [EXP-015](#exp-015-complementary-composition-the-capability-multiplier)     | Composing complementary experts does what neither alone was trained for             | 3        | **passed** (GPU)                                   |
@@ -86,7 +86,7 @@ GPU experiments need the CUDA-13 / Windows environment in [running-the-trainer.m
 
 **Kill criterion.** The boundary inhibits outside its scope, or fails to inhibit inside it -> over/under- generalized inhibition.
 
-**Reproduce.** `cargo test -p antumbra-store --test keystone_mem` (commit `5e7705c`).
+**Reproduce.** `cargo test -p antumbra-store --test antumbra_mem` (commit `5e7705c`).
 
 ## EXP-006: experts answer (serving)
 
@@ -103,13 +103,13 @@ string"` -> strings specialist -> `return s[::-1]`. Route -> load adapter -> ser
 
 ## EXP-007: live counterfactual boundary recovery
 
-**Claim.** The keystone runs live with no fake: a trained expert's competence boundary is recovered by actually generating and executing, then persisted as actionable; and the governing feature can be **discovered**, not supplied.
+**Claim.** The antumbra runs live with no fake: a trained expert's competence boundary is recovered by actually generating and executing, then persisted as actionable; and the governing feature can be **discovered**, not supplied.
 
 **Method.** Train a narrow **adder** (add-only); probe its boundary **with its own adapter** (`scope --expert adder-g0`) over an in-scope (`op=add`) vs out-of-scope (`op=multiply`) context, each with its own exec verifier. Then `--discover` to infer the governing feature from pass/fail.
 
 **Result.** Recovers reliably, including in `--discover` mode (the governing feature is _inferred_, not supplied): the adder passes `op=add` and fails `op=multiply` -> governing feature `op`, C' `{op: add}`, actionable boundary stored (`status`: 1 actionable, 0 open). Getting here flushed out three real bugs, each fixed and committed: (1) best-of-K re-seeded the RNG identically, so the K draws were the same completion -> a per-call generation nonce; (2) the server reloaded the multi-GB model on every `act` -> cache it once; (3) the verifier executed untrusted generated code with no timeout, so a runaway draw hung the whole run -> null stdin + a hard kill timeout. Throughout, the probe held integrity: it returned "stays open" rather than fabricating a scope.
 
-**Kill criterion.** The probe fabricates a boundary when generation never verifies, OR no actor/temperature setting yields reliable recovery -> the live keystone is not dependable.
+**Kill criterion.** The probe fabricates a boundary when generation never verifies, OR no actor/temperature setting yields reliable recovery -> the live antumbra is not dependable.
 
 **Reproduce.** train `corpora/add-only.json --run adder`, then `scope --spec corpora/scope-adder.json --expert adder-g0 --discover` (commits `ed8b0f0`, `7a4779a`, and the generation-diversity fix).
 

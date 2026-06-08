@@ -1,6 +1,5 @@
-//! The counterfactual boundary of competence: the antumbra, the keystone.
-//!
-//! A boundary is a *context-scoped conditional*, never a negation of the goal.
+//! A boundary is a *context-scoped conditional*, and should not be confused with
+//! the negation of the goal.
 //! It holds a behavior fixed and records the region of context where that
 //! behavior is correct, the governing features that the scope depends on, the
 //! grain of that scope, and the minimal contrastive pair (C incorrect / C'

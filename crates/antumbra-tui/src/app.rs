@@ -21,7 +21,7 @@ use crate::theme::Theme;
 
 /// Which list the navigation keys drive, and which detail panel is shown: one
 /// per region of the cast shadow: the population (umbra), the shadows in training
-/// (penumbra), or the boundaries (antumbra, the keystone).
+/// (penumbra), or the boundaries (antumbra).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
     Experts,

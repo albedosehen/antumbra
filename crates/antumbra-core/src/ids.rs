@@ -44,46 +44,40 @@ macro_rules! string_id {
 }
 
 string_id!(
-    /// A frozen expert (in v0, a LoRA adapter over the shared base).
+    /// shared base
     ExpertId
 );
 string_id!(
-    /// A short-lived trainable shadow (the penumbra).
+    /// trainable shadow (penumbra).
     ShadowId
 );
 string_id!(
-    /// A learned counterfactual boundary (the antumbra / keystone).
+    /// learned counterfactual boundary (antumbra).
     BoundaryId
 );
 string_id!(
-    /// A durable orchestration or generational run.
+    /// durable orchestration or generational run.
     RunId
 );
 string_id!(
-    /// A Penumbra memory trace (the soft, editable region that consolidates
-    /// into the umbra).
+    /// Memory trace
     MemoryId
 );
 string_id!(
-    /// One embedded chunk of an ingested knowledge document (P-3), distinct from
-    /// an episodic [`MemoryId`].
+    /// One knowledge document embedded chunk, distinct from an episodic [`MemoryId`].
     DocumentChunkId
 );
 string_id!(
-    /// The tenant: the isolation key for the Penumbra (Kushtaka's `workspace_id`
-    /// maps onto this). Engine-enforced via `PERMISSIONS ... WHERE tenant_id =
-    /// $auth.tenant`; an owner role queries across tenants, and an agent
-    /// isolates by authenticating as its own tenant.
+    /// Engine-enforced via `PERMISSIONS ... WHERE tenant_id =
+    /// $auth.tenant`
     TenantId
 );
 string_id!(
-    /// A user (person) within a tenant: the actor that owns and shares
-    /// compartments. `$auth.user` carries this; an agent acts as a user and
-    /// stamps provenance, but is not itself an ownership boundary.
+    /// User (person, team, or agent) identifier
     UserId
 );
 string_id!(
-    /// A compartment (a named "latent-space" of memories): the unit of
+    /// Named latent-space of memories: the unit of
     /// organization, sharing, deletion, and reference-scope within a tenant.
     CompartmentId
 );

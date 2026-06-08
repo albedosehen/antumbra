@@ -137,7 +137,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("reward_signal")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("reward_run_idx", ["run_id", "step_idx"])]),
-        // Inhibitory store (antumbra / keystone): the counterfactual boundary of competence. Shared population.
+        // Inhibitory store (antumbra): the counterfactual boundary of competence. Shared population.
         table_schema("failure_boundary")
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
