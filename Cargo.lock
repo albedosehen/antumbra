@@ -217,6 +217,8 @@ dependencies = [
  "antumbra-core",
  "antumbra-store",
  "chrono",
+ "jsonwebtoken",
+ "serde",
  "tokio",
  "uuid",
 ]

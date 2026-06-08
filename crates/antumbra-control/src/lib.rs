@@ -19,6 +19,9 @@ use antumbra_store::repo::account::{self, Account};
 use antumbra_store::repo::{invite, principal};
 use antumbra_store::Store;
 
+mod magic;
+pub use magic::{MagicLink, Mailer};
+
 /// A verified external identity (the output of an OAuth callback or a magic-link
 /// click). `subject` is the stable, canonical login key (e.g. `github:12345` or
 /// `email:a@b.com`); `email` / `display` are provenance.
@@ -188,6 +191,38 @@ mod tests {
         signup(&store, &id, "one-shot", &issuer()).await.unwrap();
         let other = VerifiedIdentity::new("github:2");
         assert!(signup(&store, &other, "one-shot", &issuer()).await.is_err());
+    }
+
+    // The whole passwordless path, offline: request a magic link → follow it →
+    // verify → invite-signup → an RS256 token the server would accept.
+    #[tokio::test]
+    async fn magic_link_then_invite_signup_issues_a_verifiable_token() {
+        use std::sync::Mutex;
+        struct Capture(Mutex<Vec<String>>);
+        impl Mailer for Capture {
+            fn send_link(&self, _to: &str, link: &str) -> Result<()> {
+                self.0.lock().unwrap().push(link.to_string());
+                Ok(())
+            }
+        }
+
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        invite::mint(&store, "inv", None).await.unwrap();
+
+        let mailer = Capture(Mutex::new(Vec::new()));
+        let ml = MagicLink::new(b"magic", Duration::from_secs(600), "https://app", &mailer);
+        ml.request("ada@x.com").unwrap();
+        let token = {
+            let links = mailer.0.lock().unwrap();
+            links[0].split("token=").nth(1).unwrap().to_string()
+        };
+        let identity = ml.verify(&token).unwrap();
+        assert_eq!(identity.subject, "email:ada@x.com");
+
+        let jwt = signup(&store, &identity, "inv", &issuer()).await.unwrap();
+        let (tenant, user) = verify(&jwt);
+        assert!(tenant.starts_with("ws:"));
+        assert_eq!(user, "user:owner");
     }
 
     #[tokio::test]
