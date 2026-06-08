@@ -15,7 +15,7 @@ use crate::theme::Theme;
 
 use super::panel;
 
-fn status_color(t: &Theme, s: EvalStatus) -> Color {
+pub(super) fn status_color(t: &Theme, s: EvalStatus) -> Color {
     match s {
         EvalStatus::Success => t.success,
         EvalStatus::Failure | EvalStatus::Error => t.alert,
@@ -24,7 +24,7 @@ fn status_color(t: &Theme, s: EvalStatus) -> Color {
     }
 }
 
-fn status_label(s: EvalStatus) -> &'static str {
+pub(super) fn status_label(s: EvalStatus) -> &'static str {
     match s {
         EvalStatus::Success => "pass",
         EvalStatus::Failure => "FAIL",

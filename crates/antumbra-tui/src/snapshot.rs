@@ -192,6 +192,15 @@ mod tests {
             created_at: now,
         };
         vec![
+            // Two runs for the same frozen expert: the newer one drifted (the
+            // no-forgetting tripwire), so the drill-down has a real comparison.
+            mk(
+                "run:1b",
+                SubjectKind::Expert,
+                "expert:arith-specialist",
+                EvalStatus::Failure,
+                Some("ffffffff"),
+            ),
             mk(
                 "run:1",
                 SubjectKind::Expert,
@@ -511,6 +520,17 @@ mod tests {
         app.set_page(crate::app::Page::Evals);
         let buf = render(&mut app, 120, 36, 1600.0).unwrap();
         assert_golden("evals_page", &to_text(&buf));
+    }
+
+    // Golden the evaluation drill-down: the regression comparison + run history
+    // for a drifted subject (scoped to the modal; no timestamps shown).
+    #[test]
+    fn golden_eval_detail() {
+        let mut app = demo_app();
+        app.set_page(crate::app::Page::Evals);
+        app.selected_eval = 0; // the drifted arith run
+        app.open_detail();
+        golden_overlay("eval_detail", &mut app, 120, 36);
     }
 
     // Golden the operator-action confirm prompt.

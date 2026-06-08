@@ -7,12 +7,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, Focus, Mode};
+use crate::app::{App, Focus, Mode, Page};
 use crate::events::EventKind;
 use crate::overlay;
 use crate::scroll;
 use crate::theme::Theme;
 
+use super::evals::{status_color, status_label};
 use super::{gauge_row, gauge_spans, heading, kv, shadow_color, sparkline_row};
 
 /// The modal box rectangle for the active overlay (the size source the open
@@ -151,10 +152,14 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let (title, lines) = match app.focus {
-        Focus::Experts => expert_detail(app, &t),
-        Focus::Shadows => shadow_detail(app, &t),
-        Focus::Boundaries => boundary_detail(app, &t),
+    let (title, lines) = if app.page == Page::Evals {
+        eval_detail(app, &t)
+    } else {
+        match app.focus {
+            Focus::Experts => expert_detail(app, &t),
+            Focus::Shadows => shadow_detail(app, &t),
+            Focus::Boundaries => boundary_detail(app, &t),
+        }
     };
     let inner = overlay::modal(f, &t, area, &title);
     f.render_widget(
@@ -163,6 +168,125 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
             .wrap(Wrap { trim: false }),
         inner,
     );
+}
+
+/// The evaluation drill-down: the run's fields, the regression comparison
+/// against the previous run for the same subject (the ADR-0001 no-forgetting
+/// tripwire), and the subject's run history — all from the loaded set.
+fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
+    let Some(run) = app.evals.get(app.selected_eval) else {
+        return (
+            "evaluation".into(),
+            vec![Line::from(Span::styled(
+                "(no run selected)",
+                Style::default().fg(t.dim),
+            ))],
+        );
+    };
+    let group = |label: String| {
+        Line::from(Span::styled(
+            label,
+            Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+        ))
+    };
+    let short = |fp: Option<&str>| {
+        fp.map(|s| s.chars().take(12).collect::<String>())
+            .unwrap_or_else(|| "—".to_string())
+    };
+
+    let mut l = vec![heading(t, run.subject_id.clone())];
+    l.push(kv(t, "kind", run.subject_kind.as_str()));
+    l.push(kv(t, "task", &run.corpus_task_id));
+    l.push(Line::from(vec![
+        Span::styled(format!("{:<11}", "status"), Style::default().fg(t.dim)),
+        Span::styled(
+            status_label(run.status),
+            Style::default()
+                .fg(status_color(t, run.status))
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    l.push(Line::from(vec![
+        Span::styled("fingerprint ", Style::default().fg(t.dim)),
+        Span::styled(
+            run.regression_fingerprint
+                .as_deref()
+                .unwrap_or("—")
+                .to_string(),
+            Style::default().fg(t.value),
+        ),
+    ]));
+    if let Some(m) = &run.metrics {
+        l.push(kv(t, "metrics", &m.to_string()));
+    }
+
+    // Compare this run's fingerprint to the previous run for the same subject.
+    let history = app.eval_history(run);
+    let prev = history
+        .iter()
+        .position(|r| r.run_id.as_str() == run.run_id.as_str())
+        .and_then(|i| history.get(i + 1))
+        .copied();
+    l.push(Line::from(""));
+    l.push(group(
+        "regression  (vs previous run for this subject)".into(),
+    ));
+    match prev {
+        None => l.push(Line::from(Span::styled(
+            "  no prior run to compare",
+            Style::default().fg(t.dim),
+        ))),
+        Some(p) => {
+            let (verdict, color) = match (&run.regression_fingerprint, &p.regression_fingerprint) {
+                (Some(_), Some(_)) if run.fingerprint_matches(p) => ("stable", t.success),
+                (Some(_), Some(_)) => ("DRIFTED — no-forgetting tripwire", t.alert),
+                _ => ("n/a — no fingerprint", t.dim),
+            };
+            l.push(Line::from(vec![
+                Span::styled("  this      ", Style::default().fg(t.dim)),
+                Span::styled(
+                    short(run.regression_fingerprint.as_deref()),
+                    Style::default().fg(t.value),
+                ),
+            ]));
+            l.push(Line::from(vec![
+                Span::styled("  previous  ", Style::default().fg(t.dim)),
+                Span::styled(
+                    short(p.regression_fingerprint.as_deref()),
+                    Style::default().fg(t.value),
+                ),
+                Span::styled(
+                    format!("   → {verdict}"),
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
+    }
+
+    // The subject's run history (newest first).
+    l.push(Line::from(""));
+    l.push(group(format!("history  ·  {} runs", history.len())));
+    for r in &history {
+        let marker = if r.run_id.as_str() == run.run_id.as_str() {
+            "▸"
+        } else {
+            " "
+        };
+        l.push(Line::from(vec![
+            Span::styled(format!(" {marker} "), Style::default().fg(t.accent)),
+            Span::styled(
+                format!("{:<8}", status_label(r.status)),
+                Style::default().fg(status_color(t, r.status)),
+            ),
+            Span::styled(
+                format!("{:<14}", short(r.regression_fingerprint.as_deref())),
+                Style::default().fg(t.value),
+            ),
+            Span::styled(r.corpus_task_id.clone(), Style::default().fg(t.dim)),
+        ]));
+    }
+
+    (format!("evaluation · {}", run.subject_id), l)
 }
 
 fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {

@@ -3,12 +3,12 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
   1 population  ·  2 memory  ·  3 loop  ·  4 evals
   fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
-╭ evaluations · 3 runs · 1 regressions ────────────────────────────────────────────────────────────────────────────────╮
+╭ evaluations · 4 runs · 2 regressions ────────────────────────────────────────────────────────────────────────────────╮
 │  subject                                   kind     task           status   fingerprint                              │
-│▌ expert:arith-specialist                   expert   task:arith     pass     a1b2c3d4                                 │
+│▌ expert:arith-specialist                   expert   task:arith     FAIL     ffffffff                                 │
+│  expert:arith-specialist                   expert   task:arith     pass     a1b2c3d4                                 │
 │  shadow:g3                                 shadow   task:arith     FAIL     —                                        │
 │  router                                    router   task:arith     running  —                                        │
-│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

@@ -572,13 +572,24 @@ impl App {
 
     /// Open the drill-down detail overlay for the focused selection (Enter).
     pub fn open_detail(&mut self) {
-        // The Memory page shows its detail inline; the drill-down overlay is for
-        // the population regions only.
-        if self.page != Page::Population {
-            return;
+        // The population regions and the Evals rows have a drill-down overlay;
+        // Memory shows its detail inline, and the Loop page has none.
+        match self.page {
+            Page::Population => {}
+            Page::Evals if !self.evals.is_empty() => {}
+            _ => return,
         }
         self.mode = Mode::Detail;
         self.detail_scroll = 0;
+    }
+
+    /// Every run for the same subject as `run` (newest first), from the already-
+    /// loaded set — the subject's evaluation history for the drill-down.
+    pub fn eval_history<'a>(&'a self, run: &EvaluationRun) -> Vec<&'a EvaluationRun> {
+        self.evals
+            .iter()
+            .filter(|r| r.subject_kind == run.subject_kind && r.subject_id == run.subject_id)
+            .collect()
     }
 
     /// Scroll the detail overlay by `delta` lines (clamped at the top).
@@ -1422,6 +1433,40 @@ mod tests {
         assert_eq!(app.selected_eval, 0, "single run, selection holds");
         app.request_action();
         assert!(app.pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn eval_history_groups_by_subject_and_drill_down_opens() {
+        let (_store, mut app) = seeded().await;
+        let now = Utc::now();
+        let mk = |id: &str, subj: &str, status| EvaluationRun {
+            run_id: RunId::new(id),
+            subject_kind: SubjectKind::Expert,
+            subject_id: subj.into(),
+            corpus_task_id: "task:a".into(),
+            status,
+            metrics: None,
+            regression_fingerprint: None,
+            created_at: now,
+        };
+        app.evals = vec![
+            mk("run:x2", "expert:x", EvalStatus::Failure),
+            mk("run:x1", "expert:x", EvalStatus::Success),
+            mk("run:y", "expert:y", EvalStatus::Success),
+        ];
+        let first = app.evals[0].clone();
+        assert_eq!(app.eval_history(&first).len(), 2, "two runs for expert:x");
+        assert_eq!(app.eval_history(&app.evals[2].clone()).len(), 1);
+
+        // Enter drills into a run on the Evals page (inert when there are none).
+        app.page = Page::Evals;
+        app.selected_eval = 0;
+        app.open_detail();
+        assert_eq!(app.mode, Mode::Detail);
+        app.mode = Mode::Normal;
+        app.evals.clear();
+        app.open_detail();
+        assert_eq!(app.mode, Mode::Normal, "no drill-down with no runs");
     }
 
     #[tokio::test]

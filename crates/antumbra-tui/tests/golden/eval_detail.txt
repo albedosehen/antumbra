@@ -1,0 +1,30 @@
+╭ evaluation · expert:arith-specialist ──────────────────────────────────╮
+│expert:arith-specialist                                                 │
+│kind       expert                                                       │
+│task       task:arith                                                   │
+│status     FAIL                                                         │
+│fingerprint ffffffff                                                    │
+│                                                                        │
+│regression  (vs previous run for this subject)                          │
+│  this      ffffffff                                                    │
+│  previous  a1b2c3d4   → DRIFTED — no-forgetting tripwire               │
+│                                                                        │
+│history  ·  2 runs                                                      │
+│ ▸ FAIL    ffffffff      task:arith                                     │
+│   pass    a1b2c3d4      task:arith                                     │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+╰────────────────────────────────────────────────────────────────────────╯
