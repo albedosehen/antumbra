@@ -12,14 +12,20 @@ cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui[\\/]
 cargo llvm-cov --workspace --summary-only
 ```
 
-**Result (2026-06-07):** **92.7% line / 90.6% region / 90.6% function** over the
-measured surface — which now **includes** the `antumbra-tui` logic (only the TUI
-render layer + binary entrypoints are excluded). Most library crates sit at
-89–100%; the low outlier is `antumbra-embed` (~67%), whose live HTTP path is
-network-gated (see below). Within the console, `events.rs`/`theme.rs` are 100%,
-`overlay.rs`/`scroll.rs`/`command.rs` ~98–99%, `transition.rs` 95%, `app.rs`
-~90%, and `pacing.rs` 89% (the remainder is Windows-FFI monitor detection that
-can't run on CI).
+**Result (2026-06-07):** **92.6% line / 90.6% region / 90.8% function** over the
+measured surface — which **includes** the `antumbra-tui` logic (only the TUI
+render layer + binary entrypoints are excluded). The measured surface grew
+substantially with the console build-out (operator actions, the
+memory/loop/evals pages, the drill-downs, the loop graceful-stop) yet coverage
+held: the new owner-view store reads (`edge`/`generation`/`evaluation`/
+`loop_control`) are 100% line-covered, and `app.rs` sits at ~90%. Most library
+crates are 89–100%; the low outliers are `antumbra-embed` (~67%, its live HTTP
+path is network-gated, see below) and `antumbra-tui/render.rs` (~69%, the
+feature-gated raster probe + the `Raster`/`HalfBlock` tier branches that only a
+`raster` build constructs). Within the console, `events.rs`/`theme.rs` are 100%,
+`overlay.rs`/`scroll.rs`/`command.rs` ~98–99%, `transition.rs` 95%, and
+`pacing.rs` 89% (the remainder is Windows-FFI monitor detection that can't run
+on CI).
 
 The main untested remainders are paths that need a live `ws://` SurrealDB, a
 remote HTTP endpoint, or a GPU, and so belong to the docker-/network-/`models`-gated
