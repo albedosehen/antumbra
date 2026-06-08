@@ -20,7 +20,7 @@ use super::{gauge_row, gauge_spans, heading, kv, shadow_color, sparkline_row};
 /// animation also targets). `None` in the live view.
 pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     match app.mode {
-        Mode::Help => Some(overlay::centered(frame, 56, 27)),
+        Mode::Help => Some(overlay::centered(frame, 56, 28)),
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
             Some(overlay::centered(frame, 56, listed + 4))
@@ -35,6 +35,7 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
         }
         Mode::Detail => Some(overlay::centered(frame, 74, 30)),
         Mode::Gate => Some(overlay::centered(frame, 72, 24)),
+        Mode::Connect => Some(overlay::centered(frame, 78, 27)),
         Mode::Ask => {
             let rows = app
                 .ask_result
@@ -92,6 +93,103 @@ pub(super) fn first_run_hint(f: &mut Frame, app: &App) {
         ]),
     ];
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+/// The "connect your agent" panel (`c`): a guided, copyable reference for wiring
+/// the MCP lifecycle hooks and minting a hook token, so connecting an agent is an
+/// in-app step instead of a hunt through the README.
+pub(super) fn connect_overlay(f: &mut Frame, app: &App) {
+    let t = app.theme();
+    let Some(area) = overlay_area(app, f.area()) else {
+        return;
+    };
+    let inner = overlay::modal(f, &t, area, "connect · wire your agent");
+    let dim = Style::default().fg(t.dim);
+    let val = Style::default().fg(t.value);
+    let cmd = Style::default().fg(t.accent);
+    let step = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
+    let url = if app.store_url.is_empty() {
+        "<your --url>"
+    } else {
+        app.store_url.as_str()
+    };
+    let line = |spans: Vec<Span<'static>>| Line::from(spans);
+    let lines = vec![
+        Line::from(Span::styled(
+            "Plug a coding agent (Claude Code / Cursor) into Antumbra over MCP.",
+            val,
+        )),
+        Line::from(""),
+        line(vec![
+            Span::styled("1  ", step),
+            Span::styled("Serve this store over MCP (HTTP):", dim),
+        ]),
+        Line::from(Span::styled(
+            "     antumbra-mcp --http 127.0.0.1:8081 \\".to_string(),
+            cmd,
+        )),
+        Line::from(Span::styled(format!("       --url {url}"), cmd)),
+        Line::from(""),
+        line(vec![
+            Span::styled("2  ", step),
+            Span::styled("Mint a long-lived hook token:", dim),
+        ]),
+        Line::from(Span::styled(
+            "     antumbra-mcp --mint-token --tenant <ws> --user <you> \\".to_string(),
+            cmd,
+        )),
+        Line::from(Span::styled(
+            "       --jwt-secret <secret> --token-ttl-days 365".to_string(),
+            cmd,
+        )),
+        Line::from(""),
+        line(vec![
+            Span::styled("3  ", step),
+            Span::styled("Set the hook environment:", dim),
+        ]),
+        Line::from(Span::styled(
+            "     ANTUMBRA_URL=http://127.0.0.1:8081   ANTUMBRA_WORKSPACE_ID=<ws>".to_string(),
+            val,
+        )),
+        Line::from(Span::styled(
+            "     ANTUMBRA_TOKEN=<step 2>   ANTUMBRA_HOST_ID=<this device>".to_string(),
+            val,
+        )),
+        Line::from(""),
+        line(vec![
+            Span::styled("4  ", step),
+            Span::styled("Add the hooks to your agent's settings.json:", dim),
+        ]),
+        Line::from(Span::styled(
+            "     macOS / Linux   bash ./scripts/hooks/<name>.sh".to_string(),
+            cmd,
+        )),
+        Line::from(Span::styled(
+            "     Windows         pwsh -File ./scripts/hooks/<name>.ps1".to_string(),
+            cmd,
+        )),
+        Line::from(Span::styled(
+            "     SessionStart=bootstrap  Stop=capture  PreToolUse=strip".to_string(),
+            dim,
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Full walkthrough: scripts/hooks/README.md".to_string(),
+            dim,
+        )),
+        Line::from(Span::styled(
+            format!(
+                "store: {} memories, {} experts          q/esc to close",
+                app.memories.len(),
+                app.experts.len()
+            ),
+            dim,
+        )),
+    ];
+    // Clamp the scroll so paging never runs off the end of the guide.
+    let max = lines.len().saturating_sub(inner.height as usize) as u16;
+    let off = app.detail_scroll.min(max);
+    f.render_widget(Paragraph::new(lines).scroll((off, 0)), inner);
 }
 
 /// The operator-action confirmation (`x`): a yes/no prompt before a store
@@ -756,6 +854,7 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
         bind("/", "filter the focused list, jump to a match"),
         bind(":", "command palette (ask · route a task here)"),
         bind("e", "live event stream of store changes"),
+        bind("c", "connect your agent: hooks + token"),
         bind("x", "prune/graduate · freeze · delete"),
         bind("r", "reload from the store"),
         bind("? esc", "close this help"),

@@ -42,6 +42,8 @@ pub enum Mode {
     /// The gate (router) inspector: learned weights + self-routing health.
     Gate,
     Ask,
+    /// The "connect your agent" panel: how to wire the MCP hooks + mint a token.
+    Connect,
     Confirm,
 }
 
@@ -242,6 +244,9 @@ pub struct App {
     /// Launched with `--demo`: a throwaway seeded store, shown as a badge so the
     /// operator knows nothing persists.
     pub demo: bool,
+    /// The store url this console is bound to, surfaced in the connect panel so
+    /// the generated MCP-server command matches what the operator is viewing.
+    pub store_url: String,
     pub should_quit: bool,
 }
 
@@ -294,6 +299,7 @@ impl App {
             idle: false,
             render_tier: crate::render::RenderTier::default(),
             demo: false,
+            store_url: String::new(),
             should_quit: false,
         };
         app.reload(store).await?;
@@ -628,6 +634,13 @@ impl App {
     /// Open the gate (router) inspector overlay.
     pub fn open_gate(&mut self) {
         self.mode = Mode::Gate;
+        self.detail_scroll = 0;
+    }
+
+    /// Open the "connect your agent" panel: a guided reference for wiring the
+    /// MCP lifecycle hooks and minting a hook token.
+    pub fn open_connect(&mut self) {
+        self.mode = Mode::Connect;
         self.detail_scroll = 0;
     }
 

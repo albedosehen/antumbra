@@ -20,6 +20,7 @@
 │  /       filter the focused list, jump to a match    │
 │  :       command palette (ask · route a task here)   │
 │  e       live event stream of store changes          │
+│  c       connect your agent: hooks + token           │
 │  x       prune/graduate · freeze · delete            │
 │  r       reload from the store                       │
 │  ? esc   close this help                             │

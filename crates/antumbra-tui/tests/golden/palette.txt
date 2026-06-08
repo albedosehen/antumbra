@@ -18,6 +18,7 @@
 │  fps · increase cap                                  │
 │  fps · decrease cap                                  │
 │  ask · route a task through the gate                 │
+│  connect · wire your agent (hooks + token)           │
 │  events · live store changes                         │
 │  gate · inspect the router (weights · self-routing)  │
 │  graduate the selected shadow                        │

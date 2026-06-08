@@ -343,6 +343,7 @@ mod tests {
             idle: false,
             render_tier: crate::render::RenderTier::default(),
             demo: false,
+            store_url: "surrealkv://./data/antumbra.skv".into(),
             should_quit: false,
         }
     }
@@ -684,6 +685,23 @@ mod tests {
         assert!(
             !over.contains("store is empty"),
             "a modal supersedes the card"
+        );
+    }
+
+    #[test]
+    fn connect_overlay_guides_agent_wiring() {
+        let mut app = demo_app();
+        app.open_connect();
+        assert_eq!(app.mode, Mode::Connect, "the connect panel is open");
+        let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
+        assert!(text.contains("mint-token"), "shows the token-mint command");
+        assert!(
+            text.contains("scripts/hooks"),
+            "points at the hook templates"
+        );
+        assert!(
+            text.contains("surrealkv://./data/antumbra.skv"),
+            "echoes the bound store url in the MCP-server command"
         );
     }
 

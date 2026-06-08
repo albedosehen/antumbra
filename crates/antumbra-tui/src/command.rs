@@ -18,6 +18,7 @@ pub enum Action {
     FpsDown,
     FollowMonitor,
     Ask,
+    Connect,
     Events,
     Gate,
     GraduateShadow,
@@ -102,6 +103,10 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "ask · route a task through the gate",
         action: Action::Ask,
+    },
+    Command {
+        label: "connect · wire your agent (hooks + token)",
+        action: Action::Connect,
     },
     Command {
         label: "events · live store changes",

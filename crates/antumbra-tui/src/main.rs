@@ -178,6 +178,7 @@ async fn app_main() -> Result<()> {
                 "palette" => app.open_palette(),
                 "events" => app.open_events(),
                 "gate" => app.open_gate(),
+                "connect" => app.open_connect(),
                 "detail" => app.open_detail(),
                 "confirm" => {
                     app.set_focus(app::Focus::Boundaries);
@@ -220,6 +221,12 @@ async fn app_main() -> Result<()> {
     };
     let mut app = App::load(&store).await?;
     app.demo = args.demo;
+    // The connect panel echoes this back in the MCP-server command it suggests.
+    app.store_url = if args.demo {
+        "mem://".into()
+    } else {
+        args.url.clone()
+    };
     // Capture the terminal window now, while it's focused, so the follow tracks
     // this window between monitors rather than re-reading focus each tick.
     app.capture_window();
@@ -618,6 +625,10 @@ async fn apply_action(
             app.open_gate();
             *transition = Some(transition::overlay_open());
         }
+        Action::Connect => {
+            app.open_connect();
+            *transition = Some(transition::overlay_open());
+        }
         Action::GraduateShadow => {
             app.request_graduate();
             if app.mode == Mode::Confirm {
@@ -788,6 +799,16 @@ async fn run(
                             KeyCode::PageUp => app.detail_move(-10),
                             _ => {}
                         },
+                        Mode::Connect => match key.code {
+                            KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc => {
+                                app.close_overlay()
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => app.detail_move(1),
+                            KeyCode::Up | KeyCode::Char('k') => app.detail_move(-1),
+                            KeyCode::PageDown => app.detail_move(10),
+                            KeyCode::PageUp => app.detail_move(-10),
+                            _ => {}
+                        },
                         Mode::Ask => match key.code {
                             KeyCode::Esc => app.close_overlay(),
                             KeyCode::Backspace => app.ask_backspace(),
@@ -823,6 +844,10 @@ async fn run(
                             }
                             KeyCode::Char('e') => {
                                 app.open_events();
+                                transition = Some(transition::overlay_open());
+                            }
+                            KeyCode::Char('c') => {
+                                app.open_connect();
                                 transition = Some(transition::overlay_open());
                             }
                             KeyCode::Char('x') => {

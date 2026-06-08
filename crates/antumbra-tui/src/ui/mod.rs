@@ -60,6 +60,7 @@ pub fn render(f: &mut Frame, app: &App) {
             Mode::Events => overlays::events_overlay(f, app),
             Mode::Detail => overlays::detail_overlay(f, app),
             Mode::Gate => overlays::gate_overlay(f, app),
+            Mode::Connect => overlays::connect_overlay(f, app),
             Mode::Ask => overlays::ask_overlay(f, app),
             Mode::Confirm => overlays::confirm_overlay(f, app),
             Mode::Normal => {}
