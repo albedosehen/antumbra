@@ -10,6 +10,7 @@ use crate::app::{Focus, LayoutMode, Page};
 pub enum Action {
     Reload,
     CycleTheme,
+    CycleSort,
     Page(Page),
     Focus(Focus),
     Layout(LayoutMode),
@@ -75,6 +76,14 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "layout · graph (full width)",
         action: Action::Layout(LayoutMode::Graph),
+    },
+    Command {
+        label: "layout · table (sortable experts)",
+        action: Action::Layout(LayoutMode::Table),
+    },
+    Command {
+        label: "sort · cycle the table column",
+        action: Action::CycleSort,
     },
     Command {
         label: "fps · follow active monitor",

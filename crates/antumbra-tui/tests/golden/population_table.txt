@@ -1,0 +1,36 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│◆◆◆  ANTUMBRA   self-improving substrate · 3 umbra · gen 2  ·  144 fps  ·  table                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  1 population  ·  2 memory  ·  3 loop  ·  4 evals
+  fitness ████▌─ 0.76  frozen ████── 0.67  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
+╭ population · 3 experts · sort: fitness (s) ──────────────────────────────────────────────────────────────────────────╮
+│  name                                       fitness          gen   state    model                                    │
+│▌ arith-specialist                           █████████▎ 0.92  0     frozen   Qwen2.5-Coder-1.5B                       │
+│  string-specialist                          ████████▏─ 0.81  1     frozen   Qwen2.5-Coder-1.5B                       │
+│  json-shaper                                █████▌──── 0.55  2     live     Qwen2.5-Coder-1.5B                       │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ q  quit   ↑↓  select   tab  focus:umbra   []  page:population   t  theme:shadow   ±  cap:144   r  reload   ?  help   :

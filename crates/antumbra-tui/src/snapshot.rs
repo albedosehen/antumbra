@@ -252,6 +252,7 @@ mod tests {
             page: crate::app::Page::Population,
             focus: Focus::Experts,
             layout: LayoutMode::Focused,
+            sort: crate::app::SortKey::Fitness,
             mode: Mode::Normal,
             palette: Palette::default(),
             filter: String::new(),
@@ -370,6 +371,37 @@ mod tests {
         app.set_page(crate::app::Page::Memory);
         let buf = render(&mut app, 120, 36, 1600.0).unwrap();
         assert_golden("memory_page", &to_text(&buf));
+    }
+
+    // Golden the sortable population table (full-width data grid, no animated
+    // graph, so the full frame is deterministic). Default sort is fitness-desc.
+    #[test]
+    fn golden_population_table() {
+        let now = Utc::now();
+        let mk = |id: &str, name: &str, fitness: f32, gen: u32, frozen: bool| Expert {
+            id: ExpertId::new(id),
+            name: name.into(),
+            base_model: "Qwen2.5-Coder-1.5B".into(),
+            artifact_uri: "mem://x".into(),
+            capability_card: serde_json::json!({}),
+            capability_vec: None,
+            fitness,
+            frozen_at: frozen.then_some(now),
+            generation: Generation(gen),
+            owner: None,
+            compartment: None,
+            created_at: now,
+        };
+        let mut app = demo_app();
+        app.experts = vec![
+            mk("expert:arith", "arith-specialist", 0.92, 0, true),
+            mk("expert:string", "string-specialist", 0.81, 1, true),
+            mk("expert:json", "json-shaper", 0.55, 2, false),
+        ];
+        app.sort_experts();
+        app.set_layout(LayoutMode::Table);
+        let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+        assert_golden("population_table", &to_text(&buf));
     }
 
     // Golden the operator-action confirm prompt.
@@ -802,6 +834,8 @@ mod tests {
         assert_eq!(app.layout, LayoutMode::Dashboard);
         app.cycle_layout();
         assert_eq!(app.layout, LayoutMode::Graph);
+        app.cycle_layout();
+        assert_eq!(app.layout, LayoutMode::Table);
         app.cycle_layout();
         assert_eq!(app.layout, LayoutMode::Focused, "layout wraps");
 

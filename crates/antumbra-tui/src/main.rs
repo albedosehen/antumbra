@@ -160,6 +160,7 @@ async fn app_main() -> Result<()> {
             app.set_layout(match layout.as_str() {
                 "dashboard" => app::LayoutMode::Dashboard,
                 "graph" => app::LayoutMode::Graph,
+                "table" => app::LayoutMode::Table,
                 _ => app::LayoutMode::Focused,
             });
             app.set_focus(match focus.as_str() {
@@ -522,6 +523,7 @@ async fn apply_action(
             app.set_page(page);
             *transition = Some(transition::layout_switch());
         }
+        Action::CycleSort => app.cycle_sort(),
         Action::Focus(target) => {
             app.set_focus(target);
             *transition = Some(transition::focus_switch());
@@ -764,6 +766,7 @@ async fn run(
                                 app.cycle_layout();
                                 transition = Some(transition::layout_switch());
                             }
+                            KeyCode::Char('s') => app.cycle_sort(),
                             KeyCode::Char('t') => {
                                 app.cycle_theme();
                                 transition = Some(transition::theme_wash(&app.theme()));

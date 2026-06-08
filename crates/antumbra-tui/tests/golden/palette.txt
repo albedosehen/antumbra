@@ -12,6 +12,8 @@
 │  layout · dashboard (all regions)                    │
 │  layout · focused (single detail)                    │
 │  layout · graph (full width)                         │
+│  layout · table (sortable experts)                   │
+│  sort · cycle the table column                       │
 │  fps · follow active monitor                         │
 │  fps · increase cap                                  │
 │  fps · decrease cap                                  │

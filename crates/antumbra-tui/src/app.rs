@@ -60,6 +60,8 @@ pub enum LayoutMode {
     Focused,
     Dashboard,
     Graph,
+    /// A full-width sortable table of the population (the data-grid view).
+    Table,
 }
 
 impl LayoutMode {
@@ -69,6 +71,28 @@ impl LayoutMode {
             LayoutMode::Focused => "focused",
             LayoutMode::Dashboard => "dashboard",
             LayoutMode::Graph => "graph",
+            LayoutMode::Table => "table",
+        }
+    }
+}
+
+/// The column the population table sorts on (the data-grid sort key).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SortKey {
+    /// Fitness, strongest first.
+    Fitness,
+    /// Name, A→Z.
+    Name,
+    /// Generation, newest first.
+    Generation,
+}
+
+impl SortKey {
+    pub fn name(self) -> &'static str {
+        match self {
+            SortKey::Fitness => "fitness",
+            SortKey::Name => "name",
+            SortKey::Generation => "generation",
         }
     }
 }
@@ -140,8 +164,10 @@ pub struct App {
     pub page: Page,
     /// Which list navigation/detail targets (umbra / penumbra / antumbra).
     pub focus: Focus,
-    /// How the body arranges its panels (focused / dashboard / graph).
+    /// How the body arranges its panels (focused / dashboard / graph / table).
     pub layout: LayoutMode,
+    /// The column the population table sorts on.
+    pub sort: SortKey,
     /// What's drawn on top of the live view (help / palette / nothing).
     pub mode: Mode,
     /// The command palette's query and selection (used while `mode == Palette`).
@@ -217,6 +243,7 @@ impl App {
             page: Page::Population,
             focus: Focus::Experts,
             layout: LayoutMode::Focused,
+            sort: SortKey::Fitness,
             mode: Mode::Normal,
             palette: Palette::default(),
             filter: String::new(),
@@ -252,6 +279,7 @@ impl App {
 
     pub async fn reload(&mut self, store: &Store) -> anyhow::Result<()> {
         self.experts = expert::list(store).await?;
+        self.sort_experts();
         self.boundaries = boundary::list(store).await?;
         self.shadows = shadow::list(store).await?;
         // Newest first, so the penumbra view leads with current training.
@@ -783,16 +811,53 @@ impl App {
 
     /// Cycle the body layout: focused -> dashboard -> graph.
     pub fn cycle_layout(&mut self) {
-        self.layout = match self.layout {
+        let next = match self.layout {
             LayoutMode::Focused => LayoutMode::Dashboard,
             LayoutMode::Dashboard => LayoutMode::Graph,
-            LayoutMode::Graph => LayoutMode::Focused,
+            LayoutMode::Graph => LayoutMode::Table,
+            LayoutMode::Table => LayoutMode::Focused,
         };
+        self.set_layout(next);
+    }
+
+    /// Cycle the population table's sort column and re-order in place.
+    pub fn cycle_sort(&mut self) {
+        self.sort = match self.sort {
+            SortKey::Fitness => SortKey::Name,
+            SortKey::Name => SortKey::Generation,
+            SortKey::Generation => SortKey::Fitness,
+        };
+        self.sort_experts();
+    }
+
+    /// Re-order the population by the active sort key, keeping the same expert
+    /// selected (selection tracks the id, not the row index).
+    pub fn sort_experts(&mut self) {
+        let selected_id = self
+            .experts
+            .get(self.selected)
+            .map(|e| e.id.as_str().to_string());
+        match self.sort {
+            SortKey::Fitness => self.experts.sort_by(|a, b| b.fitness.total_cmp(&a.fitness)),
+            SortKey::Name => self.experts.sort_by(|a, b| a.name.cmp(&b.name)),
+            SortKey::Generation => self
+                .experts
+                .sort_by_key(|e| std::cmp::Reverse(e.generation.0)),
+        }
+        if let Some(id) = selected_id {
+            if let Some(pos) = self.experts.iter().position(|e| e.id.as_str() == id) {
+                self.selected = pos;
+            }
+        }
     }
 
     /// Set the body layout (the palette's layout commands).
     pub fn set_layout(&mut self, layout: LayoutMode) {
         self.layout = layout;
+        // The table is the expert data-grid; point navigation at the population.
+        if layout == LayoutMode::Table {
+            self.focus = Focus::Experts;
+        }
     }
 
     /// Jump straight to a page (the palette / tab-number keys).
@@ -1224,6 +1289,60 @@ mod tests {
             .unwrap();
         assert!(!thawed.is_frozen(), "the store reflects the thaw");
         assert!(app.events.iter().any(|ev| ev.text.contains("thawed")));
+    }
+
+    fn an_expert(id: &str, name: &str, fitness: f32, gen: u32) -> Expert {
+        Expert {
+            id: ExpertId::new(id),
+            name: name.into(),
+            base_model: "base".into(),
+            artifact_uri: "a".into(),
+            capability_card: serde_json::json!({}),
+            capability_vec: None,
+            fitness,
+            frozen_at: None,
+            generation: Generation(gen),
+            owner: None,
+            compartment: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn sort_experts_orders_and_preserves_selection() {
+        let (_store, mut app) = seeded().await;
+        app.experts = vec![
+            an_expert("expert:b", "beta", 0.5, 2),
+            an_expert("expert:a", "alpha", 0.9, 1),
+            an_expert("expert:c", "gamma", 0.7, 3),
+        ];
+        app.selected = 0; // beta
+
+        app.sort = SortKey::Fitness;
+        app.sort_experts();
+        let names: Vec<&str> = app.experts.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["alpha", "gamma", "beta"],
+            "fitness, strongest first"
+        );
+        assert_eq!(
+            app.selected_expert().unwrap().name,
+            "beta",
+            "selection tracks the expert across the re-sort"
+        );
+
+        app.cycle_sort(); // Fitness → Name
+        assert_eq!(app.sort, SortKey::Name);
+        let names: Vec<&str> = app.experts.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["alpha", "beta", "gamma"]);
+
+        app.cycle_sort(); // Name → Generation
+        assert_eq!(
+            app.experts.first().unwrap().name,
+            "gamma",
+            "newest gen first"
+        );
     }
 
     #[tokio::test]

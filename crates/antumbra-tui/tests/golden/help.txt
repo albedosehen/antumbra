@@ -8,7 +8,8 @@
 │                                                      │
 │view                                                  │
 │  [ ] 1-4 switch page: population/memory/loop/evals   │
-│  l       cycle layout: focused / dashboard / graph   │
+│  l       cycle layout: focused/dashboard/graph/table │
+│  s       sort the population table (fitness/name/gen)│
 │  t       cycle theme: shadow / ember / mono          │
 │                                                      │
 │frame rate                                            │

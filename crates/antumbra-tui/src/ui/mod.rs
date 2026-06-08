@@ -13,6 +13,7 @@ mod graph;
 mod memory;
 mod overlays;
 mod panels;
+mod table;
 
 use std::f64::consts::TAU;
 
@@ -113,6 +114,7 @@ fn placeholder(f: &mut Frame, app: &App, area: Rect, title: &str, blurb: &str) {
 /// beside one focused detail, graph beside all three regions, or graph alone.
 fn body(f: &mut Frame, app: &App, area: Rect) {
     match app.layout {
+        LayoutMode::Table => table::experts_table(f, app, area),
         LayoutMode::Graph => graph::graph(f, app, area),
         LayoutMode::Focused => {
             let cols = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
