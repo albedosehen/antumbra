@@ -2,7 +2,7 @@
 //! generated DDL, inspect the population, and drive the generational loop.
 //!
 //! Until the real candle/llama engines land (antumbra-train / antumbra-serve),
-//! `loop` runs with the demo trainer + embedder so the ADR-0008 machine is
+//! `loop` runs with the demo trainer + embedder so the durable generational loop is
 //! exercisable end-to-end.
 
 use antumbra_core::ports::Embedder;
@@ -60,7 +60,7 @@ fn make_embedder() -> anyhow::Result<Box<dyn Embedder>> {
 }
 
 /// Train (or retrain) the learned router over the whole population's exemplars
-/// and persist it (ADR-0009). Returns the expert count it covers, or `None` when
+/// and persist it (the learned gate). Returns the expert count it covers, or `None` when
 /// the population is too small to need a router (<2 experts/exemplars). This is
 /// the self-maintaining gate: `train`/`teach` call it so routing stays current
 /// without a manual `gate-train`.
@@ -113,8 +113,8 @@ const DEMO_SPECIALISTS: [(&str, &str); 3] = [
 ];
 
 fn main() -> anyhow::Result<()> {
-    // SurrealDB query evaluation (the engine-enforced ACL subqueries, ADR-0013/
-    // 0014) recurses deep; the OS default main-thread stack (1 MB on Windows)
+    // SurrealDB query evaluation (the engine-enforced ACL subqueries for tenant
+    // isolation and memory compartments) recurses deep; the OS default main-thread stack (1 MB on Windows)
     // overflows. Host the runtime on a thread with a large stack. (Tests pass
     // because they run on tokio worker threads, which already have room.)
     std::thread::Builder::new()
@@ -253,7 +253,7 @@ async fn run() -> anyhow::Result<()> {
             let store = connect(&cli.url).await?;
             let embedder = make_embedder()?;
             let task_vec = embedder.embed(&task).await?;
-            // Prefer the learned router (ADR-0009) once trained; it separates
+            // Prefer the learned router (the learned gate) once trained; it separates
             // specialists from generalists where raw-cosine coverage cannot.
             if let Some(router) = antumbra_store::repo::router::load(&store).await? {
                 let ranked = router.route(&task_vec);
@@ -527,7 +527,7 @@ async fn run() -> anyhow::Result<()> {
                         let context_vec = embedder.embed(&format!("{behavior} {ctx_only}")).await?;
                         // Embed C' too, so inhibition is relative (closer to the
                         // failure than to the acceptable context) -- the only
-                        // way to scope contexts that differ slightly (ADR-0004).
+                        // way to scope contexts that differ slightly (the counterfactual boundary of competence).
                         let mut ok_only = finding.near_ok_context.clone();
                         if let Some(obj) = ok_only.as_object_mut() {
                             obj.remove("verify");
@@ -729,7 +729,7 @@ async fn run() -> anyhow::Result<()> {
                 }
                 // Retire boundaries the new correction resolves: a captured
                 // expert whose competence lands in a failure region supersedes
-                // the boundary that flagged it (ADR-0004 lifecycle). The gate
+                // the boundary that flagged it (the boundary lifecycle). The gate
                 // then routes the region to the fix instead of escalating.
                 let experts = expert::list(&store).await?;
                 for b in boundary::list(&store).await? {

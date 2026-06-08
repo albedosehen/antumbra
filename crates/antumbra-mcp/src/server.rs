@@ -176,7 +176,7 @@ impl McpServer {
     /// router, plus the user's own private experts by centroid. Top-`k`, best
     /// first. The expert ACL already scopes `expert::list` to shared + own-private.
     ///
-    /// Boundary inhibition (ADR-0004): if this task falls inside a known failure
+    /// Boundary inhibition at the counterfactual boundary of competence: if this task falls inside a known failure
     /// scope, escalate (return no routes) rather than route confidently; the
     /// same gate the CLI's learned-route path applies, so the two front doors
     /// agree. Only *actionable* boundaries inhibit (the relative C/C' margin), so
@@ -696,7 +696,7 @@ impl McpServer {
 
     /// Ingest a knowledge document: chunk, embed, and store it for recall. A
     /// document is reference material the agent was *given*, kept distinct from
-    /// the episodic memory it *earned* (ADR-0004/0009) so neither drowns the other.
+    /// the episodic memory it *earned* so neither drowns the other.
     #[tool(
         description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored."
     )]
@@ -1474,7 +1474,7 @@ mod tests {
         assert!(r.0.covered && !r.0.escalate);
 
         // An actionable boundary whose failure context IS this task region: the
-        // task sits closer to C than to C', so inhibition fires (ADR-0004) and
+        // task sits closer to C than to C', so inhibition fires and
         // the served path escalates rather than route to an expert that fails here.
         // C embeds to the task region itself (sim_fail = 1), C' to a far context,
         // so the relative margin clears the escalate threshold.

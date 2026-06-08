@@ -1,8 +1,9 @@
-//! The frozen-expert population (the umbra). ADR-0001.
+//! The frozen-expert population (the umbra): a population of small frozen
+//! experts, the umbra ideal.
 //!
 //! In v0 an expert *is* a frozen LoRA adapter over the shared, code-capable
 //! base. The weights live on disk (`artifact_uri`); this row is metadata plus
-//! the learned capability vector used for routing-as-retrieval (ADR-0005).
+//! the learned capability vector used for routing-as-retrieval.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,7 @@ pub struct Expert {
     /// Structured "what I do" card.
     #[serde(default)]
     pub capability_card: serde_json::Value,
-    /// Learned routing vector; co-learned from evaluated behaviour (ADR-0005).
+    /// Learned routing vector; co-learned from evaluated behaviour.
     #[serde(default)]
     pub capability_vec: Option<Vec<f32>>,
     #[serde(default)]
@@ -31,8 +32,8 @@ pub struct Expert {
     #[serde(default)]
     pub generation: Generation,
     /// The owning user for a **private** expert (consolidated from a private
-    /// compartment, ADR-0014/0012). `None` = a shared expert in the common umbra
-    /// (readable by every tenant session; ADR-0013).
+    /// compartment). `None` = a shared expert in the common umbra
+    /// (readable by every tenant session, by multi-tenant isolation).
     #[serde(default)]
     pub owner: Option<UserId>,
     /// The source compartment a private expert was consolidated from.
@@ -42,8 +43,8 @@ pub struct Expert {
 }
 
 impl Expert {
-    /// Freezing is the load-bearing invariant of ADR-0001: a frozen expert is
-    /// never written again.
+    /// Freezing is the load-bearing invariant of the frozen-expert population: a
+    /// frozen expert is never written again.
     pub fn is_frozen(&self) -> bool {
         self.frozen_at.is_some()
     }
@@ -55,7 +56,7 @@ impl Expert {
 
     /// Cosine similarity of this expert's capability vector to a query vector,
     /// or `None` if the expert has not yet been embedded. Used by the gate
-    /// (ADR-0005) for coverage scoring.
+    /// for coverage scoring.
     pub fn capability_similarity(&self, query: &[f32]) -> Option<f32> {
         self.capability_vec
             .as_deref()

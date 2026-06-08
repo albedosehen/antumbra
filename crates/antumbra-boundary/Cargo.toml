@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ADR-0004 keystone: counterfactual scope search. Hold a behavior fixed, vary context until acceptability flips, recover the governing feature and the nearest in-scope context (C')."
+description = "The keystone: counterfactual scope search. Hold a behavior fixed, vary context until acceptability flips, recover the governing feature and the nearest in-scope context (C')."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }

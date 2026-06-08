@@ -1,4 +1,5 @@
-//! The JWT token contract for the antumbra networked surface (ADR-0015/0016).
+//! The JWT token contract for the antumbra networked surface: the MCP runtime
+//! surface and the hosted-onboarding control plane.
 //!
 //! The shared seam between the **issuer** (the offline mint, or the hosted
 //! control plane) and the **verifier** (the MCP server). A client proves its
@@ -75,7 +76,7 @@ pub fn mint_hs256(
 }
 
 /// Mint a scope-bound **RS256** token signed with the auth service's RSA private
-/// key: the asymmetric, hosted counterpart to [`mint_hs256`] (ADR-0015/0016).
+/// key: the asymmetric, hosted counterpart to [`mint_hs256`].
 /// The control plane (the issuer) holds the private key and mints on signup /
 /// login; the MCP server only ever verifies, with the matching public key
 /// ([`JwtVerifier::rs256_pem`]). Pass the server's `audience` so a token minted

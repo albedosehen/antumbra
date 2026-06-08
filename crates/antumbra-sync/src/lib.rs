@@ -5,7 +5,7 @@
 //! The cadence-based data movement is R-1; the live, push-on-change engine is
 //! R-2. Both live here. R-2's last mile -- delivering a change to a subscriber's
 //! MCP client over the SSE stream -- belongs to the MCP transport (it carries the
-//! ADR-0015 stateless-vs-streaming tension); this crate produces the routed
+//! stateless-vs-streaming tension of the MCP runtime surface); this crate produces the routed
 //! [`propagate::MemoryChange`] events for it to deliver.
 //!
 //! - [`config`] -- the two endpoints and the reconcile/backoff timing.

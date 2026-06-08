@@ -44,24 +44,24 @@ macro_rules! string_id {
 }
 
 string_id!(
-    /// A frozen expert (in v0, a LoRA adapter over the shared base). ADR-0001.
+    /// A frozen expert (in v0, a LoRA adapter over the shared base).
     ExpertId
 );
 string_id!(
-    /// A short-lived trainable shadow (the penumbra). ADR-0002.
+    /// A short-lived trainable shadow (the penumbra).
     ShadowId
 );
 string_id!(
-    /// A learned counterfactual boundary (the antumbra / keystone). ADR-0004.
+    /// A learned counterfactual boundary (the antumbra / keystone).
     BoundaryId
 );
 string_id!(
-    /// A durable orchestration or generational run. ADR-0005 / ADR-0008.
+    /// A durable orchestration or generational run.
     RunId
 );
 string_id!(
     /// A Penumbra memory trace (the soft, editable region that consolidates
-    /// into the umbra). ADR-0004/0009.
+    /// into the umbra).
     MemoryId
 );
 string_id!(
@@ -88,7 +88,7 @@ string_id!(
     CompartmentId
 );
 
-/// Monotonic generation counter for the durable loop (ADR-0008).
+/// Monotonic generation counter for the durable loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Generation(pub u32);

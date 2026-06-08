@@ -1,5 +1,6 @@
 //! The trainable penumbra: short-lived shadows that explore around the frozen
-//! core and then graduate (deepen into umbra) or prune. ADR-0002.
+//! core and then graduate (deepen into umbra) or prune. The shadows hold the
+//! plasticity.
 //!
 //! The status field is a real state machine; [`ShadowStatus::transition`] is the
 //! single guarded entry point, so illegal moves (e.g. resurrecting a pruned
@@ -18,11 +19,11 @@ pub enum ShadowStatus {
     Spawning,
     /// Adapter attached; acting on the corpus.
     Exploring,
-    /// Environment verifies + critic densifies (ADR-0003).
+    /// Environment verifies + critic densifies (the environment is the truth).
     Scoring,
-    /// Fitness cleared threshold; will refreeze into an expert (ADR-0001).
+    /// Fitness cleared threshold; will refreeze into a frozen expert.
     Graduated,
-    /// Stalled or collapsed; discarded, boundary logged (ADR-0004).
+    /// Stalled or collapsed; discarded, boundary logged.
     Pruned,
 }
 
@@ -44,7 +45,7 @@ impl ShadowStatus {
         }
     }
 
-    /// The states reachable in one step from `self`, mirroring the ADR-0002
+    /// The states reachable in one step from `self`, mirroring the shadow
     /// lifecycle diagram exactly.
     pub fn allowed_next(self) -> &'static [ShadowStatus] {
         use ShadowStatus::*;
@@ -83,7 +84,7 @@ pub struct Shadow {
     pub adapter_uri: Option<String>,
     pub status: ShadowStatus,
     pub generation: Generation,
-    /// Per-step fitness history; the anti-collapse signal lives here (ADR-0002).
+    /// Per-step fitness history; the anti-collapse signal lives here.
     #[serde(default)]
     pub reward_curve: Vec<f32>,
     pub created_at: DateTime<Utc>,
@@ -118,7 +119,7 @@ impl Shadow {
         self.reward_curve.last().copied().unwrap_or(0.0)
     }
 
-    /// Collapse guard (ADR-0002): a shadow whose reward never rises above the
+    /// Collapse guard: a shadow whose reward never rises above the
     /// floor has degenerated to empty/trivial output and should be pruned.
     pub fn has_collapsed(&self, floor: f32) -> bool {
         !self.reward_curve.is_empty() && self.reward_curve.iter().all(|&r| r <= floor)

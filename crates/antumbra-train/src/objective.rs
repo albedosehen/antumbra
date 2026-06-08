@@ -1,4 +1,4 @@
-//! The SFT training objective (ADR-0010): causal-LM cross-entropy over the
+//! The SFT training objective: causal-LM cross-entropy over the
 //! **completion** tokens only. The model predicts token `t+1` from position
 //! `t`; we mask the prompt so the adapter is trained to *produce* the verified
 //! winner, not to reconstruct the prompt. This is what `CausalLm::sft_step`

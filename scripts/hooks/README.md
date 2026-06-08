@@ -24,7 +24,7 @@ Hooks talk to a running Antumbra **MCP HTTP surface**, either a local one you
 start for yourself (`antumbra-mcp --http 127.0.0.1:8081 --url surrealkv://./data.skv`)
 or your hosted tenant. Either way:
 
-```
+```sh
 ANTUMBRA_URL=http://127.0.0.1:8081     # the antumbra-mcp engine
 ANTUMBRA_WORKSPACE_ID=<workspace>      # your tenant/workspace scope
 ANTUMBRA_TOKEN=<bearer-jwt>            # Authorization: Bearer <token>
@@ -32,10 +32,10 @@ ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)`
-claims become the engine's `$auth` (ADR-0013/0015). On the offline / self-hosted
+claims become the engine's `$auth`. On the offline / self-hosted
 tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
 
-```
+```sh
 antumbra-mcp --mint-token --tenant <workspace> --user <user> \
              --jwt-secret <secret> --token-ttl-days 365
 ```
@@ -50,7 +50,7 @@ directly; then the capture/bootstrap tools are called in-band and the
 
 ## Wire it (settings.json excerpt)
 
-```jsonc
+```json
 {
   "autoMemoryEnabled": false,
   "permissions": { "deny": ["Write(**/.agent/memory/**)", "Edit(**/.agent/memory/**)"] },

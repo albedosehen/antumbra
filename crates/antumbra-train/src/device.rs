@@ -1,4 +1,4 @@
-//! Device + precision selection (ADR-0010). The 3090 Ti (Ampere) is the v0
+//! Device + precision selection. The 3090 Ti (Ampere) is the v0
 //! training target; CPU is the always-available fallback for builds/tests.
 
 use candle_core::Device;

@@ -1,4 +1,4 @@
-//! Evaluation-run repository: one row per measured run. ADR-0007.
+//! Evaluation-run repository: one row per measured run.
 //! `EvaluationRun` has no reserved `id` field, so it persists directly.
 
 use surql::query::builder::Query;

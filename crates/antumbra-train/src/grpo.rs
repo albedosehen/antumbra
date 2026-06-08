@@ -1,4 +1,4 @@
-//! GRPO: group-relative policy optimization (ADR-0011), the v1 upgrade over
+//! GRPO: group-relative policy optimization, the v1 efficiency upgrade over
 //! RAFT. Same sample -> verify loop, but instead of SFT on the winners it takes
 //! a clipped policy-gradient step weighted by each sample's *group-relative*
 //! advantage, with a KL leash to a frozen reference. Critic-free: the group
@@ -120,7 +120,7 @@ pub trait GrpoModelLoader: Send + Sync {
 
 /// Run GRPO for `cfg.rounds` rounds (group size = `cfg.samples_per_task`) and
 /// return the trained adapter outcome. The per-round pass-rate is the reward
-/// curve, exactly as RAFT (ADR-0010), so the loop swaps in behind the trainer.
+/// curve, exactly as RAFT, so the loop swaps in behind the trainer.
 pub async fn grpo_train(
     model: &mut (dyn GrpoLm + Send),
     verifier: &dyn Verifier,

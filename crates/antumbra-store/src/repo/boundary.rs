@@ -1,4 +1,4 @@
-//! Failure-boundary repository (the antumbra / inhibitory store). ADR-0004.
+//! Failure-boundary repository (the antumbra / inhibitory store): the counterfactual boundary of competence.
 //!
 //! Boundaries accrue and may have their confidence updated, so they are
 //! addressed by a stable record id and upserted. Context KNN uses surql-rs's
@@ -100,7 +100,7 @@ pub async fn list(store: &Store) -> Result<Vec<FailureBoundary>> {
 }
 
 /// The `k` boundaries whose context is nearest `query` (inhibitory-penalty
-/// lookup, ADR-0005), via surql-rs's vector-search builder.
+/// lookup via routing-as-retrieval), through surql-rs's vector-search builder.
 pub async fn knn_by_context(
     store: &Store,
     query: &[f32],

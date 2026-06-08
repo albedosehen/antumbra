@@ -1,4 +1,4 @@
-//! Bootstrap from an existing memory corpus (the capture intake, ADR-0004/0009).
+//! Bootstrap from an existing memory corpus (the capture intake into the composed model).
 //!
 //! People already hold verified competence in their agents' memory stores:
 //! Kushtaka, a qdrant collection, a json file, surrealdb. A memory earned its
@@ -105,7 +105,7 @@ impl MemoryRecord {
     }
 
     /// Build a normalized record from a stored Penumbra memory (the source for
-    /// per-compartment consolidation, ADR-0014/0012). The compartment is the
+    /// per-compartment consolidation across latent-spaces of memory). The compartment is the
     /// skill grouping; strength/reinforcement/volatile carry the gate signals.
     pub fn from_memory(m: &antumbra_core::Memory) -> Self {
         Self {

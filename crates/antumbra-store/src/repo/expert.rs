@@ -1,4 +1,4 @@
-//! Expert repository (the umbra population). ADR-0001 / ADR-0005 (KNN routing).
+//! Expert repository (the umbra population of small frozen experts), with routing-as-retrieval (KNN routing).
 //!
 //! Built entirely on surql-rs: `crud::create_record` for writes, the `Query`
 //! builder + `crud` for typed reads, and `Query::vector_search` for KNN. No
@@ -75,7 +75,7 @@ pub async fn list(store: &Store) -> Result<Vec<Expert>> {
     rows.into_iter().map(ExpertRow::into_domain).collect()
 }
 
-/// Routing-as-retrieval (ADR-0005): the `k` experts whose capability vector is
+/// Routing-as-retrieval: the `k` experts whose capability vector is
 /// nearest to `query` under cosine distance, via surql-rs's vector-search
 /// builder.
 pub async fn knn_by_capability(store: &Store, query: &[f32], k: usize) -> Result<Vec<Expert>> {

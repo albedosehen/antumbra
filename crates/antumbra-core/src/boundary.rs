@@ -1,4 +1,4 @@
-//! The counterfactual boundary: the antumbra, the keystone. ADR-0004.
+//! The counterfactual boundary of competence: the antumbra, the keystone.
 //!
 //! A boundary is a *context-scoped conditional*, never a negation of the goal.
 //! It holds a behavior fixed and records the region of context where that
@@ -36,7 +36,7 @@ pub fn governing_feature_from_pair(
 }
 
 /// Resolution at which a scope applies. Over-generalizing the grain is exactly
-/// the false-inhibition failure mode ADR-0004 exists to prevent.
+/// the false-inhibition failure mode the counterfactual boundary exists to prevent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Grain {
@@ -79,12 +79,12 @@ pub struct FailureBoundary {
     pub governing_features: Vec<String>,
     #[serde(default)]
     pub grain: Option<Grain>,
-    /// Embedded context for inhibitory-penalty KNN lookup (ADR-0005/0007).
+    /// Embedded context for inhibitory-penalty KNN lookup.
     #[serde(default)]
     pub context_vec: Option<Vec<f32>>,
     /// Embedded C' (the acceptable context). When present, inhibition is
     /// *relative* (closer to the failure than to C'), which separates
-    /// near-identical contexts an absolute radius cannot (ADR-0004).
+    /// near-identical contexts an absolute radius cannot.
     #[serde(default)]
     pub ok_context_vec: Option<Vec<f32>>,
     #[serde(default)]
@@ -107,12 +107,12 @@ impl FailureBoundary {
     ///
     /// Zero unless the boundary is actionable *and* the candidate is close
     /// enough (in embedded context space) to the known-incorrect region. This
-    /// is the "inhibit only within the incorrect scope" rule of ADR-0004 made
+    /// is the "inhibit only within the incorrect scope" rule of the boundary made
     /// concrete: outside the scope the penalty is exactly zero.
     /// True when an expert (by capability vector) covers this boundary's
     /// failure region: it sits closer to the failure context than to C', the
     /// same relative test the inhibition uses. A captured correction that lands
-    /// here *resolves* the boundary, so the lifecycle can retire it (ADR-0004).
+    /// here *resolves* the boundary, so the lifecycle can retire it (retire-on-correction).
     pub fn is_covered_by(&self, expert_vec: &[f32]) -> bool {
         let (Some(fail), Some(ok)) = (self.context_vec.as_deref(), self.ok_context_vec.as_deref())
         else {
@@ -138,7 +138,7 @@ impl FailureBoundary {
             // The shared background cancels in the difference, so contexts that
             // differ only slightly (same task, different project) separate by
             // the *sign* of the margin (the gate's top-1-minus-top-2 idea,
-            // applied to the boundary; ADR-0004; an absolute radius cannot).
+            // applied to the boundary; an absolute radius cannot).
             Some(ok) => {
                 let sim_ok = crate::expert::cosine_similarity(ok, candidate_vec);
                 let margin = sim_fail - sim_ok;

@@ -1,4 +1,4 @@
-//! Metabolize the harness (ADR-0001).
+//! Metabolize the harness into the population of small frozen experts.
 //!
 //! An agent harness (loops, behavior graphs, task execution, code-intel) is
 //! orchestration layered *on top of* a frozen brain. Antumbra's thesis is to

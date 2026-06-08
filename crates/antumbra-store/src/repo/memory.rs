@@ -1,5 +1,5 @@
 //! Penumbra memory repository: tenant-isolated traces (the consolidation
-//! source). ADR-0004/0009.
+//! source for the counterfactual boundary and the learned gate).
 //!
 //! Isolation is engine-enforced: the `memory` table carries a row-level
 //! `PERMISSIONS ... WHERE tenant_id = $auth.tenant` clause, so once a per-tenant
@@ -172,7 +172,7 @@ pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
 }
 
 /// A compartment's memories (the corpus for per-compartment consolidation,
-/// ADR-0014/0012). Tenant + compartment filtered; the engine ACL also applies
+/// across compartments, the latent-spaces of the memory store). Tenant + compartment filtered; the engine ACL also applies
 /// under a tenant session.
 pub async fn list_by_compartment(
     store: &Store,

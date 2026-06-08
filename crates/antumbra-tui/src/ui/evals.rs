@@ -1,6 +1,6 @@
-//! The Evals page (ADR-0007): the evaluation runs as a table of subject, corpus
+//! The Evals page: the evaluation runs as a table of subject, corpus
 //! task, status, and the regression fingerprint. A `FAIL` on a frozen expert is
-//! the ADR-0001 no-forgetting tripwire firing, so failures are alert-coloured.
+//! the no-forgetting tripwire firing, so failures are alert-coloured.
 
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};

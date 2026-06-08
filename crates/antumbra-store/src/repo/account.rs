@@ -1,4 +1,4 @@
-//! Accounts: the hosted-onboarding identity map (ADR-0016): a verified external
+//! Accounts: the hosted-onboarding identity map (the control plane and product surface): a verified external
 //! login (an OAuth `provider:subject`, or `email:<addr>`) → the `(tenant, user)`
 //! it owns. Created at signup; read at login. Keyed by the canonical subject.
 //! Owner-only: the `account` table has no `PERMISSIONS`, so a tenant session is

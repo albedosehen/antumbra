@@ -303,7 +303,7 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
 }
 
 /// The evaluation drill-down: the run's fields, the regression comparison
-/// against the previous run for the same subject (the ADR-0001 no-forgetting
+/// against the previous run for the same subject (the no-forgetting
 /// tripwire), and the subject's run history, all from the loaded set.
 fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     let Some(run) = app.evals.get(app.selected_eval) else {

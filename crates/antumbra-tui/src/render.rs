@@ -1,4 +1,4 @@
-//! Render-capability tiers (ADR-0009): how visuals realize themselves. The
+//! Render-capability tiers for the operator console: how visuals realize themselves. The
 //! default is a universal hand-rolled Braille/Canvas drawing that renders
 //! identically over SSH, inside multiplexers, and in CI; richer terminals can
 //! opt into a raster image path (sixel/kitty/iTerm2) for genuinely raster-y

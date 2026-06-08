@@ -1,4 +1,4 @@
-//! Antumbra operator console (ADR-0009): a live, animated view of the
+//! Antumbra operator console: a live, animated view of the
 //! population (umbra), boundaries (antumbra), and the learned gate, over the
 //! same SurrealDB store the CLI drives. Interactive: route-ask through the gate,
 //! a live event stream of store changes, drill-down inspection, and operator

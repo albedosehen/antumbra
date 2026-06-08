@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ADR-0003: verifier-first reward aggregation; the critic only densifies between verifier checkpoints."
+description = "Verifier-first reward aggregation for credit assignment; the critic only densifies between verifier checkpoints."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }

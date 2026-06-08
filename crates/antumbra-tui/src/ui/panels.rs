@@ -106,7 +106,7 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// The boundaries inspector (the antumbra, ADR-0004): the learned scopes, with
+/// The boundaries inspector (the antumbra, the counterfactual boundary of competence): the learned scopes, with
 /// the selected one's detail: actionable vs open, governing feature, grain,
 /// confidence, and the C -> C' contrast it was recovered from.
 pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
@@ -193,7 +193,7 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
 
 /// The penumbra: shadows in (or recently out of) training, newest first, with the
 /// selected one's lineage: status, generation, final reward, and its reward curve
-/// as a sparkline (the anti-collapse signal, ADR-0002/0003).
+/// as a sparkline (the anti-collapse signal from the shadow plasticity and the critic).
 pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let rows = Layout::vertical([

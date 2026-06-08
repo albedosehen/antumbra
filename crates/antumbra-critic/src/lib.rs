@@ -1,4 +1,4 @@
-//! # antumbra-critic (ADR-0003)
+//! # antumbra-critic: credit assignment
 //!
 //! Verifiable signals are the primary reward; the critic is a secondary
 //! *densifier* that interpolates per-step credit between verifier checkpoints
@@ -44,7 +44,7 @@ pub async fn run_verifiers(
     for req in requests {
         for verifier in verifiers {
             let verdict = verifier.verify(req).await?;
-            // pass/fail is authoritative (ADR-0003): a failed verdict contributes
+            // pass/fail is authoritative (the environment is the truth): a failed verdict contributes
             // zero reward regardless of any partial `value` it reports, so a
             // not-quite-passing step can never be rescued into a verified win.
             let value = if verdict.passed { verdict.value } else { 0.0 };
@@ -170,7 +170,7 @@ mod tests {
 
     // A misbehaving verifier that reports partial credit on a FAILED step. The
     // critic must still score it zero -- `passed` is authoritative, so the
-    // `value` of a failed verdict can never leak into the reward (ADR-0003).
+    // `value` of a failed verdict can never leak into the reward (the environment is the truth).
     struct PartialCreditOnFail;
     #[async_trait::async_trait]
     impl antumbra_core::ports::Verifier for PartialCreditOnFail {

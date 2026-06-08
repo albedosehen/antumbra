@@ -1,4 +1,4 @@
-//! Reward-signal repository. ADR-0003. `RewardSignal` has no reserved `id`
+//! Reward-signal repository (the critic for credit assignment). `RewardSignal` has no reserved `id`
 //! field, so it persists directly (no DTO). Source-tagged and auditable.
 
 use surql::query::builder::Query;

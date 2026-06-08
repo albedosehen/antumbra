@@ -1,4 +1,4 @@
-//! Learned-router repository (ADR-0009). A singleton per store: the gate's
+//! Learned-router repository (the learned gate). A singleton per store: the gate's
 //! trained metric + centroids, retrained whenever the population changes. No
 //! raw SurrealQL; surql-rs `crud` helpers only.
 

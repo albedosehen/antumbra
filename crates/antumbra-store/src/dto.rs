@@ -26,7 +26,7 @@ pub(crate) struct ExpertRow {
     #[serde(default)]
     pub generation: u32,
     // Omitted when None so the engine sees `owner = NONE` for shared experts
-    // (the shared-umbra read rule, ADR-0013).
+    // (the shared-umbra read rule of multi-tenant isolation).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

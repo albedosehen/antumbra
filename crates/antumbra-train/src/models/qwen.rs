@@ -1,4 +1,4 @@
-//! candle Qwen2.5-Coder + LoRA: the real [`CausalLm`] (ADR-0010, MT-1).
+//! candle Qwen2.5-Coder + LoRA: the real [`CausalLm`] (the candle QLoRA trainer, MT-1).
 //!
 //! Architecture vendored from candle-transformers' `qwen2` (GQA attention,
 //! RoPE, RMSNorm, KV cache) with the seven projection linears per layer swapped
@@ -87,7 +87,7 @@ fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 // --- a LoRA-wrapped linear over a frozen base ------------------------------
 
 /// The frozen base weight: a dense tensor, or a 4-bit Q4_K `QTensor` that is
-/// dequantized in the forward (QLoRA-proper, ADR-0011). Either way it is a
+/// dequantized in the forward (QLoRA-proper, v1 efficiency). Either way it is a
 /// constant; gradients only reach the LoRA factors.
 enum BaseWeight {
     Dense(Tensor),
@@ -100,7 +100,7 @@ struct LoraLinear {
     a: Tensor,
     b: Tensor,
     scale: f64,
-    /// When false the forward is base-only (the GRPO reference pass, ADR-0011).
+    /// When false the forward is base-only (the GRPO reference pass).
     enabled: bool,
     /// When false the LoRA factors are detached so the forward is *not* tracked
     /// (generation). Without this, sampling retains the whole autograd graph in
@@ -178,7 +178,7 @@ impl LoraLinear {
         self.grad = on;
     }
 
-    /// Quantize the frozen base weight to 4-bit Q4_K (ADR-0011). Q4_K needs the
+    /// Quantize the frozen base weight to 4-bit Q4_K (v1 efficiency). Q4_K needs the
     /// `in` dim divisible by 256, which holds for every Qwen projection.
     fn quantize(&mut self, device: &Device) -> CResult<()> {
         if let BaseWeight::Dense(w) = &self.base {
@@ -658,7 +658,7 @@ impl QwenLora {
         }
     }
 
-    /// Quantize every projection's frozen base weight to 4-bit (ADR-0011).
+    /// Quantize every projection's frozen base weight to 4-bit (v1 efficiency).
     fn quantize_base(&mut self, device: &Device) -> CResult<()> {
         for l in self.layers.iter_mut() {
             l.quantize_base(device)?;
@@ -757,7 +757,7 @@ impl QwenCausalLm {
             cfg.lora_scale(),
         )
         .map_err(ce)?;
-        // 4-bit QLoRA base (ADR-0011): dequant-in-forward. A capacity lever for
+        // 4-bit QLoRA base (v1 efficiency): dequant-in-forward. A capacity lever for
         // larger bases; off by default on the 1.5B base.
         if cfg.quantize_base {
             model.quantize_base(&device).map_err(ce)?;

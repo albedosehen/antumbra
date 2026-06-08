@@ -1,9 +1,9 @@
-//! A trainable LoRA linear layer over a frozen base weight (ADR-0001/0002).
+//! A trainable LoRA linear layer over a frozen base weight: a frozen expert that the shadow makes plastic.
 //!
 //! `y = x · Wᵀ + scale · (x · Aᵀ) · Bᵀ`, where `W` is the frozen base (no
 //! gradient) and `A`, `B` are the trainable low-rank factors. `B` starts at
 //! zero (the LoRA convention), so a freshly attached adapter is a no-op until
-//! it learns. Gradients flow only into `A`/`B`, never the base: the ADR-0001
+//! it learns. Gradients flow only into `A`/`B`, never the base: the frozen-expert
 //! freeze, by construction.
 //!
 //! This is a **standalone reference layer**: its CPU test (`lora_adapter_trains_on_cpu`)

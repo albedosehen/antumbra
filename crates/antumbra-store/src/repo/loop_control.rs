@@ -1,5 +1,5 @@
 //! Loop-control repository: the out-of-band command an operator writes to
-//! cooperatively stop a running loop (ADR-0008). A singleton-per-run row keyed
+//! cooperatively stop a running loop (the durable generational loop). A singleton-per-run row keyed
 //! by the run id (mirroring the generation head); the runner polls it at each
 //! generation boundary. Built on surql-rs `crud`; no raw SurrealQL.
 

@@ -1,8 +1,9 @@
 //! Penumbra clustering: the antumbra *proposes* compartments by grouping a
-//! user's uncompartmented memories into competence-coherent regions (ADR-0014).
+//! user's uncompartmented memories into competence-coherent regions (the
+//! compartments, latent-spaces of memory).
 //!
 //! This is the "second part of the antumbra": beyond drawing competence
-//! boundaries (ADR-0004), it surfaces structure in the penumbra so the user can
+//! boundaries, it surfaces structure in the penumbra so the user can
 //! organize, share, and ultimately consolidate a region into a private expert.
 //! It is pure analysis over the embeddings already stored on each [`Memory`]
 //! (no model, no IO), so the whole proposal pass is deterministic and testable on

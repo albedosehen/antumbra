@@ -1,4 +1,4 @@
-//! Generation-head repository: the durable loop checkpoint. ADR-0008.
+//! Generation-head repository: the durable generational loop checkpoint.
 //!
 //! A singleton-per-run row, addressed by a stable record id (`RecordID` auto-
 //! escapes the run key), upserted via surql-rs's `crud` helpers. No raw

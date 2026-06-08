@@ -1,4 +1,4 @@
-//! Trainer configuration (ADR-0010). RAFT-style reward-ranked LoRA fine-tuning
+//! Trainer configuration. RAFT-style reward-ranked LoRA fine-tuning
 //! over an f16 frozen, code-capable base.
 
 use candle_core::DType;
@@ -24,7 +24,7 @@ impl TrainDtype {
 
 #[derive(Debug, Clone)]
 pub struct RaftConfig {
-    /// Hugging Face id of the shared, code-capable base (ADR-0010 locks
+    /// Hugging Face id of the shared, code-capable base (the trainer locks
     /// Qwen2.5-Coder-1.5B for v0).
     pub base_model: String,
     /// Directory where graduated adapter checkpoints are written.
@@ -56,11 +56,11 @@ pub struct RaftConfig {
     /// Block any token that would complete an `n`-gram already present in the
     /// generated continuation (a hard anti-loop guard). `0` is off.
     pub no_repeat_ngram_size: usize,
-    /// GRPO PPO-clip epsilon (ADR-0011). Unused by RAFT.
+    /// GRPO PPO-clip epsilon. Unused by RAFT.
     pub clip_eps: f64,
-    /// GRPO KL-to-reference penalty weight (ADR-0011). Unused by RAFT.
+    /// GRPO KL-to-reference penalty weight. Unused by RAFT.
     pub kl_beta: f64,
-    /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, ADR-0011);
+    /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, v1 efficiency);
     /// dequantized in the forward. A capacity lever for larger bases.
     pub quantize_base: bool,
     /// Warm-start the LoRA from this saved adapter instead of fresh factors, so

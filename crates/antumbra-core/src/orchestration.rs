@@ -1,6 +1,6 @@
-//! Durable orchestration runs (ADR-0005): multi-step composition whose status
+//! Durable orchestration runs: multi-step composition whose status
 //! field IS the checkpoint, so a crash resumes mid-task. The generational loop
-//! (ADR-0008) rides the same durable-state engine.
+//! rides the same durable-state engine.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

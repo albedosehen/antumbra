@@ -2,7 +2,7 @@
 
 Engineer-facing reference for the implementation: crate map, domain model, the port seams, the algorithms as
 actually coded, the build matrix, and the validation results to date. For the *why*, read
-[architecture.md](architecture.md), the [ADRs](adr/), and the [glossary](glossary.md). For the metaphor, the
+[architecture.md](architecture.md) and the [glossary](glossary.md). For the metaphor, the
 [README](../README.md). For GPU setup, [running-the-trainer.md](running-the-trainer.md).
 
 This document describes what is built and measured, and is explicit about what is not.
@@ -20,7 +20,7 @@ is right, where it is wrong, and when to escalate.
 | 2. Know each expert's scope: route in, refuse/escalate out | keystone (routing half) | **demonstrated** - relative-coverage gate, capability vectors from evaluated behavior |
 | 3. Compose a growing population without forgetting | payoff | **partial** - population grows + routes; composition and forgetting tests are future |
 
-The deepest keystone claim - recovering a counterfactual `C'` for a failure boundary (ADR-0004) - now runs
+The deepest keystone claim, recovering a counterfactual `C'` for a failure boundary, now runs
 **live and autonomous**: a real generate-then-verify probe recovers the boundary on the GPU, the governing
 feature is *discovered* from pass/fail (not supplied), and the gate inhibits routing within the recovered scope.
 The candidate context set is still authored, and scale remains untested.
@@ -29,37 +29,37 @@ The candidate context set is still authored, and scale remains untested.
 
 Thirteen crates, single Rust workspace. The default build is light (no ML deps); candle is gated behind `models`.
 
-| Crate | ADR | Responsibility | Heavy deps (feature) |
-|---|---|---|---|
-| `antumbra-core` | 0001-0004, 0012-0014 | Domain types (incl. `Memory`, `Compartment`, `Grant`, identity ids), state machines, port traits, `penumbra` clustering (`propose_compartments`), `testing` fakes. No I/O. | - (`testing` feature for fakes) |
-| `antumbra-store` | 0007, 0012-0014 | SurrealDB data layer, **surql-rs builders only** (no hand-written SurrealQL): schema-as-code, repositories, HNSW recall, the Penumbra memory store + graph + **compartments**, record-access auth and the **engine-enforced tenant/compartment ACL**. | `surrealdb` (kv-mem, kv-surrealkv) |
-| `antumbra-embed` | 0015 | HTTP embedder: an OpenAI-compatible `/embeddings` client behind the core `Embedder` port, shared by the MCP server and the operator console so route/ask/recall embed with the *same* model the population was built with (dimension enforced, `EMBED_DIM`). | `ureq` |
-| `antumbra-sync` | - | Collector/sync (R-1): bidirectional last-write-wins replication of the Penumbra between a local embedded store and a remote authoritative one. | - |
-| `antumbra-critic` | 0003 | Verifiers (the reward is the environment): in-process rules + external commands. | - |
-| `antumbra-gate` | 0005 | Boundary-conditioned coverage gate: rank by capability, escalate on relative coverage. | - |
-| `antumbra-boundary` | 0004 | Counterfactual scope engine (keystone). Seam for `C'` recovery. | - |
-| `antumbra-loop` | 0008 | Durable generational loop; writes full lineage to the substrate. | - |
-| `antumbra-train` | 0001, 0002, 0010, 0012 | candle QLoRA/RAFT trainer: Qwen2.5-Coder + LoRA, SFT, save; capture/teach intake; **consolidation** (gate + replay), memory-import, and **harness metabolization** (`harness`: successful orchestration traces → capture tasks). | `candle-*`, `tokenizers`, `hf-hub` (`models`); `cuda`/`metal` |
-| `antumbra-serve` | 0006 | Candle adapter serving: `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert), plus the real candle BERT embedder. | `candle-*`, `candle-transformers`, `antumbra-train` (`models`); `cuda`/`metal` |
-| `antumbra-cli` | - | Operator CLI: `migrate · schema · experts · status · loop · route · ask · serve · train · teach · evolve · populate · memory-import · metabolize · remember · consolidate · consolidate-compartment · propose-compartments · retire`. | pulls `train`/`serve`/`critic` (`models`) |
-| `antumbra-mcp` | 0015 | MCP server over the Penumbra + population: 14 tools (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`), an optional autonomous propose trigger (`--auto-propose`). Two transports: stdio (one bound `(tenant, user)`) and `--http` (networked, multi-tenant per request, where JWT claims become `$auth`). | `rmcp`, `axum`, `jsonwebtoken`; `antumbra-serve` (`models`) |
-| `antumbra-tui` | 0005 | Interactive operator console (ratatui + tachyonfx): the live animated population/gate, with route-ask through the gate, a live event stream of store changes, drill-down inspection, a tabbed multi-page shell (population · memory · loop · evals), switchable layouts (focused / dashboard / graph / sortable table), a KPI metric strip, time-series charts (reward curves) and a reward-landscape heatmap, multi-monitor high-refresh pacing, fuzzy filter/palette, switchable themes, and operator actions (prune/graduate shadow · freeze/thaw expert · delete boundary · graceful-stop the loop) behind a confirm, plus drill-downs (route-ask, evaluation regression, gate/router inspector). Capability-tiered rendering (`--render` auto/canvas/ascii; raster sixel/kitty behind a `raster` feature) keeps the Braille/Canvas path universal. Headless `snapshot` mode renders an e2e text grid + PNG. | `ratatui`, `tachyonfx`, `antumbra-embed` |
+| Crate | Responsibility | Heavy deps (feature) |
+|---|---|---|
+| `antumbra-core` | Domain types (incl. `Memory`, `Compartment`, `Grant`, identity ids), state machines, port traits, `penumbra` clustering (`propose_compartments`), `testing` fakes. No I/O. | - (`testing` feature for fakes) |
+| `antumbra-store` | SurrealDB data layer, **surql-rs builders only** (no hand-written SurrealQL): schema-as-code, repositories, HNSW recall, the Penumbra memory store + graph + **compartments**, record-access auth and the **engine-enforced tenant/compartment ACL**. | `surrealdb` (kv-mem, kv-surrealkv) |
+| `antumbra-embed` | HTTP embedder: an OpenAI-compatible `/embeddings` client behind the core `Embedder` port, shared by the MCP server and the operator console so route/ask/recall embed with the *same* model the population was built with (dimension enforced, `EMBED_DIM`). | `ureq` |
+| `antumbra-sync` | Collector/sync (R-1): bidirectional last-write-wins replication of the Penumbra between a local embedded store and a remote authoritative one. | - |
+| `antumbra-critic` | Verifiers (the reward is the environment): in-process rules + external commands. | - |
+| `antumbra-gate` | Boundary-conditioned coverage gate: rank by capability, escalate on relative coverage. | - |
+| `antumbra-boundary` | Counterfactual scope engine (keystone). Seam for `C'` recovery. | - |
+| `antumbra-loop` | Durable generational loop; writes full lineage to the substrate. | - |
+| `antumbra-train` | candle QLoRA/RAFT trainer: Qwen2.5-Coder + LoRA, SFT, save; capture/teach intake; **consolidation** (gate + replay), memory-import, and **harness metabolization** (`harness`: successful orchestration traces → capture tasks). | `candle-*`, `tokenizers`, `hf-hub` (`models`); `cuda`/`metal` |
+| `antumbra-serve` | Candle adapter serving: `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert), plus the real candle BERT embedder. | `candle-*`, `candle-transformers`, `antumbra-train` (`models`); `cuda`/`metal` |
+| `antumbra-cli` | Operator CLI: `migrate · schema · experts · status · loop · route · ask · serve · train · teach · evolve · populate · memory-import · metabolize · remember · consolidate · consolidate-compartment · propose-compartments · retire`. | pulls `train`/`serve`/`critic` (`models`) |
+| `antumbra-mcp` | MCP server over the Penumbra + population: 14 tools (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`), an optional autonomous propose trigger (`--auto-propose`). Two transports: stdio (one bound `(tenant, user)`) and `--http` (networked, multi-tenant per request, where JWT claims become `$auth`). | `rmcp`, `axum`, `jsonwebtoken`; `antumbra-serve` (`models`) |
+| `antumbra-tui` | Interactive operator console (ratatui + tachyonfx): the live animated population/gate, with route-ask through the gate, a live event stream of store changes, drill-down inspection, a tabbed multi-page shell (population · memory · loop · evals), switchable layouts (focused / dashboard / graph / sortable table), a KPI metric strip, time-series charts (reward curves) and a reward-landscape heatmap, multi-monitor high-refresh pacing, fuzzy filter/palette, switchable themes, and operator actions (prune/graduate shadow · freeze/thaw expert · delete boundary · graceful-stop the loop) behind a confirm, plus drill-downs (route-ask, evaluation regression, gate/router inspector). Capability-tiered rendering (`--render` auto/canvas/ascii; raster sixel/kitty behind a `raster` feature) keeps the Braille/Canvas path universal. Headless `snapshot` mode renders an e2e text grid + PNG. | `ratatui`, `tachyonfx`, `antumbra-embed` |
 
 ## 3. Domain model (`antumbra-core`)
 
 Plain data types, serializable, with the state-machine logic as methods.
 
-- **`Expert`** (ADR-0001) - a frozen adapter in the population. Fields: `id`, `name`, `base_model`,
+- **`Expert`** (a frozen expert in the population) - a frozen adapter in the population. Fields: `id`, `name`, `base_model`,
   `artifact_uri` (adapter file), `capability_card` (JSON provenance), `capability_vec: Option<Vec<f32>>`,
   `fitness`, `frozen_at`, `generation`, `created_at`. `capability_similarity(query) -> Option<f32>` is cosine
   over `capability_vec`.
-- **`Shadow`** (ADR-0002) - an in-training adapter. `ShadowStatus` is a guarded state machine:
+- **`Shadow`** (shadow plasticity) - an in-training adapter. `ShadowStatus` is a guarded state machine:
   `Spawned -> Exploring -> Scoring -> {Graduated | Pruned}`; illegal transitions error.
-- **`FailureBoundary`** (ADR-0004) - a recorded failure region: `behavior`, `fail_context`,
+- **`FailureBoundary`** (the counterfactual boundary of competence) - a recorded failure region: `behavior`, `fail_context`,
   `near_ok_context`, `governing_features`, `grain`, `context_vec`, `confidence`. `is_actionable()` is false
   until a near-OK counterfactual exists; `inhibition_for(task_vec, radius)` returns the routing penalty.
-- **`RewardSignal`** (ADR-0003) - source-tagged (`RewardSource`) per-step reward; `fold_step` accumulates.
-- **`EvaluationRun`** (ADR-0007) - one measured run with `EvalStatus`, metrics, regression fingerprint.
+- **`RewardSignal`** (the critic for credit assignment) - source-tagged (`RewardSource`) per-step reward; `fold_step` accumulates.
+- **`EvaluationRun`** (the SurrealDB substrate) - one measured run with `EvalStatus`, metrics, regression fingerprint.
 - **`Generation`**, **ids** (`ExpertId`, `ShadowId`, `BoundaryId`, `RunId`) - newtypes; `Generation::ZERO`.
 - **`generational::{GenerationHead, LoopState}`** - the loop's persisted checkpoint and its state enum.
 
@@ -89,7 +89,7 @@ Key payloads:
 Fakes: `ScriptedTrainer` (graduating / collapsing / `graduating_with_exemplars`), `FixedEmbedder`
 (byte-histogram), `EchoServe`, `MarkerVerifier`.
 
-## 5. The generational loop (`antumbra-loop`, ADR-0008)
+## 5. The generational loop (`antumbra-loop`)
 
 A resumable state machine in the database: `grow -> explore -> score -> decide -> consolidate -> grow`. The
 `GenerationHead` is persisted after **every** transition, so the state value *is* the checkpoint - kill the
@@ -102,7 +102,7 @@ on an un-scoped negative until counterfactual search recovers a near-OK `C'`).
 
 `GenerationReport { generation, shadow, fitness, graduated, reward_curve }` is returned per generation.
 
-## 6. The trainer (`antumbra-train`, ADR-0002/0010)
+## 6. The trainer (`antumbra-train`)
 
 RAFT - reward-ranked fine-tuning, the simplest realization of RLVR.
 
@@ -117,7 +117,7 @@ reinforce nothing).
   mask the prompt).
 - **Model** (`models/qwen.rs`, feature `models`): vendored Qwen2 (GQA, RoPE, RMSNorm, KV cache) with
   LoRA-wrapped projections, loaded from hf-hub. `dtype = f32` on CPU, `bf16` on GPU (f16 overflowed to NaN
-  logits - see ADR-0010). Generation is temperature sampling with a greedy fallback on a degenerate
+  logits, as recorded for the candle QLoRA trainer). Generation is temperature sampling with a greedy fallback on a degenerate
   distribution.
 - **`RaftTrainer`** (`trainer.rs`) realizes the `Trainer` port over a `ModelLoader`, a `Corpus`, and a
   `Verifier`. Only the model loader touches the GPU, so the orchestration is tested with fakes.
@@ -127,7 +127,7 @@ reinforce nothing).
 `RaftConfig`: `base_model` (Qwen2.5-Coder-1.5B), `lora_rank` 16, `lora_alpha` 32, `samples_per_task` 8,
 `rounds` 4, `max_new_tokens` 256, `learning_rate` 1e-4, `dtype` bf16.
 
-## 7. The verifier (`antumbra-critic`, ADR-0003)
+## 7. The verifier (`antumbra-critic`)
 
 `CommandVerifier` reads the task's `verify` spec from the request artifact and, optionally, `extract_code`
 (pulls the first fenced code block). Then:
@@ -146,7 +146,7 @@ The environment is the reward; the (future) critic densifies it but never overri
 (tiny model; keep the GPU free). `embed` tokenizes, runs BERT, mean-pools over tokens, and L2-normalizes (kNN-OOD
 calls normalization critical). The default build keeps the fake `FixedEmbedder`; `EMBED_DIM` is 384.
 
-## 9. Capability vectors from evaluated behavior (ADR-0004/0005)
+## 9. Capability vectors from evaluated behavior
 
 An expert's capability vector is **not** a hand-written label. On graduation, the loop embeds each prompt the
 shadow provably solved (`TrainOutcome.capability_exemplars`) and takes the **centroid** - so the routing vector
@@ -154,7 +154,7 @@ is defined by what the expert *demonstrably does*. The solved prompts are also s
 provenance. With no exemplars, it falls back to a generic descriptor. (Cosine downstream is scale-invariant, so
 the centroid is not renormalized.)
 
-## 10. The gate (`antumbra-gate`, ADR-0005)
+## 10. The gate (`antumbra-gate`)
 
 `route(task_vec, experts, boundaries, k, cfg) -> GateDecision { chosen, escalate, ranked, coverage }`.
 
@@ -170,13 +170,13 @@ the centroid is not renormalized.)
     (coverage collapsed to ~0). With a single expert it degrades to the absolute score.
   - Escalate when `coverage < coverage_threshold` (default 0.08) - the abstention / risk-coverage knob of
     selective prediction (arXiv:1705.08500), calibrated per deployment.
-- **Boundary inhibition** (ADR-0004) is subtracted from coverage, so a confident boundary forces escalation.
+- **Boundary inhibition** (the counterfactual boundary of competence) is subtracted from coverage, so a confident boundary forces escalation.
 
 `GateConfig { coverage_threshold: 0.08, inhibition_radius: 0.5 }`. Known v0 limitation: a task served equally
 by two experts has a small margin and escalates (ambiguity conflated with out-of-scope); north-star composition
-(ADR-0009) dissolves it.
+(the heterogeneous composed model) dissolves it.
 
-## 11. The substrate (`antumbra-store`, ADR-0007)
+## 11. The substrate (`antumbra-store`)
 
 SurrealDB via **surql-rs** (`oneiriq-surql`) builders exclusively - no hand-written SurrealQL anywhere. Tables
 are `SCHEMALESS` with explicit unique and HNSW vector indexes; the DDL is *generated*. Records use a `key`
@@ -226,9 +226,9 @@ release-profile `opt-level=1` override on `surrealdb`/`surrealdb-core` works aro
   abstention threshold to 0.045 separates *this* population cleanly (in-scope >= 0.054, out-of-scope <= 0.033)
   for 5/5. This is the predicted selective-prediction behavior: the threshold is a per-deployment risk-coverage
   knob, not a universal constant, and overlapping capability regions compress the margin - which is precisely
-  the case for a learned/boundary-conditioned gate (ADR-0004/0009) over a fixed margin.
+  the case for a learned/boundary-conditioned gate (the counterfactual boundary feeding the learned gate) over a fixed margin.
 
-- **Keystone end-to-end (ADR-0004).** Counterfactual search recovers C' for a behavior failure, the actionable
+- **Keystone end-to-end (the counterfactual boundary of competence).** Counterfactual search recovers C' for a behavior failure, the actionable
   boundary persists through surql-rs, and the gate inhibits a perfectly-matching expert **inside** the failure
   scope (forcing escalation) while doing nothing **outside** it; a no-boundary control routes the same task
   straight to that expert, isolating the boundary as the cause
@@ -274,4 +274,4 @@ told it.
 **Not yet:** capability is exercised on small corpora and few experts (no generalization or catastrophic-
 forgetting test); candidate governing features are authored rather than discovered; the gate is the heuristic
 coverage gate, not the learned latent mixer; multi-adapter hot-swap and the `llama-cpp-2`/`mistral.rs` backends,
-GRPO (v1 over RAFT), and GGUF-Q4 quantized backward (MT-4) are future; composition (ADR-0009) is the north star.
+GRPO (v1 over RAFT), and GGUF-Q4 quantized backward (MT-4) are future; composition (the heterogeneous composed model) is the north star.

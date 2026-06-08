@@ -1,4 +1,4 @@
-//! # antumbra-boundary, ADR-0004 (the keystone)
+//! # antumbra-boundary: the counterfactual boundary of competence (the keystone)
 //!
 //! Counterfactual scope search. The behavior **B** is held fixed; the context
 //! is varied along candidate governing dimensions; the frozen population is
@@ -6,7 +6,7 @@
 //! *flips*. The payload is the governing dimension and the nearest in-scope
 //! context **C'** (*where and why* the rule applies), never a negated goal.
 //!
-//! This is job #1 of ADR-0004. Building the persisted [`FailureBoundary`] from
+//! This is job #1 of the keystone. Building the persisted [`FailureBoundary`] from
 //! a finding (job #2's store side) is [`finding_to_boundary`].
 
 use std::collections::BTreeSet;
@@ -92,7 +92,7 @@ fn value_set(contexts: &[&Value], key: &str) -> BTreeSet<String> {
 /// alone separates the two (its passing-values are disjoint from its
 /// failing-values), preferring the simplest such key (fewest distinct values).
 /// Returns `None` when no boundary exists (all pass or all fail) or no single
-/// feature explains the split. This is the autonomous half of ADR-0004: the
+/// feature explains the split. This is the autonomous half of the keystone: the
 /// system names *its own* governing feature from evaluated behavior.
 pub async fn discover_boundary(
     behavior: &str,

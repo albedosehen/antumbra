@@ -1,17 +1,17 @@
-//! # antumbra-gate, ADR-0005 (v0 heuristic)
+//! # antumbra-gate: the boundary-conditioned gate (v0 heuristic)
 //!
 //! A learned, boundary-conditioned latent mixer is the north-star gate. v0
-//! ships the honest fallback that ADR-0005 names "coverage routing (still
+//! ships the honest fallback we call "coverage routing (still
 //! useful)": score each expert by capability similarity to the task, subtract
-//! the in-scope inhibition any boundary imposes (ADR-0004), take the top-k,
+//! the in-scope inhibition any counterfactual boundary imposes, take the top-k,
 //! and **escalate** when nothing clears the in-scope bar. The learned mixer
 //! plugs in behind the same `route` signature later.
 //!
 //! ## Out-of-scope detection is relative, not absolute
 //!
 //! Routing among in-scope experts is just nearest-capability. Deciding that a
-//! task is out of *every* expert's scope is the harder, keystone half (ADR-0004)
-//! and is an out-of-distribution problem. Validation showed an **absolute**
+//! task is out of *every* expert's scope is the harder, keystone half (the
+//! counterfactual boundary of competence) and is an out-of-distribution problem. Validation showed an **absolute**
 //! similarity floor cannot do it: sentence-embedding cosine for short texts is
 //! compressed into a high band (~0.6-0.9 for everything), so an out-of-scope
 //! task still clears any usable absolute bar. The fix, grounded in the OOD
@@ -36,12 +36,12 @@
 //! - Selective prediction (arXiv:1705.08500): escalation is abstention; the
 //!   `coverage_threshold` is the risk-coverage knob, calibrated per deployment.
 //!
-//! A confident boundary (ADR-0004) is subtracted from coverage, so it can force
+//! A confident counterfactual boundary is subtracted from coverage, so it can force
 //! escalation independently. Known v0 limitation: a task served *equally well*
 //! by two experts has a small margin and will escalate; the prototype-margin
 //! conflates "ambiguous between in-scope experts" with "out of scope". Escalating
-//! such cases is safe for coverage routing; north-star composition (ADR-0009),
-//! which blends adapters, dissolves it.
+//! such cases is safe for coverage routing; the north-star heterogeneous composed
+//! model, which blends adapters, dissolves it.
 
 use antumbra_core::{Expert, ExpertId, FailureBoundary};
 

@@ -1,7 +1,7 @@
-//! `RaftTrainer`: the [`Trainer`] port realized as the RAFT loop (ADR-0010).
+//! `RaftTrainer`: the [`Trainer`] port realized as the RAFT loop.
 //!
 //! It owns the config, a model loader (the candle base+LoRA factory), a corpus
-//! resolver, and the verifier (ground truth, ADR-0003). `train_shadow` loads a
+//! resolver, and the verifier (ground truth: the environment is the truth). `train_shadow` loads a
 //! fresh adapter, resolves the request's tasks, and runs `raft_train`. Only the
 //! model loader touches the GPU, so this orchestration is tested with fakes.
 
@@ -56,7 +56,7 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
     }
 }
 
-/// The [`Trainer`] port realized as the GRPO loop (ADR-0011); same shape as
+/// The [`Trainer`] port realized as the GRPO loop (v1 efficiency); same shape as
 /// [`RaftTrainer`] but over a [`GrpoModelLoader`].
 pub struct GrpoTrainer<L: GrpoModelLoader, C: Corpus> {
     config: RaftConfig,
@@ -96,7 +96,7 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
     }
 }
 
-/// The [`Trainer`] port realized as correction capture (ADR-0004/0009): same
+/// The [`Trainer`] port realized as correction capture (capture intake into the composed model): same
 /// shape as [`RaftTrainer`], but it internalizes the corpus's supplied,
 /// verifier-checked corrections instead of discovering them by sampling.
 pub struct CaptureTrainer<L: ModelLoader, C: Corpus> {

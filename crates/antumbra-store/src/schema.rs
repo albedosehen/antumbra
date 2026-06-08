@@ -1,4 +1,4 @@
-//! Schema as code (ADR-0007), defined entirely with surql-rs schema builders;
+//! Schema as code on SurrealDB as the unified substrate, defined entirely with surql-rs schema builders;
 //! no hand-authored SurrealQL. v0 keeps tables `SCHEMALESS` and leans on
 //! explicit unique + HNSW indexes; the DDL is *generated* by surql-rs.
 //!
@@ -17,7 +17,7 @@ use antumbra_core::Result;
 
 use crate::error::map;
 
-/// Default embedding dimension (all-MiniLM-L6-v2). ADR-0007.
+/// Default embedding dimension (all-MiniLM-L6-v2).
 pub const EMBED_DIM: usize = 384;
 
 /// Permissions for the shared-population tables (the umbra: experts, the learned
@@ -34,7 +34,7 @@ const SHARED_POPULATION_PERMS: [(&str, &str); 4] = [
     ("delete", "false"),
 ];
 
-/// Expert population permissions (ADR-0013/0014): a session reads a **shared**
+/// Expert population permissions (multi-tenant isolation across compartments, the latent-spaces of memory): a session reads a **shared**
 /// expert (`owner = NONE`, the common umbra) or one it **owns** (a private
 /// expert consolidated from its compartment); only the owner/root writes (a
 /// record session is denied; the rootful owner connection bypasses).
@@ -109,7 +109,7 @@ const EDGE_LINK_RULE: &str = "tenant_id = $auth.tenant AND to_id IN (SELECT VALU
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
     vec![
-        // Expert population (umbra). ADR-0001/0013/0014. Shared experts read by
+        // Expert population (umbra), the population of small frozen experts, with multi-tenant isolation across compartments. Shared experts read by
         // all; private experts read only by their owner; owner writes.
         table_schema("expert")
             .with_mode(TableMode::Schemaless)
@@ -126,18 +126,18 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                     None,
                 ),
             ]),
-        // Shadow lifecycle (penumbra). ADR-0002.
+        // Shadow lifecycle (penumbra): shadow models hold the plasticity.
         table_schema("shadow")
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("shadow_key_uq", ["key"]),
                 index("shadow_status_idx", ["status", "generation"]),
             ]),
-        // Critic signal (verifier-first). ADR-0003.
+        // Critic signal (verifier-first): the critic for credit assignment.
         table_schema("reward_signal")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("reward_run_idx", ["run_id", "step_idx"])]),
-        // Inhibitory store (antumbra / keystone). ADR-0004. Shared population.
+        // Inhibitory store (antumbra / keystone): the counterfactual boundary of competence. Shared population.
         table_schema("failure_boundary")
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
@@ -153,32 +153,32 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                     None,
                 ),
             ]),
-        // Durable orchestration. ADR-0005.
+        // Durable orchestration (the boundary-conditioned gate, routing-as-retrieval).
         table_schema("orchestration_run")
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("orun_key_uq", ["key"]),
                 index("orun_status_idx", ["status", "updated_at"]),
             ]),
-        // Durable generational loop head (the checkpoint). ADR-0008.
+        // Durable generational loop head (the generation_head checkpoint).
         table_schema("generation_head").with_mode(TableMode::Schemaless),
-        // Out-of-band loop control (operator graceful-stop signal). ADR-0008.
+        // Out-of-band loop control (operator graceful-stop signal) for the durable generational loop.
         table_schema("loop_control").with_mode(TableMode::Schemaless),
-        // Hosted-onboarding control plane (ADR-0016). No PERMISSIONS clause, so
+        // Hosted-onboarding control plane and product surface. No PERMISSIONS clause, so
         // both default to deny for record/tenant sessions; only the control
         // plane's owner connection reads/writes them (an account row maps a login
         // to a tenant and must never be tenant-readable).
         table_schema("invite_code").with_mode(TableMode::Schemaless),
         table_schema("account").with_mode(TableMode::Schemaless),
-        // Validation harness. ADR-0007.
+        // Validation harness.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("eval_subject_idx", ["subject_kind", "subject_id"])]),
-        // Placement registry (inert until the fleet wakes). ADR-0006.
+        // Placement registry for hardware-adaptive serving (inert until the fleet wakes).
         table_schema("device_profile")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("device_host_idx", ["host", "backend"])]),
-        // Learned router singleton (ADR-0009). Shared population: tenants read
+        // Learned router singleton (the learned gate). Shared population: tenants read
         // it to route a task across the shared experts; the owner trains/writes
         // it. Previously auto-created (which defaulted to deny for record
         // sessions); defined here so the read permission is explicit.

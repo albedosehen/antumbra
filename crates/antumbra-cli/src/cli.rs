@@ -63,7 +63,7 @@ pub enum Command {
         #[arg(long, default_value_t = 0.08)]
         threshold: f32,
         /// Standing experts always composed onto the routed one (your conventions),
-        /// `name:weight,...`, the Kushtaka rule layer, internalized (ADR-0009).
+        /// `name:weight,...`, the Kushtaka rule layer, internalized into the learned gate.
         #[arg(long)]
         with: Option<String>,
         /// Blend weight for the task-routed (contextual) expert when composing
@@ -75,7 +75,7 @@ pub enum Command {
         #[arg(long, default_value_t = 0.0)]
         temperature: f64,
     },
-    /// Resident multi-adapter server (ADR-0006): load the shared base ONCE and
+    /// Resident multi-adapter server with hardware-adaptive serving: load the shared base ONCE and
     /// hot-swap each routed expert's adapter per prompt, instead of cold-loading
     /// a model per call. Reads prompts from stdin (one per line) or a single
     /// --task, routes each via the learned router, and serves the answer from the
@@ -118,7 +118,7 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         once: bool,
     },
-    /// Recover a failure boundary's scope by generate-then-verify (ADR-0004):
+    /// Recover a failure boundary's scope by generate-then-verify (the counterfactual boundary of competence):
     /// hold a behavior fixed, vary the context, and find the governing feature
     /// and C' by actually serving and checking. Stores an actionable boundary.
     /// Needs --features models + a GPU + python.
@@ -165,14 +165,14 @@ pub enum Command {
         /// Max tokens generated per completion.
         #[arg(long, default_value_t = 256)]
         max_new_tokens: usize,
-        /// Algorithm: `raft` (reward-ranked SFT) or `grpo` (ADR-0011).
+        /// Algorithm: `raft` (reward-ranked SFT) or `grpo` (the v1 efficiency path).
         #[arg(long, default_value = "raft")]
         algo: String,
-        /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, ADR-0011).
+        /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, v1 efficiency).
         #[arg(long)]
         quantize_base: bool,
         /// Warm-start the LoRA from this saved adapter (continual fine-tune)
-        /// instead of fresh factors. EXP-010's monolithic arm (ADR-0011).
+        /// instead of fresh factors. EXP-010's monolithic arm (v1 efficiency).
         #[arg(long)]
         parent: Option<String>,
     },
@@ -195,7 +195,7 @@ pub enum Command {
         max_new_tokens: usize,
     },
     /// Capture a supplied, verifier-checked correction into a frozen expert (the
-    /// other intake path beside `train`, ADR-0004/0009). The corpus carries a
+    /// other intake path beside `train`, the capture intake into the umbra). The corpus carries a
     /// `completion` per task. Needs --features models + a GPU + python.
     Teach {
         /// JSON corpus of {id, prompt, completion, verify} corrections.
@@ -221,7 +221,7 @@ pub enum Command {
         #[arg(long)]
         parent: Option<String>,
     },
-    /// Train the learned router over the population's exemplars (ADR-0009): a
+    /// Train the learned router over the population's exemplars (the learned gate): a
     /// per-dimension metric that separates specialists from generalists where
     /// raw-cosine routing cannot. Retrain after the population changes. Needs
     /// --features models (the real embedder).
@@ -230,7 +230,7 @@ pub enum Command {
         epochs: usize,
     },
     /// Compose several experts into one blended adapter and serve a task
-    /// through it (ADR-0009): the population as a capability multiplier. Needs
+    /// through it (the heterogeneous composed model): the population as a capability multiplier. Needs
     /// --features models + a GPU.
     Compose {
         /// The task to answer with the blended experts.
@@ -389,7 +389,7 @@ pub enum Command {
         #[arg(long, default_value_t = 1.0)]
         confidence: f32,
     },
-    /// Consolidate a private compartment into a **private expert** (ADR-0014):
+    /// Consolidate a private compartment into a **private expert** (a memory compartment):
     /// gather the compartment's memories, score them through the consolidation
     /// gate, capture the graduates, and mint an expert owned by the user (not in
     /// the shared router; routed for its owner by centroid). Needs --features
@@ -417,7 +417,7 @@ pub enum Command {
         #[arg(long, default_value_t = 0.5)]
         replay_ratio: f64,
     },
-    /// Metabolize a harness (ADR-0001): adapt a harness's successful
+    /// Metabolize a harness into the frozen-expert population: adapt a harness's successful
     /// orchestration traces (loop runs, behavior-graph evaluations, task
     /// executions) into capture tasks the population internalizes, so the brain
     /// learns to do in one shot what the harness did in many steps. Only
@@ -476,7 +476,7 @@ pub enum Command {
         #[arg(long, default_value_t = 3e-4)]
         lr: f64,
     },
-    /// Have the antumbra propose compartments (ADR-0014) by clustering a user's
+    /// Have the antumbra propose memory compartments by clustering a user's
     /// unorganized memory (their inbox compartment + anything they authored
     /// uncompartmented) into competence-coherent regions. Needs no model: it
     /// clusters the embeddings already stored on each memory. With --apply it

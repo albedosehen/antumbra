@@ -1,4 +1,4 @@
-//! Train the learned router's metric (ADR-0009). Prototypical: learn a
+//! Train the learned router's metric (the learned gate). Prototypical: learn a
 //! per-dimension weighting of the frozen sentence embedding so each expert's
 //! exemplars cluster tightest around their own centroid in the reweighted
 //! space. Labels are free: an expert's solved exemplars are its positives.

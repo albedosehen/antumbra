@@ -1,4 +1,4 @@
-//! Compose experts by blending their LoRA adapters (ADR-0009). The learned
+//! Compose experts by blending their LoRA adapters into one heterogeneous model. The learned
 //! router gives per-expert weights for a task; this realizes that mix as one
 //! served adapter.
 //!

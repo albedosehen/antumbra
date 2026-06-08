@@ -4,12 +4,12 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ADR-0002/0010: the DIY candle QLoRA trainer (Qwen2.5-Coder + LoRA; RAFT + GRPO), GPU-validated. The real candle path is behind --features models; a CPU stub otherwise."
+description = "The DIY candle QLoRA trainer where shadow models hold the plasticity (Qwen2.5-Coder + LoRA; RAFT + GRPO), GPU-validated. The real candle path is behind --features models; a CPU stub otherwise."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 async-trait.workspace = true
-# candle is the training engine (ADR-0010). CPU backend by default so the
+# candle is the training engine. CPU backend by default so the
 # workspace stays buildable everywhere; `cuda`/`metal` light up the GPU.
 candle-core = "0.10"
 candle-nn = "0.10"

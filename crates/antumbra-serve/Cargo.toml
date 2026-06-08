@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ADR-0006: S-LoRA-style multi-adapter serving over one resident base via candle (hot-swap LoRA factors per routed expert). Build with --features models for the real engine."
+description = "Hardware-adaptive S-LoRA-style multi-adapter serving over one resident base via candle (hot-swap LoRA factors per routed expert). Build with --features models for the real engine."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
@@ -21,15 +21,15 @@ tokenizers = { version = "0.22", optional = true }
 # 1.0.0-rc.1 pre-release: `cargo update` will carry this to the final 1.0.0 when
 # it ships (^1.0.0-rc.1 matches the stable release).
 hf-hub = { version = "1.0.0-rc.1", optional = true, default-features = false, features = ["blocking", "rustls-tls"] }
-# Candle serving reuses the trainer's Qwen2.5-Coder + LoRA model (ADR-0006).
+# Candle serving reuses the trainer's Qwen2.5-Coder + LoRA model (hardware-adaptive serving).
 antumbra-train = { path = "../antumbra-train", optional = true }
 # Await-safe mutex (cached model) + block_in_place (don't park the runtime
-# worker during synchronous generation, ADR-0011 #4).
+# worker during synchronous generation, a v1 serving-throughput concern).
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"], optional = true }
 
 [features]
 default = []
-# The candle BERT sentence embedder (ADR-0005) + candle adapter serving (ADR-0006).
+# The candle BERT sentence embedder (routing-as-retrieval) + candle adapter serving (hardware-adaptive).
 models = [
     "dep:candle-core",
     "dep:candle-nn",

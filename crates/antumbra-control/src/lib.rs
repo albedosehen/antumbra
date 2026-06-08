@@ -1,4 +1,4 @@
-//! The hosted-onboarding control plane (ADR-0016): the **issuer** side of the
+//! The hosted-onboarding control plane: the **issuer** side of the
 //! `antumbra-auth` token contract. It gates signup behind invite codes,
 //! provisions a fresh tenant for each new account, and issues the RS256 JWT the
 //! MCP server verifies (with its matching public key). The offline tier is

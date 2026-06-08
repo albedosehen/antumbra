@@ -1,4 +1,4 @@
-//! The Loop page (ADR-0008): the generational loop as a pipeline,
+//! The Loop page, the durable generational loop: the loop as a pipeline,
 //! grow → explore → score → decide → consolidate → (grow), with the current
 //! stage lit, the generation counter, and the run it belongs to. The loop state
 //! is the durable checkpoint, so this is a live view of where the substrate is

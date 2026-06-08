@@ -1,6 +1,6 @@
-//! Reward signals: verifiable-first, critic-densified. ADR-0003.
+//! Reward signals: verifiable-first, critic-densified.
 //!
-//! The discipline of ADR-0003 is encoded in the type: every signal is tagged
+//! The discipline (the environment is the truth) is encoded in the type: every signal is tagged
 //! with its [`RewardSource`], verifiers are primary and trusted, and the critic
 //! can only *densify* between verifier checkpoints; it can never override one.
 
@@ -87,7 +87,8 @@ impl RewardSignal {
     }
 }
 
-/// Fold a step's source-tagged signals into one scalar, honoring ADR-0003:
+/// Fold a step's source-tagged signals into one scalar, honoring the
+/// environment-is-truth discipline:
 /// if any verifier reading exists it bounds the result, and the critic may only
 /// move the value *within* the verifier-trusted envelope, never past it.
 ///

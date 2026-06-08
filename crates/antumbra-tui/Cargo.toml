@@ -21,7 +21,7 @@ anyhow.workspace = true
 clap = { workspace = true, features = ["env"] }
 serde_json.workspace = true
 chrono.workspace = true
-# Headless snapshots (ADR-0009): render a frame to an in-memory buffer and emit
+# Headless snapshots for the operator console: render a frame to an in-memory buffer and emit
 # a text grid (e2e-assertable) or a PNG screenshot (visual fidelity). `image`
 # encodes the PNG; `ab_glyph` rasterizes the embedded Cascadia Mono (OFL, see
 # assets/CascadiaMono.LICENSE) so braille / box-drawing / symbols render true.

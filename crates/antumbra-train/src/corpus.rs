@@ -1,4 +1,4 @@
-//! A file-backed corpus of verifiable tasks (ADR-0002: your selected repos).
+//! A file-backed corpus of verifiable tasks (your selected repos, the source of plasticity).
 //!
 //! Each task is `{ "id", "prompt", "verify" }`, where `verify` is the spec the
 //! verifier consumes (e.g. `CommandVerifier`'s `{program,args,cwd}`). The loop
@@ -15,7 +15,7 @@ pub struct JsonCorpus {
 
 /// Read a contrastive scope from a task object, when it carries both
 /// `fail_context` and `near_ok_context` -- so a file-based correction can assert
-/// *where* it applies and become an actionable boundary once verified (ADR-0004).
+/// *where* it applies and become an actionable boundary of competence once verified.
 /// `governing_feature` is optional: absent, it is inferred from the one key that
 /// differs between the two contexts. Missing either context -> a plain correction.
 fn parse_scope(task: &serde_json::Value) -> Option<TaskScope> {

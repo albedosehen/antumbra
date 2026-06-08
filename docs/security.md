@@ -24,7 +24,7 @@ Isolation is **engine-enforced**, defence-in-depth:
   `crates/antumbra-store/tests/penumbra_auth.rs` (a record session sees only its
   tenant).
 - Repos add a second app-layer `WHERE tenant_id = …` as backup.
-- **Compartment sharing** (ADR-0014) is engine-gated: only a compartment's owner
+- **Compartment sharing** is engine-gated: only a compartment's owner
   may write a `grant`; grantees are intra-tenant; revocation (tombstone) takes
   effect immediately. There is no cross-tenant self-grant.
 - The `*_unscoped` / `all_heads` reads return rows across all tenants **only**
@@ -35,7 +35,7 @@ Isolation is **engine-enforced**, defence-in-depth:
   used only on owner connections (the console, the sync watcher), never to
   service a tenant request.
 
-### Networked MCP (ADR-0015)
+### Networked MCP
 
 - Per-request **JWT** verification before any DB access; `exp` is **mandatory**
   (a non-expiring token is a standing key). HS256 (shared secret, self-hosted)

@@ -1,4 +1,4 @@
-//! The networked multi-tenant HTTP transport (ADR-0015).
+//! The networked multi-tenant HTTP transport: the MCP runtime surface.
 //!
 //! Each request carries a signed JWT; its verified `tenant`/`user` claims become
 //! `$auth`, so the engine enforces isolation **per request**: one server, many
@@ -282,7 +282,7 @@ fn server_config() -> StreamableHttpServerConfig {
         // server-initiated notifications (live propagation, R-2). The auth lock is
         // still only held while `handle` builds each response -- the GET stream
         // does no DB work and streams *after* the handler returns -- so the lock
-        // never spans the stream (the ADR-0015 concern does not apply: an SSE
+        // never spans the stream (the runtime-surface concern does not apply: an SSE
         // stream is MCP transport state, it does not hold the DB connection).
         .with_stateful_mode(true)
         .with_json_response(false)

@@ -1,13 +1,13 @@
-# Antumbra - Glossary (ADR-0010 vocabulary)
+# Antumbra - Glossary (trainer vocabulary)
 
-Plain-English definitions plus a diagram for every acronym in the trainer ADR. Read alongside
-[ADR-0010](adr/0010-candle-qlora-trainer.md) and the [diagram atlas](diagrams.md).
+Plain-English definitions plus a diagram for every trainer acronym. Read alongside
+[the candle QLoRA trainer](adr/0010-candle-qlora-trainer.md) and the [diagram atlas](diagrams.md).
 
 - Naming: [why "candle"](#why-candle)
 - Learning algorithm: [RLVR](#rlvr---reinforcement-learning-with-verifiable-rewards) · [RAFT](#raft---reward-ranked-finetuning) · [GRPO](#grpo---group-relative-policy-optimization)
 - Parameter efficiency: [PEFT](#peft---parameter-efficient-fine-tuning) · [LoRA](#lora---low-rank-adaptation) · [QLoRA](#qlora---quantized-lora) · [NF4](#nf4---4-bit-normalfloat) · [GGUF](#gguf)
 - Mechanics: [SFT](#sft---supervised-fine-tuning) · [KV cache](#kv-cache---keyvalue-cache)
-- Process: [ADR](#adr---architecture-decision-record) · [MT-1..MT-4](#mt-1mt-4---trainer-milestones)
+- Process: [MT-1..MT-4](#mt-1mt-4---trainer-milestones)
 - [How they compose](#how-they-compose) · [the result](#the-result)
 
 ---
@@ -17,8 +17,8 @@ Plain-English definitions plus a diagram for every acronym in the trainer ADR. R
 `candle` is Hugging Face's minimalist ML framework for Rust (tensors, autograd, CUDA/Metal) - a proper name,
 not an acronym. It riffs on PyTorch's "torch": a torch is a big, heavy flame (a large framework that pulls in
 all of Python); a **candle** is a small, lightweight light. That captures the pitch - a tiny, Python-free
-runtime shippable as one Rust binary, which is exactly why Antumbra uses it (single-process, one GPU -
-ADR-0006/0007).
+runtime shippable as one Rust binary, which is exactly why Antumbra uses it (single-process, one GPU,
+hardware-adaptive serving over the SurrealDB substrate).
 
 ---
 
@@ -27,7 +27,7 @@ ADR-0006/0007).
 ### RLVR - Reinforcement Learning with Verifiable Rewards
 
 The reward is an objective, checkable signal (a test passes, output matches a rule) - not a human-preference or
-learned reward model. This is Antumbra's reward philosophy (ADR-0003: the environment is the truth).
+learned reward model. This is Antumbra's reward philosophy: the environment is the truth.
 
 ```mermaid
 flowchart LR
@@ -82,7 +82,7 @@ flowchart TB
 ### LoRA - Low-Rank Adaptation
 
 A weight update to a matrix `W` (out x in) is approximated by two skinny matrices `B*A` of rank `r` much smaller
-than in/out. Freeze `W`, train only `A` and `B`. One trained `A,B` pair is one expert (ADR-0001).
+than in/out. Freeze `W`, train only `A` and `B`. One trained `A,B` pair is one frozen expert.
 `y = Wx + (alpha/r) * B(Ax)`.
 
 ```mermaid
@@ -117,7 +117,7 @@ flowchart LR
 
 The specific 4-bit number format QLoRA introduced: a quantization grid that is information-theoretically optimal
 for normally-distributed weights. candle does not use NF4 - it uses the llama.cpp quant types (see GGUF), which
-ADR-0010 notes is arguably a better fit.
+the trainer's notes call arguably a better fit.
 
 ### GGUF
 
@@ -160,14 +160,9 @@ flowchart LR
 
 ## Process
 
-### ADR - Architecture Decision Record
-
-One short document per load-bearing decision: context, decision, consequences, kill criterion. Antumbra has
-ADR-0001 through ADR-0010.
-
 ### MT-1..MT-4 - trainer milestones
 
-The trainer's milestone track inside ADR-0010, each a falsifiable experiment with a kill criterion:
+The trainer's milestone track, each a falsifiable experiment with a kill criterion:
 
 ```mermaid
 flowchart LR
@@ -180,7 +175,7 @@ flowchart LR
 
 ## How they compose
 
-The whole ADR-0010 trainer in one picture: **RAFT** (the loop) drives **SFT** on **PEFT/LoRA** adapters over a
+The whole trainer in one picture: **RAFT** (the loop) drives **SFT** on **PEFT/LoRA** adapters over a
 frozen base, rewarded by **RLVR** verifiers, on **candle** - with **GRPO** and **QLoRA/NF4/GGUF** as the
 labeled upgrade path.
 
@@ -191,8 +186,8 @@ flowchart TD
     VER --> RANK["reward-rank (RAFT)"]
     RANK -->|"verified winners"| SFT["SFT the LoRA<br/>(cross-entropy on winners)"]
     SFT -->|"repeat rounds"| GEN
-    SFT --> GRAD["graduate -> frozen expert (ADR-0001)"]
-    GRAD --> DB["SurrealDB substrate (ADR-0007)"]
+    SFT --> GRAD["graduate -> frozen expert"]
+    GRAD --> DB["SurrealDB substrate"]
 ```
 
 ---

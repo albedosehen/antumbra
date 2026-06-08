@@ -1,4 +1,4 @@
-//! Concrete verifiers (ADR-0003): the environment is the reward.
+//! Concrete verifiers for credit assignment: the environment is the reward.
 //!
 //! [`CommandVerifier`] runs an external command and treats exit-code 0 as a
 //! pass: a test suite that goes green, a build that succeeds, an exec check

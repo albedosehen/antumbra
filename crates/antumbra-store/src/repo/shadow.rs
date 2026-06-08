@@ -1,4 +1,4 @@
-//! Shadow repository (the penumbra). ADR-0002.
+//! Shadow repository (the penumbra): shadow models hold the plasticity.
 //!
 //! Shadows mutate through their lifecycle, so they are addressed by a stable
 //! record id and written with `crud::upsert_record`. No raw SurrealQL.

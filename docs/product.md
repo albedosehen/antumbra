@@ -69,15 +69,17 @@ all of it; its thesis is to *absorb* the orchestration and *build* the control p
 - **Behavior graphs / the behavior mixer become a population of metabolized experts.**
   Where the predecessor *executes* a composed graph every time, Antumbra metabolizes
   a successful, recurrent graph (including its step decomposition) into weights via
-  `antumbra metabolize`, and composes experts at serve time (ADR-0009 is the learned
-  cross-attention end state; a linear adapter blend is the precursor today). The
+  `antumbra metabolize`, and composes experts at serve time (the heterogeneous
+  composed model is the learned cross-attention end state; a linear adapter blend is
+  the precursor today). The
   composition surface a user wants becomes an **expert mixer**, not a graph mixer.
 - **Autonomous loops / planning become the generational training loop + the `answer`
   tool.** The agent's learned competence replaces hand-built iteration where it can;
   out-of-scope tasks escalate.
-- **Multi-tenancy becomes engine-enforced ACL** (ADR-0013), stronger than app-side
+- **Multi-tenancy becomes engine-enforced ACL**, stronger than app-side
   scoping, validated over the wire.
-- **Evaluation harness becomes the experiment ledger + `evaluation_run`** (ADR-0007).
+- **Evaluation harness becomes the experiment ledger + `evaluation_run`**, on the
+  SurrealDB substrate.
 
 ### To build: the control plane and product surface (the real gap)
 
@@ -109,7 +111,7 @@ content. Dimensions stay consistent with the HNSW index the store provisions.
 ## Phased plan to close the gap
 
 Tracked as roadmap items (see [`roadmap.md`](roadmap.md)); decision recorded in
-[ADR-0016](adr/0016-control-plane-and-product-surface.md).
+[the control plane and product surface](adr/0016-control-plane-and-product-surface.md).
 
 1. **Hook auth + REST shim + per-workspace embedder config**: a hook token, a REST
    `/mcp/call` convenience endpoint for shell hooks, and runtime BYO-embedder;

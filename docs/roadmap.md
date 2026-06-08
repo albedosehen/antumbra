@@ -2,7 +2,7 @@
 
 Forward-looking items that are **scoped but deliberately deferred**, captured so
 they are not lost, ordered roughly by when they unblock. Shipped work lives in
-the [ADRs](adr/) and the [experiment ledger](../experiments/README.md); this file
+the [experiment ledger](../experiments/README.md); this file
 is only the *not-yet-built* queue.
 
 ## Deferred: networked / multi-device
@@ -10,7 +10,7 @@ is only the *not-yet-built* queue.
 ### R-1 · Collector / sync: local-embedded penumbra ↔ remote-authoritative store
 **Status:** BUILT (crate `antumbra-sync`, CLI `sync`; GPU-free, validated 2026-06-05).
 **Shape:** an edge device keeps its **embedded** penumbra (`surrealkv://`, single
-writer, see ADR-0015) and a **collector** reconciles it with a **remote
+writer, see the MCP runtime surface) and a **collector** reconciles it with a **remote
 authoritative** SurrealDB (`ws://`), so a fleet shares one source of truth without
 each opening the embedded file. Mirrors the supervised reconnect/backoff worker in
 `many-tiny-stuff/tinytropolis/sync`. **Conflict policy chosen: bidirectional
@@ -59,7 +59,7 @@ timestamp-mode watermark + delay window). Validated over docker `ws://`
 (`crates/antumbra-sync/tests/ws_incremental.rs`, gated on `ANTUMBRA_SYNC_WS`): the
 real v3 engine's string `>` converges (seed → incremental push → remote-only pull
 → settle).
-**Unblocks:** multi-device compartment sharing; the fleet (ADR-0006/0009); R-2.
+**Unblocks:** multi-device compartment sharing; the fleet; R-2.
 **Was deferred on:** a conflict/ordering policy, now decided (LWW).
 
 ### R-2 · Live propagation (real-time awareness)
@@ -77,7 +77,7 @@ grantees, via new `repo::compartment::get`/`list_grants`), and emits a routed
 end-to-end: a write into a shared compartment reaches the owner and the grantee.
 **Delivery (done):** the MCP transport now runs in rmcp **stateful (SSE) mode**
 (`http::server_config`), so a client's GET stream carries server-initiated
-notifications. The **ADR-0015 tension was a misframing**: the auth lock is held
+notifications. The **MCP runtime-surface tension was a misframing**: the auth lock is held
 only while `handle` builds a response; an SSE stream is MCP transport state that
 does no DB work and streams after the handler returns, so it never holds the DB
 connection (validated: all 20 transport tests still pass under stateful mode).
@@ -176,7 +176,7 @@ hence the mock + gated-real split above, run it against a harness with traces.
 **Deferred:** multi-tool fan-out in one pull (list tasks → fetch each trace) and
 behavior-graph *edge* structure (ordering/branching), beyond per-node steps.
 
-## Product / control plane (ADR-0016)
+## Product / control plane
 
 The engine is built; this is the surface that makes it usable by a non-operator and
 sellable in three tiers (offline-private / hosted-but-private / bespoke). Each item
@@ -218,7 +218,7 @@ endpoint per server, which is what the offline / self-hosted tier needs.
 A browser surface over the same MCP tools an agent calls: the population + experts +
 fitness, route hit-rate / escalation / cost-avoided stats, memory recall, and the
 compartment/`memory_edge` graph (2D first, 3D after). Inherits the engine ACL
-(ADR-0013), so it can see no more than the bound `(tenant, user)`.
+(engine-enforced multi-tenant isolation), so it can see no more than the bound `(tenant, user)`.
 
 ### P-3 · Knowledge documents
 **Status:** DONE (ingest → chunk → embed → recall); the document *list* surface
@@ -236,7 +236,7 @@ document by its title (`document::list_titles` is the document list); a separate
 ### P-4 · Interactive control (expert mixer + agent drive)
 **Status:** queued (after P-2 lands).
 The **expert mixer** (pick experts + weights, preview, save a composed serve
-profile, the user-facing form of ADR-0009 composition; `compose_adapters` is the
+profile, the user-facing form of heterogeneous composed-model composition; `compose_adapters` is the
 precursor) and driving a connected agent's `answer`/`route` from the dashboard.
 
 ### P-5 · Hosted onboarding

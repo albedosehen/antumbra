@@ -9,22 +9,22 @@ shared-base adapters for v0, heterogeneous composition as the north star).
 
 ## 1. The thesis, and the two readings of the chain
 
-**ADR-0004 - modeling the counterfactual boundary of the agent's own competence - is the keystone.** It is the
+**Modeling the counterfactual boundary of the agent's own competence is the keystone.** It is the
 reason the project exists; everything else is apparatus. Read *conceptually*, the architecture radiates from it:
 
 ```mermaid
 flowchart TD
-    T["ADR-0004 · KEYSTONE<br/>counterfactual scope of competence<br/>right-here / wrong-there + governing feature"]
-    T --> N1["needs a STABLE substrate<br/>ADR-0001 frozen experts"]
-    T --> N2["needs PROBES near the edge<br/>ADR-0002 shadows"]
-    T --> N3["needs to MEASURE correctness<br/>ADR-0003 critic + verifiers"]
-    T --> N4["is CONSUMED by the gate<br/>ADR-0005 router/gate"]
-    T --> N5["is REFINED each generation<br/>ADR-0008 loop"]
-    T --> N6["scales to separate models<br/>ADR-0009 north star"]
+    T["KEYSTONE<br/>counterfactual scope of competence<br/>right-here / wrong-there + governing feature"]
+    T --> N1["needs a STABLE substrate<br/>frozen experts"]
+    T --> N2["needs PROBES near the edge<br/>shadows"]
+    T --> N3["needs to MEASURE correctness<br/>critic + verifiers"]
+    T --> N4["is CONSUMED by the gate<br/>router/gate"]
+    T --> N5["is REFINED each generation<br/>loop"]
+    T --> N6["scales to separate models<br/>north star"]
 ```
 
-Read as an **engineering** (build-dependency) order, the same pieces fall the other way, which is why the ADRs
-are numbered 0001 → 0009 even though 0004 is the heart.
+Read as an **engineering** (build-dependency) order, the same pieces fall the other way, which is why the
+decision records are numbered 0001 through 0009 even though the boundary (0004) is the heart.
 
 ---
 
@@ -40,13 +40,13 @@ Unsloth) - a **DIY `candle`** path for both the QLoRA adapters and the gate.
 flowchart TB
     task["task (e.g. a repo task)"] --> GATE
     subgraph RUST["Antumbra - single-plane Rust process"]
-        GATE["Learned gate · ADR-0005<br/>boundary-conditioned adapter mixer"]
+        GATE["Learned gate<br/>boundary-conditioned adapter mixer"]
         BASE["shared frozen base (code-capable)"]
-        ADPT["frozen LoRA experts - the population · ADR-0001"]
-        BND["boundary engine · ADR-0004<br/>counterfactual scope"]
-        CRIT["critic harness · ADR-0003<br/>verifiers + (optional) flagship-as-critic"]
-        LOOP["generational loop · ADR-0008"]
-        TR["trainer · ADR-0002<br/>candle QLoRA + gate"]
+        ADPT["frozen LoRA experts - the population"]
+        BND["boundary engine<br/>counterfactual scope"]
+        CRIT["critic harness<br/>verifiers + (optional) flagship-as-critic"]
+        LOOP["generational loop"]
+        TR["trainer<br/>candle QLoRA + gate"]
         STORE["store layer · surql-rs"]
     end
     GATE --> ADPT
@@ -81,15 +81,15 @@ flowchart LR
     CORP["your selected repos<br/>(the corpus)"] --> ACT["expert/shadow ACTS<br/>(runs a command, writes code)"]
     ACT --> ENV["environment judges<br/>tests / build / exec = TRUTH"]
     ENV -->|"fail"| CRIT["critic densifies + diagnoses<br/>(verifier rules and/or flagship)<br/>names the governing feature"]
-    CRIT --> BND["counterfactual boundary<br/>(scope + governing feature) · ADR-0004"]
-    ENV -->|"verified outcome"| TRAIN["train on the VERIFIED OUTCOME<br/>(not the critic's text) · ADR-0002"]
+    CRIT --> BND["counterfactual boundary<br/>(scope + governing feature)"]
+    ENV -->|"verified outcome"| TRAIN["train on the VERIFIED OUTCOME<br/>(not the critic's text)"]
     BND --> TRAIN
-    TRAIN --> GRAD["graduate adapter · ADR-0001"]
+    TRAIN --> GRAD["graduate adapter"]
 ```
 
 - **The environment is the reward** (a command that works, a test that passes). For coding, this is exec/CI.
 - **The critic** (verifier rules, and *optionally* a flagship model) turns a raw failure into a dense diagnostic
-  signal and **names the governing feature** of the boundary (e.g. "this is a Deno project") - ADR-0003/0004.
+  signal and **names the governing feature** of the boundary (e.g. "this is a Deno project").
 - **You train on the verified outcome, not the critic's words.** The flagship, if used, is a *cold-start
   accelerator*, not an imitation target - your own repos are the more authoritative teacher.
 - **Ideal first domain: coding-over-your-repos** - maximally verifiable, maximally context-scoped (per-repo
@@ -107,7 +107,7 @@ flowchart TB
         G --> S1["one frozen code-capable base + frozen LoRA experts"]
         G --> S2["learned boundary-conditioned gate (latent mixing)"]
     end
-    subgraph NS["north star - heterogeneous composed model · ADR-0009"]
+    subgraph NS["north star - heterogeneous composed model"]
         H["genuinely separate frozen experts"]
         H --> H1["learned cross-attention bridges (CALM/BTX)"]
         H --> H2["sparse top-k selection + paged experts"]
@@ -122,7 +122,7 @@ The fleet (MacBook M4 Pro 48 GB, RTX 3080 mobile, GTX 1080, Jetson Orin Nano) an
 
 ## 5. Schema (SurrealDB) - summary
 
-Full DDL in [ADR-0007](adr/0007-surrealdb-substrate.md). In v0 an `expert` row describes a **frozen LoRA adapter
+Full DDL in [the SurrealDB substrate record](adr/0007-surrealdb-substrate.md). In v0 an `expert` row describes a **frozen LoRA adapter
 over the shared base** (`base_model` = the shared base, `artifact_uri` = adapter path). Patterns reuse
 **kushtaka** (HNSW recall, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph**
 (`C:\Users\shonp\repos\data-plane-builder-graph`: schema-as-code, drift detection, migrations, tenant perms).
@@ -174,15 +174,15 @@ antumbra/
   crates/
     antumbra-core/         # domain types: Expert(adapter), Shadow, FailureBoundary, Generation
     antumbra-store/        # surql-rs data layer (schema/migrations/repositories)
-    antumbra-embed/        # ADR-0015: HTTP embedder (OpenAI-compatible /embeddings) behind the Embedder port
-    antumbra-gate/         # ADR-0005: boundary-conditioned adapter gate (+ north-star bridge client)
-    antumbra-boundary/     # ADR-0004: counterfactual scope engine (keystone)
-    antumbra-loop/         # ADR-0008: durable generational loop
-    antumbra-critic/       # ADR-0003: verifiers + optional flagship-as-critic
-    antumbra-train/        # ADR-0002: candle QLoRA + gate training; consolidation (ADR-0012)
+    antumbra-embed/        # the MCP runtime surface: HTTP embedder (OpenAI-compatible /embeddings) behind the Embedder port
+    antumbra-gate/         # the boundary-conditioned gate: adapter gate (+ north-star bridge client)
+    antumbra-boundary/     # the counterfactual boundary: scope engine (keystone)
+    antumbra-loop/         # the durable generational loop
+    antumbra-critic/       # the critic for credit assignment: verifiers + optional flagship-as-critic
+    antumbra-train/        # shadow plasticity: candle QLoRA + gate training; consolidation (Penumbra memory store)
     antumbra-serve/        # embedder (candle BERT) + multi-adapter serving seam
     antumbra-cli/          # operator CLI
-    antumbra-mcp/          # ADR-0015: MCP server (memory + graph + compartments + route)
+    antumbra-mcp/          # the MCP runtime surface: MCP server (memory + graph + compartments + route)
     antumbra-sync/         # R-1: last-write-wins penumbra replication (local <-> remote)
     antumbra-tui/          # interactive operator console (ratatui): route-ask, event stream, drill-downs, actions
   migrations/            # SurrealDB .surql
@@ -191,10 +191,10 @@ antumbra/
   docs/adr/              # 0001..0016
 ```
 
-The Penumbra memory store, engine-enforced multi-tenancy, and compartments (ADR-0012/0013/0014) live in
+The Penumbra memory store, engine-enforced multi-tenancy, and compartments live in
 `antumbra-core` (domain) + `antumbra-store` (the `memory`/`memory_edge`/`compartment`/`grant`/`principal` tables,
 record-access auth, and the engine-enforced ACL); `antumbra-train` carries the consolidation gate + replay; the
-`antumbra-mcp` server is the agent-facing runtime surface (ADR-0015).
+`antumbra-mcp` server is the agent-facing runtime surface.
 
 ### v0 implementation status (2026-06-05)
 
@@ -202,17 +202,17 @@ All **thirteen crates** exist and compile; the workspace is green (`cargo test`,
 (`oneiriq-surql`, the local `release/0.28.0` checkout, builder-only, with no hand-written SurrealQL) on the SurrealDB
 3.x driver. Since the early snapshots: the trainer is GPU-validated (MT-3, pass-rate to 1.0), the real candle
 BERT embedder + relative-coverage gate are wired, the Penumbra memory store landed with engine-enforced
-tenant/compartment isolation (ADR-0012/0013/0014), and the agent-facing MCP runtime surface (ADR-0015) is up.
+tenant/compartment isolation, and the agent-facing MCP runtime surface is up.
 
 | Crate | State |
 |---|---|
 | core, store, critic, gate, boundary, loop | **implemented + tested** - the generational loop persists its full lineage and resumes across restarts (proven on `surrealkv://`); the store adds the Penumbra (memory + graph + compartments) under an engine-enforced, record-access ACL (`$auth.tenant`/`$auth.user`), with `penumbra::propose_compartments` clustering. |
-| train (ADR-0002/0010/0012) | **implemented + GPU-validated** - RAFT/GRPO LoRA fine-tuning (candle Qwen2.5-Coder + LoRA `CausalLm`), capture/teach intake, consolidation (gate + replay), memory-import. On the 3090 Ti (CUDA 13.3): RAFT graduated an expert, and memory consolidation internalized a verifier-gated expert (`deno install`) at 1.00. Behind `models`; see `docs/running-the-trainer.md`. |
-| serve (ADR-0006) | **implemented + GPU-validated** - `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert); both served a trained adapter on the 3090 Ti (CUDA 13.3). |
-| mcp (ADR-0015) | **implemented + tested** - 14 tools over the Penumbra + population (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`); the antumbra can auto-organize the inbox (`--auto-propose`); stdio (single identity) and networked JWT multi-tenant HTTP (per-request `$auth`, isolation proven on embedded). |
+| train (shadow plasticity, the candle QLoRA trainer, the Penumbra memory store) | **implemented + GPU-validated** - RAFT/GRPO LoRA fine-tuning (candle Qwen2.5-Coder + LoRA `CausalLm`), capture/teach intake, consolidation (gate + replay), memory-import. On the 3090 Ti (CUDA 13.3): RAFT graduated an expert, and memory consolidation internalized a verifier-gated expert (`deno install`) at 1.00. Behind `models`; see `docs/running-the-trainer.md`. |
+| serve (hardware-adaptive serving) | **implemented + GPU-validated** - `CandleServe` (single pinned adapter) and `MultiAdapterServe` (resident base, S-LoRA hot-swap per routed expert); both served a trained adapter on the 3090 Ti (CUDA 13.3). |
+| mcp (the MCP runtime surface) | **implemented + tested** - 14 tools over the Penumbra + population (memory, graph, compartments incl. `propose_compartments`, `route`, `answer`); the antumbra can auto-organize the inbox (`--auto-propose`); stdio (single identity) and networked JWT multi-tenant HTTP (per-request `$auth`, isolation proven on embedded). |
 | cli | `migrate · schema · experts · status · loop · route · seed · ask · serve · train · teach · evolve · populate · memory-import · metabolize · remember · consolidate · consolidate-compartment · propose-compartments · retire · scope · gate-train · compose` |
-| embed (ADR-0015) | **implemented + tested** - the OpenAI-compatible `HttpEmbedder` (behind the `Embedder` port, dimension-enforced) shared by the MCP server and the TUI, so route/ask/recall embed with the same model the population was built with. |
-| tui (ADR-0005/0009) | **interactive operator console** (ratatui + tachyonfx) over the live population/gate: route-ask through the gate (`--embed-url`), a live event stream of store changes, drill-down inspection, a tabbed multi-page shell (population · memory · loop · evals), switchable layouts (focused / dashboard / graph / sortable table), a KPI metric strip, time-series charts and a reward-landscape heatmap, multi-monitor high-refresh pacing, fuzzy filter/command palette, switchable themes, and operator actions (prune/graduate shadow · freeze/thaw expert · delete boundary · graceful-stop the loop) behind a confirm, plus drill-downs (route-ask, evaluation regression, gate/router inspector). Capability-tiered rendering (`--render`; raster sixel/kitty behind a `raster` feature) keeps the Braille/Canvas path universal. A headless `snapshot` mode emits a text grid (e2e) + a PNG screenshot. |
+| embed (the MCP runtime surface) | **implemented + tested** - the OpenAI-compatible `HttpEmbedder` (behind the `Embedder` port, dimension-enforced) shared by the MCP server and the TUI, so route/ask/recall embed with the same model the population was built with. |
+| tui (the boundary-conditioned gate, the operator console) | **interactive operator console** (ratatui + tachyonfx) over the live population/gate: route-ask through the gate (`--embed-url`), a live event stream of store changes, drill-down inspection, a tabbed multi-page shell (population · memory · loop · evals), switchable layouts (focused / dashboard / graph / sortable table), a KPI metric strip, time-series charts and a reward-landscape heatmap, multi-monitor high-refresh pacing, fuzzy filter/command palette, switchable themes, and operator actions (prune/graduate shadow · freeze/thaw expert · delete boundary · graceful-stop the loop) behind a confirm, plus drill-downs (route-ask, evaluation regression, gate/router inspector). Capability-tiered rendering (`--render`; raster sixel/kitty behind a `raster` feature) keeps the Braille/Canvas path universal. A headless `snapshot` mode emits a text grid (e2e) + a PNG screenshot. |
 
 Not yet runtime-validated / built: GPU validation of `MultiAdapterServe`'s swap and a real private-LoRA mint
 (`consolidate-compartment`); a live multi-tenant deployment of the networked MCP against a `ws://` server; the
@@ -222,16 +222,16 @@ date are in the [experiment ledger](../experiments/README.md).
 
 ---
 
-## 8. ADR map
+## 8. Decision map
 
-| ADR | Title | v0 role |
-|---|---|---|
-| [0001](adr/0001-frozen-experts.md) | Population of frozen experts (adapters) | core |
-| [0002](adr/0002-shadow-plasticity.md) | Shadow plasticity (DIY candle QLoRA) | core |
-| [0003](adr/0003-critic-credit-assignment.md) | Critic / verifiable rewards | core |
-| [0004](adr/0004-inhibitory-boundaries.md) | Counterfactual boundary | **keystone - first-class** |
-| [0005](adr/0005-orchestrator-router.md) | Router → in-model gate | core |
-| [0006](adr/0006-hardware-serving.md) | Hardware-adaptive serving | **scoped to 1 GPU; fleet deferred** |
-| [0007](adr/0007-surrealdb-substrate.md) | SurrealDB substrate | core |
-| [0008](adr/0008-generational-loop.md) | Durable generational loop | core |
-| [0009](adr/0009-heterogeneous-composition.md) | Heterogeneous composed model | **north star (deferred)** |
+| Decision | v0 role |
+|---|---|
+| Population of frozen experts (adapters) | core |
+| Shadow plasticity (DIY candle QLoRA) | core |
+| Critic / verifiable rewards | core |
+| Counterfactual boundary | **keystone, first-class** |
+| Router to an in-model gate | core |
+| Hardware-adaptive serving | **scoped to 1 GPU; fleet deferred** |
+| SurrealDB substrate | core |
+| Durable generational loop | core |
+| Heterogeneous composed model | **north star (deferred)** |

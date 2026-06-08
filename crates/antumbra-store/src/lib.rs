@@ -1,7 +1,7 @@
 //! # antumbra-store
 //!
 //! SurrealDB persistence for Antumbra via surql-rs (`oneiriq-surql`). The store
-//! is the single substrate of ADR-0007: document, vector (HNSW), and the
+//! is the single unified substrate (SurrealDB): document, vector (HNSW), and the
 //! durable flow state that makes the generational loop crash-resumable.
 
 mod dto;

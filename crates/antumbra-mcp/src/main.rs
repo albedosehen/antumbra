@@ -255,7 +255,7 @@ fn default_host(explicit: Option<String>) -> String {
 }
 
 fn main() -> Result<()> {
-    // SurrealDB's engine-enforced ACL subqueries (ADR-0013/0014) recurse deep;
+    // SurrealDB's engine-enforced ACL subqueries for tenant isolation and memory compartments recurse deep;
     // host the runtime on a large-stack thread so the 1 MB Windows main-thread
     // stack does not overflow (see the matching note in the CLI).
     std::thread::Builder::new()

@@ -26,7 +26,7 @@ chrono.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
 rmcp = { version = "1.7.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
-# Networked transport (ADR-0015): the JWT-authenticated, per-request multi-tenant
+# Networked transport, the MCP runtime surface: the JWT-authenticated, per-request multi-tenant
 # HTTP surface. axum hosts the streamable-HTTP service; jsonwebtoken verifies the
 # bearer token whose claims become $auth (tenant, user).
 axum = "0.8"

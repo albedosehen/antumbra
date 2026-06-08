@@ -1,4 +1,4 @@
-//! The durable generational loop as a resumable state machine. ADR-0008.
+//! The durable generational loop as a resumable state machine.
 //!
 //! `grow -> explore -> score -> decide -> consolidate -> grow | paused`.
 //! The state is persisted; killing the process mid-run and restarting resumes
@@ -30,7 +30,7 @@ pub enum LoopState {
 
 impl LoopState {
     /// The canonical forward step for each state (the solid edges of the
-    /// ADR-0008 diagram). `Consolidate` advances to the next generation's
+    /// durable generational loop). `Consolidate` advances to the next generation's
     /// `Grow`; `Paused` resumes into `Grow`.
     pub fn forward(self) -> LoopState {
         use LoopState::*;

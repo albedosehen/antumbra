@@ -1,7 +1,8 @@
-//! ADR-0004 keystone, end-to-end. Counterfactual search recovers C', the
+//! The keystone, the counterfactual boundary of competence, end-to-end.
+//! Counterfactual search recovers C', the
 //! boundary persists as actionable through surql-rs, and the gate inhibits
-//! routing inside the failure scope -- and only inside it. The single fake is
-//! the `AcceptabilityProbe` (the real probe needs serving, ADR-0006); the
+//! routing inside the failure scope, and only inside it. The single fake is
+//! the `AcceptabilityProbe` (the real probe needs hardware-adaptive serving); the
 //! search, the persistence, and the gate are all production code.
 
 use antumbra_boundary::{find_scope, finding_to_boundary};

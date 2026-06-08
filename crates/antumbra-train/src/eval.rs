@@ -1,4 +1,4 @@
-//! Eval: an adapter's pass-rate on a corpus, with no training (ADR-0010).
+//! Eval: an adapter's pass-rate on a corpus, with no training.
 //!
 //! This is one RAFT measurement round without the SFT step or the save: sample
 //! `K` per task, verify each, report the fraction that pass. EXP-010 uses it to

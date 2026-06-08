@@ -1,4 +1,4 @@
-//! # antumbra-train (ADR-0002 / ADR-0010)
+//! # antumbra-train (shadow models hold the plasticity; the candle QLoRA trainer)
 //!
 //! The DIY `candle` path that trains shadow adapters from **verified outcomes**
 //! via RAFT-style reward-ranked LoRA fine-tuning.

@@ -1,4 +1,4 @@
-//! The real `AcceptabilityProbe` (ADR-0004): **generate-then-verify**.
+//! The real `AcceptabilityProbe` (the counterfactual boundary of competence): **generate-then-verify**.
 //!
 //! Hold a behavior fixed, render it for a candidate context, **serve** a
 //! completion, and let a **verifier** judge it. This retires the keystone's
@@ -19,7 +19,7 @@ use antumbra_core::{Result, RunId};
 /// Generation is stochastic, so a single sample is a noisy acceptability test (a
 /// model that *can* satisfy a context still fails on some draws). The probe is
 /// therefore **best-of-K**: a context is acceptable if any of `samples` served
-/// completions verifies. This is the kill-criterion fix from ADR-0004: raise
+/// completions verifies. This is the retire-on-correction kill-criterion fix: raise
 /// `samples` until single-draw noise stops flipping the boundary.
 pub struct GenerateVerifyProbe<S: Serve, V: Verifier> {
     serve: S,

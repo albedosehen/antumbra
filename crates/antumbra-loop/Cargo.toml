@@ -4,18 +4,18 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ADR-0008: the durable generational loop. A resumable state-machine-in-DB (grow -> explore -> score -> decide -> consolidate) driven by injected ports; the persisted head is the checkpoint."
+description = "The durable generational loop: a resumable state-machine-in-DB (grow -> explore -> score -> decide -> consolidate) driven by injected ports; the persisted head is the checkpoint."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 antumbra-store = { path = "../antumbra-store" }
 # Promotes a verified correction's BoundaryFinding into a persistable, embedded
-# actionable boundary (ADR-0004).
+# actionable counterfactual boundary.
 antumbra-boundary = { path = "../antumbra-boundary" }
 chrono.workspace = true
 serde_json.workspace = true
 # sha256 of a frozen adapter's bytes = the no-forgetting regression fingerprint
-# (ADR-0001). Already in the dependency tree, so no new compile cost.
+# (the frozen-expert population). Already in the dependency tree, so no new compile cost.
 sha2 = "0.10"
 
 [dev-dependencies]

@@ -1,8 +1,8 @@
-//! Candle-backed serving (ADR-0006). v0 serves a single frozen LoRA adapter
+//! Candle-backed serving (hardware-adaptive serving). v0 serves a single frozen LoRA adapter
 //! over the shared base by reusing the antumbra-train Qwen2.5-Coder + LoRA
 //! model: load the base, load the adapter weights, generate. This is what turns
 //! a graduated expert into an answer. Multi-adapter hot-swap (S-LoRA-style) and
-//! the llama-cpp-2 / mistral.rs backends are the deferred richer ADR-0006.
+//! the llama-cpp-2 / mistral.rs backends are the deferred richer hardware-adaptive serving.
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -40,7 +40,7 @@ impl Serve for CandleServe {
         let mut guard = self.model.lock().await;
         // candle generation is synchronous and CPU/GPU-bound. Run it under
         // `block_in_place` so the runtime spawns a replacement worker and other
-        // tasks are not starved while a request is being served (ADR-0011 #4).
+        // tasks are not starved while a request is being served (a v1 serving-throughput concern).
         // Requires a multi-threaded runtime, which the CLI uses.
         let mut outputs = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {

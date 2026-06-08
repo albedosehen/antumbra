@@ -33,7 +33,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-# The TUI stack (ADR-0009 operator console): ratatui + its bundled crossterm,
+# The TUI stack (the operator console): ratatui + its bundled crossterm,
 # tachyonfx for composable shader-like animation/transitions.
 ratatui = "0.30"
 tachyonfx = "0.25"

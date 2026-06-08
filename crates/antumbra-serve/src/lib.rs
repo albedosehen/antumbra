@@ -1,4 +1,4 @@
-//! # antumbra-serve (ADR-0006)
+//! # antumbra-serve (hardware-adaptive serving)
 //!
 //! S-LoRA-style serving: one shared base resident on a single device plus a
 //! library of frozen LoRA adapters hot-swapped per request. [`CandleServe`]
@@ -114,7 +114,7 @@ impl Serve for MultiAdapterServe {
         use antumbra_train::CausalLm;
 
         // The gate selects experts in rank order; v0 serves the top one. A true
-        // latent blend of several adapters (ADR-0005) needs `compose_adapters`,
+        // latent blend of several adapters (routing-as-retrieval) needs `compose_adapters`,
         // which changes the LoRA rank and so a differently-shaped base. That is
         // the `ask --with` path, not an in-place swap, and is deferred here.
         let target = req.adapters.first().cloned().ok_or_else(|| {
@@ -134,7 +134,7 @@ impl Serve for MultiAdapterServe {
 
         // candle generation is synchronous and device-bound. Run it under
         // `block_in_place` so the runtime spawns a replacement worker and other
-        // tasks are not starved while a request is served (ADR-0011 #4). Requires
+        // tasks are not starved while a request is served (a v1 serving-throughput concern). Requires
         // a multi-threaded runtime.
         let final_output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {

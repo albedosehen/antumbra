@@ -1,15 +1,8 @@
 # Antumbra
 
-> A research project exploring one question: can a coding agent's **verified**
-> work be metabolized into a growing population of small, frozen, on-device
-> specialists, so the system gets measurably better at the work you repeat, and
-> learns the **scope** of what each specialist is good at (when to answer locally,
-> when to escalate)?
-
-Antumbra started as a research project and remains one: an independent, all-Rust
-exploration, not a product. The idea under test: a private substrate that plugs
+Antumbra is developed as private substrate that plugs
 into a coding agent you already use (Claude Code, Cursor, any MCP client) and,
-instead of merely *remembering*, **gets better** by training verified outcomes
+instead of merely *remembering*, it **gets better** by training verified outcomes
 into frozen LoRA adapters over a shared base, and learning a competence boundary
 for each. Every milestone is a falsifiable experiment with a kill criterion; the
 sections below are the bets and what has (and hasn't) held up so far.
@@ -23,29 +16,30 @@ it, you send it your data, and it is exactly as good tomorrow as today. It never
 learns *your* work.
 
 The bet Antumbra explores is the opposite. It maintains a **population of small,
-frozen specialists** (LoRA adapters over one shared, code-capable base model),
+frozen specialists** [LoRA adapters](https://huggingface.co/docs/peft/en/developer_guides/lora) over one shared, code-capable base model,
 each good at a narrow, recurring task. When a result is **verified** (a test
 passes, a command works, a schema matches, you accept a draft), that competence
-is trained into an adapter and **frozen** into the population. A **learned
-router** sends each new task to the specialist most likely to handle it, and a
-**competence boundary** decides whether to answer locally or escalate. The
+is trained into an adapter and [**frozen** into the population](https://openreview.net/forum?id=aGOQYJfz6H). A [**learned
+router**](https://www.sciencedirect.com/science/article/pii/S111001682500122X) sends each new task to the specialist most likely to handle it, and a
+[**competence boundary**](https://eric.ed.gov/?id=ED306490) decides whether to answer locally or escalate. The
 hypothesis: over time it gets measurably better at the work you do most, on your
 own machine, with your data never leaving the building.
 
-Two design commitments are the heart of the experiment:
+Two design commitments are the heart of Antumbra:
 
 - **Frozen experts.** A graduated specialist is immutable. Immutability is the
   only hard guarantee that a learned skill is never silently forgotten when the
-  system trains something new (ADR-0001).
+  system trains something new.s
 - **Scope, not just skill.** Most systems accumulate what *works*. The bet here is
   that the neglected, more valuable half is the **boundary** of a rule: learning
   that a behavior is right in one context and wrong in a neighbouring one, and
   *which contextual feature governs the switch*. Constraints are scoped, not
   absolute: "use `deno install`, not `npm install`" is true **in this repo**, not
-  everywhere. That boundary is what the route-locally-vs-escalate decision rests
-  on (ADR-0004).
+  everywhere. By defining context boundaries, the system learns when to answer locally
+  and when to escalate, which results in more accurate responses and prevents it from
+  [interfering when it's out of its depth](https://cloud.google.com/discover/what-are-ai-hallucinations).
 
----
+___
 
 ## How it's exercised
 
@@ -57,7 +51,7 @@ hooks, which is how the loop gets its verified data:
 1. **Bootstrap on session start.** A hook pulls standing conventions and the
    memory relevant to this project into the agent's opening context. There is no cold
    start; it already knows "this repo uses `deno`."
-2. **Route or answer.** The agent calls the `answer`/`route` tools: a task goes to
+2. **Route or answer.** The agent calls the `answer`/`route` tools: a task goes tos
    the frozen expert most likely to cover it, or escalates when out of scope.
 3. **Capture on stop.** A hook nudges the agent to write verified observations
    back. Those recurrent, checked traces are what `antumbra metabolize` later
@@ -82,10 +76,10 @@ teacher's text:
 
 - **The environment is the truth.** For coding over repos: the test that passes,
   the command that runs, the build that goes green. That is the reward (RAFT,
-  reward-ranked fine-tuning over verified completions, ADR-0010).
+  reward-ranked fine-tuning over verified completions).
 - **A critic turns a failure into a diagnostic signal**, such as "`npm install` failed
   because this is a Deno project; use `deno install`", and names the *governing
-  feature* of the boundary. That is counterfactual scope extraction (ADR-0004).
+  feature* of the boundary. That is counterfactual scope extraction.
 - **Training is on the verified outcome, not the critic's words.** That keeps
   learning grounded in real data, and clear of "trained on a provider's outputs."
   A frontier model, if used at all, is an optional cold-start accelerator.
@@ -101,7 +95,7 @@ textbook boundaries), and the data is yours.
 Antumbra carries its own first-class memory and runtime rather than running
 alongside a separate agent engine.
 
-- **Memory store** (ADR-0012): a tenant-scoped store with three networks
+- **Memory store** (Penumbra): a tenant-scoped store with three networks
   (`world` facts, `bank` experiences, `opinion` judgments), HNSW vector recall,
   reinforcement counts, and per-memory provenance. It is both the **bootstrap**
   (existing memories seed the population with no cold start) and the
@@ -113,14 +107,14 @@ alongside a separate agent engine.
   resurrected by another replica. The embedder is pluggable behind the `Embedder`
   port, so the embedding step that touches your content stays on your side.
 
-- **Engine-enforced isolation** (ADR-0013): multi-tenancy lives in the SurrealDB
+- **Engine-enforced isolation**: multi-tenancy and identity live in the SurrealDB
   engine, not in handler code. Record-access binds `(tenant, user)` to `$auth`,
   and table permissions (`WHERE tenant_id = $auth.tenant`, plus compartment
   ownership and grant subqueries) filter every row at the engine, so a forgotten
   app-side filter cannot leak. Validated live against a real `ws://` server,
   including the fix (R-6) that runs each request on a scoped, non-root connection.
 
-- **Compartments** (ADR-0014): named, ownable spaces of memory, the unit of
+- **Compartments**: named, ownable latent-spaces of memory, the unit of
   organization, deletion, and sharing. A user grants another `reference` or `link`
   capability (engine-enforced); a private compartment consolidates into a private
   expert. **Revocation is a tombstone** that fails closed immediately at the
@@ -128,7 +122,7 @@ alongside a separate agent engine.
 
 ## The runtime surface
 
-- **MCP server** (`antumbra-mcp`, ADR-0015): a Rust Model Context Protocol server
+- **MCP server** (`antumbra-mcp`): a Rust Model Context Protocol server
   exposing memory, graph, compartment, routing, and `answer` tools, over **stdio**
   (one local identity) or a **networked, multi-tenant HTTP** surface where each
   request's signed JWT `(tenant, user)` claims become the engine's `$auth`
@@ -179,8 +173,8 @@ is exercisable without a GPU.
 **Not yet / in progress:** large corpora and many experts (the real
 generalization-and-forgetting test at scale); the learned latent-mixing gate (the
 north star beyond the coverage gate); 4-bit quantized training (RAFT and GRPO both
-ship); heterogeneous composition by learned cross-attention bridges (ADR-0009).
-The hosted direction (ADR-0016) is an active exploration, not a launch: the
+ship); heterogeneous composition by learned cross-attention bridges (the north star).
+The hosted direction (the control plane and product surface) is an active exploration, not a launch: the
 control-plane onboarding *core* exists (invite-gated signup/login that provisions
 a tenant and issues the RS256 token the server verifies, plus magic-link auth),
 while the web dashboard, OAuth providers, and HTTP surface are still to come. The
@@ -236,7 +230,7 @@ recipe and the validated generation-quality settings.
 - **[Roadmap](docs/roadmap.md)**: what is built and what is queued, per item.
 - **[Running the trainer](docs/running-the-trainer.md)**: the CUDA GPU recipe.
 - **[Architecture Decision Records](docs/adr/README.md)**: every load-bearing
-  decision, ADR-0001 … ADR-0016.
+  decision, from the population of frozen experts through the control plane and product surface.
 - **[Experiment Ledger](experiments/README.md)**: each falsifiable validation:
   claim, method, result, kill criterion, reproduce command.
 

@@ -3,34 +3,33 @@
 In Antumbra the **falsifiable validations *are* the milestones** (architecture §7). This ledger records each
 one: the claim, how it was tested, the measured result, an explicit **kill criterion**, and a **reproduce**
 command. Results to date are toy-scale and honest about what is faked; see the
-[Technical Reference §13-14](../docs/technical-reference.md) for the standing scorecard and the ADRs for the
-decisions each experiment exercises.
+[Technical Reference §13-14](../docs/technical-reference.md) for the standing scorecard.
 
 GPU experiments need the CUDA-13 / Windows environment in [running-the-trainer.md](../docs/running-the-trainer.md)
 and `python` on `PATH` for the exec verifiers; build with `--features models,cuda --release`. Non-GPU
 experiments are plain `cargo test`.
 
-| ID | Claim | Pillar / ADR | Status |
+| ID | Claim | Pillar | Status |
 |---|---|---|---|
-| [EXP-001](#exp-001-the-trainer-learns-from-verified-outcomes) | An adapter learns from verified outcomes | 1 / 0002,0003,0010 | **passed** (GPU) |
-| [EXP-002](#exp-002-the-gate-routes-in-scope-and-refuses-out-of-scope) | Gate routes in-scope, refuses out-of-scope | 2 / 0005 | **passed** |
-| [EXP-003](#exp-003-capability-vectors-from-evaluated-behavior) | Capability vectors come from evaluated behavior | 2 / 0004,0005 | **passed** |
-| [EXP-004](#exp-004-a-multi-expert-population-routes) | A multi-expert population routes correctly | 3 / 0001,0005 | **passed** (GPU) |
-| [EXP-005](#exp-005-an-actionable-boundary-inhibits-routing-in-scope-only) | An actionable boundary inhibits routing, in-scope only | keystone / 0004 | **passed** |
-| [EXP-006](#exp-006-experts-answer-serving) | A graduated expert serves a real answer | 1 / 0006 | **passed** (GPU) |
-| [EXP-007](#exp-007-live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery + autonomous discovery | keystone / 0004,0006 | **passed** (GPU) |
-| [EXP-008](#exp-008-grpo-vs-raft) | GRPO is more sample-efficient than RAFT | 1 / 0011 | **passed, single run** (GPU) |
-| [EXP-009](#exp-009-4-bit-qlora-training-memory) | 4-bit base trains a LoRA at f16 quality, ~1/4 resident base | 1 / 0011 | **passed** (GPU) |
-| [EXP-010](#exp-010-catastrophic-forgetting-frozen-population-vs-monolithic) | Frozen population retains skills a monolith forgets | 3 / 0001,0010 | **inconclusive** (no forgetting at toy scale, GPU) |
-| [EXP-011](#exp-011-durable-correction-against-a-strong-prior) | A one-time correction is captured + routed across a context reset | 1,2 / 0004,0006,0009 | **passed** (GPU) |
-| [EXP-012](#exp-012-the-self-improvement-lifecycle-end-to-end) | Fail -> bound -> capture -> retire -> route to the fix, in one loop | keystone / 0004,0005,0006,0009 | **passed** (GPU) |
-| [EXP-013](#exp-013-the-learned-router) | A learned router separates specialists from generalists | 2 / 0005,0009 | **passed** (GPU) |
-| [EXP-014](#exp-014-adapter-composition) | Experts compose into one served adapter; behavior is dialable | 3 / 0006,0009 | **passed** (GPU) |
-| [EXP-015](#exp-015-complementary-composition-the-capability-multiplier) | Composing complementary experts does what neither alone was trained for | 3 / 0006,0009 | **passed** (GPU) |
-| [EXP-016](#exp-016-the-closed-serving-loop-route-auto-compose) | One `ask` routes the project expert and auto-composes standing conventions | 2,3 / 0005,0006,0009 | **passed** (GPU) |
-| [EXP-017](#exp-017-calibrated-router-out-of-distribution-abstention) | The router abstains on out-of-distribution tasks instead of overconfidently routing | 2 / 0005,0009 | **passed** (GPU) |
-| [EXP-018](#exp-018-autonomous-self-improvement-eval-gated) | The system trains itself to a quality bar and stops, no manual driving | 1 / 0002,0010 | **passed** (GPU) |
-| [EXP-019](#exp-019-autonomous-population-growth-serving-coverage) | The system grows its own population from a task stream until it covers it | 1,2,3 / 0001,0005,0006 | **passed** (GPU) |
+| [EXP-001](#exp-001-the-trainer-learns-from-verified-outcomes) | An adapter learns from verified outcomes | 1 | **passed** (GPU) |
+| [EXP-002](#exp-002-the-gate-routes-in-scope-and-refuses-out-of-scope) | Gate routes in-scope, refuses out-of-scope | 2 | **passed** |
+| [EXP-003](#exp-003-capability-vectors-from-evaluated-behavior) | Capability vectors come from evaluated behavior | 2 | **passed** |
+| [EXP-004](#exp-004-a-multi-expert-population-routes) | A multi-expert population routes correctly | 3 | **passed** (GPU) |
+| [EXP-005](#exp-005-an-actionable-boundary-inhibits-routing-in-scope-only) | An actionable boundary inhibits routing, in-scope only | keystone | **passed** |
+| [EXP-006](#exp-006-experts-answer-serving) | A graduated expert serves a real answer | 1 | **passed** (GPU) |
+| [EXP-007](#exp-007-live-counterfactual-boundary-recovery) | Live counterfactual boundary recovery + autonomous discovery | keystone | **passed** (GPU) |
+| [EXP-008](#exp-008-grpo-vs-raft) | GRPO is more sample-efficient than RAFT | 1 | **passed, single run** (GPU) |
+| [EXP-009](#exp-009-4-bit-qlora-training-memory) | 4-bit base trains a LoRA at f16 quality, ~1/4 resident base | 1 | **passed** (GPU) |
+| [EXP-010](#exp-010-catastrophic-forgetting-frozen-population-vs-monolithic) | Frozen population retains skills a monolith forgets | 3 | **inconclusive** (no forgetting at toy scale, GPU) |
+| [EXP-011](#exp-011-durable-correction-against-a-strong-prior) | A one-time correction is captured + routed across a context reset | 1,2 | **passed** (GPU) |
+| [EXP-012](#exp-012-the-self-improvement-lifecycle-end-to-end) | Fail -> bound -> capture -> retire -> route to the fix, in one loop | keystone | **passed** (GPU) |
+| [EXP-013](#exp-013-the-learned-router) | A learned router separates specialists from generalists | 2 | **passed** (GPU) |
+| [EXP-014](#exp-014-adapter-composition) | Experts compose into one served adapter; behavior is dialable | 3 | **passed** (GPU) |
+| [EXP-015](#exp-015-complementary-composition-the-capability-multiplier) | Composing complementary experts does what neither alone was trained for | 3 | **passed** (GPU) |
+| [EXP-016](#exp-016-the-closed-serving-loop-route-auto-compose) | One `ask` routes the project expert and auto-composes standing conventions | 2,3 | **passed** (GPU) |
+| [EXP-017](#exp-017-calibrated-router-out-of-distribution-abstention) | The router abstains on out-of-distribution tasks instead of overconfidently routing | 2 | **passed** (GPU) |
+| [EXP-018](#exp-018-autonomous-self-improvement-eval-gated) | The system trains itself to a quality bar and stops, no manual driving | 1 | **passed** (GPU) |
+| [EXP-019](#exp-019-autonomous-population-growth-serving-coverage) | The system grows its own population from a task stream until it covers it | 1,2,3 | **passed** (GPU) |
 
 ---
 
@@ -119,7 +118,7 @@ generalized inhibition.
 
 ## EXP-006: experts answer (serving)
 
-**Claim.** A graduated expert can be loaded and serve a real answer (ADR-0006).
+**Claim.** A graduated expert can be loaded and serve a real answer (hardware-adaptive serving).
 
 **Method.** `CandleServe` loads the shared base + an expert's adapter and generates; `ask` routes a task to a
 specialist and serves from its adapter (GPU).
@@ -161,7 +160,7 @@ generation-diversity fix).
 
 ## EXP-008: GRPO vs RAFT
 
-**Claim.** GRPO (group-relative policy optimization, ADR-0011) reaches a given pass-rate in fewer sampled
+**Claim.** GRPO (group-relative policy optimization, a v1 efficiency upgrade) reaches a given pass-rate in fewer sampled
 completions than RAFT, the v1 sample-efficiency upgrade.
 
 **Method.** Train the same arith corpus on the GPU with `train --algo raft` and `--algo grpo`, identical knobs
@@ -181,7 +180,7 @@ shelve GRPO, keep RAFT. *(Cleared directionally; a rigorous win needs multiple s
 ## EXP-009: 4-bit QLoRA training memory
 
 **Claim.** A Q4_K base trains a LoRA at f16 pass-rate using ~1/4 of the resident base memory (dequant-in-forward,
-ADR-0011).
+the v1 efficiency target).
 
 **Method.** Train the arith corpus with the f16 base and with `--quantize-base`, identical knobs (samples 4,
 rounds 3, max-new-tokens 32).
@@ -242,7 +241,7 @@ adapters/adder_g0.safetensors`.
 prior, can be captured into a frozen expert and re-applied by routing, so it persists across a context reset
 without being re-stated. This is the agent failure Antumbra targets: the model assumes the obvious default
 (`package.json` -> npm), is corrected once ("this project uses bun"), and would otherwise repeat the mistake
-after the correction falls out of context. Capture is the second intake path beside RAFT discovery (ADR-0004/0009).
+after the correction falls out of context. Capture is the second intake path beside RAFT discovery (capture intake, toward the north star).
 
 **Method.** Clean proxy: project `acme-api` should use `bun add <pkg>`, but the base reaches for `npm` by habit.
 The disambiguator lives only in the expert, never the inference prompt (the prompt carries the project, not the
@@ -268,7 +267,7 @@ semantically adjacent ("add a dependency to a project"), compressing the margin,
 rather than mis-serving. This is the EXP-004 per-population calibration property, reconfirmed: discrimination is
 correct; the threshold only trades confident-serve against safe-abstain.
 
-**Boundary probe (ADR-0004), now with relative inhibition.** We also drove the *counterfactual boundary* on this
+**Boundary probe (the counterfactual boundary of competence), now with relative inhibition.** We also drove the *counterfactual boundary* on this
 scenario: a general `generaldeps -> npm` expert (which covers `acme-api` by similarity, coverage 0.877, the
 confident mistake), then `scope --discover` to recover where it is wrong. Recovery worked: probing the expert's
 own behavior inferred `governing feature: project`, found `C' = webshop`, and stored an actionable boundary. The
@@ -316,7 +315,7 @@ expert, so the specialist routes uncontested.
 
 **Kill criterion.** If any link breaks (the mistake is not stopped, the correction is not captured, the boundary
 is not retired, or the fix is not routed), the loop is not autonomous. *(Cleared end-to-end; the only open edge is
-the general-vs-specialist routing margin, a known item for the learned gate, ADR-0009.)*
+the general-vs-specialist routing margin, a known item for the learned gate.)*
 
 **Reproduce.** The staged run: `teach` generaldeps; `route` acme-api; `scope --discover --expert generaldeps-g0`;
 `route` (escalates), `route` webshop (spared); `teach` bunexpert (retires the boundary); `route`/`ask`
@@ -328,7 +327,7 @@ the general-vs-specialist routing margin, a known item for the learned gate, ADR
 expert's capability centroid, and frozen sentence embeddings compress general and specific experts into the same
 band, so a specialist barely outscores a generalist and the gate abstains. A router that learns a per-dimension
 metric from the population's own exemplars (the same relative idea as the gate, but *learned* instead of
-hand-set) should separate them cleanly (ADR-0009, the north-star gate in its routing form).
+hand-set) should separate them cleanly (the learned gate, the north-star gate in its routing form).
 
 **Method.** Capture three experts whose tasks overlap heavily: `generaldeps -> npm` (general), `bunexpert ->
 acme-api bun`, `yarnexpert -> payments yarn`. Route an `acme-api` task with the heuristic gate, then `gate-train`
@@ -356,7 +355,7 @@ confidence is sharp), and folding boundary inhibition into the learned path.
 **Claim.** A population is a *capability multiplier*: several frozen experts can be blended into one served
 adapter, with the mix controllable (and ultimately driven by the learned router's weights). Because every expert
 shares the base rank and scale, the weighted delta-sum is **exact** as a rank-concatenated adapter, with no
-weight-space interference and no model surgery (ADR-0009).
+weight-space interference and no model surgery (the heterogeneous composed model).
 
 **Method.** `compose_adapters` stacks each expert's `sqrt(w_i)`-scaled `A`/`B` factors (A along its rank rows, B
 along its rank columns) into one rank-`(sum r_i)` adapter; the existing single-adapter forward serves it (with
@@ -384,7 +383,7 @@ experiment; conflicting behaviors (npm vs bun) can only be dialed between, not c
 **Claim.** The real prize over interpolation (EXP-014): composing two **complementary** experts produces output
 **neither alone was trained for**: the population as a genuine capability multiplier, not just a behavior dial.
 This is the personalization layer as composable weights: a standing convention applied *within* project-specific
-knowledge, from independently-grown owned experts (ADR-0009; the Antumbra-replaces-the-Kushtaka-harness thesis).
+knowledge, from independently-grown owned experts (the heterogeneous composed model; the Antumbra-replaces-the-Kushtaka-harness thesis).
 
 **Method.** Two experts with non-conflicting competences: `bunexpert` (acme-api -> `bun add X`, a *project tool*)
 and `convexpert` (-> `... --save-exact`, a *cross-project convention*, trained across varied projects/tools so it
@@ -531,7 +530,7 @@ the prompt), and gaps that need a *correction* (base actively wrong) want captur
 
 **Per-skill specialists (2026-06-04).** `populate` now clusters the gap tasks by **skill** (a `skill` field on
 each task, falling back to its id) and grows a *dedicated specialist per skill*: narrow frozen experts, the
-umbra ideal (ADR-0001), not one generalist over all gaps. On mixed-skills it grew `grown-add`, `grown-reverse`,
+umbra ideal (a population of small frozen experts), not one generalist over all gaps. On mixed-skills it grew `grown-add`, `grown-reverse`,
 `grown-upper`, and the learned router then routed each skill to **its** specialist at p=1.000 (add->grown-add
 sim 0.887, reverse->grown-reverse 0.971, upper->grown-upper 0.878): clean per-skill discrimination. A real
 training finding surfaced: per-skill RAFT *bootstrap* is higher-variance than the combined expert; `grown-add`
@@ -560,7 +559,7 @@ a measured open question that needs a load-bearing-adapter / interference regime
 **Claim.** A population does not have to discover every skill cold. People already hold verified competence in
 their agents' memory stores (Kushtaka, qdrant, surrealdb, a json file); a memory earned its place by working in
 production and being reinforced, and that reinforcement *is* the reward RLVR would otherwise rediscover. So an
-existing memory store can be adapted into the **capture** intake (ADR-0004/0009) and learned from directly,
+existing memory store can be adapted into the **capture** intake (capture intake, toward the north star) and learned from directly,
 sidestepping the high-variance RAFT bootstrap of EXP-019.
 
 **Mechanism.** `memory::import` adapts a *normalized* memory export (source-agnostic: `{content, scope, network,
@@ -629,7 +628,7 @@ plain capture). This is the principled, literature-backed answer to the EXP-010 
 **Contradiction → retirement, forgetting from frozen weights (`retire`).** A LoRA cannot be edited per-fact, but
 the *population* can forget: `retire` supersedes an expert by name and refreshes the router. Wiring a store's
 `report_contradiction` against a *consolidated* memory to `retire` undoes a graduation at the population scale
-(ADR-0004 retire-on-correction). That closes the one limit that looked fundamental: you *can* unlearn, by
+(retire-on-correction). That closes the one limit that looked fundamental: you *can* unlearn, by
 retiring the whole expert and (optionally) re-consolidating from the corrected memory.
 
 **Write-back / demotion.** `consolidate` appends graduates to an accumulating consolidated log

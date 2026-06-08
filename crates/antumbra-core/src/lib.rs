@@ -5,9 +5,9 @@
 //! training so the rest of the system is exercisable without a GPU.
 //!
 //! Metaphor map (a cast shadow has three regions):
-//! - **umbra** = frozen experts ([`expert`], ADR-0001)
-//! - **penumbra** = shadows-in-training ([`shadow`], ADR-0002)
-//! - **antumbra** = the counterfactual boundary, the keystone ([`boundary`], ADR-0004)
+//! - **umbra** = frozen experts ([`expert`])
+//! - **penumbra** = shadows-in-training ([`shadow`])
+//! - **antumbra** = the counterfactual boundary, the keystone ([`boundary`])
 
 pub mod boundary;
 pub mod compartment;

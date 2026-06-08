@@ -1,4 +1,4 @@
-//! Capture: internalize a *given, verified* correction (ADR-0004/0009).
+//! Capture: internalize a *given, verified* correction into the composed model.
 //!
 //! RAFT (`raft.rs`) discovers a skill from the model's own verified-correct
 //! samples. Capture is the other intake path into the same population: a

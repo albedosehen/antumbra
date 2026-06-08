@@ -1,6 +1,6 @@
 //! Evaluation runs: one row per measured run (the reuse of kushtaka's
-//! strongest idea). ADR-0007. The `regression_fingerprint` is what makes the
-//! ADR-0001/0002 no-forgetting invariant *checkable*: a frozen expert's
+//! strongest idea). The `regression_fingerprint` is what makes the
+//! no-forgetting invariant *checkable*: a frozen expert's
 //! fingerprint on its corpus must not change when the population grows.
 
 use chrono::{DateTime, Utc};
@@ -66,7 +66,7 @@ pub struct EvaluationRun {
 impl EvaluationRun {
     /// Whether two runs of the same subject on the same corpus task produced
     /// byte-identical canonical output. A `false` here for a *frozen* expert is
-    /// the ADR-0001 kill criterion firing.
+    /// the frozen-expert kill criterion firing.
     pub fn fingerprint_matches(&self, other: &EvaluationRun) -> bool {
         match (&self.regression_fingerprint, &other.regression_fingerprint) {
             (Some(a), Some(b)) => a == b,

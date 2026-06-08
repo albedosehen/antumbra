@@ -1,4 +1,4 @@
-//! ADR-0008 validation: the loop grows the population across generations,
+//! Durable generational loop validation: the loop grows the population across generations,
 //! survives a simulated kill/restart by resuming from the persisted head,
 //! prunes (does not grow) when shadows collapse, and writes its full lineage
 //! (shadows, rewards, evaluations, boundaries) to the substrate.
@@ -74,7 +74,7 @@ async fn grows_population_and_resumes_after_restart() {
     );
 }
 
-// A cooperative halt (ADR-0008): an operator sets the loop control to Halt; the
+// A cooperative halt of the durable loop: an operator sets the loop control to Halt; the
 // runner stops at the next generation boundary, checkpoints the head as Paused,
 // and consumes the signal. Re-running resumes from that checkpoint.
 #[tokio::test]
@@ -146,7 +146,7 @@ async fn capability_vector_is_learned_from_solved_exemplars() {
     }
 }
 
-// The no-forgetting tripwire (ADR-0001): across generations, every frozen expert
+// The no-forgetting tripwire (the frozen-expert population): across generations, every frozen expert
 // stays byte-identical to its freeze baseline, so each generation reports zero
 // regressions -- the freeze holds.
 #[tokio::test]
@@ -256,7 +256,7 @@ async fn collapsing_shadows_are_pruned_and_logged() {
     assert_eq!(evals.len(), 1);
 }
 
-// A graduating expert retires the boundaries it now covers (ADR-0004 lifecycle):
+// A graduating expert retires the boundaries it now covers (retire-on-correction lifecycle):
 // by its capability vector it sits inside the failure region a scope marked, so
 // the gap is filled and the boundary must stop gating routing. A boundary it does
 // not cover is left intact.
@@ -307,7 +307,7 @@ async fn a_graduating_expert_retires_the_boundaries_it_covers() {
 }
 
 // A capture run that surfaces a verified correction's contrastive pair persists
-// an ACTIONABLE boundary (ADR-0004): a C' was recovered, and the loop embeds
+// an ACTIONABLE counterfactual boundary: a C' was recovered, and the loop embeds
 // both contexts so the relative-margin inhibition can fire -- unlike the
 // open-negative a prune logs.
 #[tokio::test]

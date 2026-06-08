@@ -1,6 +1,6 @@
 # Running the trainer (MT-3)
 
-The candle RAFT trainer (ADR-0010) is built and compiles; this is how to run it
+The candle RAFT trainer is built and compiles; this is how to run it
 on a CUDA GPU (the 3090 Ti). Everything below the actual run is CPU-tested; the
 first real run is where model-specific behaviour gets tuned.
 
@@ -73,7 +73,7 @@ code out of a markdown fence first.
 
 Getting clean, *correct* output from a small LoRA over few examples took four
 research-grounded fixes (each diagnosed against a real GPU failure, citations in
-the ADRs / experiment ledger). The end state: a 10-example "deno install &lt;pkg&gt;"
+the experiment ledger). The end state: a 10-example "deno install &lt;pkg&gt;"
 corpus trains an expert that emits the right command for trained **and held-out**
 packages.
 

@@ -1,6 +1,6 @@
 //! End-to-end substrate test against an embedded in-memory SurrealDB:
 //! schema apply, expert insert/get/list, capability KNN recall, and the
-//! durable generation-head checkpoint (ADR-0008).
+//! durable generation-head checkpoint of the generational loop.
 
 use antumbra_core::{Expert, ExpertId, Generation, GenerationHead, LoopState, RunId};
 use antumbra_store::repo::{expert, generation};

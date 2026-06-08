@@ -243,8 +243,8 @@ pub struct ConsolidateCompartmentArgs {
     pub replay_ratio: f64,
 }
 
-/// Consolidate a **private compartment** into a **private expert** (ADR-0014/0012,
-/// the personalization north star). Gathers the compartment's memories, scores
+/// Consolidate a **private compartment** into a **private expert** (compartments
+/// over the memory store, the personalization north star). Gathers the compartment's memories, scores
 /// them through the consolidation gate, captures the graduates, and mints an
 /// expert tagged `(owner = user, compartment)`. The expert is NOT added to the
 /// shared learned router (it would leak); the route tool matches it by centroid
@@ -375,7 +375,7 @@ pub struct ProposeCompartmentsArgs {
 
 /// The antumbra proposes compartments by clustering a user's **unorganized**
 /// memory (the inbox compartment plus anything they authored uncompartmented)
-/// into competence-coherent regions (ADR-0014). This is the owner/offline
+/// into competence-coherent regions (memory compartments). This is the owner/offline
 /// surface mirroring the MCP `propose_compartments` tool: cron-able, and the
 /// path toward proposing autonomously as the penumbra grows. It needs no model:
 /// clustering runs over the embeddings already stored on each memory, so this is
@@ -460,7 +460,7 @@ pub async fn propose_compartments(url: &str, a: ProposeCompartmentsArgs) -> anyh
 /// Supersede an expert by name and refresh the router: population-level
 /// forgetting. Wire a store's `report_contradiction` against a *consolidated*
 /// memory to this: a contradiction retires the expert that memory produced, so
-/// the gate stops routing to it (ADR-0004 retire-on-correction at the
+/// the gate stops routing to it (retire-on-correction at the
 /// population scale, since a frozen LoRA cannot be edited per-fact).
 #[cfg(feature = "models")]
 pub async fn retire(url: &str, expert_name: &str) -> anyhow::Result<()> {

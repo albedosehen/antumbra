@@ -3,7 +3,7 @@
 //! The domain core (loop, gate, boundary, critic aggregation) is written
 //! entirely against these traits, so it is exercisable with in-memory fakes
 //! (see [`crate::testing`]) and the heavy implementations (candle QLoRA
-//! training (ADR-0002), llama.cpp / mistral.rs serving (ADR-0006)) drop in
+//! training, llama.cpp / mistral.rs hardware-adaptive serving) drop in
 //! later as the only changed pieces.
 
 use async_trait::async_trait;
@@ -13,13 +13,13 @@ use crate::boundary::BoundaryFinding;
 use crate::error::Result;
 use crate::ids::{ExpertId, RunId, ShadowId};
 
-// --- serving (ADR-0006) ---------------------------------------------------
+// --- serving (hardware-adaptive) ------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActRequest {
     pub task_id: String,
     pub prompt: String,
-    /// The adapters the gate selected to blend in latent space (ADR-0005).
+    /// The adapters the gate selected to blend in latent space.
     #[serde(default)]
     pub adapters: Vec<ExpertId>,
 }
@@ -51,14 +51,14 @@ pub trait Serve: Send + Sync {
     }
 }
 
-/// The optional flagship escalation tier (ADR-0005): consulted only when the
+/// The optional flagship escalation tier: consulted only when the
 /// gate says out-of-scope / low-confidence, and shrinks over time.
 #[async_trait]
 pub trait FlagshipTier: Send + Sync {
     async fn escalate(&self, req: ActRequest) -> Result<ActOutput>;
 }
 
-// --- training (ADR-0002) --------------------------------------------------
+// --- training -------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrainRequest {
@@ -75,11 +75,11 @@ pub struct TrainOutcome {
     pub final_fitness: f32,
     /// Prompts the shadow provably solved (verified-correct) by the final round.
     /// The expert's capability vector is learned from these evaluated behaviors
-    /// rather than a hand-written description (ADR-0004/0005).
+    /// rather than a hand-written description.
     pub capability_exemplars: Vec<String>,
     /// Actionable boundary findings this run produced: each is a verified
     /// contrastive context pair (C incorrect / C' acceptable) the loop embeds
-    /// and persists as a scope that gates routing (ADR-0004). The capture path
+    /// and persists as a scope that gates routing. The capture path
     /// surfaces these from corrections; discovery-only runs leave it empty.
     #[serde(default)]
     pub boundary_findings: Vec<BoundaryFinding>,
@@ -92,7 +92,7 @@ pub trait Trainer: Send + Sync {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome>;
 }
 
-// --- reward (ADR-0003) ----------------------------------------------------
+// --- reward ----------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifyRequest {
@@ -123,13 +123,13 @@ pub struct CriticScore {
 }
 
 /// A PRM-style densifier that interpolates per-step credit between verifier
-/// checkpoints. Never authoritative (ADR-0003).
+/// checkpoints. Never authoritative.
 #[async_trait]
 pub trait Critic: Send + Sync {
     async fn densify(&self, output: &ActOutput) -> Result<Vec<CriticScore>>;
 }
 
-// --- embedding + boundary probe (ADR-0004/0005) ---------------------------
+// --- embedding + boundary probe -------------------------------------------
 
 /// Produces capability / context vectors for routing-as-retrieval and boundary
 /// lookup.
@@ -141,7 +141,7 @@ pub trait Embedder: Send + Sync {
 
 /// Replays the frozen population to judge whether a behavior is acceptable in a
 /// given context. This is what makes counterfactual search affordable
-/// (ADR-0004): cheap, repeatable re-probing over frozen experts.
+/// affordable: cheap, repeatable re-probing over frozen experts.
 #[async_trait]
 pub trait AcceptabilityProbe: Send + Sync {
     async fn acceptable(&self, behavior: &str, context: &serde_json::Value) -> Result<bool>;

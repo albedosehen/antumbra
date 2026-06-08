@@ -1,4 +1,4 @@
-//! A learned router (ADR-0009: the north-star gate, in its routing form).
+//! A learned router (the north-star gate, in its routing form).
 //!
 //! The v0 gate routes by raw cosine to each expert's capability centroid. Frozen
 //! sentence embeddings compress general and specific experts into the same band,
@@ -31,7 +31,7 @@ pub struct LearnedRouter {
     /// nearest-centroid similarity (in the learned metric space) for a task to
     /// be considered covered by the population. A task below it is out of
     /// distribution -> escalate, not route (selective prediction; DynMoLE-style
-    /// uncertainty gating, ADR-0009).
+    /// uncertainty gating; the learned gate).
     #[serde(default)]
     pub floor: f32,
 }

@@ -153,7 +153,7 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
 
             // Cluster the gap tasks by *skill* and grow a dedicated
             // specialist for each: a narrow frozen expert per skill, not
-            // one generalist over all gaps (the umbra ideal, ADR-0001).
+            // one generalist over all gaps (the umbra ideal, a population of small frozen experts).
             let mut groups: Vec<(String, Vec<CorpusTask>)> = Vec::new();
             for t in &gaps {
                 let skill = t.skill();
@@ -541,7 +541,7 @@ pub struct ServeArgs {
     pub temperature: f64,
 }
 
-/// Resident multi-adapter server (ADR-0006): load the shared base once and
+/// Resident multi-adapter server with hardware-adaptive serving: load the shared base once and
 /// hot-swap each routed expert's adapter per prompt via [`MultiAdapterServe`].
 /// Answers a single `--task` or a stream of prompts from stdin, routing each
 /// through the learned router (boundary-conditioned gate as fallback). A stream
@@ -711,7 +711,7 @@ pub struct MetabolizeArgs {
     pub lr: f64,
 }
 
-/// Metabolize a harness's successful orchestration traces (ADR-0001): adapt a
+/// Metabolize a harness's successful orchestration traces into the frozen-expert population: adapt a
 /// normalized harness-trace export (loop runs, behavior-graph evaluations, task
 /// executions) into capture tasks the population internalizes, so the brain
 /// learns to do in one shot what the harness did in many steps. Writes the

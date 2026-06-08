@@ -18,7 +18,7 @@ pub struct CorpusTask {
     pub prompt: String,
     pub verify: serde_json::Value,
     /// A supplied, verifier-checked correction to internalize (the capture
-    /// intake, ADR-0004/0009). `None` for RAFT tasks, which discover their own.
+    /// intake into the composed model). `None` for RAFT tasks, which discover their own.
     pub completion: Option<String>,
     /// The skill group this task belongs to: many tasks can share one skill, and
     /// a grown expert is a specialist for a *skill*, not a single task. Defaults
@@ -26,7 +26,7 @@ pub struct CorpusTask {
     pub skill: Option<String>,
     /// When a correction also asserts *where* it applies (the governing feature
     /// and the contrastive context pair), capture promotes the verified
-    /// correction to an actionable boundary (ADR-0004). `None` for a plain
+    /// correction to an actionable boundary of competence. `None` for a plain
     /// correction or a RAFT task.
     pub scope: Option<TaskScope>,
 }
@@ -82,7 +82,7 @@ impl CorpusTask {
     }
 
     /// Attach a contrastive scope whose governing feature is *inferred* from the
-    /// one context key that differs between C and C' (ADR-0004). If zero or
+    /// one context key that differs between C and C' (the counterfactual boundary). If zero or
     /// several keys differ the feature cannot be named, and capture emits no
     /// boundary for it.
     pub fn with_inferred_scope(

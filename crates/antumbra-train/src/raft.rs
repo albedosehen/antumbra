@@ -1,9 +1,9 @@
-//! RAFT: reward-ranked fine-tuning over verified outcomes (ADR-0010).
+//! RAFT: reward-ranked fine-tuning over verified outcomes.
 //!
-//! Each round: sample `K` completions per task, **verify** each (the ADR-0003
-//! verifier is ground truth), keep the winners, and SFT the LoRA adapter on
+//! Each round: sample `K` completions per task, **verify** each (the
+//! verifier is ground truth, the environment is the truth), keep the winners, and SFT the LoRA adapter on
 //! them. The model learns from its *own verified-correct* generations, not a
-//! teacher's text (ADR-0002/0003). The per-round pass-rate is the reward curve.
+//! teacher's text (plasticity grounded in verification). The per-round pass-rate is the reward curve.
 
 use serde_json::json;
 
@@ -67,7 +67,7 @@ pub async fn raft_train(
         // Keep the latest round's solved set (reflects the trained adapter).
         capability_exemplars = solved;
 
-        // Anti-collapse (ADR-0002): only train on verified positives; an empty
+        // Anti-collapse (shadow plasticity discipline): only train on verified positives; an empty
         // winner set means no update this round (never reinforce nothing).
         if !winners.is_empty() {
             model.sft_step(&winners).await?;
