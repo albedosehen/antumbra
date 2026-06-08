@@ -9,6 +9,15 @@
 //! recall. The irreducible network call is isolated behind [`EmbedTransport`] so
 //! the request shaping, response parsing, and dimension check are mock-tested
 //! offline, with the real `ureq` POST covered by a gated `#[ignore]` test.
+//!
+//! Security: the endpoint URL and bearer key are **operator-configured**
+//! (`--embed-url` / `ANTUMBRA_EMBED_URL` / `ANTUMBRA_EMBED_KEY`) and are never
+//! derived from tenant or stored data, so this is not an SSRF sink — if a future
+//! feature ever lets a request choose the URL, validate it against
+//! localhost/private ranges first. The key rides the `Authorization` header
+//! (never the URL, never logged — transport errors carry only the URL), and
+//! [`HttpEmbedder`] deliberately has no `Debug` impl, so the key cannot leak
+//! through `{:?}`.
 
 use std::sync::Arc;
 

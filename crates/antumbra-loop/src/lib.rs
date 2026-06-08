@@ -75,19 +75,21 @@ pub struct GenerationReport {
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
-/// frozen expert whose weights file is mutated under it is caught. Falls back to
-/// the uri when the file is absent (the demo trainer, or an artifact not present
-/// on this node) — still deterministic, so the tripwire works without a GPU.
+/// frozen expert whose weights file is mutated under it is caught. When the file
+/// is absent (the demo trainer, or an artifact not present on this node) it falls
+/// back to a digest **of the uri** — still deterministic and distinct per adapter
+/// (so re-pointing a frozen expert to a different missing path still trips the
+/// check), but without echoing the raw path into the stored/exposed fingerprint.
 fn fingerprint(adapter_uri: &str) -> String {
+    let digest = |bytes: &[u8]| -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    };
     match std::fs::read(adapter_uri) {
-        Ok(bytes) => {
-            let hex: String = Sha256::digest(&bytes)
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect();
-            format!("sha256:{hex}")
-        }
-        Err(_) => format!("uri:{adapter_uri}"),
+        Ok(bytes) => format!("sha256:{}", digest(&bytes)),
+        Err(_) => format!("absent:{}", digest(adapter_uri.as_bytes())),
     }
 }
 
