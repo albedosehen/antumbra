@@ -18,7 +18,12 @@ Run it:
 
 Expected: "RESULT: PASS - multi-tenant isolation holds over ws://".
 """
-import base64, hashlib, hmac, json, time, urllib.request
+import base64
+import hashlib
+import hmac
+import json
+import time
+import urllib.request
 
 SECRET = b"test-secret"
 BASE = "http://127.0.0.1:8081/mcp"

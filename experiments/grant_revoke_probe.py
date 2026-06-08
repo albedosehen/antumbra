@@ -10,7 +10,12 @@ Reuses the R-3 setup (docker surrealdb v3 + antumbra-mcp --http ... --url ws://.
 Expected: "RESULT: PASS - revoke fails closed over ws://" (since R-6 landed the
 scoped, non-root per-session serving connection that makes the engine ACL enforce).
 """
-import base64, hashlib, hmac, json, time, urllib.request
+import base64
+import hashlib
+import hmac
+import json
+import time
+import urllib.request
 
 SECRET = b"test-secret"
 BASE = "http://127.0.0.1:8081/mcp"
