@@ -16,6 +16,7 @@
 !/scripts/
 !/rust-toolchain.toml
 !/justfile
+!/dist-workspace.toml
 
 # Explicit Ignore
 # Generated artifacts anywhere inside allowlisted directories.

@@ -4,7 +4,15 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
 description = "Antumbra operator console: a live, animated TUI over the population (umbra), boundaries (antumbra), and the learned gate. ratatui + tachyonfx."
+
+[package.metadata.wix]
+upgrade-guid = "F71ABE7F-DB06-4E54-80F6-877B0B1713D9"
+path-guid = "C6AD2A37-72A9-439C-88C4-F1E86E935DE4"
+license = false
+eula = false
 
 [[bin]]
 name = "antumbra-tui"

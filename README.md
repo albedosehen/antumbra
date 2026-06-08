@@ -181,28 +181,66 @@ CLI/TUI and the [`scripts/hooks/`](scripts/hooks/) templates are today's interfa
 
 ---
 
-## Build & run
+## Install
+
+### Prebuilt binaries (no Rust toolchain)
+
+Each binary ships a one-line installer that pulls the right prebuilt build for your
+OS (macOS, Linux, Windows) from the latest GitHub release. The operator console
+(`antumbra-tui`):
 
 ```bash
-cargo test                      # whole workspace, green
+# macOS / Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Oneiriq/antumbra/releases/latest/download/antumbra-tui-installer.sh | sh
+```
+```powershell
+# Windows (PowerShell)
+irm https://github.com/Oneiriq/antumbra/releases/latest/download/antumbra-tui-installer.ps1 | iex
+```
 
-# No-GPU demo: drive the durable loop with the CPU trainer, then inspect.
-cargo run -p antumbra-cli -- schema                                  # print generated DDL
-cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv loop --generations 3
-cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv status
+The CLI (`antumbra`) and the MCP server (`antumbra-mcp`) install the same way,
+swapping `antumbra-tui` for `antumbra-cli` or `antumbra-mcp` in the URL. Windows
+`.msi` packages, per-OS archives, and checksums are attached to every
+[release](https://github.com/Oneiriq/antumbra/releases).
 
-# Real training + serving (CUDA GPU + the Qwen weights; python for exec verifiers).
+### From source (needs the Rust toolchain)
+
+```bash
+just install        # builds + installs antumbra, antumbra-tui, antumbra-mcp into ~/.cargo/bin
+# or, without `just`:
+cargo install --path crates/antumbra-cli --locked
+cargo install --path crates/antumbra-tui --locked
+cargo install --path crates/antumbra-mcp --locked
+```
+
+Both the prebuilt binaries and `just install` produce the light, no-GPU build. GPU
+training and serving are a feature-gated source build (see Run, below).
+
+## Run
+
+```bash
+# Operator console (ratatui): a live view of the population, gate, loop, and memory.
+antumbra-tui
+
+# Drive the durable loop with the CPU trainer, then inspect it.
+antumbra --url surrealkv://./data/a.skv schema            # print the generated DDL
+antumbra --url surrealkv://./data/a.skv loop --generations 3
+antumbra --url surrealkv://./data/a.skv status
+
+# Bidirectional sync between this store and a remote authoritative SurrealDB.
+antumbra --url surrealkv://./data/a.skv \
+  sync --remote ws://host:8000/rpc --remote-user root --remote-pass <pw>
+```
+
+Real training and serving need the GPU build (a CUDA GPU and the Qwen weights, plus
+`python` for the exec verifiers), which is a source build behind the `models,cuda`
+features:
+
+```bash
 cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
   train --corpus corpora/arith.json --run arith --generations 1
 cargo run -p antumbra-cli --features models,cuda -- --url surrealkv://./data/a.skv \
   ask "Write a Python function add(a, b) that returns their sum."   # route -> load adapter -> generate
-
-# Operator console (ratatui): a live view of the population, gate, loop, and memory.
-cargo run -p antumbra-tui
-
-# Bidirectional sync between this store and a remote authoritative SurrealDB.
-cargo run -p antumbra-cli -- --url surrealkv://./data/a.skv \
-  sync --remote ws://host:8000/rpc --remote-user root --remote-pass <pw>
 ```
 
 The networked MCP server (`antumbra-mcp --http 0.0.0.0:8081 --url ws://... --db-user

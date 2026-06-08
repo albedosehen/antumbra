@@ -23,6 +23,7 @@ edition = "2021"
 license = "AGPL-3.0-only"
 rust-version = "1.90"
 repository = "https://github.com/Oneiriq/antumbra"
+authors = ["Shon Thomas <shonpt@outlook.com>"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -53,3 +54,8 @@ opt-level = 1
 
 [profile.release.package.surrealdb]
 opt-level = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
