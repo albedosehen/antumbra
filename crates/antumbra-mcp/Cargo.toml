@@ -14,6 +14,7 @@ path = "src/main.rs"
 # `testing` gives the byte-histogram FixedEmbedder so the server compiles and
 # runs without a GPU; the real BERT embedder lands under `models`.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+antumbra-auth = { path = "../antumbra-auth" }
 antumbra-store = { path = "../antumbra-store" }
 antumbra-embed = { path = "../antumbra-embed" }
 antumbra-sync = { path = "../antumbra-sync" }

@@ -169,6 +169,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "antumbra-auth"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "jsonwebtoken",
+ "serde",
+]
+
+[[package]]
 name = "antumbra-boundary"
 version = "0.0.0"
 dependencies = [
@@ -261,6 +270,7 @@ dependencies = [
 name = "antumbra-mcp"
 version = "0.0.0"
 dependencies = [
+ "antumbra-auth",
  "antumbra-core",
  "antumbra-embed",
  "antumbra-serve",

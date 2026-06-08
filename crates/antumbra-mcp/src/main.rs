@@ -21,7 +21,12 @@ use antumbra_core::{Compartment, CompartmentId, TenantId, UserId};
 use antumbra_store::repo::{compartment, principal};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
-mod auth;
+/// The JWT token contract now lives in the shared `antumbra-auth` crate (so the
+/// hosted control plane can mint what this server verifies); re-exported here so
+/// `crate::auth::…` keeps resolving.
+mod auth {
+    pub use antumbra_auth::*;
+}
 mod embed;
 mod http;
 mod notify;
