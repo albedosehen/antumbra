@@ -32,14 +32,16 @@ pub fn render(f: &mut Frame, app: &App) {
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(1),
+        Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .split(f.area());
     chrome::header(f, app, rows[0]);
     chrome::tabs(f, app, rows[1]);
-    page_body(f, app, rows[2]);
-    chrome::footer(f, app, rows[3]);
+    chrome::metrics(f, app, rows[2]);
+    page_body(f, app, rows[3]);
+    chrome::footer(f, app, rows[4]);
     if app.mode != Mode::Normal {
         overlay::dim_backdrop(f, f.area());
         match app.mode {

@@ -2,28 +2,28 @@
 │◆◆◆  ANTUMBRA   self-improving substrate · 1 umbra · gen 0  ·  144 fps  ·  focused                                    │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
   1 population  ·  2 memory  ·  3 loop  ·  4 evals
+  fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
 ╭ penumbra · memory networks ────────────────────────────────────────────╮╭ memory ────────────────────────────────────╮
 │                                                                        ││prefer deno over node for new scripts       │
 │                                                                        ││                                            │
 │                                                                        ││network    world                            │
 │                                                                        ││status     committed                        │
 │                                                                        ││confidence ██████████▍─ 0.86                │
-│                                   ◉⠄                                   ││reinforce  4                                │
-│                                  ⡠⠃                                    ││volatile   no                               │
-│                                ⢀⠜                                      ││                                            │
-│                               ⡠⠃                                       ││evidence                                    │
-│                             ⢀⠜   world                                 ││  · session-log                             │
-│                            ⡠⠃                                          ││                                            │
-│                          ⢀⠜                                            ││edges (2)                                   │
-│                         ⡠⠃                                             ││  ← contradicts memory:incident             │
-│                       ⢀⠜                                               ││  → caused      memory:incident             │
-│                      ⡠⠃                                                ││                                            │
-│                    ⢀⠜                                                  ││                                            │
-│                   ⡠⠃                                                   ││                                            │
-│                 ⢀⠜                                                     ││                                            │
-│                ⡠⠃                                                      ││                                            │
-│              ○⠜                                        ○               ││                                            │
-│                                                                        ││                                            │
+│                                   ◉⠂                                   ││reinforce  4                                │
+│                                 ⢀⠔⠁                                    ││volatile   no                               │
+│                                ⡠⠊                                      ││                                            │
+│                              ⢀⠔⠁                                       ││evidence                                    │
+│                             ⡠⠃   world                                 ││  · session-log                             │
+│                           ⢀⠜                                           ││                                            │
+│                          ⡠⠃                                            ││edges (2)                                   │
+│                        ⢀⠜                                              ││  ← contradicts memory:incident             │
+│                       ⡰⠁                                               ││  → caused      memory:incident             │
+│                     ⢀⠎                                                 ││                                            │
+│                    ⡰⠁                                                  ││                                            │
+│                  ⢠⠊                                                    ││                                            │
+│                 ⡔⠁                                                     ││                                            │
+│              ○⢠⠊                                       ○               ││                                            │
+│              ⠐⠁                                                        ││                                            │
 │                                                                        ││                                            │
 │                                                                        ││                                            │
 │             bank                                      opinion          ││                                            │

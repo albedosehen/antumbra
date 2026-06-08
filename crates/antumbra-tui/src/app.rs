@@ -982,6 +982,57 @@ impl App {
         self.memories.get(self.selected_memory)
     }
 
+    /// The KPI strip: five `[0,1]` quality ratios across the substrate — mean
+    /// population fitness, the frozen ratio, the shadow graduation rate, the
+    /// share of boundaries actively gating, and mean memory strength. Always
+    /// rendered above the body, so every page carries the same health readout.
+    pub fn dashboard_metrics(&self) -> [(&'static str, f32); 5] {
+        let mean = |vals: &[f32]| {
+            if vals.is_empty() {
+                0.0
+            } else {
+                vals.iter().sum::<f32>() / vals.len() as f32
+            }
+        };
+        let ratio = |num: usize, den: usize| {
+            if den == 0 {
+                0.0
+            } else {
+                num as f32 / den as f32
+            }
+        };
+        let fitness = mean(&self.experts.iter().map(|e| e.fitness).collect::<Vec<_>>());
+        let frozen = ratio(
+            self.experts.iter().filter(|e| e.is_frozen()).count(),
+            self.experts.len(),
+        );
+        let graduated = ratio(
+            self.shadows
+                .iter()
+                .filter(|s| s.status.as_str() == "graduated")
+                .count(),
+            self.shadows.len(),
+        );
+        let gating = ratio(
+            self.boundaries.iter().filter(|b| b.is_actionable()).count(),
+            self.boundaries.len(),
+        );
+        let memory = mean(
+            &self
+                .memories
+                .iter()
+                .map(|m| m.confidence)
+                .collect::<Vec<_>>(),
+        );
+        [
+            ("fitness", fitness),
+            ("frozen", frozen),
+            ("graduated", graduated),
+            ("gating", gating),
+            ("memory", memory),
+        ]
+    }
+
     /// Edges touching `id`, as `(edge, is_outgoing)` — the selected trace's links.
     pub fn memory_edges(&self, id: &str) -> Vec<(&MemoryEdge, bool)> {
         self.edges
@@ -1173,6 +1224,22 @@ mod tests {
             .unwrap();
         assert!(!thawed.is_frozen(), "the store reflects the thaw");
         assert!(app.events.iter().any(|ev| ev.text.contains("thawed")));
+    }
+
+    #[tokio::test]
+    async fn dashboard_metrics_summarize_the_substrate() {
+        let (_store, mut app) = seeded().await;
+        let m = app.dashboard_metrics();
+        assert_eq!(
+            m.map(|(label, _)| label),
+            ["fitness", "frozen", "graduated", "gating", "memory"]
+        );
+        // No experts seeded → zero mean fitness; the one shadow is exploring.
+        assert_eq!(m[0].1, 0.0, "no experts");
+        assert_eq!(m[2].1, 0.0, "no graduated shadows");
+        // Graduate the lone shadow → the graduation ratio becomes 1/1.
+        app.shadows[0].status = ShadowStatus::Graduated;
+        assert_eq!(app.dashboard_metrics()[2].1, 1.0);
     }
 
     #[tokio::test]

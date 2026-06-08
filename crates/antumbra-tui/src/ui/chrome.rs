@@ -7,9 +7,35 @@ use ratatui::widgets::{Paragraph, Tabs};
 use ratatui::Frame;
 
 use crate::app::{App, Focus, Page};
-use crate::theme::rgb;
+use crate::theme::{rgb, Theme};
 
-use super::{panel, pulse};
+use super::{gauge_spans, panel, pulse};
+
+/// The KPI strip: a row of labelled mini-gauges for the substrate's quality
+/// ratios (fitness / frozen / graduated / gating / memory), shown on every page.
+pub(super) fn metrics(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    // Each metric gets a distinct accent so the strip reads at a glance.
+    let colors = [t.fitness(1.0, 1.0), t.value, t.success, t.warning, t.accent];
+    let mut spans = Vec::new();
+    for ((label, value), color) in app.dashboard_metrics().into_iter().zip(colors) {
+        cell(&mut spans, &t, label, value, color);
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// One `label ▆▆▆▍ 0.73` gauge cell appended to the strip.
+fn cell(spans: &mut Vec<Span<'static>>, t: &Theme, label: &str, value: f32, color: Color) {
+    spans.push(Span::styled(
+        format!("  {label} "),
+        Style::default().fg(t.dim),
+    ));
+    spans.extend(gauge_spans(t, value, 6, color));
+    spans.push(Span::styled(
+        format!(" {value:.2}"),
+        Style::default().fg(t.value),
+    ));
+}
 
 /// The top-level tab strip: one numbered tab per [`Page`], active one accented.
 pub(super) fn tabs(f: &mut Frame, app: &App, area: Rect) {
