@@ -1,0 +1,17 @@
+[package]
+name = "antumbra-control"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Hosted-onboarding control plane (ADR-0016): invite-gated signup and login that provision a tenant and issue the RS256 JWT the MCP server verifies. The issuer side of the antumbra-auth token contract."
+
+[dependencies]
+antumbra-auth = { path = "../antumbra-auth" }
+antumbra-core = { path = "../antumbra-core" }
+antumbra-store = { path = "../antumbra-store" }
+chrono.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { workspace = true }

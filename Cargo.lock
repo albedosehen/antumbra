@@ -210,6 +210,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "antumbra-control"
+version = "0.0.0"
+dependencies = [
+ "antumbra-auth",
+ "antumbra-core",
+ "antumbra-store",
+ "chrono",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "antumbra-core"
 version = "0.0.0"
 dependencies = [

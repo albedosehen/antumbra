@@ -164,6 +164,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("generation_head").with_mode(TableMode::Schemaless),
         // Out-of-band loop control (operator graceful-stop signal). ADR-0008.
         table_schema("loop_control").with_mode(TableMode::Schemaless),
+        // Hosted-onboarding control plane (ADR-0016). No PERMISSIONS clause, so
+        // both default to deny for record/tenant sessions — only the control
+        // plane's owner connection reads/writes them (an account row maps a login
+        // to a tenant and must never be tenant-readable).
+        table_schema("invite_code").with_mode(TableMode::Schemaless),
+        table_schema("account").with_mode(TableMode::Schemaless),
         // Validation harness. ADR-0007.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)
