@@ -16,13 +16,15 @@ use chrono::Utc;
 use sha2::{Digest, Sha256};
 
 use antumbra_boundary::finding_to_boundary;
-use antumbra_core::generational::{GenerationHead, LoopState};
+use antumbra_core::generational::{GenerationHead, LoopCommand, LoopState};
 use antumbra_core::ports::{Embedder, TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::{
     BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Grain,
     Result, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind,
 };
-use antumbra_store::repo::{boundary, evaluation, expert, generation, reward, shadow};
+use antumbra_store::repo::{
+    boundary, evaluation, expert, generation, loop_control, reward, shadow,
+};
 use antumbra_store::Store;
 
 /// Confidence stamped on a correction-derived boundary. The context pair is
@@ -204,8 +206,20 @@ impl<'a> GenerationLoop<'a> {
         target_generation: u32,
     ) -> Result<Vec<GenerationReport>> {
         let mut head = self.resume_or_init(run_id).await?;
+        // Resume out of a prior cooperative halt (Paused) into the next Grow,
+        // without crossing a generation boundary.
+        if head.state == LoopState::Paused {
+            self.advance(&mut head, LoopState::Grow).await?;
+        }
         let mut reports = Vec::new();
         while head.generation.0 < target_generation {
+            // Cooperative stop (ADR-0008): an operator can halt the run between
+            // generations. Default (no control) is Run, so this is a no-op then.
+            if loop_control::load(self.store, run_id).await? == LoopCommand::Halt {
+                self.advance(&mut head, LoopState::Paused).await?;
+                loop_control::clear(self.store, run_id).await?;
+                break;
+            }
             reports.push(self.run_generation(&mut head).await?);
         }
         Ok(reports)

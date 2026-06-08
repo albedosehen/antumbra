@@ -11,8 +11,8 @@
 │                                                                                                                      │
 │  → verifiers + critic produce reward signals                                                                         │
 │                                                                                                                      │
-│  x · request a graceful halt (stops at the next generation)                                                          │
-│                                                                                                                      │
+│  ⚠ halt requested — the loop will stop at the next generation                                                        │
+│    cancel via the palette (loop · cancel a pending halt)                                                             │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

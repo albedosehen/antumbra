@@ -162,6 +162,8 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             ]),
         // Durable generational loop head (the checkpoint). ADR-0008.
         table_schema("generation_head").with_mode(TableMode::Schemaless),
+        // Out-of-band loop control (operator graceful-stop signal). ADR-0008.
+        table_schema("loop_control").with_mode(TableMode::Schemaless),
         // Validation harness. ADR-0007.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)

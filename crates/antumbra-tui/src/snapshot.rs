@@ -304,6 +304,7 @@ mod tests {
             edges: demo_edges(now),
             selected_memory: 0,
             loop_heads: demo_loop_heads(now),
+            loop_halt_pending: false,
             evals: demo_evals(now),
             selected_eval: 0,
             router: None,
@@ -511,6 +512,16 @@ mod tests {
         app.set_page(crate::app::Page::Loop);
         let buf = render(&mut app, 120, 36, 1600.0).unwrap();
         assert_golden("loop_page", &to_text(&buf));
+    }
+
+    // Golden the Loop page with a pending halt (the operator graceful-stop).
+    #[test]
+    fn golden_loop_halted() {
+        let mut app = demo_app();
+        app.set_page(crate::app::Page::Loop);
+        app.loop_halt_pending = true;
+        let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+        assert_golden("loop_halted", &to_text(&buf));
     }
 
     // Golden the Evals page: the evaluation-run table with a regression failure

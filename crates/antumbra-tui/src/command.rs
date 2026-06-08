@@ -22,6 +22,7 @@ pub enum Action {
     Gate,
     GraduateShadow,
     FreezeExpert,
+    CancelHalt,
     Help,
     Quit,
 }
@@ -117,6 +118,10 @@ pub const COMMANDS: &[Command] = &[
     Command {
         label: "freeze · thaw the selected expert",
         action: Action::FreezeExpert,
+    },
+    Command {
+        label: "loop · cancel a pending halt",
+        action: Action::CancelHalt,
     },
     Command {
         label: "reload from the store",

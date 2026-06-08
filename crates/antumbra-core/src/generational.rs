@@ -110,6 +110,38 @@ impl GenerationHead {
     }
 }
 
+/// An out-of-band control signal for a running loop, written by an operator and
+/// polled by the runner at each generation boundary. Absent = [`LoopCommand::Run`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LoopCommand {
+    /// Keep running (the default when no control row is set).
+    #[default]
+    Run,
+    /// Halt gracefully at the next generation boundary: checkpoint the head as
+    /// `Paused` and exit. Re-running the loop resumes from that checkpoint.
+    Halt,
+}
+
+impl LoopCommand {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LoopCommand::Run => "run",
+            LoopCommand::Halt => "halt",
+        }
+    }
+}
+
+/// The persisted control row for a run (one per run id). Writing it is how an
+/// operator cooperatively stops a running loop without killing the process — the
+/// runner consumes it at the next generation boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoopControl {
+    pub run_id: RunId,
+    pub command: LoopCommand,
+    pub updated_at: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -36,7 +36,7 @@ pub use compartment::{Capability, Compartment, Grant, Origin};
 pub use document::{chunk_text, DocumentChunk};
 pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};
 pub use expert::{cosine_similarity, Expert};
-pub use generational::{GenerationHead, LoopState};
+pub use generational::{GenerationHead, LoopCommand, LoopControl, LoopState};
 pub use ids::{
     BoundaryId, CompartmentId, DocumentChunkId, ExpertId, Generation, MemoryId, RunId, ShadowId,
     TenantId, UserId,

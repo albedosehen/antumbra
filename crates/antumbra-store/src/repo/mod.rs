@@ -10,6 +10,7 @@ pub mod edge;
 pub mod evaluation;
 pub mod expert;
 pub mod generation;
+pub mod loop_control;
 pub mod memory;
 pub mod principal;
 pub mod reward;

@@ -1,13 +1,13 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, loaded from the store and ticked for animation.
 
-use antumbra_core::generational::GenerationHead;
+use antumbra_core::generational::{GenerationHead, LoopCommand};
 use antumbra_core::{
     BoundaryId, EvaluationRun, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory,
-    MemoryEdge, Shadow, ShadowId, ShadowStatus,
+    MemoryEdge, RunId, Shadow, ShadowId, ShadowStatus,
 };
 use antumbra_store::repo::{
-    boundary, edge, evaluation, expert, generation, memory, router, shadow,
+    boundary, edge, evaluation, expert, generation, loop_control, memory, router, shadow,
 };
 use antumbra_store::Store;
 
@@ -55,6 +55,8 @@ pub enum Pending {
     FreezeExpert(ExpertId, bool),
     /// Delete the boundary from the antumbra.
     DeleteBoundary(BoundaryId),
+    /// Ask the generational loop to halt gracefully at the next generation.
+    HaltLoop(RunId),
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -160,6 +162,8 @@ pub struct App {
     pub selected_memory: usize,
     /// The generational loop heads (one per run), for the Loop page.
     pub loop_heads: Vec<GenerationHead>,
+    /// Whether a graceful halt is pending for the displayed loop run.
+    pub loop_halt_pending: bool,
     /// Recent evaluation runs (newest first), for the Evals page.
     pub evals: Vec<EvaluationRun>,
     /// Index into `evals` of the highlighted run (Evals page).
@@ -248,6 +252,7 @@ impl App {
             edges: Vec::new(),
             selected_memory: 0,
             loop_heads: Vec::new(),
+            loop_halt_pending: false,
             evals: Vec::new(),
             selected_eval: 0,
             router: None,
@@ -311,6 +316,10 @@ impl App {
         self.edges = edge::all_unscoped(store).await?;
         // The generational loop heads and recent evaluation runs (Loop / Evals).
         self.loop_heads = generation::all_heads(store).await?;
+        self.loop_halt_pending = match self.loop_heads.first() {
+            Some(head) => loop_control::load(store, &head.run_id).await? == LoopCommand::Halt,
+            None => false,
+        };
         self.evals = evaluation::recent_unscoped(store).await?;
         self.router = router::load(store).await?;
         if !self.experts.is_empty() && self.selected >= self.experts.len() {
@@ -432,7 +441,15 @@ impl App {
     /// Stage the operator action for the focused selection (`x`), opening the
     /// confirm prompt. Prune the focused shadow, or delete the focused boundary.
     pub fn request_action(&mut self) {
-        // Operator actions target the population regions, not the Memory page.
+        // The Loop page's operator action is a graceful halt of the run.
+        if self.page == Page::Loop {
+            if let Some(head) = self.loop_heads.first().filter(|_| !self.loop_halt_pending) {
+                self.pending = Some(Pending::HaltLoop(head.run_id.clone()));
+                self.mode = Mode::Confirm;
+            }
+            return;
+        }
+        // The remaining operator actions target the population regions.
         if self.page != Page::Population {
             return;
         }
@@ -482,6 +499,12 @@ impl App {
             Pending::FreezeExpert(id, freeze) => {
                 let verb = if *freeze { "Freeze" } else { "Thaw" };
                 format!("{verb} expert {} ?", id.as_str())
+            }
+            Pending::HaltLoop(run) => {
+                format!(
+                    "Halt loop {} ? (stops at the next generation)",
+                    run.as_str()
+                )
             }
             Pending::DeleteBoundary(id) => {
                 let behavior = self
@@ -535,10 +558,24 @@ impl App {
                         self.operator_event(format!("boundary removed · {behavior}"));
                     }
                 }
+                Pending::HaltLoop(run) => {
+                    loop_control::set(store, &run, LoopCommand::Halt).await?;
+                    self.operator_event(format!("halt requested · loop {}", run.as_str()));
+                }
             }
             self.reload(store).await?;
         }
         self.mode = Mode::Normal;
+        Ok(())
+    }
+
+    /// Cancel a pending loop halt (clear the control back to `Run`), then reload.
+    pub async fn cancel_halt(&mut self, store: &Store) -> anyhow::Result<()> {
+        if let Some(run) = self.loop_heads.first().map(|h| h.run_id.clone()) {
+            loop_control::clear(store, &run).await?;
+            self.operator_event(format!("halt cancelled · loop {}", run.as_str()));
+            self.reload(store).await?;
+        }
         Ok(())
     }
 
@@ -1441,6 +1478,43 @@ mod tests {
         assert_eq!(app.selected_eval, 0, "single run, selection holds");
         app.request_action();
         assert!(app.pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
+        let (store, mut app) = seeded().await;
+        let head = GenerationHead::new(RunId::new("run:z"), Utc::now());
+        generation::save_head(&store, &head).await.unwrap();
+        app.reload(&store).await.unwrap();
+        assert_eq!(app.loop_heads.len(), 1);
+        assert!(!app.loop_halt_pending);
+
+        // `x` on the Loop page stages a halt confirm; applying writes the control.
+        app.page = Page::Loop;
+        app.request_action();
+        assert!(matches!(app.pending, Some(Pending::HaltLoop(_))));
+        app.apply_pending(&store).await.unwrap();
+        assert!(app.loop_halt_pending, "halt is now pending");
+        assert_eq!(
+            loop_control::load(&store, &RunId::new("run:z"))
+                .await
+                .unwrap(),
+            LoopCommand::Halt
+        );
+
+        // Re-requesting is inert while a halt is already pending.
+        app.request_action();
+        assert!(app.pending.is_none());
+
+        // Cancelling clears the control back to Run.
+        app.cancel_halt(&store).await.unwrap();
+        assert!(!app.loop_halt_pending);
+        assert_eq!(
+            loop_control::load(&store, &RunId::new("run:z"))
+                .await
+                .unwrap(),
+            LoopCommand::Run
+        );
     }
 
     #[tokio::test]

@@ -126,5 +126,22 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         )));
     }
 
+    lines.push(Line::from(""));
+    if app.loop_halt_pending {
+        lines.push(Line::from(Span::styled(
+            "  ⚠ halt requested — the loop will stop at the next generation",
+            Style::default().fg(t.warning).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            "    cancel via the palette (loop · cancel a pending halt)",
+            Style::default().fg(t.dim),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "  x · request a graceful halt (stops at the next generation)",
+            Style::default().fg(t.dim),
+        )));
+    }
+
     f.render_widget(Paragraph::new(lines), inner);
 }

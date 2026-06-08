@@ -3,6 +3,7 @@
 //! prunes (does not grow) when shadows collapse, and writes its full lineage
 //! (shadows, rewards, evaluations, boundaries) to the substrate.
 
+use antumbra_core::generational::LoopCommand;
 use antumbra_core::generational::LoopState;
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
@@ -11,7 +12,9 @@ use antumbra_core::{
     Generation, Grain, RunId, ShadowStatus, SubjectKind,
 };
 use antumbra_loop::{GenerationLoop, LoopConfig};
-use antumbra_store::repo::{boundary, evaluation, expert, reward, shadow};
+use antumbra_store::repo::{
+    boundary, evaluation, expert, generation, loop_control, reward, shadow,
+};
 use antumbra_store::Store;
 use chrono::Utc;
 
@@ -69,6 +72,40 @@ async fn grows_population_and_resumes_after_restart() {
             .len(),
         2
     );
+}
+
+// A cooperative halt (ADR-0008): an operator sets the loop control to Halt; the
+// runner stops at the next generation boundary, checkpoints the head as Paused,
+// and consumes the signal. Re-running resumes from that checkpoint.
+#[tokio::test]
+async fn an_operator_halt_stops_the_loop_at_a_generation_boundary() {
+    let store = Store::connect_memory(8).await.expect("connect");
+    let trainer = ScriptedTrainer::graduating();
+    let embedder = FixedEmbedder::new(8);
+    let run = RunId::new("run:halt");
+
+    // Halt requested before the run starts → it stops immediately, no generations.
+    loop_control::set(&store, &run, LoopCommand::Halt)
+        .await
+        .unwrap();
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
+    let reports = lp.run_until(&run, 3).await.unwrap();
+    assert!(reports.is_empty(), "halted before any generation ran");
+
+    // The head is checkpointed Paused and the control was consumed (back to Run).
+    let head = generation::load_head(&store, &run).await.unwrap().unwrap();
+    assert_eq!(head.state, LoopState::Paused);
+    assert_eq!(head.generation, Generation::ZERO);
+    assert_eq!(
+        loop_control::load(&store, &run).await.unwrap(),
+        LoopCommand::Run,
+        "the halt was consumed"
+    );
+
+    // Re-running with no control resumes out of Paused and makes progress.
+    let reports = lp.run_until(&run, 1).await.unwrap();
+    assert_eq!(reports.len(), 1, "resumed and ran one generation");
+    assert_eq!(expert::list(&store).await.unwrap().len(), 1);
 }
 
 #[tokio::test]

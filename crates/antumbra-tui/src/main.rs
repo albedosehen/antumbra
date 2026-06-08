@@ -582,6 +582,7 @@ async fn apply_action(
             *transition = Some(transition::layout_switch());
         }
         Action::CycleSort => app.cycle_sort(),
+        Action::CancelHalt => app.cancel_halt(store).await?,
         Action::Focus(target) => {
             app.set_focus(target);
             *transition = Some(transition::focus_switch());
