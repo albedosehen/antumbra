@@ -167,6 +167,7 @@ mod tests {
         MemoryEdge, MemoryNetwork, Shadow, ShadowId, ShadowStatus,
     };
     use chrono::Utc;
+    use ratatui::layout::{Constraint, Layout};
 
     /// Three demo traces (one per network) and two edges, for the Memory page.
     fn demo_memories(now: chrono::DateTime<Utc>) -> Vec<Memory> {
@@ -402,6 +403,44 @@ mod tests {
         app.set_layout(LayoutMode::Table);
         let buf = render(&mut app, 120, 36, 1600.0).unwrap();
         assert_golden("population_table", &to_text(&buf));
+    }
+
+    // Golden the reward-landscape heatmap (the bottom strip of the dashboard
+    // layout). Scoped to that strip so the animated population graph above it
+    // never churns the comparison; the heatmap itself is deterministic.
+    #[test]
+    fn golden_reward_heatmap() {
+        let now = Utc::now();
+        let mk = |id: &str, curve: Vec<f32>| Shadow {
+            id: ShadowId::new(id),
+            parent_expert: None,
+            adapter_uri: None,
+            status: ShadowStatus::Exploring,
+            generation: Generation(4),
+            reward_curve: curve,
+            created_at: now,
+        };
+        let mut app = demo_app();
+        app.shadows = vec![
+            mk("shadow:rise", vec![0.1, 0.4, 0.7, 0.95]),
+            mk("shadow:flat", vec![0.5, 0.5, 0.5, 0.5]),
+            mk("shadow:fall", vec![0.6, 0.3, 0.1, 0.05]),
+        ];
+        app.set_layout(LayoutMode::Dashboard);
+        let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+        // Recompute the heatmap strip: the body is the 4th chrome row, then the
+        // dashboard puts the heatmap in the bottom Length(9) slice.
+        let chrome = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(buf.area);
+        let strip =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(chrome[3])[1];
+        assert_golden("reward_heatmap", &to_text_in(&buf, strip));
     }
 
     // Golden the operator-action confirm prompt.

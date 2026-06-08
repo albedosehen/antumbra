@@ -10,6 +10,7 @@
 
 mod chrome;
 mod graph;
+mod heatmap;
 mod memory;
 mod overlays;
 mod panels;
@@ -127,10 +128,13 @@ fn body(f: &mut Frame, app: &App, area: Rect) {
             }
         }
         LayoutMode::Dashboard => {
+            // Graph + the three regions up top, a full-width reward heatmap below.
+            let stack = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(area);
             let cols = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
-                .split(area);
+                .split(stack[0]);
             graph::graph(f, app, cols[0]);
             panels::dashboard(f, app, cols[1]);
+            heatmap::reward_heatmap(f, app, stack[1]);
         }
     }
 }
