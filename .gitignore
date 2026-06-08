@@ -1,11 +1,7 @@
-# Inverted ignore: everything at the repo root is ignored by default, so stray
-# generated files (accidental shell-redirect artifacts, scratch output, local
-# scripts) never get tracked. To commit a NEW top-level path, add it to the
-# allowlist below. `/*` matches only root entries (it does not cross `/`), so
-# files inside allowlisted directories are tracked normally.
+# Ignore by default
 /*
 
-# Allowlisted top-level entries (the real project surface).
+# Whitelist project files and directories
 !/.gitattributes
 !/.github/
 !/.gitignore
@@ -18,7 +14,10 @@
 !/docs/
 !/experiments/
 !/scripts/
+!/rust-toolchain.toml
+!/justfile
 
+# Explicit Ignore
 # Generated artifacts anywhere inside allowlisted directories.
 **/*.rs.bk
 Cargo.lock.bak
@@ -26,9 +25,6 @@ Cargo.lock.bak
 *.safetensors
 *.surql.db
 *.db
-!*.ps1
-!*.bat
-!*.sh
 # memory-import / compose scratch outputs (corpora/_imported.json, etc.).
 corpora/_*.json
 
