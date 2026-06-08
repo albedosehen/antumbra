@@ -48,12 +48,17 @@ single identity you can instead run the **stdio** server and have your agent con
 directly; then the capture/bootstrap tools are called in-band and the
 `SessionStart` script is optional.
 
-## Wire it (settings.json excerpt)
+## Why disable built-in and additional external memory?
+
+Disabling an agent's built-in file memory (`autoMemoryEnabled: false` + the deny
+rule) makes Antumbra the **single source of truth**: one store, one ACL, one thing
+to back up. You should disable any other external memory the agent has access to outside
+of Antumbra as well to reduce side-effects or unintended poisoning/corruption of context.
 
 Pick the block for your OS. Both wire the same three touchpoints; they differ only
 in how the command is launched (`bash` + the `.sh` script, or `pwsh` + the `.ps1`).
 
-### macOS / Linux (bash)
+### macOS / Linux (bash) settings.json (claude code)
 
 ```json
 {
@@ -77,7 +82,7 @@ in how the command is launched (`bash` + the `.sh` script, or `pwsh` + the `.ps1
 The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev
 machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubuntu).
 
-### Windows (PowerShell)
+### Windows (PowerShell) settings.json (claude code)
 
 ```json
 {
@@ -98,17 +103,5 @@ machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubunt
 }
 ```
 
-(`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is
+Note: (`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is
 cross-platform too; the `.sh` siblings are the native, dependency-light option.)
-
-Disabling the agent's built-in file memory (`autoMemoryEnabled: false` + the deny
-rule) makes Antumbra the **single source of truth**: one store, one ACL, one thing
-to back up.
-
-> **What works today.** The **capture** and **strip-attribution** hooks emit hook
-> *decisions* only (they make no call to Antumbra), so they work against any agent.
-> The long-lived **hook token** is mintable with `--mint-token` (above), and the
-> **bootstrap** hook's transport is now live: `POST /mcp/call {tool, arguments}`
-> returns the tool's JSON result under your bearer token, no initialize→tools/call
-> handshake, so the templates below are drop-in. (The remaining P-1 item is the
-> per-workspace embedder config, P-1c, which the hooks don't need.)
