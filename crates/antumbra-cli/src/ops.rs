@@ -254,45 +254,19 @@ pub async fn consolidate_compartment(
     url: &str,
     a: ConsolidateCompartmentArgs,
 ) -> anyhow::Result<()> {
-    use antumbra_core::{CompartmentId, Memory, TenantId, UserId};
-    use antumbra_store::repo::{memory, principal};
+    use antumbra_core::{CompartmentId, TenantId, UserId};
 
     let store = crate::connect(url).await?;
     let embedder = crate::make_embedder()?;
     let tenant = TenantId::new(a.tenant.as_str());
     let user = UserId::new(a.user.as_str());
     let comp = CompartmentId::new(a.compartment.as_str());
-    principal::provision(&store, &tenant, &user).await?;
 
-    // Gather -> convert -> score -> graduate (all CPU; the gate is arithmetic).
-    let mems: Vec<Memory> = memory::list_by_compartment(&store, &tenant, &comp).await?;
     let policy = ConsolidationPolicy {
         min_confidence: a.min_confidence,
         min_recurrence: a.min_recurrence,
         ..ConsolidationPolicy::default()
     };
-    let conv = ImportPolicy {
-        capture_threshold: 0.0,
-    };
-    let tasks: Vec<CorpusTask> = mems
-        .iter()
-        .enumerate()
-        .map(|(i, m)| (i, MemoryRecord::from_memory(m)))
-        .filter(|(_, r)| score_memory(r, &policy).graduate)
-        .map(|(i, r)| to_task(&r, i, &conv).task)
-        .collect();
-    println!(
-        "compartment {} : {} memories, {} graduate",
-        a.compartment,
-        mems.len(),
-        tasks.len()
-    );
-    if tasks.is_empty() {
-        println!("nothing to consolidate");
-        return Ok(());
-    }
-
-    // Capture into a private expert (the only GPU step; the rest is CPU).
     let cfg = RaftConfig {
         samples_per_task: a.samples,
         rounds: a.rounds,
@@ -301,52 +275,32 @@ pub async fn consolidate_compartment(
         replay_ratio: a.replay_ratio,
         ..RaftConfig::default()
     };
-    let loader = CandleModelLoader::new(cfg.clone());
-    let verifier = antumbra_critic::CommandVerifier;
-    let name = format!("expert:{}:{}", a.user, a.compartment);
-    let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
-    let out = capture_corrections(
-        &mut model,
-        &verifier,
-        &tasks,
-        &RunId::new(name.clone()),
+
+    // One orchestration, shared with the MCP server's autonomous trigger: gather
+    // the compartment, keep what clears the gate, capture into a private expert.
+    match antumbra_serve::consolidate_compartment(
+        &store,
+        embedder.as_ref(),
+        &tenant,
+        &user,
+        &comp,
+        &policy,
         &cfg,
-        &[],
     )
-    .await?;
-    let solved = if out.capability_exemplars.is_empty() {
-        tasks.iter().map(|t| t.prompt.clone()).collect()
-    } else {
-        out.capability_exemplars.clone()
-    };
-    let mut acc = vec![0.0f32; EMBED_DIM];
-    for text in &solved {
-        for (x, b) in acc.iter_mut().zip(embedder.embed(text).await?) {
-            *x += b;
-        }
+    .await?
+    {
+        Some(o) => println!(
+            "compartment {} : {} graduated -> PRIVATE expert {} (internalized {:.2})",
+            a.compartment,
+            o.graduated,
+            o.expert.as_str(),
+            o.fitness
+        ),
+        None => println!(
+            "compartment {} : nothing cleared the consolidation gate",
+            a.compartment
+        ),
     }
-    let nproto = solved.len().max(1) as f32;
-    let now = Utc::now();
-    let e = Expert {
-        id: ExpertId::new(name.clone()),
-        name: name.clone(),
-        base_model: cfg.base_model.clone(),
-        artifact_uri: out.adapter_uri,
-        capability_card: serde_json::json!({ "exemplars": solved, "compartment": a.compartment, "private": true }),
-        capability_vec: Some(acc.iter().map(|v| v / nproto).collect()),
-        fitness: out.final_fitness,
-        frozen_at: Some(now),
-        generation: Generation::ZERO,
-        owner: Some(user),
-        compartment: Some(comp),
-        created_at: now,
-    };
-    expert::delete(&store, &e.id).await?; // supersede on re-run
-    expert::insert(&store, &e).await?;
-    println!(
-        "minted PRIVATE expert {name} for {} (internalized {:.2})",
-        a.user, out.final_fitness
-    );
     Ok(())
 }
 
