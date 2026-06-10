@@ -1,0 +1,50 @@
+# antumbra-mcp, GPU build (serving + autonomous consolidation).
+#
+# Builds with `--features models,cuda`, so this server can serve experts through
+# the `answer` tool AND auto-graduate memory into private experts on the GPU
+# (`--auto-consolidate`). The default docker/Dockerfile stays the light,
+# memory-only server for hosts without an NVIDIA GPU.
+#
+# Run via the `gpu` compose profile (it requests the GPU and enables the
+# trigger): `docker compose --profile gpu -f docker/docker-compose.yml up -d`.
+# Needs the NVIDIA Container Toolkit on the host (Linux, or Windows via WSL2).
+#
+# NOTE: authored to the standard CUDA-on-Linux pattern but NOT yet built/run in
+# CI; validate on a Linux/WSL2 GPU host. On Linux nvcc uses gcc as its host
+# compiler, so the Windows `cl.exe`/CUDA-13.3 toolchain dance does not apply.
+
+# --- build stage: CUDA devel (nvcc + gcc) + pinned rust --------------------
+# CUDA 12.6 maps to cudarc's `cuda-12060`, so no CUDARC_CUDA_VERSION override is
+# needed (unlike a 13.3 host toolkit). The host driver must be new enough for it.
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS builder
+WORKDIR /build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates pkg-config build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.96.0
+ENV PATH="/root/.cargo/bin:${PATH}"
+COPY . .
+# CUDA_COMPUTE_CAP targets the GPU arch (86 = Ampere / RTX 30-series; set to
+# match your card, e.g. 89 for Ada / 40-series) so candle builds the right SASS.
+ENV CUDA_COMPUTE_CAP=86
+RUN cargo build --release -p antumbra-mcp --locked --features models,cuda
+
+# --- runtime stage: CUDA runtime + python (the exec verifier) --------------
+FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
+ENV DEBIAN_FRONTEND=noninteractive
+# `python` is the consolidation/capture verifier (marker checks run as a subprocess).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 ca-certificates \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -u 65532 -m -s /usr/sbin/nologin nonroot
+COPY --from=builder /build/target/release/antumbra-mcp /usr/local/bin/antumbra-mcp
+# Base weights (Qwen2.5-Coder-1.5B) download here on first train; persist via a
+# volume. Trained adapters land under /adapters (the server's working dir).
+ENV HF_HOME=/weights
+WORKDIR /adapters
+RUN mkdir -p /weights /adapters && chown 65532:65532 /weights /adapters
+USER 65532
+EXPOSE 8081
+ENTRYPOINT ["/usr/local/bin/antumbra-mcp"]

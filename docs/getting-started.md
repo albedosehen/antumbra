@@ -111,6 +111,16 @@ ANTUMBRA_HOST_ID=<this machine's name>
 
 then add the three lifecycle hooks. **[`scripts/hooks/README.md`](../scripts/hooks/README.md)** has copy-paste `settings.json` blocks: a `bash` / `.sh` set for macOS/Linux and a `pwsh` / `.ps1` set for Windows.
 
+## Optional: serving + autonomy (needs an NVIDIA GPU)
+
+The stack above is the default, GPU-free server: memory, recall, routing. To also have your agent get **answers served from trained experts** (the `answer` tool) and have Antumbra **consolidate its own memory into experts on its own**, run the GPU build on a machine with an NVIDIA card (Linux, or Windows via WSL2):
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
+```
+
+See [Running the trainer → the autonomous server](running-the-trainer.md#the-autonomous-server-serving--consolidation) for the build details, the native (non-Docker) recipe, and the gate tuning. Without a GPU, `answer` escalates cleanly and everything else works as normal.
+
 ## Just kicking the tires?
 
 You need none of the above to look around. From a clone:

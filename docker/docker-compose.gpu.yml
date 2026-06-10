@@ -1,0 +1,49 @@
+# GPU override: swap the light antumbra-mcp for the `models,cuda` build, which
+# adds real expert serving (the `answer` tool) and autonomous consolidation
+# (`--auto-consolidate`: a reinforced memory auto-graduates its compartment into
+# a private expert on the GPU). Use alongside the base compose:
+#
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
+#
+# Needs an NVIDIA GPU + the NVIDIA Container Toolkit on the host (Linux, or
+# Windows via WSL2). NOT yet CI-validated; see docs/running-the-trainer.md.
+# The light docker/docker-compose.yml remains the default for non-GPU hosts.
+
+services:
+  antumbra-mcp:
+    build:
+      dockerfile: docker/Dockerfile.cuda
+    image: antumbra-mcp-gpu:local
+    # Command is replaced wholesale (compose does not merge arrays); same as the
+    # base server plus `--auto-consolidate`.
+    command:
+      - --http
+      - 0.0.0.0:8081
+      - --url
+      - ws://surrealdb:8000/rpc
+      - --db-user
+      - root
+      - --db-pass
+      - ${SURREAL_PASS}
+      - --embedder-url
+      - ${ANTUMBRA_EMBEDDER_URL:-http://host.docker.internal:11434/v1/embeddings}
+      - --embedder-model
+      - ${ANTUMBRA_EMBEDDER_MODEL:-all-minilm}
+      - --auto-consolidate
+    # Serving caches base weights and consolidation writes adapter files, so the
+    # light server's read-only root is relaxed and two volumes are added.
+    read_only: false
+    volumes:
+      - ${ANTUMBRA_WEIGHTS:-antumbra-weights}:/weights
+      - ${ANTUMBRA_ADAPTERS:-antumbra-adapters}:/adapters
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  antumbra-weights:
+  antumbra-adapters:

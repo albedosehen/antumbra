@@ -110,3 +110,28 @@ Release builds also need the `surrealdb` / `surrealdb-core` `opt-level = 1` over
 - Or, to validate the GPU path with no Python at all, use a corpus whose `verify` is `cmd /C exit 0` (e.g. `corpora/smoke.json`): RAFT treats every completion as a pass, which still trains and serves a real adapter (generation quality just isn't gated).
 
 **Driver requirement:** the GPU driver must support the _toolkit_ version, or PTX load fails with `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Check `nvidia-smi` (driver 610.47 here covers CUDA 13.3). If the driver is older than the toolkit, update it or install a matching (lower) toolkit.
+
+**Note (2026-06-10):** a Developer-shell alternative to the `vcvars64.bat` + `fallback-latest` recipe above also works and is what the autonomous-server validation used: enter a VS dev shell (`Enter-VsDevShell` via `vswhere`, which puts `cl.exe` on `PATH`), put `%CUDA_PATH%\bin\x64;%CUDA_PATH%\bin` on `PATH`, and pin cudarc explicitly with `CUDARC_CUDA_VERSION=13020` (13.2 bindings, ABI-compatible with the 13.3 runtime) instead of relying on the off-`PATH` fallback. Either path produces the same binary; the non-negotiable is that **`cl.exe` must be on `PATH`** when candle's kernels compile (a fresh kernel build with no `cl.exe` fails as `nvcc fatal: Cannot find compiler 'cl.exe'`, sometimes surfaced as an empty `nvcc error`).
+
+## The autonomous server (serving + consolidation)
+
+The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds the **light** server: it does memory (store / recall / route / compartments / sync), but `answer` reports _serving not configured_ and `--auto-consolidate` is a no-op, because both need the candle/GPU half. To get real expert serving **and** autonomous consolidation (a reinforced or high-confidence memory auto-graduates its compartment into a private expert on the GPU, hot-registered so `answer` serves it without a restart), run the `models,cuda` server where the GPU is.
+
+**Docker (Linux, or Windows via WSL2; needs the NVIDIA Container Toolkit):**
+
+```bash
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
+```
+
+The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, adds `--auto-consolidate`, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). _This image is authored to the standard CUDA-on-Linux pattern but is not yet CI-validated; validate on a real GPU host._
+
+**Native (e.g. a Windows GPU box):** build `antumbra-mcp` per the CUDA section above (`--features models,cuda`), then run it with the runtime `PATH` set:
+
+```bat
+target\release\antumbra-mcp.exe --http 127.0.0.1:8081 --url ws://127.0.0.1:8000/rpc ^
+  --db-user root --db-pass %SURREAL_PASS% ^
+  --embedder-url http://127.0.0.1:11434/v1/embeddings --embedder-model all-minilm ^
+  --auto-consolidate
+```
+
+Either way, the gate defaults are deliberately conservative (recurrence ≥ 2, confidence ≥ 0.5; `world`/`bank` facts need a check, `opinion`s graduate on a ≥ 0.9 provenance tier). The autonomous capture is light (8 rounds) since it re-fires and supersedes; the manual `antumbra consolidate-compartment` keeps the heavier 40-round capture for a deliberate one-off.
