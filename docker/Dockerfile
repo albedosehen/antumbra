@@ -1,6 +1,4 @@
-# antumbra-mcp, built reproducibly and shipped on a minimal NON-ROOT runtime.
-# Build context is the repo root (so the whole workspace + Cargo.lock are present):
-#   docker build -f docker/Dockerfile -t antumbra-mcp:local .
+# antumbra-mcp
 
 # --- build stage: pinned toolchain, release binary -------------------------
 FROM rust:1.96-slim-bookworm AS builder
@@ -10,11 +8,10 @@ WORKDIR /build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config \
     && rm -rf /var/lib/apt/lists/*
-# Copy the whole workspace; --locked pins to the committed Cargo.lock.
 COPY . .
 RUN cargo build --release -p antumbra-mcp --locked
 
-# --- runtime stage: distroless, runs as uid 65532 (nonroot) ----------------
+# --- runtime stage: runs as uid 65532 (nonroot) ----------------
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=builder /build/target/release/antumbra-mcp /usr/local/bin/antumbra-mcp
 EXPOSE 8081
