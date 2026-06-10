@@ -11,9 +11,32 @@ cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui[\\/]
 cargo llvm-cov --workspace --summary-only
 ```
 
-**Result (2026-06-07):** **92.6% line / 90.6% region / 90.8% function** over the measured surface, which **includes** the `antumbra-tui` logic (only the TUI render layer + binary entrypoints are excluded). The measured surface grew substantially with the console build-out (operator actions, the memory/loop/evals pages, the drill-downs, the loop graceful-stop) yet coverage held: the new owner-view store reads (`edge`/`generation`/`evaluation`/ `loop_control`) are 100% line-covered, and `app.rs` sits at ~90%. Most library crates are 89% to 100%; the low outliers are `antumbra-embed` (~67%, its live HTTP path is network-gated, see below) and `antumbra-tui/render.rs` (~69%, the feature-gated raster probe + the `Raster`/`HalfBlock` tier branches that only a `raster` build constructs). Within the console, `events.rs`/`theme.rs` are 100%, `overlay.rs`/`scroll.rs`/`command.rs` ~98% to 99%, `transition.rs` 95%, and `pacing.rs` 89% (the remainder is Windows-FFI monitor detection that can't run on CI).
+**Result (2026-06-10, gated suite included):** **93.4% line / 91.3% region / 91.6% function** over the measured surface, which **includes** the `antumbra-tui` logic (only the TUI render layer + binary entrypoints are excluded). This run also folds in the previously network-gated paths: with the gated suite's env set and `-- --include-ignored` (see [Running the gated suite](#running-the-gated-suite)), the store's `signin_root` root-credential branch, the sync worker's push/pull cycle, and `antumbra-embed`'s live `ureq` request are exercised against a real SurrealDB v3 container and a local embeddings endpoint. The owner-view store reads (`edge`/`generation`/`evaluation`/`loop_control`) are 100% line-covered and `app.rs` sits at ~90%. The remaining uncovered residue is structural and intentional: the feature-gated raster tier branches in `antumbra-tui/render.rs` (only a `raster` build constructs them), the Windows-FFI monitor detection in `pacing.rs` (can't run on CI), and the `models`-gated GPU trainer/serve code (not compiled into the default build). Running the default suite without the gated env yields a slightly lower number, since those tests skip.
 
-The main untested remainders are paths that need a live `ws://` SurrealDB, a remote HTTP endpoint, or a GPU, and so belong to the docker-/network-/`models`-gated suites: the store's `signin_root` root-credential branch; the sync worker's push/pull cycle (an in-memory store is fresh per connect, so reconcile always moves nothing); the `antumbra-embed` HTTP client's live request path (the `EmbedTransport` seam is unit-tested, but the real `ureq` call needs a server); and the `models`-gated candle trainer code (not compiled in the default build).
+The paths that need a live `ws://` SurrealDB or a remote embeddings endpoint now have **gated integration tests** that pass against a real SurrealDB v3 container and a local OpenAI-compatible endpoint (see [Running the gated suite](#running-the-gated-suite)):
+
+- the store's `signin_root` root-credential branch, exercised over `ws://` by `antumbra-store/tests/ws_owner.rs` (on `mem://` the owner view is plain `invalidate`, so the embedded suite cannot reach the `RootCredentials` arm);
+- the sync worker's incremental push / pull / converge cycle against a networked authoritative store, by `antumbra-sync/tests/ws_incremental.rs`;
+- the `antumbra-embed` live `ureq` request path, by the `#[ignore]`d `real_endpoint_returns_the_right_dimension` (the `EmbedTransport` seam is also mock-tested offline).
+
+Each skips when its env var is unset, so the default `cargo test` stays network-free. The only surface still outside the measurement is the **`models`-gated candle trainer/serve code**, which needs a GPU and is not compiled into the default build (its CPU-testable logic is already measured over fakes).
+
+## Running the gated suite
+
+These exercise the live `ws://` and network paths. Bring up two throwaway SurrealDB v3 containers (separate databases, so the store and sync tests never share state) and a 384-dim embeddings endpoint, then run with the env set:
+
+```bash
+docker run --rm -d -p 8002:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root --bind 0.0.0.0:8000 memory
+docker run --rm -d -p 8003:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root --bind 0.0.0.0:8000 memory
+ollama pull all-minilm   # a 384-dim model that matches EMBED_DIM
+
+ANTUMBRA_STORE_WS=ws://127.0.0.1:8002/rpc \
+ANTUMBRA_SYNC_WS=ws://127.0.0.1:8003/rpc \
+ANTUMBRA_EMBED_URL=http://127.0.0.1:11434/v1/embeddings ANTUMBRA_EMBED_MODEL=all-minilm \
+cargo test --workspace -- --include-ignored
+```
+
+To fold the gated paths into the headline coverage, run the same env in front of the `cargo llvm-cov` command above (also with `-- --include-ignored`).
 
 ## What is excluded from the headline metric, and why
 
