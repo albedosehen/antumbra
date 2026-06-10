@@ -102,6 +102,8 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 ## Install
 
+New here? **[docs/getting-started.md](docs/getting-started.md)** is the full end-to-end setup (the Docker stack, the embedder, and your agent) for macOS, Windows, and Linux. The quick paths below cover just the binaries.
+
 ### Prebuilt binaries (no Rust toolchain)
 
 Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS, Linux, Windows) from the latest GitHub release. The operator console (`antumbra-tui`):
@@ -164,6 +166,7 @@ memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUD
 
 ## Documentation
 
+- **[Getting started](docs/getting-started.md)**: end-to-end setup on macOS, Windows, and Linux. Start here.
 - **[Antumbra, explained for anyone](docs/antumbra-explained.md)**: a plain-English tour with diagrams and analogies (no ML background needed).
 - **[Using Antumbra](docs/integration.md)**: wire it into a coding agent (the bootstrap/capture lifecycle hooks), offline vs networked. Start here.
 - **[Architecture](docs/architecture.md)**: system, substrate, decision chain, training and data flow, schema.
