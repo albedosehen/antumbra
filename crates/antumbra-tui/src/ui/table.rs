@@ -30,7 +30,11 @@ pub(super) fn experts_table(f: &mut Frame, app: &App, area: Rect) {
     ])
     .style(Style::default().fg(t.dim).add_modifier(Modifier::BOLD));
 
-    let rows = app.experts.iter().map(|e| {
+    // Build only the on-screen rows so the table scales to any population size.
+    let visible = (area.height as usize).saturating_sub(3); // borders + header
+    let (offset, rel_sel) = super::visible_window(app.experts.len(), app.selected, visible);
+    let end = (offset + visible).min(app.experts.len());
+    let rows = app.experts[offset..end].iter().map(|e| {
         let mut fit = gauge_spans(&t, e.fitness, 10, t.fitness(e.fitness, 1.0));
         fit.push(Span::styled(
             format!(" {:.2}", e.fitness),
@@ -73,7 +77,7 @@ pub(super) fn experts_table(f: &mut Frame, app: &App, area: Rect) {
 
     let mut state = TableState::default();
     if !app.experts.is_empty() {
-        state.select(Some(app.selected.min(app.experts.len() - 1)));
+        state.select(Some(rel_sel));
     }
     f.render_stateful_widget(table, area, &mut state);
 }

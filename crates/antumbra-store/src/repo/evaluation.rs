@@ -52,14 +52,23 @@ pub async fn latest_for_subject(
     first(store.client(), &query).await.map_err(map)
 }
 
+/// How many recent runs the operator console loads. Evaluation runs accumulate
+/// without bound over a project's life; the console only shows recent ones, so
+/// cap the read (and so the per-frame table build) instead of streaming the whole
+/// history every refresh.
+pub const RECENT_LIMIT: i64 = 200;
+
 /// The most recent runs across all subjects, newest first: the owner/console
-/// view (parallels [`crate::repo::memory::all_unscoped`]).
+/// view (parallels [`crate::repo::memory::all_unscoped`]). Capped at
+/// [`RECENT_LIMIT`].
 pub async fn recent_unscoped(store: &Store) -> Result<Vec<EvaluationRun>> {
     let query = Query::new()
         .select(None)
         .from_table(TABLE)
         .map_err(map)?
         .order_by("created_at", "DESC")
+        .map_err(map)?
+        .limit(RECENT_LIMIT)
         .map_err(map)?;
     query_records(store.client(), &query).await.map_err(map)
 }

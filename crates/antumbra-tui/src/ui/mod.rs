@@ -112,6 +112,18 @@ fn pulse(clock_ms: f64, period_ms: f64, phase: f64) -> f64 {
     0.5 + 0.5 * ((clock_ms / period_ms * TAU) + phase).sin()
 }
 
+/// The visible window `[offset, offset + rows)` of a `len`-item list that keeps
+/// `selected` on screen, so a `Table` builds only the rows it actually shows even
+/// when the data is store-sized. Returns `(offset, in-window index of selected)`.
+pub(super) fn visible_window(len: usize, selected: usize, rows: usize) -> (usize, usize) {
+    if rows == 0 || len <= rows {
+        return (0, selected.min(len.saturating_sub(1)));
+    }
+    let sel = selected.min(len - 1);
+    let offset = sel.saturating_sub(rows / 2).min(len - rows);
+    (offset, sel - offset)
+}
+
 /// A rounded, dim-bordered panel block with a titled, inked header.
 fn panel<'a>(t: &Theme, title: impl Into<Line<'a>>) -> Block<'a> {
     Block::bordered()

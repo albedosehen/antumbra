@@ -70,7 +70,11 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     ])
     .style(Style::default().fg(t.dim).add_modifier(Modifier::BOLD));
 
-    let rows = app.evals.iter().map(|e| {
+    // Build only on-screen rows so the table scales to long eval histories.
+    let visible = (area.height as usize).saturating_sub(3); // borders + header
+    let (offset, rel_sel) = super::visible_window(app.evals.len(), app.selected_eval, visible);
+    let end = (offset + visible).min(app.evals.len());
+    let rows = app.evals[offset..end].iter().map(|e| {
         let fp = e
             .regression_fingerprint
             .as_deref()
@@ -118,6 +122,6 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         .highlight_symbol("▌ ");
 
     let mut state = TableState::default();
-    state.select(Some(app.selected_eval.min(app.evals.len() - 1)));
+    state.select(Some(rel_sel));
     f.render_stateful_widget(table, area, &mut state);
 }

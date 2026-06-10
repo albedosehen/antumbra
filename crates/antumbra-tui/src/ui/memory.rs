@@ -35,6 +35,10 @@ const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
 /// network, so the cap keeps the most reinforced anchors.
 const MAX_GRAPH_NODES_PER_NETWORK: usize = 48;
 
+/// Bound the edge scan too, so a dense relation set can't stall the frame (only
+/// edges joining drawn nodes paint anyway).
+const MAX_GRAPH_EDGES: usize = 256;
+
 pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     let cols =
         Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).split(area);
@@ -67,17 +71,22 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
         .x_bounds([-100.0, 100.0])
         .y_bounds([-100.0, 100.0])
         .paint(move |ctx| {
-            // Lay each network's traces on a ring around its anchor.
+            // Lay each network's traces on a ring around its anchor. Only the
+            // capped subset is positioned and drawn (a real store holds thousands;
+            // the ring fills solid past a few dozen and drawing every one pegs the
+            // render). Keep each node's global index so the selection still lands.
             let mut pos: HashMap<&str, (f64, f64)> = HashMap::new();
+            let mut nodes: Vec<(usize, &_, f64, f64)> = Vec::new();
             for (net, (ax, ay)) in ANCHORS {
-                let mems: Vec<&_> = app
+                let mems: Vec<(usize, &_)> = app
                     .memories
                     .iter()
-                    .filter(|m| m.network == net)
+                    .enumerate()
+                    .filter(|(_, m)| m.network == net)
                     .take(MAX_GRAPH_NODES_PER_NETWORK)
                     .collect();
                 let n = mems.len();
-                for (j, m) in mems.iter().enumerate() {
+                for (j, (gi, m)) in mems.iter().enumerate() {
                     let p = if n <= 1 {
                         (ax, ay)
                     } else {
@@ -85,10 +94,11 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
                         (ax + 24.0 * ang.cos(), ay + 24.0 * ang.sin())
                     };
                     pos.insert(m.id.as_str(), p);
+                    nodes.push((*gi, *m, p.0, p.1));
                 }
             }
-            // Edges first, under the nodes.
-            for e in &app.edges {
+            // Edges first, under the nodes (only those joining drawn nodes).
+            for e in app.edges.iter().take(MAX_GRAPH_EDGES) {
                 if let (Some(&(x1, y1)), Some(&(x2, y2))) =
                     (pos.get(e.from_id.as_str()), pos.get(e.to_id.as_str()))
                 {
@@ -102,24 +112,22 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
                 }
             }
             // Nodes: confidence tints the glyph; the selected trace is accented,
-            // a consolidated one is filled.
-            for (i, m) in app.memories.iter().enumerate() {
-                if let Some(&(x, y)) = pos.get(m.id.as_str()) {
-                    let selected = i == app.selected_memory;
-                    let glyph = if selected {
-                        "◉"
-                    } else if m.is_consolidated() {
-                        "●"
-                    } else {
-                        "○"
-                    };
-                    let col = if selected {
-                        t.accent
-                    } else {
-                        t.fitness(m.confidence, 0.9)
-                    };
-                    ctx.print(x, y, Span::styled(glyph, Style::default().fg(col)));
-                }
+            // a consolidated one is filled. Iterate only the capped set.
+            for (gi, m, x, y) in &nodes {
+                let selected = *gi == app.selected_memory;
+                let glyph = if selected {
+                    "◉"
+                } else if m.is_consolidated() {
+                    "●"
+                } else {
+                    "○"
+                };
+                let col = if selected {
+                    t.accent
+                } else {
+                    t.fitness(m.confidence, 0.9)
+                };
+                ctx.print(*x, *y, Span::styled(glyph, Style::default().fg(col)));
             }
             // Network labels under each cluster.
             for (net, (ax, ay)) in ANCHORS {
