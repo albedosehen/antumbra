@@ -142,8 +142,11 @@ impl McpServer {
         self.auto_consolidate = Some(AutoConsolidateConfig {
             min_recurrence: 2,
             min_confidence: 0.5,
-            rounds: 40,
-            samples: 8,
+            // Lighter than the manual `consolidate-compartment` (40): an autonomous
+            // trigger fires repeatedly and supersedes its expert each time, so a
+            // short capture per reinforce is the right trade.
+            rounds: 8,
+            samples: 4,
             max_new_tokens: 32,
             lr: 3e-4,
             replay_ratio: 0.5,
@@ -1431,6 +1434,73 @@ mod tests {
             .0
             .memories
             .is_empty());
+    }
+
+    /// The autonomous consolidation trigger, end to end: storing then
+    /// reinforcing a memory past the gate fires `maybe_consolidate`, which mints
+    /// a private expert in the background with no manual `consolidate-compartment`
+    /// call. Gated: needs the candle trainer (`--features models`) + a GPU +
+    /// `python` (the exec verifier) + the base weights. Run with `--ignored`.
+    #[cfg(feature = "models")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "needs --features models + a GPU + python; run with --ignored"]
+    async fn auto_consolidate_mints_a_private_expert_on_reinforce() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let comp = "comp:ws:test:auto";
+        let s = McpServer::new(
+            store.clone(),
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "test-host".into(),
+            CompartmentId::new(comp),
+            None,
+        )
+        .with_auto_consolidate();
+
+        // A high-confidence opinion graduates on the provenance tier once it is
+        // reinforced past recurrence >= 2; `None` compartment lands in the
+        // server default (`comp`), which the minted expert is named for.
+        let stored = s
+            .store_memory(Parameters(StoreParams {
+                content: "Prefer `deno install` over `npm install` in this project.".into(),
+                network: "opinion".into(),
+                confidence: Some(1.0),
+                evidence: None,
+                volatile: None,
+                compartment: None,
+            }))
+            .await
+            .unwrap();
+        let id = stored.0.id.clone();
+
+        // Reinforce past the gate. A no-op early reinforce (recurrence < 2) returns
+        // fast, freeing the per-compartment guard before a later one trains; the
+        // spacing keeps the trigger from being swallowed by an in-flight no-op.
+        for _ in 0..3 {
+            s.reinforce_memory(Parameters(IdParams {
+                memory_id: id.clone(),
+            }))
+            .await
+            .unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+
+        // The consolidation runs in a spawned task; poll for the private expert.
+        let want = ExpertId::new(format!("expert:user:test:{comp}"));
+        let mut minted = false;
+        for _ in 0..240 {
+            if expert::get(&store, &want).await.unwrap().is_some() {
+                minted = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        assert!(
+            minted,
+            "autonomous consolidation should mint {} on reinforce",
+            want.as_str()
+        );
     }
 
     #[tokio::test]
