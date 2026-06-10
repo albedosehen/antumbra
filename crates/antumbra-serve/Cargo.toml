@@ -23,6 +23,11 @@ tokenizers = { version = "0.22", optional = true }
 hf-hub = { version = "1.0.0-rc.1", optional = true, default-features = false, features = ["blocking", "rustls-tls"] }
 # Candle serving reuses the trainer's Qwen2.5-Coder + LoRA model (hardware-adaptive serving).
 antumbra-train = { path = "../antumbra-train", optional = true }
+# Autonomous consolidation (memory -> private expert) reads the store and runs
+# the exec verifier; models-gated, so the default serve build stays light.
+antumbra-store = { path = "../antumbra-store", optional = true }
+antumbra-critic = { path = "../antumbra-critic", optional = true }
+chrono = { workspace = true, optional = true }
 # Await-safe mutex (cached model) + block_in_place (don't park the runtime
 # worker during synchronous generation, a v1 serving-throughput concern).
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"], optional = true }
@@ -38,6 +43,9 @@ models = [
     "dep:hf-hub",
     "dep:antumbra-train",
     "antumbra-train/models",
+    "dep:antumbra-store",
+    "dep:antumbra-critic",
+    "dep:chrono",
     "dep:tokio",
 ]
 # A GPU backend only matters for the candle model path, so it implies `models`

@@ -42,6 +42,15 @@ pub struct McpServer {
     /// When set, the antumbra auto-organizes the inbox once it grows past the
     /// threshold (the autonomous propose trigger). `None` = on-demand only.
     auto_propose: Option<AutoProposeConfig>,
+    /// When set, a reinforced memory whose compartment clears the consolidation
+    /// gate auto-graduates into a private expert on the GPU (the autonomous sleep
+    /// trigger). `None` = on-demand only (the `consolidate-compartment` CLI).
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    auto_consolidate: Option<AutoConsolidateConfig>,
+    /// Compartments with a consolidation in flight, so a burst of reinforces
+    /// coalesces into one train instead of stacking GPU jobs.
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    consolidating: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
     /// The serving engine the `answer` tool drives (route → serve through the
     /// expert's adapter). `None` = serving not configured (route-only surface).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
@@ -58,6 +67,21 @@ struct AutoProposeConfig {
     threshold: usize,
     min_size: usize,
     similarity_threshold: f32,
+}
+
+/// Tuning for the autonomous consolidation trigger. Plain primitives so the
+/// server struct stays free of the models-gated trainer types; the gate policy
+/// and `RaftConfig` are built from these inside the models-gated trigger.
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
+#[derive(Clone)]
+struct AutoConsolidateConfig {
+    min_recurrence: u32,
+    min_confidence: f32,
+    rounds: usize,
+    samples: usize,
+    max_new_tokens: usize,
+    lr: f64,
+    replay_ratio: f64,
 }
 
 impl McpServer {
@@ -81,6 +105,8 @@ impl McpServer {
             host,
             default_compartment,
             auto_propose: None,
+            auto_consolidate: None,
+            consolidating: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             serve,
             registry: None,
         }
@@ -105,6 +131,91 @@ impl McpServer {
             similarity_threshold: 0.6,
         });
         self
+    }
+
+    /// Enable the autonomous consolidation trigger: when a reinforced memory's
+    /// compartment clears the consolidation gate, it graduates into a private
+    /// expert on the GPU in the background (the "during sleep" trigger). Off by
+    /// default; needs the server built with `--features models` + a GPU to train.
+    #[must_use]
+    pub fn with_auto_consolidate(mut self) -> Self {
+        self.auto_consolidate = Some(AutoConsolidateConfig {
+            min_recurrence: 2,
+            min_confidence: 0.5,
+            rounds: 40,
+            samples: 8,
+            max_new_tokens: 32,
+            lr: 3e-4,
+            replay_ratio: 0.5,
+        });
+        self
+    }
+
+    /// Autonomous consolidation: if the just-written/reinforced `mem` belongs to
+    /// a compartment, graduate that compartment into a private expert in the
+    /// background (one train per compartment at a time; a burst coalesces). The
+    /// shared `consolidate_compartment` gathers and scores, so it returns cheaply
+    /// when nothing in the compartment clears the gate. A no-op unless built with
+    /// `--features models` and enabled via `with_auto_consolidate`.
+    async fn maybe_consolidate(&self, _mem: &Memory) {
+        #[cfg(feature = "models")]
+        {
+            let Some(acfg) = self.auto_consolidate.clone() else {
+                return;
+            };
+            let Some(comp) = _mem.compartment.clone() else {
+                return;
+            };
+            let key = comp.as_str().to_string();
+            {
+                let mut inflight = self.consolidating.lock().await;
+                if !inflight.insert(key.clone()) {
+                    return; // already consolidating this compartment
+                }
+            }
+            let store = self.store.clone();
+            let embedder = self.embedder.clone();
+            let tenant = self.tenant.clone();
+            let user = _mem.author.clone().unwrap_or_else(|| self.user.clone());
+            let inflight = self.consolidating.clone();
+            let policy = antumbra_serve::ConsolidationPolicy {
+                min_recurrence: acfg.min_recurrence,
+                min_confidence: acfg.min_confidence,
+                ..Default::default()
+            };
+            let cfg = antumbra_serve::RaftConfig {
+                samples_per_task: acfg.samples,
+                rounds: acfg.rounds,
+                max_new_tokens: acfg.max_new_tokens,
+                learning_rate: acfg.lr,
+                replay_ratio: acfg.replay_ratio,
+                ..Default::default()
+            };
+            tokio::spawn(async move {
+                match antumbra_serve::consolidate_compartment(
+                    &store,
+                    embedder.as_ref(),
+                    &tenant,
+                    &user,
+                    &comp,
+                    &policy,
+                    &cfg,
+                )
+                .await
+                {
+                    Ok(Some(o)) => eprintln!(
+                        "[auto-consolidate] {} : {} graduated -> {} (internalized {:.2})",
+                        comp.as_str(),
+                        o.graduated,
+                        o.expert.as_str(),
+                        o.fitness
+                    ),
+                    Ok(None) => {}
+                    Err(e) => eprintln!("[auto-consolidate] {} failed: {e}", comp.as_str()),
+                }
+                inflight.lock().await.remove(&key);
+            });
+        }
     }
 
     /// The *unorganized* memory pool: the inbox (default compartment) plus
@@ -817,11 +928,16 @@ impl McpServer {
         .await
         .map_err(err)?
         {
-            Some(m) => Ok(Json(ReinforceOut {
-                found: true,
-                reinforcement: m.reinforcement,
-                confidence: m.confidence,
-            })),
+            Some(m) => {
+                // A reinforcement may push this memory's compartment over the
+                // consolidation gate; graduate it into a private expert if so.
+                self.maybe_consolidate(&m).await;
+                Ok(Json(ReinforceOut {
+                    found: true,
+                    reinforcement: m.reinforcement,
+                    confidence: m.confidence,
+                }))
+            }
             None => Ok(Json(ReinforceOut {
                 found: false,
                 reinforcement: 0,

@@ -25,10 +25,20 @@ mod serve_candle;
 #[cfg(feature = "models")]
 pub use serve_candle::CandleServe;
 
+#[cfg(feature = "models")]
+mod consolidate;
+#[cfg(feature = "models")]
+pub use consolidate::{consolidate_compartment, ConsolidationOutcome};
+
 /// Re-exported so callers can construct [`MultiAdapterServe`] without depending
 /// on `antumbra-train` directly.
 #[cfg(feature = "models")]
 pub use antumbra_train::RaftConfig;
+
+/// Re-exported so the consolidation gate can be tuned without a direct
+/// `antumbra-train` dependency (the MCP server's autonomous trigger uses it).
+#[cfg(feature = "models")]
+pub use antumbra_train::consolidate::ConsolidationPolicy;
 
 // --- the real resident multi-adapter engine (models build) ----------------
 

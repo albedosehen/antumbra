@@ -83,6 +83,12 @@ struct Cli {
     /// compartments (reversible; the user curates). Off when unset.
     #[arg(long)]
     auto_propose: Option<usize>,
+    /// Enable the autonomous consolidation trigger: when a reinforced memory's
+    /// compartment clears the consolidation gate, it graduates into a private
+    /// expert on the GPU in the background. Needs `--features models` + a GPU to
+    /// actually train. Off when unset.
+    #[arg(long, default_value_t = false)]
+    auto_consolidate: bool,
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -315,6 +321,7 @@ async fn run() -> Result<()> {
             embedder,
             verifier,
             cli.auto_propose,
+            cli.auto_consolidate,
         )
         .await;
     }
@@ -332,6 +339,9 @@ async fn run() -> Result<()> {
     .await?;
     if let Some(threshold) = cli.auto_propose {
         service = service.with_auto_propose(threshold);
+    }
+    if cli.auto_consolidate {
+        service = service.with_auto_consolidate();
     }
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))

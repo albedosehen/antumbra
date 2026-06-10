@@ -74,6 +74,8 @@ struct HttpState {
     auth: Mutex<()>,
     /// Autonomous propose threshold, applied to every per-identity server.
     auto_propose: Option<usize>,
+    /// Autonomous consolidation trigger, applied to every per-identity server.
+    auto_consolidate: bool,
     /// The serving engine the `answer` tool drives, built once from the owner
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
@@ -97,6 +99,7 @@ pub async fn serve(
     embedder: Arc<dyn Embedder>,
     verifier: JwtVerifier,
     auto_propose: Option<usize>,
+    auto_consolidate: bool,
 ) -> Result<()> {
     let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving connection. On an authenticated remote, requests must run
@@ -119,6 +122,7 @@ pub async fn serve(
         embedder,
         auth: Mutex::new(()),
         auto_propose,
+        auto_consolidate,
         serve,
         sessions: Mutex::new(HashMap::new()),
         registry: crate::notify::PeerRegistry::new(),
@@ -272,6 +276,9 @@ impl HttpState {
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
         }
+        if self.auto_consolidate {
+            mcp = mcp.with_auto_consolidate();
+        }
         Ok(mcp)
     }
 }
@@ -405,6 +412,7 @@ mod tests {
             embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
             auth: Mutex::new(()),
             auto_propose: None,
+            auto_consolidate: false,
             serve: None,
             sessions: Mutex::new(HashMap::new()),
             registry: crate::notify::PeerRegistry::new(),
