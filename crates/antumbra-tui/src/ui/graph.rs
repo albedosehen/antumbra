@@ -25,7 +25,14 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
         .x_bounds([-100.0, 100.0])
         .y_bounds([-100.0, 100.0])
         .paint(move |ctx| {
-            let n = app.experts.len().max(1);
+            // Cap the orbit at a readable number of nodes: a real population can
+            // grow large, and drawing every expert each frame both blurs the ring
+            // to a solid band and pegs the render (the Memory graph had the same
+            // flaw). Experts arrive sorted by the active column, so the cap keeps
+            // the leaders; the detail panel and navigation still reach all of them.
+            const MAX_GRAPH_EXPERTS: usize = 64;
+            let count = app.experts.len().min(MAX_GRAPH_EXPERTS);
+            let n = count.max(1);
             // A tilted ring (squashed vertically) reads as a 3D orbit: depth is
             // sin(angle): front nodes sit lower and glow brighter, back nodes
             // higher and dimmer.
@@ -34,7 +41,7 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
             let angle = |i: usize| rot + (i as f64 / n as f64) * TAU;
 
             // Draw back-to-front so nearer nodes occlude farther ones.
-            let mut order: Vec<usize> = (0..app.experts.len()).collect();
+            let mut order: Vec<usize> = (0..count).collect();
             order.sort_by(|&a, &b| {
                 angle(a)
                     .sin()

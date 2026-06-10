@@ -250,6 +250,64 @@ pub struct App {
     pub should_quit: bool,
 }
 
+/// A consistent read of everything the console shows, loaded in one place so the
+/// run loop can run it OFF the render thread; only the cheap
+/// [`App::apply_snapshot`] then touches `App`. Loading thousands of rows over a
+/// `ws://` connection must never block input.
+pub struct Snapshot {
+    pub experts: Vec<Expert>,
+    pub boundaries: Vec<FailureBoundary>,
+    pub shadows: Vec<Shadow>,
+    pub memories: Vec<Memory>,
+    pub edges: Vec<MemoryEdge>,
+    pub loop_heads: Vec<GenerationHead>,
+    pub loop_halt_pending: bool,
+    pub evals: Vec<EvaluationRun>,
+    pub router: Option<LearnedRouter>,
+}
+
+impl Snapshot {
+    /// Read the whole console view. Pure sorts that need no `App` state are done
+    /// here; the expert sort (which depends on the active column) is deferred to
+    /// [`App::apply_snapshot`].
+    pub async fn load(store: &Store) -> anyhow::Result<Self> {
+        let experts = expert::list(store).await?;
+        let boundaries = boundary::list(store).await?;
+        let mut shadows = shadow::list(store).await?;
+        // Newest first, so the penumbra view leads with current training.
+        shadows.sort_by_key(|s| std::cmp::Reverse(s.created_at));
+        // Lite load (no embedding vectors): the console never shows them and a
+        // whole store of embeddings stalls a ws:// read. Grouped by network then
+        // strongest first, so each network leads with its anchors.
+        let mut memories = memory::all_unscoped_lite(store).await?;
+        memories.sort_by(|a, b| {
+            a.network
+                .as_str()
+                .cmp(b.network.as_str())
+                .then(b.confidence.total_cmp(&a.confidence))
+        });
+        let edges = edge::all_unscoped(store).await?;
+        let loop_heads = generation::all_heads(store).await?;
+        let loop_halt_pending = match loop_heads.first() {
+            Some(head) => loop_control::load(store, &head.run_id).await? == LoopCommand::Halt,
+            None => false,
+        };
+        let evals = evaluation::recent_unscoped(store).await?;
+        let router = router::load(store).await?;
+        Ok(Self {
+            experts,
+            boundaries,
+            shadows,
+            memories,
+            edges,
+            loop_heads,
+            loop_halt_pending,
+            evals,
+            router,
+        })
+    }
+}
+
 impl App {
     pub async fn load(store: &Store) -> anyhow::Result<Self> {
         let mut app = Self {
@@ -318,33 +376,25 @@ impl App {
     }
 
     pub async fn reload(&mut self, store: &Store) -> anyhow::Result<()> {
-        self.experts = expert::list(store).await?;
+        self.apply_snapshot(Snapshot::load(store).await?);
+        Ok(())
+    }
+
+    /// Swap in a freshly loaded [`Snapshot`]: re-run the App-state-dependent expert
+    /// sort, clamp selections to the new lengths, and diff for the event stream.
+    /// Cheap and synchronous, so the run loop can call it the moment an off-thread
+    /// load finishes, keeping the periodic refresh off the render thread.
+    pub fn apply_snapshot(&mut self, snap: Snapshot) {
+        self.experts = snap.experts;
         self.sort_experts();
-        self.boundaries = boundary::list(store).await?;
-        self.shadows = shadow::list(store).await?;
-        // Newest first, so the penumbra view leads with current training.
-        self.shadows
-            .sort_by_key(|s| std::cmp::Reverse(s.created_at));
-        // Penumbra memory networks + their edges (the Memory page). Grouped by
-        // network then strongest first, so each network leads with its anchors.
-        // Lite load (no embedding vectors): the console shows memories but never
-        // their vectors, and pulling a whole store of embeddings stalls a ws:// read.
-        self.memories = memory::all_unscoped_lite(store).await?;
-        self.memories.sort_by(|a, b| {
-            a.network
-                .as_str()
-                .cmp(b.network.as_str())
-                .then(b.confidence.total_cmp(&a.confidence))
-        });
-        self.edges = edge::all_unscoped(store).await?;
-        // The generational loop heads and recent evaluation runs (Loop / Evals).
-        self.loop_heads = generation::all_heads(store).await?;
-        self.loop_halt_pending = match self.loop_heads.first() {
-            Some(head) => loop_control::load(store, &head.run_id).await? == LoopCommand::Halt,
-            None => false,
-        };
-        self.evals = evaluation::recent_unscoped(store).await?;
-        self.router = router::load(store).await?;
+        self.boundaries = snap.boundaries;
+        self.shadows = snap.shadows;
+        self.memories = snap.memories;
+        self.edges = snap.edges;
+        self.loop_heads = snap.loop_heads;
+        self.loop_halt_pending = snap.loop_halt_pending;
+        self.evals = snap.evals;
+        self.router = snap.router;
         if !self.experts.is_empty() && self.selected >= self.experts.len() {
             self.selected = self.experts.len() - 1;
         }
@@ -362,7 +412,6 @@ impl App {
         }
         self.record_events();
         self.since_reload_ms = 0.0;
-        Ok(())
     }
 
     /// Diff this reload against the last to emit store-change events. The first

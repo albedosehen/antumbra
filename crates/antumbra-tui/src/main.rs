@@ -697,6 +697,10 @@ async fn run(
     // tick. Best-effort, so the console runs unchanged where live queries are
     // unavailable; the watchers stop when these receivers drop at return.
     let mut live = live::watch_store(store).await;
+    // The periodic refresh runs OFF the render thread: a store with thousands of
+    // rows over `ws://` takes long enough that awaiting it inline stutters input.
+    // At most one load is in flight; its result is applied (cheaply) when ready.
+    let mut reload_inflight: Option<tokio::task::JoinHandle<anyhow::Result<app::Snapshot>>> = None;
     let mut last = Instant::now();
     // The active view-switch effect (and the scope it animates), processed
     // against the frame buffer and cleared when it finishes.
@@ -919,9 +923,22 @@ async fn run(
                 }
             }
         }
-        // Reload on a live store change (instant) or the periodic fallback tick.
-        if live::drained_change(&mut live) || app.wants_reload() {
-            app.reload(store).await?;
+        // Apply a finished off-thread load (cheap), then start a new one when a
+        // live change lands or the periodic tick is due. The load never blocks the
+        // render loop; the explicit `r` / operator-action reloads stay inline.
+        if reload_inflight.as_ref().is_some_and(|h| h.is_finished()) {
+            if let Some(handle) = reload_inflight.take() {
+                if let Ok(Ok(snap)) = handle.await {
+                    app.apply_snapshot(snap);
+                }
+            }
+        }
+        if reload_inflight.is_none() && (live::drained_change(&mut live) || app.wants_reload()) {
+            app.since_reload_ms = 0.0; // restart the interval from this request
+            let store = store.clone();
+            reload_inflight = Some(tokio::spawn(
+                async move { app::Snapshot::load(&store).await },
+            ));
         }
         if app.should_quit {
             return Ok(());
