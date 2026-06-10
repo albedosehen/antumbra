@@ -1,0 +1,15 @@
+# Keep the antumbra-mcp build context small and free of host artifacts/secrets.
+.git/
+target/
+data/
+weights/
+adapters/
+**/*.skv
+**/*.skv/
+**/*.db
+**/*.gguf
+**/*.safetensors
+kushtaka-export.json
+corpora/_*.json
+docker/.env
+.claude/

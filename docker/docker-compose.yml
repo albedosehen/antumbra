@@ -1,0 +1,84 @@
+# Antumbra local stack: a SurrealDB v3 backend and the antumbra-mcp server, both
+# hardened to run as NON-ROOT (uid 65532), with capabilities dropped and no
+# privilege escalation. Embeddings come from a host OpenAI-compatible endpoint
+# (ollama) so no model weights are baked in.
+#
+#   cp docker/.env.example docker/.env   # then fill in the secrets + data path
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# Ports bind to 127.0.0.1 only. SurrealDB data is a host bind-mount (writable by
+# the non-root uid on Docker Desktop); on a Linux host the directory must be
+# owned by uid 65532 (see docker/README.md).
+
+name: antumbra
+
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:v3.0.5
+    container_name: antumbra-surrealdb
+    # The image is distroless-nonroot already; pin the uid/gid explicitly.
+    user: "65532:65532"
+    command:
+      - start
+      - --user
+      - root
+      - --pass
+      - ${SURREAL_PASS:?set SURREAL_PASS in docker/.env}
+      - --bind
+      - 0.0.0.0:8000
+      # rocksdb (not surrealkv): a saner default backend for a server container.
+      - rocksdb:/data/antumbra.db
+    volumes:
+      - ${ANTUMBRA_SURREAL_DATA:?set ANTUMBRA_SURREAL_DATA in docker/.env}:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/surreal", "isready", "--endpoint", "http://localhost:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 8s
+
+  antumbra-mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: antumbra-mcp:local
+    container_name: antumbra-mcp
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+    command:
+      - --http
+      - 0.0.0.0:8081
+      - --url
+      - ws://surrealdb:8000/rpc
+      - --db-user
+      - root
+      - --db-pass
+      - ${SURREAL_PASS}
+      - --embedder-url
+      - ${ANTUMBRA_EMBEDDER_URL:-http://host.docker.internal:11434/v1/embeddings}
+      - --embedder-model
+      - ${ANTUMBRA_EMBEDDER_MODEL:-all-minilm}
+    environment:
+      - ANTUMBRA_JWT_SECRET=${ANTUMBRA_JWT_SECRET:?set ANTUMBRA_JWT_SECRET in docker/.env}
+    # Reach the host's ollama (works on Docker Desktop and Linux with host-gateway).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8081:8081"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The server talks to SurrealDB over the wire and needs no writable disk.
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped

@@ -18,8 +18,12 @@
 !/justfile
 !/dist-workspace.toml
 !/dprint.json
+!/.dockerignore
+!/docker/
 
 # Explicit Ignore
+# Local secrets / env for the docker stack (never commit).
+/docker/.env
 # Generated artifacts anywhere inside allowlisted directories.
 **/*.rs.bk
 Cargo.lock.bak
