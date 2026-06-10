@@ -171,6 +171,44 @@ pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
         .collect()
 }
 
+/// Like [`all_unscoped`] but WITHOUT each memory's embedding vector. The operator
+/// console loads the whole population to show it, yet never displays the vectors;
+/// a full store's worth of 384-float embeddings is megabytes that stalls a
+/// `ws://` client, so omit them here. Recall still uses the indexed vectors.
+pub async fn all_unscoped_lite(store: &Store) -> Result<Vec<Memory>> {
+    // Every MemoryRow field except `embedding` (left `None` by its serde default).
+    let fields = [
+        "key",
+        "tenant_id",
+        "network",
+        "content",
+        "confidence",
+        "reinforcement",
+        "evidence",
+        "volatile",
+        "consolidated_expert",
+        "compartment",
+        "author",
+        "author_host",
+        "status",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    ]
+    .iter()
+    .map(|s| (*s).to_string())
+    .collect();
+    let query = Query::new()
+        .select(Some(fields))
+        .from_table(TABLE)
+        .map_err(map)?;
+    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(MemoryRow::into_domain)
+        .collect()
+}
+
 /// A compartment's memories (the corpus for per-compartment consolidation,
 /// across compartments, the latent-spaces of the memory store). Tenant + compartment filtered; the engine ACL also applies
 /// under a tenant session.

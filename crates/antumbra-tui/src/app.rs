@@ -327,7 +327,9 @@ impl App {
             .sort_by_key(|s| std::cmp::Reverse(s.created_at));
         // Penumbra memory networks + their edges (the Memory page). Grouped by
         // network then strongest first, so each network leads with its anchors.
-        self.memories = memory::all_unscoped(store).await?;
+        // Lite load (no embedding vectors): the console shows memories but never
+        // their vectors, and pulling a whole store of embeddings stalls a ws:// read.
+        self.memories = memory::all_unscoped_lite(store).await?;
         self.memories.sort_by(|a, b| {
             a.network
                 .as_str()

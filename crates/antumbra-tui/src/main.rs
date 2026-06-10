@@ -39,6 +39,13 @@ struct Args {
     /// SurrealDB url (same store the CLI uses).
     #[arg(long, default_value = "surrealkv://./data/antumbra.skv", global = true)]
     url: String,
+    /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
+    /// embedded store or an unauthenticated server. Reads as owner over the wire.
+    #[arg(long, env = "ANTUMBRA_DB_USER", global = true)]
+    db_user: Option<String>,
+    /// Root password for the remote SurrealDB.
+    #[arg(long, env = "ANTUMBRA_DB_PASS", global = true)]
+    db_pass: Option<String>,
     /// Pin the frame-rate cap (Hz) to a fixed value. Omit to follow the active
     /// monitor's refresh rate automatically; adjust live with `+`/`-`, `a` to
     /// resume following.
@@ -154,7 +161,7 @@ async fn app_main() -> Result<()> {
             let store = if demo {
                 seed_demo().await?
             } else {
-                connect(&args.url).await?
+                connect(&args.url, args.db_user.as_deref(), args.db_pass.as_deref()).await?
             };
             let mut app = App::load(&store).await?;
             app.set_page(match page.as_str() {
@@ -218,7 +225,7 @@ async fn app_main() -> Result<()> {
     let store = if args.demo {
         seed_demo().await?
     } else {
-        connect(&args.url).await?
+        connect(&args.url, args.db_user.as_deref(), args.db_pass.as_deref()).await?
     };
     let mut app = App::load(&store).await?;
     app.demo = args.demo;
@@ -573,13 +580,22 @@ async fn seed_demo() -> Result<Store> {
     Ok(store)
 }
 
-async fn connect(url: &str) -> Result<Store> {
-    let config = ConnectionConfig::builder()
+async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
+    let mut builder = ConnectionConfig::builder()
         .url(url)
         .namespace("antumbra")
-        .database("main")
-        .build()?;
-    Ok(Store::connect(config, EMBED_DIM).await?)
+        .database("main");
+    // Root login for an authenticated remote (`ws://`); embedded stores need none.
+    // The console reads as owner, so it sees the whole population and memory.
+    if let (Some(user), Some(pass)) = (db_user, db_pass) {
+        builder = builder.username(user).password(pass);
+    }
+    let config = builder.build()?;
+    // A read-only console must NOT re-apply the schema: re-running the `DEFINE`s
+    // rebuilds the memory HNSW index over the whole store on every launch (slow on
+    // a populated remote). The store is provisioned by the CLI/MCP/loop; here we
+    // only connect as owner and observe.
+    Ok(Store::connect_without_schema(config, EMBED_DIM).await?)
 }
 
 /// Run a palette-chosen [`Action`], queuing any view transition it implies. The
