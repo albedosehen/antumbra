@@ -37,12 +37,21 @@ use antumbra_train::{
     CandleModelLoader, CaptureTrainer, GrpoTrainer, JsonCorpus, RaftConfig, RaftTrainer,
 };
 
+/// Root DB credentials for an authenticated remote, captured once from the global
+/// `--db-user`/`--db-pass` so `connect` (called from many handlers that only carry
+/// the url) can apply them without threading them through every call site.
+static DB_CREDS: std::sync::OnceLock<(Option<String>, Option<String>)> = std::sync::OnceLock::new();
+
 async fn connect(url: &str) -> anyhow::Result<Store> {
-    let config = ConnectionConfig::builder()
+    let mut builder = ConnectionConfig::builder()
         .url(url)
         .namespace("antumbra")
-        .database("main")
-        .build()?;
+        .database("main");
+    // Root login for an authenticated remote (`ws://`); embedded stores need none.
+    if let Some((Some(user), Some(pass))) = DB_CREDS.get() {
+        builder = builder.username(user.as_str()).password(pass.as_str());
+    }
+    let config = builder.build()?;
     Ok(Store::connect(config, EMBED_DIM).await?)
 }
 
@@ -131,6 +140,7 @@ fn main() -> anyhow::Result<()> {
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let _ = DB_CREDS.set((cli.db_user.clone(), cli.db_pass.clone()));
     match cli.command {
         Command::Migrate => {
             connect(&cli.url).await?;

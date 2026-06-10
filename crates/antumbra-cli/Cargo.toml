@@ -30,7 +30,7 @@ antumbra-boundary = { path = "../antumbra-boundary" }
 antumbra-train = { path = "../antumbra-train", optional = true }
 antumbra-critic = { path = "../antumbra-critic", optional = true }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 anyhow.workspace = true
 chrono.workspace = true
