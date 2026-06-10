@@ -28,22 +28,22 @@ pub struct KushtakaConfig {
     pub args: Value,
 }
 
-/// The MCP call body Kushtaka expects: the tool name, the scope (under both the
-/// `scope` and `workspace_id` keys the memory/trace tools accept), and any extra
-/// args merged in at the top level.
+/// The MCP call body Kushtaka's `/mcp/call` expects: the tool `name` and an
+/// `arguments` object (it rejects a flat body with HTTP 400). The scope rides
+/// inside `arguments` under `workspace_id` -- the key the planning tools accept
+/// (`list_tasks` / `list_behavior_graph_evaluations`); they reject a `scope`
+/// kwarg outright. Any extra args (e.g. a `graph_id` or `limit`) merge alongside.
 fn call_body(cfg: &KushtakaConfig) -> Value {
-    let mut body = serde_json::Map::new();
-    body.insert("tool".into(), json!(cfg.tool));
+    let mut arguments = serde_json::Map::new();
     if let Some(scope) = &cfg.scope {
-        body.insert("scope".into(), json!(scope));
-        body.insert("workspace_id".into(), json!(scope));
+        arguments.insert("workspace_id".into(), json!(scope));
     }
     if let Value::Object(extra) = &cfg.args {
         for (k, v) in extra {
-            body.insert(k.clone(), v.clone());
+            arguments.insert(k.clone(), v.clone());
         }
     }
-    Value::Object(body)
+    json!({ "name": cfg.tool, "arguments": Value::Object(arguments) })
 }
 
 /// Fetch and normalize traces using an injected transport `call(tool, body) ->
@@ -57,20 +57,39 @@ where
     Ok(traces_from_kushtaka(&response))
 }
 
-/// The real transport: POST the MCP call to `{base}/mcp/call` with the API key.
-/// Blocking (`ureq`); the CLI runs it under `block_in_place`. Covered only by the
-/// gated live smoke test -- a real socket cannot be exercised deterministically
-/// in a unit test, so everything around it ([`fetch_traces_with`], [`call_body`],
-/// the normalizer) is mocked instead.
+/// Kushtaka wraps every `/mcp/call` result as `{success, result}`. Pull the inner
+/// `result` out so the normalizer sees the tool's own payload, and surface an
+/// explicit `success: false` as an error rather than silently normalizing an
+/// error body down to zero traces. A bare (unwrapped) payload passes through.
+fn unwrap_envelope(v: Value) -> anyhow::Result<Value> {
+    if v.get("success").and_then(Value::as_bool) == Some(false) {
+        let msg = v
+            .get("error")
+            .or_else(|| v.get("detail"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        anyhow::bail!("kushtaka call returned success=false: {msg}");
+    }
+    Ok(v.get("result").cloned().unwrap_or(v))
+}
+
+/// The real transport: POST the MCP call to `{base}/mcp/call` with the API key,
+/// then unwrap the `{success, result}` envelope. Blocking (`ureq`); the CLI runs
+/// it under `block_in_place`. Covered only by the gated live smoke test -- a real
+/// socket cannot be exercised deterministically in a unit test, so everything
+/// around it ([`fetch_traces_with`], [`call_body`], [`unwrap_envelope`], the
+/// normalizer) is unit-tested instead.
 pub fn live_call(base_url: &str, api_key: &str, body: Value) -> anyhow::Result<Value> {
     let url = format!("{}/mcp/call", base_url.trim_end_matches('/'));
     let mut resp = ureq::post(&url)
         .header("X-API-Key", api_key)
         .send_json(&body)
         .map_err(|e| anyhow::anyhow!("kushtaka call to {url} failed: {e}"))?;
-    resp.body_mut()
+    let value = resp
+        .body_mut()
         .read_json::<Value>()
-        .map_err(|e| anyhow::anyhow!("kushtaka response was not JSON: {e}"))
+        .map_err(|e| anyhow::anyhow!("kushtaka response was not JSON: {e}"))?;
+    unwrap_envelope(value)
 }
 
 /// Fetch traces from a live Kushtaka harness over the real transport.
@@ -95,12 +114,17 @@ mod tests {
     }
 
     #[test]
-    fn call_body_carries_tool_scope_and_merged_args() {
+    fn call_body_uses_name_and_nests_workspace_and_args_under_arguments() {
         let b = call_body(&cfg());
-        assert_eq!(b["tool"], json!("list_tasks"));
-        assert_eq!(b["scope"], json!("ws"));
-        assert_eq!(b["workspace_id"], json!("ws"));
-        assert_eq!(b["limit"], json!(5), "extra args merge at the top level");
+        assert_eq!(b["name"], json!("list_tasks"));
+        // The scope rides as `workspace_id` only; the planning tools reject `scope`.
+        assert_eq!(b["arguments"]["workspace_id"], json!("ws"));
+        assert!(b["arguments"].get("scope").is_none());
+        assert_eq!(
+            b["arguments"]["limit"],
+            json!(5),
+            "extra args nest under arguments"
+        );
     }
 
     #[test]
@@ -108,9 +132,9 @@ mod tests {
         let traces = fetch_traces_with(&cfg(), |tool, body| {
             assert_eq!(tool, "list_tasks");
             assert_eq!(
-                body["workspace_id"],
+                body["arguments"]["workspace_id"],
                 json!("ws"),
-                "scope reaches the transport"
+                "scope reaches the transport under arguments"
             );
             Ok(json!({
                 "count": 1,
@@ -153,6 +177,35 @@ mod tests {
             t.iter().all(|x| x.goal.is_empty()),
             "an error body has no goal, so nothing is internalized"
         );
+    }
+
+    #[test]
+    fn unwrap_envelope_pulls_the_result_payload_out() {
+        // Kushtaka's real shape: {success, result:{tasks:[...]}}. The inner payload
+        // must reach the normalizer, or real traces are invisible.
+        let v = json!({
+            "success": true,
+            "result": { "count": 1, "tasks": [
+                {"task_id": "k1", "prompt": "do x", "outcome": "did x", "status": "completed"}
+            ]}
+        });
+        let traces = traces_from_kushtaka(&unwrap_envelope(v).unwrap());
+        assert_eq!(traces.len(), 1);
+        assert_eq!(traces[0].goal, "do x");
+    }
+
+    #[test]
+    fn unwrap_envelope_surfaces_an_explicit_failure() {
+        let v = json!({ "success": false, "detail": "API key required" });
+        let err = unwrap_envelope(v);
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("API key required"));
+    }
+
+    #[test]
+    fn unwrap_envelope_passes_a_bare_payload_through() {
+        let v = json!({ "tasks": [] });
+        assert!(unwrap_envelope(v).unwrap().get("tasks").is_some());
     }
 
     // Opt-in live smoke test: a real socket cannot be exercised deterministically
