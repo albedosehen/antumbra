@@ -688,14 +688,8 @@ async fn serve_prompt(
 /// Parameters for [`metabolize`].
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct MetabolizeArgs {
-    /// A normalized trace file (XOR `from_harness`).
-    pub source: Option<String>,
-    /// Live source: a running Kushtaka harness MCP base URL (XOR `source`).
-    pub from_harness: Option<String>,
-    pub harness_tool: String,
-    pub harness_args: Option<String>,
-    pub api_key: Option<String>,
-    pub scope: Option<String>,
+    /// A normalized trace file (any harness exports to this shape).
+    pub source: String,
     pub out: String,
     pub min_recurrence: u32,
     /// Drop the per-step decomposition (learn only the collapsed outcome).
@@ -719,11 +713,6 @@ pub struct MetabolizeArgs {
 pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
     let MetabolizeArgs {
         source,
-        from_harness,
-        harness_tool,
-        harness_args,
-        api_key,
-        scope,
         out,
         min_recurrence,
         no_steps,
@@ -746,33 +735,10 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
             min_recurrence,
             include_steps: !no_steps,
         };
-        let key = api_key.or_else(|| std::env::var("ANTUMBRA_KUSHTAKA_KEY").ok());
-        let tool_args: serde_json::Value = match &harness_args {
-            Some(s) => serde_json::from_str(s)
-                .map_err(|e| anyhow::anyhow!("--harness-args is not valid JSON: {e}"))?,
-            None => serde_json::json!({}),
-        };
 
-        // Resolve the trace source once: a live Kushtaka pull or a normalized file.
+        // Read and normalize the trace export (re-read each cycle under --watch).
         let get_traces = || -> anyhow::Result<Vec<HarnessTrace>> {
-            if let Some(base) = &from_harness {
-                let key = key.clone().ok_or_else(|| {
-                    anyhow::anyhow!("--from-harness needs --api-key or ANTUMBRA_KUSHTAKA_KEY")
-                })?;
-                let cfg = crate::harness::KushtakaConfig {
-                    base_url: base.clone(),
-                    api_key: key,
-                    scope: scope.clone(),
-                    tool: harness_tool.clone(),
-                    args: tool_args.clone(),
-                };
-                // ureq is blocking; don't park the runtime worker (rt-multi-thread).
-                tokio::task::block_in_place(|| crate::harness::fetch_live(&cfg))
-            } else if let Some(path) = &source {
-                Ok(parse_harness_traces(&std::fs::read(path)?)?)
-            } else {
-                anyhow::bail!("provide --source <file> or --from-harness <url>")
-            }
+            Ok(parse_harness_traces(&std::fs::read(&source)?)?)
         };
 
         // The store + embedder are reused across watch cycles when training.
@@ -884,11 +850,6 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
         let _ = (
             url,
             &source,
-            &from_harness,
-            &harness_tool,
-            &harness_args,
-            &api_key,
-            &scope,
             &out,
             min_recurrence,
             no_steps,

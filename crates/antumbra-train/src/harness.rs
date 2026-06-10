@@ -87,8 +87,8 @@ impl HarnessStep {
 }
 
 /// One normalized harness trace, source-agnostic. An adapter for any harness
-/// (Kushtaka task traces, behavior-graph evaluations, loop runs) only has to
-/// emit this shape.
+/// (task traces, behavior-graph evaluations, loop runs) only has to emit this
+/// shape.
 #[derive(Debug, Clone, Default)]
 pub struct HarnessTrace {
     /// Stable id; synthesized from the kind + index when absent.
@@ -197,21 +197,21 @@ impl Default for MetabolizePolicy {
 }
 
 /// Parse a normalized harness-trace export. Accepts a JSON array of trace objects
-/// or an object wrapping the array (see [`traces_from_kushtaka`]).
+/// or an object wrapping the array (see [`normalize_traces`]).
 pub fn parse_traces(bytes: &[u8]) -> Result<Vec<HarnessTrace>> {
     let v: Value =
         serde_json::from_slice(bytes).map_err(|e| AntumbraError::other(e.to_string()))?;
-    Ok(traces_from_kushtaka(&v))
+    Ok(normalize_traces(&v))
 }
 
-/// Normalize any harness tool response into traces. Tolerant of shape: a top-level
+/// Normalize any harness export into traces. Tolerant of shape: a top-level
 /// array, an object carrying the array under a common key (`tasks`, `traces`,
 /// `evaluations`, `runs`, `results`, `data`, `memories`, `items`), or a single
 /// trace object. Field names are matched with fallbacks (goal|prompt|task,
 /// solution|outcome|result|…, steps|nodes|iterations), so one adapter covers a
-/// Kushtaka `list_tasks` / task-trace / `list_behavior_graph_evaluations` /
-/// loop-run payload without a per-tool schema. Non-object/array values yield none.
-pub fn traces_from_kushtaka(value: &Value) -> Vec<HarnessTrace> {
+/// task list / task-trace / behavior-graph-evaluations / loop-run payload
+/// without a per-tool schema. Non-object/array values yield none.
+pub fn normalize_traces(value: &Value) -> Vec<HarnessTrace> {
     let items: Vec<&Value> = match value {
         Value::Array(a) => a.iter().collect(),
         Value::Object(_) => [
@@ -408,7 +408,7 @@ mod tests {
         assert!(metabolize(&[trace], &MetabolizePolicy::default()).is_empty());
     }
 
-    // A status string stands in for an explicit success bool (Kushtaka task state).
+    // A status string stands in for an explicit success bool (a harness task state).
     #[test]
     fn status_string_maps_to_success() {
         let done = HarnessTrace::from_value(&serde_json::json!({
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn normalizer_tolerates_each_tool_envelope() {
         // list_tasks-style: { tasks: [...] }
-        let tasks = traces_from_kushtaka(&serde_json::json!({
+        let tasks = normalize_traces(&serde_json::json!({
             "count": 2,
             "tasks": [
                 {"task_id": "k1", "prompt": "do x", "outcome": "did x"},
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(tasks[0].goal, "do x");
 
         // behavior-graph evaluations: { runs: [...] } with a count-recurrence.
-        let runs = traces_from_kushtaka(&serde_json::json!({
+        let runs = normalize_traces(&serde_json::json!({
             "runs": [{"run_id": "r1", "objective": "g", "final_output": "o", "count": 5}]
         }));
         assert_eq!(runs.len(), 1);
@@ -451,11 +451,11 @@ mod tests {
 
         // a single trace object (get_task_trace) and the empty / wrong-typed cases.
         assert_eq!(
-            traces_from_kushtaka(&serde_json::json!({"goal": "g", "solution": "s"})).len(),
+            normalize_traces(&serde_json::json!({"goal": "g", "solution": "s"})).len(),
             1
         );
-        assert!(traces_from_kushtaka(&serde_json::json!({})).len() == 1); // self as one
-        assert!(traces_from_kushtaka(&serde_json::json!([])).is_empty());
-        assert!(traces_from_kushtaka(&serde_json::json!("nope")).is_empty());
+        assert!(normalize_traces(&serde_json::json!({})).len() == 1); // self as one
+        assert!(normalize_traces(&serde_json::json!([])).is_empty());
+        assert!(normalize_traces(&serde_json::json!("nope")).is_empty());
     }
 }

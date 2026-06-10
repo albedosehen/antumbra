@@ -26,7 +26,7 @@ The engine is identical across all three; only transport, identity, and who runs
 
 ## Two kinds of parity: **absorb** vs **build**
 
-A predecessor agent engine (Kushtakas) exposed memory, code intelligence, planning, behavior graphs (a composable "behavior mixer"), an evaluation harness, autonomous loops, per-workspace embedders, and a web dashboard (2D/3D memory views, stats, knowledge documents, remote agent control, onboarding). Antumbra does **not** clone all of it; its thesis is to _absorb_ the orchestration and _build_ the control plane.
+A predecessor agent engine exposed memory, code intelligence, planning, behavior graphs (a composable "behavior mixer"), an evaluation harness, autonomous loops, per-workspace embedders, and a web dashboard (2D/3D memory views, stats, knowledge documents, remote agent control, onboarding). Antumbra does **not** clone all of it; its thesis is to _absorb_ the orchestration and _build_ the control plane, superseding that harness rather than depending on it.
 
 ### Absorbed: superseded by metabolizing (not re-implemented as runtime scaffold)
 

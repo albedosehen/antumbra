@@ -6,7 +6,7 @@
 
 Antumbra needs a document store (the stores), a vector index (router retrieval, boundary lookup), a graph (lineage), and durable flow state (resumable loop/router). Running four systems is overhead. SurrealDB is one multi-model engine that does all four, and `surql-rs` (`oneiriq-surql` ≥ 0.28) gives Rust a type-safe layer with HNSW index defs, `<|k|>` KNN, `RELATE`/traverse helpers, migrations, and transactions - exactly this project's hot path.
 
-Two proven references inform the schema (we reuse their **persistence patterns**, not their orchestration): **kushtaka** (memory networks, HNSW recall, `memory_contradiction`, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** at `C:\Users\shonp\repos\data-plane-builder-graph` (schema-as-code in `shared/schema/*.py`, drift detection in `schema/drift.py`, timestamped `migrations/`, tenant `PERMISSIONS` in `schema/_permissions.py`).
+Two proven references inform the schema (we reuse their **persistence patterns**, not their orchestration): a prior memory engine (memory networks, HNSW recall, `memory_contradiction`, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** at `C:\Users\shonp\repos\data-plane-builder-graph` (schema-as-code in `shared/schema/*.py`, drift detection in `schema/drift.py`, timestamped `migrations/`, tenant `PERMISSIONS` in `schema/_permissions.py`).
 
 ## Decision
 
@@ -113,7 +113,7 @@ DEFINE FIELD capabilities ON device_profile TYPE object DEFAULT {};
 DEFINE INDEX device_host_idx ON device_profile FIELDS host, backend;
 DEFINE TABLE placed_on TYPE RELATION FROM expert TO device_profile;
 
--- Validation harness (kushtaka's strongest idea: one row per measured run).
+-- Validation harness (the audit-trail pattern: one row per measured run).
 DEFINE TABLE evaluation_run SCHEMAFULL;
 DEFINE FIELD run_id        ON evaluation_run TYPE string;
 DEFINE FIELD subject_kind  ON evaluation_run TYPE string
@@ -137,7 +137,7 @@ DEFINE INDEX eval_subject_idx ON evaluation_run FIELDS subject_kind, subject_id;
 ## Alternatives considered
 
 - **Separate vector DB + document DB + graph DB.** Rejected: operational overhead; SurrealDB unifies them.
-- **Reuse dpbg / kushtaka schema as a dependency.** Rejected (greenfield); their _patterns_ are adopted, the code is not.
+- **Reuse the dpbg / prior-engine schema as a dependency.** Rejected (greenfield); their _patterns_ are adopted, the code is not.
 
 ## Validation
 

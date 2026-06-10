@@ -44,8 +44,8 @@ pub use corpus::JsonCorpus;
 pub use eval::{eval_pass_rate, EvalOutcome, TaskResult};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use harness::{
-    metabolize, parse_traces as parse_harness_traces, traces_from_kushtaka, HarnessStep,
-    HarnessTrace, MetabolizePolicy,
+    metabolize, normalize_traces, parse_traces as parse_harness_traces, HarnessStep, HarnessTrace,
+    MetabolizePolicy,
 };
 pub use memory::{import as import_memories, ImportPolicy, ImportedTask, Intake, MemoryRecord};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};

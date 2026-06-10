@@ -71,7 +71,7 @@ pub enum Command {
         #[arg(long, default_value_t = 0.08)]
         threshold: f32,
         /// Standing experts always composed onto the routed one (your conventions),
-        /// `name:weight,...`, the Kushtaka rule layer, internalized into the learned gate.
+        /// `name:weight,...`, the static rule layer, internalized into the learned gate.
         #[arg(long)]
         with: Option<String>,
         /// Blend weight for the task-routed (contextual) expert when composing
@@ -295,8 +295,8 @@ pub enum Command {
         #[arg(long, default_value_t = 32)]
         max_new_tokens: usize,
     },
-    /// Bootstrap from an existing memory corpus (Kushtaka, qdrant, surrealdb, a
-    /// json file): adapt a normalized memory export into capture tasks and learn
+    /// Bootstrap from an existing memory corpus (qdrant, surrealdb, a json
+    /// file): adapt a normalized memory export into capture tasks and learn
     /// from them, instead of discovering every skill cold via RAFT. Reinforced
     /// memories are captured (trusted on import); weak ones become RAFT seeds.
     /// Writes the converted corpus; with --train, internalizes the captures.
@@ -425,35 +425,18 @@ pub enum Command {
         #[arg(long, default_value_t = 0.5)]
         replay_ratio: f64,
     },
-    /// Metabolize a harness into the frozen-expert population: adapt a harness's successful
-    /// orchestration traces (loop runs, behavior-graph evaluations, task
+    /// Metabolize orchestration traces into the frozen-expert population: adapt a
+    /// normalized trace export (loop runs, behavior-graph evaluations, task
     /// executions) into capture tasks the population internalizes, so the brain
-    /// learns to do in one shot what the harness did in many steps. Only
-    /// successful, recurrent traces metabolize. Writes the converted corpus; with
-    /// --train, internalizes it. Needs --features models.
+    /// learns to do in one shot what it took many steps to do. Only successful,
+    /// recurrent traces metabolize. Writes the converted corpus; with --train,
+    /// internalizes it. Needs --features models.
     Metabolize {
         /// JSON file of normalized harness traces ({goal, solution, kind, steps,
-        /// success, recurrence, ...}). See `harness::HarnessTrace`. Provide this
-        /// OR --from-harness.
+        /// success, recurrence, ...}). See `antumbra_train::HarnessTrace`. Any
+        /// harness exports to this shape (see scripts/ for an example adapter).
         #[arg(long)]
-        source: Option<String>,
-        /// Pull traces LIVE from a running Kushtaka harness instead of a file:
-        /// the MCP engine base URL (e.g. http://10.0.0.110:8081). Needs --api-key
-        /// (or ANTUMBRA_KUSHTAKA_KEY). Normalizes any trace-returning tool.
-        #[arg(long)]
-        from_harness: Option<String>,
-        /// The Kushtaka trace tool to call (any trace-shaped response works).
-        #[arg(long, default_value = "list_tasks")]
-        harness_tool: String,
-        /// Extra JSON args for the harness tool (e.g. '{"graph_id":"g","limit":50}').
-        #[arg(long)]
-        harness_args: Option<String>,
-        /// Kushtaka API key for --from-harness (else env ANTUMBRA_KUSHTAKA_KEY).
-        #[arg(long)]
-        api_key: Option<String>,
-        /// Kushtaka workspace/scope passed on each call.
-        #[arg(long)]
-        scope: Option<String>,
+        source: String,
         /// Where to write the converted capture corpus for inspection / `teach`.
         #[arg(long, default_value = "corpora/_metabolized.json")]
         out: String,

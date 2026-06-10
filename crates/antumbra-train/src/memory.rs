@@ -1,7 +1,7 @@
 //! Bootstrap from an existing memory corpus (the capture intake into the composed model).
 //!
 //! People already hold verified competence in their agents' memory stores:
-//! Kushtaka, a qdrant collection, a json file, surrealdb. A memory earned its
+//! a qdrant collection, a json file, surrealdb. A memory earned its
 //! place by working in production and being reinforced; that reinforcement is
 //! the reward signal RLVR would otherwise have to rediscover from a cold start.
 //! This module adapts a *normalized* memory export into the same [`CorpusTask`]s
@@ -29,7 +29,7 @@ use serde_json::Value;
 use crate::model::CorpusTask;
 
 /// One normalized memory, source-agnostic. An adapter for any backing store
-/// (Kushtaka, qdrant, surrealdb, a json file) only has to emit this shape. Like
+/// (qdrant, surrealdb, a json file) only has to emit this shape. Like
 /// [`crate::corpus`], it is read from a `serde_json::Value` by hand to keep the
 /// serde derive out of the default (non-`models`) build.
 #[derive(Debug, Clone, Default)]

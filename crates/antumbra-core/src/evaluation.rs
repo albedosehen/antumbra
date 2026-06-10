@@ -1,7 +1,7 @@
-//! Evaluation runs: one row per measured run (the reuse of kushtaka's
-//! strongest idea). The `regression_fingerprint` is what makes the
-//! no-forgetting invariant *checkable*: a frozen expert's
-//! fingerprint on its corpus must not change when the population grows.
+//! Evaluation runs: one row per measured run (the audit trail behind the
+//! no-forgetting invariant). The `regression_fingerprint` is what makes that
+//! invariant *checkable*: a frozen expert's fingerprint on its corpus must not
+//! change when the population grows.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

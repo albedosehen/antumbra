@@ -7,7 +7,7 @@ These ADRs capture the **load-bearing decisions** behind Antumbra. **ADR-0004 (t
 | Status                    | Meaning                                                                        |
 | ------------------------- | ------------------------------------------------------------------------------ |
 | **Accepted**              | Decided; build to it.                                                          |
-| **Antumbra**              | The central idea; first-class; the project's defining gate.                  |
+| **Antumbra**              | The central idea; first-class; the project's defining gate.                    |
 | **Proposed**              | Direction set, not yet proven; validated behind a kill criterion.              |
 | **North star / Deferred** | The target architecture or out-of-scope-for-v0; documented so the seam exists. |
 

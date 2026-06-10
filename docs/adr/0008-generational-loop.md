@@ -4,7 +4,7 @@
 
 ## Context
 
-ADRs 0001 through 0005 describe _parts_; something has to drive them as one continuous process: grow shadows, let them explore, score them, graduate the winners, prune the losers, consolidate failures, repeat - unattended, across reboots. kushtaka's loop is _task-centric_ (one task at a time); Antumbra's must be **population-aware** (it manages a growing population across generations) and **durable** (it survives crashes by treating persisted `status` as the checkpoint - the dpbg pattern, done as a real flow engine rather than CRUD handlers).
+ADRs 0001 through 0005 describe _parts_; something has to drive them as one continuous process: grow shadows, let them explore, score them, graduate the winners, prune the losers, consolidate failures, repeat - unattended, across reboots. A conventional agent loop is _task-centric_ (one task at a time); Antumbra's must be **population-aware** (it manages a growing population across generations) and **durable** (it survives crashes by treating persisted `status` as the checkpoint - the dpbg pattern, done as a real flow engine rather than CRUD handlers).
 
 ## Decision
 
@@ -37,7 +37,7 @@ stateDiagram-v2
 
 ## Alternatives considered
 
-- **Reuse kushtaka's task loop.** Rejected: task-centric, not population-aware (greenfield anyway).
+- **Reuse a conventional task loop.** Rejected: task-centric, not population-aware (greenfield anyway).
 - **In-memory loop, persist only results.** Rejected: not crash-resumable; the durable-state property is the point.
 - **A general workflow engine (Temporal etc.).** Rejected for v0: heavyweight; the state machine over SurrealDB is enough and keeps everything in one substrate.
 

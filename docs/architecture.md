@@ -106,7 +106,7 @@ The fleet (MacBook M4 Pro 48 GB, RTX 3080 mobile, GTX 1080, Jetson Orin Nano) an
 
 ## 5. Schema (SurrealDB) - summary
 
-Full DDL in [the SurrealDB substrate record](adr/0007-surrealdb-substrate.md). In v0 an `expert` row describes a **frozen LoRA adapter over the shared base** (`base_model` = the shared base, `artifact_uri` = adapter path). Patterns reuse **kushtaka** (HNSW recall, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** (`C:\Users\shonp\repos\data-plane-builder-graph`: schema-as-code, drift detection, migrations, tenant perms).
+Full DDL in [the SurrealDB substrate record](adr/0007-surrealdb-substrate.md). In v0 an `expert` row describes a **frozen LoRA adapter over the shared base** (`base_model` = the shared base, `artifact_uri` = adapter path). Patterns reuse a **prior memory engine** (HNSW recall, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** (`C:\Users\shonp\repos\data-plane-builder-graph`: schema-as-code, drift detection, migrations, tenant perms).
 
 ```mermaid
 erDiagram
@@ -143,7 +143,7 @@ erDiagram
 | Training    | **`candle`** - QLoRA adapters **and** the gate (NF4 4-bit base + LoRA); `burn` fallback                                        |
 | Base model  | open, **code-capable** (Qwen-Coder-class or a code-tuned OLMo 3); shared by all adapters                                       |
 | Embeddings  | 384-d (all-MiniLM-L6-v2, candle BERT, CPU); capability vectors are the centroid of solved-task embeddings (evaluated behavior) |
-| Async / CLI | `tokio`; `ratatui` (Kushtaka-style ergonomics)                                                                                 |
+| Async / CLI | `tokio`; `ratatui` (terminal-native ergonomics)                                                                                |
 
 ---
 

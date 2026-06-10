@@ -17,10 +17,6 @@ use clap::Parser;
 
 mod cli;
 mod commands;
-// Live harness ingestion (R-5): the Kushtaka trace puller. Models-gated like the
-// `metabolize` command it serves.
-#[cfg(feature = "models")]
-mod harness;
 mod ops;
 use cli::{Cli, Command};
 
@@ -1032,11 +1028,6 @@ async fn run() -> anyhow::Result<()> {
         }
         Command::Metabolize {
             source,
-            from_harness,
-            harness_tool,
-            harness_args,
-            api_key,
-            scope,
             out,
             min_recurrence,
             no_steps,
@@ -1053,11 +1044,6 @@ async fn run() -> anyhow::Result<()> {
                 &cli.url,
                 commands::MetabolizeArgs {
                     source,
-                    from_harness,
-                    harness_tool,
-                    harness_args,
-                    api_key,
-                    scope,
                     out,
                     min_recurrence,
                     no_steps,
