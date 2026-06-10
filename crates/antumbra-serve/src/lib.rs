@@ -52,7 +52,9 @@ pub use antumbra_train::consolidate::ConsolidationPolicy;
 pub struct MultiAdapterServe {
     base_model: String,
     config: antumbra_train::RaftConfig,
-    registry: std::collections::HashMap<antumbra_core::ExpertId, String>,
+    // `RwLock` so the engine can hot-register a freshly-minted expert (autonomous
+    // consolidation) through a shared `&self`, instead of snapshotting at build.
+    registry: std::sync::RwLock<std::collections::HashMap<antumbra_core::ExpertId, String>>,
     state: tokio::sync::Mutex<Resident>,
 }
 
@@ -72,7 +74,7 @@ impl MultiAdapterServe {
         Self {
             base_model: base_model.into(),
             config,
-            registry: std::collections::HashMap::new(),
+            registry: std::sync::RwLock::new(std::collections::HashMap::new()),
             state: tokio::sync::Mutex::new(Resident::default()),
         }
     }
@@ -80,7 +82,10 @@ impl MultiAdapterServe {
     /// Map an expert to its adapter file (its `artifact_uri`). Routes naming this
     /// expert hot-swap that file onto the resident base.
     pub fn register(&mut self, expert: antumbra_core::ExpertId, adapter_path: impl Into<String>) {
-        self.registry.insert(expert, adapter_path.into());
+        self.registry
+            .get_mut()
+            .expect("registry lock")
+            .insert(expert, adapter_path.into());
     }
 
     /// Builder form of [`register`](Self::register) for fluent construction from
@@ -97,12 +102,12 @@ impl MultiAdapterServe {
 
     /// How many adapters are registered.
     pub fn len(&self) -> usize {
-        self.registry.len()
+        self.registry.read().expect("registry lock").len()
     }
 
     /// Whether no adapter is registered.
     pub fn is_empty(&self) -> bool {
-        self.registry.is_empty()
+        self.registry.read().expect("registry lock").is_empty()
     }
 }
 
@@ -112,7 +117,19 @@ impl Serve for MultiAdapterServe {
     /// Servable iff the expert's adapter was registered (this engine snapshots the
     /// population at build time), so a route to an unregistered expert escalates.
     fn can_serve(&self, expert: &antumbra_core::ExpertId) -> bool {
-        self.registry.contains_key(expert)
+        self.registry
+            .read()
+            .expect("registry lock")
+            .contains_key(expert)
+    }
+
+    /// Hot-register a freshly-minted expert's adapter, so a route to it serves
+    /// without a restart (closes the autonomous consolidation loop end to end).
+    fn register_expert(&self, expert: &antumbra_core::ExpertId, adapter_uri: &str) {
+        self.registry
+            .write()
+            .expect("registry lock")
+            .insert(expert.clone(), adapter_uri.to_string());
     }
 
     async fn act(
@@ -135,12 +152,18 @@ impl Serve for MultiAdapterServe {
         })?;
         // Resolve before touching the device: an unknown expert is a config
         // error, not a generation failure, and must not pay a model load.
-        let path = self.registry.get(&target).cloned().ok_or_else(|| {
-            AntumbraError::other(format!(
-                "MultiAdapterServe: no adapter registered for {target} (register the population \
-                 before serving)"
-            ))
-        })?;
+        let path = self
+            .registry
+            .read()
+            .expect("registry lock")
+            .get(&target)
+            .cloned()
+            .ok_or_else(|| {
+                AntumbraError::other(format!(
+                    "MultiAdapterServe: no adapter registered for {target} (register the population \
+                     before serving)"
+                ))
+            })?;
 
         // candle generation is synchronous and device-bound. Run it under
         // `block_in_place` so the runtime spawns a replacement worker and other

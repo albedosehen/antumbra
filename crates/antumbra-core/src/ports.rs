@@ -49,6 +49,12 @@ pub trait Serve: Send + Sync {
     fn can_serve(&self, _expert: &ExpertId) -> bool {
         true
     }
+
+    /// Register (or replace) an expert's adapter in the live engine, so a route
+    /// to a freshly-minted expert (autonomous consolidation, training) serves
+    /// without a restart. Default no-op for engines that pin a single adapter or
+    /// snapshot their population at build time.
+    fn register_expert(&self, _expert: &ExpertId, _adapter_uri: &str) {}
 }
 
 /// The optional flagship escalation tier: consulted only when the

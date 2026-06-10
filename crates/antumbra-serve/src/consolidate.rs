@@ -21,6 +21,8 @@ use antumbra_train::{capture_corrections, CandleModelLoader, CorpusTask, ModelLo
 #[derive(Debug, Clone)]
 pub struct ConsolidationOutcome {
     pub expert: ExpertId,
+    /// The minted adapter's path, so a live engine can hot-register it.
+    pub adapter_uri: String,
     pub graduated: usize,
     pub fitness: f32,
 }
@@ -110,6 +112,7 @@ pub async fn consolidate_compartment(
 
     Ok(Some(ConsolidationOutcome {
         expert: e.id,
+        adapter_uri: e.artifact_uri,
         graduated,
         fitness: out.final_fitness,
     }))

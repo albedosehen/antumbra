@@ -181,6 +181,7 @@ impl McpServer {
             let tenant = self.tenant.clone();
             let user = _mem.author.clone().unwrap_or_else(|| self.user.clone());
             let inflight = self.consolidating.clone();
+            let serve = self.serve.clone();
             let policy = antumbra_serve::ConsolidationPolicy {
                 min_recurrence: acfg.min_recurrence,
                 min_confidence: acfg.min_confidence,
@@ -206,13 +207,20 @@ impl McpServer {
                 )
                 .await
                 {
-                    Ok(Some(o)) => eprintln!(
-                        "[auto-consolidate] {} : {} graduated -> {} (internalized {:.2})",
-                        comp.as_str(),
-                        o.graduated,
-                        o.expert.as_str(),
-                        o.fitness
-                    ),
+                    Ok(Some(o)) => {
+                        // Close the loop: hot-register the minted expert so the
+                        // `answer` tool can serve it now, with no server restart.
+                        if let Some(serve) = &serve {
+                            serve.register_expert(&o.expert, &o.adapter_uri);
+                        }
+                        eprintln!(
+                            "[auto-consolidate] {} : {} graduated -> {} (internalized {:.2}, now servable)",
+                            comp.as_str(),
+                            o.graduated,
+                            o.expert.as_str(),
+                            o.fitness
+                        );
+                    }
                     Ok(None) => {}
                     Err(e) => eprintln!("[auto-consolidate] {} failed: {e}", comp.as_str()),
                 }
@@ -778,8 +786,10 @@ impl McpServer {
             m = m.volatile(true);
         }
         memory::upsert(&self.store, &m).await.map_err(err)?;
-        // Autonomous trigger: if the inbox has grown enough, the antumbra
-        // organizes it now (no-op when disabled or below threshold).
+        // Autonomous triggers (both no-ops when disabled / below threshold): the
+        // antumbra organizes the inbox once it grows, and a write that itself
+        // clears the consolidation gate graduates its compartment now.
+        self.maybe_consolidate(&m).await;
         let auto_proposed = self.maybe_auto_propose().await.map_err(err)?;
         Ok(Json(StoredOut { id, auto_proposed }))
     }
@@ -1445,8 +1455,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "needs --features models + a GPU + python; run with --ignored"]
     async fn auto_consolidate_mints_a_private_expert_on_reinforce() {
+        use antumbra_core::ports::Serve;
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();
         let comp = "comp:ws:test:auto";
+        // A real (empty) serve engine: the trigger should hot-register the minted
+        // expert into it, so `answer` could serve it with no restart.
+        let serve = Arc::new(antumbra_serve::MultiAdapterServe::new(
+            "Qwen/Qwen2.5-Coder-1.5B",
+            antumbra_serve::RaftConfig::default(),
+        ));
         let s = McpServer::new(
             store.clone(),
             Arc::new(FixedEmbedder::new(EMBED_DIM)),
@@ -1454,7 +1471,7 @@ mod tests {
             UserId::new("user:test"),
             "test-host".into(),
             CompartmentId::new(comp),
-            None,
+            Some(serve.clone() as Arc<dyn antumbra_core::ports::Serve>),
         )
         .with_auto_consolidate();
 
@@ -1486,20 +1503,26 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
 
-        // The consolidation runs in a spawned task; poll for the private expert.
+        // The consolidation runs in a spawned task. `can_serve` flips true only
+        // after the expert is minted AND hot-registered, so it is the end-to-end
+        // signal that the whole loop closed (memory -> expert -> servable).
         let want = ExpertId::new(format!("expert:user:test:{comp}"));
-        let mut minted = false;
+        let mut servable = false;
         for _ in 0..240 {
-            if expert::get(&store, &want).await.unwrap().is_some() {
-                minted = true;
+            if serve.can_serve(&want) {
+                servable = true;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
         assert!(
-            minted,
-            "autonomous consolidation should mint {} on reinforce",
+            servable,
+            "autonomous consolidation should mint {} and hot-register it for serving",
             want.as_str()
+        );
+        assert!(
+            expert::get(&store, &want).await.unwrap().is_some(),
+            "the minted expert is persisted in the store"
         );
     }
 
