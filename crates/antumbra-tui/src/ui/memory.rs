@@ -28,6 +28,13 @@ const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
     (MemoryNetwork::Opinion, (60.0, -38.0)),
 ];
 
+/// Cap the nodes drawn per network on the canvas. The graph is a visualization,
+/// not a list: a real store holds thousands of memories, and laying out and
+/// drawing every one each frame pegs a core and starves input for no visual gain
+/// (the ring just fills solid). Memories arrive sorted strongest-first per
+/// network, so the cap keeps the most reinforced anchors.
+const MAX_GRAPH_NODES_PER_NETWORK: usize = 48;
+
 pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     let cols =
         Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).split(area);
@@ -63,7 +70,12 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
             // Lay each network's traces on a ring around its anchor.
             let mut pos: HashMap<&str, (f64, f64)> = HashMap::new();
             for (net, (ax, ay)) in ANCHORS {
-                let mems: Vec<&_> = app.memories.iter().filter(|m| m.network == net).collect();
+                let mems: Vec<&_> = app
+                    .memories
+                    .iter()
+                    .filter(|m| m.network == net)
+                    .take(MAX_GRAPH_NODES_PER_NETWORK)
+                    .collect();
                 let n = mems.len();
                 for (j, m) in mems.iter().enumerate() {
                     let p = if n <= 1 {
