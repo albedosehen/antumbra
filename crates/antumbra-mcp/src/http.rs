@@ -68,7 +68,12 @@ struct HttpState {
     serve_store: Store,
     host: String,
     verifier: JwtVerifier,
+    /// The server default embedder (the `--embedder-url` / built-in), used for
+    /// any workspace without its own configured endpoint.
     embedder: Arc<dyn Embedder>,
+    /// Per-tenant resolved embedders (hosted P-1c): a workspace's own configured
+    /// endpoint when set, else `embedder`. Resolved once per tenant and cached.
+    embedders: Mutex<HashMap<String, Arc<dyn Embedder>>>,
     /// Serializes `signin(identity) -> handle` so two identities never share the
     /// connection's auth state concurrently.
     auth: Mutex<()>,
@@ -120,6 +125,7 @@ pub async fn serve(
         host,
         verifier,
         embedder,
+        embedders: Mutex::new(HashMap::new()),
         auth: Mutex::new(()),
         auto_propose,
         auto_consolidate,
@@ -259,14 +265,17 @@ impl HttpState {
         let user = UserId::new(&identity.user);
         // Provision owner-side (principal + default compartment), under the auth
         // lock in owner mode so it never races a signed-in request.
-        let default_compartment = {
+        let (default_compartment, embedder) = {
             let _guard = self.auth.lock().await;
             self.store.signin_root().await?;
-            crate::provision_identity(&self.store, &tenant, &user).await?
+            let dc = crate::provision_identity(&self.store, &tenant, &user).await?;
+            // Resolve the workspace's embedder under the owner connection (P-1c).
+            let emb = self.embedder_for(&tenant).await;
+            (dc, emb)
         };
         let mut mcp = McpServer::new(
             self.serve_store.clone(),
-            self.embedder.clone(),
+            embedder,
             tenant,
             user,
             self.host.clone(),
@@ -280,6 +289,33 @@ impl HttpState {
             mcp = mcp.with_auto_consolidate();
         }
         Ok(mcp)
+    }
+
+    /// Resolve a workspace's embedder (hosted P-1c): its own configured endpoint
+    /// when set, else the server default. Cached per tenant after the first
+    /// resolution; a config read error falls back to the default rather than
+    /// failing the session. The caller holds the auth lock in owner mode, so the
+    /// (tenant-scoped) config row is read on the owner connection.
+    async fn embedder_for(&self, tenant: &TenantId) -> Arc<dyn Embedder> {
+        let key = tenant.as_str().to_string();
+        if let Some(e) = self.embedders.lock().await.get(&key) {
+            return e.clone();
+        }
+        let resolved = match antumbra_store::repo::embedder_config::get(&self.store, tenant).await {
+            Ok(Some(cfg)) => Arc::new(antumbra_embed::HttpEmbedder::new(
+                cfg.url, cfg.model, cfg.api_key,
+            )) as Arc<dyn Embedder>,
+            Ok(None) => self.embedder.clone(),
+            Err(e) => {
+                eprintln!("antumbra-mcp: embedder config read failed for {key}: {e}; using default");
+                self.embedder.clone()
+            }
+        };
+        self.embedders
+            .lock()
+            .await
+            .insert(key, resolved.clone());
+        resolved
     }
 }
 
@@ -410,6 +446,7 @@ mod tests {
             host: "test".into(),
             verifier: JwtVerifier::hs256(b"test-secret"),
             embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            embedders: Mutex::new(HashMap::new()),
             auth: Mutex::new(()),
             auto_propose: None,
             auto_consolidate: false,
