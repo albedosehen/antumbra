@@ -284,6 +284,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("principal")
             .with_mode(TableMode::Schemaless)
             .with_indexes([unique_index("principal_tenant_user_uq", ["tenant", "user"])]),
+        // Per-workspace embedder endpoint (hosted multi-tenant): one row per
+        // tenant, tenant-scoped so a workspace sets only its own.
+        table_schema("embedder_config")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(TENANT_PERMS)
+            .with_indexes([unique_index("embedder_config_tenant_uq", ["tenant_id"])]),
     ]
 }
 

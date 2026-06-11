@@ -8,6 +8,7 @@ pub mod boundary;
 pub mod compartment;
 pub mod document;
 pub mod edge;
+pub mod embedder_config;
 pub mod evaluation;
 pub mod expert;
 pub mod generation;
