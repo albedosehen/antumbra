@@ -286,7 +286,14 @@ impl HttpState {
             mcp = mcp.with_auto_propose(threshold);
         }
         if self.auto_consolidate {
-            mcp = mcp.with_auto_consolidate();
+            // The autonomous trigger must consolidate on a stable OWNER
+            // connection, not the per-request scoped `serve_store` this server is
+            // built with. `store` is the root/owner connection (only ever
+            // signed-in-as-root), so the detached background task gathers,
+            // provisions, and mints as owner regardless of request churn.
+            mcp = mcp
+                .with_auto_consolidate()
+                .with_consolidation_store(self.store.clone());
         }
         Ok(mcp)
     }

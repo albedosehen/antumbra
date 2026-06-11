@@ -30,6 +30,13 @@ use antumbra_store::Store;
 #[derive(Clone)]
 pub struct McpServer {
     store: Store,
+    /// A stable OWNER connection the autonomous consolidation background task
+    /// runs on (gather + provision + mint execute as root). In the multi-tenant
+    /// HTTP server `store` is the per-request *scoped* connection, which a
+    /// detached task cannot rely on; `None` falls back to `store` (stdio /
+    /// embedded, where it is already the owner connection).
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    consolidation_store: Option<Store>,
     embedder: Arc<dyn Embedder>,
     tenant: TenantId,
     /// The user this session acts as (compartment owner / grantor).
@@ -99,6 +106,7 @@ impl McpServer {
     ) -> Self {
         Self {
             store,
+            consolidation_store: None,
             embedder,
             tenant,
             user,
@@ -154,6 +162,17 @@ impl McpServer {
         self
     }
 
+    /// Set the OWNER connection the autonomous consolidation runs on. The HTTP
+    /// server passes its stable root connection here, because the per-request
+    /// scoped `store` it builds each `McpServer` with is not safe to use from a
+    /// detached background task (its signin is rebound per request). Unset, the
+    /// trigger uses `store` (correct for stdio / the embedded owner connection).
+    #[must_use]
+    pub fn with_consolidation_store(mut self, store: Store) -> Self {
+        self.consolidation_store = Some(store);
+        self
+    }
+
     /// Autonomous consolidation: if the just-written/reinforced `mem` belongs to
     /// a compartment, graduate that compartment into a private expert in the
     /// background (one train per compartment at a time; a burst coalesces). The
@@ -176,7 +195,13 @@ impl McpServer {
                     return; // already consolidating this compartment
                 }
             }
-            let store = self.store.clone();
+            // Run the gather + provision + mint as OWNER on a stable connection,
+            // not the per-request scoped `store` (which a detached task cannot
+            // rely on); falls back to `store` for stdio / the embedded owner.
+            let store = self
+                .consolidation_store
+                .clone()
+                .unwrap_or_else(|| self.store.clone());
             let embedder = self.embedder.clone();
             let tenant = self.tenant.clone();
             let user = _mem.author.clone().unwrap_or_else(|| self.user.clone());
