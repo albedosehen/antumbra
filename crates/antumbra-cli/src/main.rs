@@ -1080,6 +1080,20 @@ async fn run() -> anyhow::Result<()> {
             )
             .await?;
         }
+        Command::SetEmbedder {
+            tenant,
+            endpoint,
+            model,
+            key,
+        } => {
+            ops::set_embedder(&cli.url, &tenant, &endpoint, &model, key).await?;
+        }
+        Command::GetEmbedder { tenant } => {
+            ops::get_embedder(&cli.url, &tenant).await?;
+        }
+        Command::Reembed { tenant } => {
+            ops::reembed(&cli.url, &tenant).await?;
+        }
     }
     Ok(())
 }

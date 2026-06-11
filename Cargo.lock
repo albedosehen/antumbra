@@ -195,6 +195,7 @@ dependencies = [
  "antumbra-boundary",
  "antumbra-core",
  "antumbra-critic",
+ "antumbra-embed",
  "antumbra-gate",
  "antumbra-loop",
  "antumbra-serve",

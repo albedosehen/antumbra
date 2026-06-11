@@ -498,3 +498,81 @@ pub async fn remember(url: &str, a: RememberArgs) -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// Set a workspace's embedder endpoint (hosted multi-tenant): the OpenAI-
+/// compatible `/embeddings` URL + model it embeds with. The owner/admin path
+/// (writes the tenant-scoped `embedder_config` row on the owner connection).
+pub async fn set_embedder(
+    url: &str,
+    tenant: &str,
+    endpoint: &str,
+    model: &str,
+    key: Option<String>,
+) -> anyhow::Result<()> {
+    use antumbra_store::repo::embedder_config::{self, EmbedderConfig};
+
+    let store = crate::connect(url).await?;
+    embedder_config::upsert(
+        &store,
+        &EmbedderConfig {
+            tenant_id: tenant.to_string(),
+            url: endpoint.to_string(),
+            model: model.to_string(),
+            api_key: key,
+        },
+    )
+    .await?;
+    println!("set embedder for {tenant}: {endpoint} ({model})");
+    println!(
+        "note: applied to sessions built after now; reconnect the workspace's agent \
+         (or restart the server) to apply to an active session, and run \
+         `reembed --tenant {tenant}` if the model changed"
+    );
+    Ok(())
+}
+
+/// Show a workspace's configured embedder, or that it falls back to the default.
+pub async fn get_embedder(url: &str, tenant: &str) -> anyhow::Result<()> {
+    use antumbra_core::TenantId;
+    use antumbra_store::repo::embedder_config;
+
+    let store = crate::connect(url).await?;
+    match embedder_config::get(&store, &TenantId::new(tenant)).await? {
+        Some(c) => println!(
+            "{tenant}: {} ({}){}",
+            c.url,
+            c.model,
+            if c.api_key.is_some() { " [key set]" } else { "" }
+        ),
+        None => println!("{tenant}: no embedder configured (uses the server default)"),
+    }
+    Ok(())
+}
+
+/// Re-embed all of a workspace's memories with its configured embedder. Run after
+/// changing a workspace's embedder model so its HNSW vectors (fixed `EMBED_DIM`)
+/// stay consistent with the new model; recall over a mix of old and new vectors
+/// is otherwise incoherent.
+pub async fn reembed(url: &str, tenant: &str) -> anyhow::Result<()> {
+    use antumbra_core::ports::Embedder;
+    use antumbra_core::TenantId;
+    use antumbra_store::repo::{embedder_config, memory};
+
+    let store = crate::connect(url).await?;
+    let t = TenantId::new(tenant);
+    let cfg = embedder_config::get(&store, &t).await?.ok_or_else(|| {
+        anyhow::anyhow!("workspace {tenant} has no embedder config; set one with `set-embedder` first")
+    })?;
+    let embedder = antumbra_embed::HttpEmbedder::new(cfg.url.clone(), cfg.model.clone(), cfg.api_key);
+
+    let mems = memory::list(&store, &t).await?;
+    let total = mems.len();
+    let mut n = 0usize;
+    for m in &mems {
+        let emb = embedder.embed(&m.content).await?;
+        memory::upsert(&store, &m.clone().with_embedding(emb)).await?;
+        n += 1;
+    }
+    println!("re-embedded {n}/{total} memories for {tenant} via {} ({})", cfg.url, cfg.model);
+    Ok(())
+}

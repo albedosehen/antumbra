@@ -23,6 +23,9 @@ path = "src/main.rs"
 # embedder until the real candle/llama engines (antumbra-train/serve) land.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
+# The per-workspace embedder (set-embedder / reembed) builds an HttpEmbedder
+# from a workspace's configured endpoint; light (ureq), no models needed.
+antumbra-embed = { path = "../antumbra-embed" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-loop = { path = "../antumbra-loop" }
 antumbra-gate = { path = "../antumbra-gate" }

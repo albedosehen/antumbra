@@ -491,4 +491,31 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         apply: bool,
     },
+    /// Set a workspace's embedder endpoint (hosted multi-tenant): the
+    /// OpenAI-compatible `/embeddings` URL + model it embeds with. Must produce
+    /// the index dimension. Applies to sessions built after; reconnect to apply
+    /// to an active one, and `reembed` if the model changed.
+    SetEmbedder {
+        #[arg(long)]
+        tenant: String,
+        /// The OpenAI-compatible `/embeddings` endpoint URL for this workspace.
+        #[arg(long)]
+        endpoint: String,
+        #[arg(long)]
+        model: String,
+        /// Optional bearer key for the endpoint.
+        #[arg(long)]
+        key: Option<String>,
+    },
+    /// Show a workspace's configured embedder (or that it uses the server default).
+    GetEmbedder {
+        #[arg(long)]
+        tenant: String,
+    },
+    /// Re-embed all of a workspace's memories with its configured embedder. Run
+    /// after changing the workspace's embedder model so recall stays coherent.
+    Reembed {
+        #[arg(long)]
+        tenant: String,
+    },
 }
