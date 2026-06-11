@@ -58,6 +58,8 @@ fn str_array(v: &Value, key: &str) -> Vec<String> {
 /// supervision into *process* supervision, so the expert learns the decomposition.
 #[derive(Debug, Clone, Default)]
 pub struct HarnessStep {
+    /// A stable id edges reference. Absent, a step is addressed by `step{index}`.
+    pub id: Option<String>,
     pub goal: String,
     pub solution: String,
     pub marker: Option<String>,
@@ -67,6 +69,7 @@ pub struct HarnessStep {
 impl HarnessStep {
     fn from_value(v: &Value) -> Self {
         Self {
+            id: first_str(v, &["id", "node_id", "step_id"]),
             goal: first_str(v, &["goal", "prompt", "name", "label", "description"])
                 .unwrap_or_default(),
             solution: first_str(
@@ -83,6 +86,28 @@ impl HarnessStep {
     /// (an empty node, a bare branch/marker, is scaffolding, not a sub-skill).
     fn is_metabolizable(&self) -> bool {
         !self.goal.is_empty() && !self.solution.is_empty()
+    }
+}
+
+/// A directed edge of a behavior graph: orchestration flows from one step to the
+/// next, optionally under a branch `condition`. Metabolizing edges teaches the
+/// *ordering / branching* (produce `to` after `from`), the dataflow the isolated
+/// per-step captures do not carry. `from`/`to` reference a step's id (or its
+/// synthesized `step{index}`).
+#[derive(Debug, Clone, Default)]
+pub struct HarnessEdge {
+    pub from: String,
+    pub to: String,
+    pub condition: Option<String>,
+}
+
+impl HarnessEdge {
+    fn from_value(v: &Value) -> Option<Self> {
+        Some(Self {
+            from: first_str(v, &["from", "source", "src"])?,
+            to: first_str(v, &["to", "target", "dst"])?,
+            condition: first_str(v, &["condition", "cond", "when"]),
+        })
     }
 }
 
@@ -116,6 +141,10 @@ pub struct HarnessTrace {
     /// tasks). Each becomes its own capture task under [`MetabolizePolicy`]'s
     /// `include_steps`, so the expert learns the process, not only the outcome.
     pub steps: Vec<HarnessStep>,
+    /// The graph's directed edges (ordering / branching between steps). Each
+    /// becomes a transition capture task under `include_steps`, so the expert
+    /// learns the dataflow, not only the isolated sub-skills.
+    pub edges: Vec<HarnessEdge>,
 }
 
 impl HarnessTrace {
@@ -154,6 +183,11 @@ impl HarnessTrace {
                 .and_then(Value::as_u64)
                 .map(|n| n as u32),
             steps,
+            edges: v
+                .get("edges")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(HarnessEdge::from_value).collect())
+                .unwrap_or_default(),
         }
     }
 
@@ -256,6 +290,34 @@ fn step_task(step: &HarnessStep, kind: &str, base_id: &str, n: usize) -> CorpusT
     task
 }
 
+/// Build the capture task for one edge: teach what follows what (the ordering /
+/// branch). The prompt frames the `to` step as the continuation of `from` (under
+/// the branch `condition`, when present); the completion is `to`'s outcome, so
+/// the expert learns the dataflow, not just the sub-skills in isolation.
+fn edge_task(
+    from: &HarnessStep,
+    to: &HarnessStep,
+    edge: &HarnessEdge,
+    kind: &str,
+    base_id: &str,
+) -> CorpusTask {
+    let marker = to.marker.as_deref().unwrap_or(&to.solution);
+    let cond = edge
+        .condition
+        .as_deref()
+        .map(|c| format!(" (when {c})"))
+        .unwrap_or_default();
+    let prompt = format!(
+        "After: {}{cond}\nwhich produced:\n{}\n\nNext: {}",
+        from.goal, from.solution, to.goal
+    );
+    let mut task = CorpusTask::new(format!("{base_id}#edge:{}->{}", edge.from, edge.to), prompt)
+        .with_verify(marker_verify(marker, &to.forbid))
+        .with_completion(to.solution.clone());
+    task.skill = Some(kind.to_string());
+    task
+}
+
 /// Metabolize the traces that clear the gate into capture tasks (per-kind
 /// skilled, carrying trusted completions). Failed and one-off traces are
 /// dropped; nothing unverified or non-recurrent is fine-tuned into the weights.
@@ -273,6 +335,22 @@ pub fn metabolize(traces: &[HarnessTrace], policy: &MetabolizePolicy) -> Vec<Cor
         if policy.include_steps {
             for (n, step) in trace.steps.iter().enumerate() {
                 out.push(step_task(step, &kind, &id, n));
+            }
+            // Transition tasks for the graph's edges (ordering / branching),
+            // resolving each edge's endpoints to steps (by id or `step{index}`);
+            // an edge naming a dropped/missing step is skipped.
+            if !trace.edges.is_empty() {
+                let by_id: std::collections::HashMap<String, &HarnessStep> = trace
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .map(|(n, s)| (s.id.clone().unwrap_or_else(|| format!("step{n}")), s))
+                    .collect();
+                for edge in &trace.edges {
+                    if let (Some(from), Some(to)) = (by_id.get(&edge.from), by_id.get(&edge.to)) {
+                        out.push(edge_task(from, to, edge, &kind, &id));
+                    }
+                }
             }
         }
     }
@@ -406,6 +484,41 @@ mod tests {
             "steps": [{"goal": "sub", "solution": "out"}]
         }));
         assert!(metabolize(&[trace], &MetabolizePolicy::default()).is_empty());
+    }
+
+    #[test]
+    fn edges_metabolize_into_transition_tasks() {
+        let trace = HarnessTrace::from_value(&serde_json::json!({
+            "goal": "fetch then summarize", "solution": "pipeline", "kind": "graph",
+            "success": true, "recurrence": 5,
+            "nodes": [
+                {"goal": "fetch html", "solution": "requests.get(url).text", "marker": "requests.get"},
+                {"goal": "summarize text", "solution": "text[:280]", "marker": "text["}
+            ],
+            "edges": [{"from": "step0", "to": "step1", "condition": "fetch ok"}]
+        }));
+        let tasks = metabolize(&[trace], &MetabolizePolicy::default());
+        assert_eq!(tasks.len(), 4, "whole + 2 steps + 1 edge transition");
+        let edge = tasks
+            .iter()
+            .find(|t| t.id.contains("#edge:step0->step1"))
+            .expect("an edge transition task is metabolized");
+        assert!(edge.prompt.contains("Next: summarize text"));
+        assert!(edge.prompt.contains("when fetch ok"), "the branch condition rides the prompt");
+        assert_eq!(edge.completion.as_deref(), Some("text[:280]"));
+        assert_eq!(edge.skill.as_deref(), Some("graph"));
+    }
+
+    #[test]
+    fn an_edge_to_a_dropped_or_missing_step_is_skipped() {
+        let trace = HarnessTrace::from_value(&serde_json::json!({
+            "goal": "g", "solution": "s", "kind": "graph", "success": true, "recurrence": 5,
+            "nodes": [{"goal": "a", "solution": "out_a"}],
+            "edges": [{"from": "step0", "to": "step9"}]
+        }));
+        let tasks = metabolize(&[trace], &MetabolizePolicy::default());
+        assert_eq!(tasks.len(), 2, "whole + 1 step; the edge to a missing step is dropped");
+        assert!(!tasks.iter().any(|t| t.id.contains("#edge")));
     }
 
     // A status string stands in for an explicit success bool (a harness task state).
