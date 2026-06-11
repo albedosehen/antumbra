@@ -87,6 +87,11 @@ struct HttpState {
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     sessions: Mutex<HashMap<Identity, IdentityService>>,
+    /// Compartments with a consolidation in flight, SHARED across every
+    /// per-identity server so concurrent reinforces of the same compartment
+    /// collapse into one train (each request builds a fresh `McpServer`, so a
+    /// per-instance guard never coalesces and they race on the weight download).
+    consolidating: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Live-propagation (R-2) delivery: each session registers its peer here on
     /// initialize; the change watcher pushes shared-memory changes to recipients.
     registry: crate::notify::PeerRegistry,
@@ -131,6 +136,7 @@ pub async fn serve(
         auto_consolidate,
         serve,
         sessions: Mutex::new(HashMap::new()),
+        consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
         registry: crate::notify::PeerRegistry::new(),
     });
     spawn_live_propagation(state.clone());
@@ -293,7 +299,8 @@ impl HttpState {
             // provisions, and mints as owner regardless of request churn.
             mcp = mcp
                 .with_auto_consolidate()
-                .with_consolidation_store(self.store.clone());
+                .with_consolidation_store(self.store.clone())
+                .with_consolidating(self.consolidating.clone());
         }
         Ok(mcp)
     }
@@ -459,6 +466,7 @@ mod tests {
             auto_consolidate: false,
             serve: None,
             sessions: Mutex::new(HashMap::new()),
+            consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
             registry: crate::notify::PeerRegistry::new(),
         })
     }

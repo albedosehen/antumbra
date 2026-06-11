@@ -173,6 +173,21 @@ impl McpServer {
         self
     }
 
+    /// Share the in-flight consolidation guard across every per-identity server.
+    /// The HTTP server builds a fresh `McpServer` per request, so a per-instance
+    /// guard never coalesces; passing one shared set makes concurrent reinforces
+    /// of the same compartment collapse into a single train (and stops them
+    /// racing on the same model-weight download). Unset, each server keeps its
+    /// own (correct for stdio).
+    #[must_use]
+    pub fn with_consolidating(
+        mut self,
+        inflight: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
+    ) -> Self {
+        self.consolidating = inflight;
+        self
+    }
+
     /// Autonomous consolidation: if the just-written/reinforced `mem` belongs to
     /// a compartment, graduate that compartment into a private expert in the
     /// background (one train per compartment at a time; a burst coalesces). The
@@ -811,6 +826,24 @@ impl McpServer {
             m = m.volatile(true);
         }
         memory::upsert(&self.store, &m).await.map_err(err)?;
+        // The compartment write-ACL silently drops a write into a compartment the
+        // caller may not write to (an UPSERT under a record session succeeds but
+        // persists nothing). Verify the row landed, so the caller gets a real
+        // error instead of a phantom id -- and we never consolidate a vanished write.
+        if memory::get(&self.store, &self.tenant, &MemoryId::new(id.clone()))
+            .await
+            .map_err(err)?
+            .is_none()
+        {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "could not store the memory into compartment '{}': it is not one you can \
+                     write to (create it with create_compartment first, or omit it for your default)",
+                    m.compartment.as_ref().map(|c| c.as_str()).unwrap_or("(default)")
+                ),
+                None,
+            ));
+        }
         // Autonomous triggers (both no-ops when disabled / below threshold): the
         // antumbra organizes the inbox once it grows, and a write that itself
         // clears the consolidation gate graduates its compartment now.
