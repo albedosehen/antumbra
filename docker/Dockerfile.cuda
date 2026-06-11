@@ -28,7 +28,16 @@ COPY . .
 # CUDA_COMPUTE_CAP targets the GPU arch (86 = Ampere / RTX 30-series; set to
 # match your card, e.g. 89 for Ada / 40-series) so candle builds the right SASS.
 ENV CUDA_COMPUTE_CAP=86
-RUN cargo build --release -p antumbra-mcp --locked --features models,cuda
+# BuildKit cache mounts: crate downloads and compiled artifacts persist across
+# builds, so a rebuild -- or a build interrupted by host sleep -- resumes in
+# minutes instead of recompiling candle + the CUDA kernels from scratch. The
+# binary is copied OUT of the cache-mounted target before the stage ends, since
+# a cache mount is not part of the image layer the runtime stage COPYs from.
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release -p antumbra-mcp --locked --features models,cuda \
+    && cp /build/target/release/antumbra-mcp /build/antumbra-mcp
 
 # --- runtime stage: CUDA runtime + python (the exec verifier) --------------
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
@@ -39,7 +48,7 @@ RUN apt-get update \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -u 65532 -m -s /usr/sbin/nologin nonroot
-COPY --from=builder /build/target/release/antumbra-mcp /usr/local/bin/antumbra-mcp
+COPY --from=builder /build/antumbra-mcp /usr/local/bin/antumbra-mcp
 # Base weights (Qwen2.5-Coder-1.5B) download here on first train; persist via a
 # volume. Trained adapters land under /adapters (the server's working dir).
 ENV HF_HOME=/weights
