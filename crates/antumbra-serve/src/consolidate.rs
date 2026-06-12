@@ -77,6 +77,19 @@ pub async fn consolidate_compartment(
     )
     .await?;
 
+    // A capture that verified nothing leaves the adapter at its untrained init
+    // (fitness 0; NaN if the eval itself failed). Minting it would register a
+    // non-functional expert that then wins routes and churns escalation, and
+    // would supersede any prior working expert. Mint only if it learned something.
+    if out.final_fitness <= 0.0 || out.final_fitness.is_nan() {
+        eprintln!(
+            "[consolidate] {}: capture did not learn (fitness {:.2}); not minting",
+            compartment.as_str(),
+            out.final_fitness
+        );
+        return Ok(None);
+    }
+
     // The capability vector is the centroid of the prompts it provably solved.
     let solved: Vec<String> = if out.capability_exemplars.is_empty() {
         tasks.iter().map(|t| t.prompt.clone()).collect()

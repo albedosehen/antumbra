@@ -228,7 +228,12 @@ impl McpServer {
                 .unwrap_or_else(|| self.store.clone());
             let embedder = self.embedder.clone();
             let tenant = self.tenant.clone();
-            let user = _mem.author.clone().unwrap_or_else(|| self.user.clone());
+            // The private expert is owned by the session user who reinforced the
+            // memory, not the memory's original author: in a shared compartment,
+            // owning it by the author would mint an expert the reinforcing user
+            // could not serve (owner-scoped), and attribute their training to
+            // someone else.
+            let user = self.user.clone();
             let inflight = self.consolidating.clone();
             let serve = self.serve.clone();
             let policy = antumbra_serve::ConsolidationPolicy {
