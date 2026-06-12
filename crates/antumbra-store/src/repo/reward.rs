@@ -2,7 +2,7 @@
 //! field, so it persists directly (no DTO). Source-tagged and auditable.
 
 use surql::query::builder::Query;
-use surql::query::crud::{create_record, query_records};
+use surql::query::crud::{create_records, query_records};
 use surql::types::operators::eq;
 
 use antumbra_core::{Result, RewardSignal, RunId};
@@ -12,13 +12,18 @@ use crate::store::Store;
 
 const TABLE: &str = "reward_signal";
 
-/// Append a batch of signals (one row each, source-tagged).
+/// Append a batch of signals in one round-trip (one row each, source-tagged).
 pub async fn insert_many(store: &Store, signals: &[RewardSignal]) -> Result<()> {
-    for signal in signals {
-        create_record(store.client(), TABLE, serde_json::to_value(signal)?)
-            .await
-            .map_err(map)?;
+    if signals.is_empty() {
+        return Ok(());
     }
+    let rows = signals
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    create_records(store.client(), TABLE, rows)
+        .await
+        .map_err(map)?;
     Ok(())
 }
 

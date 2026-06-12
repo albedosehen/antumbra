@@ -20,7 +20,7 @@ pub async fn insert(store: &Store, run: &EvaluationRun) -> Result<()> {
     Ok(())
 }
 
-/// Every run for a subject.
+/// Every run for a subject, most recent first (stable, predictable order).
 pub async fn list_for_subject(
     store: &Store,
     kind: SubjectKind,
@@ -31,7 +31,9 @@ pub async fn list_for_subject(
         .from_table(TABLE)
         .map_err(map)?
         .where_(eq("subject_kind", kind.as_str()))
-        .where_(eq("subject_id", subject_id));
+        .where_(eq("subject_id", subject_id))
+        .order_by("created_at", "DESC")
+        .map_err(map)?;
     query_records(store.client(), &query).await.map_err(map)
 }
 

@@ -20,6 +20,10 @@ use crate::store::Store;
 
 const TABLE: &str = "memory_edge";
 
+/// Cap on edges returned for one node, so a heavily-connected memory can't
+/// return an unbounded result set into a traversal or the operator console.
+const NEIGHBOR_LIMIT: i64 = 256;
+
 #[derive(Serialize, Deserialize)]
 struct EdgeRow {
     tenant_id: String,
@@ -110,7 +114,9 @@ pub async fn neighbors(
         .select(None)
         .from_table(TABLE)
         .map_err(map)?
-        .where_(cond);
+        .where_(cond)
+        .limit(NEIGHBOR_LIMIT)
+        .map_err(map)?;
     let rows: Vec<EdgeRow> = query_records(store.client(), &q).await.map_err(map)?;
     rows.into_iter().map(EdgeRow::into_domain).collect()
 }

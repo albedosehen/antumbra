@@ -17,7 +17,7 @@ use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::expressions::{field, value};
 use surql::query::helpers::VectorDistanceType;
-use surql::types::operators::{and_, eq, is_none};
+use surql::types::operators::{and_, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
 use antumbra_core::{
@@ -410,23 +410,29 @@ pub async fn soft_delete(
 /// the sync interval, so every replica has seen the tombstone before it is
 /// purged (resurrection-safe garbage collection). Returns how many were purged.
 pub async fn purge(store: &Store, older_than: chrono::DateTime<chrono::Utc>) -> Result<usize> {
-    let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
+    // Select only actual tombstones older than the grace window -- a range scan
+    // on the `deleted_at` index, not a full-table read. Every timestamp is UTC
+    // RFC3339, so the lexicographic `<` matches chronological order.
+    let cutoff = older_than.to_rfc3339();
+    let query = Query::new()
+        .select(None)
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(and_(
+            is_not_none("deleted_at"),
+            lt("deleted_at", cutoff.as_str()),
+        ));
     let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
     let mut purged = 0;
     for row in rows {
-        let Some(ts) = row.deleted_at.as_deref() else {
-            continue; // live trace
-        };
-        if parse_dt(ts).map(|t| t < older_than).unwrap_or(false) {
-            let condition = and_(
-                eq("key", row.key.as_str()),
-                eq("tenant_id", row.tenant_id.as_str()),
-            );
-            delete_records(store.client(), TABLE, Some(&condition))
-                .await
-                .map_err(map)?;
-            purged += 1;
-        }
+        let condition = and_(
+            eq("key", row.key.as_str()),
+            eq("tenant_id", row.tenant_id.as_str()),
+        );
+        delete_records(store.client(), TABLE, Some(&condition))
+            .await
+            .map_err(map)?;
+        purged += 1;
     }
     Ok(purged)
 }

@@ -207,6 +207,10 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 // Supports the collector's incremental watermark filter
                 // (`updated_at > since`) as a range scan (R-1).
                 index("memory_updated_at_idx", ["updated_at"]),
+                // Bounds the GC purge to a range scan over actual tombstones
+                // (`deleted_at IS NOT NONE AND deleted_at < cutoff`) instead of a
+                // full-table read.
+                index("memory_deleted_at_idx", ["deleted_at"]),
                 hnsw_index(
                     "memory_embedding_hnsw",
                     "embedding",
