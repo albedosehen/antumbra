@@ -33,6 +33,12 @@ use crate::theme::Theme;
 pub use overlays::overlay_area;
 
 pub fn render(f: &mut Frame, app: &App) {
+    // Guard the render loop against a degenerately-small terminal: the fixed
+    // chrome layout would leave no space for the body and some widgets subtract
+    // past zero. Rendering nothing is safe; a panic here would crash the console.
+    if f.area().width < 8 || f.area().height < 3 {
+        return;
+    }
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(1),

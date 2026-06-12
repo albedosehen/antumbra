@@ -404,6 +404,16 @@ impl<'a> GenerationLoop<'a> {
         let mut centroid = vec![0.0f32; self.embedder.dim()];
         for prompt in exemplars {
             let v = self.embedder.embed(prompt).await?;
+            // A dimension drift (e.g. the embedder model changed mid-run) would
+            // silently truncate the centroid via zip; refuse it instead of storing
+            // a corrupted capability vector the gate would then route against.
+            if v.len() != centroid.len() {
+                return Err(antumbra_core::AntumbraError::other(format!(
+                    "embedder returned dim {} but the capability centroid is {}",
+                    v.len(),
+                    centroid.len()
+                )));
+            }
             for (c, x) in centroid.iter_mut().zip(v.iter()) {
                 *c += *x;
             }

@@ -17,9 +17,19 @@ use tokio::time::timeout;
 use antumbra_core::ports::{Verifier, VerifierVerdict, VerifyRequest};
 use antumbra_core::{AntumbraError, Result};
 
-/// Hard cap on a verify subprocess: model-generated code is untrusted and may
-/// loop forever or block on input, so a timeout (and null stdin) is mandatory.
-const VERIFY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default hard cap on a verify subprocess; override with
+/// `ANTUMBRA_VERIFY_TIMEOUT_SECS` (e.g. a slow CI box, or a verifier that
+/// compiles code). Untrusted model-generated code may loop forever or block on
+/// input, so a timeout (and null stdin) is mandatory.
+const VERIFY_TIMEOUT_SECS: u64 = 10;
+
+fn verify_timeout() -> Duration {
+    std::env::var("ANTUMBRA_VERIFY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&s| s > 0)
+        .map_or(Duration::from_secs(VERIFY_TIMEOUT_SECS), Duration::from_secs)
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct CommandVerifier;
@@ -127,7 +137,7 @@ impl Verifier for CommandVerifier {
         let mut child = cmd
             .spawn()
             .map_err(|e| AntumbraError::other(format!("verify spawn `{program}`: {e}")))?;
-        let passed = match timeout(VERIFY_TIMEOUT, child.wait()).await {
+        let passed = match timeout(verify_timeout(), child.wait()).await {
             Ok(status) => status
                 .map_err(|e| AntumbraError::other(format!("verify wait `{program}`: {e}")))?
                 .success(),

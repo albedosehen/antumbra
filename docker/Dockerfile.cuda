@@ -25,9 +25,11 @@ RUN apt-get update \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.96.0
 ENV PATH="/root/.cargo/bin:${PATH}"
 COPY . .
-# CUDA_COMPUTE_CAP targets the GPU arch (86 = Ampere / RTX 30-series; set to
-# match your card, e.g. 89 for Ada / 40-series) so candle builds the right SASS.
-ENV CUDA_COMPUTE_CAP=86
+# CUDA_COMPUTE_CAP targets the GPU arch (86 = Ampere / RTX 30-series). Override
+# for your card at build time -- `--build-arg CUDA_COMPUTE_CAP=89` (Ada/40-series)
+# or via the compose build `args:` -- so candle builds the matching SASS.
+ARG CUDA_COMPUTE_CAP=86
+ENV CUDA_COMPUTE_CAP=${CUDA_COMPUTE_CAP}
 # BuildKit cache mounts: crate downloads and compiled artifacts persist across
 # builds, so a rebuild -- or a build interrupted by host sleep -- resumes in
 # minutes instead of recompiling candle + the CUDA kernels from scratch. The
