@@ -203,6 +203,15 @@ impl McpServer {
             let Some(comp) = _mem.compartment.clone() else {
                 return;
             };
+            // The default/inbox compartment (`comp:{tenant}:{user}:default`) is an
+            // unorganized grab-bag that can hold thousands of unrelated memories;
+            // it is neither a coherent skill to graduate into one expert nor cheap
+            // to gather on every write. Auto-consolidate only deliberately-created
+            // compartments (`comp:<id>`); the inbox is organized first, via
+            // `propose_compartments`, then those compartments consolidate.
+            if comp.as_str().ends_with(":default") {
+                return;
+            }
             let key = comp.as_str().to_string();
             {
                 let mut inflight = self.consolidating.lock().await;
