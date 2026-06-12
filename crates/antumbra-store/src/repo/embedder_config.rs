@@ -59,8 +59,12 @@ pub async fn get(store: &Store, tenant: &TenantId) -> Result<Option<EmbedderConf
 
 /// Clear the workspace's embedder (revert to the server default). No-op if absent.
 pub async fn delete(store: &Store, tenant: &TenantId) -> Result<()> {
-    delete_records(store.client(), TABLE, Some(&eq("tenant_id", tenant.as_str())))
-        .await
-        .map_err(map)?;
+    delete_records(
+        store.client(),
+        TABLE,
+        Some(&eq("tenant_id", tenant.as_str())),
+    )
+    .await
+    .map_err(map)?;
     Ok(())
 }

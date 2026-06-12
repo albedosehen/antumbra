@@ -11,7 +11,10 @@ async fn embedder_config_roundtrips_per_tenant() {
     let alpha = TenantId::new("ws:alpha");
 
     // Unset -> None (the caller falls back to the server default).
-    assert!(embedder_config::get(&store, &alpha).await.unwrap().is_none());
+    assert!(embedder_config::get(&store, &alpha)
+        .await
+        .unwrap()
+        .is_none());
 
     embedder_config::upsert(
         &store,
@@ -60,5 +63,8 @@ async fn embedder_config_roundtrips_per_tenant() {
 
     // Delete reverts to the default.
     embedder_config::delete(&store, &alpha).await.unwrap();
-    assert!(embedder_config::get(&store, &alpha).await.unwrap().is_none());
+    assert!(embedder_config::get(&store, &alpha)
+        .await
+        .unwrap()
+        .is_none());
 }

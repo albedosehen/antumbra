@@ -504,7 +504,10 @@ mod tests {
             .find(|t| t.id.contains("#edge:step0->step1"))
             .expect("an edge transition task is metabolized");
         assert!(edge.prompt.contains("Next: summarize text"));
-        assert!(edge.prompt.contains("when fetch ok"), "the branch condition rides the prompt");
+        assert!(
+            edge.prompt.contains("when fetch ok"),
+            "the branch condition rides the prompt"
+        );
         assert_eq!(edge.completion.as_deref(), Some("text[:280]"));
         assert_eq!(edge.skill.as_deref(), Some("graph"));
     }
@@ -517,7 +520,11 @@ mod tests {
             "edges": [{"from": "step0", "to": "step9"}]
         }));
         let tasks = metabolize(&[trace], &MetabolizePolicy::default());
-        assert_eq!(tasks.len(), 2, "whole + 1 step; the edge to a missing step is dropped");
+        assert_eq!(
+            tasks.len(),
+            2,
+            "whole + 1 step; the edge to a missing step is dropped"
+        );
         assert!(!tasks.iter().any(|t| t.id.contains("#edge")));
     }
 

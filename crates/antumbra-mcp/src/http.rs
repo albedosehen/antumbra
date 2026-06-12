@@ -421,8 +421,11 @@ impl HttpState {
         match &self.serving {
             Serving::Shared(conn) => {
                 let guard = self.auth.lock().await;
-                conn.signin(&TenantId::new(&identity.tenant), &UserId::new(&identity.user))
-                    .await?;
+                conn.signin(
+                    &TenantId::new(&identity.tenant),
+                    &UserId::new(&identity.user),
+                )
+                .await?;
                 Ok(Some(guard))
             }
             Serving::PerIdentity { .. } => Ok(None),
@@ -441,18 +444,19 @@ impl HttpState {
         }
         let resolved = match antumbra_store::repo::embedder_config::get(&self.store, tenant).await {
             Ok(Some(cfg)) => Arc::new(antumbra_embed::HttpEmbedder::new(
-                cfg.url, cfg.model, cfg.api_key,
+                cfg.url,
+                cfg.model,
+                cfg.api_key,
             )) as Arc<dyn Embedder>,
             Ok(None) => self.embedder.clone(),
             Err(e) => {
-                eprintln!("antumbra-mcp: embedder config read failed for {key}: {e}; using default");
+                eprintln!(
+                    "antumbra-mcp: embedder config read failed for {key}: {e}; using default"
+                );
                 self.embedder.clone()
             }
         };
-        self.embedders
-            .lock()
-            .await
-            .insert(key, resolved.clone());
+        self.embedders.lock().await.insert(key, resolved.clone());
         resolved
     }
 }

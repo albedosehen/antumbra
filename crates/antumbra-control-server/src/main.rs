@@ -22,7 +22,10 @@ use antumbra_control::{authenticate, Issuer, MagicLink, Mailer};
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 
 #[derive(Parser)]
-#[command(name = "antumbra-control-server", about = "Antumbra hosted control plane")]
+#[command(
+    name = "antumbra-control-server",
+    about = "Antumbra hosted control plane"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Command,
@@ -38,7 +41,11 @@ enum Command {
 
 #[derive(Args)]
 struct StoreArgs {
-    #[arg(long, env = "ANTUMBRA_DB_URL", default_value = "ws://127.0.0.1:8000/rpc")]
+    #[arg(
+        long,
+        env = "ANTUMBRA_DB_URL",
+        default_value = "ws://127.0.0.1:8000/rpc"
+    )]
     url: String,
     #[arg(long, env = "ANTUMBRA_DB_USER")]
     db_user: Option<String>,
@@ -145,7 +152,9 @@ impl Mailer for SmtpMailer {
             .from(self.from.parse().map_err(|e| oops(format!("from: {e}")))?)
             .to(to.parse().map_err(|e| oops(format!("to: {e}")))?)
             .subject("Your Antumbra sign-in link")
-            .body(format!("Sign in to Antumbra:\n\n{link}\n\nThe link expires shortly."))
+            .body(format!(
+                "Sign in to Antumbra:\n\n{link}\n\nThe link expires shortly."
+            ))
             .map_err(|e| oops(format!("build: {e}")))?;
         self.transport
             .send(&email)
@@ -238,7 +247,12 @@ async fn login_handler(State(st): State<AppState>, Json(req): Json<LoginReq>) ->
 }
 
 async fn verify_handler(State(st): State<AppState>, Query(q): Query<VerifyQuery>) -> Response {
-    let ml = MagicLink::new(&st.magic_secret, st.magic_ttl, &st.base_url, st.mailer.as_ref());
+    let ml = MagicLink::new(
+        &st.magic_secret,
+        st.magic_ttl,
+        &st.base_url,
+        st.mailer.as_ref(),
+    );
     match authenticate(&st.store, &ml, &q.token, &st.issuer).await {
         Ok(token) => Json(json!({ "token": token })).into_response(),
         Err(e) => bad(&e.to_string()),
@@ -255,7 +269,12 @@ fn router(state: AppState) -> Router {
 }
 
 async fn serve(a: ServeArgs) -> anyhow::Result<()> {
-    let store = connect(&a.store.url, a.store.db_user.as_deref(), a.store.db_pass.as_deref()).await?;
+    let store = connect(
+        &a.store.url,
+        a.store.db_user.as_deref(),
+        a.store.db_pass.as_deref(),
+    )
+    .await?;
     let private_pem = std::fs::read(&a.signing_key)
         .map_err(|e| anyhow::anyhow!("read signing key {}: {e}", a.signing_key))?;
     let issuer = Issuer::new(
@@ -273,7 +292,10 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(&a.addr).await?;
-    eprintln!("antumbra-control-server: listening on http://{}/ (signup / login / magic)", a.addr);
+    eprintln!(
+        "antumbra-control-server: listening on http://{}/ (signup / login / magic)",
+        a.addr
+    );
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -391,4 +413,3 @@ mod tests {
         );
     }
 }
-

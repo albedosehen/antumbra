@@ -542,7 +542,11 @@ pub async fn get_embedder(url: &str, tenant: &str) -> anyhow::Result<()> {
             "{tenant}: {} ({}){}",
             c.url,
             c.model,
-            if c.api_key.is_some() { " [key set]" } else { "" }
+            if c.api_key.is_some() {
+                " [key set]"
+            } else {
+                ""
+            }
         ),
         None => println!("{tenant}: no embedder configured (uses the server default)"),
     }
@@ -561,7 +565,9 @@ pub async fn reembed(url: &str, tenant: &str, dry_run: bool, yes: bool) -> anyho
     let store = crate::connect(url).await?;
     let t = TenantId::new(tenant);
     let cfg = embedder_config::get(&store, &t).await?.ok_or_else(|| {
-        anyhow::anyhow!("workspace {tenant} has no embedder config; set one with `set-embedder` first")
+        anyhow::anyhow!(
+            "workspace {tenant} has no embedder config; set one with `set-embedder` first"
+        )
     })?;
 
     let mems = memory::list(&store, &t).await?;
@@ -580,7 +586,9 @@ pub async fn reembed(url: &str, tenant: &str, dry_run: bool, yes: bool) -> anyho
     if !yes {
         // This rewrites every vector in the workspace; a wrong endpoint or model
         // silently makes recall incoherent, so require an explicit confirmation.
-        print!("This rewrites all {total} embeddings and cannot be undone. Type 'yes' to proceed: ");
+        print!(
+            "This rewrites all {total} embeddings and cannot be undone. Type 'yes' to proceed: "
+        );
         std::io::Write::flush(&mut std::io::stdout())?;
         let mut line = String::new();
         std::io::stdin().read_line(&mut line)?;

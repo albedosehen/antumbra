@@ -28,7 +28,10 @@ fn verify_timeout() -> Duration {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|&s| s > 0)
-        .map_or(Duration::from_secs(VERIFY_TIMEOUT_SECS), Duration::from_secs)
+        .map_or(
+            Duration::from_secs(VERIFY_TIMEOUT_SECS),
+            Duration::from_secs,
+        )
 }
 
 #[derive(Debug, Default, Clone)]
