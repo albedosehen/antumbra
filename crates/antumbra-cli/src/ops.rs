@@ -553,7 +553,7 @@ pub async fn get_embedder(url: &str, tenant: &str) -> anyhow::Result<()> {
 /// changing a workspace's embedder model so its HNSW vectors (fixed `EMBED_DIM`)
 /// stay consistent with the new model; recall over a mix of old and new vectors
 /// is otherwise incoherent.
-pub async fn reembed(url: &str, tenant: &str) -> anyhow::Result<()> {
+pub async fn reembed(url: &str, tenant: &str, dry_run: bool, yes: bool) -> anyhow::Result<()> {
     use antumbra_core::ports::Embedder;
     use antumbra_core::TenantId;
     use antumbra_store::repo::{embedder_config, memory};
@@ -563,16 +563,66 @@ pub async fn reembed(url: &str, tenant: &str) -> anyhow::Result<()> {
     let cfg = embedder_config::get(&store, &t).await?.ok_or_else(|| {
         anyhow::anyhow!("workspace {tenant} has no embedder config; set one with `set-embedder` first")
     })?;
-    let embedder = antumbra_embed::HttpEmbedder::new(cfg.url.clone(), cfg.model.clone(), cfg.api_key);
 
     let mems = memory::list(&store, &t).await?;
     let total = mems.len();
-    let mut n = 0usize;
-    for m in &mems {
-        let emb = embedder.embed(&m.content).await?;
-        memory::upsert(&store, &m.clone().with_embedding(emb)).await?;
-        n += 1;
+    println!(
+        "reembed: {total} memories in workspace {tenant} -> {} ({})",
+        cfg.url, cfg.model
+    );
+    if dry_run {
+        println!("dry run: nothing written. Re-run without --dry-run to apply.");
+        return Ok(());
     }
-    println!("re-embedded {n}/{total} memories for {tenant} via {} ({})", cfg.url, cfg.model);
+    if total == 0 {
+        return Ok(());
+    }
+    if !yes {
+        // This rewrites every vector in the workspace; a wrong endpoint or model
+        // silently makes recall incoherent, so require an explicit confirmation.
+        print!("This rewrites all {total} embeddings and cannot be undone. Type 'yes' to proceed: ");
+        std::io::Write::flush(&mut std::io::stdout())?;
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        if line.trim() != "yes" {
+            println!("aborted.");
+            return Ok(());
+        }
+    }
+
+    let embedder =
+        antumbra_embed::HttpEmbedder::new(cfg.url.clone(), cfg.model.clone(), cfg.api_key.clone());
+    let step = (total / 10).max(1);
+    let mut ok = 0usize;
+    let mut failed: Vec<(String, String)> = Vec::new();
+    for (i, m) in mems.iter().enumerate() {
+        // Keep going on a per-memory failure (e.g. a transient endpoint blip) so
+        // one bad memory doesn't abandon the rest; report the failures at the end.
+        let outcome = match embedder.embed(&m.content).await {
+            Ok(emb) => memory::upsert(&store, &m.clone().with_embedding(emb)).await,
+            Err(e) => Err(e),
+        };
+        match outcome {
+            Ok(()) => ok += 1,
+            Err(e) => failed.push((m.id.as_str().to_string(), e.to_string())),
+        }
+        if (i + 1) % step == 0 || i + 1 == total {
+            println!("  {}/{total} ({ok} ok, {} failed)", i + 1, failed.len());
+        }
+    }
+    println!(
+        "re-embedded {ok}/{total} memories for {tenant} via {} ({})",
+        cfg.url, cfg.model
+    );
+    if !failed.is_empty() {
+        eprintln!("{} memories failed (showing up to 5):", failed.len());
+        for (id, e) in failed.iter().take(5) {
+            eprintln!("  {id}: {e}");
+        }
+        anyhow::bail!(
+            "{} of {total} memories failed to re-embed; the rest were updated, re-run to retry",
+            failed.len()
+        );
+    }
     Ok(())
 }

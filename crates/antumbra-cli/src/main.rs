@@ -1091,8 +1091,12 @@ async fn run() -> anyhow::Result<()> {
         Command::GetEmbedder { tenant } => {
             ops::get_embedder(&cli.url, &tenant).await?;
         }
-        Command::Reembed { tenant } => {
-            ops::reembed(&cli.url, &tenant).await?;
+        Command::Reembed {
+            tenant,
+            dry_run,
+            yes,
+        } => {
+            ops::reembed(&cli.url, &tenant, dry_run, yes).await?;
         }
     }
     Ok(())

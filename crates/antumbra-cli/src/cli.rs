@@ -517,5 +517,11 @@ pub enum Command {
     Reembed {
         #[arg(long)]
         tenant: String,
+        /// Report what would be re-embedded and exit without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the confirmation prompt (for non-interactive / scripted use).
+        #[arg(long)]
+        yes: bool,
     },
 }
