@@ -111,6 +111,10 @@ pub fn route(
         .iter()
         .filter_map(|e| {
             e.capability_similarity(task_vec)
+                // Drop a non-finite similarity (NaN/inf from a malformed embedding):
+                // ranking it would silently corrupt the order, and excluding it lets
+                // an all-NaN task escalate rather than route to a garbage expert.
+                .filter(|sim| sim.is_finite())
                 .map(|sim| (e.id.clone(), sim))
         })
         .collect();
