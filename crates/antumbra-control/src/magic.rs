@@ -29,6 +29,25 @@ struct MagicClaims {
     exp: u64,
 }
 
+/// A deliberately-conservative shape check (not full RFC 5322): exactly one `@`,
+/// a non-empty local part, and a dotted, non-empty domain, no whitespace. It
+/// guards against obviously-bad input before signing a link -- not a guarantee
+/// of deliverability (the mailer is the real check).
+fn is_plausible_email(email: &str) -> bool {
+    if email.len() > 254 || email.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let mut parts = email.split('@');
+    let (Some(local), Some(domain), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false; // zero, or more than one, `@`
+    };
+    !local.is_empty()
+        && !domain.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+}
+
 fn mint_token(secret: &[u8], email: &str, ttl: Duration) -> Result<String> {
     let claims = MagicClaims {
         sub: email.to_string(),
@@ -73,8 +92,8 @@ impl<'a> MagicLink<'a> {
 
     /// Email a one-time login link for `email`.
     pub fn request(&self, email: &str) -> Result<()> {
-        if !email.contains('@') {
-            return Err(AntumbraError::other("not an email address"));
+        if !is_plausible_email(email) {
+            return Err(AntumbraError::other("not a valid email address"));
         }
         let token = mint_token(self.secret, email, self.ttl)?;
         let link = format!(
@@ -154,6 +173,21 @@ mod tests {
     fn a_non_email_request_is_rejected() {
         let mailer = FakeMailer(Mutex::new(Vec::new()));
         let ml = MagicLink::new(b"s", Duration::from_secs(60), "https://app", &mailer);
-        assert!(ml.request("notanemail").is_err());
+        for bad in [
+            "notanemail",
+            "",
+            "@x.com",
+            "a@",
+            "a@b@c.com",
+            "a@b",
+            "a b@x.com",
+            "a@.com",
+            "a@x.",
+        ] {
+            assert!(ml.request(bad).is_err(), "{bad:?} should be rejected");
+        }
+        for good in ["ada@x.com", "a.b+tag@sub.example.org"] {
+            assert!(is_plausible_email(good), "{good:?} should pass");
+        }
     }
 }
