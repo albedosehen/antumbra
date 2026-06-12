@@ -54,6 +54,51 @@ use crate::server::McpServer;
 
 type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
 
+/// Cap on cached per-identity MCP services / serving connections. Bounds memory
+/// on a long-running multi-tenant host; an evicted identity just re-provisions on
+/// its next request.
+const MAX_SESSIONS: usize = 4096;
+/// Cap on cached per-tenant resolved embedders.
+const MAX_EMBEDDERS: usize = 1024;
+
+/// A bounded, insertion-ordered map: at capacity it evicts the oldest entry
+/// before adding a new key. Bounds the per-identity caches so a long-running
+/// server cannot grow them without limit. Eviction only drops the cache's handle;
+/// an in-flight request holding a clone keeps its value alive (cached values are
+/// reference-counted).
+struct Bounded<K, V> {
+    map: HashMap<K, V>,
+    order: std::collections::VecDeque<K>,
+    cap: usize,
+}
+
+impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
+    fn new(cap: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            order: std::collections::VecDeque::new(),
+            cap: cap.max(1),
+        }
+    }
+
+    fn get(&self, key: &K) -> Option<&V> {
+        self.map.get(key)
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        // A brand-new key extends the order ring and may evict the oldest; an
+        // update to an existing key just replaces the value (no reorder).
+        if self.map.insert(key.clone(), value).is_none() {
+            self.order.push_back(key);
+            while self.order.len() > self.cap {
+                if let Some(old) = self.order.pop_front() {
+                    self.map.remove(&old);
+                }
+            }
+        }
+    }
+}
+
 struct HttpState {
     /// The **root/owner** connection: schema, per-identity provisioning, and the
     /// owner-view R-2 watcher run here. On a remote it is root-authenticated.
@@ -73,7 +118,7 @@ struct HttpState {
     embedder: Arc<dyn Embedder>,
     /// Per-tenant resolved embedders (hosted P-1c): a workspace's own configured
     /// endpoint when set, else `embedder`. Resolved once per tenant and cached.
-    embedders: Mutex<HashMap<String, Arc<dyn Embedder>>>,
+    embedders: Mutex<Bounded<String, Arc<dyn Embedder>>>,
     /// Serializes `signin(identity) -> handle` so two identities never share the
     /// connection's auth state concurrently.
     auth: Mutex<()>,
@@ -86,7 +131,9 @@ struct HttpState {
     /// scopes which expert a session may pick).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
-    sessions: Mutex<HashMap<Identity, IdentityService>>,
+    /// Bounded so a host that sees many distinct identities cannot grow it without
+    /// limit; an evicted identity rebuilds its service on the next request.
+    sessions: Mutex<Bounded<Identity, IdentityService>>,
     /// Compartments with a consolidation in flight, SHARED across every
     /// per-identity server so concurrent reinforces of the same compartment
     /// collapse into one train (each request builds a fresh `McpServer`, so a
@@ -130,12 +177,12 @@ pub async fn serve(
         host,
         verifier,
         embedder,
-        embedders: Mutex::new(HashMap::new()),
+        embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
         auth: Mutex::new(()),
         auto_propose,
         auto_consolidate,
         serve,
-        sessions: Mutex::new(HashMap::new()),
+        sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
         registry: crate::notify::PeerRegistry::new(),
     });
@@ -163,13 +210,17 @@ fn spawn_live_propagation(state: Arc<HttpState>) {
         };
         eprintln!("antumbra-mcp: live propagation watching shared-memory changes");
         while let Some(event) = feed.recv().await {
-            let change = {
+            // Return the shared connection to the owner view under the lock, then
+            // resolve the audience OUTSIDE it: resolution only reads, on the
+            // always-root `store`, so holding the lock across it would needlessly
+            // serialize the watcher with every request.
+            {
                 let _guard = state.auth.lock().await;
                 if state.store.signin_root().await.is_err() {
                     continue; // could not return to owner view; skip this event
                 }
-                antumbra_sync::resolve_change(&state.store, &event).await
-            };
+            }
+            let change = antumbra_sync::resolve_change(&state.store, &event).await;
             if let Some(change) = change {
                 state.registry.notify(&change).await;
             }
@@ -476,12 +527,12 @@ mod tests {
             host: "test".into(),
             verifier: JwtVerifier::hs256(b"test-secret"),
             embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            embedders: Mutex::new(HashMap::new()),
+            embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
             auth: Mutex::new(()),
             auto_propose: None,
             auto_consolidate: false,
             serve: None,
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
             consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
             registry: crate::notify::PeerRegistry::new(),
         })
