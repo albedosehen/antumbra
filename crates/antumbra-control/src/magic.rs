@@ -23,11 +23,14 @@ pub trait Mailer: Send + Sync {
 }
 
 /// The one-time link token's claims: the email being verified, plus expiry, plus
-/// the invite code a *signup* link carries (a login link omits it).
+/// the invite code a *signup* link carries (a login link omits it). `jti` is the
+/// link's unique id, the key the single-use ledger consumes on verify -- without
+/// it a leaked login link could be replayed for fresh tokens until expiry.
 #[derive(Serialize, Deserialize)]
 struct MagicClaims {
     sub: String,
     exp: u64,
+    jti: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     inv: Option<String>,
 }
@@ -55,6 +58,7 @@ fn mint_token(secret: &[u8], email: &str, invite: Option<&str>, ttl: Duration) -
     let claims = MagicClaims {
         sub: email.to_string(),
         exp: get_current_timestamp() + ttl.as_secs(),
+        jti: uuid::Uuid::new_v4().simple().to_string(),
         inv: invite.map(str::to_string),
     };
     encode(
@@ -65,14 +69,24 @@ fn mint_token(secret: &[u8], email: &str, invite: Option<&str>, ttl: Duration) -
     .map_err(|e| AntumbraError::other(format!("mint magic token: {e}")))
 }
 
-/// Verify a link token → its email and the invite it carried (if a signup link).
-fn verify_token(secret: &[u8], token: &str) -> Result<(String, Option<String>)> {
+/// Verify a link token's signature and expiry → its claims.
+fn verify_token(secret: &[u8], token: &str) -> Result<MagicClaims> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["exp"]);
     validation.validate_aud = false;
     let data = decode::<MagicClaims>(token, &DecodingKey::from_secret(secret), &validation)
-        .map_err(|e| AntumbraError::other(format!("invalid magic link: {e}")))?;
-    Ok((data.claims.sub, data.claims.inv))
+        .map_err(|e| AntumbraError::rejected(format!("invalid magic link: {e}")))?;
+    Ok(data.claims)
+}
+
+/// A verified (signature + expiry) magic link, before the single-use check:
+/// who it authenticates, the invite a signup link carried, and the `jti` /
+/// `expires_at` pair the consumer writes through the single-use ledger.
+pub struct VerifiedLink {
+    pub identity: VerifiedIdentity,
+    pub invite: Option<String>,
+    pub jti: String,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// A magic-link issuer/verifier over a [`Mailer`].
@@ -107,7 +121,7 @@ impl<'a> MagicLink<'a> {
 
     fn send(&self, email: &str, invite: Option<&str>) -> Result<()> {
         if !is_plausible_email(email) {
-            return Err(AntumbraError::other("not a valid email address"));
+            return Err(AntumbraError::rejected("not a valid email address"));
         }
         let token = mint_token(self.secret, email, invite, self.ttl)?;
         let link = format!(
@@ -117,14 +131,21 @@ impl<'a> MagicLink<'a> {
         self.mailer.send_link(email, &link)
     }
 
-    /// Verify a clicked link's token → the verified identity (`email:<addr>`) and
-    /// the invite it carried (`Some` for a signup link, `None` for a login link).
-    pub fn verify(&self, token: &str) -> Result<(VerifiedIdentity, Option<String>)> {
-        let (email, invite) = verify_token(self.secret, token)?;
-        Ok((
-            VerifiedIdentity::new(format!("email:{email}")).with(Some(email), None),
-            invite,
-        ))
+    /// Verify a clicked link's token (signature + expiry) → the [`VerifiedLink`].
+    /// This is the pure half; the caller still owes the link's `jti` to the
+    /// single-use ledger ([`crate::authenticate`] does both).
+    pub fn verify(&self, token: &str) -> Result<VerifiedLink> {
+        let claims = verify_token(self.secret, token)?;
+        let expires_at =
+            chrono::DateTime::from_timestamp(claims.exp.min(i64::MAX as u64) as i64, 0)
+                .ok_or_else(|| AntumbraError::other("magic link exp out of range"))?;
+        Ok(VerifiedLink {
+            identity: VerifiedIdentity::new(format!("email:{}", claims.sub))
+                .with(Some(claims.sub), None),
+            invite: claims.inv,
+            jti: claims.jti,
+            expires_at,
+        })
     }
 }
 
@@ -159,10 +180,15 @@ mod tests {
         let link = mailer.0.lock().unwrap()[0].clone();
         assert!(link.starts_with("https://app.example/magic/verify?token="));
 
-        let (id, invite) = ml.verify(&token_in(&link)).unwrap();
-        assert_eq!(id.subject, "email:ada@x.com");
-        assert_eq!(id.email.as_deref(), Some("ada@x.com"));
-        assert_eq!(invite, None, "a login link carries no invite");
+        let verified = ml.verify(&token_in(&link)).unwrap();
+        assert_eq!(verified.identity.subject, "email:ada@x.com");
+        assert_eq!(verified.identity.email.as_deref(), Some("ada@x.com"));
+        assert_eq!(verified.invite, None, "a login link carries no invite");
+        assert!(!verified.jti.is_empty(), "every link gets a unique id");
+        assert!(
+            verified.expires_at > chrono::Utc::now(),
+            "expiry decodes to the future"
+        );
     }
 
     #[test]
@@ -171,9 +197,21 @@ mod tests {
         let ml = MagicLink::new(b"s", Duration::from_secs(900), "https://app", &mailer);
         ml.request_signup("new@x.com", "invite-123").unwrap();
         let link = mailer.0.lock().unwrap()[0].clone();
-        let (id, invite) = ml.verify(&token_in(&link)).unwrap();
-        assert_eq!(id.subject, "email:new@x.com");
-        assert_eq!(invite.as_deref(), Some("invite-123"));
+        let verified = ml.verify(&token_in(&link)).unwrap();
+        assert_eq!(verified.identity.subject, "email:new@x.com");
+        assert_eq!(verified.invite.as_deref(), Some("invite-123"));
+    }
+
+    #[test]
+    fn two_links_for_the_same_email_get_distinct_ids() {
+        let mailer = FakeMailer(Mutex::new(Vec::new()));
+        let ml = MagicLink::new(b"s", Duration::from_secs(900), "https://app", &mailer);
+        ml.request("ada@x.com").unwrap();
+        ml.request("ada@x.com").unwrap();
+        let links = mailer.0.lock().unwrap().clone();
+        let a = ml.verify(&token_in(&links[0])).unwrap();
+        let b = ml.verify(&token_in(&links[1])).unwrap();
+        assert_ne!(a.jti, b.jti);
     }
 
     #[test]

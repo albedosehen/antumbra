@@ -16,11 +16,11 @@ use chrono::Utc;
 use antumbra_auth::mint_rs256;
 use antumbra_core::{AntumbraError, Result, TenantId, UserId};
 use antumbra_store::repo::account::{self, Account};
-use antumbra_store::repo::{invite, principal};
+use antumbra_store::repo::{invite, magic_use, principal};
 use antumbra_store::Store;
 
 mod magic;
-pub use magic::{MagicLink, Mailer};
+pub use magic::{MagicLink, Mailer, VerifiedLink};
 
 /// A verified external identity (the output of an OAuth callback or a magic-link
 /// click). `subject` is the stable, canonical login key (e.g. `github:12345` or
@@ -98,7 +98,7 @@ pub async fn signup(
         .await?
         .is_some()
     {
-        return Err(AntumbraError::other(
+        return Err(AntumbraError::rejected(
             "identity already registered; log in instead",
         ));
     }
@@ -131,23 +131,34 @@ pub async fn signup(
 pub async fn login(store: &Store, identity: &VerifiedIdentity, issuer: &Issuer) -> Result<String> {
     let account = account::get_by_subject(store, &identity.subject)
         .await?
-        .ok_or_else(|| AntumbraError::other("no account for this identity; sign up first"))?;
+        .ok_or_else(|| AntumbraError::rejected("no account for this identity; sign up first"))?;
     issuer.mint(&account.tenant, &account.user)
 }
 
-/// Complete a clicked magic link: verify it, then sign up (when the link carried
-/// an invite) or log in (when it did not), returning the issued bearer token. The
-/// one entry point the HTTP `/magic/verify` handler needs.
+/// Complete a clicked magic link: verify it, consume its single-use id, then
+/// sign up (when the link carried an invite) or log in (when it did not),
+/// returning the issued bearer token. The one entry point the HTTP
+/// `/magic/verify` handler needs.
+///
+/// The id is consumed up front, so a link dies on its first click regardless of
+/// the outcome -- a replayed link cannot probe for a different result, and two
+/// concurrent clicks cannot both win the race.
 pub async fn authenticate(
     store: &Store,
     magic: &MagicLink<'_>,
     token: &str,
     issuer: &Issuer,
 ) -> Result<String> {
-    let (identity, invite) = magic.verify(token)?;
-    match invite {
-        Some(code) => signup(store, &identity, &code, issuer).await,
-        None => login(store, &identity, issuer).await,
+    let link = magic.verify(token)?;
+    // Opportunistic ledger hygiene: entries for links that can no longer
+    // verify are dead weight.
+    magic_use::sweep_expired(store, Utc::now()).await?;
+    if !magic_use::consume(store, &link.jti, link.expires_at).await? {
+        return Err(AntumbraError::rejected("magic link already used"));
+    }
+    match link.invite {
+        Some(code) => signup(store, &link.identity, &code, issuer).await,
+        None => login(store, &link.identity, issuer).await,
     }
 }
 
@@ -249,6 +260,19 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(verify(&jwt2), (tenant, user));
+
+        // Every link is single-use: replaying either consumed token is refused
+        // as a deliberate rejection, not an internal fault.
+        for replayed in [&token, &login_token] {
+            let err = authenticate(&store, &ml, replayed, &issuer())
+                .await
+                .unwrap_err();
+            assert!(err.is_rejection(), "replay must be a rejection: {err}");
+            assert!(err.to_string().contains("already used"));
+        }
+        // The pure verify still passes (signature + expiry are intact); it is
+        // the ledger that kills the replay.
+        assert!(ml.verify(&token).is_ok());
     }
 
     #[tokio::test]
