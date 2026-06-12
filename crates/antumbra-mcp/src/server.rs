@@ -245,7 +245,7 @@ impl McpServer {
                 ..Default::default()
             };
             tokio::spawn(async move {
-                match antumbra_serve::consolidate_compartment(
+                let result = antumbra_serve::consolidate_compartment(
                     &store,
                     embedder.as_ref(),
                     &tenant,
@@ -254,8 +254,9 @@ impl McpServer {
                     &policy,
                     &cfg,
                 )
-                .await
-                {
+                .await;
+                let trained = matches!(result, Ok(Some(_)));
+                match result {
                     Ok(Some(o)) => {
                         // Close the loop: hot-register the minted expert so the
                         // `answer` tool can serve it now, with no server restart.
@@ -272,6 +273,13 @@ impl McpServer {
                     }
                     Ok(None) => {}
                     Err(e) => eprintln!("[auto-consolidate] {} failed: {e}", comp.as_str()),
+                }
+                // Debounce: after an actual train, hold the compartment's slot a
+                // little longer so a burst of reinforces collapses into one train
+                // instead of retraining the same expert on every reinforce. No
+                // cooldown when nothing trained, so a later graduate is not delayed.
+                if trained {
+                    tokio::time::sleep(std::time::Duration::from_secs(45)).await;
                 }
                 inflight.lock().await.remove(&key);
             });

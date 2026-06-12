@@ -378,6 +378,14 @@ struct RestCall {
     arguments: serde_json::Value,
 }
 
+/// True for the transient "anonymous / not enough permissions" a freshly
+/// established serving connection can return on its first signed-in query right
+/// after a restart; a re-signin clears it (see the retry in `handle_call`).
+fn is_cold_auth_race(e: &rmcp::ErrorData) -> bool {
+    let m = e.message.as_ref();
+    m.contains("Anonymous access") || m.contains("Not enough permissions")
+}
+
 /// REST convenience surface (P-1b): `POST /mcp/call {tool, arguments}` returns the
 /// tool's JSON result, so a one-shot client (a lifecycle hook fetching bootstrap
 /// context) can call a tool without the JSON-RPC initialize -> tools/call
@@ -416,25 +424,31 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         }
     };
 
-    // Bind the scoped connection to this identity, then dispatch -- the same
-    // serialized authenticated section as a /mcp request.
-    let result = {
-        let _guard = state.auth.lock().await;
-        if let Err(e) = state
-            .serve_store
-            .signin(
-                &TenantId::new(&identity.tenant),
-                &UserId::new(&identity.user),
-            )
-            .await
-        {
-            eprintln!(
-                "antumbra-mcp: /mcp/call signin failed for {}: {e}",
-                identity.tenant
-            );
-            return internal_error();
+    // Bind the scoped connection to this identity, then dispatch (the same
+    // serialized authenticated section as a /mcp request). Immediately after a
+    // restart the freshly-established serving connection can race the signin
+    // handshake and let the first signed-in query see a spurious "anonymous";
+    // a re-signin clears it, so retry that one transient exactly once.
+    let tenant_id = TenantId::new(&identity.tenant);
+    let user_id = UserId::new(&identity.user);
+    let mut attempt = 0;
+    let result = loop {
+        let r = {
+            let _guard = state.auth.lock().await;
+            if let Err(e) = state.serve_store.signin(&tenant_id, &user_id).await {
+                eprintln!(
+                    "antumbra-mcp: /mcp/call signin failed for {}: {e}",
+                    identity.tenant
+                );
+                return internal_error();
+            }
+            mcp.call_tool(&call.tool, call.arguments.clone()).await
+        };
+        if attempt == 0 && matches!(&r, Err(e) if is_cold_auth_race(e)) {
+            attempt += 1;
+            continue;
         }
-        mcp.call_tool(&call.tool, call.arguments).await
+        break r;
     };
 
     match result {
