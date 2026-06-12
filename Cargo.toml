@@ -16,6 +16,7 @@ members = [
     "crates/antumbra-mcp",
     "crates/antumbra-sync",
     "crates/antumbra-control",
+    "crates/antumbra-control-server",
 ]
 
 [workspace.package]

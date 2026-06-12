@@ -1,0 +1,40 @@
+[package]
+name = "antumbra-control-server"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Antumbra hosted control plane: an HTTP surface for invite-gated signup, magic-link login, and RS256 token issuance, run separately from the data-plane MCP server."
+
+[[bin]]
+name = "antumbra-control-server"
+path = "src/main.rs"
+
+[dependencies]
+antumbra-control = { path = "../antumbra-control" }
+antumbra-store = { path = "../antumbra-store" }
+antumbra-core = { path = "../antumbra-core" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal"] }
+anyhow.workspace = true
+clap = { workspace = true, features = ["env"] }
+serde = { workspace = true }
+serde_json.workspace = true
+axum = "0.8"
+# Real SMTP delivery (sync transport over rustls), pulled in only under `smtp`.
+# Without it the server uses the dev mailer that logs the link to stderr.
+lettre = { version = "0.11", default-features = false, features = [
+    "smtp-transport",
+    "rustls-tls",
+    "builder",
+], optional = true }
+
+[dev-dependencies]
+# `oneshot` drives the axum router in tests without binding a socket.
+tower = { version = "0.5", features = ["util"] }
+
+[features]
+default = []
+# Enable real SMTP magic-link delivery (configure via SMTP_HOST/PORT/USER/PASS/FROM).
+smtp = ["dep:lettre"]

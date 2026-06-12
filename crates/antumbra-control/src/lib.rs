@@ -135,6 +135,22 @@ pub async fn login(store: &Store, identity: &VerifiedIdentity, issuer: &Issuer) 
     issuer.mint(&account.tenant, &account.user)
 }
 
+/// Complete a clicked magic link: verify it, then sign up (when the link carried
+/// an invite) or log in (when it did not), returning the issued bearer token. The
+/// one entry point the HTTP `/magic/verify` handler needs.
+pub async fn authenticate(
+    store: &Store,
+    magic: &MagicLink<'_>,
+    token: &str,
+    issuer: &Issuer,
+) -> Result<String> {
+    let (identity, invite) = magic.verify(token)?;
+    match invite {
+        Some(code) => signup(store, &identity, &code, issuer).await,
+        None => login(store, &identity, issuer).await,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,18 +227,28 @@ mod tests {
 
         let mailer = Capture(Mutex::new(Vec::new()));
         let ml = MagicLink::new(b"magic", Duration::from_secs(600), "https://app", &mailer);
-        ml.request("ada@x.com").unwrap();
+        // A signup link carries the invite; `authenticate` then provisions.
+        ml.request_signup("ada@x.com", "inv").unwrap();
         let token = {
             let links = mailer.0.lock().unwrap();
             links[0].split("token=").nth(1).unwrap().to_string()
         };
-        let identity = ml.verify(&token).unwrap();
-        assert_eq!(identity.subject, "email:ada@x.com");
-
-        let jwt = signup(&store, &identity, "inv", &issuer()).await.unwrap();
+        let jwt = authenticate(&store, &ml, &token, &issuer()).await.unwrap();
         let (tenant, user) = verify(&jwt);
         assert!(tenant.starts_with("ws:"));
         assert_eq!(user, "user:owner");
+
+        // A second click of a *login* link for the same email logs in (no invite,
+        // no second invite needed) to the SAME workspace.
+        ml.request("ada@x.com").unwrap();
+        let login_token = {
+            let links = mailer.0.lock().unwrap();
+            links[1].split("token=").nth(1).unwrap().to_string()
+        };
+        let jwt2 = authenticate(&store, &ml, &login_token, &issuer())
+            .await
+            .unwrap();
+        assert_eq!(verify(&jwt2), (tenant, user));
     }
 
     #[tokio::test]

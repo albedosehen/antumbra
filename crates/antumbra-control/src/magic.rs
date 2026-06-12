@@ -22,11 +22,14 @@ pub trait Mailer: Send + Sync {
     fn send_link(&self, to: &str, link: &str) -> Result<()>;
 }
 
-/// The one-time link token's claims: the email being verified, plus expiry.
+/// The one-time link token's claims: the email being verified, plus expiry, plus
+/// the invite code a *signup* link carries (a login link omits it).
 #[derive(Serialize, Deserialize)]
 struct MagicClaims {
     sub: String,
     exp: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    inv: Option<String>,
 }
 
 /// A deliberately-conservative shape check (not full RFC 5322): exactly one `@`,
@@ -48,10 +51,11 @@ fn is_plausible_email(email: &str) -> bool {
         && !domain.ends_with('.')
 }
 
-fn mint_token(secret: &[u8], email: &str, ttl: Duration) -> Result<String> {
+fn mint_token(secret: &[u8], email: &str, invite: Option<&str>, ttl: Duration) -> Result<String> {
     let claims = MagicClaims {
         sub: email.to_string(),
         exp: get_current_timestamp() + ttl.as_secs(),
+        inv: invite.map(str::to_string),
     };
     encode(
         &Header::new(Algorithm::HS256),
@@ -61,13 +65,14 @@ fn mint_token(secret: &[u8], email: &str, ttl: Duration) -> Result<String> {
     .map_err(|e| AntumbraError::other(format!("mint magic token: {e}")))
 }
 
-fn verify_token(secret: &[u8], token: &str) -> Result<String> {
+/// Verify a link token → its email and the invite it carried (if a signup link).
+fn verify_token(secret: &[u8], token: &str) -> Result<(String, Option<String>)> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["exp"]);
     validation.validate_aud = false;
     let data = decode::<MagicClaims>(token, &DecodingKey::from_secret(secret), &validation)
         .map_err(|e| AntumbraError::other(format!("invalid magic link: {e}")))?;
-    Ok(data.claims.sub)
+    Ok((data.claims.sub, data.claims.inv))
 }
 
 /// A magic-link issuer/verifier over a [`Mailer`].
@@ -90,12 +95,21 @@ impl<'a> MagicLink<'a> {
         }
     }
 
-    /// Email a one-time login link for `email`.
+    /// Email a one-time LOGIN link (no invite) for an existing account.
     pub fn request(&self, email: &str) -> Result<()> {
+        self.send(email, None)
+    }
+
+    /// Email a one-time SIGNUP link carrying `invite`, for a new account.
+    pub fn request_signup(&self, email: &str, invite: &str) -> Result<()> {
+        self.send(email, Some(invite))
+    }
+
+    fn send(&self, email: &str, invite: Option<&str>) -> Result<()> {
         if !is_plausible_email(email) {
             return Err(AntumbraError::other("not a valid email address"));
         }
-        let token = mint_token(self.secret, email, self.ttl)?;
+        let token = mint_token(self.secret, email, invite, self.ttl)?;
         let link = format!(
             "{}/magic/verify?token={token}",
             self.base_url.trim_end_matches('/')
@@ -103,10 +117,14 @@ impl<'a> MagicLink<'a> {
         self.mailer.send_link(email, &link)
     }
 
-    /// Verify a clicked link's token → the verified identity (`email:<addr>`).
-    pub fn verify(&self, token: &str) -> Result<VerifiedIdentity> {
-        let email = verify_token(self.secret, token)?;
-        Ok(VerifiedIdentity::new(format!("email:{email}")).with(Some(email), None))
+    /// Verify a clicked link's token → the verified identity (`email:<addr>`) and
+    /// the invite it carried (`Some` for a signup link, `None` for a login link).
+    pub fn verify(&self, token: &str) -> Result<(VerifiedIdentity, Option<String>)> {
+        let (email, invite) = verify_token(self.secret, token)?;
+        Ok((
+            VerifiedIdentity::new(format!("email:{email}")).with(Some(email), None),
+            invite,
+        ))
     }
 }
 
@@ -141,9 +159,21 @@ mod tests {
         let link = mailer.0.lock().unwrap()[0].clone();
         assert!(link.starts_with("https://app.example/magic/verify?token="));
 
-        let id = ml.verify(&token_in(&link)).unwrap();
+        let (id, invite) = ml.verify(&token_in(&link)).unwrap();
         assert_eq!(id.subject, "email:ada@x.com");
         assert_eq!(id.email.as_deref(), Some("ada@x.com"));
+        assert_eq!(invite, None, "a login link carries no invite");
+    }
+
+    #[test]
+    fn a_signup_link_round_trips_its_invite() {
+        let mailer = FakeMailer(Mutex::new(Vec::new()));
+        let ml = MagicLink::new(b"s", Duration::from_secs(900), "https://app", &mailer);
+        ml.request_signup("new@x.com", "invite-123").unwrap();
+        let link = mailer.0.lock().unwrap()[0].clone();
+        let (id, invite) = ml.verify(&token_in(&link)).unwrap();
+        assert_eq!(id.subject, "email:new@x.com");
+        assert_eq!(invite.as_deref(), Some("invite-123"));
     }
 
     #[test]
