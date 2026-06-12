@@ -23,6 +23,8 @@
 
 # Explicit Ignore
 **/.env
+# Control-plane signing keys (RS256 PEMs) are deployment secrets, never committed.
+/docker/keys/
 # Generated artifacts anywhere inside allowlisted directories.
 **/*.rs.bk
 Cargo.lock.bak

@@ -1,6 +1,6 @@
 # Antumbra local Docker stack
 
-A hardened, **non-root** local stack: SurrealDB v3 (Antumbra needs v3) plus the `antumbra-mcp` server, with embeddings served by a host ollama. Everything binds to `127.0.0.1` and every container runs as uid 65532 with capabilities dropped and `no-new-privileges`.
+A hardened, **non-root** local stack: SurrealDB v3 (Antumbra needs v3) plus the `antumbra-mcp` server, with embeddings served by a host ollama, and an optional `antumbra-control-server` for hosted signup. Everything binds to `127.0.0.1` and every container runs as uid 65532 with capabilities dropped and `no-new-privileges`.
 
 ## Prerequisites
 
@@ -36,7 +36,23 @@ $env:ANTUMBRA_TOKEN = '<token minted with the same ANTUMBRA_JWT_SECRET>'
 pwsh scripts/kushtaka-import.ps1 -In kushtaka-export.json
 ```
 
+## Hosted signup (optional)
+
+`antumbra-control-server` is the control plane: invite-gated signup and magic-link login that mint RS256 tokens. Skip it entirely to stay on the offline HS256 `mint-token` flow.
+
+One-time setup -- generate the RS256 issuer keypair into `docker/keys/` (gitignored) and set the control-plane variables in `docker/.env`:
+
+```bash
+openssl genrsa -out docker/keys/control-signing.pem 2048
+openssl rsa -in docker/keys/control-signing.pem -pubout -out docker/keys/control-signing.pub.pem
+# in docker/.env: ANTUMBRA_MAGIC_SECRET (openssl rand -base64 32), ANTUMBRA_CONTROL_BASE_URL
+docker compose -f docker/docker-compose.yml up -d antumbra-control-server
+```
+
+The flow: mint an invite (`antumbra-control-server mint-invite`), `POST /signup {email, invite}`, follow the emailed magic link (`GET /magic/verify?token=...`), receive the RS256 JWT. Without `SMTP_*` set, the dev mailer logs the magic link to the container's stderr (`docker logs antumbra-control-server`); set `SMTP_HOST/PORT/USER/PASS/FROM` in `docker/.env` for real delivery. To make `antumbra-mcp` accept these tokens, run it with `--jwt-public-key /keys/control-signing.pub.pem --jwt-audience antumbra` (mount `./keys` into that container too).
+
 ## Notes
 
 - `docker/.env` holds secrets and is gitignored. Move these to a secret manager (Doppler) for anything beyond local use.
-- The first `antumbra-mcp` image build compiles the workspace and is slow; rebuilds are cached.
+- The first image build of `antumbra-mcp` or `antumbra-control-server` compiles the workspace and is slow; rebuilds are cached.
+- The RS256 private key never enters an image; it is bind-mounted read-only at runtime.

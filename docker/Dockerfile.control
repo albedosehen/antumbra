@@ -1,0 +1,24 @@
+# antumbra-control-server: the hosted control plane (invite-gated signup,
+# magic-link login, RS256 token issuance). Light build; it talks to SurrealDB and
+# delivers magic links over SMTP (the `smtp` feature, rustls) when configured,
+# else a dev mailer that logs the link to stderr.
+
+# --- build stage: pinned toolchain, release binary -------------------------
+FROM rust:1.96-slim-bookworm AS builder
+WORKDIR /build
+# ca-certificates is copied into the runtime so rustls can verify the SMTP
+# server's certificate; pkg-config covers crates that probe the system.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN cargo build --release -p antumbra-control-server --locked --features smtp
+
+# --- runtime stage: runs as uid 65532 (nonroot) ---------------------------
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /build/target/release/antumbra-control-server /usr/local/bin/antumbra-control-server
+EXPOSE 8090
+# The RS256 signing key is mounted at runtime (never baked in); the binary only
+# verifies/issues tokens and talks to the DB, so it needs no elevated privileges.
+ENTRYPOINT ["/usr/local/bin/antumbra-control-server"]

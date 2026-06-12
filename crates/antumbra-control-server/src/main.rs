@@ -166,7 +166,12 @@ impl Mailer for SmtpMailer {
 fn build_mailer() -> Arc<dyn Mailer> {
     #[cfg(feature = "smtp")]
     {
-        if std::env::var("SMTP_HOST").is_ok() {
+        // Treat an empty SMTP_HOST as unset, so a compose file can pass the
+        // SMTP_* seam through with empty defaults without forcing SMTP on.
+        if std::env::var("SMTP_HOST")
+            .map(|h| !h.is_empty())
+            .unwrap_or(false)
+        {
             match SmtpMailer::from_env() {
                 Ok(m) => {
                     eprintln!("antumbra-control-server: delivering magic links via SMTP");
