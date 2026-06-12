@@ -32,6 +32,13 @@ pub enum AntumbraError {
     #[error("serde: {0}")]
     Serde(#[from] serde_json::Error),
 
+    /// The request was understood and refused (bad credentials, an expired or
+    /// replayed link, an unknown invite...). Surfaces (e.g. HTTP layers) may
+    /// show this message to the caller as a 4xx; everything else is an internal
+    /// fault whose detail belongs in server logs only.
+    #[error("{0}")]
+    Rejected(String),
+
     #[error("{0}")]
     Other(String),
 }
@@ -44,6 +51,16 @@ impl AntumbraError {
     pub fn other(msg: impl Into<String>) -> Self {
         Self::Other(msg.into())
     }
+
+    pub fn rejected(msg: impl Into<String>) -> Self {
+        Self::Rejected(msg.into())
+    }
+
+    /// True when this error is a deliberate refusal of the request
+    /// ([`AntumbraError::Rejected`]) rather than an internal fault.
+    pub fn is_rejection(&self) -> bool {
+        matches!(self, Self::Rejected(_))
+    }
 }
 
 pub type Result<T> = core::result::Result<T, AntumbraError>;
@@ -51,6 +68,16 @@ pub type Result<T> = core::result::Result<T, AntumbraError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejections_are_distinguishable_from_internal_faults() {
+        let refusal = AntumbraError::rejected("invite code expired");
+        assert!(refusal.is_rejection());
+        assert_eq!(refusal.to_string(), "invite code expired");
+        for internal in [AntumbraError::store("io"), AntumbraError::other("bug")] {
+            assert!(!internal.is_rejection());
+        }
+    }
 
     #[test]
     fn variants_render_their_message() {
