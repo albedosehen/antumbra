@@ -35,13 +35,32 @@ struct Claims {
 /// The claims a minted token carries (the inverse of [`Claims`]). `aud` is set
 /// only by the RS256 (hosted) mint so a token can be scoped to one server; the
 /// HS256 mint omits it (the offline verifier opts out of audience by default).
+/// `iat` and `jti` are forward hooks: issuance time for rotation/debugging and
+/// a unique id a future revocation list can key on. The verifier ignores both
+/// today (a token is judged by signature, expiry, and scope claims alone).
 #[derive(Debug, Serialize)]
 struct MintClaims<'a> {
     tenant: &'a str,
     user: &'a str,
     exp: u64,
+    iat: u64,
+    jti: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     aud: Option<&'a str>,
+}
+
+impl<'a> MintClaims<'a> {
+    fn new(tenant: &'a str, user: &'a str, ttl: std::time::Duration, aud: Option<&'a str>) -> Self {
+        let now = get_current_timestamp();
+        Self {
+            tenant,
+            user,
+            exp: now + ttl.as_secs(),
+            iat: now,
+            jti: uuid::Uuid::new_v4().simple().to_string(),
+            aud,
+        }
+    }
 }
 
 /// Mint a long-lived, scope-bound HS256 token for a non-interactive client (a
@@ -61,15 +80,9 @@ pub fn mint_hs256(
     if tenant.trim().is_empty() || user.trim().is_empty() {
         return Err(AuthError::Invalid("empty tenant/user".into()));
     }
-    let claims = MintClaims {
-        tenant,
-        user,
-        exp: get_current_timestamp() + ttl.as_secs(),
-        aud: None,
-    };
     encode(
         &Header::new(Algorithm::HS256),
-        &claims,
+        &MintClaims::new(tenant, user, ttl, None),
         &EncodingKey::from_secret(secret),
     )
     .map_err(|e| AuthError::Invalid(e.to_string()))
@@ -92,16 +105,14 @@ pub fn mint_rs256(
     if tenant.trim().is_empty() || user.trim().is_empty() {
         return Err(AuthError::Invalid("empty tenant/user".into()));
     }
-    let claims = MintClaims {
-        tenant,
-        user,
-        exp: get_current_timestamp() + ttl.as_secs(),
-        aud: audience,
-    };
     let key =
         EncodingKey::from_rsa_pem(private_pem).map_err(|e| AuthError::Invalid(e.to_string()))?;
-    encode(&Header::new(Algorithm::RS256), &claims, &key)
-        .map_err(|e| AuthError::Invalid(e.to_string()))
+    encode(
+        &Header::new(Algorithm::RS256),
+        &MintClaims::new(tenant, user, ttl, audience),
+        &key,
+    )
+    .map_err(|e| AuthError::Invalid(e.to_string()))
 }
 
 /// Why a token was rejected. Kept coarse on purpose: the wire response should
@@ -404,6 +415,28 @@ dwIDAQAB
         .unwrap();
         let other = JwtVerifier::hs256(b"a-different-secret");
         assert!(matches!(other.verify(&token), Err(AuthError::Invalid(_))));
+    }
+
+    #[test]
+    fn minted_tokens_carry_unique_jti_and_an_issuance_time() {
+        #[derive(Deserialize)]
+        struct Hooks {
+            iat: u64,
+            jti: String,
+        }
+        let ttl = std::time::Duration::from_secs(3600);
+        let decode_hooks = |token: &str| {
+            let mut v = Validation::new(Algorithm::HS256);
+            v.set_required_spec_claims(&["exp"]);
+            decode::<Hooks>(token, &DecodingKey::from_secret(SECRET), &v)
+                .unwrap()
+                .claims
+        };
+        let a = decode_hooks(&mint_hs256(SECRET, "ws:1", "user:a", ttl).unwrap());
+        let b = decode_hooks(&mint_hs256(SECRET, "ws:1", "user:a", ttl).unwrap());
+        assert_ne!(a.jti, b.jti, "every mint gets its own token id");
+        let now = get_current_timestamp();
+        assert!(a.iat <= now && a.iat > now - 60, "iat is the mint time");
     }
 
     #[test]
