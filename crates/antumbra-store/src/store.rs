@@ -1,11 +1,11 @@
 //! The connection handle. Wraps surql-rs's `DatabaseClient` and owns the
 //! configured embedding dimension so repositories and schema agree.
 
-use surql::connection::auth::{RootCredentials, ScopeCredentials};
+use surql::connection::auth::{DatabaseCredentials, RootCredentials, ScopeCredentials};
 use surql::connection::ConnectionConfig;
 use surql::DatabaseClient;
 
-use antumbra_core::{Result, TenantId, UserId};
+use antumbra_core::{AntumbraError, Result, TenantId, UserId};
 
 use crate::error::map;
 use crate::schema::{self, EMBED_DIM, TENANT_ACCESS};
@@ -16,6 +16,11 @@ pub struct Store {
     embed_dim: usize,
     namespace: String,
     database: String,
+    /// Database-level owner credentials (a `DEFINE USER ... ON DATABASE`
+    /// user), when the deployment scopes this service below instance root.
+    /// `None` = the classic shape: root credentials in the connection config,
+    /// or an unauthenticated embedded store.
+    db_owner: Option<(String, String)>,
 }
 
 impl Store {
@@ -58,7 +63,36 @@ impl Store {
             embed_dim,
             namespace,
             database,
+            db_owner: None,
         })
+    }
+
+    /// Connect as a **database-level** user (`DEFINE USER ... ON DATABASE`)
+    /// instead of instance root: the least-privilege shape for a service that
+    /// only ever works inside one database (the control plane). The config must
+    /// be credential-less -- config credentials would make the client sign the
+    /// session in at root level on connect -- so the connection comes up
+    /// anonymous and is then signed in at database level. The credentials are
+    /// kept so [`Store::signin_root`] can restore the owner view after a
+    /// record-scoped `signin`. A `ROLES OWNER` database user can run the
+    /// (database-level) schema DDL, so `ensure_schema` still applies.
+    pub async fn connect_with_db_user(
+        config: ConnectionConfig,
+        db_user: &str,
+        db_pass: &str,
+        embed_dim: usize,
+    ) -> Result<Self> {
+        if config.username().is_some() || config.password().is_some() {
+            return Err(AntumbraError::other(
+                "connect_with_db_user requires a credential-less config; \
+                 pass the database user via db_user/db_pass",
+            ));
+        }
+        let mut store = Self::connect_without_schema(config, embed_dim).await?;
+        store.db_owner = Some((db_user.to_string(), db_pass.to_string()));
+        store.signin_root().await?;
+        store.ensure_schema().await?;
+        Ok(store)
     }
 
     /// Authenticate this session as `(tenant, user)` via the record-access
@@ -81,14 +115,21 @@ impl Store {
         Ok(())
     }
 
-    /// Return to the **owner/root** view for cross-tenant work (provisioning a
-    /// principal, the live-propagation watcher). On an authenticated remote
-    /// (`ws://` with root credentials) this re-signs-in as root, because there
-    /// `invalidate` would drop to *anonymous*, which has no permissions. On an
-    /// embedded/unauthenticated store (no configured credentials) it falls back
-    /// to `invalidate` (anonymous *is* the owner there). Use this, not
-    /// `invalidate`, whenever owner access is required on a real deployment.
+    /// Return to the **owner** view for cross-tenant work (provisioning a
+    /// principal, the live-propagation watcher). On a database-scoped store
+    /// ([`Store::connect_with_db_user`]) the owner view is the database user;
+    /// on an authenticated remote (`ws://` with root credentials) it re-signs-in
+    /// as root, because there `invalidate` would drop to *anonymous*, which has
+    /// no permissions. On an embedded/unauthenticated store (no configured
+    /// credentials) it falls back to `invalidate` (anonymous *is* the owner
+    /// there). Use this, not `invalidate`, whenever owner access is required on
+    /// a real deployment.
     pub async fn signin_root(&self) -> Result<()> {
+        if let Some((user, pass)) = &self.db_owner {
+            let creds = DatabaseCredentials::new(&self.namespace, &self.database, user, pass);
+            self.client.signin(&creds).await.map_err(map)?;
+            return Ok(());
+        }
         match (
             self.client.config().username(),
             self.client.config().password(),
@@ -125,6 +166,24 @@ pub const DEFAULT_EMBED_DIM: usize = EMBED_DIM;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_db_scoped_connect_refuses_config_credentials() {
+        // Config credentials would sign the session in at ROOT on connect,
+        // silently defeating the point of the database-scoped user.
+        let config = ConnectionConfig::builder()
+            .url("mem://")
+            .namespace("antumbra")
+            .database("main")
+            .username("root")
+            .password("root")
+            .build()
+            .unwrap();
+        let Err(err) = Store::connect_with_db_user(config, "ctrl", "pw", EMBED_DIM).await else {
+            panic!("config credentials must be refused");
+        };
+        assert!(err.to_string().contains("credential-less"));
+    }
 
     #[tokio::test]
     async fn embedded_store_reports_its_dim_and_owner_access_falls_back() {
