@@ -49,7 +49,26 @@ openssl rsa -in docker/keys/control-signing.pem -pubout -out docker/keys/control
 docker compose -f docker/docker-compose.yml up -d antumbra-control-server
 ```
 
-The flow: mint an invite (`antumbra-control-server mint-invite`), `POST /signup {email, invite}`, follow the emailed magic link (`GET /magic/verify?token=...`), receive the RS256 JWT. Without `SMTP_*` set, the dev mailer logs the magic link to the container's stderr (`docker logs antumbra-control-server`); set `SMTP_HOST/PORT/USER/PASS/FROM` in `docker/.env` for real delivery. To make `antumbra-mcp` accept these tokens, run it with `--jwt-public-key /keys/control-signing.pub.pem --jwt-audience antumbra` (mount `./keys` into that container too).
+The server refuses to start while `ANTUMBRA_MAGIC_SECRET` is the `.env.example` placeholder (or shorter than 32 chars) -- a copied example file must not ship forgeable links.
+
+The flow: mint an invite (`antumbra-control-server mint-invite`, expires in 14 days by default; `--ttl-days 0` for non-expiring), `POST /signup {email, invite}`, follow the emailed magic link (`GET /magic/verify?token=...`), receive the RS256 JWT. Every magic link is **single-use** (a replayed link is refused even inside its 15-minute window) and link requests sit behind a per-email cooldown (default 60s; `--link-cooldown-secs`). `list-invites` / `revoke-invite <code>` manage outstanding codes. Without `SMTP_*` set, the dev mailer logs the magic link to the container's stderr (`docker logs antumbra-control-server`); set `SMTP_HOST/PORT/USER/PASS/FROM` in `docker/.env` for real delivery. To make `antumbra-mcp` accept these tokens, run it with `--jwt-public-key /keys/control-signing.pub.pem --jwt-audience antumbra` (mount `./keys` into that container too).
+
+### Least-privilege database access (recommended)
+
+By default the control plane signs in as the SurrealDB instance root. Scope it to a **database-level** user instead, so a compromise of this internet-adjacent service is contained to the `antumbra/main` database:
+
+```bash
+# one-time DDL, as root (a ROLES OWNER database user can still run the schema DDL):
+echo "DEFINE USER antumbra_control ON DATABASE PASSWORD '<generated>' ROLES OWNER;" \
+  | docker exec -i antumbra-surrealdb /surreal sql \
+      --endpoint http://localhost:8000 --user root --pass "$SURREAL_PASS" \
+      --ns antumbra --db main --hide-welcome
+# then in docker/.env:
+#   ANTUMBRA_CONTROL_DB_USER=antumbra_control
+#   ANTUMBRA_CONTROL_DB_PASS=<generated>
+#   ANTUMBRA_CONTROL_DB_AUTH=database
+docker compose -f docker/docker-compose.yml up -d antumbra-control-server
+```
 
 ## Notes
 

@@ -91,10 +91,16 @@ services:
       - serve
       - --url
       - ws://surrealdb:8000/rpc
+      # Least privilege: point these at a `DEFINE USER ... ON DATABASE` user
+      # and set ANTUMBRA_CONTROL_DB_AUTH=database (one-time DDL in
+      # docker/README.md). The defaults fall back to instance root for a quick
+      # local bring-up.
       - --db-user
-      - root
+      - ${ANTUMBRA_CONTROL_DB_USER:-root}
       - --db-pass
-      - ${SURREAL_PASS}
+      - ${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
+      - --db-auth
+      - ${ANTUMBRA_CONTROL_DB_AUTH:-root}
       - --addr
       - 0.0.0.0:8090
       - --base-url
@@ -121,6 +127,21 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8090:8090"
+    # Distroless has no shell or curl, so the binary probes itself: one
+    # HTTP/1.0 GET against /healthz, which round-trips the store.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/usr/local/bin/antumbra-control-server",
+          "probe",
+          "--addr",
+          "127.0.0.1:8090",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     security_opt:
       - no-new-privileges:true
     cap_drop:

@@ -48,9 +48,7 @@ arguments}` → the tool's JSON result) beside the JSON-RPC `/mcp` router, so a 
 
 ### P-5 · Hosted onboarding
 
-**Status:** queued. Signup, tenant provisioning, and the setup flow wrapping the [`scripts/hooks/`](../scripts/hooks) templates; billing for the SaaS tier. The offline tier needs none of this; the CLI
-
-- hooks are its onboarding.
+**Status:** signup + tenant provisioning DONE (2026-06-12); setup flow + billing queued. `antumbra-control` (the flow) + `antumbra-control-server` (the HTTP surface, dockerized alongside the stack) implement invite-gated signup and magic-link login minting the RS256 tokens the MCP server verifies: invites are operator-minted (`mint-invite` / `list-invites` / `revoke-invite`, expiring by default), magic links are **single-use** (a `jti` ledger refuses replays) and rate-limited per email, the mailer is a seam (dev stderr mailer or SMTP under `--features smtp`), and the service can run as a `DEFINE USER ... ON DATABASE` least-privilege user (`--db-auth database`). See [`docker/README.md`](../docker/README.md). Still queued: the setup flow wrapping the [`scripts/hooks/`](../scripts/hooks) templates, and billing for the SaaS tier. The offline tier needs none of this; the CLI + hooks are its onboarding.
 
 ## Foundational: make the current surface provably work
 
