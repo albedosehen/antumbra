@@ -413,26 +413,27 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         Err(e) => return bad_request(&format!("invalid JSON body: {e}")),
     };
 
-    let mcp = match state.mcp_for(&identity).await {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!(
-                "antumbra-mcp: /mcp/call init failed for {}/{}: {e}",
-                identity.tenant, identity.user
-            );
-            return internal_error();
-        }
-    };
-
-    // Bind the scoped connection to this identity, then dispatch (the same
-    // serialized authenticated section as a /mcp request). Immediately after a
-    // restart the freshly-established serving connection can race the signin
-    // handshake and let the first signed-in query see a spurious "anonymous";
-    // a re-signin clears it, so retry that one transient exactly once.
+    // Provision + bind the scoped connection to this identity, then dispatch
+    // (the same serialized authenticated section as a /mcp request). Right after
+    // a restart a just-provisioned principal is briefly not yet visible to the
+    // serving connection's signin, so the first signed-in query sees a spurious
+    // "anonymous"; a later request settles it. Replay the whole provision ->
+    // signin -> call a few times with a short backoff so that first request
+    // doesn't fail.
     let tenant_id = TenantId::new(&identity.tenant);
     let user_id = UserId::new(&identity.user);
-    let mut attempt = 0;
+    let mut attempt = 0u64;
     let result = loop {
+        let mcp = match state.mcp_for(&identity).await {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!(
+                    "antumbra-mcp: /mcp/call init failed for {}/{}: {e}",
+                    identity.tenant, identity.user
+                );
+                return internal_error();
+            }
+        };
         let r = {
             let _guard = state.auth.lock().await;
             if let Err(e) = state.serve_store.signin(&tenant_id, &user_id).await {
@@ -444,8 +445,9 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
             }
             mcp.call_tool(&call.tool, call.arguments.clone()).await
         };
-        if attempt == 0 && matches!(&r, Err(e) if is_cold_auth_race(e)) {
+        if attempt < 3 && matches!(&r, Err(e) if is_cold_auth_race(e)) {
             attempt += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(150 * attempt)).await;
             continue;
         }
         break r;
