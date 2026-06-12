@@ -170,6 +170,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // to a tenant and must never be tenant-readable).
         table_schema("invite_code").with_mode(TableMode::Schemaless),
         table_schema("account").with_mode(TableMode::Schemaless),
+        // Consumed magic-link ids (keyed by `jti`): the single-use ledger a
+        // verify writes through, with an `expires_at` matching the link's so
+        // rows self-expire out at the next sweep. Owner-only, like the rest of
+        // the control-plane tables.
+        table_schema("magic_link_use").with_mode(TableMode::Schemaless),
         // Validation harness.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)

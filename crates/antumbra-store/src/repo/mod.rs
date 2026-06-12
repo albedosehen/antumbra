@@ -14,6 +14,7 @@ pub mod expert;
 pub mod generation;
 pub mod invite;
 pub mod loop_control;
+pub mod magic_use;
 pub mod memory;
 pub mod principal;
 pub mod reward;

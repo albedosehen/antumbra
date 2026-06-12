@@ -7,7 +7,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use surql::query::crud::{delete_record, get_record, upsert_record};
+use surql::query::builder::Query;
+use surql::query::crud::{delete_record, get_record, query_records, upsert_record};
 use surql::types::RecordID;
 
 use antumbra_core::{AntumbraError, Result};
@@ -25,6 +26,13 @@ pub struct Invite {
     #[serde(default)]
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+}
+
+impl Invite {
+    /// Whether the invite is still redeemable at `now` (unexpired or eternal).
+    pub fn is_usable_at(&self, now: DateTime<Utc>) -> bool {
+        self.expires_at.is_none_or(|exp| exp >= now)
+    }
 }
 
 fn record_id(code: &str) -> Result<RecordID> {
@@ -55,16 +63,34 @@ pub async fn get(store: &Store, code: &str) -> Result<Option<Invite>> {
     }
 }
 
+/// Every outstanding (un-redeemed) invite: the operator's audit view.
+pub async fn all(store: &Store) -> Result<Vec<Invite>> {
+    let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
+    query_records(store.client(), &query).await.map_err(map)
+}
+
+/// Revoke an outstanding invite (operator action). Returns whether the code
+/// existed; revoking an unknown/already-redeemed code is a quiet no-op.
+pub async fn revoke(store: &Store, code: &str) -> Result<bool> {
+    let existed = get(store, code).await?.is_some();
+    if existed {
+        delete_record(store.client(), &record_id(code)?)
+            .await
+            .map_err(map)?;
+    }
+    Ok(existed)
+}
+
 /// Redeem (consume) an invite: it must exist and be unexpired. The row is
-/// deleted, so a code is single-use. Errors if the code is unknown or expired.
+/// deleted, so a code is single-use. Rejects if the code is unknown or expired.
 pub async fn redeem(store: &Store, code: &str, now: DateTime<Utc>) -> Result<()> {
     let invite = get(store, code)
         .await?
-        .ok_or_else(|| AntumbraError::other("unknown invite code"))?;
-    if invite.expires_at.is_some_and(|exp| exp < now) {
+        .ok_or_else(|| AntumbraError::rejected("unknown invite code"))?;
+    if !invite.is_usable_at(now) {
         // Tidy up the dead code on the way out.
         let _ = delete_record(store.client(), &record_id(code)?).await;
-        return Err(AntumbraError::other("invite code expired"));
+        return Err(AntumbraError::rejected("invite code expired"));
     }
     delete_record(store.client(), &record_id(code)?)
         .await
@@ -97,6 +123,31 @@ mod tests {
         mint(&s, "code-exp", Some(now - chrono::Duration::minutes(1)))
             .await
             .unwrap();
-        assert!(redeem(&s, "code-exp", now).await.is_err());
+        let err = redeem(&s, "code-exp", now).await.unwrap_err();
+        assert!(err.is_rejection(), "a caller fault, not an internal one");
+        // And `is_usable_at` reports the same verdict without consuming.
+        mint(&s, "code-live", Some(now + chrono::Duration::minutes(5)))
+            .await
+            .unwrap();
+        let live = get(&s, "code-live").await.unwrap().unwrap();
+        assert!(live.is_usable_at(now));
+        assert!(!live.is_usable_at(now + chrono::Duration::minutes(6)));
+    }
+
+    #[tokio::test]
+    async fn list_and_revoke_manage_outstanding_invites() {
+        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+        mint(&s, "a", None).await.unwrap();
+        mint(&s, "b", Some(Utc::now() + chrono::Duration::days(7)))
+            .await
+            .unwrap();
+        let mut codes: Vec<String> = all(&s).await.unwrap().into_iter().map(|i| i.code).collect();
+        codes.sort();
+        assert_eq!(codes, ["a", "b"]);
+
+        assert!(revoke(&s, "a").await.unwrap(), "revoked");
+        assert!(!revoke(&s, "a").await.unwrap(), "second revoke is a no-op");
+        assert!(redeem(&s, "a", Utc::now()).await.is_err(), "a is dead");
+        assert_eq!(all(&s).await.unwrap().len(), 1);
     }
 }
