@@ -3,23 +3,25 @@
 //! data-plane MCP server, which only *verifies* the tokens this server signs).
 //!
 //! The whole signup -> token -> login flow lives in `antumbra-control`; this
-//! binary is the thin HTTP + config + mailer shell over it. Magic links are
-//! delivered by a [`Mailer`]: a dev mailer that logs the link to stderr by
-//! default, or a real SMTP mailer under `--features smtp` when `SMTP_*` is set.
+//! binary is the thin HTTP + config + mailer shell over it (see `http` and
+//! `mailer`), plus the operator's invite lifecycle (mint / list / revoke) and a
+//! self-probe for the container healthcheck.
+
+mod http;
+mod mailer;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
-use clap::{Args, Parser, Subcommand};
-use serde_json::json;
+use chrono::Utc;
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use antumbra_control::{authenticate, Issuer, MagicLink, Mailer};
+use antumbra_control::Issuer;
+use antumbra_store::repo::invite;
 use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
+
+use crate::http::{router, AppState, Cooldown};
+use crate::mailer::build_mailer;
 
 #[derive(Parser)]
 #[command(
@@ -36,7 +38,26 @@ enum Command {
     /// Run the HTTP control plane (signup / login / magic-link verify).
     Serve(ServeArgs),
     /// Mint a single-use invite code and print it (hand it to a new user).
-    MintInvite(StoreArgs),
+    MintInvite(MintInviteArgs),
+    /// List the outstanding (un-redeemed) invite codes.
+    ListInvites(StoreArgs),
+    /// Revoke an outstanding invite code.
+    RevokeInvite(RevokeInviteArgs),
+    /// Probe a running server's `/healthz` and exit 0/1: the container
+    /// healthcheck (distroless has no shell or curl, so the binary checks
+    /// itself).
+    Probe(ProbeArgs),
+}
+
+/// How the service authenticates to SurrealDB.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DbAuth {
+    /// `--db-user`/`--db-pass` are instance-root credentials.
+    Root,
+    /// They are a `DEFINE USER ... ON DATABASE ... ROLES OWNER` user: least
+    /// privilege, containing a compromise of this internet-adjacent service to
+    /// the one database it works in.
+    Database,
 }
 
 #[derive(Args)]
@@ -51,6 +72,33 @@ struct StoreArgs {
     db_user: Option<String>,
     #[arg(long, env = "ANTUMBRA_DB_PASS")]
     db_pass: Option<String>,
+    /// The authentication level of `--db-user` / `--db-pass`.
+    #[arg(long, env = "ANTUMBRA_DB_AUTH", value_enum, default_value = "root")]
+    db_auth: DbAuth,
+}
+
+#[derive(Args)]
+struct MintInviteArgs {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// Days until the invite expires; `0` mints a non-expiring code.
+    #[arg(long, default_value_t = 14)]
+    ttl_days: i64,
+}
+
+#[derive(Args)]
+struct RevokeInviteArgs {
+    #[command(flatten)]
+    store: StoreArgs,
+    /// The invite code to revoke.
+    code: String,
+}
+
+#[derive(Args)]
+struct ProbeArgs {
+    /// `host:port` the server listens on.
+    #[arg(long, default_value = "127.0.0.1:8090")]
+    addr: String,
 }
 
 #[derive(Args)]
@@ -78,208 +126,101 @@ struct ServeArgs {
     /// Magic-link lifetime, in minutes.
     #[arg(long, default_value_t = 15)]
     magic_ttl_mins: u64,
+    /// Minimum seconds between magic links to the same address (the email-
+    /// cannon brake); `0` disables the cooldown.
+    #[arg(long, default_value_t = 60)]
+    link_cooldown_secs: u64,
 }
 
-#[derive(Clone)]
-struct AppState {
-    store: Store,
-    issuer: Arc<Issuer>,
-    magic_secret: Arc<Vec<u8>>,
-    base_url: Arc<String>,
-    magic_ttl: Duration,
-    mailer: Arc<dyn Mailer>,
-}
-
-#[derive(serde::Deserialize)]
-struct SignupReq {
-    email: String,
-    invite: String,
-}
-
-#[derive(serde::Deserialize)]
-struct LoginReq {
-    email: String,
-}
-
-#[derive(serde::Deserialize)]
-struct VerifyQuery {
-    token: String,
-}
-
-/// The dev mailer: log the link to stderr so the passwordless flow is usable
-/// without an email provider. Swap in [`SmtpMailer`] (under `--features smtp`).
-struct StderrMailer;
-
-impl Mailer for StderrMailer {
-    fn send_link(&self, to: &str, link: &str) -> antumbra_core::Result<()> {
-        eprintln!("[control-server dev mailer] magic link for {to}:\n  {link}");
-        Ok(())
-    }
-}
-
-#[cfg(feature = "smtp")]
-struct SmtpMailer {
-    transport: lettre::SmtpTransport,
-    from: String,
-}
-
-#[cfg(feature = "smtp")]
-impl SmtpMailer {
-    fn from_env() -> anyhow::Result<Self> {
-        use lettre::transport::smtp::authentication::Credentials;
-        let host = std::env::var("SMTP_HOST")?;
-        let from = std::env::var("SMTP_FROM")?;
-        let mut relay = lettre::SmtpTransport::relay(&host)?;
-        if let Ok(port) = std::env::var("SMTP_PORT") {
-            relay = relay.port(port.parse()?);
-        }
-        if let (Ok(u), Ok(p)) = (std::env::var("SMTP_USER"), std::env::var("SMTP_PASS")) {
-            relay = relay.credentials(Credentials::new(u, p));
-        }
-        Ok(Self {
-            transport: relay.build(),
-            from,
-        })
-    }
-}
-
-#[cfg(feature = "smtp")]
-impl Mailer for SmtpMailer {
-    fn send_link(&self, to: &str, link: &str) -> antumbra_core::Result<()> {
-        use lettre::Transport;
-        let oops = |e: String| antumbra_core::AntumbraError::other(format!("smtp: {e}"));
-        let email = lettre::Message::builder()
-            .from(self.from.parse().map_err(|e| oops(format!("from: {e}")))?)
-            .to(to.parse().map_err(|e| oops(format!("to: {e}")))?)
-            .subject("Your Antumbra sign-in link")
-            .body(format!(
-                "Sign in to Antumbra:\n\n{link}\n\nThe link expires shortly."
-            ))
-            .map_err(|e| oops(format!("build: {e}")))?;
-        self.transport
-            .send(&email)
-            .map_err(|e| oops(format!("send: {e}")))?;
-        Ok(())
-    }
-}
-
-fn build_mailer() -> Arc<dyn Mailer> {
-    #[cfg(feature = "smtp")]
-    {
-        // Treat an empty SMTP_HOST as unset, so a compose file can pass the
-        // SMTP_* seam through with empty defaults without forcing SMTP on.
-        if std::env::var("SMTP_HOST")
-            .map(|h| !h.is_empty())
-            .unwrap_or(false)
-        {
-            match SmtpMailer::from_env() {
-                Ok(m) => {
-                    eprintln!("antumbra-control-server: delivering magic links via SMTP");
-                    return Arc::new(m);
-                }
-                Err(e) => {
-                    eprintln!("antumbra-control-server: SMTP config failed ({e}); using dev mailer")
-                }
-            }
-        }
-    }
-    eprintln!(
-        "antumbra-control-server: DEV mailer -- links are logged to stderr \
-         (build --features smtp and set SMTP_* for real email)"
-    );
-    Arc::new(StderrMailer)
-}
-
-async fn connect(url: &str, user: Option<&str>, pass: Option<&str>) -> anyhow::Result<Store> {
-    let mut builder = ConnectionConfig::builder()
-        .url(url)
+async fn connect(s: &StoreArgs) -> anyhow::Result<Store> {
+    let builder = ConnectionConfig::builder()
+        .url(&s.url)
         .namespace("antumbra")
         .database("main");
-    if let (Some(u), Some(p)) = (user, pass) {
-        builder = builder.username(u).password(p);
-    }
-    Ok(Store::connect(builder.build()?, EMBED_DIM).await?)
-}
-
-fn bad(msg: &str) -> Response {
-    (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response()
-}
-
-fn internal(e: impl std::fmt::Display) -> Response {
-    eprintln!("antumbra-control-server: {e}");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "error": "internal error" })),
-    )
-        .into_response()
-}
-
-/// Mint a magic link and (try to) email it. The mailer send may block (SMTP), so
-/// it runs off the async runtime.
-async fn send_link(st: &AppState, email: String, invite: Option<String>) -> Response {
-    let mailer = st.mailer.clone();
-    let secret = st.magic_secret.clone();
-    let base = st.base_url.clone();
-    let ttl = st.magic_ttl;
-    let res = tokio::task::spawn_blocking(move || {
-        let ml = MagicLink::new(&secret, ttl, &base, mailer.as_ref());
-        match invite {
-            Some(code) => ml.request_signup(&email, &code),
-            None => ml.request(&email),
+    match s.db_auth {
+        DbAuth::Database => {
+            let (Some(user), Some(pass)) = (s.db_user.as_deref(), s.db_pass.as_deref()) else {
+                anyhow::bail!("--db-auth database requires --db-user and --db-pass");
+            };
+            Ok(Store::connect_with_db_user(builder.build()?, user, pass, EMBED_DIM).await?)
         }
-    })
-    .await;
-    match res {
-        Ok(Ok(())) => Json(json!({ "status": "link sent" })).into_response(),
-        Ok(Err(e)) => bad(&e.to_string()),
-        Err(e) => internal(e),
+        DbAuth::Root => {
+            let builder = match (s.db_user.as_deref(), s.db_pass.as_deref()) {
+                (Some(user), Some(pass)) => builder.username(user).password(pass),
+                _ => builder,
+            };
+            Ok(Store::connect(builder.build()?, EMBED_DIM).await?)
+        }
     }
 }
 
-async fn signup_handler(State(st): State<AppState>, Json(req): Json<SignupReq>) -> Response {
-    // Fail fast before emailing if the invite is plainly unusable (a race that
-    // consumes it before verify is still caught at signup time).
-    match antumbra_store::repo::invite::get(&st.store, &req.invite).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return bad("unknown or already-used invite code"),
-        Err(e) => return internal(e),
-    }
-    send_link(&st, req.email, Some(req.invite)).await
-}
+/// The `.env.example` placeholder: a magic secret anyone can read out of the
+/// repo, so refusing it outright beats serving with forgeable links.
+const PLACEHOLDER_SECRET: &str = "change-me-base64-32-bytes";
 
-async fn login_handler(State(st): State<AppState>, Json(req): Json<LoginReq>) -> Response {
-    send_link(&st, req.email, None).await
-}
-
-async fn verify_handler(State(st): State<AppState>, Query(q): Query<VerifyQuery>) -> Response {
-    let ml = MagicLink::new(
-        &st.magic_secret,
-        st.magic_ttl,
-        &st.base_url,
-        st.mailer.as_ref(),
+fn validate_magic_secret(secret: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        secret != PLACEHOLDER_SECRET,
+        "ANTUMBRA_MAGIC_SECRET is still the .env.example placeholder; \
+         generate a real one: openssl rand -base64 32"
     );
-    match authenticate(&st.store, &ml, &q.token, &st.issuer).await {
-        Ok(token) => Json(json!({ "token": token })).into_response(),
-        Err(e) => bad(&e.to_string()),
-    }
+    anyhow::ensure!(
+        secret.len() >= 32,
+        "ANTUMBRA_MAGIC_SECRET is too short ({} chars, want >= 32); \
+         generate one: openssl rand -base64 32",
+        secret.len()
+    );
+    Ok(())
 }
 
-fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/signup", post(signup_handler))
-        .route("/login", post(login_handler))
-        .route("/magic/verify", get(verify_handler))
-        .route("/healthz", get(|| async { "ok" }))
-        .with_state(state)
+/// Resolve on SIGTERM (what `docker stop` sends PID 1) or ctrl-c, so axum can
+/// stop accepting and drain in-flight requests instead of dropping them.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("install ctrl-c handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
+    eprintln!("antumbra-control-server: shutdown signal; draining");
+}
+
+/// One HTTP/1.0 GET against `/healthz`, std-only so the healthcheck needs
+/// nothing but this binary.
+fn probe(addr: &str) -> anyhow::Result<()> {
+    use std::io::{Read, Write};
+    let target = addr
+        .parse::<std::net::SocketAddr>()
+        .map_err(|e| anyhow::anyhow!("bad --addr {addr}: {e}"))?;
+    let mut stream = std::net::TcpStream::connect_timeout(&target, Duration::from_secs(3))?;
+    stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(3)))?;
+    write!(stream, "GET /healthz HTTP/1.0\r\nHost: {addr}\r\n\r\n")?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+    let status = response.lines().next().unwrap_or_default();
+    anyhow::ensure!(
+        status.starts_with("HTTP/1.1 200") || status.starts_with("HTTP/1.0 200"),
+        "unhealthy: {status}"
+    );
+    Ok(())
 }
 
 async fn serve(a: ServeArgs) -> anyhow::Result<()> {
-    let store = connect(
-        &a.store.url,
-        a.store.db_user.as_deref(),
-        a.store.db_pass.as_deref(),
-    )
-    .await?;
+    validate_magic_secret(&a.magic_secret)?;
+    let store = connect(&a.store).await?;
     let private_pem = std::fs::read(&a.signing_key)
         .map_err(|e| anyhow::anyhow!("read signing key {}: {e}", a.signing_key))?;
     let issuer = Issuer::new(
@@ -294,6 +235,7 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
         base_url: Arc::new(a.base_url),
         magic_ttl: Duration::from_secs(a.magic_ttl_mins * 60),
         mailer: build_mailer(),
+        cooldown: Arc::new(Cooldown::new(Duration::from_secs(a.link_cooldown_secs))),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(&a.addr).await?;
@@ -301,7 +243,9 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
         "antumbra-control-server: listening on http://{}/ (signup / login / magic)",
         a.addr
     );
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
 }
 
@@ -309,112 +253,100 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     match Cli::parse().cmd {
         Command::Serve(a) => serve(a).await,
-        Command::MintInvite(s) => {
-            let store = connect(&s.url, s.db_user.as_deref(), s.db_pass.as_deref()).await?;
+        Command::MintInvite(a) => {
+            let store = connect(&a.store).await?;
             let code = antumbra_control::new_invite_code();
-            antumbra_store::repo::invite::mint(&store, &code, None).await?;
+            let expires_at =
+                (a.ttl_days > 0).then(|| Utc::now() + chrono::Duration::days(a.ttl_days));
+            invite::mint(&store, &code, expires_at).await?;
+            match expires_at {
+                Some(exp) => eprintln!("expires {}", exp.to_rfc3339()),
+                None => eprintln!("never expires"),
+            }
             println!("{code}");
             Ok(())
         }
+        Command::ListInvites(s) => {
+            let store = connect(&s).await?;
+            let mut invites = invite::all(&store).await?;
+            invites.sort_by_key(|inv| inv.created_at);
+            for inv in &invites {
+                let expiry = inv
+                    .expires_at
+                    .map_or_else(|| "never expires".to_string(), |e| e.to_rfc3339());
+                println!(
+                    "{}  minted {}  {}",
+                    inv.code,
+                    inv.created_at.to_rfc3339(),
+                    expiry
+                );
+            }
+            eprintln!("{} outstanding invite(s)", invites.len());
+            Ok(())
+        }
+        Command::RevokeInvite(a) => {
+            let store = connect(&a.store).await?;
+            if invite::revoke(&store, &a.code).await? {
+                eprintln!("revoked {}", a.code);
+                Ok(())
+            } else {
+                anyhow::bail!("no outstanding invite {}", a.code)
+            }
+        }
+        Command::Probe(a) => probe(&a.addr),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::Request;
-    use std::sync::Mutex;
-    use tower::ServiceExt;
 
-    // The control crate's throwaway RS256 private key (test-only).
-    const RS_PRIV: &[u8] = include_bytes!("../../antumbra-control/tests/test_jwt_priv.pem");
-
-    struct Capture(Mutex<Vec<String>>);
-    impl Mailer for Capture {
-        fn send_link(&self, _to: &str, link: &str) -> antumbra_core::Result<()> {
-            self.0.lock().unwrap().push(link.to_string());
-            Ok(())
-        }
+    #[test]
+    fn the_placeholder_and_short_magic_secrets_are_refused() {
+        assert!(validate_magic_secret(PLACEHOLDER_SECRET).is_err());
+        assert!(validate_magic_secret("short").is_err());
+        assert!(validate_magic_secret("oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l").is_ok());
     }
 
-    fn state_with(store: Store, capture: Arc<Capture>) -> AppState {
-        AppState {
+    // The probe round-trip against a real listener: healthy store -> exit Ok,
+    // and a refused connection -> Err.
+    #[tokio::test]
+    async fn probe_round_trips_against_a_live_server() {
+        use crate::http::{router, AppState, Cooldown};
+        use std::sync::Arc;
+
+        const RS_PRIV: &[u8] = include_bytes!("../../antumbra-control/tests/test_jwt_priv.pem");
+        let store = antumbra_store::Store::connect_memory(EMBED_DIM)
+            .await
+            .unwrap();
+        let state = AppState {
             store,
             issuer: Arc::new(Issuer::new(
                 RS_PRIV.to_vec(),
                 "antumbra",
-                Duration::from_secs(3600),
+                Duration::from_secs(60),
             )),
             magic_secret: Arc::new(b"test-magic".to_vec()),
             base_url: Arc::new("https://app".to_string()),
-            magic_ttl: Duration::from_secs(600),
-            mailer: capture,
-        }
-    }
+            magic_ttl: Duration::from_secs(60),
+            mailer: Arc::new(crate::mailer::StderrMailer),
+            cooldown: Arc::new(Cooldown::new(Duration::ZERO)),
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move {
+            axum::serve(listener, router(state)).await.unwrap();
+        });
 
-    #[tokio::test]
-    async fn signup_then_verify_issues_a_token() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        antumbra_store::repo::invite::mint(&store, "inv-1", None)
+        let probed = tokio::task::spawn_blocking(move || probe(&addr))
             .await
             .unwrap();
-        let capture = Arc::new(Capture(Mutex::new(Vec::new())));
-        let app = router(state_with(store, capture.clone()));
+        assert!(probed.is_ok(), "healthy server probes ok: {probed:?}");
 
-        // POST /signup -> a magic link is "sent" (captured).
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::post("/signup")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"email":"a@b.com","invite":"inv-1"}"#))
-                    .unwrap(),
-            )
+        // Nothing listens on this port: the probe must fail, not hang.
+        let dead = tokio::task::spawn_blocking(|| probe("127.0.0.1:9"))
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let link = capture.0.lock().unwrap()[0].clone();
-        let token = link.split("token=").nth(1).unwrap().to_string();
-
-        // GET /magic/verify -> an issued bearer token.
-        let resp = app
-            .oneshot(
-                Request::get(format!("/magic/verify?token={token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
-            .await
-            .unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(
-            v["token"].as_str().unwrap_or_default().starts_with("ey"),
-            "an issued JWT"
-        );
-    }
-
-    #[tokio::test]
-    async fn signup_with_unknown_invite_is_rejected_before_emailing() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let capture = Arc::new(Capture(Mutex::new(Vec::new())));
-        let resp = router(state_with(store, capture.clone()))
-            .oneshot(
-                Request::post("/signup")
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"email":"a@b.com","invite":"nope"}"#))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(
-            capture.0.lock().unwrap().is_empty(),
-            "no link emailed for a bad invite"
-        );
+        assert!(dead.is_err());
     }
 }

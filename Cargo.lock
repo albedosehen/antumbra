@@ -175,6 +175,7 @@ dependencies = [
  "anyhow",
  "jsonwebtoken",
  "serde",
+ "uuid",
 ]
 
 [[package]]
@@ -232,6 +233,7 @@ dependencies = [
  "antumbra-store",
  "anyhow",
  "axum",
+ "chrono",
  "clap",
  "lettre",
  "serde",
