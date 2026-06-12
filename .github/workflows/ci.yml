@@ -28,15 +28,21 @@ jobs:
         run: cargo test --workspace
 
   models-build:
-    name: candle model compile-check
+    name: candle model build + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
-      # Compile the candle Qwen2.5-Coder + LoRA stack (no run — training needs a GPU).
-      - name: build --features models
-        run: cargo build -p antumbra-train --features models
+      # Compile AND lint the candle Qwen2.5-Coder + LoRA stack and everything
+      # gated on `models` (serving, the MCP consolidation trigger, the CLI train
+      # command). No run — training/inference needs a GPU — but `-D warnings`
+      # keeps the model path from drifting, since the default-feature clippy above
+      # never sees it.
+      - name: clippy --features models
+        run: cargo clippy -p antumbra-train -p antumbra-serve -p antumbra-mcp -p antumbra-cli --features models --all-targets -- -D warnings
 
   hooks:
     name: agent hook scripts
@@ -63,3 +69,16 @@ jobs:
         run: |
           ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
           echo "$ctx" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' > /dev/null
+
+  audit:
+    name: cargo audit (advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: taiki-e/install-action@cargo-audit
+      # Scans the committed Cargo.lock against the RustSec advisory DB. Fails on a
+      # known vulnerability; triage an unfixable transitive one with `--ignore
+      # RUSTSEC-XXXX` (or move it into an audit.toml) rather than dropping the gate.
+      - name: cargo audit
+        run: cargo audit
