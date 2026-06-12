@@ -99,18 +99,33 @@ impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
     }
 }
 
+/// How a request reaches a scoped (record-signed) connection so the engine ACL is
+/// enforced -- never the root `store`, which bypasses it (R-6). Chosen at startup
+/// by deployment.
+enum Serving {
+    /// Embedded (no DB credentials): the single connection, the same as `store`.
+    /// A request signs it in as its record under `auth` for the call; with one
+    /// writer, serializing is fine, and embedded mem:// / surrealkv expose only
+    /// one connection anyway.
+    Shared(Store),
+    /// Remote (authenticated): a *dedicated, credential-less* connection per
+    /// identity, signed in once as its record and reused across that identity's
+    /// concurrent requests (the surreal client multiplexes them), so requests run
+    /// WITHOUT the global lock. Bounded; eviction drops only the cache handle --
+    /// an in-flight request keeps its clone alive.
+    PerIdentity {
+        url: String,
+        conns: Mutex<Bounded<Identity, Store>>,
+    },
+}
+
 struct HttpState {
     /// The **root/owner** connection: schema, per-identity provisioning, and the
     /// owner-view R-2 watcher run here. On a remote it is root-authenticated.
     store: Store,
-    /// The **scoped serving** connection: every request signs in on this one as
-    /// its `(tenant, user)` record, so the engine ACL is enforced. On an
-    /// authenticated remote it is a *separate, credential-less* connection,
-    /// because a root session bypasses row-level permissions and cannot be scoped
-    /// (surrealdb#6259), so requests must NOT run on the root connection (R-6).
-    /// On embedded (single-writer) it is the same connection as `store`, which
-    /// already scopes correctly on record signin.
-    serve_store: Store,
+    /// The scoped serving strategy (per-identity connections on a remote, the
+    /// shared connection on embedded).
+    serving: Serving,
     host: String,
     verifier: JwtVerifier,
     /// The server default embedder (the `--embedder-url` / built-in), used for
@@ -119,8 +134,10 @@ struct HttpState {
     /// Per-tenant resolved embedders (hosted P-1c): a workspace's own configured
     /// endpoint when set, else `embedder`. Resolved once per tenant and cached.
     embedders: Mutex<Bounded<String, Arc<dyn Embedder>>>,
-    /// Serializes `signin(identity) -> handle` so two identities never share the
-    /// connection's auth state concurrently.
+    /// Serializes the brief owner-side work on the shared connections: the
+    /// `signin_root` + provision on `store`, and (embedded only) a request's
+    /// record signin on the shared serving connection. On a remote the per-request
+    /// hot path holds NO lock -- each identity has its own serving connection.
     auth: Mutex<()>,
     /// Autonomous propose threshold, applied to every per-identity server.
     auto_propose: Option<usize>,
@@ -159,21 +176,25 @@ pub async fn serve(
     auto_consolidate: bool,
 ) -> Result<()> {
     let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
-    // The scoped serving connection. On an authenticated remote, requests must run
-    // on a NON-root connection or the engine ACL is bypassed (R-6): open a second,
-    // credential-less connection (schema already applied by `store`). On embedded
-    // there are no credentials and only one connection is possible, so serving
-    // reuses `store`; record signin scopes correctly there.
-    let serve_store = match (db_user.as_deref(), db_pass.as_deref()) {
-        (Some(_), Some(_)) => crate::connect_serving(&url).await?,
-        _ => store.clone(),
+    // The scoped serving strategy. On an authenticated remote, requests must run
+    // on NON-root connections or the engine ACL is bypassed (R-6): give each
+    // identity its own credential-less connection (schema already applied by
+    // `store`), reused across its requests so the hot path needs no global lock.
+    // On embedded there are no credentials and only one connection is possible, so
+    // serving reuses `store`; a per-request record signin scopes it.
+    let serving = match (db_user.as_deref(), db_pass.as_deref()) {
+        (Some(_), Some(_)) => Serving::PerIdentity {
+            url: url.clone(),
+            conns: Mutex::new(Bounded::new(MAX_SESSIONS)),
+        },
+        _ => Serving::Shared(store.clone()),
     };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
     let serve = crate::build_serve(&store).await?;
     let state = Arc::new(HttpState {
         store,
-        serve_store,
+        serving,
         host,
         verifier,
         embedder,
@@ -266,22 +287,17 @@ async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Resp
         }
     };
 
-    // Serialize the authenticated section over the single shared connection: bind
-    // this identity, run the request, then release so the next request re-binds.
-    let _guard = state.auth.lock().await;
-    // Bind the SERVING connection to this identity's record (engine-scoped), not
-    // the root `store`.
-    if let Err(e) = state
-        .serve_store
-        .signin(
-            &TenantId::new(&identity.tenant),
-            &UserId::new(&identity.user),
-        )
-        .await
-    {
-        eprintln!("antumbra-mcp: signin failed for {}: {e}", identity.tenant);
-        return internal_error();
-    }
+    // Bind the scoped connection to this identity. On a remote each identity has
+    // its own already-signed-in serving connection, so this is a no-op and the
+    // request runs with NO lock; on embedded it signs the shared connection in
+    // under `auth`, held across the exchange.
+    let _guard = match state.bind(&identity).await {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("antumbra-mcp: signin failed for {}: {e}", identity.tenant);
+            return internal_error();
+        }
+    };
     // rmcp returns its own boxed body; rewrap it as an axum body.
     let (parts, body) = service.handle(req).await.into_parts();
     Response::from_parts(parts, Body::new(body))
@@ -330,8 +346,12 @@ impl HttpState {
             let emb = self.embedder_for(&tenant).await;
             (dc, emb)
         };
+        // The connection the tools run on: the identity's dedicated serving
+        // connection on a remote (signed in once, reused, no per-request lock), or
+        // the shared `store` on embedded (a request signs it in per call; `bind`).
+        let conn = self.serving_conn(identity, &tenant, &user).await?;
         let mut mcp = McpServer::new(
-            self.serve_store.clone(),
+            conn,
             embedder,
             tenant,
             user,
@@ -344,8 +364,8 @@ impl HttpState {
         }
         if self.auto_consolidate {
             // The autonomous trigger must consolidate on a stable OWNER
-            // connection, not the per-request scoped `serve_store` this server is
-            // built with. `store` is the root/owner connection (only ever
+            // connection, not the scoped serving connection this server is built
+            // with. `store` is the root/owner connection (only ever
             // signed-in-as-root), so the detached background task gathers,
             // provisions, and mints as owner regardless of request churn.
             mcp = mcp
@@ -354,6 +374,59 @@ impl HttpState {
                 .with_consolidating(self.consolidating.clone());
         }
         Ok(mcp)
+    }
+
+    /// The scoped connection an identity's tools run on. Embedded: the shared
+    /// `store` (a request binds it via [`HttpState::bind`]). Remote: the
+    /// identity's own credential-less connection, created + record-signed once and
+    /// cached, then reused across that identity's concurrent requests.
+    async fn serving_conn(
+        &self,
+        identity: &Identity,
+        tenant: &TenantId,
+        user: &UserId,
+    ) -> Result<Store> {
+        let (url, conns) = match &self.serving {
+            Serving::Shared(conn) => return Ok(conn.clone()),
+            Serving::PerIdentity { url, conns } => (url, conns),
+        };
+        if let Some(c) = conns.lock().await.get(identity) {
+            return Ok(c.clone());
+        }
+        // The principal was just provisioned on `store`; a fresh connection's
+        // signin can briefly not see it (the cold-start race), so verify with a
+        // cheap authed read and retry with backoff before caching.
+        let conn = crate::connect_serving(url).await?;
+        let mut attempt = 0u64;
+        loop {
+            conn.signin(tenant, user).await?;
+            match warmup_probe(&conn, tenant).await {
+                Ok(()) => break,
+                Err(e) if attempt < 3 && is_cold_auth_race_msg(&e.to_string()) => {
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(150 * attempt)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        conns.lock().await.insert(identity.clone(), conn.clone());
+        Ok(conn)
+    }
+
+    /// Bind the scoped serving connection to `identity` for a request. Embedded:
+    /// sign the shared connection in under `auth` and return the guard to hold
+    /// across the exchange. Remote: the identity's own connection is already
+    /// signed in, so return `None` -- the request runs with no lock.
+    async fn bind(&self, identity: &Identity) -> Result<Option<tokio::sync::MutexGuard<'_, ()>>> {
+        match &self.serving {
+            Serving::Shared(conn) => {
+                let guard = self.auth.lock().await;
+                conn.signin(&TenantId::new(&identity.tenant), &UserId::new(&identity.user))
+                    .await?;
+                Ok(Some(guard))
+            }
+            Serving::PerIdentity { .. } => Ok(None),
+        }
     }
 
     /// Resolve a workspace's embedder (hosted P-1c): its own configured endpoint
@@ -429,12 +502,24 @@ struct RestCall {
     arguments: serde_json::Value,
 }
 
+/// A cheap authed SELECT confirming a serving connection's record session is
+/// live: a scoped session returns `Ok(None)`; a cold/unscoped one errors with the
+/// "anonymous / not enough permissions" message.
+async fn warmup_probe(conn: &Store, tenant: &TenantId) -> Result<()> {
+    antumbra_store::repo::memory::get(
+        conn,
+        tenant,
+        &antumbra_core::MemoryId::new("memory:__warmup__"),
+    )
+    .await?;
+    Ok(())
+}
+
 /// True for the transient "anonymous / not enough permissions" a freshly
-/// established serving connection can return on its first signed-in query right
-/// after a restart; a re-signin clears it (see the retry in `handle_call`).
-fn is_cold_auth_race(e: &rmcp::ErrorData) -> bool {
-    let m = e.message.as_ref();
-    m.contains("Anonymous access") || m.contains("Not enough permissions")
+/// established serving connection can return before a just-provisioned principal
+/// is visible to it; a retry after a short backoff clears it.
+fn is_cold_auth_race_msg(msg: &str) -> bool {
+    msg.contains("Anonymous access") || msg.contains("Not enough permissions")
 }
 
 /// REST convenience surface (P-1b): `POST /mcp/call {tool, arguments}` returns the
@@ -464,44 +549,34 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         Err(e) => return bad_request(&format!("invalid JSON body: {e}")),
     };
 
-    // Provision + bind the scoped connection to this identity, then dispatch
-    // (the same serialized authenticated section as a /mcp request). Right after
-    // a restart a just-provisioned principal is briefly not yet visible to the
-    // serving connection's signin, so the first signed-in query sees a spurious
-    // "anonymous"; a later request settles it. Replay the whole provision ->
-    // signin -> call a few times with a short backoff so that first request
-    // doesn't fail.
-    let tenant_id = TenantId::new(&identity.tenant);
-    let user_id = UserId::new(&identity.user);
-    let mut attempt = 0u64;
-    let result = loop {
-        let mcp = match state.mcp_for(&identity).await {
-            Ok(m) => m,
+    // Provision + build the per-identity server (its dedicated serving connection
+    // is created and warmed here on a remote, retrying the cold-start race once
+    // per identity rather than per request).
+    let mcp = match state.mcp_for(&identity).await {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "antumbra-mcp: /mcp/call init failed for {}/{}: {e}",
+                identity.tenant, identity.user
+            );
+            return internal_error();
+        }
+    };
+    // Bind the scoped connection, then dispatch. Embedded: lock + signin the
+    // shared connection, held across the call. Remote: a no-op (the identity's
+    // own connection is already signed in), so the call runs with no lock.
+    let result = {
+        let _guard = match state.bind(&identity).await {
+            Ok(g) => g,
             Err(e) => {
-                eprintln!(
-                    "antumbra-mcp: /mcp/call init failed for {}/{}: {e}",
-                    identity.tenant, identity.user
-                );
-                return internal_error();
-            }
-        };
-        let r = {
-            let _guard = state.auth.lock().await;
-            if let Err(e) = state.serve_store.signin(&tenant_id, &user_id).await {
                 eprintln!(
                     "antumbra-mcp: /mcp/call signin failed for {}: {e}",
                     identity.tenant
                 );
                 return internal_error();
             }
-            mcp.call_tool(&call.tool, call.arguments.clone()).await
         };
-        if attempt < 3 && matches!(&r, Err(e) if is_cold_auth_race(e)) {
-            attempt += 1;
-            tokio::time::sleep(std::time::Duration::from_millis(150 * attempt)).await;
-            continue;
-        }
-        break r;
+        mcp.call_tool(&call.tool, call.arguments).await
     };
 
     match result {
@@ -522,7 +597,7 @@ mod tests {
     async fn state() -> Arc<HttpState> {
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();
         Arc::new(HttpState {
-            serve_store: store.clone(),
+            serving: Serving::Shared(store.clone()),
             store,
             host: "test".into(),
             verifier: JwtVerifier::hs256(b"test-secret"),
