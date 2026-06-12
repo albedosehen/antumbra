@@ -35,12 +35,39 @@ pub trait EmbedTransport: Send + Sync {
     fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value>;
 }
 
-/// The production transport: a blocking `ureq` POST.
-struct UreqTransport;
+/// Default per-request budget for the embeddings endpoint, overridable with
+/// `ANTUMBRA_EMBED_TIMEOUT_SECS`. Without a bound a hung or unreachable endpoint
+/// pins the blocking worker forever; because the HTTP server runs a tool (and so
+/// this embed) under its per-request lock, an unbounded call stalls every tenant.
+const EMBED_TIMEOUT_SECS: u64 = 30;
+
+/// The production transport: a blocking `ureq` POST over an agent with a bounded
+/// global timeout, so a dead endpoint fails fast instead of hanging the worker.
+struct UreqTransport {
+    agent: ureq::Agent,
+}
+
+impl UreqTransport {
+    fn new() -> Self {
+        let secs = std::env::var("ANTUMBRA_EMBED_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&s| s > 0)
+            .unwrap_or(EMBED_TIMEOUT_SECS);
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(secs)))
+            .build()
+            .into();
+        Self { agent }
+    }
+}
 
 impl EmbedTransport for UreqTransport {
     fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value> {
-        let mut req = ureq::post(url).header("content-type", "application/json");
+        let mut req = self
+            .agent
+            .post(url)
+            .header("content-type", "application/json");
         if let Some(key) = api_key {
             req = req.header("authorization", &format!("Bearer {key}"));
         }
@@ -68,7 +95,7 @@ impl HttpEmbedder {
             url,
             model,
             api_key,
-            transport: Arc::new(UreqTransport),
+            transport: Arc::new(UreqTransport::new()),
         }
     }
 
