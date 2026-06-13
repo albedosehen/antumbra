@@ -1,0 +1,30 @@
+╭ generational loop · run:demo ──────────────────────────────────────────╮
+│run:demo                                                                │
+│generation 4                                                            │
+│state      score                                                        │
+│                                                                        │
+│lifecycle                                                               │
+│  ✓ grow                                                                │
+│  ✓ explore                                                             │
+│  ◉ score       verifiers + critic produce reward signals               │
+│  · decide                                                              │
+│  · consolidate                                                         │
+│                                                                        │
+│running · x requests a graceful halt                                    │
+│                                                                        │
+│evaluations  ·  2 for this run                                          │
+│  pass    expert  expert:arith-specialist                               │
+│  FAIL    shadow  shadow:g4                                             │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+│                                                                        │
+╰────────────────────────────────────────────────────────────────────────╯

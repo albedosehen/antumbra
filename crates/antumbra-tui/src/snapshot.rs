@@ -304,6 +304,7 @@ mod tests {
             edges: demo_edges(now),
             selected_memory: 0,
             loop_heads: demo_loop_heads(now),
+            selected_loop: 0,
             loop_halt_pending: false,
             evals: demo_evals(now),
             selected_eval: 0,
@@ -545,6 +546,60 @@ mod tests {
         app.selected_eval = 0; // the drifted arith run
         app.open_detail();
         golden_overlay("eval_detail", &mut app, 120, 36);
+    }
+
+    // Golden the loop drill-down: the done/current/pending lifecycle ladder and
+    // the run's evaluation history (the Loop → Evals link), scoped to the modal.
+    #[test]
+    fn golden_loop_detail() {
+        let mut app = demo_app();
+        app.set_page(crate::app::Page::Loop);
+        // Tie a couple of eval runs to the displayed run (run:demo) so the
+        // drill-down shows a non-empty evaluation history.
+        let now = Utc::now();
+        let ev = |subj: &str, kind, status| EvaluationRun {
+            run_id: RunId::new("run:demo"),
+            subject_kind: kind,
+            subject_id: subj.into(),
+            corpus_task_id: "task:arith".into(),
+            status,
+            metrics: None,
+            regression_fingerprint: None,
+            created_at: now,
+        };
+        app.evals = vec![
+            ev(
+                "expert:arith-specialist",
+                SubjectKind::Expert,
+                EvalStatus::Success,
+            ),
+            ev("shadow:g4", SubjectKind::Shadow, EvalStatus::Failure),
+        ];
+        app.open_detail();
+        golden_overlay("loop_detail", &mut app, 120, 36);
+    }
+
+    // Golden the Loop page with several live runs: the selectable run list with
+    // the focused run highlighted, its pipeline below (no timestamps shown).
+    #[test]
+    fn golden_loop_multihead() {
+        let mut app = demo_app();
+        app.set_page(crate::app::Page::Loop);
+        let now = Utc::now();
+        let mk = |id: &str, gen: u32, state| {
+            let mut h = GenerationHead::new(RunId::new(id), now);
+            h.generation = Generation(gen);
+            h.state = state;
+            h
+        };
+        app.loop_heads = vec![
+            mk("run:arith", 4, LoopState::Score),
+            mk("run:strings", 2, LoopState::Explore),
+            mk("run:lists", 7, LoopState::Consolidate),
+        ];
+        app.selected_loop = 1;
+        let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+        assert_golden("loop_multihead", &to_text(&buf));
     }
 
     // Golden the gate (router) inspector: the weight profile + self-routing

@@ -164,6 +164,8 @@ pub struct App {
     pub selected_memory: usize,
     /// The generational loop heads (one per run), for the Loop page.
     pub loop_heads: Vec<GenerationHead>,
+    /// Index into `loop_heads` of the run the Loop page is focused on.
+    pub selected_loop: usize,
     /// Whether a graceful halt is pending for the displayed loop run.
     pub loop_halt_pending: bool,
     /// Recent evaluation runs (newest first), for the Evals page.
@@ -318,6 +320,7 @@ impl App {
             edges: Vec::new(),
             selected_memory: 0,
             loop_heads: Vec::new(),
+            selected_loop: 0,
             loop_halt_pending: false,
             evals: Vec::new(),
             selected_eval: 0,
@@ -409,6 +412,9 @@ impl App {
         }
         if !self.evals.is_empty() && self.selected_eval >= self.evals.len() {
             self.selected_eval = self.evals.len() - 1;
+        }
+        if !self.loop_heads.is_empty() && self.selected_loop >= self.loop_heads.len() {
+            self.selected_loop = self.loop_heads.len() - 1;
         }
         self.record_events();
         self.since_reload_ms = 0.0;
@@ -696,11 +702,12 @@ impl App {
     }
 
     pub fn open_detail(&mut self) {
-        // The population regions and the Evals rows have a drill-down overlay;
-        // Memory shows its detail inline, and the Loop page has none.
+        // The population regions, the Evals rows, and the Loop runs have a
+        // drill-down overlay; Memory shows its detail inline.
         match self.page {
             Page::Population => {}
             Page::Evals if !self.evals.is_empty() => {}
+            Page::Loop if !self.loop_heads.is_empty() => {}
             _ => return,
         }
         self.mode = Mode::Detail;
@@ -713,6 +720,22 @@ impl App {
         self.evals
             .iter()
             .filter(|r| r.subject_kind == run.subject_kind && r.subject_id == run.subject_id)
+            .collect()
+    }
+
+    /// The loop head the Loop page is focused on (selection is clamped on
+    /// reload, but `get` keeps this total in case the heads emptied mid-frame).
+    pub fn selected_loop_head(&self) -> Option<&GenerationHead> {
+        self.loop_heads.get(self.selected_loop)
+    }
+
+    /// The evaluation runs belonging to `head`'s run (from the loaded set):
+    /// the loop run's evaluation history for the Loop drill-down, which is how
+    /// the Loop page links to the evidence the Evals page tabulates.
+    pub fn loop_eval_history<'a>(&'a self, head: &GenerationHead) -> Vec<&'a EvaluationRun> {
+        self.evals
+            .iter()
+            .filter(|e| e.run_id.as_str() == head.run_id.as_str())
             .collect()
     }
 
@@ -1070,83 +1093,31 @@ impl App {
         self.since_reload_ms >= 2000.0
     }
 
-    /// Advance the highlighted item in the focused list (wraps).
+    /// Advance the highlighted item in the focused list (wraps). Routes through
+    /// [`Self::focused_list`] so every page's selection follows one dispatch.
     pub fn select_next(&mut self) {
-        if self.page == Page::Memory {
-            if !self.memories.is_empty() {
-                self.selected_memory = (self.selected_memory + 1) % self.memories.len();
-            }
-            return;
-        }
-        if self.page == Page::Evals {
-            if !self.evals.is_empty() {
-                self.selected_eval = (self.selected_eval + 1) % self.evals.len();
-            }
-            return;
-        }
-        match self.focus {
-            Focus::Experts => {
-                if !self.experts.is_empty() {
-                    self.selected = (self.selected + 1) % self.experts.len();
-                }
-            }
-            Focus::Shadows => {
-                if !self.shadows.is_empty() {
-                    self.selected_shadow = (self.selected_shadow + 1) % self.shadows.len();
-                }
-            }
-            Focus::Boundaries => {
-                if !self.boundaries.is_empty() {
-                    self.selected_boundary = (self.selected_boundary + 1) % self.boundaries.len();
-                }
-            }
+        let (len, sel) = self.focused_list();
+        if len > 0 {
+            self.set_focused_selection((sel + 1) % len);
         }
     }
 
     pub fn select_prev(&mut self) {
-        if self.page == Page::Memory {
-            if !self.memories.is_empty() {
-                let n = self.memories.len();
-                self.selected_memory = (self.selected_memory + n - 1) % n;
-            }
-            return;
-        }
-        if self.page == Page::Evals {
-            if !self.evals.is_empty() {
-                let n = self.evals.len();
-                self.selected_eval = (self.selected_eval + n - 1) % n;
-            }
-            return;
-        }
-        match self.focus {
-            Focus::Experts => {
-                if !self.experts.is_empty() {
-                    self.selected = (self.selected + self.experts.len() - 1) % self.experts.len();
-                }
-            }
-            Focus::Shadows => {
-                if !self.shadows.is_empty() {
-                    self.selected_shadow =
-                        (self.selected_shadow + self.shadows.len() - 1) % self.shadows.len();
-                }
-            }
-            Focus::Boundaries => {
-                if !self.boundaries.is_empty() {
-                    self.selected_boundary = (self.selected_boundary + self.boundaries.len() - 1)
-                        % self.boundaries.len();
-                }
-            }
+        let (len, sel) = self.focused_list();
+        if len > 0 {
+            self.set_focused_selection((sel + len - 1) % len);
         }
     }
 
-    /// The `(len, selected)` of the list the navigation keys drive: the Memory
-    /// page's trace list, else the focused population region.
+    /// The `(len, selected)` of the list the navigation keys drive: per non-
+    /// Population page, else the focused population region. The single source of
+    /// truth all the selection movers (next/prev/first/last/page) dispatch on.
     fn focused_list(&self) -> (usize, usize) {
-        if self.page == Page::Memory {
-            return (self.memories.len(), self.selected_memory);
-        }
-        if self.page == Page::Evals {
-            return (self.evals.len(), self.selected_eval);
+        match self.page {
+            Page::Memory => return (self.memories.len(), self.selected_memory),
+            Page::Evals => return (self.evals.len(), self.selected_eval),
+            Page::Loop => return (self.loop_heads.len(), self.selected_loop),
+            Page::Population => {}
         }
         match self.focus {
             Focus::Experts => (self.experts.len(), self.selected),
@@ -1155,15 +1126,23 @@ impl App {
         }
     }
 
-    /// Set the highlighted index of the focused list.
+    /// Set the highlighted index of the focused list (the write counterpart to
+    /// [`Self::focused_list`]).
     fn set_focused_selection(&mut self, idx: usize) {
-        if self.page == Page::Memory {
-            self.selected_memory = idx;
-            return;
-        }
-        if self.page == Page::Evals {
-            self.selected_eval = idx;
-            return;
+        match self.page {
+            Page::Memory => {
+                self.selected_memory = idx;
+                return;
+            }
+            Page::Evals => {
+                self.selected_eval = idx;
+                return;
+            }
+            Page::Loop => {
+                self.selected_loop = idx;
+                return;
+            }
+            Page::Population => {}
         }
         match self.focus {
             Focus::Experts => self.selected = idx,
@@ -1557,6 +1536,79 @@ mod tests {
         assert_eq!(app.selected_eval, 0, "single run, selection holds");
         app.request_action();
         assert!(app.pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn loop_page_selects_runs_and_drills_into_eval_history() {
+        let (store, mut app) = seeded().await;
+        let now = Utc::now();
+        let mut a = GenerationHead::new(RunId::new("run:a"), now);
+        a.state = LoopState::Score;
+        let b = GenerationHead::new(RunId::new("run:b"), now);
+        generation::save_head(&store, &a).await.unwrap();
+        generation::save_head(&store, &b).await.unwrap();
+        // One evaluation, tied to run:b only.
+        evaluation::insert(
+            &store,
+            &EvaluationRun {
+                run_id: RunId::new("run:b"),
+                subject_kind: SubjectKind::Shadow,
+                subject_id: "shadow:b0".into(),
+                corpus_task_id: "task:b".into(),
+                status: EvalStatus::Success,
+                metrics: None,
+                regression_fingerprint: None,
+                created_at: now,
+            },
+        )
+        .await
+        .unwrap();
+        app.reload(&store).await.unwrap();
+        assert_eq!(app.loop_heads.len(), 2);
+
+        // j/k drive selected_loop and wrap (the Loop page now owns a selection).
+        app.page = Page::Loop;
+        assert_eq!(app.selected_loop, 0);
+        app.select_next();
+        assert_eq!(app.selected_loop, 1);
+        app.select_next();
+        assert_eq!(app.selected_loop, 0, "wraps");
+        app.select_prev();
+        assert_eq!(app.selected_loop, 1, "wraps back");
+
+        // Enter drills in — the Loop page now has a detail overlay.
+        app.open_detail();
+        assert_eq!(app.mode, Mode::Detail);
+
+        // The drill-down's eval history is scoped to one run (the Loop→Evals
+        // link), independent of how the store ordered the heads.
+        let with_eval = app
+            .loop_heads
+            .iter()
+            .find(|h| h.run_id.as_str() == "run:b")
+            .unwrap()
+            .clone();
+        let without = app
+            .loop_heads
+            .iter()
+            .find(|h| h.run_id.as_str() == "run:a")
+            .unwrap()
+            .clone();
+        let hist = app.loop_eval_history(&with_eval);
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].subject_id, "shadow:b0");
+        assert!(app.loop_eval_history(&without).is_empty());
+
+        // Reload clamps an out-of-range selection back into the heads.
+        app.selected_loop = 9;
+        app.reload(&store).await.unwrap();
+        assert!(app.selected_loop < app.loop_heads.len());
+
+        // With no heads, Enter is a no-op (no empty drill-down).
+        app.loop_heads.clear();
+        app.mode = Mode::Normal;
+        app.open_detail();
+        assert_eq!(app.mode, Mode::Normal);
     }
 
     #[tokio::test]

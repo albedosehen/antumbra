@@ -5,18 +5,18 @@
   fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
 ╭ generational loop ───────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                                      │
-│  generation 4    ·    run:demo    ·    state score                                                                   │
+│  run:arith                 gen 4     score                                                                           │
+│▌ run:strings               gen 2     explore                                                                         │
+│  run:lists                 gen 7     consolidate                                                                     │
 │                                                                                                                      │
-│  ○ grow  →  ○ explore  →  ◉ score  →  ○ decide  →  ○ consolidate  ↺                                                  │
+│  generation 2    ·    run:strings    ·    state explore                                                              │
 │                                                                                                                      │
-│  → verifiers + critic produce reward signals                                                                         │
+│  ○ grow  →  ◉ explore  →  ○ score  →  ○ decide  →  ○ consolidate  ↺                                                  │
+│                                                                                                                      │
+│  → shadows train (DIY candle QLoRA via the trainer)                                                                  │
 │                                                                                                                      │
 │  x · request a graceful halt (stops at the next generation)                                                          │
 │  enter · inspect this run                                                                                            │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

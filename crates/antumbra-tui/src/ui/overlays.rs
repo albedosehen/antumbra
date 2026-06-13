@@ -14,6 +14,7 @@ use crate::scroll;
 use crate::theme::Theme;
 
 use super::evals::{status_color, status_label};
+use super::loops::{stage_blurb, stage_label, STAGES};
 use super::{gauge_row, gauge_spans, heading, kv, shadow_color, sparkline_row};
 
 /// The modal box rectangle for the active overlay (the size source the open
@@ -429,14 +430,14 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let (title, lines) = if app.page == Page::Evals {
-        eval_detail(app, &t)
-    } else {
-        match app.focus {
+    let (title, lines) = match app.page {
+        Page::Evals => eval_detail(app, &t),
+        Page::Loop => loop_detail(app, &t),
+        _ => match app.focus {
             Focus::Experts => expert_detail(app, &t),
             Focus::Shadows => shadow_detail(app, &t),
             Focus::Boundaries => boundary_detail(app, &t),
-        }
+        },
     };
     let inner = overlay::modal(f, &t, area, &title);
     f.render_widget(
@@ -564,6 +565,112 @@ fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     }
 
     (format!("evaluation · {}", run.subject_id), l)
+}
+
+/// The loop drill-down: the focused run's place in the generational cycle (a
+/// done/current/pending lifecycle ladder), its halt status, and the run's
+/// evaluation history -- the bridge from the Loop page to the evidence the
+/// Evals page tabulates.
+fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
+    use antumbra_core::generational::LoopState;
+    let Some(head) = app.selected_loop_head() else {
+        return (
+            "generational loop".into(),
+            vec![Line::from(Span::styled(
+                "(no run selected)",
+                Style::default().fg(t.dim),
+            ))],
+        );
+    };
+    let group = |label: String| {
+        Line::from(Span::styled(
+            label,
+            Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+        ))
+    };
+
+    let mut l = vec![heading(t, head.run_id.as_str().to_string())];
+    l.push(kv(t, "generation", &head.generation.0.to_string()));
+    l.push(kv(t, "state", stage_label(head.state)));
+
+    // Lifecycle ladder: stages before the current are done, the current is lit,
+    // the rest pending. Paused has no current stage (the cycle is at rest).
+    l.push(Line::from(""));
+    l.push(group("lifecycle".into()));
+    let current_idx = STAGES.iter().position(|&s| s == head.state);
+    for (i, &s) in STAGES.iter().enumerate() {
+        let current = Some(i) == current_idx;
+        let (glyph, color) = match current_idx {
+            Some(ci) if i < ci => ("✓", t.success),
+            _ if current => ("◉", t.accent),
+            _ => ("·", t.dim),
+        };
+        let label_style = if current {
+            Style::default().fg(t.text).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(t.dim)
+        };
+        let mut spans = vec![
+            Span::styled(format!("  {glyph} "), Style::default().fg(color)),
+            Span::styled(format!("{:<12}", stage_label(s)), label_style),
+        ];
+        // Only the current stage carries its blurb, so the ladder stays tight.
+        if current {
+            spans.push(Span::styled(stage_blurb(s), Style::default().fg(t.dim)));
+        }
+        l.push(Line::from(spans));
+    }
+    if head.state == LoopState::Paused {
+        l.push(Line::from(Span::styled(
+            "  ‖ paused; resumes into grow",
+            Style::default().fg(t.warning),
+        )));
+    }
+
+    l.push(Line::from(""));
+    if app.loop_halt_pending {
+        l.push(Line::from(Span::styled(
+            "⚠ graceful halt requested; stops at the next generation",
+            Style::default().fg(t.warning).add_modifier(Modifier::BOLD),
+        )));
+    } else {
+        l.push(Line::from(Span::styled(
+            "running · x requests a graceful halt",
+            Style::default().fg(t.dim),
+        )));
+    }
+
+    // The run's evaluation history (the Loop -> Evals link), newest first.
+    let history = app.loop_eval_history(head);
+    l.push(Line::from(""));
+    l.push(group(format!(
+        "evaluations  ·  {} for this run",
+        history.len()
+    )));
+    if history.is_empty() {
+        l.push(Line::from(Span::styled(
+            "  none recorded yet",
+            Style::default().fg(t.dim),
+        )));
+    } else {
+        for r in &history {
+            l.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<8}", status_label(r.status)),
+                    Style::default()
+                        .fg(status_color(t, r.status))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<8}", r.subject_kind.as_str()),
+                    Style::default().fg(t.dim),
+                ),
+                Span::styled(r.subject_id.clone(), Style::default().fg(t.text)),
+            ]));
+        }
+    }
+
+    (format!("generational loop · {}", head.run_id.as_str()), l)
 }
 
 fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
