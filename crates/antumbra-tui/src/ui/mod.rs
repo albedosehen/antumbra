@@ -9,6 +9,7 @@
 //! filter modals). The small shared widget helpers live here.
 
 mod chrome;
+mod detail;
 mod evals;
 mod graph;
 mod heatmap;
