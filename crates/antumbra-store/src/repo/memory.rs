@@ -145,12 +145,11 @@ pub async fn get(store: &Store, tenant: &TenantId, id: &MemoryId) -> Result<Opti
 
 /// All of a tenant's memories (tenant-filtered).
 pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
-    let query = Query::new()
-        .select(None)
-        .from_table(TABLE)
-        .map_err(map)?
-        .where_(eq("tenant_id", tenant.as_str()));
-    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`): a tenant's whole population can be
+    // thousands of embedding-carrying rows. Order is unspecified, so id-paging
+    // needs no re-sort.
+    let filter = eq("tenant_id", tenant.as_str());
+    let rows: Vec<MemoryRow> = store.read_paged(TABLE, None, Some(&filter)).await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
         .map(MemoryRow::into_domain)
@@ -163,8 +162,11 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
 /// scope the result to that tenant, which is precisely the engine-enforcement
 /// guarantee (isolation holds even with no app-side WHERE).
 pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
-    let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
-    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`): the cross-tenant population is the
+    // largest read in the store -- thousands of embedding-carrying rows that
+    // would overflow one `ws://` frame. No app-side filter (the engine ACL still
+    // scopes a tenant session); order is unspecified, so no re-sort.
+    let rows: Vec<MemoryRow> = store.read_paged(TABLE, None, None).await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
         .map(MemoryRow::into_domain)
@@ -177,7 +179,7 @@ pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
 /// `ws://` client, so omit them here. Recall still uses the indexed vectors.
 pub async fn all_unscoped_lite(store: &Store) -> Result<Vec<Memory>> {
     // Every MemoryRow field except `embedding` (left `None` by its serde default).
-    let fields = [
+    let fields: Vec<String> = [
         "key",
         "tenant_id",
         "network",
@@ -198,11 +200,10 @@ pub async fn all_unscoped_lite(store: &Store) -> Result<Vec<Memory>> {
     .iter()
     .map(|s| (*s).to_string())
     .collect();
-    let query = Query::new()
-        .select(Some(fields))
-        .from_table(TABLE)
-        .map_err(map)?;
-    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`): the whole population, minus the
+    // vectors. Dropping the embeddings shrinks each row, but the row *count* is
+    // still the full store, so the frame can still overflow without paging.
+    let rows: Vec<MemoryRow> = store.read_paged(TABLE, Some(fields), None).await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none())
         .map(MemoryRow::into_domain)
@@ -217,15 +218,13 @@ pub async fn list_by_compartment(
     tenant: &TenantId,
     compartment: &CompartmentId,
 ) -> Result<Vec<Memory>> {
-    let query = Query::new()
-        .select(None)
-        .from_table(TABLE)
-        .map_err(map)?
-        .where_(and_(
-            eq("tenant_id", tenant.as_str()),
-            eq("compartment", compartment.as_str()),
-        ));
-    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`); the existing tenant+compartment
+    // filter is preserved. Order is unspecified, so no re-sort.
+    let filter = and_(
+        eq("tenant_id", tenant.as_str()),
+        eq("compartment", compartment.as_str()),
+    );
+    let rows: Vec<MemoryRow> = store.read_paged(TABLE, None, Some(&filter)).await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
         .map(MemoryRow::into_domain)
@@ -238,15 +237,13 @@ pub async fn list_by_network(
     tenant: &TenantId,
     network: MemoryNetwork,
 ) -> Result<Vec<Memory>> {
-    let query = Query::new()
-        .select(None)
-        .from_table(TABLE)
-        .map_err(map)?
-        .where_(and_(
-            eq("tenant_id", tenant.as_str()),
-            eq("network", network.as_str()),
-        ));
-    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`); the existing tenant+network filter
+    // is preserved. Order is unspecified, so no re-sort.
+    let filter = and_(
+        eq("tenant_id", tenant.as_str()),
+        eq("network", network.as_str()),
+    );
+    let rows: Vec<MemoryRow> = store.read_paged(TABLE, None, Some(&filter)).await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
         .map(MemoryRow::into_domain)

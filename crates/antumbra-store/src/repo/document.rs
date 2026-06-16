@@ -103,12 +103,11 @@ pub async fn recall(
 
 /// Distinct document titles the tenant has ingested (the document list).
 pub async fn list_titles(store: &Store, tenant: &TenantId) -> Result<Vec<String>> {
-    let q = Query::new()
-        .select(None)
-        .from_table(TABLE)
-        .map_err(map)?
-        .where_(eq("tenant_id", tenant.as_str()));
-    let rows: Vec<ChunkRow> = query_records(store.client(), &q).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`): a tenant's whole chunk corpus, one
+    // row per chunk, is large enough to overflow a frame. The titles are sorted
+    // and deduped below, so the row order off the wire is irrelevant.
+    let filter = eq("tenant_id", tenant.as_str());
+    let rows: Vec<ChunkRow> = store.read_paged(TABLE, None, Some(&filter)).await?;
     let mut titles: Vec<String> = rows.into_iter().map(|r| r.title).collect();
     titles.sort();
     titles.dedup();

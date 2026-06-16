@@ -1,8 +1,13 @@
 //! The connection handle. Wraps surql-rs's `DatabaseClient` and owns the
 //! configured embedding dimension so repositories and schema agree.
 
+use serde::de::DeserializeOwned;
+
 use surql::connection::auth::{DatabaseCredentials, RootCredentials, ScopeCredentials};
 use surql::connection::ConnectionConfig;
+use surql::query::builder::Query;
+use surql::query::crud::query_records;
+use surql::types::operators::Operator;
 use surql::DatabaseClient;
 
 use antumbra_core::{AntumbraError, Result, TenantId, UserId};
@@ -158,6 +163,52 @@ impl Store {
 
     pub(crate) fn client(&self) -> &DatabaseClient {
         &self.client
+    }
+
+    /// Page through an otherwise-unbounded `SELECT` to avoid a single oversized
+    /// WebSocket response. A full `memory` population (each row carrying an
+    /// embedding) or a whole-table replication read is thousands of rows;
+    /// returning them in one frame exceeds the `ws://` frame limit and resets the
+    /// connection (surql-rs v0.28 exposes no max-frame-size knob, so paging is the
+    /// only fix). Orders by `id` -- a stable total order, so LIMIT/OFFSET paging
+    /// never drops or duplicates rows the way paging over a tied field
+    /// (`created_at`/`updated_at`) would. Callers that need a particular order
+    /// re-sort the accumulated rows in Rust afterward. `fields` is the projection
+    /// (`None` selects every field); `filter` is the caller's existing `WHERE`
+    /// predicate (its row-scoping is preserved verbatim).
+    pub(crate) async fn read_paged<T: DeserializeOwned>(
+        &self,
+        table: &str,
+        fields: Option<Vec<String>>,
+        filter: Option<&Operator>,
+    ) -> Result<Vec<T>> {
+        const PAGE: i64 = 20_000;
+        let mut out: Vec<T> = Vec::new();
+        let mut offset: i64 = 0;
+        loop {
+            let mut builder = Query::new()
+                .select(fields.clone())
+                .from_table(table)
+                .map_err(map)?;
+            if let Some(condition) = filter {
+                builder = builder.where_(condition);
+            }
+            let query = builder
+                .order_by("id", "ASC")
+                .map_err(map)?
+                .limit(PAGE)
+                .map_err(map)?
+                .offset(offset)
+                .map_err(map)?;
+            let page: Vec<T> = query_records(self.client(), &query).await.map_err(map)?;
+            let n = page.len() as i64;
+            out.extend(page);
+            if n < PAGE {
+                break;
+            }
+            offset += PAGE;
+        }
+        Ok(out)
     }
 }
 

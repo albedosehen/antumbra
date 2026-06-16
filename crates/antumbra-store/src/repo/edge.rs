@@ -85,8 +85,10 @@ pub async fn relate(store: &Store, edge: &MemoryEdge) -> Result<()> {
 /// graph (parallels [`crate::repo::memory::all_unscoped`]). For the operator
 /// console, which reads the store as owner; not for tenant-scoped paths.
 pub async fn all_unscoped(store: &Store) -> Result<Vec<MemoryEdge>> {
-    let q = Query::new().select(None).from_table(TABLE).map_err(map)?;
-    let rows: Vec<EdgeRow> = query_records(store.client(), &q).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`): the whole graph can be large in a
+    // densely-related store. No app-side filter (owner view); order is
+    // unspecified, so no re-sort.
+    let rows: Vec<EdgeRow> = store.read_paged(TABLE, None, None).await?;
     rows.into_iter().map(EdgeRow::into_domain).collect()
 }
 

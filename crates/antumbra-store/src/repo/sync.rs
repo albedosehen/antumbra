@@ -12,8 +12,7 @@
 use futures::StreamExt;
 use serde_json::Value;
 use surql::connection::streaming::LiveQuery;
-use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record_target};
+use surql::query::crud::upsert_record_target;
 use surql::types::operators::gt;
 use surrealdb::types::Action;
 use tokio::sync::mpsc;
@@ -26,9 +25,11 @@ use crate::store::Store;
 /// Every row of `table`, as raw JSON. Each row carries its own SurrealDB record
 /// `id`, which [`row_id`] reads back and [`put_row`] writes to the other store.
 pub async fn list_rows(store: &Store, table: &str) -> Result<Vec<Value>> {
-    let query = Query::new().select(None).from_table(table).map_err(map)?;
-    let rows: Vec<Value> = query_records(store.client(), &query).await.map_err(map)?;
-    Ok(rows)
+    // Paged by id (see `Store::read_paged`): a full-table replication read is the
+    // highest-risk frame -- `memory` alone is thousands of embedding-carrying
+    // rows, and this path is table-agnostic so any large table flows through it.
+    // The collector pairs rows by their carried record id, so id-order is fine.
+    store.read_paged(table, None, None).await
 }
 
 /// The rows of `table` whose `version_field` is **strictly greater** than
@@ -52,13 +53,11 @@ pub async fn list_rows_since(
     if since.is_empty() {
         return list_rows(store, table).await;
     }
-    let query = Query::new()
-        .select(None)
-        .from_table(table)
-        .map_err(map)?
-        .where_(gt(version_field, since));
-    let rows: Vec<Value> = query_records(store.client(), &query).await.map_err(map)?;
-    Ok(rows)
+    // Paged by id (see `Store::read_paged`); the incremental `version_field >
+    // since` cursor is preserved. The collector pairs rows by id, so id-order is
+    // fine.
+    let filter = gt(version_field, since);
+    store.read_paged(table, None, Some(&filter)).await
 }
 
 /// Upsert a raw row (as returned by [`list_rows`]) into this store, recreating

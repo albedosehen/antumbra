@@ -6,8 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use surql::query::builder::Query;
-use surql::query::crud::{get_record, query_records, upsert_record};
+use surql::query::crud::{get_record, upsert_record};
 use surql::types::operators::eq;
 use surql::types::RecordID;
 
@@ -82,19 +81,18 @@ pub async fn get(store: &Store, id: &ShadowId) -> Result<Option<Shadow>> {
 
 /// All shadows currently in a given lifecycle state.
 pub async fn list_by_status(store: &Store, status: ShadowStatus) -> Result<Vec<Shadow>> {
-    let query = Query::new()
-        .select(None)
-        .from_table(TABLE)
-        .map_err(map)?
-        .where_(eq("status", status.as_str()));
-    let rows: Vec<ShadowRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`); the existing status filter is
+    // preserved. Order is unspecified, so no re-sort.
+    let filter = eq("status", status.as_str());
+    let rows: Vec<ShadowRow> = store.read_paged(TABLE, None, Some(&filter)).await?;
     rows.into_iter().map(ShadowRow::into_domain).collect()
 }
 
 /// Every shadow ever spawned (the penumbra's full lineage, in-flight and retired).
 /// The console reads this to show recent training activity.
 pub async fn list(store: &Store) -> Result<Vec<Shadow>> {
-    let query = Query::new().select(None).from_table(TABLE).map_err(map)?;
-    let rows: Vec<ShadowRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // Paged by id (see `Store::read_paged`): the full lineage grows unbounded
+    // over the loop's lifetime. Order is unspecified, so no re-sort.
+    let rows: Vec<ShadowRow> = store.read_paged(TABLE, None, None).await?;
     rows.into_iter().map(ShadowRow::into_domain).collect()
 }
