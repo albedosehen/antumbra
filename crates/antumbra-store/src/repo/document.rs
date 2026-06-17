@@ -3,11 +3,13 @@
 //! every row, and the repo also filters explicitly (defense-in-depth). HNSW
 //! vector recall via surql-rs's `vector_search` builder; no raw SurrealQL.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use surql::query::builder::Query;
 use surql::query::crud::{query_records, upsert_record};
-use surql::query::helpers::VectorDistanceType;
+use surql::query::helpers::{fulltext_search_query, VectorDistanceType};
 use surql::types::operators::eq;
 use surql::types::RecordID;
 
@@ -15,9 +17,17 @@ use antumbra_core::{DocumentChunk, DocumentChunkId, Result, TenantId};
 
 use crate::dto::parse_dt;
 use crate::error::map;
+use crate::fusion::{rrf_fuse, DEFAULT_RRF_K};
 use crate::store::Store;
 
 const TABLE: &str = "document_chunk";
+
+/// Candidate-pool sizing for [`recall_hybrid`] (see the `memory` repo for the
+/// rationale): each leg fetches `k * POOL_MULTIPLIER`, clamped, so fusion can
+/// reorder before truncating to `k`.
+const POOL_MULTIPLIER: usize = 5;
+const MIN_POOL: usize = 20;
+const MAX_POOL: usize = 200;
 
 #[derive(Serialize, Deserialize)]
 struct ChunkRow {
@@ -96,6 +106,64 @@ pub async fn recall(
             VectorDistanceType::Cosine,
             None,
         )
+        .map_err(map)?;
+    let rows: Vec<ChunkRow> = query_records(store.client(), &q).await.map_err(map)?;
+    rows.into_iter().map(ChunkRow::into_domain).collect()
+}
+
+/// Hybrid recall over document chunks: fuse the dense (HNSW) and sparse (BM25
+/// full-text) legs over `query_text` + `query_vec` via Reciprocal Rank Fusion,
+/// returning the top `k` chunks for `tenant`. The sparse leg is best-effort (a
+/// full-text error degrades to dense-only); a blank query is dense-only.
+pub async fn recall_hybrid(
+    store: &Store,
+    tenant: &TenantId,
+    query_text: &str,
+    query_vec: &[f32],
+    k: usize,
+) -> Result<Vec<DocumentChunk>> {
+    let pool = k.saturating_mul(POOL_MULTIPLIER).clamp(MIN_POOL, MAX_POOL);
+
+    let dense = recall(store, tenant, query_vec, pool).await?;
+    let sparse = sparse_recall(store, tenant, query_text, pool)
+        .await
+        .unwrap_or_default();
+
+    if sparse.is_empty() {
+        return Ok(dense.into_iter().take(k).collect());
+    }
+
+    let dense_ids: Vec<String> = dense.iter().map(|c| c.id.as_str().to_string()).collect();
+    let sparse_ids: Vec<String> = sparse.iter().map(|c| c.id.as_str().to_string()).collect();
+    let fused = rrf_fuse(&[dense_ids, sparse_ids], DEFAULT_RRF_K);
+
+    let mut by_id: HashMap<String, DocumentChunk> = HashMap::new();
+    for c in dense.into_iter().chain(sparse) {
+        by_id.entry(c.id.as_str().to_string()).or_insert(c);
+    }
+    Ok(fused
+        .into_iter()
+        .take(k)
+        .filter_map(|id| by_id.remove(&id))
+        .collect())
+}
+
+/// The BM25 full-text (sparse) leg of [`recall_hybrid`]: the `k` chunks whose
+/// `content` best matches `query_text`, tenant-scoped, in BM25 relevance order.
+/// An empty/blank query returns nothing.
+async fn sparse_recall(
+    store: &Store,
+    tenant: &TenantId,
+    query_text: &str,
+    k: usize,
+) -> Result<Vec<DocumentChunk>> {
+    if query_text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let q = fulltext_search_query(TABLE, "content", 1, query_text, None, "score")
+        .map_err(map)?
+        .where_(eq("tenant_id", tenant.as_str()))
+        .limit(k as i64)
         .map_err(map)?;
     let rows: Vec<ChunkRow> = query_records(store.client(), &q).await.map_err(map)?;
     rows.into_iter().map(ChunkRow::into_domain).collect()

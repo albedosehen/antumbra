@@ -8,10 +8,13 @@
 
 use surql::schema::access::{record_access, AccessDefinition, RecordAccessConfig};
 use surql::schema::table::{
-    hnsw_index, index, table_schema, unique_index, HnswDistanceType, MTreeVectorType,
+    bm25_index, hnsw_index, index, table_schema, unique_index, HnswDistanceType, MTreeVectorType,
     TableDefinition, TableMode,
 };
-use surql::schema::{generate_access_sql_with_options, generate_table_sql};
+use surql::schema::{
+    generate_access_sql_with_options, generate_analyzer_sql_with_options, generate_table_sql,
+    standard_analyzer, AnalyzerDefinition,
+};
 
 use antumbra_core::Result;
 
@@ -19,6 +22,17 @@ use crate::error::map;
 
 /// Default embedding dimension (all-MiniLM-L6-v2).
 pub const EMBED_DIM: usize = 384;
+
+/// The full-text analyzer name shared by the `memory` and `document_chunk` BM25
+/// indexes (the lexical/sparse leg of hybrid recall). A generalist tokenizer +
+/// case/ascii folding -- no stemming -- so exact tokens (code identifiers, error
+/// codes, tickers) match, which is precisely what dense vectors silently drop.
+pub const CONTENT_ANALYZER: &str = "antumbra_content";
+
+/// The `DEFINE ANALYZER` definition for [`CONTENT_ANALYZER`].
+fn content_analyzer() -> AnalyzerDefinition {
+    standard_analyzer(CONTENT_ANALYZER)
+}
 
 /// Permissions for the shared-population tables (the umbra: experts, the learned
 /// router, boundaries). Any authenticated tenant session may READ them (the
@@ -225,6 +239,9 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                     None,
                     None,
                 ),
+                // BM25 full-text over content: the sparse leg of hybrid recall,
+                // fused with the HNSW dense leg by Reciprocal Rank Fusion.
+                bm25_index("memory_content_fts", ["content"], CONTENT_ANALYZER),
             ]),
         // Penumbra graph: typed, directed edges between memories
         // (references/supersedes/contradicts/follows/caused). Tenant-isolated
@@ -263,6 +280,8 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                     None,
                     None,
                 ),
+                // BM25 full-text over content (sparse leg of hybrid recall).
+                bm25_index("document_chunk_content_fts", ["content"], CONTENT_ANALYZER),
             ]),
         // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
         // subqueries resolve; ownership/sharing is carried in the rows (owner +
@@ -328,6 +347,10 @@ pub const TENANT_ACCESS: &str = "tenant";
 /// checkout until released).
 pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
     let mut out = Vec::new();
+    // The full-text analyzer must be defined before any FULLTEXT index that
+    // references it (the `memory` / `document_chunk` BM25 indexes), so emit it
+    // first. Idempotent (`IF NOT EXISTS`), re-applied on every connect.
+    out.extend(generate_analyzer_sql_with_options(&content_analyzer(), true).map_err(map)?);
     for table in tables(embed_dim) {
         table.validate().map_err(map)?;
         out.extend(generate_table_sql(&table, true));

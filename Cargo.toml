@@ -41,7 +41,12 @@ ratatui = "0.30"
 tachyonfx = "0.25"
 # The user's code-first SurrealDB toolkit (surql-rs), published as `oneiriq-surql`.
 # Pure-Rust TLS so CI/Windows builds need no system OpenSSL.
-oneiriq-surql = { version = "0.28", default-features = false, features = ["client-rustls"] }
+oneiriq-surql = { version = "0.29", default-features = false, features = ["client-rustls"] }
+
+# TEMPORARY: consume the local surql-rs checkout (full-text BM25 work) until
+# oneiriq-surql 0.29.0 is published to crates.io, then drop this patch.
+[patch.crates-io]
+oneiriq-surql = { path = "../surql-rs" }
 
 [profile.dev]
 # Faster incremental builds for the heavy dependency graph.

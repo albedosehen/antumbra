@@ -884,9 +884,12 @@ impl McpServer {
     ) -> Result<Json<MemoriesOut>, ErrorData> {
         let q = self.embedder.embed(&p.query).await.map_err(err)?;
         let net = p.network.as_deref().map(parse_network);
-        let hits = memory::recall(
+        // Hybrid recall: dense (HNSW) + sparse (BM25 full-text) fused by RRF, so
+        // exact tokens the embedding drops still surface.
+        let hits = memory::recall_hybrid(
             &self.store,
             &self.tenant,
+            &p.query,
             &q,
             p.top_k.unwrap_or(5) as usize,
             net,
@@ -946,9 +949,16 @@ impl McpServer {
         Parameters(p): Parameters<RecallDocumentsParams>,
     ) -> Result<Json<DocumentChunksOut>, ErrorData> {
         let q = self.embedder.embed(&p.query).await.map_err(err)?;
-        let hits = document::recall(&self.store, &self.tenant, &q, p.top_k.unwrap_or(5) as usize)
-            .await
-            .map_err(err)?;
+        // Hybrid recall (dense HNSW + sparse BM25, RRF-fused), like memory recall.
+        let hits = document::recall_hybrid(
+            &self.store,
+            &self.tenant,
+            &p.query,
+            &q,
+            p.top_k.unwrap_or(5) as usize,
+        )
+        .await
+        .map_err(err)?;
         Ok(Json(DocumentChunksOut {
             chunks: hits.iter().map(DocumentChunkView::from).collect(),
         }))
