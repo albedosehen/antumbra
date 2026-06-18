@@ -41,7 +41,7 @@ ratatui = "0.30"
 tachyonfx = "0.25"
 # The user's code-first SurrealDB toolkit (surql-rs), published as `oneiriq-surql`.
 # Pure-Rust TLS so CI/Windows builds need no system OpenSSL.
-oneiriq-surql = { version = "0.28", default-features = false, features = ["client-rustls"] }
+oneiriq-surql = { version = "0.29", default-features = false, features = ["client-rustls"] }
 
 [profile.dev]
 # Faster incremental builds for the heavy dependency graph.

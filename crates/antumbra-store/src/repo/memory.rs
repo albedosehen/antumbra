@@ -10,13 +10,15 @@
 //! another tenant's trace reads as absent). Built on surql-rs builders + `crud`;
 //! no raw SurrealQL.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::expressions::{field, value};
-use surql::query::helpers::VectorDistanceType;
+use surql::query::helpers::{fulltext_search_query, VectorDistanceType};
 use surql::types::operators::{and_, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
@@ -27,9 +29,17 @@ use antumbra_core::{
 
 use crate::dto::parse_dt;
 use crate::error::map;
+use crate::fusion::{rrf_fuse, DEFAULT_RRF_K};
 use crate::store::Store;
 
 const TABLE: &str = "memory";
+
+/// Candidate-pool sizing for [`recall_hybrid`]: each leg fetches `k *
+/// POOL_MULTIPLIER` (clamped) so Reciprocal Rank Fusion has room to reorder
+/// before the result is truncated to `k`.
+const POOL_MULTIPLIER: usize = 5;
+const MIN_POOL: usize = 20;
+const MAX_POOL: usize = 200;
 
 #[derive(Serialize, Deserialize)]
 struct MemoryRow {
@@ -284,6 +294,89 @@ pub async fn recall(
     let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .map(MemoryRow::into_domain)
+        .collect()
+}
+
+/// Hybrid recall: fuse the dense (HNSW vector) and sparse (BM25 full-text) legs
+/// over `query_text` and its `query_vec` embedding via Reciprocal Rank Fusion,
+/// returning the top `k` memories for `tenant` (optionally one network).
+///
+/// The dense leg finds semantically-near traces; the sparse leg catches the
+/// exact tokens (identifiers, error codes, tickers) a 384-d vector silently
+/// drops. The sparse leg is best-effort: if the full-text query errors (e.g. the
+/// index is still building, or an older store predates it), recall degrades to
+/// dense-only rather than failing. A blank `query_text` is dense-only by design.
+pub async fn recall_hybrid(
+    store: &Store,
+    tenant: &TenantId,
+    query_text: &str,
+    query_vec: &[f32],
+    k: usize,
+    network: Option<MemoryNetwork>,
+) -> Result<Vec<Memory>> {
+    // Pull a wider candidate pool from each leg than the final k, so fusion has
+    // room to reorder before truncating.
+    let pool = k.saturating_mul(POOL_MULTIPLIER).clamp(MIN_POOL, MAX_POOL);
+
+    let dense = recall(store, tenant, query_vec, pool, network).await?;
+    let sparse = sparse_recall(store, tenant, query_text, pool, network)
+        .await
+        .unwrap_or_default();
+
+    // Nothing lexical to fuse: dense already is the answer (and `rrf_fuse` over a
+    // single list is order-preserving, but skip the allocation).
+    if sparse.is_empty() {
+        return Ok(dense.into_iter().take(k).collect());
+    }
+
+    let dense_ids: Vec<String> = dense.iter().map(|m| m.id.as_str().to_string()).collect();
+    let sparse_ids: Vec<String> = sparse.iter().map(|m| m.id.as_str().to_string()).collect();
+    let fused = rrf_fuse(&[dense_ids, sparse_ids], DEFAULT_RRF_K);
+
+    // Map each fused id back to its Memory (either leg carries the full row).
+    let mut by_id: HashMap<String, Memory> = HashMap::new();
+    for m in dense.into_iter().chain(sparse) {
+        by_id.entry(m.id.as_str().to_string()).or_insert(m);
+    }
+    Ok(fused
+        .into_iter()
+        .take(k)
+        .filter_map(|id| by_id.remove(&id))
+        .collect())
+}
+
+/// The BM25 full-text (sparse) leg of [`recall_hybrid`]: the `k` memories whose
+/// `content` best matches `query_text`, tenant- (and optionally network-)scoped,
+/// in the engine's BM25 relevance order. An empty/blank query returns nothing.
+async fn sparse_recall(
+    store: &Store,
+    tenant: &TenantId,
+    query_text: &str,
+    k: usize,
+    network: Option<MemoryNetwork>,
+) -> Result<Vec<Memory>> {
+    if query_text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let condition = match network {
+        Some(net) => and_(
+            eq("tenant_id", tenant.as_str()),
+            eq("network", net.as_str()),
+        ),
+        None => eq("tenant_id", tenant.as_str()),
+    };
+    // `SELECT *, search::score(1) AS score FROM memory WHERE content @1@ <query>
+    //  AND <tenant/network> LIMIT k` -- rows return in BM25 relevance order; the
+    // projected score column is ignored by MemoryRow (serde drops it).
+    let q = fulltext_search_query(TABLE, "content", 1, query_text, None, "score")
+        .map_err(map)?
+        .where_(condition)
+        .limit(k as i64)
+        .map_err(map)?;
+    let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
         .map(MemoryRow::into_domain)
         .collect()
 }
@@ -575,5 +668,84 @@ mod tests {
                 .unwrap();
         assert!(row.deleted_at.is_some(), "tombstone survives");
         assert_eq!(row.reinforcement, 2, "no phantom increment after forget");
+    }
+
+    // Hybrid recall surfaces a memory that the dense (vector) leg alone would
+    // miss: the target's embedding is orthogonal to the query, but its content
+    // carries a rare exact token the BM25 sparse leg finds, and RRF lifts it into
+    // the top-k. This is the whole point of the sparse + dense fusion.
+    #[tokio::test]
+    async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("t");
+        let now = chrono::Utc::now();
+
+        // Query embedding points along axis 0 (where the fillers cluster).
+        let mut qvec = vec![0.0f32; EMBED_DIM];
+        qvec[0] = 1.0;
+
+        // Five "filler" traces near the query vector, none mentioning the token.
+        let ids = [
+            "00000000-0000-0000-0000-0000000000a1",
+            "00000000-0000-0000-0000-0000000000a2",
+            "00000000-0000-0000-0000-0000000000a3",
+            "00000000-0000-0000-0000-0000000000a4",
+            "00000000-0000-0000-0000-0000000000a5",
+        ];
+        for (i, id) in ids.iter().enumerate() {
+            let mut e = vec![0.0f32; EMBED_DIM];
+            e[0] = 1.0;
+            e[1] = (i as f32 + 1.0) * 0.1; // slightly less similar each step
+            let m = Memory::new(
+                *id,
+                tenant.clone(),
+                MemoryNetwork::World,
+                format!("routine market note number {i}"),
+                0.6,
+                now,
+            )
+            .with_embedding(e);
+            upsert(&store, &m).await.unwrap();
+        }
+
+        // The target: embedding orthogonal to the query (axis 5), but its content
+        // carries the rare token.
+        let mut tvec = vec![0.0f32; EMBED_DIM];
+        tvec[5] = 1.0;
+        let target = Memory::new(
+            "00000000-0000-0000-0000-0000000000ff",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "the florbnugget anomaly was first observed in this trace",
+            0.6,
+            now,
+        )
+        .with_embedding(tvec);
+        upsert(&store, &target).await.unwrap();
+
+        // Dense-only top-3 misses the target (its vector is orthogonal).
+        let dense_only = recall(&store, &tenant, &qvec, 3, None).await.unwrap();
+        assert!(
+            !dense_only.iter().any(|m| m.id.as_str() == target.id.as_str()),
+            "dense-only top-3 should not contain the orthogonal target: {:?}",
+            dense_only
+                .iter()
+                .map(|m| m.id.as_str().to_string())
+                .collect::<Vec<_>>()
+        );
+
+        // Hybrid recall with the rare token as query text: the BM25 sparse leg
+        // finds it by exact token, and RRF lifts it into the top-3.
+        let hybrid = recall_hybrid(&store, &tenant, "florbnugget", &qvec, 3, None)
+            .await
+            .unwrap();
+        assert!(
+            hybrid.iter().any(|m| m.id.as_str() == target.id.as_str()),
+            "hybrid top-3 should surface the exact-token target: {:?}",
+            hybrid
+                .iter()
+                .map(|m| m.id.as_str().to_string())
+                .collect::<Vec<_>>()
+        );
     }
 }
