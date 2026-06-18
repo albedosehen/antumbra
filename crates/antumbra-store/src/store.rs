@@ -183,6 +183,17 @@ impl Store {
         filter: Option<&Operator>,
     ) -> Result<Vec<T>> {
         const PAGE: i64 = 20_000;
+        // SurrealDB v3 requires the `ORDER BY` idiom to appear in an explicit
+        // projection: `SELECT a, b FROM t ORDER BY id` errors with "Missing
+        // order idiom `id` in statement selection". We page by `id`, so ensure
+        // it is selected when the caller passes a narrowed field list. (A `None`
+        // projection is `SELECT *`, which already includes `id`.)
+        let fields = fields.map(|mut f| {
+            if !f.iter().any(|c| c == "id") {
+                f.insert(0, "id".to_string());
+            }
+            f
+        });
         let mut out: Vec<T> = Vec::new();
         let mut offset: i64 = 0;
         loop {
