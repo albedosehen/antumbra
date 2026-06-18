@@ -2,9 +2,13 @@
 //! each workspace bring its own OpenAI-compatible `/embeddings` endpoint (its own
 //! Ollama / TEI / provider), instead of one endpoint baked into the server.
 //!
-//! One row per tenant (`tenant_id` is unique). The endpoint MUST return
-//! `EMBED_DIM`-wide vectors -- the HNSW index is fixed-dimension, so this is a
-//! model/endpoint choice, not a dimension one; changing the model means
+//! One row per tenant (`tenant_id` is unique). By default the endpoint MUST
+//! return `EMBED_DIM`-wide vectors -- the HNSW index is fixed-dimension. The
+//! optional `source_dim` opens the **Matryoshka** path: a generalist model
+//! (BGE-M3, multilingual-e5, …) returns a longer vector whose leading
+//! `EMBED_DIM` prefix is stored (re-normalized) into the same fixed index, so a
+//! richer embedder is a *configuration*, not an index change. Either way the
+//! stored vector is exactly `EMBED_DIM`-wide; changing the model means
 //! re-embedding the workspace's memories (the `reembed` CLI). All access is via
 //! surql-rs builders; the table is tenant-scoped by engine PERMISSIONS.
 
@@ -27,10 +31,19 @@ pub struct EmbedderConfig {
     pub tenant_id: String,
     /// Full OpenAI-compatible embeddings endpoint (e.g. `http://host:11434/v1/embeddings`).
     pub url: String,
-    /// Model name sent to the endpoint (must produce the index dimension).
+    /// Model name sent to the endpoint.
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+    /// The Matryoshka source dimension. `None` (the default, and how every
+    /// pre-existing row deserializes) is the strict path: the endpoint must
+    /// return exactly `EMBED_DIM`-wide vectors. `Some(n)` (with `n > EMBED_DIM`)
+    /// is the Matryoshka path: the endpoint returns `n`-dim vectors and the
+    /// re-normalized leading `EMBED_DIM` prefix is stored — e.g. `Some(1024)`
+    /// means "expect 1024 from the model, store the renormalized 384 prefix".
+    /// The stored vector is always `EMBED_DIM`-wide either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_dim: Option<u32>,
 }
 
 /// One record id per tenant, so a set replaces the prior config (idempotent).

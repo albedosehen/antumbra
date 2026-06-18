@@ -4,11 +4,18 @@
 //! the MCP server and the operator console so a route/ask uses the *same*
 //! embedding the population's capability vectors were built with.
 //!
-//! The endpoint **must** return `EMBED_DIM`-wide vectors (the HNSW index has a
-//! fixed dimension); a mismatch is rejected rather than silently corrupting
-//! recall. The irreducible network call is isolated behind [`EmbedTransport`] so
-//! the request shaping, response parsing, and dimension check are mock-tested
-//! offline, with the real `ureq` POST covered by a gated `#[ignore]` test.
+//! By default the endpoint **must** return `EMBED_DIM`-wide vectors (the HNSW
+//! index has a fixed dimension); a mismatch is rejected rather than silently
+//! corrupting recall. Optionally, an operator selects the **Matryoshka** path by
+//! configuring a `source_dim` (e.g. `1024` for BGE-M3 / multilingual-e5): the
+//! endpoint then returns `source_dim`-wide vectors and this embedder stores the
+//! re-normalized leading `EMBED_DIM` prefix (see
+//! [`antumbra_core::truncate_renormalize`]). Either way the vector handed to the
+//! index is exactly `EMBED_DIM`-wide, so the HNSW invariant holds and a richer
+//! generalist model is a *configuration*, not an index migration. The
+//! irreducible network call is isolated behind [`EmbedTransport`] so the request
+//! shaping, response parsing, and dimension handling are mock-tested offline,
+//! with the real `ureq` POST covered by a gated `#[ignore]` test.
 //!
 //! Security: the endpoint URL and bearer key are **operator-configured**
 //! (`--embed-url` / `ANTUMBRA_EMBED_URL` / `ANTUMBRA_EMBED_KEY`) and are never
@@ -25,7 +32,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use antumbra_core::ports::Embedder;
-use antumbra_core::{AntumbraError, Result};
+use antumbra_core::{truncate_renormalize, AntumbraError, Result};
 use antumbra_store::EMBED_DIM;
 
 /// The one network operation an [`HttpEmbedder`] performs: POST a JSON body to an
@@ -85,16 +92,41 @@ pub struct HttpEmbedder {
     url: String,
     model: String,
     api_key: Option<String>,
+    /// The Matryoshka source dimension. `None` = strict: require exactly
+    /// `EMBED_DIM`. `Some(n)` = expect `n`-wide vectors and store the
+    /// re-normalized leading `EMBED_DIM` prefix. See [`Self::new_with_dim`].
+    source_dim: Option<u32>,
     transport: Arc<dyn EmbedTransport>,
 }
 
 impl HttpEmbedder {
-    /// Point at `url` (the full endpoint), naming `model`, optionally bearer-authed.
+    /// Point at `url` (the full endpoint), naming `model`, optionally
+    /// bearer-authed. Strict-dimension path: the endpoint must return exactly
+    /// `EMBED_DIM`-wide vectors.
     pub fn new(url: String, model: String, api_key: Option<String>) -> Self {
+        Self::new_with_dim(url, model, api_key, None)
+    }
+
+    /// As [`Self::new`], but selecting the embedder's dimension behavior.
+    ///
+    /// `source_dim`:
+    /// - `None` — strict: the endpoint must return exactly `EMBED_DIM`-wide
+    ///   vectors (the legacy/default behavior).
+    /// - `Some(n)` — Matryoshka: the endpoint returns `n`-wide vectors and this
+    ///   embedder stores the re-normalized leading `EMBED_DIM` prefix. `n` is
+    ///   expected to exceed `EMBED_DIM` (a longer generalist embedding); a
+    ///   returned vector whose length is not exactly `n` is rejected.
+    pub fn new_with_dim(
+        url: String,
+        model: String,
+        api_key: Option<String>,
+        source_dim: Option<u32>,
+    ) -> Self {
         Self {
             url,
             model,
             api_key,
+            source_dim,
             transport: Arc::new(UreqTransport::new()),
         }
     }
@@ -104,8 +136,10 @@ impl HttpEmbedder {
     }
 
     /// Pull the embedding out of an OpenAI-shaped response (`data[0].embedding`)
-    /// and enforce the index dimension.
-    fn parse(resp: &Value) -> Result<Vec<f32>> {
+    /// and reconcile it with the index dimension. Strict mode rejects anything
+    /// but `EMBED_DIM`; Matryoshka mode requires the configured `source_dim`
+    /// then truncates + re-normalizes to `EMBED_DIM` (always index-wide on exit).
+    fn parse(&self, resp: &Value) -> Result<Vec<f32>> {
         let embedding = resp
             .get("data")
             .and_then(|d| d.get(0))
@@ -115,13 +149,31 @@ impl HttpEmbedder {
             })?;
         let vector: Vec<f32> = serde_json::from_value(embedding.clone())
             .map_err(|e| AntumbraError::other(format!("embedding was not a float array: {e}")))?;
-        if vector.len() != EMBED_DIM {
-            return Err(AntumbraError::other(format!(
-                "embedder returned dimension {} but the HNSW index needs {EMBED_DIM}",
-                vector.len()
-            )));
+        match self.source_dim {
+            // Matryoshka: require the model's full width, then store the
+            // re-normalized EMBED_DIM prefix.
+            Some(n) => {
+                let expected = n as usize;
+                if vector.len() != expected {
+                    return Err(AntumbraError::other(format!(
+                        "embedder returned dimension {} but the configured Matryoshka \
+                         source dimension is {expected}",
+                        vector.len()
+                    )));
+                }
+                Ok(truncate_renormalize(vector, EMBED_DIM))
+            }
+            // Strict: the endpoint must already produce the index dimension.
+            None => {
+                if vector.len() != EMBED_DIM {
+                    return Err(AntumbraError::other(format!(
+                        "embedder returned dimension {} but the HNSW index needs {EMBED_DIM}",
+                        vector.len()
+                    )));
+                }
+                Ok(vector)
+            }
         }
-        Ok(vector)
     }
 }
 
@@ -138,7 +190,7 @@ impl Embedder for HttpEmbedder {
             tokio::task::spawn_blocking(move || transport.post(&url, api_key.as_deref(), &body))
                 .await
                 .map_err(|e| AntumbraError::other(format!("embed task panicked: {e}")))??;
-        Self::parse(&resp)
+        self.parse(&resp)
     }
 
     fn dim(&self) -> usize {
@@ -164,10 +216,15 @@ mod tests {
     }
 
     fn embedder(resp: Result<Value>) -> HttpEmbedder {
+        embedder_with_dim(resp, None)
+    }
+
+    fn embedder_with_dim(resp: Result<Value>, source_dim: Option<u32>) -> HttpEmbedder {
         HttpEmbedder {
             url: "http://localhost/embeddings".into(),
             model: "all-MiniLM-L6-v2".into(),
             api_key: None,
+            source_dim,
             transport: Arc::new(FakeTransport(resp)),
         }
     }
@@ -184,6 +241,43 @@ mod tests {
     async fn rejects_a_wrong_dimension() {
         let resp = json!({ "data": [ { "embedding": vec![0.1f32; 8] } ] });
         assert!(embedder(Ok(resp)).embed("hello").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn matryoshka_truncates_and_renormalizes_to_unit_norm() {
+        // A 1024-dim Matryoshka response with source_dim=Some(1024) yields a
+        // unit-norm EMBED_DIM (384) vector: the stored vector is always the
+        // index width regardless of the model's native dimension.
+        let resp = json!({ "data": [ { "embedding": vec![0.5f32; 1024] } ] });
+        let v = embedder_with_dim(Ok(resp), Some(1024))
+            .embed("hello")
+            .await
+            .unwrap();
+        assert_eq!(v.len(), EMBED_DIM);
+        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-5, "unit norm, got {norm}");
+    }
+
+    #[tokio::test]
+    async fn matryoshka_rejects_when_source_dim_mismatches() {
+        // source_dim=Some(1024) but the endpoint returned 512: rejected rather
+        // than silently storing a wrong-width prefix.
+        let resp = json!({ "data": [ { "embedding": vec![0.1f32; 512] } ] });
+        assert!(embedder_with_dim(Ok(resp), Some(1024))
+            .embed("hello")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn matryoshka_rejects_an_exact_embed_dim_response_when_source_is_longer() {
+        // With source_dim=Some(1024) a bare EMBED_DIM response is the wrong
+        // width for the configured Matryoshka source and is rejected.
+        let resp = json!({ "data": [ { "embedding": vec![0.25f32; EMBED_DIM] } ] });
+        assert!(embedder_with_dim(Ok(resp), Some(1024))
+            .embed("hello")
+            .await
+            .is_err());
     }
 
     #[tokio::test]

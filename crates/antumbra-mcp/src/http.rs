@@ -452,10 +452,11 @@ impl HttpState {
             return e.clone();
         }
         let resolved = match antumbra_store::repo::embedder_config::get(&self.store, tenant).await {
-            Ok(Some(cfg)) => Arc::new(antumbra_embed::HttpEmbedder::new(
+            Ok(Some(cfg)) => Arc::new(antumbra_embed::HttpEmbedder::new_with_dim(
                 cfg.url,
                 cfg.model,
                 cfg.api_key,
+                cfg.source_dim,
             )) as Arc<dyn Embedder>,
             Ok(None) => self.embedder.clone(),
             Err(e) => {

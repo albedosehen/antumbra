@@ -1,0 +1,68 @@
+{
+  "description": "A small labeled multi-domain retrieval corpus for the Antumbra embedder benchmark. Each domain has a set of documents and a set of (query, relevant_doc_id) labels. The corpus is deliberately small and lexically grounded so the deterministic FixedEmbedder baseline (fused with the BM25 sparse leg in recall_hybrid) produces stable, sane metrics with no network; a real Matryoshka HTTP embedder (env-gated) is expected to do at least as well on the semantic queries.",
+  "domains": [
+    {
+      "name": "code",
+      "documents": [
+        { "id": "code-reverse-string", "text": "fn reverse_string(s: &str) -> String { s.chars().rev().collect() }" },
+        { "id": "code-binary-search", "text": "fn binary_search(xs: &[i32], target: i32) -> Option<usize> { let (mut lo, mut hi) = (0, xs.len()); while lo < hi { let mid = (lo + hi) / 2; } None }" },
+        { "id": "code-read-file", "text": "fn read_file_to_string(path: &Path) -> std::io::Result<String> { std::fs::read_to_string(path) }" },
+        { "id": "code-http-get", "text": "async fn http_get(url: &str) -> Result<String> { reqwest::get(url).await?.text().await }" },
+        { "id": "code-fibonacci", "text": "fn fibonacci(n: u64) -> u64 { if n < 2 { n } else { fibonacci(n - 1) + fibonacci(n - 2) } }" },
+        { "id": "code-parse-json", "text": "fn parse_json(input: &str) -> serde_json::Result<Value> { serde_json::from_str(input) }" },
+        { "id": "code-sort-vec", "text": "fn sort_descending(v: &mut Vec<i32>) { v.sort_unstable_by(|a, b| b.cmp(a)); }" }
+      ],
+      "labels": [
+        { "query": "function that reverses a string", "relevant_doc_id": "code-reverse-string" },
+        { "query": "binary_search over a sorted slice for a target", "relevant_doc_id": "code-binary-search" },
+        { "query": "read a file into a String", "relevant_doc_id": "code-read-file" },
+        { "query": "async http_get request returning text", "relevant_doc_id": "code-http-get" },
+        { "query": "recursive fibonacci function", "relevant_doc_id": "code-fibonacci" },
+        { "query": "parse_json from a string with serde_json", "relevant_doc_id": "code-parse-json" },
+        { "query": "sort a vector in descending order", "relevant_doc_id": "code-sort-vec" }
+      ]
+    },
+    {
+      "name": "finance",
+      "documents": [
+        { "id": "fin-aapl", "text": "AAPL Apple Inc reported record quarterly earnings driven by iPhone and services revenue." },
+        { "id": "fin-msft", "text": "MSFT Microsoft cloud Azure growth lifted the quarter as enterprise adoption accelerated." },
+        { "id": "fin-tsla", "text": "TSLA Tesla vehicle deliveries and automotive gross margin were the focus of the report." },
+        { "id": "fin-nvda", "text": "NVDA Nvidia data-center GPU demand for AI training pushed revenue to a new high." },
+        { "id": "fin-amzn", "text": "AMZN Amazon retail and AWS segment operating income beat expectations this quarter." },
+        { "id": "fin-jpm", "text": "JPM JPMorgan net interest income rose as the bank benefited from higher rates." },
+        { "id": "fin-xom", "text": "XOM ExxonMobil upstream oil and gas production drove cash flow amid commodity prices." }
+      ],
+      "labels": [
+        { "query": "Apple quarterly earnings AAPL iPhone services", "relevant_doc_id": "fin-aapl" },
+        { "query": "Microsoft Azure cloud growth MSFT", "relevant_doc_id": "fin-msft" },
+        { "query": "Tesla TSLA vehicle deliveries automotive margin", "relevant_doc_id": "fin-tsla" },
+        { "query": "Nvidia NVDA data-center GPU AI demand", "relevant_doc_id": "fin-nvda" },
+        { "query": "Amazon AMZN AWS retail operating income", "relevant_doc_id": "fin-amzn" },
+        { "query": "JPMorgan JPM net interest income higher rates", "relevant_doc_id": "fin-jpm" },
+        { "query": "ExxonMobil XOM oil and gas production cash flow", "relevant_doc_id": "fin-xom" }
+      ]
+    },
+    {
+      "name": "news",
+      "documents": [
+        { "id": "news-satya-msft", "text": "Satya Nadella, chief executive of Microsoft, outlined the company's artificial intelligence strategy at the keynote." },
+        { "id": "news-jensen-nvda", "text": "Jensen Huang, founder of Nvidia, discussed accelerated computing and the demand for GPUs." },
+        { "id": "news-insider-acme", "text": "An insider at Acme Robotics, director Jane Calloway, disclosed a Form 4 purchase of company shares." },
+        { "id": "news-merger-globex", "text": "Globex Corporation announced a merger with Initech, creating a larger industrial conglomerate." },
+        { "id": "news-fed-powell", "text": "Jerome Powell, the Federal Reserve chair, signaled the central bank would hold interest rates steady." },
+        { "id": "news-org-redwood", "text": "Redwood Therapeutics, a biotechnology firm, reported positive results from a late-stage clinical trial." },
+        { "id": "news-insider-zylon", "text": "Zylon Dynamics chief financial officer Marcus Ueda filed an insider sale of restricted stock units." }
+      ],
+      "labels": [
+        { "query": "Satya Nadella Microsoft chief executive AI keynote", "relevant_doc_id": "news-satya-msft" },
+        { "query": "Jensen Huang Nvidia founder accelerated computing GPUs", "relevant_doc_id": "news-jensen-nvda" },
+        { "query": "insider Form 4 purchase director Jane Calloway Acme Robotics", "relevant_doc_id": "news-insider-acme" },
+        { "query": "Globex Corporation merger with Initech conglomerate", "relevant_doc_id": "news-merger-globex" },
+        { "query": "Jerome Powell Federal Reserve chair interest rates steady", "relevant_doc_id": "news-fed-powell" },
+        { "query": "Redwood Therapeutics biotechnology clinical trial results", "relevant_doc_id": "news-org-redwood" },
+        { "query": "Zylon Dynamics CFO Marcus Ueda insider sale restricted stock", "relevant_doc_id": "news-insider-zylon" }
+      ]
+    }
+  ]
+}

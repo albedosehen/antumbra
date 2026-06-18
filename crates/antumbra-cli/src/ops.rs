@@ -508,6 +508,7 @@ pub async fn set_embedder(
     endpoint: &str,
     model: &str,
     key: Option<String>,
+    source_dim: Option<u32>,
 ) -> anyhow::Result<()> {
     use antumbra_store::repo::embedder_config::{self, EmbedderConfig};
 
@@ -519,10 +520,17 @@ pub async fn set_embedder(
             url: endpoint.to_string(),
             model: model.to_string(),
             api_key: key,
+            source_dim,
         },
     )
     .await?;
-    println!("set embedder for {tenant}: {endpoint} ({model})");
+    match source_dim {
+        Some(n) => println!(
+            "set embedder for {tenant}: {endpoint} ({model}), Matryoshka source dim {n} \
+             -> renormalized 384 prefix stored"
+        ),
+        None => println!("set embedder for {tenant}: {endpoint} ({model})"),
+    }
     println!(
         "note: applied to sessions built after now; reconnect the workspace's agent \
          (or restart the server) to apply to an active session, and run \
@@ -539,13 +547,17 @@ pub async fn get_embedder(url: &str, tenant: &str) -> anyhow::Result<()> {
     let store = crate::connect(url).await?;
     match embedder_config::get(&store, &TenantId::new(tenant)).await? {
         Some(c) => println!(
-            "{tenant}: {} ({}){}",
+            "{tenant}: {} ({}){}{}",
             c.url,
             c.model,
             if c.api_key.is_some() {
                 " [key set]"
             } else {
                 ""
+            },
+            match c.source_dim {
+                Some(n) => format!(" [Matryoshka source dim {n} -> 384 prefix]"),
+                None => String::new(),
             }
         ),
         None => println!("{tenant}: no embedder configured (uses the server default)"),
@@ -598,8 +610,12 @@ pub async fn reembed(url: &str, tenant: &str, dry_run: bool, yes: bool) -> anyho
         }
     }
 
-    let embedder =
-        antumbra_embed::HttpEmbedder::new(cfg.url.clone(), cfg.model.clone(), cfg.api_key.clone());
+    let embedder = antumbra_embed::HttpEmbedder::new_with_dim(
+        cfg.url.clone(),
+        cfg.model.clone(),
+        cfg.api_key.clone(),
+        cfg.source_dim,
+    );
     let step = (total / 10).max(1);
     let mut ok = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();

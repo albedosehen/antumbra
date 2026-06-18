@@ -24,6 +24,7 @@ pub mod ports;
 pub mod reward;
 pub mod router;
 pub mod shadow;
+pub mod vector;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
@@ -47,3 +48,4 @@ pub use penumbra::{propose_compartments, ClusterConfig, ProposedCompartment};
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};
 pub use shadow::{Shadow, ShadowStatus};
+pub use vector::truncate_renormalize;

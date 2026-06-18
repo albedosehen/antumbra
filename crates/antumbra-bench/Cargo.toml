@@ -1,0 +1,29 @@
+[package]
+name = "antumbra-bench"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Antumbra multi-domain retrieval-quality benchmark: compares embedder configs (the FixedEmbedder baseline and, opt-in via env, a real Matryoshka HTTP endpoint) over a small labeled corpus spanning code, finance, and news/insider domains, reporting recall@k + MRR."
+
+[[bin]]
+name = "antumbra-bench"
+path = "src/main.rs"
+
+[dependencies]
+# `testing` lights up FixedEmbedder, the deterministic baseline that lets the
+# bench run (and be tested) with no network.
+antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+antumbra-store = { path = "../antumbra-store" }
+# The HttpEmbedder Matryoshka path is structurally supported (env-gated); light
+# (ureq), no models needed.
+antumbra-embed = { path = "../antumbra-embed" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

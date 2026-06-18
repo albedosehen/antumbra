@@ -492,9 +492,11 @@ pub enum Command {
         apply: bool,
     },
     /// Set a workspace's embedder endpoint (hosted multi-tenant): the
-    /// OpenAI-compatible `/embeddings` URL + model it embeds with. Must produce
-    /// the index dimension. Applies to sessions built after; reconnect to apply
-    /// to an active one, and `reembed` if the model changed.
+    /// OpenAI-compatible `/embeddings` URL + model it embeds with. Without
+    /// `--source-dim` the endpoint must produce the index dimension; with it,
+    /// the endpoint is a Matryoshka model returning longer vectors whose
+    /// renormalized 384-d prefix is stored. Applies to sessions built after;
+    /// reconnect to apply to an active one, and `reembed` if the model changed.
     SetEmbedder {
         #[arg(long)]
         tenant: String,
@@ -506,6 +508,12 @@ pub enum Command {
         /// Optional bearer key for the endpoint.
         #[arg(long)]
         key: Option<String>,
+        /// Matryoshka source dimension: the width the endpoint returns (e.g.
+        /// `1024` for BGE-M3 / multilingual-e5). When set, the renormalized
+        /// leading 384-d prefix is stored into the fixed HNSW index. Omit for a
+        /// strict embedder that already returns the index dimension.
+        #[arg(long)]
+        source_dim: Option<u32>,
     },
     /// Show a workspace's configured embedder (or that it uses the server default).
     GetEmbedder {

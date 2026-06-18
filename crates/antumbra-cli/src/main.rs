@@ -1085,8 +1085,9 @@ async fn run() -> anyhow::Result<()> {
             endpoint,
             model,
             key,
+            source_dim,
         } => {
-            ops::set_embedder(&cli.url, &tenant, &endpoint, &model, key).await?;
+            ops::set_embedder(&cli.url, &tenant, &endpoint, &model, key, source_dim).await?;
         }
         Command::GetEmbedder { tenant } => {
             ops::get_embedder(&cli.url, &tenant).await?;
