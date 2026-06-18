@@ -6,8 +6,8 @@ use async_trait::async_trait;
 
 use crate::error::Result;
 use crate::ports::{
-    AcceptabilityProbe, ActOutput, ActRequest, Critic, CriticScore, Embedder, Serve, StepOutput,
-    TrainOutcome, TrainRequest, Trainer, Verifier, VerifierVerdict, VerifyRequest,
+    AcceptabilityProbe, ActOutput, ActRequest, Critic, CriticScore, Embedder, Reranker, Serve,
+    StepOutput, TrainOutcome, TrainRequest, Trainer, Verifier, VerifierVerdict, VerifyRequest,
 };
 
 /// Deterministic embedder: maps text to a fixed-dimension unit-ish vector by
@@ -35,6 +35,60 @@ impl Embedder for FixedEmbedder {
 
     fn dim(&self) -> usize {
         self.dim
+    }
+}
+
+/// Deterministic reranker for tests: reorders candidates by a scripted rule with
+/// no network, mirroring [`FixedEmbedder`]'s role for the rerank stage. Either
+/// promotes any candidate whose content contains a token to the front (the rest
+/// keep their input order), or always fails (to exercise the degrade-on-error
+/// path).
+#[derive(Debug, Clone)]
+pub struct ScriptedReranker {
+    promote_substring: Option<String>,
+    fail: bool,
+}
+
+impl ScriptedReranker {
+    /// Promote every candidate whose content contains `token` to the front,
+    /// preserving the relative order of the rest. Models a cross-encoder that
+    /// lifts an exact-match document the bi-encoder ranked lower.
+    pub fn promoting_content_substring(token: impl Into<String>) -> Self {
+        Self {
+            promote_substring: Some(token.into()),
+            fail: false,
+        }
+    }
+
+    /// A reranker that always returns `Err`, so a caller's degrade-to-pre-rerank
+    /// path can be tested.
+    pub fn failing() -> Self {
+        Self {
+            promote_substring: None,
+            fail: true,
+        }
+    }
+}
+
+#[async_trait]
+impl Reranker for ScriptedReranker {
+    async fn rerank(&self, _query: &str, candidates: &[(String, String)]) -> Result<Vec<String>> {
+        if self.fail {
+            return Err(crate::error::AntumbraError::other(
+                "scripted rerank failure",
+            ));
+        }
+        let token = self.promote_substring.as_deref().unwrap_or("");
+        let (mut promoted, mut rest): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+        for (id, text) in candidates {
+            if !token.is_empty() && text.contains(token) {
+                promoted.push(id.clone());
+            } else {
+                rest.push(id.clone());
+            }
+        }
+        promoted.extend(rest);
+        Ok(promoted)
     }
 }
 
@@ -190,6 +244,26 @@ mod tests {
             e.embed("hello").await.unwrap()
         );
         assert_eq!(e.dim(), 8);
+    }
+
+    #[tokio::test]
+    async fn scripted_reranker_promotes_matching_content() {
+        let r = ScriptedReranker::promoting_content_substring("PROMOTE");
+        let cands = vec![
+            ("a".to_string(), "ordinary text".to_string()),
+            ("b".to_string(), "carries PROMOTE token".to_string()),
+            ("c".to_string(), "also ordinary".to_string()),
+        ];
+        let out = r.rerank("q", &cands).await.unwrap();
+        assert_eq!(out, vec!["b", "a", "c"], "matching id leads, rest stable");
+    }
+
+    #[tokio::test]
+    async fn scripted_reranker_failing_returns_err() {
+        assert!(ScriptedReranker::failing()
+            .rerank("q", &[("a".to_string(), "x".to_string())])
+            .await
+            .is_err());
     }
 
     #[tokio::test]

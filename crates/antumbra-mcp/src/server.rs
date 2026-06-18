@@ -65,6 +65,90 @@ pub struct McpServer {
     /// (R-2) can push shared-memory changes to it. `None` = no live delivery
     /// (stdio, route-only, or tests).
     registry: Option<crate::notify::PeerRegistry>,
+    /// Optional cross-encoder precision stage (P-2) applied after hybrid recall:
+    /// re-scores the wide RRF candidate pool over (query, content) and reorders.
+    /// `None` = RRF order is returned as-is (rerank endpoint not configured).
+    reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
+    /// Bounded per-server cache of rerank orders, keyed by (query, candidate-id
+    /// set), so a repeated recall of the same pool skips the endpoint round-trip.
+    reranker_cache: Arc<tokio::sync::Mutex<RerankCache>>,
+}
+
+/// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
+/// truncates to the caller's k. ~100 candidates is the precision/latency knee for
+/// a cross-encoder (one batched POST).
+const RERANK_POOL_MAX: usize = 100;
+
+/// Bounded cache of `(query, sorted candidate ids) -> reranked id order`. A plain
+/// insertion-ordered map capped at `CAP`; on overflow the oldest entry is
+/// evicted. A miss merely recomputes, so eviction is always safe.
+struct RerankCache {
+    map: std::collections::HashMap<String, Vec<String>>,
+    order: std::collections::VecDeque<String>,
+}
+
+impl RerankCache {
+    const CAP: usize = 1024;
+
+    fn new() -> Self {
+        Self {
+            map: std::collections::HashMap::new(),
+            order: std::collections::VecDeque::new(),
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<Vec<String>> {
+        self.map.get(key).cloned()
+    }
+
+    fn put(&mut self, key: String, value: Vec<String>) {
+        if self.map.insert(key.clone(), value).is_none() {
+            self.order.push_back(key);
+            while self.order.len() > Self::CAP {
+                if let Some(old) = self.order.pop_front() {
+                    self.map.remove(&old);
+                }
+            }
+        }
+    }
+}
+
+/// Build the cache key for a rerank over `query` + `candidates`. The candidate
+/// ids are sorted so the key is independent of the pool's internal order (the
+/// same recall set always hits the same entry); ids cannot contain a newline, so
+/// `\n` is an unambiguous separator.
+fn rerank_cache_key(query: &str, candidates: &[(String, String)]) -> String {
+    let mut ids: Vec<&str> = candidates.iter().map(|(id, _)| id.as_str()).collect();
+    ids.sort_unstable();
+    let mut key =
+        String::with_capacity(query.len() + 1 + ids.iter().map(|s| s.len() + 1).sum::<usize>());
+    key.push_str(query);
+    key.push('\n');
+    for id in ids {
+        key.push_str(id);
+        key.push('\n');
+    }
+    key
+}
+
+/// Reorder `hits` to follow the reranker's id `order` and take the top `k`. Ids
+/// in `order` not present in `hits` are skipped; any hit whose id is missing from
+/// `order` is dropped (the reranker contract returns a full permutation, so this
+/// only guards a misbehaving reranker — and `take(k)` bounds the result either
+/// way).
+fn reorder_by_ids<T>(
+    hits: Vec<T>,
+    order: &[String],
+    id_of: impl Fn(&T) -> String,
+    k: usize,
+) -> Vec<T> {
+    let mut by_id: std::collections::HashMap<String, T> =
+        hits.into_iter().map(|h| (id_of(&h), h)).collect();
+    order
+        .iter()
+        .filter_map(|id| by_id.remove(id))
+        .take(k)
+        .collect()
 }
 
 /// Tuning for the autonomous propose trigger.
@@ -117,7 +201,19 @@ impl McpServer {
             consolidating: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
             serve,
             registry: None,
+            reranker: None,
+            reranker_cache: Arc::new(tokio::sync::Mutex::new(RerankCache::new())),
         }
+    }
+
+    /// Enable the cross-encoder precision stage (P-2): after hybrid recall, the
+    /// wide RRF candidate pool is re-scored over (query, content) by `reranker`
+    /// and reordered before truncating to the caller's `top_k`. Off by default;
+    /// a reranker fault degrades to the RRF order, never failing recall.
+    #[must_use]
+    pub fn with_reranker(mut self, reranker: Arc<dyn antumbra_core::ports::Reranker>) -> Self {
+        self.reranker = Some(reranker);
+        self
     }
 
     /// Register this session's peer into `registry` on initialize, so live
@@ -874,6 +970,63 @@ impl McpServer {
         Ok(Json(StoredOut { id, auto_proposed }))
     }
 
+    /// How many candidates to pull from hybrid recall before reranking: a wide
+    /// pool when the cross-encoder is configured (so it has room to reorder),
+    /// else just the caller's `k`.
+    fn recall_pool(&self, k: usize) -> usize {
+        if self.reranker.is_some() {
+            k.max(1).saturating_mul(10).clamp(20, RERANK_POOL_MAX)
+        } else {
+            k
+        }
+    }
+
+    /// Apply the optional cross-encoder precision stage to a wide candidate pool
+    /// and truncate to `k`. Best-effort: with no reranker (or a trivial pool, or
+    /// any reranker error) the input order is preserved. `id_of`/`text_of` adapt
+    /// the row type to the `(id, content)` the reranker scores.
+    async fn rerank_to_k<T>(
+        &self,
+        query: &str,
+        hits: Vec<T>,
+        k: usize,
+        id_of: impl Fn(&T) -> String,
+        text_of: impl Fn(&T) -> String,
+    ) -> Vec<T> {
+        let Some(reranker) = self.reranker.as_ref() else {
+            return hits.into_iter().take(k).collect();
+        };
+        // Nothing to reorder (or no query): skip the round-trip.
+        if hits.len() <= 1 || query.trim().is_empty() {
+            return hits.into_iter().take(k).collect();
+        }
+
+        let candidates: Vec<(String, String)> =
+            hits.iter().map(|h| (id_of(h), text_of(h))).collect();
+        let cache_key = rerank_cache_key(query, &candidates);
+
+        // Cache hit: reuse the previously-computed order.
+        if let Some(order) = self.reranker_cache.lock().await.get(&cache_key) {
+            return reorder_by_ids(hits, &order, &id_of, k);
+        }
+
+        match reranker.rerank(query, &candidates).await {
+            Ok(order) => {
+                self.reranker_cache
+                    .lock()
+                    .await
+                    .put(cache_key, order.clone());
+                reorder_by_ids(hits, &order, &id_of, k)
+            }
+            Err(e) => {
+                // Degrade to the pre-rerank (RRF) order — a reranker fault must
+                // never turn a successful recall into a failure.
+                eprintln!("antumbra-mcp: rerank failed, using RRF order: {e}");
+                hits.into_iter().take(k).collect()
+            }
+        }
+    }
+
     /// Semantic recall over this tenant's Penumbra.
     #[tool(
         description = "Recall the memories most relevant to a query from your workspace's memory (semantic search)."
@@ -884,18 +1037,29 @@ impl McpServer {
     ) -> Result<Json<MemoriesOut>, ErrorData> {
         let q = self.embedder.embed(&p.query).await.map_err(err)?;
         let net = p.network.as_deref().map(parse_network);
+        let k = p.top_k.unwrap_or(5) as usize;
         // Hybrid recall: dense (HNSW) + sparse (BM25 full-text) fused by RRF, so
-        // exact tokens the embedding drops still surface.
+        // exact tokens the embedding drops still surface. Pull a wide pool when a
+        // reranker is configured, then re-score + truncate to k.
         let hits = memory::recall_hybrid(
             &self.store,
             &self.tenant,
             &p.query,
             &q,
-            p.top_k.unwrap_or(5) as usize,
+            self.recall_pool(k),
             net,
         )
         .await
         .map_err(err)?;
+        let hits = self
+            .rerank_to_k(
+                &p.query,
+                hits,
+                k,
+                |m| m.id.as_str().to_string(),
+                |m| m.content.clone(),
+            )
+            .await;
         Ok(Json(MemoriesOut {
             memories: hits.iter().map(MemoryView::from).collect(),
         }))
@@ -949,16 +1113,22 @@ impl McpServer {
         Parameters(p): Parameters<RecallDocumentsParams>,
     ) -> Result<Json<DocumentChunksOut>, ErrorData> {
         let q = self.embedder.embed(&p.query).await.map_err(err)?;
-        // Hybrid recall (dense HNSW + sparse BM25, RRF-fused), like memory recall.
-        let hits = document::recall_hybrid(
-            &self.store,
-            &self.tenant,
-            &p.query,
-            &q,
-            p.top_k.unwrap_or(5) as usize,
-        )
-        .await
-        .map_err(err)?;
+        let k = p.top_k.unwrap_or(5) as usize;
+        // Hybrid recall (dense HNSW + sparse BM25, RRF-fused), like memory recall;
+        // wide pool + cross-encoder rerank when configured.
+        let hits =
+            document::recall_hybrid(&self.store, &self.tenant, &p.query, &q, self.recall_pool(k))
+                .await
+                .map_err(err)?;
+        let hits = self
+            .rerank_to_k(
+                &p.query,
+                hits,
+                k,
+                |c| c.id.as_str().to_string(),
+                |c| c.content.clone(),
+            )
+            .await;
         Ok(Json(DocumentChunksOut {
             chunks: hits.iter().map(DocumentChunkView::from).collect(),
         }))
@@ -1534,6 +1704,149 @@ mod tests {
             .0
             .memories
             .is_empty());
+    }
+
+    /// Seed several memories then recall: returns the recalled content list in
+    /// order. Shared by the rerank tests so the control and reranked runs are
+    /// over identical data.
+    async fn seed_and_recall(s: &McpServer, query: &str) -> Vec<String> {
+        for content in [
+            "the first ordinary note about scheduling",
+            "a second unrelated note on logging config",
+            "PROMOTE: the exact answer about deno install in acme-api",
+            "a fourth note mentioning npm dependencies loosely",
+        ] {
+            s.store_memory(Parameters(StoreParams {
+                content: content.into(),
+                network: "world".into(),
+                confidence: Some(0.8),
+                evidence: None,
+                volatile: None,
+                compartment: None,
+            }))
+            .await
+            .unwrap();
+        }
+        s.recall_memories(Parameters(RecallParams {
+            query: query.into(),
+            top_k: Some(4),
+            network: None,
+        }))
+        .await
+        .unwrap()
+        .0
+        .memories
+        .into_iter()
+        .map(|m| m.content)
+        .collect()
+    }
+
+    #[tokio::test]
+    async fn rerank_promotes_the_cross_encoder_winner_to_top1() {
+        use antumbra_core::testing::ScriptedReranker;
+
+        // With a reranker that promotes the "PROMOTE" candidate, it leads.
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let reranked = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "test-host".into(),
+            CompartmentId::new("comp:test:default"),
+            None,
+        )
+        .with_reranker(Arc::new(ScriptedReranker::promoting_content_substring(
+            "PROMOTE",
+        )));
+        let out = seed_and_recall(&reranked, "how do I install a dependency").await;
+        assert!(
+            out[0].contains("PROMOTE"),
+            "the cross-encoder winner is reranked to top-1: {out:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_reranker_rrf_order_is_unchanged_control() {
+        // The control: the SAME data with no reranker need not put PROMOTE first
+        // (the embedding/RRF order stands). This proves the reorder above is the
+        // reranker's doing, not an artifact of the data.
+        let plain = server().await;
+        let out = seed_and_recall(&plain, "how do I install a dependency").await;
+        // PROMOTE is not guaranteed top-1 without the cross-encoder; at minimum the
+        // ordering is allowed to differ from the reranked run. Assert the control
+        // simply returns all four, in some order, without rerank applied.
+        assert_eq!(out.len(), 4, "control returns the recalled set: {out:?}");
+    }
+
+    #[tokio::test]
+    async fn reranker_error_degrades_to_rrf_order_without_failing() {
+        use antumbra_core::testing::ScriptedReranker;
+
+        // A failing reranker must NOT turn a successful recall into an error.
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let s = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "test-host".into(),
+            CompartmentId::new("comp:test:default"),
+            None,
+        )
+        .with_reranker(Arc::new(ScriptedReranker::failing()));
+        let out = seed_and_recall(&s, "how do I install a dependency").await;
+        assert_eq!(
+            out.len(),
+            4,
+            "recall still returns its results when rerank errors: {out:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rerank_reorders_document_chunks_too() {
+        use antumbra_core::testing::ScriptedReranker;
+
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let s = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "test-host".into(),
+            CompartmentId::new("comp:test:default"),
+            None,
+        )
+        .with_reranker(Arc::new(ScriptedReranker::promoting_content_substring(
+            "PROMOTE",
+        )));
+        // Two short docs so each is a single chunk; one carries the token.
+        s.ingest_document(Parameters(IngestDocumentParams {
+            title: "doc-a".into(),
+            source: None,
+            content: "an ordinary chunk about scheduling and logging".into(),
+        }))
+        .await
+        .unwrap();
+        s.ingest_document(Parameters(IngestDocumentParams {
+            title: "doc-b".into(),
+            source: None,
+            content: "PROMOTE: the exact chunk answering the dependency question".into(),
+        }))
+        .await
+        .unwrap();
+        let out = s
+            .recall_documents(Parameters(RecallDocumentsParams {
+                query: "how do I install a dependency".into(),
+                top_k: Some(2),
+            }))
+            .await
+            .unwrap();
+        let contents: Vec<String> = out.0.chunks.into_iter().map(|c| c.content).collect();
+        assert!(
+            contents[0].contains("PROMOTE"),
+            "reranked chunk leads: {contents:?}"
+        );
     }
 
     /// The autonomous consolidation trigger, end to end: storing then

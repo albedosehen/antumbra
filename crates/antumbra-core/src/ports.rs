@@ -145,6 +145,23 @@ pub trait Embedder: Send + Sync {
     fn dim(&self) -> usize;
 }
 
+/// Re-scores wide hybrid-recall candidates with a general-purpose cross-encoder
+/// over (query, candidate-content) pairs — the precision stage downstream of the
+/// wide RRF recall (P-2 rerank). A single-vector dense retriever has a
+/// dimension-bounded recall ceiling; a cross-encoder reads the query and each
+/// candidate *jointly*, so it reorders the recalled pool far more precisely than
+/// the bi-encoder scores can.
+#[async_trait]
+pub trait Reranker: Send + Sync {
+    /// Score each `(id, text)` candidate against `query` and return the candidate
+    /// ids in descending relevance order. The result is a permutation of the input
+    /// ids — callers reorder their already-fetched rows by it, then truncate to
+    /// top-k — so an implementation must neither drop nor duplicate an id. Returns
+    /// `Err` only on a real transport/parse fault; the caller then degrades to the
+    /// pre-rerank order rather than failing recall.
+    async fn rerank(&self, query: &str, candidates: &[(String, String)]) -> Result<Vec<String>>;
+}
+
 /// Replays the frozen population to judge whether a behavior is acceptable in a
 /// given context. This is what makes counterfactual search affordable
 /// affordable: cheap, repeatable re-probing over frozen experts.

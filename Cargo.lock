@@ -306,6 +306,7 @@ dependencies = [
  "antumbra-auth",
  "antumbra-core",
  "antumbra-embed",
+ "antumbra-rerank",
  "antumbra-serve",
  "antumbra-store",
  "antumbra-sync",
@@ -321,6 +322,17 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "antumbra-rerank"
+version = "0.0.0"
+dependencies = [
+ "antumbra-core",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "ureq",
 ]
 
 [[package]]
