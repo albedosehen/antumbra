@@ -109,6 +109,17 @@ struct Cli {
     /// Optional bearer key for `--embedder-url`.
     #[arg(long, env = "ANTUMBRA_EMBEDDER_KEY")]
     embedder_key: Option<String>,
+    /// Rerank hybrid-recall candidates with a cross-encoder via a TEI/Cohere-style
+    /// `/rerank` endpoint (the precision stage after RRF). Off when unset.
+    #[arg(long, env = "ANTUMBRA_RERANK_URL")]
+    rerank_url: Option<String>,
+    /// Model name sent to `--rerank-url` (omit for text-embeddings-inference,
+    /// which ignores it; Cohere/Jina require it).
+    #[arg(long)]
+    rerank_model: Option<String>,
+    /// Optional bearer key for `--rerank-url`.
+    #[arg(long, env = "ANTUMBRA_RERANK_KEY")]
+    rerank_key: Option<String>,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -309,6 +320,16 @@ async fn run() -> Result<()> {
         None => Arc::from(make_embedder()?),
     };
 
+    // Optional cross-encoder rerank stage (P-2). Operator-configured endpoint; the
+    // precision stage runs after hybrid recall and degrades to RRF order on error.
+    let reranker: Option<Arc<dyn antumbra_core::ports::Reranker>> = cli.rerank_url.map(|url| {
+        Arc::new(antumbra_rerank::HttpReranker::new(
+            url,
+            cli.rerank_model,
+            cli.rerank_key,
+        )) as Arc<dyn antumbra_core::ports::Reranker>
+    });
+
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&cli.jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
@@ -322,6 +343,7 @@ async fn run() -> Result<()> {
             verifier,
             cli.auto_propose,
             cli.auto_consolidate,
+            reranker,
         )
         .await;
     }
@@ -342,6 +364,9 @@ async fn run() -> Result<()> {
     }
     if cli.auto_consolidate {
         service = service.with_auto_consolidate();
+    }
+    if let Some(r) = reranker {
+        service = service.with_reranker(r);
     }
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))

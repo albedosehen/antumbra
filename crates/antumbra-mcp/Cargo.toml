@@ -25,6 +25,7 @@ antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-auth = { path = "../antumbra-auth" }
 antumbra-store = { path = "../antumbra-store" }
 antumbra-embed = { path = "../antumbra-embed" }
+antumbra-rerank = { path = "../antumbra-rerank" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal", "net", "sync"] }

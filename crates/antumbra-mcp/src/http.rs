@@ -147,6 +147,10 @@ struct HttpState {
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
+    /// The optional cross-encoder rerank stage (P-2), applied to every
+    /// per-identity server after hybrid recall. Server-level (one endpoint), not
+    /// per-tenant.
+    reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     /// Bounded so a host that sees many distinct identities cannot grow it without
     /// limit; an evicted identity rebuilds its service on the next request.
@@ -174,6 +178,7 @@ pub async fn serve(
     verifier: JwtVerifier,
     auto_propose: Option<usize>,
     auto_consolidate: bool,
+    reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
 ) -> Result<()> {
     let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -203,6 +208,7 @@ pub async fn serve(
         auto_propose,
         auto_consolidate,
         serve,
+        reranker,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
         registry: crate::notify::PeerRegistry::new(),
@@ -372,6 +378,9 @@ impl HttpState {
                 .with_auto_consolidate()
                 .with_consolidation_store(self.store.clone())
                 .with_consolidating(self.consolidating.clone());
+        }
+        if let Some(reranker) = self.reranker.clone() {
+            mcp = mcp.with_reranker(reranker);
         }
         Ok(mcp)
     }
@@ -611,6 +620,7 @@ mod tests {
             auto_propose: None,
             auto_consolidate: false,
             serve: None,
+            reranker: None,
             sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
             consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
             registry: crate::notify::PeerRegistry::new(),
