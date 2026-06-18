@@ -40,3 +40,6 @@ corpora/_*.json
 /data/
 /weights/
 /adapters/
+
+# Docker build logs (artifacts)
+docker/*.log
