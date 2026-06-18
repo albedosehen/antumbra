@@ -726,7 +726,9 @@ mod tests {
         // Dense-only top-3 misses the target (its vector is orthogonal).
         let dense_only = recall(&store, &tenant, &qvec, 3, None).await.unwrap();
         assert!(
-            !dense_only.iter().any(|m| m.id.as_str() == target.id.as_str()),
+            !dense_only
+                .iter()
+                .any(|m| m.id.as_str() == target.id.as_str()),
             "dense-only top-3 should not contain the orthogonal target: {:?}",
             dense_only
                 .iter()
