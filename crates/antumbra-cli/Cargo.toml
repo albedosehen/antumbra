@@ -51,6 +51,8 @@ models = [
     "dep:antumbra-serve",
     "antumbra-serve/models",
 ]
-# GPU backends (combine with `models`): e.g. --features models,cuda.
-cuda = ["antumbra-train/cuda"]
-metal = ["antumbra-train/metal"]
+# GPU backends. Each implies `models` (the cfg that gates the candle trainer into
+# `teach`/`train`), so `--features cuda` alone is enough -- matching antumbra-train /
+# antumbra-serve, whose `cuda`/`metal` likewise pull in `models`.
+cuda = ["models", "antumbra-train/cuda"]
+metal = ["models", "antumbra-train/metal"]

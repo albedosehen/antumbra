@@ -1,0 +1,122 @@
+[
+  {
+    "id": "sent-000",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: ACME\n\nClaims:\n- Acme beat earnings and raised full-year guidance.\n- Analysts upgraded ACME to buy.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": 0.85, \"by_ticker\": {\"ACME\": 0.85}, \"confidence\": 0.9}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-001",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: GLBX\n\nClaims:\n- Globex announced record quarterly revenue.\n- Globex expanded its buyback programme.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": 0.7, \"by_ticker\": {\"GLBX\": 0.7}, \"confidence\": 0.8}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-002",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: INIT\n\nClaims:\n- Initech shares slipped after a soft outlook.\n- One analyst trimmed the price target.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": -0.4, \"by_ticker\": {\"INIT\": -0.4}, \"confidence\": 0.8}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-003",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: UMBR\n\nClaims:\n- Umbrella missed earnings badly and cut its dividend.\n- The CFO resigned abruptly.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": -0.85, \"by_ticker\": {\"UMBR\": -0.85}, \"confidence\": 0.9}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-004",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: STRK\n\nClaims:\n- Stark Industries reported in-line results with no guidance change.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": 0.0, \"by_ticker\": {}, \"confidence\": 0.5}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-005",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: WAYN, WONK\n\nClaims:\n- Wayne Enterprises will acquire a rival; Wayne climbed while the target fell.\n- Wonka, named only in passing, was unaffected.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": 0.3, \"by_ticker\": {\"WAYN\": 0.6}, \"confidence\": 0.7}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-006",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: SOYL, CYBR\n\nClaims:\n- Soylent surged on FDA approval of its lead product.\n- Cyberdyne, the supplier, fell on a margin warning the same day.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": 0.1, \"by_ticker\": {\"SOYL\": 0.8, \"CYBR\": -0.6}, \"confidence\": 0.8}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-007",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: TYRL\n\nClaims:\n- Tyrell faces a regulatory probe into its accounting.\n- Trading was halted pending news.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": -0.6, \"by_ticker\": {\"TYRL\": -0.6}, \"confidence\": 0.8}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-008",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: HOOL\n\nClaims:\n- Hooli raised prices across its cloud tier, lifting margin estimates.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": 0.5, \"by_ticker\": {\"HOOL\": 0.5}, \"confidence\": 0.8}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  },
+  {
+    "id": "sent-009",
+    "prompt": "Assess the directional financial sentiment of the following news claims.\n\nTickers of interest: MASS\n\nClaims:\n- Massive Dynamic settled a lawsuit for an immaterial sum; shares were flat.\n\nReturn the overall market sentiment these claims imply, a per-ticker score for each ticker of interest (omit a ticker if the claims say nothing about it), and your confidence. Bullish = positive, bearish = negative.\nRespond ONLY with JSON of the form: {\"overall\": <float -1..1>, \"by_ticker\": {\"TICKER\": <float -1..1>}, \"confidence\": <float 0..1>}",
+    "completion": "{\"overall\": 0.0, \"by_ticker\": {}, \"confidence\": 0.4}",
+    "verify": {
+      "contains_all": [
+        "\"overall\"",
+        "\"by_ticker\"",
+        "\"confidence\""
+      ]
+    }
+  }
+]
