@@ -1219,6 +1219,38 @@ impl McpServer {
         }
     }
 
+    /// Penalize a memory whose thesis was falsified (the inverse of reinforce).
+    #[tool(
+        description = "Penalize a memory (a falsified thesis, e.g. a losing trade): decay its confidence so it does not clear the consolidation gate and graduate into an expert. The inverse of reinforce_memory."
+    )]
+    async fn penalize_memory(
+        &self,
+        Parameters(p): Parameters<IdParams>,
+    ) -> Result<Json<ReinforceOut>, ErrorData> {
+        // No consolidation trigger here: a penalty can only LOWER confidence, so unlike
+        // reinforce it never pushes a compartment over the graduation gate.
+        match memory::penalize(
+            &self.store,
+            &self.tenant,
+            &MemoryId::new(p.memory_id),
+            Utc::now(),
+        )
+        .await
+        .map_err(err)?
+        {
+            Some(m) => Ok(Json(ReinforceOut {
+                found: true,
+                reinforcement: m.reinforcement,
+                confidence: m.confidence,
+            })),
+            None => Ok(Json(ReinforceOut {
+                found: false,
+                reinforcement: 0,
+                confidence: 0.0,
+            })),
+        }
+    }
+
     /// Forget (delete) a memory.
     #[tool(description = "Forget (delete) a memory from your workspace's memory.")]
     async fn forget_memory(
