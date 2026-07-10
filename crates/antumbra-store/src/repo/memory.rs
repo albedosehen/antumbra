@@ -439,6 +439,43 @@ pub async fn reinforce(
         .transpose()
 }
 
+/// Penalize a memory whose thesis was FALSIFIED: decay its confidence toward 0 -- the mirror
+/// of [`reinforce`]. A falsified exemplar (e.g. a trade whose realized P&L was a loss) must not
+/// clear the consolidation gate and graduate into an expert, so a penalty lowers CONFIDENCE
+/// while leaving `reinforcement` (how often the pattern recurred) untouched. Same in-engine
+/// atomicity + tenant + tombstone guards as [`reinforce`], so a cross-tenant or forgotten
+/// memory matches no row (a penalty never resurrects a tombstone). `confidence * 0.75` stays
+/// within `[0, 1]`, so no clamp is needed.
+pub async fn penalize(
+    store: &Store,
+    tenant: &TenantId,
+    id: &MemoryId,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<Option<Memory>> {
+    let target = RecordID::<()>::new(TABLE, id.as_str())
+        .map_err(map)?
+        .to_string();
+    // confidence * 0.75 -- move 25% of the way toward 0 (the inverse of reinforce's 25% to 1).
+    let confidence_decay = field("confidence") * 0.75;
+    let q = Query::new()
+        .update_set(target)
+        .map_err(map)?
+        .set_expr("confidence", confidence_decay)
+        .map_err(map)?
+        .set("updated_at", now.to_rfc3339())
+        .map_err(map)?
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            is_none("deleted_at"),
+        ))
+        .return_after();
+    let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
+    rows.into_iter()
+        .next()
+        .map(MemoryRow::into_domain)
+        .transpose()
+}
+
 /// Record that a trace graduated into the umbra as `expert`, tenant-checked.
 pub async fn mark_consolidated(
     store: &Store,
@@ -668,6 +705,62 @@ mod tests {
                 .unwrap();
         assert!(row.deleted_at.is_some(), "tombstone survives");
         assert_eq!(row.reinforcement, 2, "no phantom increment after forget");
+    }
+
+    #[tokio::test]
+    async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("t");
+        let now = chrono::Utc::now();
+        let m = Memory::new(
+            "22222222-0000-0000-0000-000000000003",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "falsified thesis",
+            0.8,
+            now,
+        );
+        upsert(&store, &m).await.unwrap();
+
+        // confidence 0.8 -> 0.8 * 0.75 = 0.6; recurrence (reinforcement) is untouched.
+        let p1 = penalize(&store, &tenant, &m.id, now)
+            .await
+            .unwrap()
+            .expect("a live trace penalizes");
+        assert!(
+            (p1.confidence - 0.6).abs() < 1e-4,
+            "confidence decayed toward 0: {}",
+            p1.confidence
+        );
+        assert_eq!(
+            p1.reinforcement, 0,
+            "a penalty lowers confidence, not recurrence"
+        );
+        // Penalties compose (no lost update): 0.6 -> 0.45.
+        let p2 = penalize(&store, &tenant, &m.id, now)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!((p2.confidence - 0.45).abs() < 1e-4);
+
+        // A live trace owned by another tenant is not penalizable (the tenant guard).
+        assert!(
+            penalize(&store, &TenantId::new("other"), &m.id, now)
+                .await
+                .unwrap()
+                .is_none(),
+            "cross-tenant penalize is refused"
+        );
+
+        // Forget, then a penalty is refused and does NOT resurrect the tombstone.
+        soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+        assert!(
+            penalize(&store, &tenant, &m.id, now)
+                .await
+                .unwrap()
+                .is_none(),
+            "penalizing a forgotten trace is a no-op"
+        );
     }
 
     // Hybrid recall surfaces a memory that the dense (vector) leg alone would
