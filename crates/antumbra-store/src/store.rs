@@ -229,6 +229,78 @@ pub const DEFAULT_EMBED_DIM: usize = EMBED_DIM;
 mod tests {
     use super::*;
 
+    /// Every (table, column, index) the schema builds an HNSW index
+    /// over.
+    const VECTOR_TABLES: [(&str, &str, &str); 4] = [
+        ("expert", "capability_vec", "expert_cap_hnsw"),
+        ("failure_boundary", "context_vec", "fb_ctx_hnsw"),
+        ("memory", "embedding", "memory_embedding_hnsw"),
+        (
+            "document_chunk",
+            "embedding",
+            "document_chunk_embedding_hnsw",
+        ),
+    ];
+
+    /// Whether the plan reaches `index` anywhere in its tree. Matched
+    /// on the attribute rather than the operator name, so an operator
+    /// being respelled does not turn this green by accident.
+    fn reaches_index(node: &serde_json::Value, index: &str) -> bool {
+        if node.pointer("/attributes/index").and_then(|v| v.as_str()) == Some(index) {
+            return true;
+        }
+        node.get("children")
+            .and_then(|v| v.as_array())
+            .is_some_and(|kids| kids.iter().any(|kid| reaches_index(kid, index)))
+    }
+
+    fn plan_of(answer: &serde_json::Value) -> &serde_json::Value {
+        answer
+            .get(0)
+            .filter(|v| v.get("operator").is_some())
+            .unwrap_or_else(|| panic!("expected a plan, got {answer}"))
+    }
+
+    /// The recall paths reach their indexes, and the form they used to
+    /// render did not.
+    ///
+    /// Every vector table here has carried an HNSW index since it was
+    /// defined, and every recall path asked for neighbours with
+    /// `<|k,COSINE|>` — the metric form, which makes the engine compare
+    /// every row and ignore the index entirely. It answers correctly,
+    /// so nothing ever failed; it just paid for four indexes and used
+    /// none of them, which is invisible from the outside. `EXPLAIN`
+    /// names the plan, and the plan is the whole difference.
+    ///
+    /// The metric form is pinned too. If a future engine starts
+    /// routing it through the index, this says so by failing rather
+    /// than leaving a justification standing that has stopped being
+    /// true. The probe's vector is one element whatever the index's
+    /// width: the planner resolves the index before it reads the
+    /// literal.
+    #[tokio::test]
+    async fn every_vector_table_is_reachable_through_its_index() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+
+        for (table, column, index) in VECTOR_TABLES {
+            let indexed = format!("SELECT * FROM {table} WHERE {column} <|4,64|> [0] EXPLAIN");
+            let answer = store.client().query(&indexed).await.unwrap();
+            assert!(
+                reaches_index(plan_of(&answer), index),
+                "{table}.{column} did not reach {index}: {answer}",
+            );
+
+            let exhaustive =
+                format!("SELECT * FROM {table} WHERE {column} <|4,COSINE|> [0] EXPLAIN");
+            let answer = store.client().query(&exhaustive).await.unwrap();
+            assert!(
+                !reaches_index(plan_of(&answer), index),
+                "the metric form now reaches {index}, so the reason these repos \
+                 render the indexed form has changed: {answer}",
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_db_scoped_connect_refuses_config_credentials() {
         // Config credentials would sign the session in at ROOT on connect,

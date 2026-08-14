@@ -38,6 +38,14 @@ flowchart TB
     CR["Critic (0003)"] --> surql
 ```
 
+### Implementation note (2026-08-13): the KNN operator form, and the kill criterion
+
+The v0 note above says KNN goes through `Query::vector_search`. It did, and that was the wrong half of the operator. SurrealDB's `<|k,_|>` decides its plan on the **second operand**: an integer is the HNSW search effort and the engine walks the index (`KnnScan`); a metric keyword there asks for an exhaustive comparison over a table scan (`KnnTopK`). `vector_search` renders the metric form. So every recall path in this store — expert routing, boundary lookup, memory recall, document recall — compared every row while four HNSW indexes sat built and unused. Nothing failed; the answers were correct and the indexes were decoration.
+
+All four now render `Query::vector_search_indexed` (surql-rs 0.33), which emits `<|k,ef|>` and leaves the metric to the index definition. `store.rs` pins the plan for each of the four tables through `EXPLAIN`, in both directions: the indexed form must reach the named index, and the metric form must not. The second assertion is what keeps the first one meaningful if a future engine re-plans.
+
+This also settles the **kill criterion** in Validation below, which asked whether HNSW KNN with a relational filter could be expressed performantly. It can, with one caveat that is a property of ANN rather than of this engine: beside an index-backed KNN, a `WHERE` is a **residual** filter. The graph walk returns its nearest neighbours across the whole table and the tenant equality (and the tombstone check) thin them afterwards, so a recall that asks for exactly `k` can come back short — or empty, for a tenant holding a small share of a large table. `antumbra_store::knn` sizes a wider candidate pool for the filtered paths and the answer is truncated to `k` after the thinning; the unfiltered paths (the shared expert and boundary populations) ask for `k` and get `k`. The exhaustive form did not have this property, which is the one thing it was better at, and it is why the change carries a regression test rather than only a plan assertion.
+
 ### Schema (DDL)
 
 ```surql
@@ -131,7 +139,7 @@ DEFINE INDEX eval_subject_idx ON evaluation_run FIELDS subject_kind, subject_id;
 ## Consequences
 
 - **Positive:** one system for document + vector + graph + durable state; `surql-rs` matches the Rust plane; proven patterns (drift detection, migrations, `regression_fingerprint`) are reused, not reinvented.
-- **Negative:** single-DB coupling; the `failure_boundary` and memory tables grow unbounded → need a merge/decay policy (a learning problem inside the learning system); KNN-with-relational-filters is raw SurrealQL (the `surql-rs` query builder doesn't cover it) - acceptable.
+- **Negative:** single-DB coupling; the `failure_boundary` and memory tables grow unbounded → need a merge/decay policy (a learning problem inside the learning system); KNN-with-relational-filters is raw SurrealQL (the `surql-rs` query builder doesn't cover it) - acceptable. _(Superseded 2026-08-13: the builder covers it. What remains is that the filter is a residual, handled by over-fetching — see the implementation note above.)_
 - **Neutral:** `device_profile` / `placed_on` are defined now but inert until ADR-0006's fleet wakes up.
 
 ## Alternatives considered

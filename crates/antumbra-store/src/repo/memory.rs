@@ -18,7 +18,7 @@ use serde_json::Value;
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::expressions::{field, value};
-use surql::query::helpers::{fulltext_search_query, VectorDistanceType};
+use surql::query::helpers::fulltext_search_query;
 use surql::types::operators::{and_, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
@@ -30,16 +30,10 @@ use antumbra_core::{
 use crate::dto::parse_dt;
 use crate::error::map;
 use crate::fusion::{rrf_fuse, DEFAULT_RRF_K};
+use crate::knn::{candidate_pool, search_effort};
 use crate::store::Store;
 
 const TABLE: &str = "memory";
-
-/// Candidate-pool sizing for [`recall_hybrid`]: each leg fetches `k *
-/// POOL_MULTIPLIER` (clamped) so Reciprocal Rank Fusion has room to reorder
-/// before the result is truncated to `k`.
-const POOL_MULTIPLIER: usize = 5;
-const MIN_POOL: usize = 20;
-const MAX_POOL: usize = 200;
 
 #[derive(Serialize, Deserialize)]
 struct MemoryRow {
@@ -261,8 +255,16 @@ pub async fn list_by_network(
 }
 
 /// Semantic recall: the `k` nearest memories to `query` *within* `tenant` (and
-/// optionally one network). The tenant filter is ANDed onto the KNN clause so
-/// the candidate set never crosses a tenant boundary.
+/// optionally one network), through `memory_embedding_hnsw`.
+///
+/// The tenant filter is ANDed onto the KNN clause so the candidate set never
+/// crosses a tenant boundary — but against an index-backed KNN both that filter
+/// and the tombstone check below it are RESIDUAL: the graph walk returns its
+/// nearest neighbours across the whole table and everything else thins them
+/// afterwards. So the walk is asked for a wider pool and the answer is
+/// truncated to `k` once the thinning is done. Asking for `k` directly would
+/// hand a tenant with a small share of the table a short answer, and a tenant
+/// whose nearest neighbours are all tombstones an empty one.
 pub async fn recall(
     store: &Store,
     tenant: &TenantId,
@@ -278,22 +280,18 @@ pub async fn recall(
         ),
         None => eq("tenant_id", tenant.as_str()),
     };
+    let pool = candidate_pool(k);
     let q = Query::new()
         .select(None)
         .from_table(TABLE)
         .map_err(map)?
         .where_(condition)
-        .vector_search(
-            "embedding",
-            vector,
-            k as i64,
-            VectorDistanceType::Cosine,
-            None,
-        )
+        .vector_search_indexed("embedding", vector, pool as i64, search_effort(pool))
         .map_err(map)?;
     let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .take(k)
         .map(MemoryRow::into_domain)
         .collect()
 }
@@ -316,8 +314,9 @@ pub async fn recall_hybrid(
     network: Option<MemoryNetwork>,
 ) -> Result<Vec<Memory>> {
     // Pull a wider candidate pool from each leg than the final k, so fusion has
-    // room to reorder before truncating.
-    let pool = k.saturating_mul(POOL_MULTIPLIER).clamp(MIN_POOL, MAX_POOL);
+    // room to reorder before truncating. The same sizing the dense leg uses
+    // against its own residual filters, for the same reason.
+    let pool = candidate_pool(k);
 
     let dense = recall(store, tenant, query_vec, pool, network).await?;
     let sparse = sparse_recall(store, tenant, query_text, pool, network)
