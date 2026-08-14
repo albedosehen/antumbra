@@ -1,0 +1,38 @@
+# cargo-audit configuration.
+#
+# The gate stays on. What lives here is the small set of advisories that cannot
+# be cleared by a version bump, each with the reason it is carried and what
+# would let it be dropped. An advisory with a fix available does not belong in
+# this file -- bump the dependency instead.
+
+[advisories]
+ignore = [
+  # rkyv 0.7.46 -- insufficient archive validation, out-of-bounds reads in
+  # archives containing Rc/Arc. Fixed in 0.8.17, a major version away.
+  #
+  # This workspace never compiles rkyv. It reaches the lockfile through
+  # rust_decimal's OPTIONAL `rkyv` feature, which nothing enables:
+  # `cargo tree -i rkyv --workspace --target all -e all` prints nothing, and
+  # rkyv appears zero times in the full 5350-line dependency tree. cargo-audit
+  # scans Cargo.lock rather than the build graph, so it reports crates that are
+  # merely reachable in principle. Drop this entry if anything ever turns the
+  # feature on -- at which point the advisory becomes real and rust_decimal
+  # needs to move to rkyv 0.8.
+  "RUSTSEC-2026-0235",
+
+  # rsa 0.9.10 -- Marvin attack, a timing sidechannel in RSA private-key
+  # operations. No fixed version exists; the advisory has been open since 2023.
+  #
+  # Unavoidable: it arrives through jsonwebtoken 10.4, which surrealdb-core
+  # 3.2.4 depends on as well as antumbra-auth/-control/-mcp, so dropping our own
+  # use would not remove it.
+  #
+  # The reachable operations are RS256 signing and verification. Verification
+  # uses the public key and has no secret to leak. Signing uses the private key,
+  # but the attacker does not choose its input -- the JWT payload is
+  # server-generated -- and the Marvin vector is chosen-ciphertext DECRYPTION,
+  # which this path never performs. Low exploitability rather than none, which
+  # is why it is written down instead of waved through. Re-check whenever `rsa`
+  # ships a fix.
+  "RUSTSEC-2023-0071",
+]

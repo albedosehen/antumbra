@@ -1,21 +1,21 @@
 //! Failure-boundary repository (the antumbra / inhibitory store): the counterfactual boundary of competence.
 //!
 //! Boundaries accrue and may have their confidence updated, so they are
-//! addressed by a stable record id and upserted. Context KNN uses surql-rs's
-//! vector-search builder.
+//! addressed by a stable record id and upserted. Context KNN goes through
+//! `fb_ctx_hnsw` via surql-rs's index-backed vector-search builder.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use surql::query::builder::Query;
 use surql::query::crud::{delete_record, query_records, upsert_record};
-use surql::query::helpers::VectorDistanceType;
 use surql::types::RecordID;
 
 use antumbra_core::{BoundaryId, FailureBoundary, Generation, Grain, Result};
 
 use crate::dto::parse_dt;
 use crate::error::map;
+use crate::knn::search_effort;
 use crate::store::Store;
 
 const TABLE: &str = "failure_boundary";
@@ -100,7 +100,11 @@ pub async fn list(store: &Store) -> Result<Vec<FailureBoundary>> {
 }
 
 /// The `k` boundaries whose context is nearest `query` (inhibitory-penalty
-/// lookup via routing-as-retrieval), through surql-rs's vector-search builder.
+/// lookup via routing-as-retrieval), through `fb_ctx_hnsw`.
+///
+/// The boundary population is shared and unfiltered, so the index
+/// returns exactly the `k` asked for and the metric is the index's own
+/// cosine.
 pub async fn knn_by_context(
     store: &Store,
     query: &[f32],
@@ -111,13 +115,7 @@ pub async fn knn_by_context(
         .select(None)
         .from_table(TABLE)
         .map_err(map)?
-        .vector_search(
-            "context_vec",
-            vector,
-            k as i64,
-            VectorDistanceType::Cosine,
-            None,
-        )
+        .vector_search_indexed("context_vec", vector, k as i64, search_effort(k))
         .map_err(map)?;
     let rows: Vec<BoundaryRow> = query_records(store.client(), &q).await.map_err(map)?;
     rows.into_iter().map(BoundaryRow::into_domain).collect()

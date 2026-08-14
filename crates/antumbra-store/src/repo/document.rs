@@ -1,7 +1,8 @@
 //! Knowledge-document chunk repository (P-3). Tenant-isolated exactly like
 //! `memory`: the engine `PERMISSIONS ... WHERE tenant_id = $auth.tenant` scopes
 //! every row, and the repo also filters explicitly (defense-in-depth). HNSW
-//! vector recall via surql-rs's `vector_search` builder; no raw SurrealQL.
+//! vector recall via surql-rs's `vector_search_indexed` builder, through
+//! `document_chunk_embedding_hnsw`; no raw SurrealQL.
 
 use std::collections::HashMap;
 
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use surql::query::builder::Query;
 use surql::query::crud::{query_records, upsert_record};
-use surql::query::helpers::{fulltext_search_query, VectorDistanceType};
+use surql::query::helpers::fulltext_search_query;
 use surql::types::operators::eq;
 use surql::types::RecordID;
 
@@ -18,6 +19,7 @@ use antumbra_core::{DocumentChunk, DocumentChunkId, Result, TenantId};
 use crate::dto::parse_dt;
 use crate::error::map;
 use crate::fusion::{rrf_fuse, DEFAULT_RRF_K};
+use crate::knn::{candidate_pool, search_effort};
 use crate::store::Store;
 
 const TABLE: &str = "document_chunk";
@@ -84,9 +86,16 @@ pub async fn insert_chunks(store: &Store, chunks: &[DocumentChunk]) -> Result<()
     Ok(())
 }
 
-/// Semantic recall: the `k` document chunks nearest `query` *within* `tenant`.
+/// Semantic recall: the `k` document chunks nearest `query` *within* `tenant`,
+/// through `document_chunk_embedding_hnsw`.
+///
 /// The tenant filter is ANDed onto the KNN clause so the candidate set never
-/// crosses a tenant boundary (and the engine ACL scopes it again).
+/// crosses a tenant boundary (and the engine ACL scopes it again) — but against
+/// an index-backed KNN that filter is a RESIDUAL: the graph walk returns its
+/// nearest neighbours across the whole table and the equality thins them
+/// afterwards. So the walk is asked for a wider pool and the answer is
+/// truncated to `k` once the thinning is done; asking for `k` directly would
+/// hand a tenant with a small share of the chunks a short answer.
 pub async fn recall(
     store: &Store,
     tenant: &TenantId,
@@ -94,21 +103,19 @@ pub async fn recall(
     k: usize,
 ) -> Result<Vec<DocumentChunk>> {
     let vector: Vec<f64> = query.iter().map(|&x| f64::from(x)).collect();
+    let pool = candidate_pool(k);
     let q = Query::new()
         .select(None)
         .from_table(TABLE)
         .map_err(map)?
         .where_(eq("tenant_id", tenant.as_str()))
-        .vector_search(
-            "embedding",
-            vector,
-            k as i64,
-            VectorDistanceType::Cosine,
-            None,
-        )
+        .vector_search_indexed("embedding", vector, pool as i64, search_effort(pool))
         .map_err(map)?;
     let rows: Vec<ChunkRow> = query_records(store.client(), &q).await.map_err(map)?;
-    rows.into_iter().map(ChunkRow::into_domain).collect()
+    rows.into_iter()
+        .take(k)
+        .map(ChunkRow::into_domain)
+        .collect()
 }
 
 /// Hybrid recall over document chunks: fuse the dense (HNSW) and sparse (BM25

@@ -20,6 +20,13 @@
 !/dprint.json
 !/.dockerignore
 !/docker/
+# The audit triage only, not the whole directory: a local .cargo/config.toml is
+# machine state and must not ride along. Without this, .cargo/audit.toml is
+# swallowed by the deny-by-default `/*` above and CI audits with a config that
+# only exists on someone's laptop.
+!/.cargo/
+/.cargo/*
+!/.cargo/audit.toml
 
 # Explicit Ignore
 **/.env

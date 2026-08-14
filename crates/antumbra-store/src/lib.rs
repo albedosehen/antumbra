@@ -8,6 +8,7 @@ mod dto;
 mod error;
 
 pub mod fusion;
+pub mod knn;
 pub mod repo;
 pub mod schema;
 pub mod store;

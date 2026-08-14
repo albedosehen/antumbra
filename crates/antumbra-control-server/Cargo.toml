@@ -12,6 +12,12 @@ description = "Antumbra hosted control plane: an HTTP surface for invite-gated s
 name = "antumbra-control-server"
 path = "src/main.rs"
 
+# Not a release artifact: the hosted control plane is deployed as a container,
+# not installed from a shell/MSI installer. Opts out of `dist` for the same
+# reason antumbra-bench does.
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 antumbra-control = { path = "../antumbra-control" }
 antumbra-store = { path = "../antumbra-store" }
