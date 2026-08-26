@@ -48,6 +48,40 @@ pub trait EmbedTransport: Send + Sync {
 /// this embed) under its per-request lock, an unbounded call stalls every tenant.
 const EMBED_TIMEOUT_SECS: u64 = 30;
 
+/// Default cap on the text shipped to the embeddings endpoint, in characters,
+/// overridable with `ANTUMBRA_EMBED_MAX_CHARS`. The 384-dim sentence models
+/// this store targets (all-MiniLM and friends) have a 512-token window, and
+/// llama.cpp answers over-window input with a hard 500 rather than truncating
+/// server-side -- so before this cap, every long memory FAILED to store (hit
+/// live on the first Kushtakas import: 1737 of 4720 records exceeded the
+/// window). The caller still stores the full content; only the text the vector
+/// is computed from is capped, which is the inherent trade of a small-window
+/// embedder, not data loss. 1200 chars stays under 512 tokens for English
+/// prose and code (~2.5-3.5 chars/token); operators running a longer-window
+/// endpoint can raise it.
+const EMBED_MAX_CHARS: usize = 1200;
+
+fn embed_max_chars() -> usize {
+    static CACHE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        std::env::var("ANTUMBRA_EMBED_MAX_CHARS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(EMBED_MAX_CHARS)
+    })
+}
+
+/// The leading `max` characters of `text` as a slice -- no allocation, and the
+/// cut lands on a `char` boundary by construction (`char_indices` yields only
+/// boundaries), so multi-byte text can never be split mid-codepoint.
+fn cap_chars(text: &str, max: usize) -> &str {
+    match text.char_indices().nth(max) {
+        Some((idx, _)) => &text[..idx],
+        None => text,
+    }
+}
+
 /// The production transport: a blocking `ureq` POST over an agent with a bounded
 /// global timeout, so a dead endpoint fails fast instead of hanging the worker.
 struct UreqTransport {
@@ -132,7 +166,7 @@ impl HttpEmbedder {
     }
 
     fn request_body(&self, text: &str) -> Value {
-        json!({ "model": self.model, "input": text })
+        json!({ "model": self.model, "input": cap_chars(text, embed_max_chars()) })
     }
 
     /// Pull the embedding out of an OpenAI-shaped response (`data[0].embedding`)
@@ -302,6 +336,29 @@ mod tests {
         let body = e.request_body("hi");
         assert_eq!(body["model"], "all-MiniLM-L6-v2");
         assert_eq!(body["input"], "hi");
+    }
+
+    #[test]
+    fn request_body_caps_over_window_input() {
+        // A memory far past the embedding window ships only its head -- the
+        // endpoint must never see input it answers with a hard 500.
+        let e = embedder(Ok(Value::Null));
+        let long = "x".repeat(EMBED_MAX_CHARS * 4);
+        let body = e.request_body(&long);
+        assert_eq!(
+            body["input"].as_str().unwrap().chars().count(),
+            EMBED_MAX_CHARS
+        );
+    }
+
+    #[test]
+    fn cap_chars_counts_characters_not_bytes_and_keeps_short_input_whole() {
+        // Multi-byte text: the cap is a character count and the cut cannot
+        // split a codepoint (a byte-indexed slice here would panic).
+        let s = "é".repeat(10);
+        assert_eq!(cap_chars(&s, 4), "éééé");
+        // Under the cap: same slice back, untouched.
+        assert_eq!(cap_chars("short", 1200), "short");
     }
 
     // The irreducible real POST: point `ANTUMBRA_EMBED_URL` at a running
