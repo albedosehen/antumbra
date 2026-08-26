@@ -165,8 +165,8 @@ impl HttpEmbedder {
         }
     }
 
-    fn request_body(&self, text: &str) -> Value {
-        json!({ "model": self.model, "input": cap_chars(text, embed_max_chars()) })
+    fn request_body_capped(&self, text: &str, cap: usize) -> Value {
+        json!({ "model": self.model, "input": cap_chars(text, cap) })
     }
 
     /// Pull the embedding out of an OpenAI-shaped response (`data[0].embedding`)
@@ -214,17 +214,39 @@ impl HttpEmbedder {
 #[async_trait]
 impl Embedder for HttpEmbedder {
     async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        // `ureq` is blocking; run it off the async runtime so it never stalls a
-        // worker (the same offload the model loaders use).
-        let url = self.url.clone();
-        let api_key = self.api_key.clone();
-        let body = self.request_body(text);
-        let transport = self.transport.clone();
-        let resp =
-            tokio::task::spawn_blocking(move || transport.post(&url, api_key.as_deref(), &body))
-                .await
-                .map_err(|e| AntumbraError::other(format!("embed task panicked: {e}")))??;
-        self.parse(&resp)
+        // The char cap only approximates the model's TOKEN window, and the
+        // chars-per-token ratio swings with content (dense technical text
+        // runs ~2.3, prose ~4) -- so a fixed cap that fits most memories
+        // still lands a hard 500 on the densest ones. Rather than chase a
+        // magic number, halve the cap and retry on failure: self-adapting to
+        // whatever tokenizer sits behind the endpoint. A genuinely dead
+        // endpoint just fails all three attempts and reports the last error.
+        let mut cap = embed_max_chars();
+        let mut last_err = AntumbraError::other("embed: no attempt made");
+        for _ in 0..3 {
+            // `ureq` is blocking; run it off the async runtime so it never
+            // stalls a worker (the same offload the model loaders use).
+            let url = self.url.clone();
+            let api_key = self.api_key.clone();
+            let body = self.request_body_capped(text, cap);
+            let transport = self.transport.clone();
+            let resp = tokio::task::spawn_blocking(move || {
+                transport.post(&url, api_key.as_deref(), &body)
+            })
+            .await
+            .map_err(|e| AntumbraError::other(format!("embed task panicked: {e}")))?;
+            match resp {
+                Ok(resp) => return self.parse(&resp),
+                Err(e) => {
+                    last_err = e;
+                    cap /= 2;
+                    if cap == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        Err(last_err)
     }
 
     fn dim(&self) -> usize {
@@ -330,10 +352,46 @@ mod tests {
             .is_err());
     }
 
+    /// Refuses input longer than a token-ish budget, like llama.cpp answering
+    /// an over-window request with a 500 -- so the halve-and-retry ladder in
+    /// `embed` is what gets exercised, not the happy path.
+    struct WindowedTransport {
+        max_input_chars: usize,
+    }
+
+    impl EmbedTransport for WindowedTransport {
+        fn post(&self, _url: &str, _api_key: Option<&str>, body: &Value) -> Result<Value> {
+            let input = body["input"].as_str().unwrap_or_default();
+            if input.chars().count() > self.max_input_chars {
+                return Err(AntumbraError::other("http status: 500"));
+            }
+            Ok(json!({ "data": [ { "embedding": vec![0.25f32; EMBED_DIM] } ] }))
+        }
+    }
+
+    #[tokio::test]
+    async fn dense_input_that_still_overflows_the_window_retries_at_a_halved_cap() {
+        // The endpoint's real window sits BELOW the char cap (the dense-text
+        // case: ~2.3 chars/token puts 1200 chars past 512 tokens). First
+        // attempt 500s; the halved retry fits and succeeds.
+        let e = HttpEmbedder {
+            url: "http://localhost/embeddings".into(),
+            model: "all-MiniLM-L6-v2".into(),
+            api_key: None,
+            source_dim: None,
+            transport: Arc::new(WindowedTransport {
+                max_input_chars: EMBED_MAX_CHARS / 2,
+            }),
+        };
+        let long = "x".repeat(EMBED_MAX_CHARS * 2);
+        let v = e.embed(&long).await.unwrap();
+        assert_eq!(v.len(), EMBED_DIM);
+    }
+
     #[test]
     fn request_body_is_openai_shaped() {
         let e = embedder(Ok(Value::Null));
-        let body = e.request_body("hi");
+        let body = e.request_body_capped("hi", embed_max_chars());
         assert_eq!(body["model"], "all-MiniLM-L6-v2");
         assert_eq!(body["input"], "hi");
     }
@@ -344,7 +402,7 @@ mod tests {
         // endpoint must never see input it answers with a hard 500.
         let e = embedder(Ok(Value::Null));
         let long = "x".repeat(EMBED_MAX_CHARS * 4);
-        let body = e.request_body(&long);
+        let body = e.request_body_capped(&long, embed_max_chars());
         assert_eq!(
             body["input"].as_str().unwrap().chars().count(),
             EMBED_MAX_CHARS
