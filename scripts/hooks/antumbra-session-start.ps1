@@ -26,7 +26,9 @@ try {
         arguments = @{ query = 'standing conventions, project context, and active tasks for this agent'; limit = 12 }
     } | ConvertTo-Json -Compress -Depth 5
     $resp = Invoke-RestMethod -Method Post -Uri "$url/mcp/call" -Headers $headers -Body $payload -TimeoutSec 5 -ErrorAction Stop
-    $mems = $resp.result.memories
+    # The live /mcp/call answers with the tool's value at the TOP level
+    # ({memories: [...]}); the .result envelope is tolerated for older shims.
+    $mems = if ($resp.memories) { $resp.memories } else { $resp.result.memories }
     if ($mems -and $mems.Count -gt 0) {
         $memText = ($mems | ForEach-Object { $_.content }) -join "`n`n---`n`n"
     }

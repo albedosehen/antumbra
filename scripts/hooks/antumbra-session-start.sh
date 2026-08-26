@@ -24,10 +24,13 @@ auth=(-H 'Content-Type: application/json')
 payload='{"tool":"recall_memories","arguments":{"query":"standing conventions, project context, and active tasks for this agent","limit":12}}'
 resp=$(curl -sS --max-time 5 -X POST "$URL/mcp/call" "${auth[@]}" -d "$payload" 2>/dev/null || echo '{}')
 
+# The live /mcp/call answers with the tool's value at the TOP level
+# ({memories: [...]}); the .result envelope is tolerated for older shims.
 mem_text=$(printf '%s' "$resp" | jq -r '
-  if ((.result.memories // []) | length) > 0
-  then [.result.memories[].content] | join("\n\n---\n\n")
-  else "" end' 2>/dev/null || echo '')
+  (.memories // .result.memories // []) as $m
+  | if ($m | length) > 0
+    then [$m[].content] | join("\n\n---\n\n")
+    else "" end' 2>/dev/null || echo '')
 
 context=$(jq -nc --arg mem "$mem_text" --arg host "$HOST_ID" '
   "# Antumbra session bootstrap (host=" + $host + ")\n\n"
