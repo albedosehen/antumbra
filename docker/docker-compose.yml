@@ -7,7 +7,10 @@ name: antumbra
 
 services:
   surrealdb:
-    image: surrealdb/surrealdb:v3.0.5
+    # 3.2 for DISKANN, which 3.0.5 does not parse -- driftnet's chunk index
+    # needs it, and antumbra's own client is already on the 3.2.4 SDK. Pinned
+    # rather than :latest, which on Docker Hub still resolves to 2.4.0.
+    image: surrealdb/surrealdb:v3.2.4
     container_name: antumbra-surrealdb
     user: "65532:65532"
     command:
