@@ -153,9 +153,8 @@ struct HttpState {
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
     /// The optional copal document-of-record archive, applied to every
     /// per-identity server's ingest. One server-level instance (one endpoint);
-    /// its [`crate::copal::CopalTenancy`] decides which copal tenant each
-    /// workspace's documents land in and how the calls authenticate (the
-    /// tenant header, or `ck1` keys once copal runs its deployed auth mode).
+    /// its [`crate::copal::CopalTenancy`] decides whether each workspace is
+    /// its own copal tenant (the default) or all share one configured tenant.
     copal: Option<Arc<crate::copal::CopalArchive>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     /// Bounded so a host that sees many distinct identities cannot grow it without
@@ -490,11 +489,7 @@ fn server_config() -> StreamableHttpServerConfig {
         // does no DB work and streams *after* the handler returns -- so the lock
         // never spans the stream (the runtime-surface concern does not apply: an SSE
         // stream is MCP transport state, it does not hold the DB connection).
-        // rmcp 3 renamed stateful mode: sessions are "legacy" per SEP-2567
-        // (protocol 2026-07-28 drops them), but the GET/SSE push this server's
-        // live propagation rides exists only under session mode, so legacy
-        // session mode stays on until R-2 moves to the new protocol's push.
-        .with_legacy_session_mode(true)
+        .with_stateful_mode(true)
         .with_json_response(false)
         // The JWT is the access guard, so we do not restrict by `Host` (the
         // default loopback-only allowlist would refuse LAN clients). DNS-rebinding

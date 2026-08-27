@@ -17,16 +17,17 @@ serde_json.workspace = true
 thiserror.workspace = true
 # The real model stack (MT-1), behind the `models` feature so the default
 # workspace build stays light. candle 0.10 -> cudarc 0.19 (CUDA 13 via
-# cuda-version-from-build-system) + hf-hub 1.0.
+# cuda-version-from-build-system) + hf-hub 0.5.
 serde = { workspace = true, optional = true }
 # Pinned to 0.22 to match candle-core's transitive tokenizers (^0.22) -- a newer
 # minor would just duplicate the crate in the tree until candle updates.
 tokenizers = { version = "0.22", optional = true }
-# The stable 1.0.0 release (this pin rode the rc.1 pre-release until it shipped).
-hf-hub = { version = "1.0.0", optional = true, default-features = false, features = ["blocking", "rustls-tls"] }
+# 1.0.0-rc.1 pre-release: `cargo update` will carry this to the final 1.0.0 when
+# it ships (^1.0.0-rc.1 matches the stable release).
+hf-hub = { version = "1.0.0-rc.1", optional = true, default-features = false, features = ["blocking", "rustls-tls"] }
 # Not model-gated: the decode policy (repetition penalty / nucleus sampling) is
 # pure logits math, unit-tested in the default build. rand is tiny.
-rand = "0.10"
+rand = "0.8"
 # candle 0.10 pins cudarc 0.19, whose nvcc probe only knows CUDA <= 13.2 and
 # panics on a newer toolkit (e.g. 13.3). `fallback-latest` makes it use its
 # newest supported version (13.2, ABI-compatible with 13.3 libs) when the bare

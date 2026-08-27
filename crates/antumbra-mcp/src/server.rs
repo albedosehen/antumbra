@@ -2295,7 +2295,7 @@ mod tests {
         fn post_json(
             &self,
             _url: &str,
-            _credential: &crate::copal::CopalCredential,
+            _tenant: &str,
             _body: &serde_json::Value,
         ) -> antumbra_core::Result<serde_json::Value> {
             if self.up {
@@ -2308,7 +2308,7 @@ mod tests {
         fn put_bytes(
             &self,
             _url: &str,
-            _credential: &crate::copal::CopalCredential,
+            _tenant: &str,
             _content_type: &str,
             _body: &[u8],
         ) -> antumbra_core::Result<serde_json::Value> {

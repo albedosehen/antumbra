@@ -13,7 +13,7 @@ antumbra-store = { path = "../antumbra-store" }
 chrono.workspace = true
 uuid = { version = "1", features = ["v4"] }
 # The magic-link one-time token is a short-lived HS256 JWT carrying the email.
-jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+jsonwebtoken = "10"
 serde = { workspace = true }
 
 [dev-dependencies]

@@ -12,8 +12,7 @@ pub const DEFAULT_STOPS: &[&str] = &["```", "\ndef ", "\nclass ", "\nif __name__
 
 use std::collections::HashSet;
 
-use rand::distr::weighted::WeightedIndex;
-use rand::distr::Distribution;
+use rand::distributions::{Distribution, WeightedIndex};
 use rand::rngs::StdRng;
 
 /// How each generation step turns logits into a token. Pure logits math, so the

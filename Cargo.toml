@@ -26,7 +26,7 @@ edition = "2021"
 license = "AGPL-3.0-only"
 rust-version = "1.90"
 repository = "https://github.com/Oneiriq/antumbra"
-authors = ["Shon Thomas <shon@oneiriq.com>"]
+authors = ["Shon Thomas <shonpt@outlook.com>"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -34,23 +34,31 @@ serde_json = "1"
 thiserror = "2"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# The TUI stack (the operator console): ratatui + its bundled crossterm,
+# tachyonfx for composable shader-like animation/transitions.
 ratatui = "0.30"
 tachyonfx = "0.25"
+# The user's code-first SurrealDB toolkit (surql-rs), published as `oneiriq-surql`.
+# Pure-Rust TLS so CI/Windows builds need no system OpenSSL.
 oneiriq-surql = { version = "0.33", default-features = false, features = ["client-rustls"] }
 
 [profile.dev]
+# Faster incremental builds for the heavy dependency graph.
 opt-level = 0
 
-# Workaround: rustc 1.96 segfaults (STATUS_ACCESS_VIOLATION)
+# Workaround: rustc 1.96 segfaults (STATUS_ACCESS_VIOLATION) optimizing the
+# huge SurrealDB crates at release opt-level 3 on Windows MSVC. Build them at
+# opt-level 1; their speed is irrelevant (the candle hot path stays at 3).
 [profile.release.package.surrealdb-core]
 opt-level = 1
 
 [profile.release.package.surrealdb]
 opt-level = 1
 
+# The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
 lto = "thin"
