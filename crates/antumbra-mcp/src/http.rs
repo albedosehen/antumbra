@@ -151,6 +151,10 @@ struct HttpState {
     /// per-identity server after hybrid recall. Server-level (one endpoint), not
     /// per-tenant.
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
+    /// The optional copal document-of-record archive, applied to every
+    /// per-identity server's ingest. Server-level (one endpoint + copal
+    /// tenant), not per-workspace.
+    copal: Option<Arc<crate::copal::CopalArchive>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     /// Bounded so a host that sees many distinct identities cannot grow it without
     /// limit; an evicted identity rebuilds its service on the next request.
@@ -179,6 +183,7 @@ pub async fn serve(
     auto_propose: Option<usize>,
     auto_consolidate: bool,
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
+    copal: Option<Arc<crate::copal::CopalArchive>>,
 ) -> Result<()> {
     let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -209,6 +214,7 @@ pub async fn serve(
         auto_consolidate,
         serve,
         reranker,
+        copal,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
         registry: crate::notify::PeerRegistry::new(),
@@ -381,6 +387,9 @@ impl HttpState {
         }
         if let Some(reranker) = self.reranker.clone() {
             mcp = mcp.with_reranker(reranker);
+        }
+        if let Some(archive) = self.copal.clone() {
+            mcp = mcp.with_copal_archive(archive);
         }
         Ok(mcp)
     }
@@ -622,6 +631,7 @@ mod tests {
             auto_consolidate: false,
             serve: None,
             reranker: None,
+            copal: None,
             sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
             consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
             registry: crate::notify::PeerRegistry::new(),

@@ -94,6 +94,25 @@ Offline is the default and the privacy floor: nothing leaves the building. The h
 
 ---
 
+## Copal as the document of record (knowledge documents)
+
+`ingest_document` chunks, embeds, and stores a knowledge document for recall — and in v0 that is *all* it keeps: the chunks. Recall works, but the original bytes are gone. Point the MCP server at a **Copal** file service (content-addressed, versioned, sealed-at-rest file storage) and Copal becomes the **document of record**: on every ingest the original content is uploaded there first, and each stored chunk carries provenance back to it (`copal_file`, the archived file's id, and `copal_digest`, the content digest of exactly the bytes that were ingested) — so a `recall_documents` answer names not just what it remembers but the original it came from.
+
+Two knobs, on the server's usual clap/env conventions:
+
+```
+ANTUMBRA_COPAL_ADDR=127.0.0.1:9010    # --copal-addr: bare host:port (http:// assumed) or a full URL base
+ANTUMBRA_COPAL_TENANT=antumbra        # --copal-tenant: the x-copal-tenant header (default "antumbra")
+```
+
+The contract:
+
+- **Upload first, fail closed.** The original lands in Copal *before* any chunk is stored, and an unreachable Copal fails the ingest with a clear error. A configured document of record that silently dropped originals would be worse than none.
+- **Re-ingest revisions, never litters.** The create carries an idempotency key derived from (tenant, title), so ingesting the same title again revisions the *same* Copal file — the version history is the document's history.
+- **Absent means exactly today's behavior.** No `--copal-addr`, no archive: ingest keeps only the chunks, nothing new is required, and chunks written either way coexist (the provenance fields are simply absent on archive-less chunks).
+
+---
+
 ## Why this beats a plain memory layer
 
 Retrieval-memory tools (give the agent a vector store to recall from) make the agent _remember_. Antumbra makes it **learn**:

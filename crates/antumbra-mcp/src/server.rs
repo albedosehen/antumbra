@@ -72,6 +72,11 @@ pub struct McpServer {
     /// Bounded per-server cache of rerank orders, keyed by (query, candidate-id
     /// set), so a repeated recall of the same pool skips the endpoint round-trip.
     reranker_cache: Arc<tokio::sync::Mutex<RerankCache>>,
+    /// The copal document-of-record archive: when set, `ingest_document`
+    /// uploads the ORIGINAL content to copal FIRST (failing the ingest if
+    /// copal is unreachable) and stamps every stored chunk with the file id +
+    /// digest. `None` = no archive; ingest behaves exactly as before.
+    copal: Option<Arc<crate::copal::CopalArchive>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -203,7 +208,18 @@ impl McpServer {
             registry: None,
             reranker: None,
             reranker_cache: Arc::new(tokio::sync::Mutex::new(RerankCache::new())),
+            copal: None,
         }
+    }
+
+    /// Make a copal file service the document of record for ingested documents:
+    /// the original content is archived there before any chunk is stored, and
+    /// every chunk carries the copal file id + digest as provenance. Off by
+    /// default; without it, ingest keeps only the chunks (the v0 behavior).
+    #[must_use]
+    pub fn with_copal_archive(mut self, archive: Arc<crate::copal::CopalArchive>) -> Self {
+        self.copal = Some(archive);
+        self
     }
 
     /// Enable the cross-encoder precision stage (P-2): after hybrid recall, the
@@ -665,6 +681,13 @@ struct DocumentChunkView {
     source: Option<String>,
     ordinal: u32,
     content: String,
+    /// The copal file holding the document's original content (the document of
+    /// record); omitted when it was ingested without an archive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    copal_file: Option<String>,
+    /// The content digest copal reported for that archived original.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    copal_digest: Option<String>,
 }
 
 impl From<&DocumentChunk> for DocumentChunkView {
@@ -674,6 +697,8 @@ impl From<&DocumentChunk> for DocumentChunkView {
             source: c.source.clone(),
             ordinal: c.ordinal,
             content: c.content.clone(),
+            copal_file: c.copal_file.clone(),
+            copal_digest: c.copal_digest.clone(),
         }
     }
 }
@@ -1075,6 +1100,23 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<IngestDocumentParams>,
     ) -> Result<Json<IngestedOut>, ErrorData> {
+        // Document of record FIRST: when a copal archive is configured, the
+        // ORIGINAL content lands there before any chunk is stored -- and a
+        // failure fails the whole ingest, because a configured document of
+        // record that silently dropped originals would be worse than none.
+        let archived = match &self.copal {
+            Some(archive) => Some(
+                archive
+                    .archive_document(&p.title, p.source.as_deref(), &p.content)
+                    .await
+                    .map_err(|e| {
+                        err(format!(
+                            "copal document-of-record upload failed, nothing was ingested: {e}"
+                        ))
+                    })?,
+            ),
+            None => None,
+        };
         let now = Utc::now();
         let mut chunks = Vec::new();
         for (ordinal, content) in
@@ -1083,7 +1125,7 @@ impl McpServer {
                 .enumerate()
         {
             let embedding = self.embedder.embed(&content).await.map_err(err)?;
-            chunks.push(DocumentChunk {
+            let mut chunk = DocumentChunk {
                 id: DocumentChunkId::new(next_id("docchunk")),
                 tenant: self.tenant.clone(),
                 title: p.title.clone(),
@@ -1092,7 +1134,14 @@ impl McpServer {
                 content,
                 embedding: Some(embedding),
                 created_at: now,
-            });
+                copal_file: None,
+                copal_digest: None,
+            };
+            // Every chunk carries its provenance back to the archived original.
+            if let Some(a) = &archived {
+                chunk = chunk.with_copal(a.file_id.clone(), a.digest.clone());
+            }
+            chunks.push(chunk);
         }
         let stored = chunks.len() as u32;
         document::insert_chunks(&self.store, &chunks)
@@ -2208,6 +2257,12 @@ mod tests {
             .unwrap();
         assert!(!recalled.0.chunks.is_empty());
         assert!(recalled.0.chunks.iter().all(|c| c.title == "Onboarding"));
+        // No copal archive configured: no provenance, exactly as before.
+        assert!(recalled
+            .0
+            .chunks
+            .iter()
+            .all(|c| c.copal_file.is_none() && c.copal_digest.is_none()));
 
         // Reachable over the REST dispatcher too.
         let viarest = s
@@ -2218,6 +2273,101 @@ mod tests {
             .await
             .unwrap();
         assert!(viarest.get("chunks").is_some());
+    }
+
+    /// A canned copal for the ingest tests: create answers with a fixed file
+    /// id, upload with a fixed digest; `Err` variants exercise the fail-closed
+    /// path (a configured archive that is down must fail the ingest).
+    struct CannedCopal {
+        up: bool,
+    }
+
+    impl crate::copal::CopalTransport for CannedCopal {
+        fn post_json(
+            &self,
+            _url: &str,
+            _tenant: &str,
+            _body: &serde_json::Value,
+        ) -> antumbra_core::Result<serde_json::Value> {
+            if self.up {
+                Ok(serde_json::json!({ "id": "file:01J", "state": "draft" }))
+            } else {
+                Err(antumbra_core::AntumbraError::other("connection refused"))
+            }
+        }
+
+        fn put_bytes(
+            &self,
+            _url: &str,
+            _tenant: &str,
+            _content_type: &str,
+            _body: &[u8],
+        ) -> antumbra_core::Result<serde_json::Value> {
+            if self.up {
+                Ok(serde_json::json!({ "digest": "sha256:abc", "state": "ready" }))
+            } else {
+                Err(antumbra_core::AntumbraError::other("connection refused"))
+            }
+        }
+    }
+
+    fn canned_archive(up: bool) -> Arc<crate::copal::CopalArchive> {
+        Arc::new(crate::copal::CopalArchive::with_transport(
+            "127.0.0.1:9010",
+            "antumbra".into(),
+            Arc::new(CannedCopal { up }),
+        ))
+    }
+
+    #[tokio::test]
+    async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() {
+        let s = server().await.with_copal_archive(canned_archive(true));
+        s.ingest_document(Parameters(IngestDocumentParams {
+            title: "Onboarding".into(),
+            content: "Antumbra keeps knowledge documents separate from episodic memory. \
+                      This project uses the deno runtime."
+                .into(),
+            source: Some("onboarding.md".into()),
+        }))
+        .await
+        .unwrap();
+
+        let recalled = s
+            .recall_documents(Parameters(RecallDocumentsParams {
+                query: "what runtime does this project use".into(),
+                top_k: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert!(!recalled.0.chunks.is_empty());
+        // Every chunk names the archived original: the file AND the bytes.
+        assert!(recalled
+            .0
+            .chunks
+            .iter()
+            .all(|c| c.copal_file.as_deref() == Some("file:01J")
+                && c.copal_digest.as_deref() == Some("sha256:abc")));
+    }
+
+    #[tokio::test]
+    async fn ingest_fails_closed_when_the_configured_copal_is_unreachable() {
+        // Upload-first: with the archive configured but down, the ingest fails
+        // BEFORE any chunk is stored -- a document of record that silently
+        // dropped originals would be worse than none.
+        let s = server().await.with_copal_archive(canned_archive(false));
+        let res = s
+            .ingest_document(Parameters(IngestDocumentParams {
+                title: "Onboarding".into(),
+                content: "some reference text".into(),
+                source: None,
+            }))
+            .await;
+        assert!(
+            res.is_err(),
+            "a configured archive that is down fails ingest"
+        );
+        // Nothing was stored: the workspace still lists zero documents.
+        assert_eq!(s.workspace_stats().await.unwrap().0.documents, 0);
     }
 
     #[tokio::test]

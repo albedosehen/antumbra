@@ -27,6 +27,7 @@ use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 mod auth {
     pub use antumbra_auth::*;
 }
+mod copal;
 mod embed;
 mod http;
 mod notify;
@@ -120,6 +121,16 @@ struct Cli {
     /// Optional bearer key for `--rerank-url`.
     #[arg(long, env = "ANTUMBRA_RERANK_KEY")]
     rerank_key: Option<String>,
+    /// Archive each ingested document's ORIGINAL content to a copal file
+    /// service (the document of record): bare `host:port` or a full URL base.
+    /// The upload happens before any chunk is stored (a dead copal fails the
+    /// ingest), and every chunk carries the copal file id + digest. Off when
+    /// unset: ingest keeps only the chunks, exactly as before.
+    #[arg(long, env = "ANTUMBRA_COPAL_ADDR")]
+    copal_addr: Option<String>,
+    /// The tenant presented to copal (`x-copal-tenant`, its header auth mode).
+    #[arg(long, env = "ANTUMBRA_COPAL_TENANT", default_value = "antumbra")]
+    copal_tenant: String,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -330,6 +341,13 @@ async fn run() -> Result<()> {
         )) as Arc<dyn antumbra_core::ports::Reranker>
     });
 
+    // Optional copal document-of-record archive. Operator-configured; absent,
+    // ingest keeps only the chunks (the v0 behavior, unchanged).
+    let copal: Option<Arc<copal::CopalArchive>> = cli
+        .copal_addr
+        .as_deref()
+        .map(|addr| Arc::new(copal::CopalArchive::new(addr, cli.copal_tenant.clone())));
+
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&cli.jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
@@ -344,6 +362,7 @@ async fn run() -> Result<()> {
             cli.auto_propose,
             cli.auto_consolidate,
             reranker,
+            copal,
         )
         .await;
     }
@@ -367,6 +386,9 @@ async fn run() -> Result<()> {
     }
     if let Some(r) = reranker {
         service = service.with_reranker(r);
+    }
+    if let Some(c) = copal {
+        service = service.with_copal_archive(c);
     }
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))
