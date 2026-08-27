@@ -297,7 +297,7 @@
         ],
         "type": "object"
       },
-      "Memorie": {
+      "Memory": {
         "properties": {
           "author": {
             "type": [
@@ -356,28 +356,6 @@
         ],
         "type": "object"
       },
-      "MemoriePage": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/Memorie"
-            },
-            "type": "array"
-          },
-          "next_cursor": {
-            "description": "Opaque keyset cursor for the next page; null when drained.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "next_cursor"
-        ],
-        "type": "object"
-      },
       "MemoryEdge": {
         "properties": {
           "created_at": {
@@ -411,6 +389,28 @@
           "items": {
             "items": {
               "$ref": "#/components/schemas/MemoryEdge"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "description": "Opaque keyset cursor for the next page; null when drained.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "MemoryPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Memory"
             },
             "type": "array"
           },
@@ -982,7 +982,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MemoriePage"
+                  "$ref": "#/components/schemas/MemoryPage"
                 }
               }
             },
@@ -1009,7 +1009,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Memorie"
+                  "$ref": "#/components/schemas/Memory"
                 }
               }
             },
