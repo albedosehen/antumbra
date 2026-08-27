@@ -20,13 +20,16 @@
 !/dprint.json
 !/.dockerignore
 !/docker/
-# The audit triage only, not the whole directory: a local .cargo/config.toml is
-# machine state and must not ride along. Without this, .cargo/audit.toml is
-# swallowed by the deny-by-default `/*` above and CI audits with a config that
-# only exists on someone's laptop.
+# The audit triage and the fetch config, not the whole directory. audit.toml
+# would otherwise be swallowed by the deny-by-default `/*` above, and CI would
+# audit with a config that only exists on someone's laptop. config.toml became
+# workspace state (no longer machine state) when oneiriq-janus arrived: a
+# private git dependency fetched over ssh needs `git-fetch-with-cli`, which
+# every clone must carry or the build fails at fetch.
 !/.cargo/
 /.cargo/*
 !/.cargo/audit.toml
+!/.cargo/config.toml
 
 # Explicit Ignore
 **/.env

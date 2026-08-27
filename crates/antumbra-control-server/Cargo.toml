@@ -22,6 +22,15 @@ dist = false
 antumbra-control = { path = "../antumbra-control" }
 antumbra-store = { path = "../antumbra-store" }
 antumbra-core = { path = "../antumbra-core" }
+# The contract layer (lib name `janus`): the wire contract in src/contract/ is
+# validated against the store's real indexes and generates the checked-in API
+# artifacts (docs/openapi.json, docs/schema.graphql). Default features only --
+# this slice declares the contract; nothing executes it yet. Private repo: local
+# fetches ride ssh, CI rewrites the URL to https with a read token.
+oneiriq-janus = { git = "ssh://git@github.com/Oneiriq/janus.git", branch = "main" }
+# The schema vocabulary janus resolves the contract against; same version the
+# store builds its TableDefinitions with, so the two speak one type.
+oneiriq-surql = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "signal"] }
 anyhow.workspace = true
 chrono.workspace = true

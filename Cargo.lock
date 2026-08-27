@@ -248,6 +248,8 @@ dependencies = [
  "chrono",
  "clap",
  "lettre",
+ "oneiriq-janus",
+ "oneiriq-surql",
  "serde",
  "serde_json",
  "tokio",
@@ -4579,6 +4581,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "oneiriq-janus"
+version = "0.1.0"
+source = "git+ssh://git@github.com/Oneiriq/janus.git?branch=main#5d8ab1ea99930f5f067d253a5a1f722e8f833b9f"
+dependencies = [
+ "futures-core",
+ "oneiriq-surql",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "oneiriq-surql"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6366,6 +6380,7 @@ version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
