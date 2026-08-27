@@ -22,8 +22,15 @@ pub(super) fn resource() -> Resource {
         identity: Identity::Column("key".into()),
         fields: vec![
             FieldExposure::column("title"),
+            FieldExposure::column("source"),
             FieldExposure::column("ordinal"),
             FieldExposure::column("content"),
+            // Document-of-record provenance: when a copal archive was
+            // configured at ingest, the chunk names the archived file and
+            // its content digest (see antumbra-mcp/src/copal.rs). Absent on
+            // chunks ingested without one, like the row itself.
+            FieldExposure::column("copal_file"),
+            FieldExposure::column("copal_digest"),
             FieldExposure::column("created_at"),
             // The embedding stays off the wire for the same reason the
             // memory one does: recall machinery, not content.
@@ -56,6 +63,8 @@ pub(super) fn columns() -> Vec<FieldDefinition> {
         built(string_field("source").nullable(true)),
         built(int_field("ordinal")),
         built(string_field("content")),
+        built(string_field("copal_file").nullable(true)),
+        built(string_field("copal_digest").nullable(true)),
         built(datetime_field("created_at")),
     ]
 }

@@ -82,8 +82,11 @@ type GrantPage {
 type DocumentChunk {
   key: ID!
   title: String!
+  source: String
   ordinal: Int!
   content: String!
+  copal_file: String
+  copal_digest: String
   created_at: DateTime!
 }
 

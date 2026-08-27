@@ -59,6 +59,18 @@
           "content": {
             "type": "string"
           },
+          "copal_digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "copal_file": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -68,6 +80,12 @@
           },
           "ordinal": {
             "type": "integer"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "title": {
             "type": "string"
