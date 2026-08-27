@@ -34,7 +34,7 @@ clap = { workspace = true, features = ["env"] }
 chrono.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
-rmcp = { version = "1.7.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "3", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
 # Outbound HTTP for the copal document-of-record archive: the same blocking
 # client (and TLS posture) the embedder's transport uses.
 ureq = { version = "3", features = ["json"] }
@@ -42,7 +42,7 @@ ureq = { version = "3", features = ["json"] }
 # HTTP surface. axum hosts the streamable-HTTP service; jsonwebtoken verifies the
 # bearer token whose claims become $auth (tenant, user).
 axum = "0.8"
-jsonwebtoken = "10"
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # The `Embedder` port (and the answer-escalate test fake) are `#[async_trait]`.
 async-trait.workspace = true
 

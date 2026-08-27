@@ -7,7 +7,7 @@ rust-version.workspace = true
 description = "The JWT token contract for the antumbra networked surface: the (tenant, user) identity claims, HS256/RS256 minting, and verification. Shared by the MCP server (verifier) and the control plane (issuer)."
 
 [dependencies]
-jsonwebtoken = "10"
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 serde = { workspace = true }
 anyhow.workspace = true
 uuid = { version = "1", features = ["v4"] }

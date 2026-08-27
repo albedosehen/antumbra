@@ -16,7 +16,8 @@ use candle_core::{DType, Device, Result as CResult, Tensor, D};
 use candle_nn::init::Init;
 use candle_nn::{Activation, Embedding, Module, Optimizer, VarBuilder, VarMap};
 
-use rand::distributions::{Distribution, WeightedIndex};
+use rand::distr::weighted::WeightedIndex;
+use rand::distr::Distribution;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
