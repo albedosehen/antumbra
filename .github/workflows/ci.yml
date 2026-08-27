@@ -39,13 +39,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt, clippy
-      # The oneiriq-janus dependency lives in a private repo, reached over ssh
+      # The oneiriq-kayak dependency lives in a private repo, reached over ssh
       # locally. CI has no ssh key, so rewrite both spellings of the Oneiriq
       # remote to https with a read token, and make cargo fetch through the
       # git CLI (also set in .cargo/config.toml; exported here so the fetch
       # survives that file moving). ONEIRIQ_READ_TOKEN is a repo secret: a
-      # fine-grained token with read access to Oneiriq/janus.
-      - name: authorize the private janus fetch
+      # fine-grained token with read access to Oneiriq/kayak.
+      - name: authorize the private kayak fetch
         run: |
           git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
           git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"
@@ -73,8 +73,8 @@ jobs:
           components: clippy
       # Same private-fetch rewrite as the check job: resolving the workspace
       # reads every member's manifest, so even a -p build of crates that never
-      # touch janus needs the fetch to succeed.
-      - name: authorize the private janus fetch
+      # touch kayak needs the fetch to succeed.
+      - name: authorize the private kayak fetch
         run: |
           git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
           git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"
@@ -123,7 +123,7 @@ jobs:
       # cargo audit reads the committed Cargo.lock without fetching, but it is
       # still a cargo job, and the rewrite keeps it working the day it grows a
       # flag that resolves for real.
-      - name: authorize the private janus fetch
+      - name: authorize the private kayak fetch
         run: |
           git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
           git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"

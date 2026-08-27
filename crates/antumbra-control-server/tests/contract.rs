@@ -1,4 +1,4 @@
-//! The janus contract gate.
+//! The kayak contract gate.
 //!
 //! THE contract lives in `antumbra_control_server::contract` and is validated
 //! here over the store's REAL schema definitions (`tables(EMBED_DIM)`, the
@@ -10,12 +10,12 @@
 //!    name.
 //! 2. Artifact drift: the generated artifacts (`docs/openapi.json`,
 //!    `docs/schema.graphql`) must match their checked-in copies byte for byte
-//!    (`JANUS_BLESS=1` re-blesses as an explicit step).
+//!    (`KAYAK_BLESS=1` re-blesses as an explicit step).
 //! 3. Index regressions: dropping `memory_updated_at_idx` (or demoting a
 //!    composite's prefix) breaks a sort claim and fails here.
 
 use antumbra_control_server::contract::{contract, schema};
-use janus::{generate_all, validate};
+use kayak::{generate_all, validate};
 
 #[test]
 fn contract_validates_against_the_real_schema() {
@@ -30,16 +30,16 @@ fn generated_artifacts_match_the_checked_in_documents() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     for (filename, content) in &artifacts {
         let checked_in_path = format!("{root}/docs/{filename}");
-        if std::env::var("JANUS_BLESS").is_ok() {
+        if std::env::var("KAYAK_BLESS").is_ok() {
             std::fs::write(&checked_in_path, content).unwrap();
         }
         let checked_in = std::fs::read_to_string(&checked_in_path).unwrap_or_else(|_| {
-            panic!("{checked_in_path} missing; run with JANUS_BLESS=1 to create")
+            panic!("{checked_in_path} missing; run with KAYAK_BLESS=1 to create")
         });
         assert_eq!(
             content.trim(),
             checked_in.trim(),
-            "{filename} drifted from its checked-in copy; JANUS_BLESS=1 to re-bless",
+            "{filename} drifted from its checked-in copy; KAYAK_BLESS=1 to re-bless",
         );
     }
 }

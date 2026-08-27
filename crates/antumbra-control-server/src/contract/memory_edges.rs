@@ -1,10 +1,10 @@
 //! The memory_edges resource.
 //!
 //! One entity per file: everything here is that entity, and nothing here is
-//! anything else. `super::contract` puts them together, because what janus
+//! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use janus::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
 use surql::schema::{datetime_field, float_field, string_field, FieldDefinition};
 
 use super::built;
@@ -46,7 +46,7 @@ pub(super) fn resource() -> Resource {
     }
 }
 
-/// The wire columns of the `memory_edge` table, typed for janus. Mirrors
+/// The wire columns of the `memory_edge` table, typed for kayak. Mirrors
 /// `EdgeRow` in antumbra-store/src/repo/edge.rs.
 pub(super) fn columns() -> Vec<FieldDefinition> {
     vec![

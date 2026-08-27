@@ -4,9 +4,9 @@
 FROM rust:1.96-slim-bookworm AS builder
 WORKDIR /build
 # pkg-config covers crates that probe the system; the TLS stack is pure-Rust
-# (rustls), so no OpenSSL is needed. git is for the private oneiriq-janus
+# (rustls), so no OpenSSL is needed. git is for the private oneiriq-kayak
 # dependency: resolving the workspace reads every member's manifest, so even
-# this janus-free binary's build must fetch it.
+# this kayak-free binary's build must fetch it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config git \
     && rm -rf /var/lib/apt/lists/*

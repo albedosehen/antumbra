@@ -1,10 +1,10 @@
 //! The orchestration_runs resource.
 //!
 //! One entity per file: everything here is that entity, and nothing here is
-//! anything else. `super::contract` puts them together, because what janus
+//! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use janus::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
 use surql::schema::{array_field, datetime_field, int_field, string_field, FieldDefinition};
 
 use super::built;
@@ -50,7 +50,7 @@ pub(super) fn resource() -> Resource {
     }
 }
 
-/// The wire columns of the `orchestration_run` table, typed for janus.
+/// The wire columns of the `orchestration_run` table, typed for kayak.
 /// Mirrors `OrchestrationRun` in antumbra-core/src/orchestration.rs with the
 /// id-to-key mapping every persisted entity gets.
 pub(super) fn columns() -> Vec<FieldDefinition> {

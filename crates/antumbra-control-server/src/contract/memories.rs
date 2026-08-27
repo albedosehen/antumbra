@@ -1,12 +1,12 @@
 //! The memories resource.
 //!
 //! One entity per file: everything here is that entity, and nothing here is
-//! anything else. `super::contract` puts them together, because what janus
+//! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
 use std::collections::BTreeMap;
 
-use janus::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
 use surql::schema::{
     bool_field, datetime_field, float_field, int_field, string_field, FieldDefinition,
 };
@@ -74,7 +74,7 @@ pub(super) fn resource() -> Resource {
     }
 }
 
-/// The wire columns of the `memory` table, typed for janus. Mirrors what
+/// The wire columns of the `memory` table, typed for kayak. Mirrors what
 /// `MemoryRow` actually writes -- the store keeps the table SCHEMALESS, so
 /// this vocabulary is declared here, beside the resource that exposes it.
 pub(super) fn columns() -> Vec<FieldDefinition> {

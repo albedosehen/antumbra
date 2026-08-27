@@ -9,14 +9,14 @@
 //! Each entity lives in its own file beside this one, so opening
 //! `memories.rs` puts nothing in front of a reader except the memories
 //! resource. This module holds what belongs to no single entity and hands
-//! janus the whole, because the checks that matter span it.
+//! kayak the whole, because the checks that matter span it.
 //!
 //! Everything here is read-only and read-narrow on purpose: this slice
 //! declares the faces the store can already serve from its indexes, and
 //! nothing more. Writes stay on the MCP tools, where the engine's
 //! compartment/grant ACL does the reasoning a bare POST could not.
 
-use janus::{Contract, ContractLimits};
+use kayak::{Contract, ContractLimits};
 use surql::schema::{FieldBuilder, FieldDefinition, TableDefinition};
 
 mod compartments;
@@ -40,9 +40,9 @@ pub fn contract() -> Contract {
         // data-plane MCP server verifies them. Declared so the generated
         // clients send the credential the service actually checks, and so
         // the differ names any change to it as the break it would be.
-        auth: janus::AuthScheme::Bearer,
+        auth: kayak::AuthScheme::Bearer,
         // The default, stated because antumbra's routes will be versioned
-        // and a reader should not have to know janus's default to know
+        // and a reader should not have to know kayak's default to know
         // antumbra's paths.
         api_prefix: "/v1".into(),
         // Modest ceilings, declared here so they appear in the artifacts
@@ -77,7 +77,7 @@ pub fn contract() -> Contract {
 ///
 /// The store keeps every table SCHEMALESS by design (v0 leans on explicit
 /// indexes, not field DDL), which leaves `TableDefinition::fields` empty --
-/// and janus resolves every exposed column against those fields, both to
+/// and kayak resolves every exposed column against those fields, both to
 /// refuse a column the table does not have and to type the OpenAPI/SDL
 /// schemas. So the contract layer carries the missing half itself: each
 /// entity file types exactly the columns its repo layer actually writes,

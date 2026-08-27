@@ -1,10 +1,10 @@
 //! The evaluation_runs resource.
 //!
 //! One entity per file: everything here is that entity, and nothing here is
-//! anything else. `super::contract` puts them together, because what janus
+//! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use janus::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
 use surql::schema::{datetime_field, field, string_field, FieldDefinition, FieldType};
 
 use super::built;
@@ -51,7 +51,7 @@ pub(super) fn resource() -> Resource {
     }
 }
 
-/// The wire columns of the `evaluation_run` table, typed for janus. The
+/// The wire columns of the `evaluation_run` table, typed for kayak. The
 /// domain `EvaluationRun` persists directly (it has no reserved `id` field),
 /// so this mirrors the struct in antumbra-core/src/evaluation.rs.
 pub(super) fn columns() -> Vec<FieldDefinition> {

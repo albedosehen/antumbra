@@ -1,10 +1,10 @@
 //! The shadows resource.
 //!
 //! One entity per file: everything here is that entity, and nothing here is
-//! anything else. `super::contract` puts them together, because what janus
+//! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use janus::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
 use surql::schema::{int_field, string_field, FieldDefinition};
 
 use super::built;
@@ -46,7 +46,7 @@ pub(super) fn resource() -> Resource {
     }
 }
 
-/// The wire columns of the `shadow` table, typed for janus. A subset of
+/// The wire columns of the `shadow` table, typed for kayak. A subset of
 /// `ShadowRow` in antumbra-store/src/repo/shadow.rs: only what the resource
 /// exposes and the indexes read.
 pub(super) fn columns() -> Vec<FieldDefinition> {

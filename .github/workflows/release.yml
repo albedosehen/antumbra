@@ -60,12 +60,12 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      # HAND-ADDED (re-add after any `dist generate`): the oneiriq-janus
+      # HAND-ADDED (re-add after any `dist generate`): the oneiriq-kayak
       # dependency lives in a private repo; `dist plan` resolves the workspace
       # through cargo, which must be able to fetch it. Rewrite both spellings
       # of the Oneiriq remote to https with the ONEIRIQ_READ_TOKEN repo secret
       # and fetch through the git CLI.
-      - name: authorize the private janus fetch
+      - name: authorize the private kayak fetch
         shell: bash
         run: |
           git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
@@ -139,9 +139,9 @@ jobs:
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       # HAND-ADDED (re-add after any `dist generate`): `dist build` runs cargo
-      # over the workspace, which must fetch the private oneiriq-janus repo.
+      # over the workspace, which must fetch the private oneiriq-kayak repo.
       # Forced to bash because this matrix spans Windows runners.
-      - name: authorize the private janus fetch
+      - name: authorize the private kayak fetch
         shell: bash
         run: |
           git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
@@ -202,7 +202,7 @@ jobs:
       # HAND-ADDED (re-add after any `dist generate`): the global build still
       # reads the workspace through cargo, so it needs the same private-repo
       # rewrite as the platform builds.
-      - name: authorize the private janus fetch
+      - name: authorize the private kayak fetch
         shell: bash
         run: |
           git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
