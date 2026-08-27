@@ -1104,10 +1104,19 @@ impl McpServer {
         // ORIGINAL content lands there before any chunk is stored -- and a
         // failure fails the whole ingest, because a configured document of
         // record that silently dropped originals would be worse than none.
+        // The session's workspace tenant scopes the archive identity (the
+        // idempotency key and path), so two workspaces sharing a title never
+        // revision each other's document; the copal tenant header stays the
+        // operator-configured one (see `crate::copal`).
         let archived = match &self.copal {
             Some(archive) => Some(
                 archive
-                    .archive_document(&p.title, p.source.as_deref(), &p.content)
+                    .archive_document(
+                        self.tenant.as_str(),
+                        &p.title,
+                        p.source.as_deref(),
+                        &p.content,
+                    )
                     .await
                     .map_err(|e| {
                         err(format!(

@@ -108,7 +108,7 @@ ANTUMBRA_COPAL_TENANT=antumbra        # --copal-tenant: the x-copal-tenant heade
 The contract:
 
 - **Upload first, fail closed.** The original lands in Copal *before* any chunk is stored, and an unreachable Copal fails the ingest with a clear error. A configured document of record that silently dropped originals would be worse than none.
-- **Re-ingest revisions, never litters.** The create carries an idempotency key derived from (tenant, title), so ingesting the same title again revisions the *same* Copal file — the version history is the document's history.
+- **Re-ingest revisions, never litters.** The create carries an idempotency key derived from (workspace, title) — the *antumbra* workspace tenant, not the Copal one — so ingesting the same title again revisions the *same* Copal file, and on the multi-workspace HTTP surface two workspaces sharing a title never revision each other's document. The version history is the document's history; the archived file's metadata names its owning workspace.
 - **Absent means exactly today's behavior.** No `--copal-addr`, no archive: ingest keeps only the chunks, nothing new is required, and chunks written either way coexist (the provenance fields are simply absent on archive-less chunks).
 
 ---
