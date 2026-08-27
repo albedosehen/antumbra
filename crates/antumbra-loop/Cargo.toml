@@ -16,7 +16,7 @@ chrono.workspace = true
 serde_json.workspace = true
 # sha256 of a frozen adapter's bytes = the no-forgetting regression fingerprint
 # (the frozen-expert population). Already in the dependency tree, so no new compile cost.
-sha2 = "0.10"
+sha2 = "0.11"
 
 [dev-dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
