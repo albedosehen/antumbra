@@ -266,7 +266,7 @@ impl CopalArchive {
                         "workspace {workspace:?} cannot be presented as a copal tenant"
                     )));
                 }
-                CopalCredential::Tenant(workspace.to_string())
+                CopalCredential::Tenant(copal_tenant_name(workspace))
             }
             CopalTenancy::SharedKey(key) => CopalCredential::Bearer(key.clone()),
             CopalTenancy::PerWorkspaceKeys(keys) => {
@@ -348,6 +348,41 @@ fn normalize_base(addr: &str) -> String {
 /// matching names, or any single-workspace deployment), this is byte-identical
 /// to the original (tenant, title) derivation, so existing archived files keep
 /// revisioning under their old keys and paths.
+/// A workspace rendered into copal's tenant grammar, which is
+/// `[A-Za-z0-9_-]` (its TenantId refuses anything else with a 400 -- found
+/// live: every real antumbra workspace is `ws:<name>`, and the colon killed
+/// the first per-workspace ingest outright). Names already inside the
+/// grammar pass through untouched. Otherwise every foreign character
+/// becomes `-` and the result carries a short hash of the ORIGINAL, so the
+/// mapping stays injective: `ws:shon` -> `ws-shon-<8 hex>`, which can never
+/// collide with a workspace literally named `ws-shon`. The exact original
+/// still rides every create as `metadata.workspace`, so copal-side listings
+/// stay attributable to the real workspace name.
+fn copal_tenant_name(workspace: &str) -> String {
+    let clean = workspace
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if clean {
+        return workspace.to_string();
+    }
+    let sanitized: String = workspace
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in workspace.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{sanitized}-{:08x}", (h >> 32) as u32)
+}
+
 fn provenance_hash(workspace: &str, title: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in workspace.bytes().chain([0u8]).chain(title.bytes()) {
@@ -567,6 +602,25 @@ mod tests {
     }
 
     #[test]
+    fn tenant_names_render_into_copal_grammar_injectively() {
+        // Already-clean names pass through byte-identical.
+        assert_eq!(copal_tenant_name("antumbra"), "antumbra");
+        assert_eq!(copal_tenant_name("ws-shon_2"), "ws-shon_2");
+        // A colon (every real workspace) sanitizes and carries the original's
+        // hash, so it can never collide with a literally-clean lookalike.
+        let mapped = copal_tenant_name("ws:shon");
+        assert!(mapped.starts_with("ws-shon-"), "{mapped}");
+        assert_ne!(mapped, "ws-shon");
+        assert_ne!(copal_tenant_name("ws:shon"), copal_tenant_name("ws.shon"));
+        // Deterministic: the same workspace always lands in the same tenant.
+        assert_eq!(copal_tenant_name("ws:shon"), copal_tenant_name("ws:shon"));
+        // Everything emitted sits inside copal's grammar.
+        assert!(mapped
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'));
+    }
+
+    #[test]
     fn the_idempotency_key_is_stable_per_workspace_and_title() {
         // Same (workspace, title) => same key, so a re-ingest revisions the
         // same copal file; either changing breaks the replay.
@@ -618,15 +672,17 @@ mod tests {
             .unwrap();
         let calls = t.calls();
         assert_eq!(calls.len(), 4);
+        // The header carries the GRAMMAR-SAFE rendering of each workspace
+        // (copal's TenantId is [A-Za-z0-9_-]; the colon in every real
+        // workspace name would be a 400 verbatim), still one distinct copal
+        // tenant per workspace.
+        let one = copal_tenant_name("ws:one");
+        let two = copal_tenant_name("ws:two");
+        assert_ne!(one, two);
         let credentials: Vec<&CopalCredential> = calls.iter().map(Call::credential).collect();
         assert_eq!(
             credentials,
-            [
-                &tenant("ws:one"),
-                &tenant("ws:one"),
-                &tenant("ws:two"),
-                &tenant("ws:two")
-            ]
+            [&tenant(&one), &tenant(&one), &tenant(&two), &tenant(&two)]
         );
         let (Call::Post { body: b1, .. }, Call::Post { body: b2, .. }) = (&calls[0], &calls[2])
         else {
