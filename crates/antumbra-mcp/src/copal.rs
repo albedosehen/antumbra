@@ -8,8 +8,19 @@
 //! header: `POST {base}/v1/files` creates (or, replayed, returns) the file
 //! record, then `PUT {base}/v1/files/{id}/content` uploads the raw bytes and
 //! answers with the content digest. The create carries an idempotency key
-//! derived from (tenant, title), so re-ingesting the same title *revisions*
+//! derived from (workspace, title), so re-ingesting the same title *revisions*
 //! the same copal file instead of littering a new record per ingest.
+//!
+//! Two tenancies meet here, deliberately. The `x-copal-tenant` HEADER is the
+//! operator-configured copal tenant: one per server, like the reranker and
+//! embedder endpoints, because copal's deployed `keys` auth mode binds the
+//! tenant to the credential and a per-request header tenant would silently
+//! stop working on that upgrade. The idempotency key and archived PATH derive
+//! from the *antumbra workspace* tenant, so on the multi-workspace HTTP
+//! surface two workspaces ingesting the same title land on distinct copal
+//! files inside the shared copal tenant instead of revisioning each other's.
+//! On stdio the workspace is the session's one tenant, and the derivation is
+//! plain (tenant, title).
 //!
 //! The irreducible network calls are isolated behind [`CopalTransport`] (the
 //! same seam the embedder uses), so the request shaping, response parsing, and
@@ -129,16 +140,20 @@ impl CopalArchive {
         }
     }
 
-    /// Upload `content` as the document of record for (`title`, `source`):
-    /// create the file record (idempotent on (tenant, title), so a re-ingest
-    /// revisions the same file), then PUT the raw bytes. Returns the file id +
-    /// content digest every chunk of the document is stamped with.
+    /// Upload `content` as the document of record for (`workspace`, `title`,
+    /// `source`): create the file record (idempotent on (workspace, title), so
+    /// a re-ingest revisions the same file and two workspaces sharing a title
+    /// never revision each other's), then PUT the raw bytes. Returns the file
+    /// id + content digest every chunk of the document is stamped with.
+    /// `workspace` is the ingesting antumbra tenant; the `x-copal-tenant`
+    /// header stays the archive's configured copal tenant regardless.
     ///
     /// Any failure is an error, never a partial success -- the caller fails
     /// the ingest rather than storing chunks whose original was silently
     /// dropped.
     pub async fn archive_document(
         &self,
+        workspace: &str,
         title: &str,
         source: Option<&str>,
         content: &str,
@@ -146,18 +161,22 @@ impl CopalArchive {
         let base = self.base.clone();
         let tenant = self.tenant.clone();
         let transport = self.transport.clone();
+        let workspace = workspace.to_string();
         let title = title.to_string();
         let source = source.map(str::to_string);
         let content = content.to_string();
         // `ureq` is blocking; run both calls off the async runtime so they
         // never stall a worker (the same offload the embedder uses).
         tokio::task::spawn_blocking(move || {
-            let hash = provenance_hash(&tenant, &title);
+            let hash = provenance_hash(&workspace, &title);
+            // The workspace rides the metadata too: inside the shared copal
+            // tenant it is the human-readable answer to "whose document is
+            // this?", which the hash in the path only implies.
             let mut body = json!({
                 "path": document_path(&title, hash),
                 "content_type": "text/plain",
                 "idempotency_key": idempotency_key(hash),
-                "metadata": { "title": title },
+                "metadata": { "title": title, "workspace": workspace },
             });
             if let Some(src) = source {
                 body["metadata"]["source"] = json!(src);
@@ -198,29 +217,34 @@ fn normalize_base(addr: &str) -> String {
     }
 }
 
-/// A stable 64-bit FNV-1a over (tenant, title) -- the identity of a document
-/// within the archive. No extra deps (the `next_id` reasoning); a collision
-/// merely makes two titles revision one copal file, and the chunks still point
-/// at whatever id copal actually returned. NUL-separated: neither a tenant nor
-/// a meaningful title carries `\0`, so the pair is unambiguous.
-fn provenance_hash(tenant: &str, title: &str) -> u64 {
+/// A stable 64-bit FNV-1a over (workspace, title) -- the identity of a
+/// document within the archive. No extra deps (the `next_id` reasoning); a
+/// collision merely makes two titles revision one copal file, and the chunks
+/// still point at whatever id copal actually returned. NUL-separated: neither
+/// a workspace tenant nor a meaningful title carries `\0`, so the pair is
+/// unambiguous. When the workspace IS the configured copal tenant (stdio with
+/// matching names, or any single-workspace deployment), this is byte-identical
+/// to the original (tenant, title) derivation, so existing archived files keep
+/// revisioning under their old keys and paths.
+fn provenance_hash(workspace: &str, title: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in tenant.bytes().chain([0u8]).chain(title.bytes()) {
+    for b in workspace.bytes().chain([0u8]).chain(title.bytes()) {
         h ^= u64::from(b);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
 }
 
-/// The create's idempotency key: stable per (tenant, title), so copal replays
-/// the original record and the upload revisions it.
+/// The create's idempotency key: stable per (workspace, title), so copal
+/// replays the original record and the upload revisions it.
 fn idempotency_key(hash: u64) -> String {
     format!("antumbra-doc-{hash:016x}")
 }
 
 /// A readable, collision-safe path for the archived document: a slug of the
-/// title (for humans listing the tenant's files) plus the (tenant, title) hash
-/// (so two titles sharing a slug still land on distinct paths).
+/// title (for humans listing the tenant's files) plus the (workspace, title)
+/// hash (so two titles sharing a slug -- or two workspaces sharing a title --
+/// still land on distinct paths).
 fn document_path(title: &str, hash: u64) -> String {
     let mut slug = String::new();
     for c in title.chars() {
@@ -321,13 +345,19 @@ mod tests {
     async fn create_then_upload_returns_the_provenance() {
         let t = Arc::new(FakeTransport::happy());
         let got = archive("127.0.0.1:9010", t.clone())
-            .archive_document("Onboarding Guide", Some("guide.md"), "the original text")
+            .archive_document(
+                "ws:one",
+                "Onboarding Guide",
+                Some("guide.md"),
+                "the original text",
+            )
             .await
             .unwrap();
         assert_eq!(got.file_id, "file:01J");
         assert_eq!(got.digest, "sha256:abc");
 
-        // Create first, upload second, both under the tenant header.
+        // Create first, upload second, both under the CONFIGURED copal tenant
+        // header -- while the idempotency key derives from the WORKSPACE.
         let calls = t.calls();
         assert_eq!(calls.len(), 2);
         let Call::Post { url, tenant, body } = &calls[0] else {
@@ -339,12 +369,13 @@ mod tests {
         assert_eq!(
             body["idempotency_key"],
             json!(idempotency_key(provenance_hash(
-                "antumbra",
+                "ws:one",
                 "Onboarding Guide"
             )))
         );
         assert_eq!(body["metadata"]["title"], "Onboarding Guide");
         assert_eq!(body["metadata"]["source"], "guide.md");
+        assert_eq!(body["metadata"]["workspace"], "ws:one");
         let path = body["path"].as_str().unwrap();
         assert!(
             path.starts_with("antumbra/onboarding-guide-") && path.ends_with(".txt"),
@@ -370,7 +401,7 @@ mod tests {
     async fn source_is_omitted_from_metadata_when_unstated() {
         let t = Arc::new(FakeTransport::happy());
         archive("127.0.0.1:9010", t.clone())
-            .archive_document("Untitled", None, "text")
+            .archive_document("ws:one", "Untitled", None, "text")
             .await
             .unwrap();
         let Call::Post { body, .. } = &t.calls()[0] else {
@@ -380,13 +411,49 @@ mod tests {
     }
 
     #[test]
-    fn the_idempotency_key_is_stable_per_tenant_and_title() {
-        // Same (tenant, title) => same key, so a re-ingest revisions the same
-        // copal file; either changing breaks the replay.
-        let k = |tenant, title| idempotency_key(provenance_hash(tenant, title));
-        assert_eq!(k("antumbra", "guide"), k("antumbra", "guide"));
-        assert_ne!(k("antumbra", "guide"), k("antumbra", "other"));
-        assert_ne!(k("antumbra", "guide"), k("acme", "guide"));
+    fn the_idempotency_key_is_stable_per_workspace_and_title() {
+        // Same (workspace, title) => same key, so a re-ingest revisions the
+        // same copal file; either changing breaks the replay.
+        let k = |ws, title| idempotency_key(provenance_hash(ws, title));
+        assert_eq!(k("ws:one", "guide"), k("ws:one", "guide"));
+        assert_ne!(k("ws:one", "guide"), k("ws:one", "other"));
+        assert_ne!(k("ws:one", "guide"), k("ws:two", "guide"));
+    }
+
+    #[tokio::test]
+    async fn two_workspaces_with_the_same_title_get_distinct_keys_and_paths() {
+        // The multi-workspace HTTP surface shares one copal tenant, so the
+        // workspace must be what keeps two same-titled documents apart: same
+        // header tenant on the wire, different idempotency keys and paths --
+        // neither workspace can revision the other's document of record.
+        let t = Arc::new(FakeTransport::happy());
+        let a = archive("127.0.0.1:9010", t.clone());
+        a.archive_document("ws:one", "Guide", None, "one's text")
+            .await
+            .unwrap();
+        a.archive_document("ws:two", "Guide", None, "two's text")
+            .await
+            .unwrap();
+        let calls = t.calls();
+        let (
+            Call::Post {
+                tenant: t1,
+                body: b1,
+                ..
+            },
+            Call::Post {
+                tenant: t2,
+                body: b2,
+                ..
+            },
+        ) = (&calls[0], &calls[2])
+        else {
+            panic!("creates at 0 and 2, got {calls:?}");
+        };
+        assert_eq!(t1, "antumbra");
+        assert_eq!(t2, "antumbra");
+        assert_ne!(b1["idempotency_key"], b2["idempotency_key"]);
+        assert_ne!(b1["path"], b2["path"]);
     }
 
     #[test]
@@ -416,7 +483,7 @@ mod tests {
             ..FakeTransport::happy()
         });
         assert!(archive("127.0.0.1:9010", t.clone())
-            .archive_document("guide", None, "text")
+            .archive_document("ws:one", "guide", None, "text")
             .await
             .is_err());
         assert_eq!(t.calls().len(), 1, "no upload after a failed create");
@@ -429,7 +496,7 @@ mod tests {
             ..FakeTransport::happy()
         });
         assert!(archive("127.0.0.1:9010", t)
-            .archive_document("guide", None, "text")
+            .archive_document("ws:one", "guide", None, "text")
             .await
             .is_err());
     }
@@ -441,7 +508,7 @@ mod tests {
             ..FakeTransport::happy()
         });
         assert!(archive("127.0.0.1:9010", t.clone())
-            .archive_document("guide", None, "text")
+            .archive_document("ws:one", "guide", None, "text")
             .await
             .is_err());
         assert_eq!(t.calls().len(), 1, "no upload without a file id");
@@ -454,7 +521,7 @@ mod tests {
             ..FakeTransport::happy()
         });
         assert!(archive("127.0.0.1:9010", t)
-            .archive_document("guide", None, "text")
+            .archive_document("ws:one", "guide", None, "text")
             .await
             .is_err());
     }
