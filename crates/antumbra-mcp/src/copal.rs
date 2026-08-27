@@ -11,23 +11,33 @@
 //! derived from (workspace, title), so re-ingesting the same title *revisions*
 //! the same copal file instead of littering a new record per ingest.
 //!
-//! Two tenancies meet here, deliberately. The `x-copal-tenant` HEADER is the
-//! operator-configured copal tenant: one per server, like the reranker and
-//! embedder endpoints, because copal's deployed `keys` auth mode binds the
-//! tenant to the credential and a per-request header tenant would silently
-//! stop working on that upgrade. The idempotency key and archived PATH derive
-//! from the *antumbra workspace* tenant, so on the multi-workspace HTTP
-//! surface two workspaces ingesting the same title land on distinct copal
-//! files inside the shared copal tenant instead of revisioning each other's.
-//! On stdio the workspace is the session's one tenant, and the derivation is
-//! plain (tenant, title).
+//! Tenancy is a deployment choice ([`CopalTenancy`], from `--copal-tenant`).
+//! **Per-workspace** (the default, `--copal-tenant` unset): every antumbra
+//! workspace presents ITSELF as the `x-copal-tenant`, so each workspace is a
+//! full copal tenant -- its own quotas, listings, and search scopes, and
+//! cross-tenant reads answer 404 at copal's own boundary. This rides copal's
+//! header auth mode, where the header is trusted as the tenant identity.
+//! **Shared** (`--copal-tenant <name>`): every workspace lands under that one
+//! configured copal tenant -- the shape copal's deployed `keys` auth mode
+//! forces, where the tenant is bound to the credential and a per-request
+//! header could not name one.
+//!
+//! In BOTH modes the idempotency key and archived path derive from the
+//! *(workspace, title)* pair, so two workspaces ingesting the same title can
+//! never revision each other's document of record -- in shared mode that
+//! derivation is the isolation; in per-workspace mode copal's tenant boundary
+//! isolates again above it, and the derivation is simply stable across a
+//! deployment moving between the modes.
 //!
 //! The irreducible network calls are isolated behind [`CopalTransport`] (the
 //! same seam the embedder uses), so the request shaping, response parsing, and
-//! ordering are mock-tested offline. The address and tenant are
+//! ordering are mock-tested offline. The address and tenancy are
 //! **operator-configured** (`--copal-addr` / `ANTUMBRA_COPAL_ADDR`,
-//! `--copal-tenant` / `ANTUMBRA_COPAL_TENANT`) and never derived from request
-//! data, so this is not an SSRF sink.
+//! `--copal-tenant` / `ANTUMBRA_COPAL_TENANT`); the only request-derived value
+//! is the workspace tenant, which comes from the session's verified identity
+//! (never from tool arguments) and is refused as a header unless it is a
+//! plain printable-ASCII token. The URL is never request-derived, so this is
+//! not an SSRF sink.
 
 use std::sync::Arc;
 
@@ -109,33 +119,49 @@ pub struct ArchivedDocument {
     pub digest: String,
 }
 
+/// Whose copal tenant an archived document lands in -- the `x-copal-tenant`
+/// header on every call. The archive identity (idempotency key + path) derives
+/// from the workspace in either mode; tenancy decides only the boundary the
+/// file lives inside.
+pub enum CopalTenancy {
+    /// Each antumbra workspace IS its own copal tenant: the workspace tenant
+    /// rides the header, so quotas, listings, and search scope per workspace
+    /// and copal's own tenant boundary isolates them. Needs copal's header
+    /// auth mode (the header is the trusted identity there).
+    PerWorkspace,
+    /// Every workspace lands under this one configured copal tenant -- what
+    /// copal's deployed `keys` auth mode forces, where a single credential is
+    /// bound to a single tenant and the header cannot name one.
+    Shared(String),
+}
+
 /// Archives ingested documents to a copal file service (the document of
 /// record). One instance per server, operator-configured; absent, ingest
 /// behaves exactly as before it existed.
 pub struct CopalArchive {
     /// The normalized URL base (`http://host:port` or the full base as given).
     base: String,
-    /// The tenant presented to copal (`x-copal-tenant`, header auth mode).
-    tenant: String,
+    /// Which copal tenant receives each document (see [`CopalTenancy`]).
+    tenancy: CopalTenancy,
     transport: Arc<dyn CopalTransport>,
 }
 
 impl CopalArchive {
     /// Point at `addr` -- a bare `host:port` (given `http://`) or a full URL
-    /// base (used as-is) -- presenting `tenant` to copal on every call.
-    pub fn new(addr: &str, tenant: String) -> Self {
-        Self::with_transport(addr, tenant, Arc::new(UreqTransport::new()))
+    /// base (used as-is) -- landing documents per `tenancy`.
+    pub fn new(addr: &str, tenancy: CopalTenancy) -> Self {
+        Self::with_transport(addr, tenancy, Arc::new(UreqTransport::new()))
     }
 
     /// As [`Self::new`] with an explicit transport (the test seam).
     pub(crate) fn with_transport(
         addr: &str,
-        tenant: String,
+        tenancy: CopalTenancy,
         transport: Arc<dyn CopalTransport>,
     ) -> Self {
         Self {
             base: normalize_base(addr),
-            tenant,
+            tenancy,
             transport,
         }
     }
@@ -145,8 +171,8 @@ impl CopalArchive {
     /// a re-ingest revisions the same file and two workspaces sharing a title
     /// never revision each other's), then PUT the raw bytes. Returns the file
     /// id + content digest every chunk of the document is stamped with.
-    /// `workspace` is the ingesting antumbra tenant; the `x-copal-tenant`
-    /// header stays the archive's configured copal tenant regardless.
+    /// `workspace` is the ingesting antumbra tenant; whether it also becomes
+    /// the `x-copal-tenant` header is the archive's [`CopalTenancy`].
     ///
     /// Any failure is an error, never a partial success -- the caller fails
     /// the ingest rather than storing chunks whose original was silently
@@ -158,8 +184,23 @@ impl CopalArchive {
         source: Option<&str>,
         content: &str,
     ) -> Result<ArchivedDocument> {
+        let tenant = match &self.tenancy {
+            CopalTenancy::Shared(t) => t.clone(),
+            CopalTenancy::PerWorkspace => {
+                // The workspace becomes an HTTP header value here. Session
+                // identities are verified upstream, but a header is a syntax,
+                // not just a trust question: refuse anything that is not a
+                // plain printable-ASCII token rather than hand the HTTP layer
+                // a value it would reject (or worse, split) mid-ingest.
+                if workspace.is_empty() || !workspace.bytes().all(|b| b.is_ascii_graphic()) {
+                    return Err(AntumbraError::other(format!(
+                        "workspace {workspace:?} cannot be presented as a copal tenant"
+                    )));
+                }
+                workspace.to_string()
+            }
+        };
         let base = self.base.clone();
-        let tenant = self.tenant.clone();
         let transport = self.transport.clone();
         let workspace = workspace.to_string();
         let title = title.to_string();
@@ -169,9 +210,11 @@ impl CopalArchive {
         // never stall a worker (the same offload the embedder uses).
         tokio::task::spawn_blocking(move || {
             let hash = provenance_hash(&workspace, &title);
-            // The workspace rides the metadata too: inside the shared copal
-            // tenant it is the human-readable answer to "whose document is
-            // this?", which the hash in the path only implies.
+            // The workspace rides the metadata in both modes: under shared
+            // tenancy it is the human-readable answer to "whose document is
+            // this?" (which the hash in the path only implies), and under
+            // per-workspace tenancy it keeps the file self-describing even
+            // when exported past copal's tenant boundary.
             let mut body = json!({
                 "path": document_path(&title, hash),
                 "content_type": "text/plain",
@@ -337,8 +380,16 @@ mod tests {
         }
     }
 
+    /// A shared-tenancy archive (every workspace under the "antumbra" copal
+    /// tenant), the shape copal's `keys` auth mode forces.
     fn archive(addr: &str, transport: Arc<FakeTransport>) -> CopalArchive {
-        CopalArchive::with_transport(addr, "antumbra".into(), transport)
+        CopalArchive::with_transport(addr, CopalTenancy::Shared("antumbra".into()), transport)
+    }
+
+    /// A per-workspace-tenancy archive: each workspace presents itself as the
+    /// copal tenant (copal's header auth mode).
+    fn per_workspace(transport: Arc<FakeTransport>) -> CopalArchive {
+        CopalArchive::with_transport("127.0.0.1:9010", CopalTenancy::PerWorkspace, transport)
     }
 
     #[tokio::test]
@@ -454,6 +505,55 @@ mod tests {
         assert_eq!(t2, "antumbra");
         assert_ne!(b1["idempotency_key"], b2["idempotency_key"]);
         assert_ne!(b1["path"], b2["path"]);
+    }
+
+    #[tokio::test]
+    async fn per_workspace_tenancy_presents_each_workspace_as_the_copal_tenant() {
+        // Full tenancy: the workspace rides the x-copal-tenant header on BOTH
+        // calls, so each workspace gets its own quotas, listings, and search
+        // scope at copal's boundary -- and the key/path derivation is the same
+        // one shared tenancy uses, so moving a deployment between the modes
+        // never re-identifies a document.
+        let t = Arc::new(FakeTransport::happy());
+        let a = per_workspace(t.clone());
+        a.archive_document("ws:one", "Guide", None, "one's text")
+            .await
+            .unwrap();
+        a.archive_document("ws:two", "Guide", None, "two's text")
+            .await
+            .unwrap();
+        let calls = t.calls();
+        assert_eq!(calls.len(), 4);
+        let tenants: Vec<&str> = calls
+            .iter()
+            .map(|c| match c {
+                Call::Post { tenant, .. } | Call::Put { tenant, .. } => tenant.as_str(),
+            })
+            .collect();
+        assert_eq!(tenants, ["ws:one", "ws:one", "ws:two", "ws:two"]);
+        let (Call::Post { body: b1, .. }, Call::Post { body: b2, .. }) = (&calls[0], &calls[2])
+        else {
+            panic!("creates at 0 and 2, got {calls:?}");
+        };
+        assert_ne!(b1["idempotency_key"], b2["idempotency_key"]);
+        assert_ne!(b1["path"], b2["path"]);
+    }
+
+    #[tokio::test]
+    async fn per_workspace_tenancy_refuses_a_workspace_that_cannot_be_a_header() {
+        // The workspace becomes a header value in this mode; a value the HTTP
+        // layer would reject (or split) refuses before any byte moves.
+        let t = Arc::new(FakeTransport::happy());
+        let a = per_workspace(t.clone());
+        for bad in ["", "ws one", "ws\r\nx-evil: 1"] {
+            assert!(
+                a.archive_document(bad, "guide", None, "text")
+                    .await
+                    .is_err(),
+                "{bad:?} must refuse"
+            );
+        }
+        assert!(t.calls().is_empty(), "refused before any transport call");
     }
 
     #[test]

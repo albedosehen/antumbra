@@ -2323,7 +2323,10 @@ mod tests {
     fn canned_archive(up: bool) -> Arc<crate::copal::CopalArchive> {
         Arc::new(crate::copal::CopalArchive::with_transport(
             "127.0.0.1:9010",
-            "antumbra".into(),
+            // Per-workspace tenancy (the default): the session's workspace
+            // presents itself as the copal tenant. The header side is proven
+            // in `crate::copal`'s own tests; these care about the ingest path.
+            crate::copal::CopalTenancy::PerWorkspace,
             Arc::new(CannedCopal { up }),
         ))
     }

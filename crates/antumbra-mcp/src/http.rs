@@ -152,8 +152,9 @@ struct HttpState {
     /// per-tenant.
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
     /// The optional copal document-of-record archive, applied to every
-    /// per-identity server's ingest. Server-level (one endpoint + copal
-    /// tenant), not per-workspace.
+    /// per-identity server's ingest. One server-level instance (one endpoint);
+    /// its [`crate::copal::CopalTenancy`] decides whether each workspace is
+    /// its own copal tenant (the default) or all share one configured tenant.
     copal: Option<Arc<crate::copal::CopalArchive>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     /// Bounded so a host that sees many distinct identities cannot grow it without
