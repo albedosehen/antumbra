@@ -490,7 +490,11 @@ fn server_config() -> StreamableHttpServerConfig {
         // does no DB work and streams *after* the handler returns -- so the lock
         // never spans the stream (the runtime-surface concern does not apply: an SSE
         // stream is MCP transport state, it does not hold the DB connection).
-        .with_stateful_mode(true)
+        // rmcp 3 renamed stateful mode: sessions are "legacy" per SEP-2567
+        // (protocol 2026-07-28 drops them), but the GET/SSE push this server's
+        // live propagation rides exists only under session mode, so legacy
+        // session mode stays on until R-2 moves to the new protocol's push.
+        .with_legacy_session_mode(true)
         .with_json_response(false)
         // The JWT is the access guard, so we do not restrict by `Host` (the
         // default loopback-only allowlist would refuse LAN clients). DNS-rebinding

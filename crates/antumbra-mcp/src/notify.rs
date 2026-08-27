@@ -6,6 +6,14 @@
 //! only offers in stateful mode (see `http::server_config`). When a client
 //! initializes, the server captures its [`Peer`] here, keyed by the JWT identity;
 //! the change watcher then notifies every recipient's live peers.
+//!
+//! Delivery rides `notifications/message` (the logging channel), which MCP
+//! deprecated in SEP-2577; rmcp 3 marks every use accordingly. The wire still
+//! carries it and no replacement server-push channel has shipped, so this
+//! module keeps the channel -- dropping live propagation to dodge a
+//! deprecation would be backwards. The allow is module-wide because this
+//! module IS the deprecated channel; it leaves with the migration.
+#![allow(deprecated)]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -109,17 +117,19 @@ impl PeerRegistry {
 /// The wire form of a memory change: a structured `notifications/message` an
 /// agent can act on. The `type` discriminator marks it as a penumbra event.
 fn change_notification(change: &MemoryChange) -> LoggingMessageNotificationParam {
-    LoggingMessageNotificationParam {
-        level: LoggingLevel::Info,
-        logger: Some("antumbra/penumbra".to_string()),
-        data: json!({
+    // rmcp 3 made the param non-exhaustive; the constructor + builder is the
+    // supported way to shape it.
+    LoggingMessageNotificationParam::new(
+        LoggingLevel::Info,
+        json!({
             "type": "antumbra/memory_changed",
             "action": format!("{:?}", change.action).to_lowercase(),
             "tenant": change.tenant.as_str(),
             "compartment": change.compartment.as_str(),
             "memory": change.memory.as_str(),
         }),
-    }
+    )
+    .with_logger("antumbra/penumbra")
 }
 
 #[cfg(test)]
