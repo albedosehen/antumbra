@@ -4,54 +4,96 @@
 //! carries the archived file's id + digest back to it. Without this, ingest
 //! keeps only the chunks -- recall works, but the original bytes are gone.
 //!
-//! Two calls against copal's REST face, both under the `x-copal-tenant`
-//! header: `POST {base}/v1/files` creates (or, replayed, returns) the file
-//! record, then `PUT {base}/v1/files/{id}/content` uploads the raw bytes and
-//! answers with the content digest. The create carries an idempotency key
-//! derived from (workspace, title), so re-ingesting the same title *revisions*
-//! the same copal file instead of littering a new record per ingest.
+//! Two calls against copal's REST face: `POST {base}/v1/files` creates (or,
+//! replayed, returns) the file record, then `PUT {base}/v1/files/{id}/content`
+//! uploads the raw bytes and answers with the content digest. The create
+//! carries an idempotency key derived from (workspace, title), so re-ingesting
+//! the same title *revisions* the same copal file instead of littering a new
+//! record per ingest.
 //!
-//! Tenancy is a deployment choice ([`CopalTenancy`], from `--copal-tenant`).
-//! **Per-workspace** (the default, `--copal-tenant` unset): every antumbra
-//! workspace presents ITSELF as the `x-copal-tenant`, so each workspace is a
-//! full copal tenant -- its own quotas, listings, and search scopes, and
-//! cross-tenant reads answer 404 at copal's own boundary. This rides copal's
-//! header auth mode, where the header is trusted as the tenant identity.
-//! **Shared** (`--copal-tenant <name>`): every workspace lands under that one
-//! configured copal tenant -- the shape copal's deployed `keys` auth mode
-//! forces, where the tenant is bound to the credential and a per-request
-//! header could not name one.
+//! Tenancy is a deployment choice ([`CopalTenancy`]), two axes with two
+//! answers each. *Which copal tenant?* Per-workspace (each antumbra workspace
+//! is a full copal tenant: its own quotas, listings, and search scopes, with
+//! cross-tenant reads refusing at copal's own boundary) or shared (every
+//! workspace under one). *How does a call prove it?* Copal's `header` auth
+//! mode trusts `x-copal-tenant` as the identity; its deployed `keys` mode
+//! binds the tenant to a `ck1` bearer credential and ignores what a header
+//! claims. The four shapes:
 //!
-//! In BOTH modes the idempotency key and archived path derive from the
+//! - [`CopalTenancy::PerWorkspace`] (the default): the workspace rides the
+//!   `x-copal-tenant` header. Header auth mode.
+//! - [`CopalTenancy::Shared`] (`--copal-tenant`): one configured tenant rides
+//!   the header. Header auth mode.
+//! - [`CopalTenancy::PerWorkspaceKeys`] (`--copal-keys`, a JSON file mapping
+//!   workspace to `ck1` key): each workspace authenticates with its own
+//!   credential, so per-workspace tenancy survives copal's keys-mode upgrade.
+//!   A workspace with no key FAILS its ingest (fail closed, like every other
+//!   fault here) rather than silently landing in someone else's tenant.
+//! - [`CopalTenancy::SharedKey`] (`--copal-key`): one credential, one tenant
+//!   (the key's own). Keys auth mode.
+//!
+//! In EVERY mode the idempotency key and archived path derive from the
 //! *(workspace, title)* pair, so two workspaces ingesting the same title can
-//! never revision each other's document of record -- in shared mode that
-//! derivation is the isolation; in per-workspace mode copal's tenant boundary
-//! isolates again above it, and the derivation is simply stable across a
-//! deployment moving between the modes.
+//! never revision each other's document of record -- under a shared tenant
+//! that derivation is the isolation; under per-workspace tenancy copal's
+//! boundary isolates again above it -- and a deployment moving between modes
+//! never re-identifies a document.
 //!
 //! The irreducible network calls are isolated behind [`CopalTransport`] (the
 //! same seam the embedder uses), so the request shaping, response parsing, and
-//! ordering are mock-tested offline. The address and tenancy are
-//! **operator-configured** (`--copal-addr` / `ANTUMBRA_COPAL_ADDR`,
-//! `--copal-tenant` / `ANTUMBRA_COPAL_TENANT`); the only request-derived value
-//! is the workspace tenant, which comes from the session's verified identity
-//! (never from tool arguments) and is refused as a header unless it is a
-//! plain printable-ASCII token. The URL is never request-derived, so this is
-//! not an SSRF sink.
+//! ordering are mock-tested offline. The address, tenancy, and credentials are
+//! **operator-configured**; the only request-derived value is the workspace
+//! tenant, which comes from the session's verified identity (never from tool
+//! arguments) and is refused as a header unless it is a plain printable-ASCII
+//! token. Keys ride the `Authorization` header (never the URL, never logged;
+//! [`CopalCredential`]'s `Debug` redacts them), and the URL is never
+//! request-derived, so this is not an SSRF sink.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
 
 use antumbra_core::{AntumbraError, Result};
 
+/// How one request proves its copal tenant: the `x-copal-tenant` header
+/// (copal's `header` auth mode, where the header IS the identity) or a `ck1`
+/// bearer key (its deployed `keys` mode, where the tenant comes out of the
+/// credential and no header can name one).
+#[derive(Clone, PartialEq, Eq)]
+pub enum CopalCredential {
+    /// `x-copal-tenant: <tenant>` -- header auth mode.
+    Tenant(String),
+    /// `Authorization: Bearer <ck1 key>` -- keys auth mode.
+    Bearer(String),
+}
+
+/// Redacts the bearer secret: a credential in a panic message, an error chain,
+/// or a debug log must never be a credential leak (the `HttpEmbedder` rule,
+/// enforced here by construction instead of by omitting `Debug`, because the
+/// tests assert on recorded credentials).
+impl std::fmt::Debug for CopalCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CopalCredential::Tenant(t) => f.debug_tuple("Tenant").field(t).finish(),
+            CopalCredential::Bearer(_) => f.debug_tuple("Bearer").field(&"<redacted>").finish(),
+        }
+    }
+}
+
 /// The two network operations an archive performs: POST a JSON body (create the
-/// file record) and PUT raw bytes (upload the content), each returning the
-/// parsed JSON response. Behind a trait so the archive's logic is testable
-/// without a socket.
+/// file record) and PUT raw bytes (upload the content), each authenticated by a
+/// [`CopalCredential`] and returning the parsed JSON response. Behind a trait
+/// so the archive's logic is testable without a socket.
 pub trait CopalTransport: Send + Sync {
-    fn post_json(&self, url: &str, tenant: &str, body: &Value) -> Result<Value>;
-    fn put_bytes(&self, url: &str, tenant: &str, content_type: &str, body: &[u8]) -> Result<Value>;
+    fn post_json(&self, url: &str, credential: &CopalCredential, body: &Value) -> Result<Value>;
+    fn put_bytes(
+        &self,
+        url: &str,
+        credential: &CopalCredential,
+        content_type: &str,
+        body: &[u8],
+    ) -> Result<Value>;
 }
 
 /// Default per-request budget for the copal endpoint, overridable with
@@ -83,11 +125,9 @@ impl UreqTransport {
 }
 
 impl CopalTransport for UreqTransport {
-    fn post_json(&self, url: &str, tenant: &str, body: &Value) -> Result<Value> {
-        let mut resp = self
-            .agent
-            .post(url)
-            .header("x-copal-tenant", tenant)
+    fn post_json(&self, url: &str, credential: &CopalCredential, body: &Value) -> Result<Value> {
+        let req = self.agent.post(url);
+        let mut resp = authed(req, credential)
             .send_json(body)
             .map_err(|e| AntumbraError::other(format!("copal POST {url} failed: {e}")))?;
         resp.body_mut()
@@ -95,17 +135,33 @@ impl CopalTransport for UreqTransport {
             .map_err(|e| AntumbraError::other(format!("copal response was not JSON: {e}")))
     }
 
-    fn put_bytes(&self, url: &str, tenant: &str, content_type: &str, body: &[u8]) -> Result<Value> {
-        let mut resp = self
-            .agent
-            .put(url)
-            .header("x-copal-tenant", tenant)
-            .header("content-type", content_type)
+    fn put_bytes(
+        &self,
+        url: &str,
+        credential: &CopalCredential,
+        content_type: &str,
+        body: &[u8],
+    ) -> Result<Value> {
+        let req = self.agent.put(url).header("content-type", content_type);
+        let mut resp = authed(req, credential)
             .send(body)
             .map_err(|e| AntumbraError::other(format!("copal PUT {url} failed: {e}")))?;
         resp.body_mut()
             .read_json::<Value>()
             .map_err(|e| AntumbraError::other(format!("copal response was not JSON: {e}")))
+    }
+}
+
+/// Apply `credential` to a request: the tenant header (copal header auth mode)
+/// or the bearer key (keys mode). The key rides the `Authorization` header,
+/// never the URL.
+fn authed<B>(
+    req: ureq::RequestBuilder<B>,
+    credential: &CopalCredential,
+) -> ureq::RequestBuilder<B> {
+    match credential {
+        CopalCredential::Tenant(t) => req.header("x-copal-tenant", t),
+        CopalCredential::Bearer(k) => req.header("authorization", &format!("Bearer {k}")),
     }
 }
 
@@ -119,20 +175,31 @@ pub struct ArchivedDocument {
     pub digest: String,
 }
 
-/// Whose copal tenant an archived document lands in -- the `x-copal-tenant`
-/// header on every call. The archive identity (idempotency key + path) derives
-/// from the workspace in either mode; tenancy decides only the boundary the
-/// file lives inside.
+/// Whose copal tenant an archived document lands in, and how a call proves it
+/// (see the module docs for the four shapes). The archive identity
+/// (idempotency key + path) derives from the workspace in every mode; tenancy
+/// decides only the boundary the file lives inside and the credential on the
+/// wire. No `Debug`: two variants carry `ck1` secrets.
 pub enum CopalTenancy {
     /// Each antumbra workspace IS its own copal tenant: the workspace tenant
-    /// rides the header, so quotas, listings, and search scope per workspace
-    /// and copal's own tenant boundary isolates them. Needs copal's header
-    /// auth mode (the header is the trusted identity there).
+    /// rides the `x-copal-tenant` header, so quotas, listings, and search
+    /// scope per workspace and copal's own tenant boundary isolates them.
+    /// Needs copal's header auth mode (the header is the trusted identity
+    /// there).
     PerWorkspace,
-    /// Every workspace lands under this one configured copal tenant -- what
-    /// copal's deployed `keys` auth mode forces, where a single credential is
-    /// bound to a single tenant and the header cannot name one.
+    /// Every workspace lands under this one configured copal tenant, named by
+    /// the header. Header auth mode.
     Shared(String),
+    /// Each antumbra workspace authenticates with its own `ck1` bearer key
+    /// (the map is workspace -> key), so per-workspace tenancy holds under
+    /// copal's deployed `keys` auth mode, where the tenant is bound to the
+    /// credential. Loaded once at startup (`--copal-keys`); restart to pick up
+    /// keys minted afterward, like the serving engine picks up experts. A
+    /// workspace absent from the map fails its ingest, closed.
+    PerWorkspaceKeys(HashMap<String, String>),
+    /// One `ck1` bearer key for every workspace: shared tenancy under keys
+    /// auth mode -- the tenant is whichever one the key is bound to.
+    SharedKey(String),
 }
 
 /// Archives ingested documents to a copal file service (the document of
@@ -171,12 +238,14 @@ impl CopalArchive {
     /// a re-ingest revisions the same file and two workspaces sharing a title
     /// never revision each other's), then PUT the raw bytes. Returns the file
     /// id + content digest every chunk of the document is stamped with.
-    /// `workspace` is the ingesting antumbra tenant; whether it also becomes
-    /// the `x-copal-tenant` header is the archive's [`CopalTenancy`].
+    /// `workspace` is the ingesting antumbra tenant; the archive's
+    /// [`CopalTenancy`] decides how (and as whom) the calls authenticate.
     ///
     /// Any failure is an error, never a partial success -- the caller fails
     /// the ingest rather than storing chunks whose original was silently
-    /// dropped.
+    /// dropped. That includes a workspace with no configured key under
+    /// [`CopalTenancy::PerWorkspaceKeys`]: refusing beats archiving into a
+    /// tenant that is not the workspace's own.
     pub async fn archive_document(
         &self,
         workspace: &str,
@@ -184,8 +253,8 @@ impl CopalArchive {
         source: Option<&str>,
         content: &str,
     ) -> Result<ArchivedDocument> {
-        let tenant = match &self.tenancy {
-            CopalTenancy::Shared(t) => t.clone(),
+        let credential = match &self.tenancy {
+            CopalTenancy::Shared(t) => CopalCredential::Tenant(t.clone()),
             CopalTenancy::PerWorkspace => {
                 // The workspace becomes an HTTP header value here. Session
                 // identities are verified upstream, but a header is a syntax,
@@ -197,7 +266,17 @@ impl CopalArchive {
                         "workspace {workspace:?} cannot be presented as a copal tenant"
                     )));
                 }
-                workspace.to_string()
+                CopalCredential::Tenant(workspace.to_string())
+            }
+            CopalTenancy::SharedKey(key) => CopalCredential::Bearer(key.clone()),
+            CopalTenancy::PerWorkspaceKeys(keys) => {
+                let key = keys.get(workspace).ok_or_else(|| {
+                    AntumbraError::other(format!(
+                        "no copal key is configured for workspace {workspace} \
+                         (mint one and add it to --copal-keys, then restart)"
+                    ))
+                })?;
+                CopalCredential::Bearer(key.clone())
             }
         };
         let base = self.base.clone();
@@ -224,14 +303,14 @@ impl CopalArchive {
             if let Some(src) = source {
                 body["metadata"]["source"] = json!(src);
             }
-            let created = transport.post_json(&format!("{base}/v1/files"), &tenant, &body)?;
+            let created = transport.post_json(&format!("{base}/v1/files"), &credential, &body)?;
             let file_id = created
                 .get("id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| AntumbraError::other("copal create response missing `id`"))?;
             let uploaded = transport.put_bytes(
                 &format!("{base}/v1/files/{file_id}/content"),
-                &tenant,
+                &credential,
                 "text/plain",
                 content.as_bytes(),
             )?;
@@ -314,20 +393,36 @@ mod tests {
     use std::sync::Mutex;
 
     /// What one recorded transport call was: enough to assert the request
-    /// shaping (URL, tenant header, body) without a socket.
+    /// shaping (URL, credential, body) without a socket.
     #[derive(Debug, Clone)]
     enum Call {
         Post {
             url: String,
-            tenant: String,
+            credential: CopalCredential,
             body: Value,
         },
         Put {
             url: String,
-            tenant: String,
+            credential: CopalCredential,
             content_type: String,
             body: Vec<u8>,
         },
+    }
+
+    impl Call {
+        fn credential(&self) -> &CopalCredential {
+            match self {
+                Call::Post { credential, .. } | Call::Put { credential, .. } => credential,
+            }
+        }
+    }
+
+    fn tenant(name: &str) -> CopalCredential {
+        CopalCredential::Tenant(name.into())
+    }
+
+    fn bearer(key: &str) -> CopalCredential {
+        CopalCredential::Bearer(key.into())
     }
 
     /// Returns canned create/upload responses (or errors) and records every
@@ -354,10 +449,15 @@ mod tests {
     }
 
     impl CopalTransport for FakeTransport {
-        fn post_json(&self, url: &str, tenant: &str, body: &Value) -> Result<Value> {
+        fn post_json(
+            &self,
+            url: &str,
+            credential: &CopalCredential,
+            body: &Value,
+        ) -> Result<Value> {
             self.calls.lock().unwrap().push(Call::Post {
                 url: url.into(),
-                tenant: tenant.into(),
+                credential: credential.clone(),
                 body: body.clone(),
             });
             self.create.clone().map_err(AntumbraError::other)
@@ -366,13 +466,13 @@ mod tests {
         fn put_bytes(
             &self,
             url: &str,
-            tenant: &str,
+            credential: &CopalCredential,
             content_type: &str,
             body: &[u8],
         ) -> Result<Value> {
             self.calls.lock().unwrap().push(Call::Put {
                 url: url.into(),
-                tenant: tenant.into(),
+                credential: credential.clone(),
                 content_type: content_type.into(),
                 body: body.to_vec(),
             });
@@ -411,11 +511,16 @@ mod tests {
         // header -- while the idempotency key derives from the WORKSPACE.
         let calls = t.calls();
         assert_eq!(calls.len(), 2);
-        let Call::Post { url, tenant, body } = &calls[0] else {
+        let Call::Post {
+            url,
+            credential,
+            body,
+        } = &calls[0]
+        else {
             panic!("first call is the create, got {calls:?}");
         };
         assert_eq!(url, "http://127.0.0.1:9010/v1/files");
-        assert_eq!(tenant, "antumbra");
+        assert_eq!(credential, &tenant("antumbra"));
         assert_eq!(body["content_type"], "text/plain");
         assert_eq!(
             body["idempotency_key"],
@@ -435,7 +540,7 @@ mod tests {
 
         let Call::Put {
             url,
-            tenant,
+            credential,
             content_type,
             body,
         } = &calls[1]
@@ -443,7 +548,7 @@ mod tests {
             panic!("second call is the upload, got {calls:?}");
         };
         assert_eq!(url, "http://127.0.0.1:9010/v1/files/file:01J/content");
-        assert_eq!(tenant, "antumbra");
+        assert_eq!(credential, &tenant("antumbra"));
         assert_eq!(content_type, "text/plain");
         assert_eq!(body, b"the original text");
     }
@@ -486,23 +591,12 @@ mod tests {
             .await
             .unwrap();
         let calls = t.calls();
-        let (
-            Call::Post {
-                tenant: t1,
-                body: b1,
-                ..
-            },
-            Call::Post {
-                tenant: t2,
-                body: b2,
-                ..
-            },
-        ) = (&calls[0], &calls[2])
+        let (Call::Post { body: b1, .. }, Call::Post { body: b2, .. }) = (&calls[0], &calls[2])
         else {
             panic!("creates at 0 and 2, got {calls:?}");
         };
-        assert_eq!(t1, "antumbra");
-        assert_eq!(t2, "antumbra");
+        assert_eq!(calls[0].credential(), &tenant("antumbra"));
+        assert_eq!(calls[2].credential(), &tenant("antumbra"));
         assert_ne!(b1["idempotency_key"], b2["idempotency_key"]);
         assert_ne!(b1["path"], b2["path"]);
     }
@@ -524,19 +618,123 @@ mod tests {
             .unwrap();
         let calls = t.calls();
         assert_eq!(calls.len(), 4);
-        let tenants: Vec<&str> = calls
-            .iter()
-            .map(|c| match c {
-                Call::Post { tenant, .. } | Call::Put { tenant, .. } => tenant.as_str(),
-            })
-            .collect();
-        assert_eq!(tenants, ["ws:one", "ws:one", "ws:two", "ws:two"]);
+        let credentials: Vec<&CopalCredential> = calls.iter().map(Call::credential).collect();
+        assert_eq!(
+            credentials,
+            [
+                &tenant("ws:one"),
+                &tenant("ws:one"),
+                &tenant("ws:two"),
+                &tenant("ws:two")
+            ]
+        );
         let (Call::Post { body: b1, .. }, Call::Post { body: b2, .. }) = (&calls[0], &calls[2])
         else {
             panic!("creates at 0 and 2, got {calls:?}");
         };
         assert_ne!(b1["idempotency_key"], b2["idempotency_key"]);
         assert_ne!(b1["path"], b2["path"]);
+    }
+
+    #[tokio::test]
+    async fn a_shared_key_authenticates_every_workspace_with_the_one_bearer() {
+        // Keys auth mode, shared tenancy: no tenant header at all -- the ck1
+        // key IS the tenant, on both the create and the upload.
+        let t = Arc::new(FakeTransport::happy());
+        let a = CopalArchive::with_transport(
+            "127.0.0.1:9010",
+            CopalTenancy::SharedKey("ck1.kid.secret".into()),
+            t.clone(),
+        );
+        a.archive_document("ws:one", "Guide", None, "text")
+            .await
+            .unwrap();
+        let credentials: Vec<CopalCredential> =
+            t.calls().iter().map(|c| c.credential().clone()).collect();
+        assert_eq!(
+            credentials,
+            [bearer("ck1.kid.secret"), bearer("ck1.kid.secret")]
+        );
+    }
+
+    #[tokio::test]
+    async fn per_workspace_keys_authenticate_each_workspace_with_its_own_bearer() {
+        // The future-proof shape: copal in keys auth mode AND per-workspace
+        // tenancy. Each workspace's calls carry its own ck1 credential (the
+        // tenant is the key's), and the key/path derivation is unchanged, so
+        // a header-mode deployment upgrading to keys re-identifies nothing.
+        let t = Arc::new(FakeTransport::happy());
+        let keys: HashMap<String, String> = [
+            ("ws:one".to_string(), "ck1.one.secret".to_string()),
+            ("ws:two".to_string(), "ck1.two.secret".to_string()),
+        ]
+        .into();
+        let a = CopalArchive::with_transport(
+            "127.0.0.1:9010",
+            CopalTenancy::PerWorkspaceKeys(keys),
+            t.clone(),
+        );
+        a.archive_document("ws:one", "Guide", None, "one's text")
+            .await
+            .unwrap();
+        a.archive_document("ws:two", "Guide", None, "two's text")
+            .await
+            .unwrap();
+        let calls = t.calls();
+        let credentials: Vec<&CopalCredential> = calls.iter().map(Call::credential).collect();
+        assert_eq!(
+            credentials,
+            [
+                &bearer("ck1.one.secret"),
+                &bearer("ck1.one.secret"),
+                &bearer("ck1.two.secret"),
+                &bearer("ck1.two.secret")
+            ]
+        );
+        let (Call::Post { body: b1, .. }, Call::Post { body: b2, .. }) = (&calls[0], &calls[2])
+        else {
+            panic!("creates at 0 and 2, got {calls:?}");
+        };
+        assert_ne!(b1["idempotency_key"], b2["idempotency_key"]);
+        assert_ne!(b1["path"], b2["path"]);
+    }
+
+    #[tokio::test]
+    async fn a_workspace_without_a_configured_key_fails_closed() {
+        // A keyless workspace refuses before any byte moves: archiving into a
+        // tenant that is not the workspace's own would be worse than failing.
+        let t = Arc::new(FakeTransport::happy());
+        let keys: HashMap<String, String> =
+            [("ws:one".to_string(), "ck1.one.secret".to_string())].into();
+        let a = CopalArchive::with_transport(
+            "127.0.0.1:9010",
+            CopalTenancy::PerWorkspaceKeys(keys),
+            t.clone(),
+        );
+        let err = a
+            .archive_document("ws:two", "Guide", None, "text")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("ws:two"),
+            "the error names the keyless workspace: {err}"
+        );
+        assert!(
+            !err.to_string().contains("secret"),
+            "and never a credential: {err}"
+        );
+        assert!(t.calls().is_empty(), "refused before any transport call");
+    }
+
+    #[test]
+    fn a_debug_rendering_never_contains_the_bearer_secret() {
+        // The credential type appears in recorded calls and error chains; its
+        // Debug must redact the key (the HttpEmbedder no-leak rule).
+        let rendered = format!("{:?}", bearer("ck1.kid.secret"));
+        assert!(!rendered.contains("secret"), "{rendered}");
+        assert!(rendered.contains("redacted"), "{rendered}");
+        // The tenant variant stays legible -- it is an identity, not a secret.
+        assert_eq!(format!("{:?}", tenant("ws:one")), "Tenant(\"ws:one\")");
     }
 
     #[tokio::test]
