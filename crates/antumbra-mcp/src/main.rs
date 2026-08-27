@@ -128,9 +128,14 @@ struct Cli {
     /// unset: ingest keeps only the chunks, exactly as before.
     #[arg(long, env = "ANTUMBRA_COPAL_ADDR")]
     copal_addr: Option<String>,
-    /// The tenant presented to copal (`x-copal-tenant`, its header auth mode).
-    #[arg(long, env = "ANTUMBRA_COPAL_TENANT", default_value = "antumbra")]
-    copal_tenant: String,
+    /// Land every workspace's documents under this ONE copal tenant
+    /// (`x-copal-tenant`) -- the shape copal's `keys` auth mode forces, where
+    /// the tenant is bound to the credential. Omit for per-workspace tenancy
+    /// (the default): each workspace presents ITSELF as the copal tenant, so
+    /// quotas, listings, and search scope per workspace (copal header auth
+    /// mode). Either way the archive identity is (workspace, title).
+    #[arg(long, env = "ANTUMBRA_COPAL_TENANT")]
+    copal_tenant: Option<String>,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -342,11 +347,15 @@ async fn run() -> Result<()> {
     });
 
     // Optional copal document-of-record archive. Operator-configured; absent,
-    // ingest keeps only the chunks (the v0 behavior, unchanged).
-    let copal: Option<Arc<copal::CopalArchive>> = cli
-        .copal_addr
-        .as_deref()
-        .map(|addr| Arc::new(copal::CopalArchive::new(addr, cli.copal_tenant.clone())));
+    // ingest keeps only the chunks (the v0 behavior, unchanged). Tenancy:
+    // per-workspace unless --copal-tenant names one shared copal tenant.
+    let copal: Option<Arc<copal::CopalArchive>> = cli.copal_addr.as_deref().map(|addr| {
+        let tenancy = match cli.copal_tenant.clone() {
+            Some(tenant) => copal::CopalTenancy::Shared(tenant),
+            None => copal::CopalTenancy::PerWorkspace,
+        };
+        Arc::new(copal::CopalArchive::new(addr, tenancy))
+    });
 
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
