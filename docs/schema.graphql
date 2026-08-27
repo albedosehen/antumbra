@@ -1,0 +1,201 @@
+scalar DateTime
+scalar JSON
+
+type Memory {
+  key: String!
+  network: String!
+  content: String!
+  confidence: Float!
+  reinforcement: Int!
+  volatile: Boolean!
+  compartment: String
+  author: String
+  author_host: String
+  created_at: DateTime!
+  updated_at: DateTime!
+}
+
+enum MemorySort {
+  UPDATED_AT_ASC
+  UPDATED_AT_DESC
+}
+
+type MemoryPage {
+  items: [Memory!]!
+  nextCursor: String
+}
+
+type MemoryEdge {
+  from_id: String!
+  to_id: String!
+  edge_type: String!
+  weight: Float!
+  created_at: DateTime!
+}
+
+enum MemoryEdgeSort {
+  CREATED_AT_ASC
+  CREATED_AT_DESC
+}
+
+type MemoryEdgePage {
+  items: [MemoryEdge!]!
+  nextCursor: String
+}
+
+type Compartment {
+  key: String!
+  name: String!
+  owner: String!
+  created_at: DateTime!
+  updated_at: DateTime
+}
+
+enum CompartmentSort {
+  UPDATED_AT_ASC
+  UPDATED_AT_DESC
+}
+
+type CompartmentPage {
+  items: [Compartment!]!
+  nextCursor: String
+}
+
+type Grant {
+  grantee: String!
+  compartment: String!
+  capability: String!
+  created_at: DateTime!
+  updated_at: DateTime
+}
+
+enum GrantSort {
+  UPDATED_AT_ASC
+  UPDATED_AT_DESC
+}
+
+type GrantPage {
+  items: [Grant!]!
+  nextCursor: String
+}
+
+type DocumentChunk {
+  key: ID!
+  title: String!
+  ordinal: Int!
+  content: String!
+  created_at: DateTime!
+}
+
+enum DocumentChunkSort {
+  CREATED_AT_ASC
+  CREATED_AT_DESC
+}
+
+type DocumentChunkPage {
+  items: [DocumentChunk!]!
+  nextCursor: String
+}
+
+type Expert {
+  key: String!
+  name: String!
+  base_model: String!
+  artifact_uri: String!
+  capability_card: JSON!
+  fitness: Float!
+  frozen_at: DateTime
+  generation: Int!
+  owner: String
+  compartment: String
+  created_at: DateTime!
+}
+
+enum ExpertSort {
+  KEY_ASC
+  KEY_DESC
+}
+
+type ExpertPage {
+  items: [Expert!]!
+  nextCursor: String
+}
+
+type EvaluationRun {
+  run_id: String!
+  subject_kind: String!
+  subject_id: String!
+  corpus_task_id: String!
+  status: String!
+  metrics: JSON
+  regression_fingerprint: String
+  created_at: DateTime!
+}
+
+enum EvaluationRunSort {
+  SUBJECT_KIND_ASC
+  SUBJECT_KIND_DESC
+}
+
+type EvaluationRunPage {
+  items: [EvaluationRun!]!
+  nextCursor: String
+}
+
+type OrchestrationRun {
+  key: String!
+  task_id: String!
+  round: Int!
+  status: String!
+  chosen_experts: JSON!
+  compose_strategy: String
+  updated_at: DateTime!
+}
+
+enum OrchestrationRunSort {
+  KEY_ASC
+  KEY_DESC
+  STATUS_ASC
+  STATUS_DESC
+}
+
+type OrchestrationRunPage {
+  items: [OrchestrationRun!]!
+  nextCursor: String
+}
+
+type Shadow {
+  key: String!
+  status: String!
+  generation: Int!
+}
+
+enum ShadowSort {
+  KEY_ASC
+  KEY_DESC
+  STATUS_ASC
+  STATUS_DESC
+}
+
+type ShadowPage {
+  items: [Shadow!]!
+  nextCursor: String
+}
+
+type Query {
+  memories(limit: Int = 100, cursor: String, network: String, sort: MemorySort): MemoryPage!
+  memory(key: ID!): Memory
+  memoryEdges(limit: Int = 100, cursor: String, fromId: String, toId: String, sort: MemoryEdgeSort): MemoryEdgePage!
+  compartments(limit: Int = 100, cursor: String, owner: String, sort: CompartmentSort): CompartmentPage!
+  compartment(key: ID!): Compartment
+  grants(limit: Int = 100, cursor: String, grantee: String, compartment: String, sort: GrantSort): GrantPage!
+  documentChunks(limit: Int = 100, cursor: String, title: String, sort: DocumentChunkSort): DocumentChunkPage!
+  documentChunk(key: ID!): DocumentChunk
+  experts(limit: Int = 100, cursor: String, key: String, sort: ExpertSort): ExpertPage!
+  expert(key: ID!): Expert
+  evaluationRuns(limit: Int = 100, cursor: String, subjectKind: String, subjectId: String, sort: EvaluationRunSort): EvaluationRunPage!
+  orchestrationRuns(limit: Int = 100, cursor: String, key: String, status: String, sort: OrchestrationRunSort): OrchestrationRunPage!
+  orchestrationRun(key: ID!): OrchestrationRun
+  shadows(limit: Int = 100, cursor: String, key: String, status: String, generation: String, sort: ShadowSort): ShadowPage!
+  shadow(key: ID!): Shadow
+}
