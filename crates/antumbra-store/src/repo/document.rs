@@ -44,6 +44,13 @@ struct ChunkRow {
     #[serde(default)]
     embedding: Option<Vec<f32>>,
     created_at: String,
+    // Copal document-of-record provenance: the archived file's id and its
+    // content digest. Absent (not null) when the document was ingested without
+    // an archive, so old rows and archive-less rows are indistinguishable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    copal_file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    copal_digest: Option<String>,
 }
 
 impl ChunkRow {
@@ -57,6 +64,8 @@ impl ChunkRow {
             content: c.content.clone(),
             embedding: c.embedding.clone(),
             created_at: c.created_at.to_rfc3339(),
+            copal_file: c.copal_file.clone(),
+            copal_digest: c.copal_digest.clone(),
         }
     }
 
@@ -70,6 +79,8 @@ impl ChunkRow {
             content: self.content,
             embedding: self.embedding,
             created_at: parse_dt(&self.created_at)?,
+            copal_file: self.copal_file,
+            copal_digest: self.copal_digest,
         })
     }
 }
@@ -205,6 +216,8 @@ mod tests {
             content: format!("chunk {ordinal}"),
             embedding: Some(embedding),
             created_at: Utc::now(),
+            copal_file: None,
+            copal_digest: None,
         }
     }
 
@@ -238,5 +251,30 @@ mod tests {
             .await
             .unwrap();
         assert!(other.is_empty());
+    }
+
+    #[tokio::test]
+    async fn copal_provenance_round_trips_and_absent_stays_absent() {
+        // A chunk stamped with document-of-record provenance keeps it across
+        // the store; one ingested without an archive comes back with both
+        // fields absent (never null), indistinguishable from a pre-copal row.
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("t");
+        let mut a = vec![0.0f32; EMBED_DIM];
+        a[0] = 1.0;
+        let mut b = vec![0.0f32; EMBED_DIM];
+        b[1] = 1.0;
+        let archived = chunk("dc:arch", 0, a.clone()).with_copal("file:01J", "sha256:abc");
+        insert_chunks(&store, &[archived, chunk("dc:bare", 1, b)])
+            .await
+            .unwrap();
+
+        let got = recall(&store, &tenant, &a, 2).await.unwrap();
+        assert_eq!(got.len(), 2);
+        let by_id: HashMap<&str, &DocumentChunk> = got.iter().map(|c| (c.id.as_str(), c)).collect();
+        assert_eq!(by_id["dc:arch"].copal_file.as_deref(), Some("file:01J"));
+        assert_eq!(by_id["dc:arch"].copal_digest.as_deref(), Some("sha256:abc"));
+        assert_eq!(by_id["dc:bare"].copal_file, None);
+        assert_eq!(by_id["dc:bare"].copal_digest, None);
     }
 }

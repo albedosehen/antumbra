@@ -35,6 +35,9 @@ chrono.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
 rmcp = { version = "1.7.0", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
+# Outbound HTTP for the copal document-of-record archive: the same blocking
+# client (and TLS posture) the embedder's transport uses.
+ureq = { version = "3", features = ["json"] }
 # Networked transport, the MCP runtime surface: the JWT-authenticated, per-request multi-tenant
 # HTTP surface. axum hosts the streamable-HTTP service; jsonwebtoken verifies the
 # bearer token whose claims become $auth (tenant, user).

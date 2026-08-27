@@ -31,6 +31,23 @@ pub struct DocumentChunk {
     pub content: String,
     pub embedding: Option<Vec<f32>>,
     pub created_at: DateTime<Utc>,
+    /// The copal file holding this document's ORIGINAL content (the document of
+    /// record), when an archive is configured. `None` = ingested without one;
+    /// the chunks are then all that remains of the document (the v0 behavior).
+    pub copal_file: Option<String>,
+    /// The content digest copal reported for the archived original, so a chunk
+    /// names not just *which* file it came from but *which bytes*.
+    pub copal_digest: Option<String>,
+}
+
+impl DocumentChunk {
+    /// Stamp the chunk with the copal document-of-record provenance: the
+    /// archived file's id and the content digest copal reported for it.
+    pub fn with_copal(mut self, file: impl Into<String>, digest: impl Into<String>) -> Self {
+        self.copal_file = Some(file.into());
+        self.copal_digest = Some(digest.into());
+        self
+    }
 }
 
 /// Split `text` into chunks of at most `max_chars` characters, each overlapping
