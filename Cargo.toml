@@ -5,6 +5,7 @@ members = [
     "crates/antumbra-auth",
     "crates/antumbra-store",
     "crates/antumbra-embed",
+    "crates/antumbra-copal",
     "crates/antumbra-bench",
     "crates/antumbra-rerank",
     "crates/antumbra-critic",

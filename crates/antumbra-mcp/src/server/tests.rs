@@ -595,11 +595,11 @@ struct CannedCopal {
     up: bool,
 }
 
-impl crate::copal::CopalTransport for CannedCopal {
+impl antumbra_copal::CopalTransport for CannedCopal {
     fn post_json(
         &self,
         _url: &str,
-        _credential: &crate::copal::CopalCredential,
+        _credential: &antumbra_copal::CopalCredential,
         _body: &serde_json::Value,
     ) -> antumbra_core::Result<serde_json::Value> {
         if self.up {
@@ -612,7 +612,7 @@ impl crate::copal::CopalTransport for CannedCopal {
     fn put_bytes(
         &self,
         _url: &str,
-        _credential: &crate::copal::CopalCredential,
+        _credential: &antumbra_copal::CopalCredential,
         _content_type: &str,
         _body: &[u8],
     ) -> antumbra_core::Result<serde_json::Value> {
@@ -624,13 +624,13 @@ impl crate::copal::CopalTransport for CannedCopal {
     }
 }
 
-fn canned_archive(up: bool) -> Arc<crate::copal::CopalArchive> {
-    Arc::new(crate::copal::CopalArchive::with_transport(
+fn canned_archive(up: bool) -> Arc<antumbra_copal::CopalArchive> {
+    Arc::new(antumbra_copal::CopalArchive::with_transport(
         "127.0.0.1:9010",
         // Per-workspace tenancy (the default): the session's workspace
         // presents itself as the copal tenant. The header side is proven
-        // in `crate::copal`'s own tests; these care about the ingest path.
-        crate::copal::CopalTenancy::PerWorkspace,
+        // in `antumbra_copal`'s own tests; these care about the ingest path.
+        antumbra_copal::CopalTenancy::PerWorkspace,
         Arc::new(CannedCopal { up }),
     ))
 }

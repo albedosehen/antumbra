@@ -220,8 +220,9 @@ impl CopalArchive {
         Self::with_transport(addr, tenancy, Arc::new(UreqTransport::new()))
     }
 
-    /// As [`Self::new`] with an explicit transport (the test seam).
-    pub(crate) fn with_transport(
+    /// As [`Self::new`] with an explicit transport: the test seam, and how any
+    /// crate that ingests fakes copal in its own tests.
+    pub fn with_transport(
         addr: &str,
         tenancy: CopalTenancy,
         transport: Arc<dyn CopalTransport>,
@@ -420,6 +421,86 @@ fn document_path(title: &str, hash: u64) -> String {
     } else {
         format!("antumbra/{slug}-{hash:016x}.txt")
     }
+}
+
+/// Why the operator's copal flags could not become an archive. Every message
+/// names the flag and the workspace, never a credential.
+#[derive(Debug, thiserror::Error)]
+pub enum CopalConfigError {
+    #[error(
+        "--copal-tenant, --copal-key, and --copal-keys each pick a copal tenancy; pass at most one"
+    )]
+    ConflictingTenancy,
+    #[error("cannot read --copal-keys {path}: {reason}")]
+    KeysUnreadable { path: String, reason: String },
+    #[error("--copal-keys {path} is not a JSON object of workspace -> key: {reason}")]
+    KeysNotAnObject { path: String, reason: String },
+    #[error("--copal-keys {path} maps no workspaces")]
+    KeysEmpty { path: String },
+    #[error(
+        "--copal-keys {path}: the key for workspace {workspace} is not a plain ASCII credential"
+    )]
+    KeyNotAscii { path: String, workspace: String },
+}
+
+impl CopalArchive {
+    /// Resolve an archive from the operator's flags, the same way for every
+    /// binary that ingests (the MCP server and the CLI): `None` when no
+    /// address is configured, so ingest keeps only the chunks. The tenancy is
+    /// exactly one of `tenant` (header auth, shared), `key` (keys auth,
+    /// shared), `keys_file` (keys auth, per-workspace), or none of them
+    /// (header auth, per-workspace, the default). Naming two is a
+    /// contradiction refused up front, not a precedence resolved in silence.
+    pub fn from_flags(
+        addr: Option<&str>,
+        tenant: Option<String>,
+        key: Option<String>,
+        keys_file: Option<&std::path::Path>,
+    ) -> std::result::Result<Option<Arc<Self>>, CopalConfigError> {
+        let Some(addr) = addr else {
+            return Ok(None);
+        };
+        let tenancy = match (tenant, key, keys_file) {
+            (None, None, None) => CopalTenancy::PerWorkspace,
+            (Some(t), None, None) => CopalTenancy::Shared(t),
+            (None, Some(k), None) => CopalTenancy::SharedKey(k),
+            (None, None, Some(path)) => CopalTenancy::PerWorkspaceKeys(load_keys(path)?),
+            _ => return Err(CopalConfigError::ConflictingTenancy),
+        };
+        Ok(Some(Arc::new(Self::new(addr, tenancy))))
+    }
+}
+
+/// Load and validate the workspace -> `ck1` key map for per-workspace keys
+/// tenancy: a JSON object of strings, non-empty, every key a plain
+/// printable-ASCII credential (a real `ck1` token is; anything else is a
+/// mangled file worth stopping over up front rather than at some tenant's
+/// first ingest). Errors name the workspace, never the credential.
+pub fn load_keys(
+    path: &std::path::Path,
+) -> std::result::Result<HashMap<String, String>, CopalConfigError> {
+    let shown = path.display().to_string();
+    let raw = std::fs::read_to_string(path).map_err(|e| CopalConfigError::KeysUnreadable {
+        path: shown.clone(),
+        reason: e.to_string(),
+    })?;
+    let keys: HashMap<String, String> =
+        serde_json::from_str(&raw).map_err(|e| CopalConfigError::KeysNotAnObject {
+            path: shown.clone(),
+            reason: e.to_string(),
+        })?;
+    if keys.is_empty() {
+        return Err(CopalConfigError::KeysEmpty { path: shown });
+    }
+    for (workspace, key) in &keys {
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(CopalConfigError::KeyNotAscii {
+                path: shown,
+                workspace: workspace.clone(),
+            });
+        }
+    }
+    Ok(keys)
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@
 //! trainer + embedder so persistence and resume are exercisable without a model;
 //! real training is `train` under `--features models`.
 
+use antumbra_copal::CopalArchive;
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{Expert, ExpertId, Generation, RunId, ShadowStatus};
@@ -58,6 +59,15 @@ async fn connect(url: &str) -> anyhow::Result<Store> {
 /// flags, captured once (like `DB_CREDS`) so the many handlers that embed can
 /// call `make_embedder` without threading the flags through every call site.
 static EMBEDDER: std::sync::OnceLock<EmbedderChoice> = std::sync::OnceLock::new();
+
+/// The copal document-of-record archive from the global `--copal-*` flags,
+/// resolved once like the embedder: `None` when no address is configured.
+static COPAL: std::sync::OnceLock<Option<std::sync::Arc<CopalArchive>>> =
+    std::sync::OnceLock::new();
+
+fn copal_archive() -> Option<std::sync::Arc<CopalArchive>> {
+    COPAL.get().cloned().flatten()
+}
 
 struct EmbedderChoice {
     url: Option<String>,
@@ -183,6 +193,12 @@ async fn run() -> anyhow::Result<()> {
         key: cli.embedder_key.clone(),
         fake: cli.fake_embedder,
     });
+    let _ = COPAL.set(CopalArchive::from_flags(
+        cli.copal_addr.as_deref(),
+        cli.copal_tenant.clone(),
+        cli.copal_key.clone(),
+        cli.copal_keys.as_deref(),
+    )?);
     match cli.command {
         Command::Migrate => {
             connect(&cli.url).await?;
@@ -1114,6 +1130,7 @@ async fn run() -> anyhow::Result<()> {
                 });
             ops::ingest(
                 &cli.url,
+                copal_archive().as_deref(),
                 ops::IngestArgs {
                     tenant,
                     user,

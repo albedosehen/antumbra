@@ -157,8 +157,10 @@ antumbra status
 antumbra --embedder-url http://127.0.0.1:11434/v1/embeddings route "reverse a string"
 
 # Answer inventory questions without a parser: store what the framework's own
-# lister prints, stamped with the repo, commit, and branch it ran at; and derive
-# ownership / hotspots / co-change from git log, anchored to the commit range.
+# lister prints, stamped with the repo, commit, and branch it ran at (add
+# --copal-addr and the original is archived to copal first, the document of
+# record, exactly as the server does); and derive ownership / hotspots /
+# co-change from git log, anchored to the commit range.
 antumbra --embedder-url ... ingest --tenant ws:me --user user:me --title routes -- deno task routes
 antumbra git-facts --tenant ws:me --user user:me --compartment comp:repo --days 90
 
@@ -194,4 +196,4 @@ memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUD
 
 ### Crates
 
-`antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-rerank` (cross-encoder `/rerank` client behind the `Reranker` port) · `antumbra-bench` (retrieval-quality harness) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.
+`antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-copal` (the copal document-of-record archive client, shared by the server and the CLI) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-rerank` (cross-encoder `/rerank` client behind the `Reranker` port) · `antumbra-bench` (retrieval-quality harness) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.

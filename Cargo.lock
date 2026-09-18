@@ -206,6 +206,7 @@ name = "antumbra-cli"
 version = "0.0.0"
 dependencies = [
  "antumbra-boundary",
+ "antumbra-copal",
  "antumbra-core",
  "antumbra-critic",
  "antumbra-embed",
@@ -234,6 +235,17 @@ dependencies = [
  "serde",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "antumbra-copal"
+version = "0.0.0"
+dependencies = [
+ "antumbra-core",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "ureq",
 ]
 
 [[package]]
@@ -298,6 +310,7 @@ name = "antumbra-mcp"
 version = "0.0.0"
 dependencies = [
  "antumbra-auth",
+ "antumbra-copal",
  "antumbra-core",
  "antumbra-embed",
  "antumbra-rerank",
@@ -316,7 +329,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
- "ureq",
 ]
 
 [[package]]

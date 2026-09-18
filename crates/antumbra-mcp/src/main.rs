@@ -27,7 +27,6 @@ use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 mod auth {
     pub use antumbra_auth::*;
 }
-mod copal;
 mod embed;
 mod http;
 mod notify;
@@ -383,7 +382,7 @@ async fn run() -> Result<()> {
 
     // Optional copal document-of-record archive. Operator-configured; absent,
     // ingest keeps only the chunks (the v0 behavior, unchanged).
-    let copal = build_copal_archive(
+    let copal = antumbra_copal::CopalArchive::from_flags(
         cli.copal_addr.as_deref(),
         cli.copal_tenant,
         cli.copal_key,
@@ -460,63 +459,4 @@ fn build_verifier(
         v = v.with_audience(aud);
     }
     Ok(v)
-}
-
-/// Resolve the copal document-of-record archive from the CLI: `None` when no
-/// address is configured (ingest keeps only the chunks, the v0 behavior). The
-/// tenancy is exactly one of `--copal-tenant` (header auth, shared),
-/// `--copal-key` (keys auth, shared), `--copal-keys` (keys auth,
-/// per-workspace), or none of them (header auth, per-workspace -- the
-/// default). Naming two is a contradiction refused at startup, not a
-/// precedence resolved in silence.
-fn build_copal_archive(
-    addr: Option<&str>,
-    tenant: Option<String>,
-    key: Option<String>,
-    keys_file: Option<&std::path::Path>,
-) -> Result<Option<Arc<copal::CopalArchive>>> {
-    let Some(addr) = addr else {
-        return Ok(None);
-    };
-    let tenancy = match (tenant, key, keys_file) {
-        (None, None, None) => copal::CopalTenancy::PerWorkspace,
-        (Some(t), None, None) => copal::CopalTenancy::Shared(t),
-        (None, Some(k), None) => copal::CopalTenancy::SharedKey(k),
-        (None, None, Some(path)) => copal::CopalTenancy::PerWorkspaceKeys(load_copal_keys(path)?),
-        _ => anyhow::bail!(
-            "--copal-tenant, --copal-key, and --copal-keys each pick a copal tenancy; \
-             pass at most one"
-        ),
-    };
-    Ok(Some(Arc::new(copal::CopalArchive::new(addr, tenancy))))
-}
-
-/// Load and validate the workspace -> `ck1` key map for per-workspace keys
-/// tenancy: a JSON object of strings, non-empty, every key a plain
-/// printable-ASCII credential (a real `ck1` token is; anything else is a
-/// mangled file worth stopping over at startup rather than at some tenant's
-/// first ingest). Errors name the workspace, never the credential.
-fn load_copal_keys(path: &std::path::Path) -> Result<std::collections::HashMap<String, String>> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("cannot read --copal-keys {}: {e}", path.display()))?;
-    let keys: std::collections::HashMap<String, String> =
-        serde_json::from_str(&raw).map_err(|e| {
-            anyhow::anyhow!(
-                "--copal-keys {} is not a JSON object of workspace -> key: {e}",
-                path.display()
-            )
-        })?;
-    if keys.is_empty() {
-        anyhow::bail!("--copal-keys {} maps no workspaces", path.display());
-    }
-    for (workspace, key) in &keys {
-        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_graphic()) {
-            anyhow::bail!(
-                "--copal-keys {}: the key for workspace {workspace} is not a plain ASCII \
-                 credential",
-                path.display()
-            );
-        }
-    }
-    Ok(keys)
 }

@@ -137,6 +137,7 @@ The contract:
 - **Upload first, fail closed.** The original lands in Copal *before* any chunk is stored, and an unreachable Copal fails the ingest with a clear error. A configured document of record that silently dropped originals would be worse than none. Under `--copal-keys`, a workspace with no mapped key fails the same way — refusing beats archiving into a tenant that is not the workspace's own.
 - **Re-ingest revisions, never litters.** The create carries an idempotency key derived from (workspace, title) — the *antumbra* workspace tenant, in every tenancy shape — so ingesting the same title again revisions the *same* Copal file, two workspaces sharing a title never revision each other's document (even inside a shared tenant), and moving a deployment between shapes never re-identifies a document. The version history is the document's history; the archived file's metadata names its owning workspace.
 - **Absent means exactly today's behavior.** No `--copal-addr`, no archive: ingest keeps only the chunks, nothing new is required, and chunks written either way coexist (the provenance fields are simply absent on archive-less chunks).
+- **Every door archives the same way.** The CLI's `antumbra ingest` takes the same four flags (`--copal-addr`, `--copal-tenant`, `--copal-key`, `--copal-keys`, or the `ANTUMBRA_COPAL_*` envs) and follows the same upload-first, fail-closed contract through the shared `antumbra-copal` client, so a CI step that ingests a framework's lister output or a generated service doc lands a document of record too.
 
 ---
 

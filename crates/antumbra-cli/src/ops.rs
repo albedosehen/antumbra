@@ -26,6 +26,7 @@ use antumbra_train::{
 #[cfg(feature = "models")]
 use crate::refresh_router;
 
+use antumbra_copal::{ArchivedDocument, CopalArchive};
 use antumbra_core::document::{DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP};
 use antumbra_core::ports::Embedder;
 use antumbra_core::{chunk_text, DocumentChunk, DocumentChunkId, GitProvenance, TenantId, UserId};
@@ -669,40 +670,75 @@ pub struct IngestArgs {
     pub provenance: Option<GitProvenance>,
 }
 
+/// What one ingest produced: the chunk count, and the copal document of
+/// record when an archive was configured.
+#[derive(Debug)]
+pub struct Ingested {
+    pub chunks: u32,
+    pub archived: Option<ArchivedDocument>,
+}
+
 /// Ingest a knowledge document from the CLI: chunk, embed, store, the same shape
-/// the MCP `ingest_document` tool writes, so `recall_documents` finds it. The
-/// owner/admin path; the copal document-of-record archive is the server's
-/// concern and is not involved here.
-pub async fn ingest(url: &str, a: IngestArgs) -> anyhow::Result<u32> {
+/// the MCP `ingest_document` tool writes, so `recall_documents` finds it. With
+/// an `archive`, the same document-of-record contract as the server: the
+/// original is uploaded to copal FIRST and a failure fails the whole ingest,
+/// because a configured archive that silently dropped originals would be
+/// worse than none. The owner/admin path.
+pub async fn ingest(
+    url: &str,
+    archive: Option<&CopalArchive>,
+    a: IngestArgs,
+) -> anyhow::Result<Ingested> {
     let store = crate::connect(url).await?;
     let embedder = crate::make_embedder()?;
     let tenant = TenantId::new(a.tenant.as_str());
     let user = UserId::new(a.user.as_str());
     principal::provision(&store, &tenant, &user).await?;
-    let stored = ingest_text(&store, embedder.as_ref(), &tenant, &a).await?;
+    let out = ingest_text(&store, embedder.as_ref(), &tenant, archive, &a).await?;
     let anchor = a
         .provenance
         .as_ref()
         .map(|p| format!(" at {p}"))
         .unwrap_or_default();
+    let record = out
+        .archived
+        .as_ref()
+        .map(|d| format!("; document of record {} ({})", d.file_id, d.digest))
+        .unwrap_or_default();
     println!(
-        "ingested {stored} chunk(s) of \"{}\" (tenant {}){anchor}",
-        a.title, a.tenant
+        "ingested {} chunk(s) of \"{}\" (tenant {}){anchor}{record}",
+        out.chunks, a.title, a.tenant
     );
-    Ok(stored)
+    Ok(out)
 }
 
-/// The store-side half of `ingest`: chunk `content`, embed each chunk, and
-/// upsert them under `tenant`. Chunk ids are derived from (tenant, title,
-/// ordinal), so re-ingesting a title replaces its chunks in place instead of
-/// accumulating copies; the anchor is folded into `source` so a recalled chunk
-/// names the commit it was produced at.
+/// The store-side half of `ingest`: archive the original when an `archive` is
+/// configured (upload first, fail closed), then chunk `content`, embed each
+/// chunk, and upsert them under `tenant`. Chunk ids are derived from (tenant,
+/// title, ordinal), so re-ingesting a title replaces its chunks in place
+/// instead of accumulating copies; the git anchor is folded into `source` so a
+/// recalled chunk names the commit it was produced at, and the copal file id +
+/// digest ride every chunk so it names its document of record too.
 pub async fn ingest_text(
     store: &Store,
     embedder: &dyn Embedder,
     tenant: &TenantId,
+    archive: Option<&CopalArchive>,
     a: &IngestArgs,
-) -> anyhow::Result<u32> {
+) -> anyhow::Result<Ingested> {
+    let archived = match archive {
+        Some(archive) => Some(
+            archive
+                .archive_document(tenant.as_str(), &a.title, a.source.as_deref(), &a.content)
+                .await
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "copal document-of-record upload failed, nothing was ingested: {e}"
+                    )
+                })?,
+        ),
+        None => None,
+    };
     let source = match (&a.source, &a.provenance) {
         (Some(s), Some(p)) => Some(format!("{s} @ {p}")),
         (Some(s), None) => Some(s.clone()),
@@ -716,7 +752,7 @@ pub async fn ingest_text(
         .enumerate()
     {
         let embedding = embedder.embed(&content).await?;
-        chunks.push(DocumentChunk {
+        let mut chunk = DocumentChunk {
             id: DocumentChunkId::new(chunk_id(tenant, &a.title, ordinal)),
             tenant: tenant.clone(),
             title: a.title.clone(),
@@ -727,10 +763,17 @@ pub async fn ingest_text(
             created_at: now,
             copal_file: None,
             copal_digest: None,
-        });
+        };
+        if let Some(d) = &archived {
+            chunk = chunk.with_copal(d.file_id.clone(), d.digest.clone());
+        }
+        chunks.push(chunk);
     }
     document::insert_chunks(store, &chunks).await?;
-    Ok(chunks.len() as u32)
+    Ok(Ingested {
+        chunks: chunks.len() as u32,
+        archived,
+    })
 }
 
 /// A stable chunk id: the same (tenant, title, ordinal) always names the same
@@ -815,8 +858,48 @@ pub async fn store_facts(url: &str, a: FactsArgs) -> anyhow::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_copal::{CopalCredential, CopalTenancy, CopalTransport};
     use antumbra_core::testing::FixedEmbedder;
     use antumbra_store::EMBED_DIM;
+    use serde_json::{json, Value};
+    use std::sync::Arc;
+
+    /// A copal that answers the create + upload calls, or fails them, offline.
+    struct FakeCopal {
+        up: bool,
+    }
+
+    impl CopalTransport for FakeCopal {
+        fn post_json(
+            &self,
+            _url: &str,
+            _credential: &CopalCredential,
+            _body: &Value,
+        ) -> antumbra_core::Result<Value> {
+            if self.up {
+                Ok(json!({ "id": "file:01J" }))
+            } else {
+                Err(antumbra_core::AntumbraError::other("copal is down"))
+            }
+        }
+        fn put_bytes(
+            &self,
+            _url: &str,
+            _credential: &CopalCredential,
+            _content_type: &str,
+            _body: &[u8],
+        ) -> antumbra_core::Result<Value> {
+            Ok(json!({ "digest": "sha256:abc" }))
+        }
+    }
+
+    fn archive(up: bool) -> CopalArchive {
+        CopalArchive::with_transport(
+            "127.0.0.1:9010",
+            CopalTenancy::PerWorkspace,
+            Arc::new(FakeCopal { up }),
+        )
+    }
 
     fn args(title: &str, content: &str, provenance: Option<GitProvenance>) -> IngestArgs {
         IngestArgs {
@@ -844,6 +927,7 @@ mod tests {
             &store,
             &embedder,
             &tenant,
+            None,
             &args(
                 "routes",
                 "GET /health\nPOST /orders\n",
@@ -852,11 +936,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(first, 1);
+        assert_eq!(first.chunks, 1);
+        assert!(first.archived.is_none());
         let again = ingest_text(
             &store,
             &embedder,
             &tenant,
+            None,
             &args(
                 "routes",
                 "GET /health\nPOST /orders\nDELETE /orders/{id}\n",
@@ -865,7 +951,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(again, 1);
+        assert_eq!(again.chunks, 1);
         assert_eq!(
             document::list_titles(&store, &tenant).await.unwrap(),
             vec!["routes".to_string()],
@@ -884,6 +970,65 @@ mod tests {
             hits[0].content.contains("DELETE /orders"),
             "the newer content won"
         );
+    }
+
+    /// With an archive configured the CLI keeps the server's contract: the
+    /// original lands in copal first and every chunk names it.
+    #[tokio::test]
+    async fn ingest_text_archives_to_copal_and_stamps_every_chunk() {
+        let store = crate::connect("mem://").await.unwrap();
+        let tenant = TenantId::new("ws:t");
+        principal::provision(&store, &tenant, &UserId::new("user:u"))
+            .await
+            .unwrap();
+        let embedder = FixedEmbedder::new(EMBED_DIM);
+        let out = ingest_text(
+            &store,
+            &embedder,
+            &tenant,
+            Some(&archive(true)),
+            &args("routes", "GET /health\n", None),
+        )
+        .await
+        .unwrap();
+        let archived = out.archived.expect("archived");
+        assert_eq!(
+            (archived.file_id.as_str(), archived.digest.as_str()),
+            ("file:01J", "sha256:abc")
+        );
+        let hits = document::recall(&store, &tenant, &embedder.embed("health").await.unwrap(), 5)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].copal_file.as_deref(), Some("file:01J"));
+        assert_eq!(hits[0].copal_digest.as_deref(), Some("sha256:abc"));
+    }
+
+    /// A configured archive that is unreachable fails the ingest and stores
+    /// nothing: no chunks whose original was silently dropped.
+    #[tokio::test]
+    async fn ingest_text_fails_closed_when_copal_is_down() {
+        let store = crate::connect("mem://").await.unwrap();
+        let tenant = TenantId::new("ws:t");
+        principal::provision(&store, &tenant, &UserId::new("user:u"))
+            .await
+            .unwrap();
+        let embedder = FixedEmbedder::new(EMBED_DIM);
+        let err = ingest_text(
+            &store,
+            &embedder,
+            &tenant,
+            Some(&archive(false)),
+            &args("routes", "GET /health\n", None),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("nothing was ingested"), "{err}");
+        assert!(document::list_titles(&store, &tenant)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

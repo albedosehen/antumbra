@@ -46,6 +46,28 @@ pub struct Cli {
         default_value_t = false
     )]
     pub fake_embedder: bool,
+    /// Archive each ingested document's ORIGINAL content to a copal file
+    /// service (the document of record), exactly as the MCP server does: bare
+    /// `host:port` or a full URL base. The upload happens before any chunk is
+    /// stored (a dead copal fails the ingest), and every chunk carries the
+    /// copal file id + digest. Off when unset: ingest keeps only the chunks.
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_ADDR")]
+    pub copal_addr: Option<String>,
+    /// Land every workspace's documents under this ONE copal tenant (copal's
+    /// header auth mode). Omit all three tenancy args for per-workspace
+    /// tenancy, the default. At most one of --copal-tenant / --copal-key /
+    /// --copal-keys.
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_TENANT")]
+    pub copal_tenant: Option<String>,
+    /// One `ck1` copal API key for every workspace (keys auth mode, shared
+    /// tenancy: the key's tenant is THE tenant).
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_KEY")]
+    pub copal_key: Option<String>,
+    /// Path to a JSON file mapping workspace tenant -> `ck1` copal API key
+    /// (keys auth mode, per-workspace tenancy); a workspace absent from the
+    /// map fails its ingest rather than landing in another tenant.
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_KEYS")]
+    pub copal_keys: Option<std::path::PathBuf>,
     #[command(subcommand)]
     pub command: Command,
 }

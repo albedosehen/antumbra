@@ -77,7 +77,7 @@ pub struct McpServer {
     /// uploads the ORIGINAL content to copal FIRST (failing the ingest if
     /// copal is unreachable) and stamps every stored chunk with the file id +
     /// digest. `None` = no archive; ingest behaves exactly as before.
-    copal: Option<Arc<crate::copal::CopalArchive>>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -218,7 +218,7 @@ impl McpServer {
     /// every chunk carries the copal file id + digest as provenance. Off by
     /// default; without it, ingest keeps only the chunks (the v0 behavior).
     #[must_use]
-    pub fn with_copal_archive(mut self, archive: Arc<crate::copal::CopalArchive>) -> Self {
+    pub fn with_copal_archive(mut self, archive: Arc<antumbra_copal::CopalArchive>) -> Self {
         self.copal = Some(archive);
         self
     }
@@ -790,7 +790,7 @@ impl McpServer {
         // The session's workspace tenant scopes the archive identity (the
         // idempotency key and path), so two workspaces sharing a title never
         // revision each other's document; the copal tenant header stays the
-        // operator-configured one (see `crate::copal`).
+        // operator-configured one (see `antumbra_copal`).
         let archived = match &self.copal {
             Some(archive) => Some(
                 archive
