@@ -39,17 +39,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: rustfmt, clippy
-      # The oneiriq-kayak dependency lives in a private repo, reached over ssh
-      # locally. CI has no ssh key, so rewrite both spellings of the Oneiriq
-      # remote to https with a read token, and make cargo fetch through the
-      # git CLI (also set in .cargo/config.toml; exported here so the fetch
-      # survives that file moving). ONEIRIQ_READ_TOKEN is a repo secret: a
-      # fine-grained token with read access to Oneiriq/kayak.
-      - name: authorize the private kayak fetch
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
-          git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"
-          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt
         run: cargo fmt --all --check
@@ -71,14 +60,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy
-      # Same private-fetch rewrite as the check job: resolving the workspace
-      # reads every member's manifest, so even a -p build of crates that never
-      # touch kayak needs the fetch to succeed.
-      - name: authorize the private kayak fetch
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
-          git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"
-          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
       # Compile AND lint the candle Qwen2.5-Coder + LoRA stack and everything
       # gated on `models` (serving, the MCP consolidation trigger, the CLI train
@@ -120,17 +101,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.0
-      # cargo audit reads the committed Cargo.lock without fetching, but it is
-      # still a cargo job, and the rewrite keeps it working the day it grows a
-      # flag that resolves for real.
-      - name: authorize the private kayak fetch
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
-          git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"
-          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@cargo-audit
       # Scans the committed Cargo.lock against the RustSec advisory DB. Fails on a
       # known vulnerability; triage an unfixable transitive one with `--ignore
       # RUSTSEC-XXXX` (or move it into an audit.toml) rather than dropping the gate.
       - name: cargo audit
         run: cargo audit
+
+  control-server:
+    name: control server (own workspace, contract gate)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt, clippy
+      # The hosted control plane is its own cargo workspace (root Cargo.toml
+      # `exclude`) because its `contract` feature is the repo's one private
+      # dependency: oneiriq-kayak, reached over ssh locally. CI has no ssh key,
+      # so rewrite both spellings of the Oneiriq remote to https with a read
+      # token (ONEIRIQ_READ_TOKEN: a fine-grained token with read access to
+      # Oneiriq/kayak) and fetch through the git CLI. Only this job needs it;
+      # every other job builds from crates.io alone.
+      - name: authorize the private kayak fetch
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
+          git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/antumbra-control-server
+      - name: rustfmt
+        working-directory: crates/antumbra-control-server
+        run: cargo fmt --all --check
+      - name: clippy (default features, then contract)
+        working-directory: crates/antumbra-control-server
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          cargo clippy --all-targets --features contract -- -D warnings
+      - name: test (contract drift gate included)
+        working-directory: crates/antumbra-control-server
+        run: cargo test --features contract

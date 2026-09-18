@@ -4,8 +4,8 @@
 //! drives, proven only with the `EchoServe` fake until now.
 //!
 //! Gated twice over so the normal suite never touches a GPU or downloads weights:
-//! the file only compiles under `--features models`, and the body skips unless
-//! `ANTUMBRA_GPU_SERVE` is set. Reproduce on the 3090 Ti (CUDA 13.x toolkit):
+//! the file only compiles under `--features models`, and the test is `#[ignore]`d, run with
+//! `--ignored`, and asserts that `ANTUMBRA_GPU_SERVE` is set. Reproduce on the 3090 Ti (CUDA 13.x toolkit):
 //!
 //!   # in a VS Dev Shell, with the CUDA bin on PATH:
 //!   $env:CUDARC_CUDA_VERSION = "13000"   # 13.0 bindings link against a 13.3 runtime
@@ -25,11 +25,12 @@ use antumbra_serve::{MultiAdapterServe, RaftConfig};
 // MultiAdapterServe runs candle generation under block_in_place, so it needs a
 // multi-threaded runtime (a replacement worker takes over while a request blocks).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "live GPU: set ANTUMBRA_GPU_SERVE=1 (and the CUDA env in the header) and run with --ignored"]
 async fn multi_adapter_serve_generates_on_gpu() {
-    if std::env::var("ANTUMBRA_GPU_SERVE").is_err() {
-        eprintln!("skipped: set ANTUMBRA_GPU_SERVE=1 to run the live GPU serve validation");
-        return;
-    }
+    assert!(
+        std::env::var("ANTUMBRA_GPU_SERVE").is_ok(),
+        "ANTUMBRA_GPU_SERVE=1 must be set to run this ignored live GPU test"
+    );
     let base = std::env::var("ANTUMBRA_GPU_BASE")
         .unwrap_or_else(|_| "Qwen/Qwen2.5-Coder-1.5B-Instruct".into());
     // Default to the workspace-root adapters dir; `cargo test` runs with the

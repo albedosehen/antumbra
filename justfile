@@ -26,3 +26,11 @@ fmt-md:
 # Requires `dist` (cargo-dist) on PATH.
 dist-plan:
     dist plan
+
+# The hosted control plane is its own cargo workspace (see the root Cargo.toml);
+# these run its checks, including the kayak contract gate under `contract`.
+test-control:
+    cd crates/antumbra-control-server && cargo test --features contract
+
+lint-control:
+    cd crates/antumbra-control-server && cargo clippy --all-targets -- -D warnings && cargo clippy --all-targets --features contract -- -D warnings

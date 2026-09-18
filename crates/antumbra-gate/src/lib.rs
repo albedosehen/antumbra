@@ -10,7 +10,7 @@
 //! ## Out-of-scope detection is relative, not absolute
 //!
 //! Routing among in-scope experts is just nearest-capability. Deciding that a
-//! task is out of *every* expert's scope is the harder, half (the
+//! task is out of *every* expert's scope is the harder half (the
 //! counterfactual boundary of competence) and is an out-of-distribution problem. Validation showed an **absolute**
 //! similarity floor cannot do it: sentence-embedding cosine for short texts is
 //! compressed into a high band (~0.6-0.9 for everything), so an out-of-scope

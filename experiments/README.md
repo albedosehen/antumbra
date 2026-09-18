@@ -1,6 +1,6 @@
 # Antumbra Experiment Ledger
 
-In Antumbra the **falsifiable validations _are_ the milestones** (architecture §7). This ledger records each one: the claim, how it was tested, the measured result, an explicit **kill criterion**, and a **reproduce** command. Results to date are small-scale and about what is faked; see the [Technical Reference §13-14](../docs/technical-reference.md) for the standing scorecard.
+In Antumbra the **falsifiable validations _are_ the milestones** (architecture §7). This ledger records each one: the claim, how it was tested, the measured result, an explicit **kill criterion**, and a **reproduce** command. Results to date are small-scale and about what is faked; see the [architecture status table](../docs/architecture.md#v0-implementation-status-2026-06-05) for the standing scorecard.
 
 GPU experiments need the CUDA-13 / Windows environment in [running-the-trainer.md](../docs/running-the-trainer.md) and `python` on `PATH` for the exec verifiers; build with `--features models,cuda --release`. Non-GPU experiments are plain `cargo test`.
 

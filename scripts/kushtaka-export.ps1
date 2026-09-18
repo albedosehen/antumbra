@@ -6,7 +6,7 @@
 # Talks to the Kushtakas MCP HTTP surface (POST /mcp/call), the same endpoint the
 # SessionStart hook uses. Credentials come from the environment, so no secret is
 # baked into the file:
-#   KUSHTAKA_API_URL       MCP engine (default http://10.0.0.110:8081)
+#   KUSHTAKA_API_URL       MCP engine (default http://127.0.0.1:8081)
 #   KUSHTAKA_API_KEY       sent as X-API-Key (required; the key scopes the workspace)
 #   KUSHTAKA_WORKSPACE_ID  informational, recorded in the output header comment
 #
@@ -27,7 +27,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$apiUrl = if ($env:KUSHTAKA_API_URL) { $env:KUSHTAKA_API_URL } else { 'http://10.0.0.110:8081' }
+$apiUrl = if ($env:KUSHTAKA_API_URL) { $env:KUSHTAKA_API_URL } else { 'http://127.0.0.1:8081' }
 $apiKey = $env:KUSHTAKA_API_KEY
 if (-not $apiKey) {
     Write-Error "KUSHTAKA_API_KEY is not set (export needs the Kushtakas API key)."

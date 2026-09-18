@@ -1,8 +1,7 @@
 name: mcp-image
 
-# Publishes the antumbra-mcp image on main pushes. ONEIRIQ_READ_TOKEN
-# feeds the Dockerfile's BuildKit secret for the private oneiriq-kayak
-# workspace dependency; it never lands in a layer.
+# Publishes the antumbra-mcp image on main pushes. The main workspace has no
+# private dependencies, so the build needs no secret.
 
 on:
   push:
@@ -32,8 +31,6 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
-          secrets: |
-            oneiriq_token=${{ secrets.ONEIRIQ_READ_TOKEN }}
           tags: |
             ghcr.io/albedosehen/antumbra-mcp:${{ github.sha }}
             ghcr.io/albedosehen/antumbra-mcp:latest

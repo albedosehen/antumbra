@@ -1,6 +1,7 @@
-# Fetch git dependencies with the git CLI rather than the builtin
-# transport: the oneiriq-janus dependency lives in a private repo
-# reached over ssh, which the CLI authenticates (local keys, CI's
-# insteadOf token rewrite) where libgit2 cannot.
+# Fetch git dependencies with the git CLI rather than the builtin transport.
+# Only the control server's optional `contract` feature pulls a git dependency
+# (oneiriq-kayak, a private repo reached over ssh), and the CLI authenticates
+# that where libgit2 cannot (local keys, CI's insteadOf token rewrite). The
+# main workspace has no git dependencies, so this is inert for a default build.
 [net]
 git-fetch-with-cli = true

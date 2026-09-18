@@ -4,7 +4,8 @@
 //! (the watermark filter) plus the version-field index -- so this drives the real
 //! collector path against a networked authoritative store.
 //!
-//! Gated on `ANTUMBRA_SYNC_WS` (skips when unset), so the normal suite stays
+//! `#[ignore]`d, so the normal suite stays network-free; run it with the env set and
+//! `cargo test -p antumbra-sync --test ws_incremental -- --ignored`. Keeps the suite
 //! GPU-/network-free. Reproduce with a fresh SurrealDB v3 container:
 //!
 //!   docker run --rm -d -p 8000:8000 --name antumbra-sync-ws surrealdb/surrealdb:v3.0.5 \
@@ -27,11 +28,11 @@ fn mem(id: &str, tenant: &TenantId, content: &str, at: chrono::DateTime<chrono::
 }
 
 #[tokio::test]
+#[ignore = "live ws:// SurrealDB: set ANTUMBRA_SYNC_WS=ws://127.0.0.1:8000/rpc and run with --ignored"]
 async fn incremental_cursors_converge_over_ws() {
-    let Ok(url) = std::env::var("ANTUMBRA_SYNC_WS") else {
-        eprintln!("skipped: set ANTUMBRA_SYNC_WS=ws://127.0.0.1:8000/rpc to run");
-        return;
-    };
+    let url = std::env::var("ANTUMBRA_SYNC_WS").expect(
+        "ANTUMBRA_SYNC_WS must name a live SurrealDB (ws://127.0.0.1:8000/rpc) to run this ignored test",
+    );
     let user = std::env::var("ANTUMBRA_SYNC_WS_USER").unwrap_or_else(|_| "root".into());
     let pass = std::env::var("ANTUMBRA_SYNC_WS_PASS").unwrap_or_else(|_| "root".into());
 
