@@ -19,6 +19,7 @@ ANTUMBRA_URL=http://127.0.0.1:8081     # the antumbra-mcp engine
 ANTUMBRA_WORKSPACE_ID=<workspace>      # your tenant/workspace scope
 ANTUMBRA_TOKEN=<bearer-jwt>            # Authorization: Bearer <token>
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
+ANTUMBRA_PENALIZE_ORPHANS=0            # 1: bootstrap also penalizes memories whose branch is gone
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
@@ -81,3 +82,20 @@ The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machi
 ```
 
 Note: (`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is cross-platform too; the `.sh` siblings are the native, dependency-light option.)
+
+## Git provenance: stale memories are visible, not silently wrong
+
+A memory about code is only as good as its anchor. The hooks keep that anchor as **provenance on the memory** and judge it at recall, where git is, instead of re-extracting symbol tables and pruning them:
+
+- **Capture** (`antumbra-capture`) computes the session's git context (origin slug, HEAD commit, branch) and tells the agent to pass it as `store_memory`'s `provenance` `{repo, commit, branch[, path]}`. It lands as one evidence entry, `git:<repo>@<commit>#<branch>[:<path>]`.
+- **Bootstrap** (`antumbra-session-start`) passes the same `repo` and `branch` to `recall_memories`, so the server scopes every hit (`in_scope`, `other_branch`, `other_repo`) and demotes out-of-scope ones below in-scope ones without hiding them. Then, with git in hand, it checks each hit's anchor and tags it:
+
+  | Tag             | Meaning                                                                                              |
+  | --------------- | ---------------------------------------------------------------------------------------------------- |
+  | `[live]`        | the commit it was learned at is an ancestor of HEAD                                                  |
+  | `[not-on-head]` | learned on a commit this HEAD does not contain (an unmerged branch, or history this clone lacks)     |
+  | `[orphaned]`    | its branch no longer exists locally or on `origin` (as far as this clone knows; fetch to be current) |
+
+  Set `ANTUMBRA_PENALIZE_ORPHANS=1` to have the bootstrap also call `penalize_memory` on orphaned hits, so a memory about a branch that is gone loses standing without anyone noticing it first.
+
+Outside a repository, or without `git` on the path, both hooks run exactly as before: no anchor, no tags. Nothing here needs a parser, and nothing is garbage-collected; the anchor travels with the memory. For inventory questions ("what routes does this service expose?") the parser-free companion is `antumbra ingest --title routes -- <the framework's own lister>`, which stores what the command printed as a knowledge document stamped with the same anchor.

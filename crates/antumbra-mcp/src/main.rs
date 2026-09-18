@@ -110,6 +110,13 @@ struct Cli {
     /// Optional bearer key for `--embedder-url`.
     #[arg(long, env = "ANTUMBRA_EMBEDDER_KEY")]
     embedder_key: Option<String>,
+    /// Use the deterministic byte-histogram stand-in instead of a real embedder.
+    /// Recall is then NOT semantic (it matches character statistics), so this is
+    /// for smoke tests and demos only. Without `--features models`, the server
+    /// refuses to start with neither this nor `--embedder-url` rather than
+    /// silently degrading recall.
+    #[arg(long, env = "ANTUMBRA_FAKE_EMBEDDER", default_value_t = false)]
+    fake_embedder: bool,
     /// Rerank hybrid-recall candidates with a cross-encoder via a TEI/Cohere-style
     /// `/rerank` endpoint (the precision stage after RRF). Off when unset.
     #[arg(long, env = "ANTUMBRA_RERANK_URL")]
@@ -178,18 +185,33 @@ pub(crate) async fn connect_serving(url: &str) -> Result<Store> {
     Ok(Store::connect_without_schema(config, EMBED_DIM).await?)
 }
 
-/// The real candle BERT embedder under `--features models`, else the
-/// byte-histogram fake. Both produce `EMBED_DIM`-wide vectors.
+/// The built-in embedder when no `--embedder-url` is configured: the real candle
+/// BERT under `--features models`; `--fake-embedder` still selects the
+/// byte-histogram stand-in for smoke tests. Both produce `EMBED_DIM`-wide vectors.
 #[cfg(feature = "models")]
-fn make_embedder() -> Result<Box<dyn Embedder>> {
+fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
+    if fake {
+        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
+            EMBED_DIM,
+        )));
+    }
     Ok(Box::new(antumbra_serve::BertEmbedder::load()?))
 }
 
+/// Without `models` there is no built-in embedder: the operator brings one
+/// (`--embedder-url`) or opts into the byte-histogram stand-in explicitly.
+/// Refusing to start beats a server whose recall silently matches character
+/// statistics instead of meaning.
 #[cfg(not(feature = "models"))]
-fn make_embedder() -> Result<Box<dyn Embedder>> {
-    Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
-        EMBED_DIM,
-    )))
+fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
+    if fake {
+        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
+            EMBED_DIM,
+        )));
+    }
+    anyhow::bail!(
+        "no embedder configured: pass --embedder-url <OpenAI-compatible /embeddings endpoint \n         returning {EMBED_DIM}-d vectors> (for example Ollama serving all-minilm), or \n         --fake-embedder to accept the non-semantic byte-histogram stand-in (demos only)"
+    )
 }
 
 /// Owner-side provisioning for an identity: ensure the principal exists and the
@@ -338,15 +360,15 @@ async fn run() -> Result<()> {
 
     let host = default_host(cli.host);
     // A configured endpoint embeds on the tenant's side (P-1c); otherwise the
-    // build-time embedder (candle BERT under `models`, else the byte-histogram
-    // fake). Either way the vectors are EMBED_DIM-wide.
+    // built-in embedder (candle BERT under `models`; the byte-histogram stand-in
+    // only when asked for explicitly). Either way the vectors are EMBED_DIM-wide.
     let embedder: Arc<dyn Embedder> = match cli.embedder_url {
         Some(url) => Arc::new(embed::HttpEmbedder::new(
             url,
             cli.embedder_model,
             cli.embedder_key,
         )),
-        None => Arc::from(make_embedder()?),
+        None => Arc::from(make_embedder(cli.fake_embedder)?),
     };
 
     // Optional cross-encoder rerank stage (P-2). Operator-configured endpoint; the

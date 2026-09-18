@@ -6,7 +6,6 @@
 //! helpers via `crate::` (a child module sees its parent's private items), so
 //! no infrastructure is duplicated.
 
-#[cfg(feature = "models")]
 use chrono::Utc;
 
 #[cfg(feature = "models")]
@@ -26,6 +25,12 @@ use antumbra_train::{
 
 #[cfg(feature = "models")]
 use crate::refresh_router;
+
+use antumbra_core::document::{DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP};
+use antumbra_core::ports::Embedder;
+use antumbra_core::{chunk_text, DocumentChunk, DocumentChunkId, GitProvenance, TenantId, UserId};
+use antumbra_store::repo::{document, principal};
+use antumbra_store::Store;
 
 /// Serialize capture tasks back to the `{id, prompt, verify, completion, skill}`
 /// corpus shape (captures carry a completion; seeds do not).
@@ -649,4 +654,249 @@ pub async fn reembed(url: &str, tenant: &str, dry_run: bool, yes: bool) -> anyho
         );
     }
     Ok(())
+}
+
+/// What `ingest` needs: the workspace identity, the document, and its anchor.
+pub struct IngestArgs {
+    pub tenant: String,
+    pub user: String,
+    pub title: String,
+    /// Where the document came from, for the record.
+    pub source: Option<String>,
+    /// The document text (a file's contents, or what a command printed).
+    pub content: String,
+    /// The git anchor to fold into every chunk's `source`, when known.
+    pub provenance: Option<GitProvenance>,
+}
+
+/// Ingest a knowledge document from the CLI: chunk, embed, store, the same shape
+/// the MCP `ingest_document` tool writes, so `recall_documents` finds it. The
+/// owner/admin path; the copal document-of-record archive is the server's
+/// concern and is not involved here.
+pub async fn ingest(url: &str, a: IngestArgs) -> anyhow::Result<u32> {
+    let store = crate::connect(url).await?;
+    let embedder = crate::make_embedder()?;
+    let tenant = TenantId::new(a.tenant.as_str());
+    let user = UserId::new(a.user.as_str());
+    principal::provision(&store, &tenant, &user).await?;
+    let stored = ingest_text(&store, embedder.as_ref(), &tenant, &a).await?;
+    let anchor = a
+        .provenance
+        .as_ref()
+        .map(|p| format!(" at {p}"))
+        .unwrap_or_default();
+    println!(
+        "ingested {stored} chunk(s) of \"{}\" (tenant {}){anchor}",
+        a.title, a.tenant
+    );
+    Ok(stored)
+}
+
+/// The store-side half of `ingest`: chunk `content`, embed each chunk, and
+/// upsert them under `tenant`. Chunk ids are derived from (tenant, title,
+/// ordinal), so re-ingesting a title replaces its chunks in place instead of
+/// accumulating copies; the anchor is folded into `source` so a recalled chunk
+/// names the commit it was produced at.
+pub async fn ingest_text(
+    store: &Store,
+    embedder: &dyn Embedder,
+    tenant: &TenantId,
+    a: &IngestArgs,
+) -> anyhow::Result<u32> {
+    let source = match (&a.source, &a.provenance) {
+        (Some(s), Some(p)) => Some(format!("{s} @ {p}")),
+        (Some(s), None) => Some(s.clone()),
+        (None, Some(p)) => Some(p.to_string()),
+        (None, None) => None,
+    };
+    let now = Utc::now();
+    let mut chunks = Vec::new();
+    for (ordinal, content) in chunk_text(&a.content, DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP)
+        .into_iter()
+        .enumerate()
+    {
+        let embedding = embedder.embed(&content).await?;
+        chunks.push(DocumentChunk {
+            id: DocumentChunkId::new(chunk_id(tenant, &a.title, ordinal)),
+            tenant: tenant.clone(),
+            title: a.title.clone(),
+            source: source.clone(),
+            ordinal: ordinal as u32,
+            content,
+            embedding: Some(embedding),
+            created_at: now,
+            copal_file: None,
+            copal_digest: None,
+        });
+    }
+    document::insert_chunks(store, &chunks).await?;
+    Ok(chunks.len() as u32)
+}
+
+/// A stable chunk id: the same (tenant, title, ordinal) always names the same
+/// record, which is what makes re-ingest an in-place replacement.
+fn chunk_id(tenant: &TenantId, title: &str, ordinal: usize) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    tenant.as_str().hash(&mut hasher);
+    title.hash(&mut hasher);
+    ordinal.hash(&mut hasher);
+    format!("docchunk:{:x}", hasher.finish())
+}
+
+/// Run `argv` (program, then its arguments; no shell) and return what it printed
+/// to stdout. A non-zero exit is an error carrying the exit status and the head
+/// of stderr, because a lister that failed has not described anything.
+pub fn run_for_output(argv: &[String]) -> anyhow::Result<String> {
+    let (program, args) = argv
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("no command given after `--`"))?;
+    let out = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| anyhow::anyhow!("could not run `{program}`: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!(
+            "`{}` exited with {}: {}",
+            argv.join(" "),
+            out.status,
+            stderr.chars().take(400).collect::<String>().trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// What `git-facts` stores: the sentences and the evidence they all share.
+pub struct FactsArgs {
+    pub tenant: String,
+    pub user: String,
+    pub compartment: String,
+    pub facts: Vec<String>,
+    pub evidence: Vec<String>,
+}
+
+/// Store derived repository facts as `world` memories in one compartment, ids
+/// derived from (compartment, content) so re-running over the same window is
+/// idempotent. Returns how many were written.
+pub async fn store_facts(url: &str, a: FactsArgs) -> anyhow::Result<usize> {
+    use std::hash::{Hash, Hasher};
+
+    use antumbra_core::{CompartmentId, Memory, MemoryNetwork};
+    use antumbra_store::repo::memory;
+
+    let store = crate::connect(url).await?;
+    let tenant = TenantId::new(a.tenant.as_str());
+    let user = UserId::new(a.user.as_str());
+    principal::provision(&store, &tenant, &user).await?;
+    let now = Utc::now();
+    for content in &a.facts {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        a.compartment.hash(&mut hasher);
+        content.hash(&mut hasher);
+        let id = format!("memory:{:x}", hasher.finish());
+        let m = Memory::new(
+            id,
+            tenant.clone(),
+            MemoryNetwork::World,
+            content.clone(),
+            0.7,
+            now,
+        )
+        .by(user.clone(), "cli")
+        .in_compartment(CompartmentId::new(a.compartment.as_str()))
+        .with_evidence(a.evidence.clone());
+        memory::upsert(&store, &m).await?;
+    }
+    Ok(a.facts.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use antumbra_core::testing::FixedEmbedder;
+    use antumbra_store::EMBED_DIM;
+
+    fn args(title: &str, content: &str, provenance: Option<GitProvenance>) -> IngestArgs {
+        IngestArgs {
+            tenant: "ws:t".into(),
+            user: "user:u".into(),
+            title: title.into(),
+            source: Some("$ deno task routes".into()),
+            content: content.into(),
+            provenance,
+        }
+    }
+
+    /// The chunks land under the tenant with the anchor in their source, and a
+    /// second ingest of the same title replaces them rather than doubling them.
+    #[tokio::test]
+    async fn ingest_text_stores_anchored_chunks_and_replaces_in_place() {
+        let store = crate::connect("mem://").await.unwrap();
+        let tenant = TenantId::new("ws:t");
+        principal::provision(&store, &tenant, &UserId::new("user:u"))
+            .await
+            .unwrap();
+        let embedder = FixedEmbedder::new(EMBED_DIM);
+        let anchor = GitProvenance::new("github.com/o/r", "b697da7").on_branch("main");
+        let first = ingest_text(
+            &store,
+            &embedder,
+            &tenant,
+            &args(
+                "routes",
+                "GET /health\nPOST /orders\n",
+                Some(anchor.clone()),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, 1);
+        let again = ingest_text(
+            &store,
+            &embedder,
+            &tenant,
+            &args(
+                "routes",
+                "GET /health\nPOST /orders\nDELETE /orders/{id}\n",
+                Some(anchor),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(again, 1);
+        assert_eq!(
+            document::list_titles(&store, &tenant).await.unwrap(),
+            vec!["routes".to_string()],
+            "re-ingesting a title does not add a second document"
+        );
+        let hits = document::recall(&store, &tenant, &embedder.embed("orders").await.unwrap(), 5)
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1, "one chunk, replaced in place");
+        let source = hits[0].source.as_deref().unwrap();
+        assert!(
+            source.starts_with("$ deno task routes @ git:github.com/o/r@b697da7#main"),
+            "{source}"
+        );
+        assert!(
+            hits[0].content.contains("DELETE /orders"),
+            "the newer content won"
+        );
+    }
+
+    #[test]
+    fn run_for_output_captures_stdout_and_reports_failure() {
+        let ok = run_for_output(&["cargo".to_string(), "--version".to_string()]).unwrap();
+        assert!(ok.starts_with("cargo "));
+        let err = run_for_output(&[
+            "cargo".to_string(),
+            "definitely-not-a-cargo-subcommand".to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("exited with"), "{err}");
+        assert!(run_for_output(&[]).is_err());
+    }
 }

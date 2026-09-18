@@ -4,39 +4,134 @@
 # and returns it as `additionalContext`. Never blocks session start -- every
 # failure degrades to an empty bootstrap.
 #
-# Targets a REST convenience endpoint POST {ANTUMBRA_URL}/mcp/call {tool,arguments}
-# (roadmap P-1; see ../../docs/product.md). Antumbra's current networked surface is
-# JSON-RPC at /mcp, so until P-1 ships either run a local shim or skip this script
-# and have the agent call recall_memories at the top of its first turn.
+# Git-aware. Inside a repository it tells Antumbra where the session is (repo
+# slug + branch) so recall scopes its hits, then checks each hit's git anchor
+# with git itself -- is the commit still on HEAD, does the branch still exist --
+# and tags it [live], [not-on-head], or [orphaned]. Nothing is re-extracted and
+# nothing is garbage-collected: a stale memory is visible instead of silently
+# wrong. Set ANTUMBRA_PENALIZE_ORPHANS=1 to also penalize orphaned memories.
+#
+# Talks to the REST convenience endpoint POST {ANTUMBRA_URL}/mcp/call
+# {tool, arguments}, which dispatches the same tools as the JSON-RPC /mcp
+# router under the same auth.
 param()
 
-$url       = if ($env:ANTUMBRA_URL)          { $env:ANTUMBRA_URL }          else { 'http://127.0.0.1:8081' }
-$workspace = if ($env:ANTUMBRA_WORKSPACE_ID) { $env:ANTUMBRA_WORKSPACE_ID } else { '' }
-$token     = if ($env:ANTUMBRA_TOKEN)        { $env:ANTUMBRA_TOKEN }        else { '' }
-$hostId    = if ($env:ANTUMBRA_HOST_ID)      { $env:ANTUMBRA_HOST_ID }      else { 'local' }
+$url       = if ($env:ANTUMBRA_URL)              { $env:ANTUMBRA_URL }              else { 'http://127.0.0.1:8081' }
+$token     = if ($env:ANTUMBRA_TOKEN)            { $env:ANTUMBRA_TOKEN }            else { '' }
+$hostId    = if ($env:ANTUMBRA_HOST_ID)          { $env:ANTUMBRA_HOST_ID }          else { 'local' }
+$penalize  = if ($env:ANTUMBRA_PENALIZE_ORPHANS) { $env:ANTUMBRA_PENALIZE_ORPHANS } else { '0' }
 
 $headers = @{ 'Content-Type' = 'application/json' }
 if ($token) { $headers['Authorization'] = "Bearer $token" }
 
-# Recall the agent's standing conventions + project memory (semantic search).
-$memText = ''
+# --- where the session is, in git terms (fail-open) -------------------------
+function Invoke-Git([string[]]$GitArgs) {
+    try {
+        $out = & git @GitArgs 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        $text = ($out | Out-String).Trim()
+        if ($text) { return $text } else { return $null }
+    } catch { return $null }
+}
+function Get-RepoSlug([string]$remote) {
+    # The ssh, scp, and https spellings of one remote become one slug: host/org/name.
+    if (-not $remote) { return '' }
+    $s = $remote.Trim()
+    $s = $s -replace '^[a-z+]+://', ''
+    $s = $s -replace '^[^/@]*@', ''
+    $s = $s -replace '^([^/:]+):', '$1/'
+    $s = $s -replace '\.git/?$', ''
+    $s = $s.TrimEnd('/').ToLowerInvariant()
+    if ($s -notmatch '/' -or $s -match '\\' -or $s.StartsWith('/')) { return '' }
+    return $s
+}
+
+$repo = ''; $commit = ''; $branch = ''
+if ((Get-Command git -ErrorAction SilentlyContinue) -and (Invoke-Git @('rev-parse', '--is-inside-work-tree'))) {
+    $commit = Invoke-Git @('rev-parse', 'HEAD')
+    $branch = Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD')
+    if ($branch -eq 'HEAD') { $branch = '' }
+    $repo = Get-RepoSlug (Invoke-Git @('remote', 'get-url', 'origin'))
+    if (-not $commit) { $commit = '' }
+    if (-not $branch) { $branch = '' }
+}
+
+# --- recall, scoped to here when known --------------------------------------
+$mems = @()
 try {
-    $payload = @{
-        tool      = 'recall_memories'
-        arguments = @{ query = 'standing conventions, project context, and active tasks for this agent'; limit = 12 }
-    } | ConvertTo-Json -Compress -Depth 5
+    $arguments = @{ query = 'standing conventions, project context, and active tasks for this agent'; top_k = 12 }
+    if ($repo)   { $arguments['repo']   = $repo }
+    if ($branch) { $arguments['branch'] = $branch }
+    $payload = @{ tool = 'recall_memories'; arguments = $arguments } | ConvertTo-Json -Compress -Depth 5
     $resp = Invoke-RestMethod -Method Post -Uri "$url/mcp/call" -Headers $headers -Body $payload -TimeoutSec 5 -ErrorAction Stop
     # The live /mcp/call answers with the tool's value at the TOP level
     # ({memories: [...]}); the .result envelope is tolerated for older shims.
-    $mems = if ($resp.memories) { $resp.memories } else { $resp.result.memories }
-    if ($mems -and $mems.Count -gt 0) {
-        $memText = ($mems | ForEach-Object { $_.content }) -join "`n`n---`n`n"
-    }
-} catch { }
+    $mems = if ($resp.memories) { @($resp.memories) } elseif ($resp.result.memories) { @($resp.result.memories) } else { @() }
+} catch { $mems = @() }
 
+# --- judge each hit's anchor with git in hand --------------------------------
+# One status per memory id: live | not-on-head | orphaned. Memories with no
+# anchor, or from another repository, get none (the server's `scope` still shows).
+$statuses = @{}
+if ($commit) {
+    foreach ($m in $mems) {
+        $p = $m.provenance
+        if (-not $p -or -not $p.commit -or $p.repo -ne $repo) { continue }
+        $st = 'live'
+        & git merge-base --is-ancestor $p.commit HEAD 2>$null
+        if ($LASTEXITCODE -ne 0) { $st = 'not-on-head' }
+        if ($p.branch -and $p.branch -ne $branch) {
+            & git show-ref --verify --quiet "refs/heads/$($p.branch)" 2>$null
+            $local = ($LASTEXITCODE -eq 0)
+            & git show-ref --verify --quiet "refs/remotes/origin/$($p.branch)" 2>$null
+            $remote = ($LASTEXITCODE -eq 0)
+            if (-not $local -and -not $remote) { $st = 'orphaned' }
+        }
+        $statuses[[string]$m.id] = $st
+    }
+}
+
+# Optionally push the judgment back: an orphaned memory loses standing now,
+# instead of waiting for someone to notice it was about a branch that is gone.
+if ($penalize -eq '1') {
+    foreach ($id in ($statuses.Keys | Where-Object { $statuses[$_] -eq 'orphaned' })) {
+        try {
+            $body = @{ tool = 'penalize_memory'; arguments = @{ memory_id = $id } } | ConvertTo-Json -Compress -Depth 4
+            Invoke-RestMethod -Method Post -Uri "$url/mcp/call" -Headers $headers -Body $body -TimeoutSec 3 -ErrorAction Stop | Out-Null
+        } catch { }
+    }
+}
+
+# --- render ---------------------------------------------------------------------
+$memText = ''
+if ($mems.Count -gt 0) {
+    $lines = foreach ($m in $mems) {
+        $tags = @()
+        if ($statuses.ContainsKey([string]$m.id)) { $tags += $statuses[[string]$m.id] }
+        if ($m.scope) { $tags += [string]$m.scope }
+        $prefix = if ($tags.Count -gt 0) { '[' + ($tags -join ', ') + '] ' } else { '' }
+        $anchor = ''
+        if ($m.provenance) {
+            $anchor = "`n  (learned at $($m.provenance.repo)@$($m.provenance.commit)"
+            if ($m.provenance.branch) { $anchor += "#$($m.provenance.branch)" }
+            $anchor += ')'
+        }
+        "$prefix$($m.content)$anchor"
+    }
+    $memText = $lines -join "`n`n---`n`n"
+}
 if (-not $memText) { $memText = '[Antumbra bootstrap empty / unreachable -- starting cold.]' }
 
-$additionalContext = "# Antumbra session bootstrap (host=$hostId)`n`n$memText"
+$gitLine = ''
+if ($commit) {
+    $shownBranch = if ($branch) { $branch } else { '(detached)' }
+    $shownRepo   = if ($repo)   { $repo }   else { '?' }
+    $gitLine = "Git context: repo=$shownRepo branch=$shownBranch commit=$commit. " +
+               "When storing a memory about this code, pass provenance {repo: `"$repo`", commit: `"$commit`", branch: `"$branch`"} to store_memory (add path for a single file) so a later session can tell whether it still applies. " +
+               "Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin -- verify before relying on it, and penalize_memory if it is wrong.`n`n"
+}
+
+$additionalContext = "# Antumbra session bootstrap (host=$hostId)`n`n$gitLine$memText"
 
 @{
     hookSpecificOutput = @{

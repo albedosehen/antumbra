@@ -78,6 +78,25 @@ ANTUMBRA_HOST_ID=<this-device>         # provenance stamp on what it writes
 
 ---
 
+## Memories about code carry their anchor (provenance over extraction)
+
+A memory about code is only as good as its anchor. Static extraction keeps a symbol table fresh by re-extracting and pruning; with many concurrent branches that snapshot goes stale silently. Antumbra keeps the anchor **on the memory** and judges it at recall, where git is ([ADR-0018](adr/0018-provenance-over-extraction.md)):
+
+- **Capture** stamps memories about code with `provenance {repo, commit, branch[, path]}` (the capture hook computes it; `store_memory` stores it as one `git:` evidence entry).
+- **Recall** takes the caller's `repo` and `branch` and returns every hit with a `scope` (`in_scope`, `other_branch`, `other_repo`), demoting out-of-scope hits below in-scope ones without hiding them: the branch is a governing feature, exactly as a repo-scoped convention is.
+- **Bootstrap** asks git whether each anchor's commit is on HEAD and whether its branch still exists, and tags hits `[live]`, `[not-on-head]`, or `[orphaned]` (`ANTUMBRA_PENALIZE_ORPHANS=1` also penalizes the orphans). Nothing is re-extracted; a stale memory is visible instead of silently wrong.
+
+Inventory questions ("what routes does this service expose?") get a parser-free answer the same way: run the framework's own lister and keep what it printed, stamped with the anchor, and let git state what it already knows.
+
+```bash
+antumbra ingest --tenant ws:me --user user:me --title routes -- deno task routes   # or an OpenAPI export, cargo metadata, ...
+antumbra git-facts --tenant ws:me --user user:me --compartment comp:repo --days 90  # ownership, hotspots, co-change
+```
+
+`recall_documents` then names the commit each chunk describes, and re-ingesting a title replaces its chunks in place. Inventory is never answered from expert weights: provenance-backed memory and documents say *what exists*; experts say *how to do it*.
+
+---
+
 ## Two ways to run it
 
 Antumbra is the **same engine** in both modes; only the transport and identity differ.

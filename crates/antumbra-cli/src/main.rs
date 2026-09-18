@@ -1,13 +1,14 @@
 //! Antumbra operator CLI (`antumbra`). v0 surface: apply the schema, print the
 //! generated DDL, inspect the population, and drive the generational loop.
 //!
-//! Until the real candle/llama engines land (antumbra-train / antumbra-serve),
-//! `loop` runs with the demo trainer + embedder so the durable generational loop is
-//! exercisable end-to-end.
+//! `loop --demo` drives the durable generational loop with the scripted demo
+//! trainer + embedder so persistence and resume are exercisable without a model;
+//! real training is `train` under `--features models`.
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{Expert, ExpertId, Generation, RunId, ShadowStatus};
+use antumbra_embed::HttpEmbedder;
 use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, expert, shadow};
@@ -17,6 +18,8 @@ use clap::Parser;
 
 mod cli;
 mod commands;
+mod gitctx;
+mod gitfacts;
 mod ops;
 use cli::{Cli, Command};
 
@@ -51,17 +54,54 @@ async fn connect(url: &str) -> anyhow::Result<Store> {
     Ok(Store::connect(config, EMBED_DIM).await?)
 }
 
-/// The active embedder: real candle BERT under `--features models`, else the
-/// byte-histogram fake. Both produce `EMBED_DIM`-wide vectors so the gate and
-/// store stay dimension-consistent.
-#[cfg(feature = "models")]
+/// The embedder choice from the global `--embedder-url` / `--fake-embedder`
+/// flags, captured once (like `DB_CREDS`) so the many handlers that embed can
+/// call `make_embedder` without threading the flags through every call site.
+static EMBEDDER: std::sync::OnceLock<EmbedderChoice> = std::sync::OnceLock::new();
+
+struct EmbedderChoice {
+    url: Option<String>,
+    model: String,
+    key: Option<String>,
+    fake: bool,
+}
+
+/// The active embedder. A configured `--embedder-url` always wins (the same
+/// endpoint the population was built with). Otherwise the byte-histogram
+/// stand-in only when `--fake-embedder` asks for it explicitly, the real candle
+/// BERT under `--features models`, and a refusal without `models`: a command
+/// whose recall silently matched character statistics instead of meaning would
+/// be worse than one that stops and says so. Every path produces `EMBED_DIM`-wide
+/// vectors so the gate and store stay dimension-consistent.
 fn make_embedder() -> anyhow::Result<Box<dyn Embedder>> {
+    let choice = EMBEDDER
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("embedder flags were not captured before a handler ran"))?;
+    if let Some(url) = &choice.url {
+        return Ok(Box::new(HttpEmbedder::new(
+            url.clone(),
+            choice.model.clone(),
+            choice.key.clone(),
+        )));
+    }
+    if choice.fake {
+        return Ok(Box::new(FixedEmbedder::new(EMBED_DIM)));
+    }
+    builtin_embedder()
+}
+
+#[cfg(feature = "models")]
+fn builtin_embedder() -> anyhow::Result<Box<dyn Embedder>> {
     Ok(Box::new(antumbra_serve::BertEmbedder::load()?))
 }
 
 #[cfg(not(feature = "models"))]
-fn make_embedder() -> anyhow::Result<Box<dyn Embedder>> {
-    Ok(Box::new(FixedEmbedder::new(EMBED_DIM)))
+fn builtin_embedder() -> anyhow::Result<Box<dyn Embedder>> {
+    anyhow::bail!(
+        "no embedder configured: pass --embedder-url <OpenAI-compatible /embeddings endpoint \
+         returning {EMBED_DIM}-d vectors> (for example Ollama serving all-minilm), or \
+         --fake-embedder to accept the non-semantic byte-histogram stand-in (demos only)"
+    )
 }
 
 /// Train (or retrain) the learned router over the whole population's exemplars
@@ -137,6 +177,12 @@ fn main() -> anyhow::Result<()> {
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let _ = DB_CREDS.set((cli.db_user.clone(), cli.db_pass.clone()));
+    let _ = EMBEDDER.set(EmbedderChoice {
+        url: cli.embedder_url.clone(),
+        model: cli.embedder_model.clone(),
+        key: cli.embedder_key.clone(),
+        fake: cli.fake_embedder,
+    });
     match cli.command {
         Command::Migrate => {
             connect(&cli.url).await?;
@@ -216,7 +262,18 @@ async fn run() -> anyhow::Result<()> {
                 boundaries.len() - actionable
             );
         }
-        Command::Loop { generations, run } => {
+        Command::Loop {
+            generations,
+            run,
+            demo,
+        } => {
+            if !demo {
+                anyhow::bail!(
+                    "`loop` drives the durable loop with a scripted demo trainer that always \
+                     graduates; no model is trained. Pass --demo to run it as such, or use \
+                     `train` under --features models for real training."
+                );
+            }
             let store = connect(&cli.url).await?;
             let trainer = ScriptedTrainer::graduating();
             let embedder = FixedEmbedder::new(EMBED_DIM);
@@ -1025,6 +1082,83 @@ async fn run() -> anyhow::Result<()> {
                 },
             )
             .await?;
+        }
+        Command::Ingest {
+            tenant,
+            user,
+            title,
+            file,
+            source,
+            path,
+            no_git,
+            run,
+        } => {
+            let (content, default_source) = match (file, run.is_empty()) {
+                (Some(f), true) => (
+                    std::fs::read_to_string(&f)
+                        .map_err(|e| anyhow::anyhow!("read {}: {e}", f.display()))?,
+                    f.display().to_string(),
+                ),
+                (None, false) => (ops::run_for_output(&run)?, format!("$ {}", run.join(" "))),
+                _ => anyhow::bail!("give exactly one of --file <path> or `-- <command ...>`"),
+            };
+            // The anchor is what makes the document answerable later: a recalled
+            // chunk names the commit it describes, so a session can tell whether
+            // it is still on HEAD.
+            let provenance = (!no_git)
+                .then(gitctx::detect)
+                .flatten()
+                .map(|p| match path {
+                    Some(path) => p.at_path(path),
+                    None => p,
+                });
+            ops::ingest(
+                &cli.url,
+                ops::IngestArgs {
+                    tenant,
+                    user,
+                    title,
+                    source: Some(source.unwrap_or(default_source)),
+                    content,
+                    provenance,
+                },
+            )
+            .await?;
+        }
+        Command::GitFacts {
+            tenant,
+            user,
+            compartment,
+            days,
+            top,
+            dry_run,
+        } => {
+            let log = gitfacts::read_log(days).ok_or_else(|| {
+                anyhow::anyhow!("not inside a git repository (or git is not on the path)")
+            })?;
+            let facts = gitfacts::derive(&gitfacts::parse_log(&log), top);
+            let sentences = gitfacts::render(&facts, days);
+            let anchor = gitctx::detect();
+            let evidence = gitfacts::evidence(anchor.as_ref(), &facts, days);
+            for s in &sentences {
+                println!("{s}");
+            }
+            if dry_run {
+                println!("(dry run: {} fact(s) not stored)", sentences.len());
+            } else {
+                let stored = ops::store_facts(
+                    &cli.url,
+                    ops::FactsArgs {
+                        tenant,
+                        user,
+                        compartment,
+                        facts: sentences,
+                        evidence,
+                    },
+                )
+                .await?;
+                println!("stored {stored} fact(s) with evidence {:?}", facts.range);
+            }
         }
         Command::Metabolize {
             source,

@@ -8,7 +8,7 @@ Antumbra is a private substrate that plugs into a coding agent you already use (
 
 Most "AI assistants" are one large model in someone else's data center: you rent it, you send it your data, and it is exactly as good tomorrow as today. It never learns _your_ work.
 
-Antumbra takes the opposite approach. It maintains a **population of small, frozen specialists** [LoRA adapters](https://huggingface.co/docs/peft/en/developer_guides/lora) over one shared, code-capable base model, each good at a narrow, recurring task. When a result is **verified** (a test passes, a command works, a schema matches, you accept a draft), that competence is trained into an adapter and [**frozen** into the population](https://openreview.net/forum?id=aGOQYJfz6H). A [**learned router**](https://www.sciencedirect.com/science/article/pii/S111001682500122X) sends each new task to the specialist most likely to handle it, and a [**competence boundary**](https://eric.ed.gov/?id=ED306490) decides whether to answer locally or escalate. The payoff: over time it gets measurably better at the work you do most, on your own machine, with your data never leaving the building.
+Antumbra takes the opposite approach. It maintains a **population of small, frozen specialists** [LoRA adapters](https://huggingface.co/docs/peft/en/developer_guides/lora) over one shared, code-capable base model, each good at a narrow, recurring task. When a result is **verified** (a test passes, a command works, a schema matches, you accept a draft), that competence is trained into an adapter and [**frozen** into the population](https://openreview.net/forum?id=aGOQYJfz6H). A [**router**](https://www.sciencedirect.com/science/article/pii/S111001682500122X) sends each new task to the specialist most likely to handle it (today a trained per-dimension metric over the experts' capability centroids behind a relative-coverage gate; a learned latent mixer is the north star), and a [**competence boundary**](https://eric.ed.gov/?id=ED306490) decides whether to answer locally or escalate. The payoff: over time it gets measurably better at the work you do most, on your own machine, with your data never leaving the building.
 
 It is also a deliberate offramp from renting frontier models. Early on a big remote model does the heavy lifting (cold-start, the genuinely novel); as your verified memory accumulates and specialists graduate, more of your everyday work is served locally and the expensive tier shrinks, at whatever pace you choose. The portable asset is the memory, not the adapters: a specialist is a LoRA overlay on a specific base, so when you move to a stronger local model you re-derive your specialists from the memory you already captured rather than starting over. Small, open models are improving fast (2026 alone brought capable on-device models and the first million-token-context open models), so Antumbra is built to turn that curve into capability that is specialized to your work, private, and yours.
 
@@ -90,6 +90,7 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 **Validated (toward 2026-06):**
 
+- **Provenance over extraction ([ADR-0018](docs/adr/0018-provenance-over-extraction.md)).** Memories about code carry a git anchor (repo, commit, branch) that recall scopes to where the caller is and the session hook judges against HEAD (`[live]`, `[not-on-head]`, `[orphaned]`); inventory answers come from ingesting what the framework itself prints (`antumbra ingest -- <lister>`) and from `git log` (`antumbra git-facts`), never from a parser Antumbra would have to maintain.
 - **Training works on a real GPU.** RAFT lifts pass-rate to 1.0 under both a convention reward and a verifier that _executes_ generated code; the generation-quality recipe is dialed in, and a small corpus trains an expert that generalizes to held-out inputs.
 - **Consolidation closes the loop:** memories score through the gate and graduate into a specialist; a private compartment consolidates into a private expert.
 - **Routing + boundary:** a real embedder drives a gate that routes to the right specialist and escalates out-of-scope queries by _relative coverage_, not an absolute floor; the counterfactual boundary composes end-to-end.
@@ -105,6 +106,8 @@ Every milestone is a falsifiable experiment with a kill criterion.
 New here? **[docs/getting-started.md](docs/getting-started.md)** is the full end-to-end setup (the Docker stack, the embedder, and your agent) for macOS, Windows, and Linux. The quick paths below cover just the binaries.
 
 ### Prebuilt binaries (no Rust toolchain)
+
+> No release has been tagged yet, so the installers below resolve only once the first version tag is pushed (the `Release` workflow builds them). Until then, build from source.
 
 Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS, Linux, Windows) from the latest GitHub release. The operator console (`antumbra-tui`):
 
@@ -138,12 +141,26 @@ Both the prebuilt binaries and `just install` produce the light, no-GPU build. G
 # Operator console (ratatui): a live view of the population, gate, loop, and memory.
 antumbra-tui
 
-# Drive the durable loop with the CPU trainer, then inspect it. The CLI and the
-# operator console share one persistent on-disk store by default, so state from
-# one command is there for the next (and shows up live in antumbra-tui).
-antumbra schema            # print the generated DDL
-antumbra loop --generations 3
+# Drive the durable loop with the scripted DEMO trainer (--demo: it always
+# graduates; real training is `train` under --features models), then inspect
+# it. The CLI and the operator console share one persistent on-disk store by
+# default, so state from one command is there for the next (and shows up live
+# in antumbra-tui).
+antumbra schema                        # print the generated DDL
+antumbra loop --demo --generations 3
 antumbra status
+
+# Anything that embeds (remember, route, ingest, ...) needs an embedder: bring an
+# OpenAI-compatible /embeddings endpoint (Ollama serving all-minilm), or pass
+# --fake-embedder for a demo (a byte histogram: NOT semantic). Without
+# --features models a command refuses to run with neither, rather than degrade.
+antumbra --embedder-url http://127.0.0.1:11434/v1/embeddings route "reverse a string"
+
+# Answer inventory questions without a parser: store what the framework's own
+# lister prints, stamped with the repo, commit, and branch it ran at; and derive
+# ownership / hotspots / co-change from git log, anchored to the commit range.
+antumbra --embedder-url ... ingest --tenant ws:me --user user:me --title routes -- deno task routes
+antumbra git-facts --tenant ws:me --user user:me --compartment comp:repo --days 90
 
 # Bidirectional sync between this local store and a remote authoritative SurrealDB.
 antumbra sync --remote ws://host:8000/rpc --remote-user root --remote-pass <pw>
@@ -158,8 +175,7 @@ cargo run -p antumbra-cli --features models,cuda -- \
   ask "Write a Python function add(a, b) that returns their sum."   # route -> load adapter -> generate
 ```
 
-The networked MCP server (`antumbra-mcp --http 0.0.0.0:8081 --url ws://... --db-user
-root --db-pass <pw>`, with a JWT key) and its live multi-tenant validation are reproducible with the probes under `docs/` (against a SurrealDB v3 server, e.g. `docker run -p 8000:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root
+The networked MCP server (`antumbra-mcp --http 0.0.0.0:8081 --url ws://... --db-user root --db-pass <pw> --embedder-url <your /embeddings endpoint>`, with a JWT key; without `--features models` the server refuses to start with no embedder rather than fall back to the `--fake-embedder` stand-in) and its live multi-tenant validation are reproducible with the probes under `docs/` (against a SurrealDB v3 server, e.g. `docker run -p 8000:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root
 memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUDA recipe and the validated generation-quality settings.
 
 ---
@@ -178,4 +194,4 @@ memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUD
 
 ### Crates
 
-`antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.
+`antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-rerank` (cross-encoder `/rerank` client behind the `Reranker` port) · `antumbra-bench` (retrieval-quality harness) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.
