@@ -12,7 +12,7 @@ use antumbra_core::{
 };
 use antumbra_store::repo::{expert, memory, principal};
 use antumbra_store::{Store, EMBED_DIM};
-use antumbra_train::consolidate::{score_memory, ConsolidationPolicy};
+use antumbra_train::consolidate::{gate_report, score_memory, ConsolidationPolicy, GateReport};
 use antumbra_train::memory::{to_task, ImportPolicy, MemoryRecord};
 use antumbra_train::{capture_corrections, CandleModelLoader, CorpusTask, ModelLoader, RaftConfig};
 
@@ -27,12 +27,26 @@ pub struct ConsolidationOutcome {
     pub fitness: f32,
 }
 
+/// How a consolidation ended. Every arm says something: a run that returns
+/// quietly is indistinguishable from a trigger that never fired.
+#[derive(Debug, Clone)]
+pub enum Consolidation {
+    /// Graduates were captured and a private expert was minted.
+    Minted(ConsolidationOutcome),
+    /// Nothing cleared the gate, so nothing trained. The report says why.
+    HeldBack(GateReport),
+    /// Graduates were captured but the adapter learned nothing, so no expert
+    /// was minted (and any prior working expert was left in place).
+    DidNotLearn { graduated: usize, fitness: f32 },
+}
+
 /// Consolidate one compartment into a private expert: gather its memories, keep
 /// the ones that clear the gate (recurrence / stability / verifiability), capture
 /// them through the verifier-checked LoRA loop on the GPU, and mint (superseding
 /// on re-run) a private expert owned by `user`, routed for its owner by centroid.
-/// Returns `None` when nothing in the compartment graduates, so the caller can
-/// skip the expensive train and any router refresh.
+/// Returns [`Consolidation::HeldBack`] before any model load when nothing in the
+/// compartment graduates, so the caller skips the expensive train and any router
+/// refresh, and still learns why.
 pub async fn consolidate_compartment(
     store: &Store,
     embedder: &dyn Embedder,
@@ -41,7 +55,7 @@ pub async fn consolidate_compartment(
     compartment: &CompartmentId,
     policy: &ConsolidationPolicy,
     cfg: &RaftConfig,
-) -> Result<Option<ConsolidationOutcome>> {
+) -> Result<Consolidation> {
     principal::provision(store, tenant, user).await?;
 
     // Gather -> convert -> score -> keep the graduates (all CPU; the gate is
@@ -50,15 +64,15 @@ pub async fn consolidate_compartment(
     let conv = ImportPolicy {
         capture_threshold: 0.0,
     };
-    let tasks: Vec<CorpusTask> = mems
+    let records: Vec<MemoryRecord> = mems.iter().map(MemoryRecord::from_memory).collect();
+    let tasks: Vec<CorpusTask> = records
         .iter()
         .enumerate()
-        .map(|(i, m)| (i, MemoryRecord::from_memory(m)))
         .filter(|(_, r)| score_memory(r, policy).graduate)
-        .map(|(i, r)| to_task(&r, i, &conv).task)
+        .map(|(i, r)| to_task(r, i, &conv).task)
         .collect();
     if tasks.is_empty() {
-        return Ok(None);
+        return Ok(Consolidation::HeldBack(gate_report(&records, policy)));
     }
     let graduated = tasks.len();
 
@@ -82,12 +96,10 @@ pub async fn consolidate_compartment(
     // non-functional expert that then wins routes and churns escalation, and
     // would supersede any prior working expert. Mint only if it learned something.
     if out.final_fitness <= 0.0 || out.final_fitness.is_nan() {
-        eprintln!(
-            "[consolidate] {}: capture did not learn (fitness {:.2}); not minting",
-            compartment.as_str(),
-            out.final_fitness
-        );
-        return Ok(None);
+        return Ok(Consolidation::DidNotLearn {
+            graduated,
+            fitness: out.final_fitness,
+        });
     }
 
     // The capability vector is the centroid of the prompts it provably solved.
@@ -123,7 +135,7 @@ pub async fn consolidate_compartment(
     expert::delete(store, &e.id).await?; // supersede on re-run
     expert::insert(store, &e).await?;
 
-    Ok(Some(ConsolidationOutcome {
+    Ok(Consolidation::Minted(ConsolidationOutcome {
         expert: e.id,
         adapter_uri: e.artifact_uri,
         graduated,

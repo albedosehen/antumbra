@@ -24,7 +24,7 @@ async fn state() -> Arc<HttpState> {
         profile: None,
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     })
 }

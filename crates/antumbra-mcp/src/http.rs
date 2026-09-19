@@ -169,11 +169,11 @@ struct HttpState {
     /// Bounded so a host that sees many distinct identities cannot grow it without
     /// limit; an evicted identity rebuilds its service on the next request.
     sessions: Mutex<Bounded<Identity, IdentityService>>,
-    /// Compartments with a consolidation in flight, SHARED across every
-    /// per-identity server so concurrent reinforces of the same compartment
-    /// collapse into one train (each request builds a fresh `McpServer`, so a
-    /// per-instance guard never coalesces and they race on the weight download).
-    consolidating: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Consolidation state, SHARED across every per-identity server so concurrent
+    /// reinforces of the same compartment collapse into one train (each request
+    /// builds a fresh `McpServer`, so per-instance state never coalesces and they
+    /// race on the weight download).
+    consolidating: crate::server::consolidation::SharedConsolidation,
     /// Live-propagation (R-2) delivery: each session registers its peer here on
     /// initialize; the change watcher pushes shared-memory changes to recipients.
     registry: crate::notify::PeerRegistry,
@@ -230,7 +230,7 @@ pub async fn serve(
         profile,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     });
     spawn_live_propagation(state.clone());
