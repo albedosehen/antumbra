@@ -27,7 +27,7 @@ use antumbra_train::{
 use crate::refresh_router;
 
 use antumbra_copal::CopalArchive;
-use antumbra_core::{GitProvenance, TenantId, UserId};
+use antumbra_core::{CompartmentId, GitProvenance, TenantId, UserId};
 pub use antumbra_ingest::Ingested;
 use antumbra_store::repo::principal;
 
@@ -671,6 +671,8 @@ pub struct IngestArgs {
     pub content: String,
     /// The git anchor to fold into every chunk's `source`, when known.
     pub provenance: Option<GitProvenance>,
+    /// The compartment to keep the document in (`None` = the shared pool).
+    pub compartment: Option<String>,
 }
 
 /// Ingest a knowledge document from the CLI: chunk, embed, store, the same shape
@@ -689,11 +691,32 @@ pub async fn ingest(
     let tenant = TenantId::new(a.tenant.as_str());
     let user = UserId::new(a.user.as_str());
     principal::provision(&store, &tenant, &user).await?;
+    let compartment = a
+        .compartment
+        .as_deref()
+        .filter(|c| !c.trim().is_empty())
+        .map(CompartmentId::new);
+    // The CLI connects as owner, which the engine's write rule does not bind, so
+    // hold `--user` to it here: without this, an operator's typo would file one
+    // member's document in another member's compartment. Asked before anything is
+    // archived, like the server does.
+    if let Some(compartment) = &compartment {
+        if !antumbra_store::repo::compartment::can_write(&store, &tenant, &user, compartment)
+            .await?
+        {
+            anyhow::bail!(
+                "{} cannot write to compartment '{}' (not its owner, no link grant, or it does not exist)",
+                user.as_str(),
+                compartment.as_str()
+            );
+        }
+    }
     let doc = antumbra_ingest::Document {
         title: a.title.clone(),
         source: a.source.clone(),
         content: a.content.clone(),
         provenance: a.provenance.clone(),
+        compartment,
     };
     // The one ingest path every door takes (`antumbra-ingest`).
     let out =

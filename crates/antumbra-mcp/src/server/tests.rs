@@ -214,6 +214,7 @@ async fn rerank_reorders_document_chunks_too() {
     )));
     // Two short docs so each is a single chunk; one carries the token.
     s.ingest_document(Parameters(IngestDocumentParams {
+        compartment: None,
         provenance: None,
         title: "doc-a".into(),
         source: None,
@@ -222,6 +223,7 @@ async fn rerank_reorders_document_chunks_too() {
     .await
     .unwrap();
     s.ingest_document(Parameters(IngestDocumentParams {
+        compartment: None,
         provenance: None,
         title: "doc-b".into(),
         source: None,
@@ -258,10 +260,13 @@ async fn auto_consolidate_mints_a_private_expert_on_reinforce() {
     // yet: the trigger must be able to hot-register the minted expert into it,
     // so `answer` serves it with no restart. Hand-building an engine here hid
     // the cold start, where the server came up with no engine at all (EXP-022).
-    let serve = crate::build_serve(&store)
-        .await
-        .unwrap()
-        .expect("a fresh node still gets a serving engine");
+    let serve = match crate::build_serve(&store).await {
+        Ok(Some(serve)) => serve,
+        other => panic!(
+            "a fresh node must still get a serving engine, got {:?}",
+            other.map(|engine| engine.is_some())
+        ),
+    };
     let s = McpServer::new(
         store.clone(),
         Arc::new(FixedEmbedder::new(EMBED_DIM)),
@@ -552,6 +557,7 @@ async fn ingest_then_recall_a_knowledge_document() {
     let s = server().await;
     let ingested = s
         .ingest_document(Parameters(IngestDocumentParams {
+            compartment: None,
             provenance: None,
             title: "Onboarding".into(),
             content: "Antumbra keeps knowledge documents separate from episodic memory. \
@@ -595,6 +601,97 @@ async fn ingest_then_recall_a_knowledge_document() {
 /// A canned copal for the ingest tests: create answers with a fixed file
 /// id, upload with a fixed digest; `Err` variants exercise the fail-closed
 /// path (a configured archive that is down must fail the ingest).
+/// A copal that counts what reaches it, so a test can show that a refused
+/// ingest never got as far as the archive.
+struct CountingCopal {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl antumbra_copal::CopalTransport for CountingCopal {
+    fn post_json(
+        &self,
+        _url: &str,
+        _credential: &antumbra_copal::CopalCredential,
+        _body: &serde_json::Value,
+    ) -> antumbra_core::Result<serde_json::Value> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(serde_json::json!({ "id": "file:01J", "state": "draft" }))
+    }
+
+    fn put_bytes(
+        &self,
+        _url: &str,
+        _credential: &antumbra_copal::CopalCredential,
+        _content_type: &str,
+        _body: &[u8],
+    ) -> antumbra_core::Result<serde_json::Value> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(serde_json::json!({ "digest": "sha256:abc", "state": "ready" }))
+    }
+}
+
+/// A document goes into a compartment only when its author can write there, and
+/// the question is asked before the original is archived: the ingest uploads
+/// first, and the engine's refusal of a chunk is silent, so a refusal discovered
+/// afterwards would already have left the original in the archive.
+#[tokio::test]
+async fn ingest_into_a_compartment_is_private_and_refused_before_archiving_when_not_yours(
+) -> anyhow::Result<()> {
+    let copal = Arc::new(CountingCopal {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let archive = Arc::new(antumbra_copal::CopalArchive::with_transport(
+        "127.0.0.1:9010",
+        antumbra_copal::CopalTenancy::PerWorkspace,
+        copal.clone(),
+    ));
+    let s = server().await.with_copal_archive(archive);
+    let mine = s
+        .create_compartment(Parameters(CreateCompartmentParams {
+            name: "reviews".into(),
+        }))
+        .await?
+        .0
+        .id;
+    let doc = |compartment: &str| IngestDocumentParams {
+        compartment: Some(compartment.into()),
+        provenance: None,
+        title: "review".into(),
+        content: "A private salary review.".into(),
+        source: None,
+    };
+
+    let refused = match s
+        .ingest_document(Parameters(doc("comp:someone-elses")))
+        .await
+    {
+        Ok(_) => anyhow::bail!("a compartment that is not yours must be refused"),
+        Err(e) => e.message.to_string(),
+    };
+    assert!(refused.contains("not one you can write to"), "{refused}");
+    assert_eq!(
+        copal.calls.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "nothing reached the archive"
+    );
+
+    s.ingest_document(Parameters(doc(&mine))).await?;
+    assert!(copal.calls.load(std::sync::atomic::Ordering::SeqCst) > 0);
+    let recalled = s
+        .recall_documents(Parameters(RecallDocumentsParams {
+            query: "salary review".into(),
+            top_k: Some(3),
+        }))
+        .await?;
+    assert_eq!(recalled.0.chunks.len(), 1);
+    assert_eq!(
+        recalled.0.chunks[0].compartment.as_deref(),
+        Some(mine.as_str()),
+        "the recalled chunk says where it is kept"
+    );
+    Ok(())
+}
+
 struct CannedCopal {
     up: bool,
 }
@@ -643,6 +740,7 @@ fn canned_archive(up: bool) -> Arc<antumbra_copal::CopalArchive> {
 async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() {
     let s = server().await.with_copal_archive(canned_archive(true));
     s.ingest_document(Parameters(IngestDocumentParams {
+        compartment: None,
         provenance: None,
         title: "Onboarding".into(),
         content: "Antumbra keeps knowledge documents separate from episodic memory. \
@@ -678,6 +776,7 @@ async fn ingest_fails_closed_when_the_configured_copal_is_unreachable() {
     let s = server().await.with_copal_archive(canned_archive(false));
     let res = s
         .ingest_document(Parameters(IngestDocumentParams {
+            compartment: None,
             provenance: None,
             title: "Onboarding".into(),
             content: "some reference text".into(),

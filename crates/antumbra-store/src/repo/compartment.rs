@@ -354,6 +354,32 @@ pub async fn list_for_grantee(
         .collect()
 }
 
+/// Whether `user` may write into `compartment`: they own it, or hold a live
+/// `link` grant on it (a `reference` grant reads and no more). The app-side
+/// mirror of the engine's write rule, for a caller that has to know *before* it
+/// acts. An ingest archives the original before it writes a chunk, and under a
+/// record session the engine's refusal of that chunk is silent, so by the time
+/// anyone noticed, the original would already sit in the archive under a
+/// compartment its author could not write to.
+pub async fn can_write(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+    compartment: &CompartmentId,
+) -> Result<bool> {
+    // Absent or deleted: nobody writes there.
+    let Some(found) = get(store, tenant, compartment).await? else {
+        return Ok(false);
+    };
+    if found.owner == *user {
+        return Ok(true);
+    }
+    Ok(list_for_grantee(store, tenant, user)
+        .await?
+        .iter()
+        .any(|g| g.compartment == *compartment && g.capability.allows_link()))
+}
+
 /// Every **live** grant on a compartment (its grantees) -- the other half, with
 /// the owner, of who may see the compartment's memories. Used to fan a live
 /// change out to its audience (R-2). Revoked grants are excluded.

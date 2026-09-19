@@ -129,22 +129,22 @@ mod tests {
     /// computes synchronously for a while: other work must still run promptly.
     /// Spawned with `tokio::spawn`, the second task waits out the whole compute.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn heavy_work_does_not_stall_the_runtime() {
+    async fn heavy_work_does_not_stall_the_runtime() -> anyhow::Result<()> {
         let compute = Duration::from_millis(900);
         let (computing, started) = std::sync::mpsc::channel();
         let heavy = spawn_heavy(async move {
-            computing.send(()).unwrap();
+            computing.send(())?;
             std::thread::sleep(compute);
-            7
+            Ok::<_, std::sync::mpsc::SendError<()>>(7)
         });
         // Wait until the heavy task is inside its synchronous section. Not a
         // timer: the lone worker also drives the timers, so with the worker
         // pinned a sleep here would only fire once the compute was over, and the
         // measurement below would start after the stall it is meant to catch.
-        started.recv().unwrap();
+        started.recv()?;
 
         let asked = Instant::now();
-        let light = tokio::spawn(async { 1 }).await.unwrap();
+        let light = tokio::spawn(async { 1 }).await?;
         let waited = asked.elapsed();
 
         assert_eq!(light, 1);
@@ -152,19 +152,20 @@ mod tests {
             waited < compute / 3,
             "a light task waited {waited:?} behind {compute:?} of compute"
         );
-        assert_eq!(heavy.await.unwrap(), 7, "and the heavy task still finishes");
+        assert_eq!(heavy.await??, 7, "and the heavy task still finishes");
+        Ok(())
     }
 
     /// Awaits inside heavy work resolve: the blocking thread drives the future,
     /// the runtime drives its timers and I/O.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn heavy_work_can_still_await() {
+    async fn heavy_work_can_still_await() -> anyhow::Result<()> {
         let out = spawn_heavy(async {
             tokio::time::sleep(Duration::from_millis(20)).await;
             "done"
         })
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(out, "done");
+        Ok(())
     }
 }
