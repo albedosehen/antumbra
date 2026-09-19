@@ -17,11 +17,14 @@ services:
       - start
       - --user
       - root
-      - --pass
-      - ${SURREAL_PASS:?set SURREAL_PASS in docker/.env}
       - --bind
       - 0.0.0.0:8000
       - rocksdb:/data/antumbra.db
+    # The root password rides the environment (surreal reads SURREAL_PASS), never
+    # the command line, so a process listing or `docker inspect .Args` does not
+    # print it.
+    environment:
+      - SURREAL_PASS=${SURREAL_PASS:?set SURREAL_PASS in docker/.env}
     volumes:
       - ${ANTUMBRA_SURREAL_DATA:?set ANTUMBRA_SURREAL_DATA in docker/.env}:/data
     ports:
@@ -54,14 +57,18 @@ services:
       - ws://surrealdb:8000/rpc
       - --db-user
       - root
-      - --db-pass
-      - ${SURREAL_PASS}
       - --embedder-url
       - ${ANTUMBRA_EMBEDDER_URL:-http://host.docker.internal:11434/v1/embeddings}
       - --embedder-model
       - ${ANTUMBRA_EMBEDDER_MODEL:-all-minilm}
+    # Secrets ride the environment, never the command line. Members of the
+    # docker group can still read a container's environment through `docker
+    # inspect`; a deployment that mounts secrets as files (Docker secrets,
+    # Kubernetes, a Key Vault CSI mount) passes --db-pass-file and
+    # --jwt-secret-file instead and keeps them out of both.
     environment:
       - ANTUMBRA_JWT_SECRET=${ANTUMBRA_JWT_SECRET:?set ANTUMBRA_JWT_SECRET in docker/.env}
+      - ANTUMBRA_DB_PASS=${SURREAL_PASS}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -100,8 +107,6 @@ services:
       # local bring-up.
       - --db-user
       - ${ANTUMBRA_CONTROL_DB_USER:-root}
-      - --db-pass
-      - ${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
       - --db-auth
       - ${ANTUMBRA_CONTROL_DB_AUTH:-root}
       - --addr
@@ -112,6 +117,7 @@ services:
       - /keys/control-signing.pem
     environment:
       - ANTUMBRA_MAGIC_SECRET=${ANTUMBRA_MAGIC_SECRET:?set ANTUMBRA_MAGIC_SECRET in docker/.env}
+      - ANTUMBRA_DB_PASS=${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
       # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email; left
       # empty, links are logged to this container's stderr (dev mailer).
       - SMTP_HOST=${SMTP_HOST:-}
