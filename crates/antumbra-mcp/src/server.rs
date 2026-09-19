@@ -883,11 +883,36 @@ impl McpServer {
         Parameters(p): Parameters<IngestDocumentParams>,
     ) -> Result<Json<IngestedOut>, ErrorData> {
         let provenance = p.provenance.map(anchor_from).transpose()?;
+        let compartment = p
+            .compartment
+            .filter(|c| !c.trim().is_empty())
+            .map(CompartmentId::new);
+        // Ask before anything is archived. The ingest uploads the original first
+        // and the engine refuses a chunk it may not write by silently persisting
+        // nothing, so a refusal found afterwards would already have left the
+        // original in the archive under a compartment its author cannot write to.
+        if let Some(compartment) = &compartment {
+            let writable =
+                compartment::can_write(&self.store, &self.tenant, &self.user, compartment)
+                    .await
+                    .map_err(err)?;
+            if !writable {
+                return Err(ErrorData::invalid_params(
+                    format!(
+                        "cannot ingest into compartment '{}': it is not one you can write to \
+                         (create it with create_compartment first, or omit it for the shared pool)",
+                        compartment.as_str()
+                    ),
+                    None,
+                ));
+            }
+        }
         let doc = antumbra_ingest::Document {
             title: p.title.clone(),
             source: p.source,
             content: p.content,
             provenance,
+            compartment,
         };
         // One ingest path for every door (`antumbra-ingest`): the original to
         // copal first, fail closed; the title's chunks replaced in place; the
