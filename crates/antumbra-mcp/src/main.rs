@@ -33,6 +33,7 @@ mod notify;
 mod profile;
 mod secrets;
 mod server;
+mod session;
 use server::McpServer;
 
 #[derive(Parser)]
@@ -328,6 +329,9 @@ async fn build_session(
     // The `answer` tool serves through the routed expert. Build the engine from
     // the session's visible population (one connection; embedded is single-writer).
     let serve = build_serve(&store).await?;
+    // The process outlives the record session, so a keeper re-signs the
+    // connection in before it expires (checked at every tool call).
+    let keeper = session::SessionKeeper::new(store.clone(), tenant.clone(), user.clone());
     Ok(McpServer::new(
         store,
         embedder,
@@ -336,7 +340,8 @@ async fn build_session(
         host,
         default_compartment,
         serve,
-    ))
+    )
+    .with_session_keeper(keeper))
 }
 
 /// Build the serving engine the `answer` tool drives: a resident

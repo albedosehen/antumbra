@@ -7,6 +7,11 @@
 //! embedder in antumbra-serve).
 
 use surql::schema::access::{record_access, AccessDefinition, RecordAccessConfig};
+
+/// How long a record (tenant) session lives once signed in. A connection kept
+/// signed in for longer answers every query with "the session has expired", so
+/// the servers re-sign in well before this (`antumbra-mcp`'s session keeper).
+pub const TENANT_SESSION: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 use surql::schema::table::{
     bm25_index, hnsw_index, index, table_schema, unique_index, HnswDistanceType, MTreeVectorType,
     TableDefinition, TableMode,
@@ -333,7 +338,7 @@ pub fn tenant_access() -> AccessDefinition {
         RecordAccessConfig::new()
             .with_signin("SELECT * FROM principal WHERE tenant = $tenant AND user = $user"),
     )
-    .with_session("1h")
+    .with_session(format!("{}s", TENANT_SESSION.as_secs()))
 }
 
 /// The record-access method name (the `ac` in a scope signin).
@@ -364,6 +369,13 @@ pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tenant_access_renders_its_session_duration() {
+        let sql = generate_access_sql_with_options(&tenant_access(), true).unwrap();
+        let rendered = sql.join("\n");
+        assert!(rendered.contains("FOR SESSION 3600s"), "{rendered}");
+    }
 
     #[test]
     fn memory_table_carries_engine_enforced_tenant_permissions() {
