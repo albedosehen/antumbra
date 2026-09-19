@@ -13,7 +13,7 @@ pub mod repo;
 pub mod schema;
 pub mod store;
 
-pub use schema::EMBED_DIM;
+pub use schema::{EMBED_DIM, TENANT_SESSION};
 pub use store::Store;
 
 // Re-export the connection config so callers can point at a real server

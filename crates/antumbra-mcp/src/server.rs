@@ -84,6 +84,10 @@ pub struct McpServer {
     /// every tool. Enforced at `tools/list`, at JSON-RPC `tools/call`, and at
     /// the REST shim, so a tool outside the profile is neither seen nor run.
     profile: Option<Arc<crate::profile::ToolProfile>>,
+    /// Keeps this server's record session signed in past the store's session
+    /// duration (see `session`); checked at every tool call. `None` where the
+    /// transport signs in per request (the embedded networked surface).
+    session: Option<Arc<crate::session::SessionKeeper>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -217,6 +221,7 @@ impl McpServer {
             reranker_cache: Arc::new(tokio::sync::Mutex::new(RerankCache::new())),
             copal: None,
             profile: None,
+            session: None,
         }
     }
 
@@ -235,6 +240,24 @@ impl McpServer {
     pub fn with_tool_profile(mut self, profile: Arc<crate::profile::ToolProfile>) -> Self {
         self.profile = Some(profile);
         self
+    }
+
+    /// Keep the record session alive across long-lived use: the keeper re-signs
+    /// the connection in before the store's session duration runs out.
+    pub fn with_session_keeper(mut self, keeper: Arc<crate::session::SessionKeeper>) -> Self {
+        self.session = Some(keeper);
+        self
+    }
+
+    /// Refresh the record session when it is about to expire, before a tool
+    /// runs on it. A no-op without a keeper or while the session is fresh.
+    async fn keep_session(&self) -> Result<(), ErrorData> {
+        if let Some(keeper) = &self.session {
+            keeper.refresh_if_stale().await.map_err(|e| {
+                ErrorData::internal_error(format!("session refresh failed: {e}"), None)
+            })?;
+        }
+        Ok(())
     }
 
     /// Every tool this server has, by name, profile or not: what `--tools`
@@ -1319,6 +1342,7 @@ impl McpServer {
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, ErrorData> {
         self.check_profile(name)?;
+        self.keep_session().await?;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
         macro_rules! dispatch {
@@ -1400,6 +1424,7 @@ impl ServerHandler for McpServer {
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
         self.check_profile(&request.name)?;
+        self.keep_session().await?;
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         Self::tool_router().call(tcc).await
     }
@@ -1422,6 +1447,8 @@ impl ServerHandler for McpServer {
                 self.tenant.as_str(),
                 self.user.as_str()
             );
+        } else if let Some(keeper) = &self.session {
+            keeper.mark_signed_in().await;
         }
         if let Some(registry) = &self.registry {
             let identity = crate::auth::Identity {

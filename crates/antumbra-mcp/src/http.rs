@@ -112,13 +112,14 @@ enum Serving {
     /// one connection anyway.
     Shared(Store),
     /// Remote (authenticated): a *dedicated, credential-less* connection per
-    /// identity, signed in once as its record and reused across that identity's
+    /// identity, signed in as its record and reused across that identity's
     /// concurrent requests (the surreal client multiplexes them), so requests run
-    /// WITHOUT the global lock. Bounded; eviction drops only the cache handle --
+    /// WITHOUT the global lock. Its keeper re-signs it in before the store's
+    /// session duration runs out. Bounded; eviction drops only the cache handle --
     /// an in-flight request keeps its clone alive.
     PerIdentity {
         url: String,
-        conns: Mutex<Bounded<Identity, Store>>,
+        conns: Mutex<Bounded<Identity, Arc<crate::session::SessionKeeper>>>,
     },
 }
 
@@ -375,7 +376,7 @@ impl HttpState {
         // The connection the tools run on: the identity's dedicated serving
         // connection on a remote (signed in once, reused, no per-request lock), or
         // the shared `store` on embedded (a request signs it in per call; `bind`).
-        let conn = self.serving_conn(identity, &tenant, &user).await?;
+        let (conn, keeper) = self.serving_conn(identity, &tenant, &user).await?;
         let mut mcp = McpServer::new(
             conn,
             embedder,
@@ -385,6 +386,9 @@ impl HttpState {
             default_compartment,
             self.serve.clone(),
         );
+        if let Some(keeper) = keeper {
+            mcp = mcp.with_session_keeper(keeper);
+        }
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
         }
@@ -411,22 +415,24 @@ impl HttpState {
         Ok(mcp)
     }
 
-    /// The scoped connection an identity's tools run on. Embedded: the shared
-    /// `store` (a request binds it via [`HttpState::bind`]). Remote: the
+    /// The scoped connection an identity's tools run on, with its session keeper
+    /// on a remote. Embedded: the shared `store` (a request binds it via
+    /// [`HttpState::bind`]; no keeper, the bind signs in per request). Remote: the
     /// identity's own credential-less connection, created + record-signed once and
-    /// cached, then reused across that identity's concurrent requests.
+    /// cached, then reused across that identity's concurrent requests, its keeper
+    /// re-signing it in before the store's session duration runs out.
     async fn serving_conn(
         &self,
         identity: &Identity,
         tenant: &TenantId,
         user: &UserId,
-    ) -> Result<Store> {
+    ) -> Result<(Store, Option<Arc<crate::session::SessionKeeper>>)> {
         let (url, conns) = match &self.serving {
-            Serving::Shared(conn) => return Ok(conn.clone()),
+            Serving::Shared(conn) => return Ok((conn.clone(), None)),
             Serving::PerIdentity { url, conns } => (url, conns),
         };
-        if let Some(c) = conns.lock().await.get(identity) {
-            return Ok(c.clone());
+        if let Some(keeper) = conns.lock().await.get(identity) {
+            return Ok((keeper.store().clone(), Some(keeper.clone())));
         }
         // The principal was just provisioned on `store`; a fresh connection's
         // signin can briefly not see it (the cold-start race), so verify with a
@@ -444,8 +450,9 @@ impl HttpState {
                 Err(e) => return Err(e),
             }
         }
-        conns.lock().await.insert(identity.clone(), conn.clone());
-        Ok(conn)
+        let keeper = crate::session::SessionKeeper::new(conn.clone(), tenant.clone(), user.clone());
+        conns.lock().await.insert(identity.clone(), keeper.clone());
+        Ok((conn, Some(keeper)))
     }
 
     /// Bind the scoped serving connection to `identity` for a request. Embedded:
