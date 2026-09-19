@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::{delete_records, query_records, upsert_record};
 use surql::query::helpers::fulltext_search_query;
-use surql::types::operators::eq;
+use surql::types::operators::{and_, eq};
 use surql::types::RecordID;
 
 use antumbra_core::{DocumentChunk, DocumentChunkId, Result, TenantId};
@@ -94,6 +94,18 @@ pub async fn insert_chunks(store: &Store, chunks: &[DocumentChunk]) -> Result<()
             .await
             .map_err(map)?;
     }
+    Ok(())
+}
+
+/// Drop every chunk of `title` within `tenant` (the tenant predicate is ANDed
+/// on, so no cross-tenant delete). Ingest calls this before writing a
+/// document's new generation, which is what makes a re-ingest an in-place
+/// replacement even when the document shrank.
+pub async fn delete_title(store: &Store, tenant: &TenantId, title: &str) -> Result<()> {
+    let condition = and_(eq("tenant_id", tenant.as_str()), eq("title", title));
+    delete_records(store.client(), TABLE, Some(&condition))
+        .await
+        .map_err(map)?;
     Ok(())
 }
 
@@ -276,5 +288,55 @@ mod tests {
         assert_eq!(by_id["dc:arch"].copal_digest.as_deref(), Some("sha256:abc"));
         assert_eq!(by_id["dc:bare"].copal_file, None);
         assert_eq!(by_id["dc:bare"].copal_digest, None);
+    }
+}
+
+#[cfg(test)]
+mod delete_title_tests {
+    use super::*;
+    use crate::schema::EMBED_DIM;
+    use chrono::Utc;
+
+    fn chunk(id: &str, tenant: &str, title: &str) -> DocumentChunk {
+        DocumentChunk {
+            id: DocumentChunkId::new(id),
+            tenant: TenantId::new(tenant),
+            title: title.into(),
+            source: None,
+            ordinal: 0,
+            content: title.into(),
+            embedding: Some(vec![0.0; EMBED_DIM]),
+            created_at: Utc::now(),
+            copal_file: None,
+            copal_digest: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_title_drops_only_that_title_in_that_tenant() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        insert_chunks(
+            &store,
+            &[
+                chunk("docchunk:a0", "ws:t", "a"),
+                chunk("docchunk:a1", "ws:t", "a"),
+                chunk("docchunk:b0", "ws:t", "b"),
+                chunk("docchunk:ua", "ws:u", "a"),
+            ],
+        )
+        .await
+        .unwrap();
+        delete_title(&store, &TenantId::new("ws:t"), "a")
+            .await
+            .unwrap();
+        assert_eq!(
+            list_titles(&store, &TenantId::new("ws:t")).await.unwrap(),
+            vec!["b".to_string()]
+        );
+        assert_eq!(
+            list_titles(&store, &TenantId::new("ws:u")).await.unwrap(),
+            vec!["a".to_string()],
+            "another tenant's document of the same title is untouched"
+        );
     }
 }

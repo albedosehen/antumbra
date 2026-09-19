@@ -157,7 +157,8 @@ antumbra/
     antumbra-store/        # surql-rs data layer (schema/repositories)
     antumbra-embed/        # the MCP runtime surface: HTTP embedder (OpenAI-compatible /embeddings) behind the Embedder port
     antumbra-copal/        # the copal document-of-record archive client (upload-first, fail-closed), shared by mcp + cli
-    antumbra-github/       # the GitHub App integration: webhook signatures, event shapes, pure re-anchor / orphan / PR-memory handlers
+    antumbra-ingest/       # knowledge-document ingest, the one path the MCP tool, the CLI, and the GitHub integration share
+    antumbra-github/       # the GitHub App integration: webhook signatures, event shapes, pure re-anchor / orphan / PR-memory handlers, the App API client
     antumbra-gate/         # the boundary-conditioned gate: adapter gate (+ north-star bridge client)
     antumbra-boundary/     # the counterfactual boundary: scope engine (antumbra)
     antumbra-loop/         # the durable generational loop

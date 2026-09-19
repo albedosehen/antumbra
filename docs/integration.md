@@ -108,15 +108,19 @@ antumbra-mcp --http 0.0.0.0:8081 --jwt-secret-file /run/secrets/jwt \
   --github-webhook-secret-file /run/secrets/github-webhook \
   --github-repos /etc/antumbra/github-repos.json     # {"github.com/acme/orders": "ws:acme", ...}
   # or --github-tenant ws:acme to land every repository the App sees in one workspace
+  --github-app-id 123456 --github-app-key-file /run/secrets/github-app.pem   # lets it read contents
+  # --github-api-url https://<host>/api/v3 for Enterprise Server
 ```
 
 | Delivery | What happens |
 | --- | --- |
 | `pull_request` merged | Every memory whose anchor sits on the merged branch is re-anchored to the merge commit on the base branch (its path kept, the old anchor kept behind it as history), so a squash merge no longer leaves them `not-on-head` forever. The pull request itself becomes a `bank` memory anchored to the merge commit, with the PR URL as evidence, under a deterministic id (a redelivery revises it). |
 | `delete` of a branch | Every memory whose anchor still sits on that branch gets a `git-orphaned:<repo>#<branch>@<when>` evidence entry. Recall judges it `orphaned` (demoted, never hidden) and every view carries `orphaned_at`. A memory the merge already moved to the base branch is untouched, so GitHub's delete-after-merge is safe. |
+| `pull_request` merged, with App credentials | The knowledge documents the pull request changed (READMEs, docs, ADRs, OpenAPI and AsyncAPI specs; not source) are read at the merge commit through the contents API and ingested by the same path as `ingest_document` and `antumbra ingest`: original to copal first, the title (the path) replaced in place, every chunk anchored `git:<repo>@<merge>#<base>:<path>`. The response says how many were queued; the ingest itself runs after the response, because GitHub allows a receiver ten seconds. |
+| `installation` created, `installation_repositories` added | The cold start: every knowledge document in each mapped repository, at the head of its default branch, ingested and anchored the same way. |
 | `ping`, anything else, an unmapped repository, a close without a merge | Acknowledged with the reason, so GitHub does not retry. |
 
-Every delivery is verified against the secret (HMAC-SHA256, constant-time) before anything is read; a delivery that does not verify gets a bare 401. The handlers write as the system user `user:github`, provisioned in the workspace on first contact. Ingesting the repository's documents on merge and the cold start on installation follow once the App reads repository contents.
+Every delivery is verified against the secret (HMAC-SHA256, constant-time) before anything is read; a delivery that does not verify gets a bare 401. The handlers write as the system user `user:github`, provisioned in the workspace on first contact. Reading contents needs the App's id and private key: the receiver signs a short-lived App token, exchanges it for an installation token (cached until it is about to expire), and reads through that. Without them the receiver still re-anchors, orphans, and remembers pull requests.
 
 ## Two ways to run it
 

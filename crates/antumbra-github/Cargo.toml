@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "The native GitHub integration: webhook signature verification, the event shapes Antumbra acts on, and the pure handlers that re-anchor, orphan, and remember, so the platform's own events keep every memory's git anchor honest."
+description = "The native GitHub integration: webhook signature verification, the event shapes Antumbra acts on, the pure handlers that re-anchor, orphan, and remember, and the App client that reads repository contents, so the platform's own events keep every memory's git anchor honest."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
@@ -19,3 +19,14 @@ thiserror.workspace = true
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
+# The App's own token: an RS256 JWT signed with its private key.
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+# Outbound calls to the GitHub API: blocking `ureq` requests run off the async
+# runtime (`spawn_blocking`), the copal client's shape.
+ureq = { version = "3", features = ["json"] }
+tokio = { workspace = true }
+
+[features]
+# Test seams: a canned transport and a throwaway App key pair, for this crate's
+# tests and for any crate that drives the integration in its own.
+testing = []

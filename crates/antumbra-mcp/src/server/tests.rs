@@ -214,6 +214,7 @@ async fn rerank_reorders_document_chunks_too() {
     )));
     // Two short docs so each is a single chunk; one carries the token.
     s.ingest_document(Parameters(IngestDocumentParams {
+        provenance: None,
         title: "doc-a".into(),
         source: None,
         content: "an ordinary chunk about scheduling and logging".into(),
@@ -221,6 +222,7 @@ async fn rerank_reorders_document_chunks_too() {
     .await
     .unwrap();
     s.ingest_document(Parameters(IngestDocumentParams {
+        provenance: None,
         title: "doc-b".into(),
         source: None,
         content: "PROMOTE: the exact chunk answering the dependency question".into(),
@@ -549,6 +551,7 @@ async fn ingest_then_recall_a_knowledge_document() {
     let s = server().await;
     let ingested = s
         .ingest_document(Parameters(IngestDocumentParams {
+            provenance: None,
             title: "Onboarding".into(),
             content: "Antumbra keeps knowledge documents separate from episodic memory. \
                       Ingesting a document chunks it, embeds each chunk, and makes it \
@@ -639,6 +642,7 @@ fn canned_archive(up: bool) -> Arc<antumbra_copal::CopalArchive> {
 async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() {
     let s = server().await.with_copal_archive(canned_archive(true));
     s.ingest_document(Parameters(IngestDocumentParams {
+        provenance: None,
         title: "Onboarding".into(),
         content: "Antumbra keeps knowledge documents separate from episodic memory. \
                   This project uses the deno runtime."
@@ -673,6 +677,7 @@ async fn ingest_fails_closed_when_the_configured_copal_is_unreachable() {
     let s = server().await.with_copal_archive(canned_archive(false));
     let res = s
         .ingest_document(Parameters(IngestDocumentParams {
+            provenance: None,
             title: "Onboarding".into(),
             content: "some reference text".into(),
             source: None,
