@@ -1,0 +1,20 @@
+[package]
+name = "antumbra-copal"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "The copal document-of-record archive client: uploads an ingested document's original bytes to a copal file service, upload-first and fail-closed, shared by the MCP server and the CLI so every door into the store archives the same way."
+
+[dependencies]
+antumbra-core = { path = "../antumbra-core" }
+serde_json.workspace = true
+thiserror.workspace = true
+# `spawn_blocking`: the archive's two calls are blocking `ureq` requests run
+# off the async runtime so they never stall a worker.
+tokio = { workspace = true }
+# Outbound HTTP for the archive: the same blocking client (and TLS posture)
+# the embedder's transport uses.
+ureq = { version = "3", features = ["json"] }

@@ -1,0 +1,434 @@
+//! The MCP tool parameter and view types (the wire shapes of every tool), plus
+//! the constants the tool bodies read. Kept beside `server.rs` so the tool impl
+//! reads as behavior, not as a wall of DTOs; `pub(super)` because nothing outside
+//! the server module speaks these shapes.
+
+use super::*;
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct StoreParams {
+    /// The text to remember.
+    pub(super) content: String,
+    /// Network: `world` (facts), `bank` (experiences), `opinion` (judgments).
+    #[serde(default = "default_network")]
+    pub(super) network: String,
+    /// Initial confidence in `[0,1]` (default 0.6).
+    pub(super) confidence: Option<f32>,
+    /// Provenance sources for the memory.
+    pub(super) evidence: Option<Vec<String>>,
+    /// `true` if the fact changes over time (kept in store, never consolidated).
+    pub(super) volatile: Option<bool>,
+    /// The compartment to store into. Omit to use this session's default space.
+    pub(super) compartment: Option<String>,
+    /// Where this memory was learned, for memories about code: the repository,
+    /// commit, and branch (and the file, when it is about one file). Stored as a
+    /// `git:` evidence entry so a later recall can judge whether it still applies
+    /// (the session-start hook checks the commit against HEAD and whether the
+    /// branch still exists). Omit for memories that are not about code.
+    pub(super) provenance: Option<ProvenanceParams>,
+}
+
+/// A git anchor as the caller states it; becomes one `git:` evidence entry.
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct ProvenanceParams {
+    /// Repository slug, `host/org/name` (for example `github.com/oneiriq/antumbra`).
+    pub(super) repo: String,
+    /// The commit (7 to 40 hex digits) the memory was learned at.
+    pub(super) commit: String,
+    /// The branch checked out at the time.
+    pub(super) branch: Option<String>,
+    /// The file the memory is about, when it is about one file.
+    pub(super) path: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct StoredOut {
+    pub(super) id: String,
+    /// Compartment ids the antumbra auto-created from the inbox on this write
+    /// (only when the autonomous propose trigger is enabled and fired).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) auto_proposed: Vec<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct RecallParams {
+    /// What to recall, embedded and matched by semantic similarity.
+    pub(super) query: String,
+    /// How many to return (default 5).
+    pub(super) top_k: Option<u32>,
+    /// Optional network filter (`world`/`bank`/`opinion`).
+    pub(super) network: Option<String>,
+    /// The caller's current repository slug (`host/org/name`). With it, every
+    /// result carries a `scope` against this context, and results from another
+    /// branch or repository are demoted below in-scope ones (never hidden).
+    pub(super) repo: Option<String>,
+    /// The caller's checked-out branch, to scope results by branch as well.
+    pub(super) branch: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct ListParams {
+    /// Optional network filter (`world`/`bank`/`opinion`).
+    pub(super) network: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct IdParams {
+    pub(super) memory_id: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct MemoryView {
+    pub(super) id: String,
+    pub(super) content: String,
+    pub(super) network: String,
+    pub(super) confidence: f32,
+    pub(super) reinforcement: u32,
+    /// The git anchor parsed from the memory's evidence, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) provenance: Option<ProvenanceView>,
+    /// How the anchor relates to the caller's `repo`/`branch` context
+    /// (`in_scope`, `other_branch`, `other_repo`, `unknown`); only when recall
+    /// was given a context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) scope: Option<String>,
+}
+
+/// A memory's git anchor as returned to a caller.
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ProvenanceView {
+    pub(super) repo: String,
+    pub(super) commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) path: Option<String>,
+}
+
+impl From<&GitProvenance> for ProvenanceView {
+    fn from(p: &GitProvenance) -> Self {
+        Self {
+            repo: p.repo.clone(),
+            commit: p.commit.clone(),
+            branch: p.branch.clone(),
+            path: p.path.clone(),
+        }
+    }
+}
+
+impl From<&Memory> for MemoryView {
+    fn from(m: &Memory) -> Self {
+        Self {
+            id: m.id.as_str().to_string(),
+            content: m.content.clone(),
+            network: m.network.as_str().to_string(),
+            confidence: m.confidence,
+            reinforcement: m.reinforcement,
+            provenance: GitProvenance::from_evidence(&m.evidence)
+                .as_ref()
+                .map(ProvenanceView::from),
+            scope: None,
+        }
+    }
+}
+
+impl MemoryView {
+    /// The view of `m` judged against the caller's git context.
+    pub(super) fn scoped(m: &Memory, ctx: &GitContext) -> Self {
+        let mut view = Self::from(m);
+        let provenance = GitProvenance::from_evidence(&m.evidence);
+        view.scope = Some(scope_of(provenance.as_ref(), ctx).as_str().to_string());
+        view
+    }
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct MemoriesOut {
+    pub(super) memories: Vec<MemoryView>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct IngestDocumentParams {
+    /// The document's title (used to group and name its chunks).
+    pub(super) title: String,
+    /// The full document text to ingest.
+    pub(super) content: String,
+    /// Where the document came from (path / url / note).
+    #[serde(default)]
+    pub(super) source: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct IngestedOut {
+    pub(super) title: String,
+    pub(super) chunks: u32,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct RecallDocumentsParams {
+    /// What to recall from the ingested documents.
+    pub(super) query: String,
+    /// How many chunks to return (default 5).
+    pub(super) top_k: Option<u32>,
+}
+
+/// A document chunk as returned to a caller (without its embedding).
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct DocumentChunkView {
+    pub(super) title: String,
+    pub(super) source: Option<String>,
+    pub(super) ordinal: u32,
+    pub(super) content: String,
+    /// The copal file holding the document's original content (the document of
+    /// record); omitted when it was ingested without an archive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) copal_file: Option<String>,
+    /// The content digest copal reported for that archived original.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) copal_digest: Option<String>,
+}
+
+impl From<&DocumentChunk> for DocumentChunkView {
+    fn from(c: &DocumentChunk) -> Self {
+        DocumentChunkView {
+            title: c.title.clone(),
+            source: c.source.clone(),
+            ordinal: c.ordinal,
+            content: c.content.clone(),
+            copal_file: c.copal_file.clone(),
+            copal_digest: c.copal_digest.clone(),
+        }
+    }
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct DocumentChunksOut {
+    pub(super) chunks: Vec<DocumentChunkView>,
+}
+
+/// One expert in the visible population (read-only view, no embedding/adapter).
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ExpertView {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) generation: u32,
+    pub(super) fitness: f32,
+    /// True if this is the caller's own private expert (else a shared one).
+    pub(super) private: bool,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct PopulationOut {
+    pub(super) experts: Vec<ExpertView>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct StatsOut {
+    pub(super) memories: u32,
+    pub(super) documents: u32,
+    pub(super) experts: u32,
+    pub(super) boundaries: u32,
+    pub(super) compartments: u32,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ReinforceOut {
+    pub(super) found: bool,
+    pub(super) reinforcement: u32,
+    pub(super) confidence: f32,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ForgetOut {
+    pub(super) forgotten: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct RelateParams {
+    pub(super) from_id: String,
+    pub(super) to_id: String,
+    /// `references` / `supersedes` / `contradicts` / `follows` / `caused`.
+    #[serde(default = "default_edge_type")]
+    pub(super) edge_type: String,
+    /// Edge strength (default 1.0).
+    pub(super) weight: Option<f32>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct RelateOut {
+    pub(super) related: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct NeighborsParams {
+    pub(super) memory_id: String,
+    /// Optional edge-type filter.
+    pub(super) edge_type: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct NeighborView {
+    pub(super) edge_type: String,
+    pub(super) weight: f32,
+    pub(super) memory: MemoryView,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct NeighborsOut {
+    pub(super) neighbors: Vec<NeighborView>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct RouteParams {
+    /// The task to route across the shared expert population.
+    pub(super) task: String,
+    /// How many candidate experts to return (default 3).
+    pub(super) top_k: Option<u32>,
+}
+
+/// Minimum cosine similarity for one of the user's *private* experts to be
+/// offered as a route candidate (a heuristic floor; private experts are not in
+/// the shared learned router, so they are matched directly by centroid; a
+/// per-private-expert learned boundary is the eventual refinement).
+pub(super) const PRIVATE_ROUTE_FLOOR: f32 = 0.3;
+
+/// Document chunking (P-3): target chunk size and inter-chunk overlap, in chars.
+/// ~1200 chars is roughly a paragraph or two: enough context per chunk for the
+/// 384-d model without diluting the embedding; the overlap keeps a fact that
+/// straddles a cut wholly present in one chunk.
+pub(super) const DOCUMENT_CHUNK_CHARS: usize = antumbra_core::document::DEFAULT_CHUNK_CHARS;
+pub(super) const DOCUMENT_CHUNK_OVERLAP: usize = antumbra_core::document::DEFAULT_CHUNK_OVERLAP;
+
+/// Inhibition radius for the legacy absolute-scope boundary path; mirrors
+/// `antumbra_gate::GateConfig::default().inhibition_radius`. Correction-derived
+/// boundaries use the relative C/C' margin, which ignores the radius, so this
+/// only bites a hypothetical absolute boundary.
+pub(super) const INHIBITION_RADIUS: f32 = 0.5;
+
+/// Escalate (route to no one) when a boundary inhibits the task above this,
+/// mirroring the CLI learned-route gate. A task inside a known failure scope is
+/// handed up rather than served by an expert that provably fails there.
+pub(super) const BOUNDARY_ESCALATE_THRESHOLD: f32 = 0.5;
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct RouteHit {
+    pub(super) expert_id: String,
+    pub(super) probability: f32,
+    /// `true` if this is one of *your* private experts (consolidated from your
+    /// compartment), matched by centroid; `false` for a shared expert.
+    pub(super) private: bool,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct RouteOut {
+    /// Whether the population covers this task (vs out-of-distribution).
+    pub(super) covered: bool,
+    /// `true` when no expert covers it: defer to the generalist.
+    pub(super) escalate: bool,
+    pub(super) routes: Vec<RouteHit>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct AnswerParams {
+    /// The task to route and answer through the covering expert.
+    pub(super) task: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct AnswerOut {
+    /// The generated answer (empty when escalating).
+    pub(super) answer: String,
+    /// The expert that served it, when one covered the task.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) expert_id: Option<String>,
+    /// `true` when no expert covered it, or serving is not configured.
+    pub(super) escalate: bool,
+    /// Why it escalated, when it did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) note: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct CreateCompartmentParams {
+    /// A display name for the new compartment.
+    pub(super) name: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct CompartmentView {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) origin: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct CompartmentsOut {
+    pub(super) compartments: Vec<CompartmentView>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct ShareParams {
+    pub(super) compartment_id: String,
+    /// The user to share with (a user id in this tenant).
+    pub(super) grantee: String,
+    /// `reference` (recall) or `link` (also connect). Defaults to reference.
+    #[serde(default = "default_capability")]
+    pub(super) capability: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ShareOut {
+    pub(super) shared: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct RevokeParams {
+    pub(super) compartment_id: String,
+    pub(super) grantee: String,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct RevokeOut {
+    pub(super) revoked: bool,
+}
+
+pub(super) fn default_threshold() -> f32 {
+    0.6
+}
+
+pub(super) fn default_min_size() -> usize {
+    3
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct ProposeCompartmentsParams {
+    /// Cosine at/above which two memories cluster together (default 0.6).
+    #[serde(default = "default_threshold")]
+    pub(super) similarity_threshold: f32,
+    /// Smallest cluster worth proposing; singletons and pairs are noise (default 3).
+    #[serde(default = "default_min_size")]
+    pub(super) min_size: usize,
+    /// Persist each proposal as an `Origin::Proposed` compartment you own and
+    /// move its members into it. Default false (suggest only; reversible by
+    /// deleting the compartment).
+    #[serde(default)]
+    pub(super) apply: bool,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ProposalView {
+    /// Heuristic label from the cluster's most central memory; rename on accept.
+    pub(super) label: String,
+    /// The memory ids grouped into this proposed region.
+    pub(super) members: Vec<String>,
+    /// Mean cosine of members to the centroid; rank proposals by this.
+    pub(super) cohesion: f32,
+    /// Set when `apply` was true: the id of the created proposed compartment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) compartment_id: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ProposalsOut {
+    pub(super) proposals: Vec<ProposalView>,
+}

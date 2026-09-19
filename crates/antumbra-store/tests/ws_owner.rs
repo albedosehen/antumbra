@@ -6,7 +6,8 @@
 //! that branch (and the cross-tenant owner read it enables) against a real
 //! SurrealDB v3.
 //!
-//! Gated on `ANTUMBRA_STORE_WS` (skips when unset), so the normal suite stays
+//! `#[ignore]`d, so the normal suite stays network-free; run it with the env set and
+//! `cargo test -p antumbra-store --test ws_owner -- --ignored`. Keeps the suite
 //! network-free. Reproduce with a fresh SurrealDB v3 container:
 //!
 //!   docker run --rm -d -p 8002:8000 surrealdb/surrealdb:v3.0.5 \
@@ -35,11 +36,11 @@ fn mem(id: &str, tenant: &TenantId, content: &str) -> Memory {
 }
 
 #[tokio::test]
+#[ignore = "live ws:// SurrealDB: set ANTUMBRA_STORE_WS=ws://127.0.0.1:8002/rpc and run with --ignored"]
 async fn signin_root_restores_the_owner_view_over_ws() {
-    let Ok(url) = std::env::var("ANTUMBRA_STORE_WS") else {
-        eprintln!("skipped: set ANTUMBRA_STORE_WS=ws://127.0.0.1:8002/rpc to run");
-        return;
-    };
+    let url = std::env::var("ANTUMBRA_STORE_WS").expect(
+        "ANTUMBRA_STORE_WS must name a live SurrealDB (ws://127.0.0.1:8002/rpc) to run this ignored test",
+    );
     let user = std::env::var("ANTUMBRA_STORE_WS_USER").unwrap_or_else(|_| "root".into());
     let pass = std::env::var("ANTUMBRA_STORE_WS_PASS").unwrap_or_else(|_| "root".into());
 

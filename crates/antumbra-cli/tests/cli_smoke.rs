@@ -36,14 +36,15 @@ fn no_gpu_commands_run_end_to_end() {
     // Each command opens its own ephemeral store; we assert the handler runs
     // (exit 0), which records coverage of the dispatch + command code.
     ok(&["--url", "mem://", "migrate"]);
-    ok(&["--url", "mem://", "seed"]);
+    ok(&["--url", "mem://", "--fake-embedder", "seed"]);
     ok(&["--url", "mem://", "status"]);
     ok(&["--url", "mem://", "experts"]);
-    ok(&["--url", "mem://", "loop", "--generations", "1"]);
+    ok(&["--url", "mem://", "loop", "--generations", "1", "--demo"]);
     ok(&[
         "--url",
         "mem://",
         "remember",
+        "--fake-embedder",
         "--tenant",
         "ws:t",
         "--user",
@@ -54,10 +55,117 @@ fn no_gpu_commands_run_end_to_end() {
         "deno install left-pad",
     ]);
     // Routing with no experts escalates rather than errors.
-    ok(&["--url", "mem://", "route", "reverse a string"]);
+    ok(&[
+        "--url",
+        "mem://",
+        "--fake-embedder",
+        "route",
+        "reverse a string",
+    ]);
 }
 
 #[test]
 fn unknown_command_is_an_error() {
     assert!(!cli(&["definitely-not-a-command"]).status.success());
+}
+
+/// Without `--features models` there is no built-in embedder, so a command that
+/// embeds must stop and say what to pass rather than silently recall by byte
+/// histogram. (Under `models` the built-in candle BERT would load instead.)
+#[cfg(not(feature = "models"))]
+#[test]
+fn embedding_commands_refuse_to_run_without_an_embedder() {
+    let out = cli(&["--url", "mem://", "route", "reverse a string"]);
+    assert!(
+        !out.status.success(),
+        "route ran with no embedder configured"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--embedder-url") && stderr.contains("--fake-embedder"),
+        "the refusal names both ways out: {stderr}"
+    );
+}
+
+/// `loop` is the scripted demo trainer; it must not run as if it were training.
+#[test]
+fn loop_requires_the_demo_acknowledgement() {
+    let out = cli(&["--url", "mem://", "loop", "--generations", "1"]);
+    assert!(!out.status.success(), "loop ran without --demo");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--demo"));
+}
+
+/// `ingest` takes a file or a command's output and stores it as a document.
+#[test]
+fn ingest_stores_a_document_from_a_file_and_from_a_command() {
+    let path = std::env::temp_dir().join(format!("antumbra-ingest-{}.txt", std::process::id()));
+    std::fs::write(&path, "GET /health\nPOST /orders\n").unwrap();
+    let out = ok(&[
+        "--url",
+        "mem://",
+        "--fake-embedder",
+        "ingest",
+        "--tenant",
+        "ws:t",
+        "--user",
+        "user:u",
+        "--title",
+        "routes",
+        "--no-git",
+        "--file",
+        path.to_str().unwrap(),
+    ]);
+    assert!(out.contains("ingested 1 chunk"), "{out}");
+    std::fs::remove_file(&path).ok();
+    let out = ok(&[
+        "--url",
+        "mem://",
+        "--fake-embedder",
+        "ingest",
+        "--tenant",
+        "ws:t",
+        "--user",
+        "user:u",
+        "--title",
+        "toolchain",
+        "--",
+        "cargo",
+        "--version",
+    ]);
+    assert!(out.contains("ingested 1 chunk"), "{out}");
+    // Neither a file nor a command is a usage error, not a silent empty document.
+    let out = cli(&[
+        "--url",
+        "mem://",
+        "--fake-embedder",
+        "ingest",
+        "--tenant",
+        "ws:t",
+        "--user",
+        "user:u",
+        "--title",
+        "x",
+    ]);
+    assert!(!out.status.success());
+}
+
+/// `git-facts --dry-run` derives facts from this repository's own history and
+/// stores nothing (so it needs no embedder and no store).
+#[test]
+fn git_facts_dry_run_reads_this_repository() {
+    let out = ok(&[
+        "--url",
+        "mem://",
+        "git-facts",
+        "--tenant",
+        "ws:t",
+        "--user",
+        "user:u",
+        "--compartment",
+        "comp:c",
+        "--days",
+        "3650",
+        "--dry-run",
+    ]);
+    assert!(out.contains("dry run"), "{out}");
 }

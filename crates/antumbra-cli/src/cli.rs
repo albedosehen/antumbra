@@ -18,6 +18,56 @@ pub struct Cli {
     /// Root password for the remote SurrealDB.
     #[arg(long, global = true, env = "ANTUMBRA_DB_PASS")]
     pub db_pass: Option<String>,
+    /// Embed via an OpenAI-compatible `/embeddings` endpoint (for example Ollama
+    /// serving `all-minilm`) instead of the built-in embedder. It must return
+    /// vectors of the store's dimension. Use the SAME endpoint the population and
+    /// memories were built with, or recall and routing lose coherence.
+    #[arg(long, global = true, env = "ANTUMBRA_EMBEDDER_URL")]
+    pub embedder_url: Option<String>,
+    /// Model name sent to `--embedder-url`.
+    #[arg(
+        long,
+        global = true,
+        env = "ANTUMBRA_EMBEDDER_MODEL",
+        default_value = "all-MiniLM-L6-v2"
+    )]
+    pub embedder_model: String,
+    /// Optional bearer key for `--embedder-url`.
+    #[arg(long, global = true, env = "ANTUMBRA_EMBEDDER_KEY")]
+    pub embedder_key: Option<String>,
+    /// Use the deterministic byte-histogram stand-in (NOT semantic: it matches
+    /// character statistics), for demos and smoke tests only. Without
+    /// `--features models`, a command that embeds refuses to run with neither
+    /// this nor `--embedder-url` rather than silently degrading.
+    #[arg(
+        long,
+        global = true,
+        env = "ANTUMBRA_FAKE_EMBEDDER",
+        default_value_t = false
+    )]
+    pub fake_embedder: bool,
+    /// Archive each ingested document's ORIGINAL content to a copal file
+    /// service (the document of record), exactly as the MCP server does: bare
+    /// `host:port` or a full URL base. The upload happens before any chunk is
+    /// stored (a dead copal fails the ingest), and every chunk carries the
+    /// copal file id + digest. Off when unset: ingest keeps only the chunks.
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_ADDR")]
+    pub copal_addr: Option<String>,
+    /// Land every workspace's documents under this ONE copal tenant (copal's
+    /// header auth mode). Omit all three tenancy args for per-workspace
+    /// tenancy, the default. At most one of --copal-tenant / --copal-key /
+    /// --copal-keys.
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_TENANT")]
+    pub copal_tenant: Option<String>,
+    /// One `ck1` copal API key for every workspace (keys auth mode, shared
+    /// tenancy: the key's tenant is THE tenant).
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_KEY")]
+    pub copal_key: Option<String>,
+    /// Path to a JSON file mapping workspace tenant -> `ck1` copal API key
+    /// (keys auth mode, per-workspace tenancy); a workspace absent from the
+    /// map fails its ingest rather than landing in another tenant.
+    #[arg(long, global = true, env = "ANTUMBRA_COPAL_KEYS")]
+    pub copal_keys: Option<std::path::PathBuf>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -38,9 +88,14 @@ pub enum Command {
         generations: u32,
         #[arg(long, default_value = "run:cli")]
         run: String,
+        /// Acknowledge that this drives the loop with the scripted DEMO trainer
+        /// (it always graduates; no model is trained). Required, so the demo is
+        /// never mistaken for training: that is `train` under `--features models`.
+        #[arg(long, default_value_t = false)]
+        demo: bool,
     },
-    /// Route a task through the boundary-conditioned gate. Uses the real BERT
-    /// embedder under `--features models`, else the byte-histogram fake.
+    /// Route a task through the boundary-conditioned gate. Embeds the task with
+    /// `--embedder-url` when set, else the built-in embedder (`--features models`).
     Route {
         /// The task description to embed and route.
         task: String,
@@ -396,6 +451,61 @@ pub enum Command {
         network: String,
         #[arg(long, default_value_t = 1.0)]
         confidence: f32,
+    },
+    /// Ingest a knowledge document for `recall_documents`: chunk, embed, store,
+    /// from a file or from what a command prints. The command form is the
+    /// parser-free answer to an inventory question: run the framework's own
+    /// lister (`deno task routes`, an OpenAPI export, `cargo metadata`) and keep
+    /// its output, stamped with the repository, commit, and branch it ran at, so
+    /// a recalled chunk says which commit it describes.
+    Ingest {
+        #[arg(long)]
+        tenant: String,
+        #[arg(long)]
+        user: String,
+        /// The document's title (groups and names its chunks; re-ingesting a
+        /// title replaces its chunks in place).
+        #[arg(long)]
+        title: String,
+        /// Read the document from this file.
+        #[arg(long, conflicts_with = "run")]
+        file: Option<std::path::PathBuf>,
+        /// Where the document came from, for the record (defaults to the file
+        /// path or the command line).
+        #[arg(long)]
+        source: Option<String>,
+        /// The file the document is about, added to the git anchor.
+        #[arg(long)]
+        path: Option<String>,
+        /// Do not stamp the current repository / commit / branch on the chunks.
+        #[arg(long, default_value_t = false)]
+        no_git: bool,
+        /// The command whose stdout is the document, after `--`
+        /// (`antumbra ingest --title routes -- deno task routes`).
+        #[arg(last = true)]
+        run: Vec<String>,
+    },
+    /// Derive facts the repository's history already states, from `git log`
+    /// with no parser: ownership per top-level area, change hotspots, and files
+    /// that change together, over a window. Each fact is stored as a `world`
+    /// memory whose evidence names the commit range it came from, so a later
+    /// session sees how old it is instead of trusting a refreshed-or-not index.
+    GitFacts {
+        #[arg(long)]
+        tenant: String,
+        #[arg(long)]
+        user: String,
+        #[arg(long)]
+        compartment: String,
+        /// Look back this many days.
+        #[arg(long, default_value_t = 90)]
+        days: u32,
+        /// How many hotspots and co-change pairs to keep.
+        #[arg(long, default_value_t = 10)]
+        top: usize,
+        /// Print the facts without storing them.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
     /// Consolidate a private compartment into a **private expert** (a memory compartment):
     /// gather the compartment's memories, score them through the consolidation

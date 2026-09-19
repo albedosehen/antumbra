@@ -72,6 +72,14 @@ docker compose -f docker/docker-compose.yml up -d antumbra-control-server
 
 ## Notes
 
-- `docker/.env` holds secrets and is gitignored. Move these to a secret manager (Doppler) for anything beyond local use.
+- `docker/.env` holds secrets and is gitignored. Move these to a secret manager (Doppler) for anything beyond local use. Compose passes them as environment, never as command-line arguments; a deployment that mounts secrets as files (Docker secrets, Kubernetes, a Key Vault CSI mount) passes `--db-pass-file` and `--jwt-secret-file` to `antumbra-mcp` instead, so they appear in neither the process arguments nor the environment.
 - The first image build of `antumbra-mcp` or `antumbra-control-server` compiles the workspace and is slow; rebuilds are cached.
 - The RS256 private key never enters an image; it is bind-mounted read-only at runtime.
+
+## GPU build on a CDI host
+
+A Docker that hands out GPUs through the Container Device Interface (NixOS with `hardware.nvidia-container-toolkit`, or any daemon with CDI enabled and no named `nvidia` runtime) refuses the classic device request in `docker-compose.gpu.yml` with "could not select device driver nvidia". Layer `docker-compose.gpu-cdi.yml` last; it resets that block and asks for `nvidia.com/gpu=all` by CDI name:
+
+```sh
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml -f docker/docker-compose.gpu-cdi.yml up -d surrealdb antumbra-mcp
+```

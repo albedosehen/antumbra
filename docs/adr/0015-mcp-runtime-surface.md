@@ -20,6 +20,8 @@ For Antumbra to _replace_ the runtime role of a separate agent/memory engine, an
 | Graph (ADR-0014)        | `relate_memories` (typed edges), `get_neighbors`                                                                                                                                                                             |
 | Compartments (ADR-0014) | `create_compartment`, `list_compartments`, `share_compartment` (reference/link), `revoke_compartment`, `propose_compartments` (cluster the unorganized pool; `apply` to persist as `Origin::Proposed`)                       |
 | Brain (ADR-0005)        | `route` (which expert covers a task, ranked, or escalate, via pure-arithmetic gate inference); `answer` (route _and serve_ through the covering expert's adapter; escalates if uncovered or no serving engine is configured) |
+| Documents (P-3)         | `ingest_document` (chunk, embed, store; archived to copal as the document of record when configured), `recall_documents` (semantic search over the chunks) |
+| Operator                | `population` (the experts this session can route to), `workspace_stats`, `penalize_memory` (the symmetric counterpart of `reinforce_memory`) |
 
 The `answer` tool takes an injectable `Serve` engine: a real `MultiAdapterServe` under `--features models`, or `None` for a route-only surface (it then reports serving is not configured). The antumbra can also be told to self-organize: `--auto-propose <N>` fires `propose_compartments` over the inbox once it reaches `N` memories.
 
@@ -38,4 +40,4 @@ The client never passes `tenant`/`user`; the server resolves them from the bound
 
 ## Validation
 
-In-process integration test (store → recall → reinforce → list → forget; compartment create/list/store/share/ revoke) + a real MCP stdio smoke (initialize + `tools/list` returns all 14; store/recall round-trips). _Kill criterion:_ an MCP client cannot drive memory + routing against a real workspace → the runtime surface is not usable.
+In-process integration test (store → recall → reinforce → list → forget; compartment create/list/store/share/ revoke) + a real MCP stdio smoke (initialize + `tools/list` returns all 19: the 14 below at acceptance, plus `penalize_memory`, `ingest_document`, `recall_documents`, `population`, and `workspace_stats` since; store/recall round-trips). _Kill criterion:_ an MCP client cannot drive memory + routing against a real workspace → the runtime surface is not usable.

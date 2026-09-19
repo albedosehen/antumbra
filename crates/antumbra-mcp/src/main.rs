@@ -27,10 +27,11 @@ use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 mod auth {
     pub use antumbra_auth::*;
 }
-mod copal;
 mod embed;
 mod http;
 mod notify;
+mod profile;
+mod secrets;
 mod server;
 use server::McpServer;
 
@@ -62,8 +63,13 @@ struct Cli {
     #[arg(long)]
     http: Option<String>,
     /// HS256 shared secret for verifying request JWTs (symmetric).
-    #[arg(long, env = "ANTUMBRA_JWT_SECRET")]
+    #[arg(long, env = "ANTUMBRA_JWT_SECRET", hide_env_values = true)]
     jwt_secret: Option<String>,
+    /// Read the HS256 secret from this file instead (a Docker secret, a
+    /// Kubernetes secret, a Key Vault mount): it then appears in neither the
+    /// process arguments nor the environment.
+    #[arg(long, env = "ANTUMBRA_JWT_SECRET_FILE", conflicts_with = "jwt_secret")]
+    jwt_secret_file: Option<std::path::PathBuf>,
     /// Path to a PEM RSA public key for verifying request JWTs (RS256).
     #[arg(long)]
     jwt_public_key: Option<std::path::PathBuf>,
@@ -77,8 +83,11 @@ struct Cli {
     #[arg(long, env = "ANTUMBRA_DB_USER")]
     db_user: Option<String>,
     /// Root password for the remote SurrealDB.
-    #[arg(long, env = "ANTUMBRA_DB_PASS")]
+    #[arg(long, env = "ANTUMBRA_DB_PASS", hide_env_values = true)]
     db_pass: Option<String>,
+    /// Read the root password from this file instead (see --jwt-secret-file).
+    #[arg(long, env = "ANTUMBRA_DB_PASS_FILE", conflicts_with = "db_pass")]
+    db_pass_file: Option<std::path::PathBuf>,
     /// Enable the autonomous propose trigger: once a user's unorganized inbox
     /// reaches this many memories, a write auto-clusters it into proposed
     /// compartments (reversible; the user curates). Off when unset.
@@ -108,8 +117,15 @@ struct Cli {
     #[arg(long, default_value = "all-MiniLM-L6-v2")]
     embedder_model: String,
     /// Optional bearer key for `--embedder-url`.
-    #[arg(long, env = "ANTUMBRA_EMBEDDER_KEY")]
+    #[arg(long, env = "ANTUMBRA_EMBEDDER_KEY", hide_env_values = true)]
     embedder_key: Option<String>,
+    /// Use the deterministic byte-histogram stand-in instead of a real embedder.
+    /// Recall is then NOT semantic (it matches character statistics), so this is
+    /// for smoke tests and demos only. Without `--features models`, the server
+    /// refuses to start with neither this nor `--embedder-url` rather than
+    /// silently degrading recall.
+    #[arg(long, env = "ANTUMBRA_FAKE_EMBEDDER", default_value_t = false)]
+    fake_embedder: bool,
     /// Rerank hybrid-recall candidates with a cross-encoder via a TEI/Cohere-style
     /// `/rerank` endpoint (the precision stage after RRF). Off when unset.
     #[arg(long, env = "ANTUMBRA_RERANK_URL")]
@@ -119,7 +135,7 @@ struct Cli {
     #[arg(long)]
     rerank_model: Option<String>,
     /// Optional bearer key for `--rerank-url`.
-    #[arg(long, env = "ANTUMBRA_RERANK_KEY")]
+    #[arg(long, env = "ANTUMBRA_RERANK_KEY", hide_env_values = true)]
     rerank_key: Option<String>,
     /// Archive each ingested document's ORIGINAL content to a copal file
     /// service (the document of record): bare `host:port` or a full URL base.
@@ -140,7 +156,7 @@ struct Cli {
     /// One `ck1` copal API key for every workspace: shared tenancy under
     /// copal's deployed `keys` auth mode, where the tenant is bound to the
     /// credential (the key's tenant is THE tenant).
-    #[arg(long, env = "ANTUMBRA_COPAL_KEY")]
+    #[arg(long, env = "ANTUMBRA_COPAL_KEY", hide_env_values = true)]
     copal_key: Option<String>,
     /// Path to a JSON file mapping workspace tenant -> `ck1` copal API key
     /// (e.g. `{"ws:acme": "ck1..."}`): per-workspace tenancy under copal's
@@ -149,6 +165,15 @@ struct Cli {
     /// than landing in another tenant.
     #[arg(long, env = "ANTUMBRA_COPAL_KEYS")]
     copal_keys: Option<std::path::PathBuf>,
+    /// Which tools this server advertises and serves: `all` (default), `agent`
+    /// (the developer-agent profile: recall/store/reinforce/penalize memories,
+    /// recall/ingest documents, route, answer), or a comma-separated list of
+    /// tool names, in which `agent` expands (`agent,population`). Anything
+    /// outside the profile is neither listed nor callable, over JSON-RPC or
+    /// the REST shim: less description text in every session, and no operator
+    /// action (sharing, revoking, forgetting) one agent call away.
+    #[arg(long, env = "ANTUMBRA_TOOLS", default_value = "all")]
+    tools: String,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -178,18 +203,33 @@ pub(crate) async fn connect_serving(url: &str) -> Result<Store> {
     Ok(Store::connect_without_schema(config, EMBED_DIM).await?)
 }
 
-/// The real candle BERT embedder under `--features models`, else the
-/// byte-histogram fake. Both produce `EMBED_DIM`-wide vectors.
+/// The built-in embedder when no `--embedder-url` is configured: the real candle
+/// BERT under `--features models`; `--fake-embedder` still selects the
+/// byte-histogram stand-in for smoke tests. Both produce `EMBED_DIM`-wide vectors.
 #[cfg(feature = "models")]
-fn make_embedder() -> Result<Box<dyn Embedder>> {
+fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
+    if fake {
+        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
+            EMBED_DIM,
+        )));
+    }
     Ok(Box::new(antumbra_serve::BertEmbedder::load()?))
 }
 
+/// Without `models` there is no built-in embedder: the operator brings one
+/// (`--embedder-url`) or opts into the byte-histogram stand-in explicitly.
+/// Refusing to start beats a server whose recall silently matches character
+/// statistics instead of meaning.
 #[cfg(not(feature = "models"))]
-fn make_embedder() -> Result<Box<dyn Embedder>> {
-    Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
-        EMBED_DIM,
-    )))
+fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
+    if fake {
+        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
+            EMBED_DIM,
+        )));
+    }
+    anyhow::bail!(
+        "no embedder configured: pass --embedder-url <OpenAI-compatible /embeddings endpoint \n         returning {EMBED_DIM}-d vectors> (for example Ollama serving all-minilm), or \n         --fake-embedder to accept the non-semantic byte-histogram stand-in (demos only)"
+    )
 }
 
 /// Owner-side provisioning for an identity: ensure the principal exists and the
@@ -318,12 +358,24 @@ fn main() -> Result<()> {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
+    // Secrets resolve once, from the inline flag or its file, and only the
+    // resolved value is used from here on.
+    let jwt_secret = secrets::resolve(
+        cli.jwt_secret.clone(),
+        cli.jwt_secret_file.as_deref(),
+        "JWT secret",
+    )?;
+    let db_pass = secrets::resolve(
+        cli.db_pass.clone(),
+        cli.db_pass_file.as_deref(),
+        "database password",
+    )?;
 
     // Mint a hook token and exit -- no DB or embedder needed. HS256 only: the
     // server holds the symmetric secret; an RS256 deployment mints via its auth
     // service's private key.
     if cli.mint_token {
-        let secret = cli.jwt_secret.as_deref().ok_or_else(|| {
+        let secret = jwt_secret.as_deref().ok_or_else(|| {
             anyhow::anyhow!(
                 "--mint-token needs --jwt-secret (HS256); RS256 tokens are minted by your auth service"
             )
@@ -338,15 +390,15 @@ async fn run() -> Result<()> {
 
     let host = default_host(cli.host);
     // A configured endpoint embeds on the tenant's side (P-1c); otherwise the
-    // build-time embedder (candle BERT under `models`, else the byte-histogram
-    // fake). Either way the vectors are EMBED_DIM-wide.
+    // built-in embedder (candle BERT under `models`; the byte-histogram stand-in
+    // only when asked for explicitly). Either way the vectors are EMBED_DIM-wide.
     let embedder: Arc<dyn Embedder> = match cli.embedder_url {
         Some(url) => Arc::new(embed::HttpEmbedder::new(
             url,
             cli.embedder_model,
             cli.embedder_key,
         )),
-        None => Arc::from(make_embedder()?),
+        None => Arc::from(make_embedder(cli.fake_embedder)?),
     };
 
     // Optional cross-encoder rerank stage (P-2). Operator-configured endpoint; the
@@ -361,21 +413,25 @@ async fn run() -> Result<()> {
 
     // Optional copal document-of-record archive. Operator-configured; absent,
     // ingest keeps only the chunks (the v0 behavior, unchanged).
-    let copal = build_copal_archive(
+    let copal = antumbra_copal::CopalArchive::from_flags(
         cli.copal_addr.as_deref(),
         cli.copal_tenant,
         cli.copal_key,
         cli.copal_keys.as_deref(),
     )?;
+    // The tool profile, validated against the real tool list so a typo
+    // refuses at startup instead of silently hiding a tool.
+    let profile = profile::ToolProfile::parse(&cli.tools, &server::McpServer::all_tool_names())?
+        .map(Arc::new);
 
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
-        let verifier = build_verifier(&cli.jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
+        let verifier = build_verifier(&jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
         return http::serve(
             addr,
             cli.url,
             cli.db_user,
-            cli.db_pass,
+            db_pass,
             host,
             embedder,
             verifier,
@@ -383,6 +439,7 @@ async fn run() -> Result<()> {
             cli.auto_consolidate,
             reranker,
             copal,
+            profile,
         )
         .await;
     }
@@ -391,7 +448,7 @@ async fn run() -> Result<()> {
     let mut service = build_session(
         &cli.url,
         cli.db_user.as_deref(),
-        cli.db_pass.as_deref(),
+        db_pass.as_deref(),
         TenantId::new(cli.tenant),
         UserId::new(cli.user),
         host,
@@ -409,6 +466,9 @@ async fn run() -> Result<()> {
     }
     if let Some(c) = copal {
         service = service.with_copal_archive(c);
+    }
+    if let Some(p) = profile {
+        service = service.with_tool_profile(p);
     }
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))
@@ -438,63 +498,4 @@ fn build_verifier(
         v = v.with_audience(aud);
     }
     Ok(v)
-}
-
-/// Resolve the copal document-of-record archive from the CLI: `None` when no
-/// address is configured (ingest keeps only the chunks, the v0 behavior). The
-/// tenancy is exactly one of `--copal-tenant` (header auth, shared),
-/// `--copal-key` (keys auth, shared), `--copal-keys` (keys auth,
-/// per-workspace), or none of them (header auth, per-workspace -- the
-/// default). Naming two is a contradiction refused at startup, not a
-/// precedence resolved in silence.
-fn build_copal_archive(
-    addr: Option<&str>,
-    tenant: Option<String>,
-    key: Option<String>,
-    keys_file: Option<&std::path::Path>,
-) -> Result<Option<Arc<copal::CopalArchive>>> {
-    let Some(addr) = addr else {
-        return Ok(None);
-    };
-    let tenancy = match (tenant, key, keys_file) {
-        (None, None, None) => copal::CopalTenancy::PerWorkspace,
-        (Some(t), None, None) => copal::CopalTenancy::Shared(t),
-        (None, Some(k), None) => copal::CopalTenancy::SharedKey(k),
-        (None, None, Some(path)) => copal::CopalTenancy::PerWorkspaceKeys(load_copal_keys(path)?),
-        _ => anyhow::bail!(
-            "--copal-tenant, --copal-key, and --copal-keys each pick a copal tenancy; \
-             pass at most one"
-        ),
-    };
-    Ok(Some(Arc::new(copal::CopalArchive::new(addr, tenancy))))
-}
-
-/// Load and validate the workspace -> `ck1` key map for per-workspace keys
-/// tenancy: a JSON object of strings, non-empty, every key a plain
-/// printable-ASCII credential (a real `ck1` token is; anything else is a
-/// mangled file worth stopping over at startup rather than at some tenant's
-/// first ingest). Errors name the workspace, never the credential.
-fn load_copal_keys(path: &std::path::Path) -> Result<std::collections::HashMap<String, String>> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("cannot read --copal-keys {}: {e}", path.display()))?;
-    let keys: std::collections::HashMap<String, String> =
-        serde_json::from_str(&raw).map_err(|e| {
-            anyhow::anyhow!(
-                "--copal-keys {} is not a JSON object of workspace -> key: {e}",
-                path.display()
-            )
-        })?;
-    if keys.is_empty() {
-        anyhow::bail!("--copal-keys {} maps no workspaces", path.display());
-    }
-    for (workspace, key) in &keys {
-        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_graphic()) {
-            anyhow::bail!(
-                "--copal-keys {}: the key for workspace {workspace} is not a plain ASCII \
-                 credential",
-                path.display()
-            );
-        }
-    }
-    Ok(keys)
 }

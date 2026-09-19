@@ -27,6 +27,7 @@ antumbra-store = { path = "../antumbra-store" }
 antumbra-embed = { path = "../antumbra-embed" }
 antumbra-rerank = { path = "../antumbra-rerank" }
 antumbra-sync = { path = "../antumbra-sync" }
+antumbra-copal = { path = "../antumbra-copal" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal", "net", "sync"] }
 anyhow.workspace = true
@@ -35,9 +36,6 @@ chrono.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
 rmcp = { version = "3", features = ["server", "macros", "transport-io", "transport-streamable-http-server"] }
-# Outbound HTTP for the copal document-of-record archive: the same blocking
-# client (and TLS posture) the embedder's transport uses.
-ureq = { version = "3", features = ["json"] }
 # Networked transport, the MCP runtime surface: the JWT-authenticated, per-request multi-tenant
 # HTTP surface. axum hosts the streamable-HTTP service; jsonwebtoken verifies the
 # bearer token whose claims become $auth (tenant, user).

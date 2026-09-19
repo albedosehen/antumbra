@@ -163,8 +163,8 @@ pub trait Reranker: Send + Sync {
 }
 
 /// Replays the frozen population to judge whether a behavior is acceptable in a
-/// given context. This is what makes counterfactual search affordable
-/// affordable: cheap, repeatable re-probing over frozen experts.
+/// given context. This is what makes counterfactual search affordable:
+/// cheap, repeatable re-probing over frozen experts.
 #[async_trait]
 pub trait AcceptabilityProbe: Send + Sync {
     async fn acceptable(&self, behavior: &str, context: &serde_json::Value) -> Result<bool>;

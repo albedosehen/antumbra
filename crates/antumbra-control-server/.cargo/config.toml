@@ -1,0 +1,6 @@
+# Share the repo's target directory so building this standalone workspace
+# reuses the SurrealDB/tokio/axum artifacts the main workspace already built
+# instead of compiling them a second time. Cargo locks the directory, so the
+# two workspaces can build side by side.
+[build]
+target-dir = "../../target"

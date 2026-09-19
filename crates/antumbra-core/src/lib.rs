@@ -21,6 +21,7 @@ pub mod memory;
 pub mod orchestration;
 pub mod penumbra;
 pub mod ports;
+pub mod provenance;
 pub mod reward;
 pub mod router;
 pub mod shadow;
@@ -45,6 +46,10 @@ pub use ids::{
 pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork, MemoryStatus};
 pub use orchestration::{ComposeStrategy, OrchestrationRun, OrchestrationStatus};
 pub use penumbra::{propose_compartments, ClusterConfig, ProposedCompartment};
+pub use provenance::{
+    demote_out_of_scope, normalize_repo, repo_slug_from_remote, scope_of, GitContext,
+    GitProvenance, Scope,
+};
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};
 pub use shadow::{Shadow, ShadowStatus};

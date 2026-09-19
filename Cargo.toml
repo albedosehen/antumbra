@@ -5,6 +5,7 @@ members = [
     "crates/antumbra-auth",
     "crates/antumbra-store",
     "crates/antumbra-embed",
+    "crates/antumbra-copal",
     "crates/antumbra-bench",
     "crates/antumbra-rerank",
     "crates/antumbra-critic",
@@ -18,8 +19,13 @@ members = [
     "crates/antumbra-mcp",
     "crates/antumbra-sync",
     "crates/antumbra-control",
-    "crates/antumbra-control-server",
 ]
+# The hosted control plane is its own cargo workspace, not a member here: its
+# optional `contract` feature pulls a private git dependency (oneiriq-kayak),
+# and cargo reads every member's manifest on any build, so keeping it in would
+# make the whole workspace unbuildable without access to that repo. Build it
+# from its own directory: `cd crates/antumbra-control-server && cargo build`.
+exclude = ["crates/antumbra-control-server"]
 
 [workspace.package]
 edition = "2021"

@@ -14,6 +14,8 @@
 //! 3. Index regressions: dropping `memory_updated_at_idx` (or demoting a
 //!    composite's prefix) breaks a sort claim and fails here.
 
+#![cfg(feature = "contract")]
+
 use antumbra_control_server::contract::{contract, schema};
 use kayak::{generate_all, validate};
 

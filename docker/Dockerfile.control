@@ -12,7 +12,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY . .
-RUN cargo build --release -p antumbra-control-server --locked --features smtp
+# Its own cargo workspace (see the crate's Cargo.toml); the default features
+# need nothing outside crates.io, so no credentials are involved.
+RUN cd crates/antumbra-control-server && cargo build --release --locked --features smtp
 
 # --- runtime stage: runs as uid 65532 (nonroot) ---------------------------
 FROM gcr.io/distroless/cc-debian12:nonroot

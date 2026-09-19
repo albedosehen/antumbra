@@ -17,6 +17,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 
 use antumbra_core::ports::{ActRequest, Embedder};
+use antumbra_core::{demote_out_of_scope, scope_of, GitContext, GitProvenance, Scope};
 use antumbra_core::{
     Capability, ClusterConfig, Compartment, CompartmentId, DocumentChunk, DocumentChunkId,
     EdgeType, ExpertId, Grant, Memory, MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId,
@@ -76,7 +77,11 @@ pub struct McpServer {
     /// uploads the ORIGINAL content to copal FIRST (failing the ingest if
     /// copal is unreachable) and stamps every stored chunk with the file id +
     /// digest. `None` = no archive; ingest behaves exactly as before.
-    copal: Option<Arc<crate::copal::CopalArchive>>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    /// Which tools this session advertises and serves (`--tools`). `None` =
+    /// every tool. Enforced at `tools/list`, at JSON-RPC `tools/call`, and at
+    /// the REST shim, so a tool outside the profile is neither seen nor run.
+    profile: Option<Arc<crate::profile::ToolProfile>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -209,6 +214,7 @@ impl McpServer {
             reranker: None,
             reranker_cache: Arc::new(tokio::sync::Mutex::new(RerankCache::new())),
             copal: None,
+            profile: None,
         }
     }
 
@@ -217,9 +223,50 @@ impl McpServer {
     /// every chunk carries the copal file id + digest as provenance. Off by
     /// default; without it, ingest keeps only the chunks (the v0 behavior).
     #[must_use]
-    pub fn with_copal_archive(mut self, archive: Arc<crate::copal::CopalArchive>) -> Self {
+    pub fn with_copal_archive(mut self, archive: Arc<antumbra_copal::CopalArchive>) -> Self {
         self.copal = Some(archive);
         self
+    }
+
+    /// Narrow this session to a tool profile: only its tools are listed and
+    /// callable. Off by default (every tool).
+    pub fn with_tool_profile(mut self, profile: Arc<crate::profile::ToolProfile>) -> Self {
+        self.profile = Some(profile);
+        self
+    }
+
+    /// Every tool this server has, by name, profile or not: what `--tools`
+    /// is validated against.
+    pub fn all_tool_names() -> Vec<String> {
+        Self::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect()
+    }
+
+    /// The tools this session advertises: everything, or the profile's subset.
+    pub fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+        let all = Self::tool_router().list_all();
+        match &self.profile {
+            Some(profile) => profile.filter(all, |t| t.name.as_ref()),
+            None => all,
+        }
+    }
+
+    /// Refuse a call to a tool outside the profile with an error that names
+    /// what is advertised, rather than running it or reporting it unknown.
+    fn check_profile(&self, name: &str) -> Result<(), ErrorData> {
+        match &self.profile {
+            Some(profile) if !profile.allows(name) => Err(ErrorData::invalid_params(
+                format!(
+                    "tool `{name}` is not in this server's tool profile; advertised: {}",
+                    profile.names().collect::<Vec<_>>().join(", ")
+                ),
+                None,
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// Enable the cross-encoder precision stage (P-2): after hybrid recall, the
@@ -576,364 +623,8 @@ fn default_capability() -> String {
     "reference".into()
 }
 
-#[derive(Deserialize, schemars::JsonSchema)]
-struct StoreParams {
-    /// The text to remember.
-    content: String,
-    /// Network: `world` (facts), `bank` (experiences), `opinion` (judgments).
-    #[serde(default = "default_network")]
-    network: String,
-    /// Initial confidence in `[0,1]` (default 0.6).
-    confidence: Option<f32>,
-    /// Provenance sources for the memory.
-    evidence: Option<Vec<String>>,
-    /// `true` if the fact changes over time (kept in store, never consolidated).
-    volatile: Option<bool>,
-    /// The compartment to store into. Omit to use this session's default space.
-    compartment: Option<String>,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct StoredOut {
-    id: String,
-    /// Compartment ids the antumbra auto-created from the inbox on this write
-    /// (only when the autonomous propose trigger is enabled and fired).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    auto_proposed: Vec<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct RecallParams {
-    /// What to recall, embedded and matched by semantic similarity.
-    query: String,
-    /// How many to return (default 5).
-    top_k: Option<u32>,
-    /// Optional network filter (`world`/`bank`/`opinion`).
-    network: Option<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct ListParams {
-    /// Optional network filter (`world`/`bank`/`opinion`).
-    network: Option<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct IdParams {
-    memory_id: String,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct MemoryView {
-    id: String,
-    content: String,
-    network: String,
-    confidence: f32,
-    reinforcement: u32,
-}
-
-impl From<&Memory> for MemoryView {
-    fn from(m: &Memory) -> Self {
-        Self {
-            id: m.id.as_str().to_string(),
-            content: m.content.clone(),
-            network: m.network.as_str().to_string(),
-            confidence: m.confidence,
-            reinforcement: m.reinforcement,
-        }
-    }
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct MemoriesOut {
-    memories: Vec<MemoryView>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct IngestDocumentParams {
-    /// The document's title (used to group and name its chunks).
-    title: String,
-    /// The full document text to ingest.
-    content: String,
-    /// Where the document came from (path / url / note).
-    #[serde(default)]
-    source: Option<String>,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct IngestedOut {
-    title: String,
-    chunks: u32,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct RecallDocumentsParams {
-    /// What to recall from the ingested documents.
-    query: String,
-    /// How many chunks to return (default 5).
-    top_k: Option<u32>,
-}
-
-/// A document chunk as returned to a caller (without its embedding).
-#[derive(Serialize, schemars::JsonSchema)]
-struct DocumentChunkView {
-    title: String,
-    source: Option<String>,
-    ordinal: u32,
-    content: String,
-    /// The copal file holding the document's original content (the document of
-    /// record); omitted when it was ingested without an archive.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    copal_file: Option<String>,
-    /// The content digest copal reported for that archived original.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    copal_digest: Option<String>,
-}
-
-impl From<&DocumentChunk> for DocumentChunkView {
-    fn from(c: &DocumentChunk) -> Self {
-        DocumentChunkView {
-            title: c.title.clone(),
-            source: c.source.clone(),
-            ordinal: c.ordinal,
-            content: c.content.clone(),
-            copal_file: c.copal_file.clone(),
-            copal_digest: c.copal_digest.clone(),
-        }
-    }
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct DocumentChunksOut {
-    chunks: Vec<DocumentChunkView>,
-}
-
-/// One expert in the visible population (read-only view, no embedding/adapter).
-#[derive(Serialize, schemars::JsonSchema)]
-struct ExpertView {
-    id: String,
-    name: String,
-    generation: u32,
-    fitness: f32,
-    /// True if this is the caller's own private expert (else a shared one).
-    private: bool,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct PopulationOut {
-    experts: Vec<ExpertView>,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct StatsOut {
-    memories: u32,
-    documents: u32,
-    experts: u32,
-    boundaries: u32,
-    compartments: u32,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct ReinforceOut {
-    found: bool,
-    reinforcement: u32,
-    confidence: f32,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct ForgetOut {
-    forgotten: bool,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct RelateParams {
-    from_id: String,
-    to_id: String,
-    /// `references` / `supersedes` / `contradicts` / `follows` / `caused`.
-    #[serde(default = "default_edge_type")]
-    edge_type: String,
-    /// Edge strength (default 1.0).
-    weight: Option<f32>,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct RelateOut {
-    related: bool,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct NeighborsParams {
-    memory_id: String,
-    /// Optional edge-type filter.
-    edge_type: Option<String>,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct NeighborView {
-    edge_type: String,
-    weight: f32,
-    memory: MemoryView,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct NeighborsOut {
-    neighbors: Vec<NeighborView>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct RouteParams {
-    /// The task to route across the shared expert population.
-    task: String,
-    /// How many candidate experts to return (default 3).
-    top_k: Option<u32>,
-}
-
-/// Minimum cosine similarity for one of the user's *private* experts to be
-/// offered as a route candidate (a heuristic floor; private experts are not in
-/// the shared learned router, so they are matched directly by centroid; a
-/// per-private-expert learned boundary is the eventual refinement).
-const PRIVATE_ROUTE_FLOOR: f32 = 0.3;
-
-/// Document chunking (P-3): target chunk size and inter-chunk overlap, in chars.
-/// ~1200 chars is roughly a paragraph or two: enough context per chunk for the
-/// 384-d model without diluting the embedding; the overlap keeps a fact that
-/// straddles a cut wholly present in one chunk.
-const DOCUMENT_CHUNK_CHARS: usize = 1200;
-const DOCUMENT_CHUNK_OVERLAP: usize = 200;
-
-/// Inhibition radius for the legacy absolute-scope boundary path; mirrors
-/// `antumbra_gate::GateConfig::default().inhibition_radius`. Correction-derived
-/// boundaries use the relative C/C' margin, which ignores the radius, so this
-/// only bites a hypothetical absolute boundary.
-const INHIBITION_RADIUS: f32 = 0.5;
-
-/// Escalate (route to no one) when a boundary inhibits the task above this,
-/// mirroring the CLI learned-route gate. A task inside a known failure scope is
-/// handed up rather than served by an expert that provably fails there.
-const BOUNDARY_ESCALATE_THRESHOLD: f32 = 0.5;
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct RouteHit {
-    expert_id: String,
-    probability: f32,
-    /// `true` if this is one of *your* private experts (consolidated from your
-    /// compartment), matched by centroid; `false` for a shared expert.
-    private: bool,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct RouteOut {
-    /// Whether the population covers this task (vs out-of-distribution).
-    covered: bool,
-    /// `true` when no expert covers it: defer to the generalist.
-    escalate: bool,
-    routes: Vec<RouteHit>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct AnswerParams {
-    /// The task to route and answer through the covering expert.
-    task: String,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct AnswerOut {
-    /// The generated answer (empty when escalating).
-    answer: String,
-    /// The expert that served it, when one covered the task.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expert_id: Option<String>,
-    /// `true` when no expert covered it, or serving is not configured.
-    escalate: bool,
-    /// Why it escalated, when it did.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    note: Option<String>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct CreateCompartmentParams {
-    /// A display name for the new compartment.
-    name: String,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct CompartmentView {
-    id: String,
-    name: String,
-    origin: String,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct CompartmentsOut {
-    compartments: Vec<CompartmentView>,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct ShareParams {
-    compartment_id: String,
-    /// The user to share with (a user id in this tenant).
-    grantee: String,
-    /// `reference` (recall) or `link` (also connect). Defaults to reference.
-    #[serde(default = "default_capability")]
-    capability: String,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct ShareOut {
-    shared: bool,
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct RevokeParams {
-    compartment_id: String,
-    grantee: String,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct RevokeOut {
-    revoked: bool,
-}
-
-fn default_threshold() -> f32 {
-    0.6
-}
-
-fn default_min_size() -> usize {
-    3
-}
-
-#[derive(Deserialize, schemars::JsonSchema)]
-struct ProposeCompartmentsParams {
-    /// Cosine at/above which two memories cluster together (default 0.6).
-    #[serde(default = "default_threshold")]
-    similarity_threshold: f32,
-    /// Smallest cluster worth proposing; singletons and pairs are noise (default 3).
-    #[serde(default = "default_min_size")]
-    min_size: usize,
-    /// Persist each proposal as an `Origin::Proposed` compartment you own and
-    /// move its members into it. Default false (suggest only; reversible by
-    /// deleting the compartment).
-    #[serde(default)]
-    apply: bool,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct ProposalView {
-    /// Heuristic label from the cluster's most central memory; rename on accept.
-    label: String,
-    /// The memory ids grouped into this proposed region.
-    members: Vec<String>,
-    /// Mean cosine of members to the centroid; rank proposals by this.
-    cohesion: f32,
-    /// Set when `apply` was true: the id of the created proposed compartment.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compartment_id: Option<String>,
-}
-
-#[derive(Serialize, schemars::JsonSchema)]
-struct ProposalsOut {
-    proposals: Vec<ProposalView>,
-}
+mod params;
+use self::params::*;
 
 #[tool_router]
 impl McpServer {
@@ -962,8 +653,26 @@ impl McpServer {
         .with_embedding(embedding)
         .in_compartment(compartment)
         .by(self.user.clone(), self.host.clone());
-        if let Some(ev) = p.evidence {
-            m = m.with_evidence(ev);
+        let mut evidence = p.evidence.unwrap_or_default();
+        if let Some(prov) = p.provenance {
+            let anchor = GitProvenance {
+                repo: prov.repo,
+                commit: prov.commit,
+                branch: prov.branch,
+                path: prov.path,
+            };
+            if !anchor.is_valid() {
+                return Err(ErrorData::invalid_params(
+                    "provenance must have a repo slug without ' (host/org/name), a 7-40 hex \
+                     digit commit, and a branch without ':'"
+                        .to_string(),
+                    None,
+                ));
+            }
+            evidence.push(anchor.to_evidence());
+        }
+        if !evidence.is_empty() {
+            m = m.with_evidence(evidence);
         }
         if p.volatile.unwrap_or(false) {
             m = m.volatile(true);
@@ -1085,9 +794,29 @@ impl McpServer {
                 |m| m.content.clone(),
             )
             .await;
-        Ok(Json(MemoriesOut {
-            memories: hits.iter().map(MemoryView::from).collect(),
-        }))
+        // Scope each hit against where the caller is (repo + branch): a memory
+        // learned on another branch or in another repo is demoted below the
+        // in-scope ones, never hidden. The hook that boots a session goes
+        // further with git in hand (is the commit on HEAD, does the branch
+        // still exist); the server only knows what the caller told it.
+        let memories = if p.repo.is_some() || p.branch.is_some() {
+            let ctx = GitContext {
+                repo: p.repo,
+                branch: p.branch,
+            };
+            let views: Vec<MemoryView> = hits.iter().map(|m| MemoryView::scoped(m, &ctx)).collect();
+            demote_out_of_scope(views, |v| {
+                v.scope.as_deref().map_or(Scope::Unknown, |s| match s {
+                    "other_branch" => Scope::OtherBranch,
+                    "other_repo" => Scope::OtherRepo,
+                    "in_scope" => Scope::InScope,
+                    _ => Scope::Unknown,
+                })
+            })
+        } else {
+            hits.iter().map(MemoryView::from).collect()
+        };
+        Ok(Json(MemoriesOut { memories }))
     }
 
     /// Ingest a knowledge document: chunk, embed, and store it for recall. A
@@ -1107,7 +836,7 @@ impl McpServer {
         // The session's workspace tenant scopes the archive identity (the
         // idempotency key and path), so two workspaces sharing a title never
         // revision each other's document; the copal tenant header stays the
-        // operator-configured one (see `crate::copal`).
+        // operator-configured one (see `antumbra_copal`).
         let archived = match &self.copal {
             Some(archive) => Some(
                 archive
@@ -1623,6 +1352,7 @@ impl McpServer {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, ErrorData> {
+        self.check_profile(name)?;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
         macro_rules! dispatch {
@@ -1675,6 +1405,39 @@ impl McpServer {
 
 #[tool_handler]
 impl ServerHandler for McpServer {
+    /// `tools/list` under the session's profile. Written out (the macro
+    /// generates it only when absent) so the profile is enforced where the
+    /// agent first sees the tools: the advertisement.
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        Ok(rmcp::model::ListToolsResult {
+            result_type: Some(rmcp::model::ResultType::COMPLETE),
+            tools: self.advertised_tools(),
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
+        })
+    }
+
+    /// JSON-RPC `tools/call` under the session's profile: a tool outside it is
+    /// refused before the router sees the request.
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
+        self.check_profile(&request.name)?;
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        Self::tool_router().call(tcc).await
+    }
+
     /// On initialize, record this session's peer under its (tenant, user) identity
     /// so the live-propagation watcher can push shared-memory changes to it (R-2).
     /// A no-op when no registry is wired (stdio / route-only / tests).
@@ -1705,1076 +1468,4 @@ impl ServerHandler for McpServer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use antumbra_core::router::{LearnedRouter, RouterExpert};
-    use antumbra_core::testing::FixedEmbedder;
-    use antumbra_core::{BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain};
-    use antumbra_store::repo::{expert, router};
-    use antumbra_store::EMBED_DIM;
-    use chrono::Utc;
-
-    // Ids stay unique even minted back-to-back (potentially within one
-    // nanosecond, where the timestamp portion collides): the process-global
-    // counter disambiguates, so two sessions cannot mint the same id.
-    #[test]
-    fn next_id_is_unique_under_a_burst() {
-        let ids: std::collections::HashSet<String> = (0..1000).map(|_| next_id("m")).collect();
-        assert_eq!(
-            ids.len(),
-            1000,
-            "the process-global counter keeps ids unique"
-        );
-    }
-
-    async fn server() -> McpServer {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        McpServer::new(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "test-host".into(),
-            CompartmentId::new("comp:test:default"),
-            None,
-        )
-    }
-
-    #[tokio::test]
-    async fn store_recall_reinforce_list_forget_roundtrip() {
-        let s = server().await;
-
-        let stored = s
-            .store_memory(Parameters(StoreParams {
-                content: "In acme-api use deno install, not npm".into(),
-                network: "opinion".into(),
-                confidence: Some(0.9),
-                evidence: None,
-                volatile: None,
-                compartment: None,
-            }))
-            .await
-            .unwrap();
-        let id = stored.0.id.clone();
-        assert!(id.starts_with("memory:"));
-
-        let recalled = s
-            .recall_memories(Parameters(RecallParams {
-                query: "how do I add a dependency in acme-api".into(),
-                top_k: Some(5),
-                network: None,
-            }))
-            .await
-            .unwrap();
-        assert_eq!(recalled.0.memories.len(), 1);
-        assert!(recalled.0.memories[0].content.contains("deno"));
-
-        let r = s
-            .reinforce_memory(Parameters(IdParams {
-                memory_id: id.clone(),
-            }))
-            .await
-            .unwrap();
-        assert!(r.0.found);
-        assert_eq!(r.0.reinforcement, 1);
-
-        let listed = s
-            .list_memories(Parameters(ListParams { network: None }))
-            .await
-            .unwrap();
-        assert_eq!(listed.0.memories.len(), 1);
-
-        s.forget_memory(Parameters(IdParams { memory_id: id }))
-            .await
-            .unwrap();
-        assert!(s
-            .list_memories(Parameters(ListParams { network: None }))
-            .await
-            .unwrap()
-            .0
-            .memories
-            .is_empty());
-    }
-
-    /// Seed several memories then recall: returns the recalled content list in
-    /// order. Shared by the rerank tests so the control and reranked runs are
-    /// over identical data.
-    async fn seed_and_recall(s: &McpServer, query: &str) -> Vec<String> {
-        for content in [
-            "the first ordinary note about scheduling",
-            "a second unrelated note on logging config",
-            "PROMOTE: the exact answer about deno install in acme-api",
-            "a fourth note mentioning npm dependencies loosely",
-        ] {
-            s.store_memory(Parameters(StoreParams {
-                content: content.into(),
-                network: "world".into(),
-                confidence: Some(0.8),
-                evidence: None,
-                volatile: None,
-                compartment: None,
-            }))
-            .await
-            .unwrap();
-        }
-        s.recall_memories(Parameters(RecallParams {
-            query: query.into(),
-            top_k: Some(4),
-            network: None,
-        }))
-        .await
-        .unwrap()
-        .0
-        .memories
-        .into_iter()
-        .map(|m| m.content)
-        .collect()
-    }
-
-    #[tokio::test]
-    async fn rerank_promotes_the_cross_encoder_winner_to_top1() {
-        use antumbra_core::testing::ScriptedReranker;
-
-        // With a reranker that promotes the "PROMOTE" candidate, it leads.
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let reranked = McpServer::new(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "test-host".into(),
-            CompartmentId::new("comp:test:default"),
-            None,
-        )
-        .with_reranker(Arc::new(ScriptedReranker::promoting_content_substring(
-            "PROMOTE",
-        )));
-        let out = seed_and_recall(&reranked, "how do I install a dependency").await;
-        assert!(
-            out[0].contains("PROMOTE"),
-            "the cross-encoder winner is reranked to top-1: {out:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn without_reranker_rrf_order_is_unchanged_control() {
-        // The control: the SAME data with no reranker need not put PROMOTE first
-        // (the embedding/RRF order stands). This proves the reorder above is the
-        // reranker's doing, not an artifact of the data.
-        let plain = server().await;
-        let out = seed_and_recall(&plain, "how do I install a dependency").await;
-        // PROMOTE is not guaranteed top-1 without the cross-encoder; at minimum the
-        // ordering is allowed to differ from the reranked run. Assert the control
-        // simply returns all four, in some order, without rerank applied.
-        assert_eq!(out.len(), 4, "control returns the recalled set: {out:?}");
-    }
-
-    #[tokio::test]
-    async fn reranker_error_degrades_to_rrf_order_without_failing() {
-        use antumbra_core::testing::ScriptedReranker;
-
-        // A failing reranker must NOT turn a successful recall into an error.
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = McpServer::new(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "test-host".into(),
-            CompartmentId::new("comp:test:default"),
-            None,
-        )
-        .with_reranker(Arc::new(ScriptedReranker::failing()));
-        let out = seed_and_recall(&s, "how do I install a dependency").await;
-        assert_eq!(
-            out.len(),
-            4,
-            "recall still returns its results when rerank errors: {out:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn rerank_reorders_document_chunks_too() {
-        use antumbra_core::testing::ScriptedReranker;
-
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = McpServer::new(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "test-host".into(),
-            CompartmentId::new("comp:test:default"),
-            None,
-        )
-        .with_reranker(Arc::new(ScriptedReranker::promoting_content_substring(
-            "PROMOTE",
-        )));
-        // Two short docs so each is a single chunk; one carries the token.
-        s.ingest_document(Parameters(IngestDocumentParams {
-            title: "doc-a".into(),
-            source: None,
-            content: "an ordinary chunk about scheduling and logging".into(),
-        }))
-        .await
-        .unwrap();
-        s.ingest_document(Parameters(IngestDocumentParams {
-            title: "doc-b".into(),
-            source: None,
-            content: "PROMOTE: the exact chunk answering the dependency question".into(),
-        }))
-        .await
-        .unwrap();
-        let out = s
-            .recall_documents(Parameters(RecallDocumentsParams {
-                query: "how do I install a dependency".into(),
-                top_k: Some(2),
-            }))
-            .await
-            .unwrap();
-        let contents: Vec<String> = out.0.chunks.into_iter().map(|c| c.content).collect();
-        assert!(
-            contents[0].contains("PROMOTE"),
-            "reranked chunk leads: {contents:?}"
-        );
-    }
-
-    /// The autonomous consolidation trigger, end to end: storing then
-    /// reinforcing a memory past the gate fires `maybe_consolidate`, which mints
-    /// a private expert in the background with no manual `consolidate-compartment`
-    /// call. Gated: needs the candle trainer (`--features models`) + a GPU +
-    /// `python` (the exec verifier) + the base weights. Run with `--ignored`.
-    #[cfg(feature = "models")]
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[ignore = "needs --features models + a GPU + python; run with --ignored"]
-    async fn auto_consolidate_mints_a_private_expert_on_reinforce() {
-        use antumbra_core::ports::Serve;
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let comp = "comp:ws:test:auto";
-        // A real (empty) serve engine: the trigger should hot-register the minted
-        // expert into it, so `answer` could serve it with no restart.
-        let serve = Arc::new(antumbra_serve::MultiAdapterServe::new(
-            "Qwen/Qwen2.5-Coder-1.5B",
-            antumbra_serve::RaftConfig::default(),
-        ));
-        let s = McpServer::new(
-            store.clone(),
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "test-host".into(),
-            CompartmentId::new(comp),
-            Some(serve.clone() as Arc<dyn antumbra_core::ports::Serve>),
-        )
-        .with_auto_consolidate();
-
-        // A high-confidence opinion graduates on the provenance tier once it is
-        // reinforced past recurrence >= 2; `None` compartment lands in the
-        // server default (`comp`), which the minted expert is named for.
-        let stored = s
-            .store_memory(Parameters(StoreParams {
-                content: "Prefer `deno install` over `npm install` in this project.".into(),
-                network: "opinion".into(),
-                confidence: Some(1.0),
-                evidence: None,
-                volatile: None,
-                compartment: None,
-            }))
-            .await
-            .unwrap();
-        let id = stored.0.id.clone();
-
-        // Reinforce past the gate. A no-op early reinforce (recurrence < 2) returns
-        // fast, freeing the per-compartment guard before a later one trains; the
-        // spacing keeps the trigger from being swallowed by an in-flight no-op.
-        for _ in 0..3 {
-            s.reinforce_memory(Parameters(IdParams {
-                memory_id: id.clone(),
-            }))
-            .await
-            .unwrap();
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
-
-        // The consolidation runs in a spawned task. `can_serve` flips true only
-        // after the expert is minted AND hot-registered, so it is the end-to-end
-        // signal that the whole loop closed (memory -> expert -> servable).
-        let want = ExpertId::new(format!("expert:user:test:{comp}"));
-        let mut servable = false;
-        for _ in 0..240 {
-            if serve.can_serve(&want) {
-                servable = true;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
-        assert!(
-            servable,
-            "autonomous consolidation should mint {} and hot-register it for serving",
-            want.as_str()
-        );
-        assert!(
-            expert::get(&store, &want).await.unwrap().is_some(),
-            "the minted expert is persisted in the store"
-        );
-    }
-
-    #[tokio::test]
-    async fn relate_and_get_neighbors() {
-        let s = server().await;
-        let store = |content: &str| StoreParams {
-            content: content.into(),
-            network: "world".into(),
-            confidence: None,
-            evidence: None,
-            volatile: None,
-            compartment: None,
-        };
-        let a = s
-            .store_memory(Parameters(store("a deno project")))
-            .await
-            .unwrap()
-            .0
-            .id;
-        let b = s
-            .store_memory(Parameters(store("use deno install")))
-            .await
-            .unwrap()
-            .0
-            .id;
-
-        s.relate_memories(Parameters(RelateParams {
-            from_id: a.clone(),
-            to_id: b.clone(),
-            edge_type: "supersedes".into(),
-            weight: Some(0.8),
-        }))
-        .await
-        .unwrap();
-
-        let neighbors = s
-            .get_neighbors(Parameters(NeighborsParams {
-                memory_id: a,
-                edge_type: None,
-            }))
-            .await
-            .unwrap();
-        assert_eq!(neighbors.0.neighbors.len(), 1);
-        assert_eq!(neighbors.0.neighbors[0].edge_type, "supersedes");
-        assert_eq!(neighbors.0.neighbors[0].memory.id, b);
-    }
-
-    #[tokio::test]
-    async fn route_escalates_without_router_then_routes_with_one() {
-        let s = server().await;
-
-        // No router trained yet -> escalate (out of distribution).
-        let r = s
-            .route(Parameters(RouteParams {
-                task: "add two numbers".into(),
-                top_k: None,
-            }))
-            .await
-            .unwrap();
-        assert!(r.0.escalate && !r.0.covered && r.0.routes.is_empty());
-
-        // Save a permissive router with one expert.
-        router::save(
-            &s.store,
-            &LearnedRouter {
-                weights: vec![1.0; EMBED_DIM],
-                experts: vec![RouterExpert {
-                    id: ExpertId::new("expert:adder"),
-                    centroid: vec![0.0; EMBED_DIM],
-                }],
-                temperature: 0.1,
-                floor: -1.0,
-            },
-        )
-        .await
-        .unwrap();
-
-        let r = s
-            .route(Parameters(RouteParams {
-                task: "add two numbers".into(),
-                top_k: Some(3),
-            }))
-            .await
-            .unwrap();
-        assert!(r.0.covered && !r.0.escalate);
-        assert_eq!(r.0.routes.len(), 1);
-        assert_eq!(r.0.routes[0].expert_id, "expert:adder");
-
-        // A PRIVATE expert owned by this session's user is matched by centroid
-        // and offered alongside the shared route (flagged private).
-        let cap = FixedEmbedder::new(EMBED_DIM)
-            .embed("my private skill")
-            .await
-            .unwrap();
-        let now = Utc::now();
-        expert::insert(
-            &s.store,
-            &Expert {
-                id: ExpertId::new("expert:mine"),
-                name: "mine".into(),
-                base_model: "base".into(),
-                artifact_uri: "mem://mine".into(),
-                capability_card: serde_json::Value::Null,
-                capability_vec: Some(cap),
-                fitness: 1.0,
-                frozen_at: Some(now),
-                generation: Generation::ZERO,
-                owner: Some(UserId::new("user:test")),
-                compartment: Some(CompartmentId::new("comp:test")),
-                created_at: now,
-            },
-        )
-        .await
-        .unwrap();
-        let r = s
-            .route(Parameters(RouteParams {
-                task: "my private skill".into(),
-                top_k: Some(5),
-            }))
-            .await
-            .unwrap();
-        assert!(
-            r.0.routes
-                .iter()
-                .any(|h| h.private && h.expert_id == "expert:mine"),
-            "the user's private expert must be routable"
-        );
-    }
-
-    #[tokio::test]
-    async fn route_escalates_when_a_boundary_inhibits_the_task() {
-        let s = server().await;
-        // A permissive router that would otherwise route the task.
-        router::save(
-            &s.store,
-            &LearnedRouter {
-                weights: vec![1.0; EMBED_DIM],
-                experts: vec![RouterExpert {
-                    id: ExpertId::new("expert:adder"),
-                    centroid: vec![0.0; EMBED_DIM],
-                }],
-                temperature: 0.1,
-                floor: -1.0,
-            },
-        )
-        .await
-        .unwrap();
-
-        // Without a boundary, the task routes.
-        let r = s
-            .route(Parameters(RouteParams {
-                task: "add two numbers".into(),
-                top_k: Some(3),
-            }))
-            .await
-            .unwrap();
-        assert!(r.0.covered && !r.0.escalate);
-
-        // An actionable boundary whose failure context IS this task region: the
-        // task sits closer to C than to C', so inhibition fires and
-        // the served path escalates rather than route to an expert that fails here.
-        // C embeds to the task region itself (sim_fail = 1), C' to a far context,
-        // so the relative margin clears the escalate threshold.
-        let emb = FixedEmbedder::new(EMBED_DIM);
-        let fail_vec = emb.embed("add two numbers").await.unwrap();
-        let ok_vec = emb.embed("a poem about gardening").await.unwrap();
-        boundary::upsert(
-            &s.store,
-            &FailureBoundary {
-                id: BoundaryId::new("boundary:b1"),
-                behavior: "add two numbers".into(),
-                fail_context: serde_json::json!({ "domain": "math" }),
-                near_ok_context: Some(serde_json::json!({ "domain": "prose" })),
-                governing_features: vec!["domain".into()],
-                grain: Some(Grain::Project),
-                context_vec: Some(fail_vec),
-                ok_context_vec: Some(ok_vec),
-                confidence: 0.9,
-                generation: Generation::ZERO,
-                created_at: Utc::now(),
-            },
-        )
-        .await
-        .unwrap();
-
-        let r = s
-            .route(Parameters(RouteParams {
-                task: "add two numbers".into(),
-                top_k: Some(3),
-            }))
-            .await
-            .unwrap();
-        assert!(
-            r.0.escalate && r.0.routes.is_empty(),
-            "a task inside a known failure scope escalates"
-        );
-    }
-
-    #[tokio::test]
-    async fn call_tool_dispatches_a_named_tool() {
-        let s = server().await;
-        // Store, then list, both through the by-name dispatcher (the REST path).
-        let stored = s
-            .call_tool(
-                "store_memory",
-                serde_json::json!({ "content": "the deno runtime" }),
-            )
-            .await
-            .unwrap();
-        assert!(stored.is_object());
-        let listed = s
-            .call_tool("list_memories", serde_json::json!({}))
-            .await
-            .unwrap();
-        assert!(listed.to_string().contains("deno"));
-        // Unknown tool and malformed arguments are errors, not panics.
-        assert!(s.call_tool("nope", serde_json::json!({})).await.is_err());
-        assert!(s
-            .call_tool("store_memory", serde_json::json!({ "missing": "content" }))
-            .await
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn ingest_then_recall_a_knowledge_document() {
-        let s = server().await;
-        let ingested = s
-            .ingest_document(Parameters(IngestDocumentParams {
-                title: "Onboarding".into(),
-                content: "Antumbra keeps knowledge documents separate from episodic memory. \
-                          Ingesting a document chunks it, embeds each chunk, and makes it \
-                          recallable. This project uses the deno runtime."
-                    .into(),
-                source: Some("onboarding.md".into()),
-            }))
-            .await
-            .unwrap();
-        assert!(ingested.0.chunks >= 1);
-        assert_eq!(ingested.0.title, "Onboarding");
-
-        let recalled = s
-            .recall_documents(Parameters(RecallDocumentsParams {
-                query: "what runtime does this project use".into(),
-                top_k: Some(3),
-            }))
-            .await
-            .unwrap();
-        assert!(!recalled.0.chunks.is_empty());
-        assert!(recalled.0.chunks.iter().all(|c| c.title == "Onboarding"));
-        // No copal archive configured: no provenance, exactly as before.
-        assert!(recalled
-            .0
-            .chunks
-            .iter()
-            .all(|c| c.copal_file.is_none() && c.copal_digest.is_none()));
-
-        // Reachable over the REST dispatcher too.
-        let viarest = s
-            .call_tool(
-                "recall_documents",
-                serde_json::json!({ "query": "runtime", "top_k": 1 }),
-            )
-            .await
-            .unwrap();
-        assert!(viarest.get("chunks").is_some());
-    }
-
-    /// A canned copal for the ingest tests: create answers with a fixed file
-    /// id, upload with a fixed digest; `Err` variants exercise the fail-closed
-    /// path (a configured archive that is down must fail the ingest).
-    struct CannedCopal {
-        up: bool,
-    }
-
-    impl crate::copal::CopalTransport for CannedCopal {
-        fn post_json(
-            &self,
-            _url: &str,
-            _credential: &crate::copal::CopalCredential,
-            _body: &serde_json::Value,
-        ) -> antumbra_core::Result<serde_json::Value> {
-            if self.up {
-                Ok(serde_json::json!({ "id": "file:01J", "state": "draft" }))
-            } else {
-                Err(antumbra_core::AntumbraError::other("connection refused"))
-            }
-        }
-
-        fn put_bytes(
-            &self,
-            _url: &str,
-            _credential: &crate::copal::CopalCredential,
-            _content_type: &str,
-            _body: &[u8],
-        ) -> antumbra_core::Result<serde_json::Value> {
-            if self.up {
-                Ok(serde_json::json!({ "digest": "sha256:abc", "state": "ready" }))
-            } else {
-                Err(antumbra_core::AntumbraError::other("connection refused"))
-            }
-        }
-    }
-
-    fn canned_archive(up: bool) -> Arc<crate::copal::CopalArchive> {
-        Arc::new(crate::copal::CopalArchive::with_transport(
-            "127.0.0.1:9010",
-            // Per-workspace tenancy (the default): the session's workspace
-            // presents itself as the copal tenant. The header side is proven
-            // in `crate::copal`'s own tests; these care about the ingest path.
-            crate::copal::CopalTenancy::PerWorkspace,
-            Arc::new(CannedCopal { up }),
-        ))
-    }
-
-    #[tokio::test]
-    async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() {
-        let s = server().await.with_copal_archive(canned_archive(true));
-        s.ingest_document(Parameters(IngestDocumentParams {
-            title: "Onboarding".into(),
-            content: "Antumbra keeps knowledge documents separate from episodic memory. \
-                      This project uses the deno runtime."
-                .into(),
-            source: Some("onboarding.md".into()),
-        }))
-        .await
-        .unwrap();
-
-        let recalled = s
-            .recall_documents(Parameters(RecallDocumentsParams {
-                query: "what runtime does this project use".into(),
-                top_k: Some(3),
-            }))
-            .await
-            .unwrap();
-        assert!(!recalled.0.chunks.is_empty());
-        // Every chunk names the archived original: the file AND the bytes.
-        assert!(recalled
-            .0
-            .chunks
-            .iter()
-            .all(|c| c.copal_file.as_deref() == Some("file:01J")
-                && c.copal_digest.as_deref() == Some("sha256:abc")));
-    }
-
-    #[tokio::test]
-    async fn ingest_fails_closed_when_the_configured_copal_is_unreachable() {
-        // Upload-first: with the archive configured but down, the ingest fails
-        // BEFORE any chunk is stored -- a document of record that silently
-        // dropped originals would be worse than none.
-        let s = server().await.with_copal_archive(canned_archive(false));
-        let res = s
-            .ingest_document(Parameters(IngestDocumentParams {
-                title: "Onboarding".into(),
-                content: "some reference text".into(),
-                source: None,
-            }))
-            .await;
-        assert!(
-            res.is_err(),
-            "a configured archive that is down fails ingest"
-        );
-        // Nothing was stored: the workspace still lists zero documents.
-        assert_eq!(s.workspace_stats().await.unwrap().0.documents, 0);
-    }
-
-    #[tokio::test]
-    async fn population_and_stats_report_the_workspace() {
-        let s = server().await;
-        // A fresh workspace has no experts.
-        assert!(s.population().await.unwrap().0.experts.is_empty());
-        assert_eq!(s.workspace_stats().await.unwrap().0.experts, 0);
-
-        // Seed a memory and a document through the dispatcher.
-        s.call_tool(
-            "store_memory",
-            serde_json::json!({ "content": "remember this" }),
-        )
-        .await
-        .unwrap();
-        s.call_tool(
-            "ingest_document",
-            serde_json::json!({ "title": "Doc", "content": "some reference text" }),
-        )
-        .await
-        .unwrap();
-
-        let stats = s.workspace_stats().await.unwrap();
-        assert!(stats.0.memories >= 1);
-        assert_eq!(stats.0.documents, 1);
-
-        // The stats tool is reachable over the REST dispatcher too.
-        let via = s
-            .call_tool("workspace_stats", serde_json::json!({}))
-            .await
-            .unwrap();
-        assert!(via.get("memories").is_some());
-    }
-
-    #[tokio::test]
-    async fn compartment_tools_create_list_store_share() {
-        let s = server().await;
-
-        let c = s
-            .create_compartment(Parameters(CreateCompartmentParams {
-                name: "deno work".into(),
-            }))
-            .await
-            .unwrap();
-        assert!(c.0.id.starts_with("comp:"));
-        assert_eq!(c.0.origin, "user");
-
-        let listed = s.list_compartments().await.unwrap();
-        assert!(listed.0.compartments.iter().any(|x| x.id == c.0.id));
-
-        // Store a memory explicitly into the new compartment.
-        let m = s
-            .store_memory(Parameters(StoreParams {
-                content: "use deno install".into(),
-                network: "opinion".into(),
-                confidence: None,
-                evidence: None,
-                volatile: None,
-                compartment: Some(c.0.id.clone()),
-            }))
-            .await
-            .unwrap();
-        assert!(m.0.id.starts_with("memory:"));
-
-        // Share + revoke succeed (engine enforcement is proven in the store
-        // crate's penumbra_compartment test; here we exercise the tool plumbing).
-        assert!(
-            s.share_compartment(Parameters(ShareParams {
-                compartment_id: c.0.id.clone(),
-                grantee: "user:other".into(),
-                capability: "reference".into(),
-            }))
-            .await
-            .unwrap()
-            .0
-            .shared
-        );
-        assert!(
-            s.revoke_compartment(Parameters(RevokeParams {
-                compartment_id: c.0.id,
-                grantee: "user:other".into(),
-            }))
-            .await
-            .unwrap()
-            .0
-            .revoked
-        );
-    }
-
-    #[tokio::test]
-    async fn propose_compartments_clusters_inbox_then_applies() {
-        let s = server().await;
-        // Memories written with no compartment land in the inbox (default).
-        for content in [
-            "deno run typescript module",
-            "deno test typescript suite",
-            "deno bundle typescript output",
-            "deno fmt typescript files",
-        ] {
-            s.store_memory(Parameters(StoreParams {
-                content: content.into(),
-                network: "world".into(),
-                confidence: None,
-                evidence: None,
-                volatile: None,
-                compartment: None,
-            }))
-            .await
-            .unwrap();
-        }
-
-        // Suggest-only: proposals returned, nothing persisted. Threshold 0.0
-        // groups the whole inbox into one cluster regardless of the embedder's
-        // geometry, so the wiring (list -> cluster -> view) is deterministic.
-        let suggested = s
-            .propose_compartments(Parameters(ProposeCompartmentsParams {
-                similarity_threshold: 0.0,
-                min_size: 3,
-                apply: false,
-            }))
-            .await
-            .unwrap();
-        assert!(!suggested.0.proposals.is_empty(), "a region is proposed");
-        assert!(
-            suggested
-                .0
-                .proposals
-                .iter()
-                .all(|p| p.compartment_id.is_none()),
-            "suggest-only must not persist"
-        );
-
-        // Apply: the antumbra creates a proposed compartment and moves members in.
-        let applied = s
-            .propose_compartments(Parameters(ProposeCompartmentsParams {
-                similarity_threshold: 0.0,
-                min_size: 3,
-                apply: true,
-            }))
-            .await
-            .unwrap();
-        let prop = applied.0.proposals.first().expect("a proposal");
-        let new_id = prop.compartment_id.clone().expect("apply persisted an id");
-
-        // It is owned by the user and marked as a proposal awaiting curation.
-        let comps = s.list_compartments().await.unwrap();
-        assert!(comps
-            .0
-            .compartments
-            .iter()
-            .any(|c| c.id == new_id && c.origin == "proposed"));
-
-        // Its members were moved out of the inbox into it (engine round-trip).
-        let moved = memory::list_by_compartment(&s.store, &s.tenant, &CompartmentId::new(new_id))
-            .await
-            .unwrap();
-        assert_eq!(moved.len(), prop.members.len());
-        assert!(moved.len() >= 3, "the whole inbox region moved");
-    }
-
-    #[tokio::test]
-    async fn shared_connection_isolates_tenants_under_signin() {
-        // The HTTP transport's model on an embedded (single-writer) engine: ONE
-        // shared connection, signed in per request. Two tenants' servers share
-        // the store; serialized signin must isolate them through the real MCP
-        // tools, not just at the store layer.
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
-        let (ta, ua) = (TenantId::new("ws:a"), UserId::new("user:a"));
-        let (tb, ub) = (TenantId::new("ws:b"), UserId::new("user:b"));
-
-        // Provision both identities owner-side (principal + default compartment).
-        let comp_a = crate::provision_identity(&store, &ta, &ua).await.unwrap();
-        let comp_b = crate::provision_identity(&store, &tb, &ub).await.unwrap();
-        let server_a = McpServer::new(
-            store.clone(),
-            embedder.clone(),
-            ta.clone(),
-            ua.clone(),
-            "h".into(),
-            comp_a,
-            None,
-        );
-        let server_b = McpServer::new(
-            store.clone(),
-            embedder.clone(),
-            tb.clone(),
-            ub.clone(),
-            "h".into(),
-            comp_b,
-            None,
-        );
-
-        // Request 1: bind tenant a, store a memory via a's server.
-        store.signin(&ta, &ua).await.unwrap();
-        server_a
-            .store_memory(Parameters(StoreParams {
-                content: "alpha-only secret".into(),
-                network: "world".into(),
-                confidence: None,
-                evidence: None,
-                volatile: None,
-                compartment: None,
-            }))
-            .await
-            .unwrap();
-
-        // Request 2: re-bind the SAME connection as tenant b; b must not see it.
-        store.signin(&tb, &ub).await.unwrap();
-        let b_view = server_b
-            .list_memories(Parameters(ListParams { network: None }))
-            .await
-            .unwrap();
-        assert!(
-            b_view
-                .0
-                .memories
-                .iter()
-                .all(|m| !m.content.contains("alpha")),
-            "tenant b must not see tenant a's memory over the shared connection"
-        );
-
-        // Request 3: a re-binds and DOES see its own memory.
-        store.signin(&ta, &ua).await.unwrap();
-        let a_view = server_a
-            .list_memories(Parameters(ListParams { network: None }))
-            .await
-            .unwrap();
-        assert!(
-            a_view
-                .0
-                .memories
-                .iter()
-                .any(|m| m.content.contains("alpha")),
-            "tenant a must see its own memory"
-        );
-    }
-
-    #[tokio::test]
-    async fn auto_propose_trigger_fires_once_the_inbox_grows() {
-        // With the autonomous trigger armed at 4, the inbox is left alone until it
-        // reaches 4 memories, at which point a write self-organizes it into an
-        // Origin::Proposed compartment (and the inbox shrinks, quieting the trigger).
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = McpServer::new(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "h".into(),
-            CompartmentId::new("comp:ws:test:user:test:default"),
-            None,
-        )
-        .with_auto_propose(4);
-
-        let put = |n: usize| StoreParams {
-            content: format!("deno typescript task {n}"),
-            network: "world".into(),
-            confidence: None,
-            evidence: None,
-            volatile: None,
-            compartment: None,
-        };
-
-        // The first three writes stay below the threshold: no auto-proposal.
-        for n in 0..3 {
-            let out = s.store_memory(Parameters(put(n))).await.unwrap();
-            assert!(
-                out.0.auto_proposed.is_empty(),
-                "below threshold: inbox left alone"
-            );
-        }
-        // The fourth write reaches the threshold: the antumbra organizes the inbox.
-        let out = s.store_memory(Parameters(put(3))).await.unwrap();
-        assert!(
-            !out.0.auto_proposed.is_empty(),
-            "at threshold the antumbra auto-creates proposed compartment(s)"
-        );
-
-        // The created compartment is a proposal the user owns, awaiting curation.
-        let comps = s.list_compartments().await.unwrap();
-        assert!(comps.0.compartments.iter().any(|c| c.origin == "proposed"));
-
-        // The inbox shrank below the threshold, so the next write does not re-fire.
-        let again = s.store_memory(Parameters(put(99))).await.unwrap();
-        assert!(
-            again.0.auto_proposed.is_empty(),
-            "inbox no longer over threshold"
-        );
-    }
-
-    #[tokio::test]
-    async fn answer_routes_then_serves_through_the_expert() {
-        use antumbra_core::testing::EchoServe;
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        // A permissive router with one expert so routing covers any task.
-        router::save(
-            &store,
-            &LearnedRouter {
-                weights: vec![1.0; EMBED_DIM],
-                experts: vec![RouterExpert {
-                    id: ExpertId::new("expert:adder"),
-                    centroid: vec![0.0; EMBED_DIM],
-                }],
-                temperature: 0.1,
-                floor: -1.0,
-            },
-        )
-        .await
-        .unwrap();
-        let s = McpServer::new(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "h".into(),
-            CompartmentId::new("comp:test:default"),
-            Some(Arc::new(EchoServe)),
-        );
-        let out = s
-            .answer(Parameters(AnswerParams {
-                task: "add two numbers".into(),
-            }))
-            .await
-            .unwrap();
-        assert!(!out.0.escalate, "the population covers the task");
-        assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
-        // EchoServe serves the prompt straight back, proving route -> serve wiring.
-        assert_eq!(out.0.answer, "add two numbers");
-    }
-
-    // A serving engine that doesn't have the routed expert's adapter must make
-    // `answer` ESCALATE, not error -- and never call `act` (F4).
-    struct Unservable;
-    #[async_trait::async_trait]
-    impl antumbra_core::ports::Serve for Unservable {
-        async fn act(
-            &self,
-            _req: ActRequest,
-        ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
-            panic!("act must not be called when the expert is unservable");
-        }
-        fn can_serve(&self, _expert: &ExpertId) -> bool {
-            false
-        }
-    }
-
-    #[tokio::test]
-    async fn answer_escalates_when_the_routed_expert_is_not_servable() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        router::save(
-            &store,
-            &LearnedRouter {
-                weights: vec![1.0; EMBED_DIM],
-                experts: vec![RouterExpert {
-                    id: ExpertId::new("expert:adder"),
-                    centroid: vec![0.0; EMBED_DIM],
-                }],
-                temperature: 0.1,
-                floor: -1.0,
-            },
-        )
-        .await
-        .unwrap();
-        let s = McpServer::new(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            TenantId::new("ws:test"),
-            UserId::new("user:test"),
-            "h".into(),
-            CompartmentId::new("comp:test:default"),
-            Some(Arc::new(Unservable)),
-        );
-        let out = s
-            .answer(Parameters(AnswerParams {
-                task: "add two numbers".into(),
-            }))
-            .await
-            .unwrap();
-        assert!(
-            out.0.escalate,
-            "an unservable routed expert escalates, not errors"
-        );
-        assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
-        assert!(out.0.answer.is_empty());
-    }
-
-    #[tokio::test]
-    async fn answer_without_a_serving_engine_reports_not_configured() {
-        let s = server().await; // serve = None
-        let out = s
-            .answer(Parameters(AnswerParams { task: "x".into() }))
-            .await
-            .unwrap();
-        assert!(out.0.escalate && out.0.note.is_some());
-    }
-}
+mod tests;

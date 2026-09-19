@@ -57,6 +57,13 @@ impl DocumentChunk {
 /// whitespace), searching backward from the hard limit so a chunk does not end
 /// mid-word. Whitespace-only input yields no chunks.
 ///
+/// The chunk size and overlap every ingest path uses (the MCP `ingest_document`
+/// tool and the CLI `ingest` command), so one document chunks the same way
+/// whichever door it came in through.
+pub const DEFAULT_CHUNK_CHARS: usize = 1200;
+/// See [`DEFAULT_CHUNK_CHARS`].
+pub const DEFAULT_CHUNK_OVERLAP: usize = 200;
+
 /// Counting is by `char`, not byte, so the cuts are always on UTF-8 boundaries.
 pub fn chunk_text(text: &str, max_chars: usize, overlap: usize) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
