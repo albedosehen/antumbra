@@ -598,15 +598,15 @@ mod tests {
     /// serving engine, or the first expert it mints has nowhere to be registered.
     #[cfg(feature = "models")]
     #[tokio::test]
-    async fn a_fresh_node_gets_a_serving_engine() {
-        let store = Store::connect_memory(antumbra_store::EMBED_DIM)
-            .await
-            .unwrap();
-        let serve = build_serve(&store).await.unwrap();
-        let serve = serve.expect("an empty population still gets an engine");
+    async fn a_fresh_node_gets_a_serving_engine() -> Result<()> {
+        let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
+        let Some(serve) = build_serve(&store).await? else {
+            anyhow::bail!("an empty population must still get a serving engine");
+        };
         let minted = antumbra_core::ExpertId::new("expert:user:test:comp:fresh");
         assert!(!serve.can_serve(&minted));
         serve.register_expert(&minted, "adapters/fresh_g0.safetensors");
         assert!(serve.can_serve(&minted), "hot-registration has a target");
+        Ok(())
     }
 }
