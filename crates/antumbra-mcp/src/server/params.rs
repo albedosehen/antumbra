@@ -88,10 +88,15 @@ pub(super) struct MemoryView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) provenance: Option<ProvenanceView>,
     /// How the anchor relates to the caller's `repo`/`branch` context
-    /// (`in_scope`, `other_branch`, `other_repo`, `unknown`); only when recall
-    /// was given a context.
+    /// (`in_scope`, `other_branch`, `other_repo`, `orphaned`, `unknown`); only
+    /// when recall was given a context.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) scope: Option<String>,
+    /// When the branch this memory was learned on was deleted (recorded by the
+    /// GitHub integration on the delete event), if it was and nothing has
+    /// re-anchored the memory since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) orphaned_at: Option<String>,
 }
 
 /// A memory's git anchor as returned to a caller.
@@ -128,6 +133,7 @@ impl From<&Memory> for MemoryView {
                 .as_ref()
                 .map(ProvenanceView::from),
             scope: None,
+            orphaned_at: orphan_of(&m.evidence).map(|o| o.at.to_rfc3339()),
         }
     }
 }
@@ -136,8 +142,7 @@ impl MemoryView {
     /// The view of `m` judged against the caller's git context.
     pub(super) fn scoped(m: &Memory, ctx: &GitContext) -> Self {
         let mut view = Self::from(m);
-        let provenance = GitProvenance::from_evidence(&m.evidence);
-        view.scope = Some(scope_of(provenance.as_ref(), ctx).as_str().to_string());
+        view.scope = Some(scope_of_evidence(&m.evidence, ctx).as_str().to_string());
         view
     }
 }

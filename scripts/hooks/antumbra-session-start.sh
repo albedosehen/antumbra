@@ -57,7 +57,7 @@ resp=$(curl -sS --max-time 5 -X POST "$URL/mcp/call" "${auth[@]}" -d "$payload" 
 # anchor, or from another repository, get none (the server's `scope` still shows).
 statuses='{}'
 if [ -n "$commit" ]; then
-  while IFS=$'\t' read -r id m_repo m_commit m_branch; do
+  while IFS=$'\t' read -r id m_repo m_commit m_branch m_orphaned; do
     [ -z "$id" ] && continue
     st=""
     if [ -n "$m_commit" ] && [ "$m_repo" = "$repo" ]; then
@@ -69,10 +69,13 @@ if [ -n "$commit" ]; then
         st="orphaned"
       fi
     fi
+    # The server already knows when GitHub deleted the branch (the App's delete
+    # event marks the memory), even if this clone still has a stale local ref.
+    [ -n "$m_orphaned" ] && st="orphaned"
     [ -n "$st" ] && statuses=$(printf '%s' "$statuses" | jq -c --arg id "$id" --arg st "$st" '. + {($id): $st}')
   done < <(printf '%s' "$resp" | jq -r '
     (.memories // .result.memories // [])[]
-    | [.id, (.provenance.repo // ""), (.provenance.commit // ""), (.provenance.branch // "")]
+    | [.id, (.provenance.repo // ""), (.provenance.commit // ""), (.provenance.branch // ""), (.orphaned_at // "")]
     | @tsv' 2>/dev/null)
 fi
 
@@ -105,7 +108,7 @@ mem_text=$(printf '%s' "$resp" | jq -r --argjson st "$statuses" '
 
 git_line=""
 if [ -n "$commit" ]; then
-  git_line="Git context: repo=${repo:-?} branch=${branch:-(detached)} commit=${commit}. When storing a memory about this code, pass provenance {repo: \"${repo}\", commit: \"${commit}\", branch: \"${branch}\"} to store_memory (add path for a single file) so a later session can tell whether it still applies. Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin -- verify before relying on it, and penalize_memory if it is wrong."
+  git_line="Git context: repo=${repo:-?} branch=${branch:-(detached)} commit=${commit}. When storing a memory about this code, pass provenance {repo: \"${repo}\", commit: \"${commit}\", branch: \"${branch}\"} to store_memory (add path for a single file) so a later session can tell whether it still applies. Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin, or GitHub reported it deleted -- verify before relying on it, and penalize_memory if it is wrong."
 fi
 
 context=$(jq -nc --arg mem "$mem_text" --arg host "$HOST_ID" --arg git "$git_line" '

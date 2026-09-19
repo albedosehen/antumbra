@@ -25,6 +25,7 @@
 
 use std::fmt;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// The prefix that marks an evidence entry as git provenance.
@@ -135,6 +136,102 @@ impl fmt::Display for GitProvenance {
     }
 }
 
+/// The prefix that marks an evidence entry as a branch-orphan marker.
+pub const ORPHAN_EVIDENCE_PREFIX: &str = "git-orphaned:";
+
+/// A server-side judgment that the branch a memory was learned on no longer
+/// exists, recorded on the memory itself so it travels with it. Written by the
+/// GitHub integration when a branch-delete event arrives, before any session
+/// starts; the session hook reaches the same judgment from a checkout with
+/// `git show-ref`. Wire form: `git-orphaned:<repo>#<branch>@<rfc3339>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BranchOrphan {
+    /// Repository slug, `host/org/name`.
+    pub repo: String,
+    /// The branch that was deleted.
+    pub branch: String,
+    /// When the deletion was recorded.
+    pub at: DateTime<Utc>,
+}
+
+impl BranchOrphan {
+    pub fn new(repo: impl Into<String>, branch: impl Into<String>, at: DateTime<Utc>) -> Self {
+        Self {
+            repo: repo.into(),
+            branch: branch.into(),
+            at,
+        }
+    }
+
+    /// The evidence entry.
+    pub fn to_evidence(&self) -> String {
+        format!(
+            "{ORPHAN_EVIDENCE_PREFIX}{}#{}@{}",
+            self.repo,
+            self.branch,
+            self.at.to_rfc3339()
+        )
+    }
+
+    /// Parse the evidence form; `None` for anything that is not a well-formed
+    /// marker. The timestamp follows the LAST `@` (a branch name may contain
+    /// one; a repo slug and an RFC 3339 timestamp never do).
+    pub fn parse(evidence: &str) -> Option<Self> {
+        let rest = evidence.strip_prefix(ORPHAN_EVIDENCE_PREFIX)?;
+        let (repo, rest) = rest.split_once('#')?;
+        let (branch, at) = rest.rsplit_once('@')?;
+        if repo.is_empty() || repo.contains('@') || branch.is_empty() {
+            return None;
+        }
+        let at = DateTime::parse_from_rfc3339(at).ok()?.with_timezone(&Utc);
+        Some(Self::new(repo, branch, at))
+    }
+
+    /// Whether this marker names the branch `anchor` was learned on.
+    pub fn covers(&self, anchor: &GitProvenance) -> bool {
+        normalize_repo(&self.repo) == normalize_repo(&anchor.repo)
+            && anchor.branch.as_deref() == Some(self.branch.as_str())
+    }
+}
+
+/// The orphan marker, if any, that covers a memory's CURRENT anchor. A marker
+/// left over from before a re-anchor (the branch was deleted, then the memory
+/// was moved to the merge commit on the base branch) names a branch the anchor
+/// no longer sits on, and so no longer counts.
+pub fn orphan_of(evidence: &[String]) -> Option<BranchOrphan> {
+    let anchor = GitProvenance::from_evidence(evidence)?;
+    evidence
+        .iter()
+        .filter_map(|e| BranchOrphan::parse(e))
+        .find(|o| o.covers(&anchor))
+}
+
+/// Move a memory's anchor to `to`, keeping the old anchor behind it as history.
+/// The current anchor is always the FIRST git entry, so the new one goes in
+/// front; nothing is removed. Returns `false` (and changes nothing) when the
+/// memory already sits at `to`, so a redelivered event is a no-op.
+pub fn reanchor(evidence: &mut Vec<String>, to: &GitProvenance) -> bool {
+    if GitProvenance::from_evidence(evidence).as_ref() == Some(to) {
+        return false;
+    }
+    evidence.insert(0, to.to_evidence());
+    true
+}
+
+/// Record that the branch a memory's current anchor sits on was deleted.
+/// Returns `false` (and changes nothing) when the anchor is not on that
+/// branch or the marker is already present.
+pub fn mark_orphaned(evidence: &mut Vec<String>, orphan: &BranchOrphan) -> bool {
+    let Some(anchor) = GitProvenance::from_evidence(evidence) else {
+        return false;
+    };
+    if !orphan.covers(&anchor) || orphan_of(evidence).is_some() {
+        return false;
+    }
+    evidence.push(orphan.to_evidence());
+    true
+}
+
 /// Where the caller is right now, so recall can judge each memory's scope.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct GitContext {
@@ -155,6 +252,9 @@ pub enum Scope {
     OtherBranch,
     /// A different repository.
     OtherRepo,
+    /// Its branch no longer exists: the branch was deleted after the memory was
+    /// learned and nothing re-anchored it. The strongest staleness signal.
+    Orphaned,
     /// The memory carries no git provenance, or the caller gave no context.
     Unknown,
 }
@@ -162,15 +262,19 @@ pub enum Scope {
 impl Scope {
     /// Whether recall should demote the memory below in-scope ones.
     pub fn is_inhibited(self) -> bool {
-        matches!(self, Scope::OtherBranch | Scope::OtherRepo)
+        matches!(
+            self,
+            Scope::OtherBranch | Scope::OtherRepo | Scope::Orphaned
+        )
     }
 
-    /// The wire name (`in_scope`, `other_branch`, `other_repo`, `unknown`).
+    /// The wire name (`in_scope`, `other_branch`, `other_repo`, `orphaned`, `unknown`).
     pub fn as_str(self) -> &'static str {
         match self {
             Scope::InScope => "in_scope",
             Scope::OtherBranch => "other_branch",
             Scope::OtherRepo => "other_repo",
+            Scope::Orphaned => "orphaned",
             Scope::Unknown => "unknown",
         }
     }
@@ -189,6 +293,28 @@ pub fn scope_of(provenance: Option<&GitProvenance>, ctx: &GitContext) -> Scope {
     match (&p.branch, &ctx.branch) {
         (Some(theirs), Some(ours)) if theirs != ours => Scope::OtherBranch,
         _ => Scope::InScope,
+    }
+}
+
+/// Judge a memory by its whole evidence list: an orphan marker covering the
+/// current anchor wins over the branch rule, because a deleted branch is a
+/// fact about the memory rather than about where the caller stands. Then the
+/// anchor is judged with [`scope_of`].
+pub fn scope_of_evidence(evidence: &[String], ctx: &GitContext) -> Scope {
+    if orphan_of(evidence).is_some() {
+        return Scope::Orphaned;
+    }
+    scope_of(GitProvenance::from_evidence(evidence).as_ref(), ctx)
+}
+
+/// The [`Scope`] a wire name denotes; `Unknown` for anything unrecognized.
+pub fn scope_from_str(name: &str) -> Scope {
+    match name {
+        "in_scope" => Scope::InScope,
+        "other_branch" => Scope::OtherBranch,
+        "other_repo" => Scope::OtherRepo,
+        "orphaned" => Scope::Orphaned,
+        _ => Scope::Unknown,
     }
 }
 
@@ -361,6 +487,110 @@ mod tests {
         assert_eq!(repo_slug_from_remote("antumbra"), None);
         assert_eq!(repo_slug_from_remote("/srv/git/antumbra.git"), None);
         assert_eq!(repo_slug_from_remote("C:\\repos\\antumbra"), None);
+    }
+
+    #[test]
+    fn orphan_marker_round_trips_and_covers_only_its_branch() {
+        let at = DateTime::parse_from_rfc3339("2026-09-19T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let o = BranchOrphan::new("github.com/o/r", "feat/x@v2", at);
+        let wire = o.to_evidence();
+        assert_eq!(
+            wire,
+            "git-orphaned:github.com/o/r#feat/x@v2@2026-09-19T10:00:00+00:00"
+        );
+        assert_eq!(BranchOrphan::parse(&wire), Some(o.clone()));
+        for bad in [
+            "git-orphaned:github.com/o/r#feat",
+            "git-orphaned:#feat@2026-09-19T10:00:00Z",
+            "git-orphaned:github.com/o/r#@2026-09-19T10:00:00Z",
+            "git-orphaned:github.com/o/r#feat@not-a-time",
+            "git:github.com/o/r@0123abcdef#feat",
+        ] {
+            assert_eq!(BranchOrphan::parse(bad), None, "{bad}");
+        }
+        let on_feat = GitProvenance::new("GitHub.com/O/R", "0123abcdef").on_branch("feat/x@v2");
+        let on_main = GitProvenance::new("github.com/o/r", "0123abcdef").on_branch("main");
+        let no_branch = GitProvenance::new("github.com/o/r", "0123abcdef");
+        assert!(o.covers(&on_feat));
+        assert!(!o.covers(&on_main));
+        assert!(!o.covers(&no_branch));
+    }
+
+    #[test]
+    fn reanchor_puts_the_new_anchor_first_and_is_idempotent() {
+        let mut evidence = vec![
+            "a test note".to_string(),
+            "git:github.com/o/r@0123abcdef#feat/x:src/lib.rs".to_string(),
+        ];
+        let merged = GitProvenance::new("github.com/o/r", "fedcba9876")
+            .on_branch("main")
+            .at_path("src/lib.rs");
+        assert!(reanchor(&mut evidence, &merged));
+        assert_eq!(evidence.len(), 3);
+        assert_eq!(
+            GitProvenance::from_evidence(&evidence),
+            Some(merged.clone())
+        );
+        assert!(
+            evidence[2].contains("0123abcdef"),
+            "the old anchor stays as history"
+        );
+        assert!(
+            !reanchor(&mut evidence, &merged),
+            "redelivery changes nothing"
+        );
+        assert_eq!(evidence.len(), 3);
+    }
+
+    #[test]
+    fn orphan_marking_follows_the_current_anchor() {
+        let now = Utc::now();
+        let orphan = BranchOrphan::new("github.com/o/r", "feat/x", now);
+        let mut evidence = vec!["git:github.com/o/r@0123abcdef#feat/x".to_string()];
+        assert!(mark_orphaned(&mut evidence, &orphan));
+        assert!(orphan_of(&evidence).is_some());
+        assert!(!mark_orphaned(&mut evidence, &orphan), "already marked");
+        assert_eq!(evidence.len(), 2);
+
+        // Re-anchored onto main afterwards: the marker names a branch the
+        // anchor no longer sits on, so the memory is no longer orphaned.
+        let merged = GitProvenance::new("github.com/o/r", "fedcba9876").on_branch("main");
+        assert!(reanchor(&mut evidence, &merged));
+        assert_eq!(orphan_of(&evidence), None);
+
+        // A memory on another branch, or with no anchor, is left alone.
+        let mut other = vec!["git:github.com/o/r@0123abcdef#main".to_string()];
+        assert!(!mark_orphaned(&mut other, &orphan));
+        let mut none: Vec<String> = vec!["free text".to_string()];
+        assert!(!mark_orphaned(&mut none, &orphan));
+    }
+
+    #[test]
+    fn scope_of_evidence_puts_orphaned_first() {
+        let here = GitContext {
+            repo: Some("github.com/o/r".into()),
+            branch: Some("main".into()),
+        };
+        let now = Utc::now();
+        let mut evidence = vec!["git:github.com/o/r@0123abcdef#feat/x".to_string()];
+        assert_eq!(scope_of_evidence(&evidence, &here), Scope::OtherBranch);
+        mark_orphaned(
+            &mut evidence,
+            &BranchOrphan::new("github.com/o/r", "feat/x", now),
+        );
+        assert_eq!(scope_of_evidence(&evidence, &here), Scope::Orphaned);
+        assert_eq!(
+            scope_of_evidence(&evidence, &GitContext::default()),
+            Scope::Orphaned,
+            "an orphan is orphaned wherever the caller stands"
+        );
+        assert!(Scope::Orphaned.is_inhibited());
+        assert_eq!(Scope::Orphaned.as_str(), "orphaned");
+        assert_eq!(scope_from_str("orphaned"), Scope::Orphaned);
+        assert_eq!(scope_from_str("other_repo"), Scope::OtherRepo);
+        assert_eq!(scope_from_str("nonsense"), Scope::Unknown);
     }
 
     #[test]

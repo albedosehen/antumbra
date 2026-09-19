@@ -95,7 +95,7 @@ A memory about code is only as good as its anchor. The hooks keep that anchor as
   | --------------- | ---------------------------------------------------------------------------------------------------- |
   | `[live]`        | the commit it was learned at is an ancestor of HEAD                                                  |
   | `[not-on-head]` | learned on a commit this HEAD does not contain (an unmerged branch, or history this clone lacks)     |
-  | `[orphaned]`    | its branch no longer exists locally or on `origin` (as far as this clone knows; fetch to be current) |
+  | `[orphaned]`    | its branch no longer exists locally or on `origin` (as far as this clone knows; fetch to be current), or the server recorded GitHub deleting it (the App's delete event; `orphaned_at` on the hit) |
 
   Set `ANTUMBRA_PENALIZE_ORPHANS=1` to have the bootstrap also call `penalize_memory` on orphaned hits, so a memory about a branch that is gone loses standing without anyone noticing it first.
 

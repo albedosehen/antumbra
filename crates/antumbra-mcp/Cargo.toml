@@ -28,6 +28,7 @@ antumbra-embed = { path = "../antumbra-embed" }
 antumbra-rerank = { path = "../antumbra-rerank" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-copal = { path = "../antumbra-copal" }
+antumbra-github = { path = "../antumbra-github" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal", "net", "sync"] }
 anyhow.workspace = true

@@ -1,6 +1,6 @@
 # ADR-0019: Native GitHub integration, and a dependency graph made of evidence
 
-**Status:** Proposed · **Date:** 2026-09-19 · **Related:** 0004 (the boundary), 0012 (Penumbra memory), 0018 (provenance over extraction)
+**Status:** Accepted (in progress: the webhook receiver landed; the rest is roadmap P-7) · **Date:** 2026-09-19 · **Related:** 0004 (the boundary), 0012 (Penumbra memory), 0018 (provenance over extraction)
 
 ## Context
 
@@ -43,7 +43,7 @@ It does not own grammars or query files. Where a customer already runs a symbol 
 
 - **Positive:** the two open items of 0018 (the re-anchor step, the cold start for an organization) become event handlers; the graph gap closes without a parser; the knowledge diff is a differentiator no extraction-based service can offer, because it needs anchored memories to exist.
 - **Negative:** a GitHub App is a new operational surface (installation flow, webhook verification, rate limits, retries). The observed source depends on the customer having telemetry; without it, the learned and claimed sources carry the cold start, and they take time to earn confidence.
-- **Neutral:** this is a design record, not an implementation. The webhook receiver, the check run, the edge memory type, and the fleet runner are queued work (roadmap P-7).
+- **Neutral:** the first increment is in: `antumbra-mcp --github-webhook-secret` serves `POST /github/webhook` (HMAC-verified), and a merged pull request re-anchors the merged branch's memories to the merge commit and becomes a memory; a deleted branch marks its memories orphaned (a `git-orphaned:` evidence entry, judged `orphaned` at recall). Document ingest on merge, the cold start, the check run, the edge memory type, and the fleet runner remain queued (roadmap P-7).
 
 ## Validation
 
