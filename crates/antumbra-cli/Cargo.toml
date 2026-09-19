@@ -27,6 +27,7 @@ antumbra-store = { path = "../antumbra-store" }
 # from a workspace's configured endpoint; light (ureq), no models needed.
 antumbra-embed = { path = "../antumbra-embed" }
 antumbra-copal = { path = "../antumbra-copal" }
+antumbra-ingest = { path = "../antumbra-ingest" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-loop = { path = "../antumbra-loop" }
 antumbra-gate = { path = "../antumbra-gate" }

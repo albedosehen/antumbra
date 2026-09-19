@@ -219,6 +219,7 @@ mod tests {
                 html_url: Some("https://github.com/Acme/Orders".into()),
                 default_branch: Some("main".into()),
             },
+            installation: None,
         }
     }
 

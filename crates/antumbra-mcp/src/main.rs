@@ -198,6 +198,23 @@ struct Cli {
     /// map is acknowledged and ignored rather than landing somewhere else.
     #[arg(long, env = "ANTUMBRA_GITHUB_REPOS")]
     github_repos: Option<std::path::PathBuf>,
+    /// The GitHub App's id, with --github-app-key-file: lets the receiver read
+    /// repository contents as the App (installation tokens), which is what
+    /// ingesting a merged pull request's documents and cold-starting a newly
+    /// installed repository need. Without it the receiver still re-anchors,
+    /// orphans, and remembers pull requests.
+    #[arg(long, env = "ANTUMBRA_GITHUB_APP_ID")]
+    github_app_id: Option<String>,
+    /// Path to the App's private key (PEM), read once at startup.
+    #[arg(long, env = "ANTUMBRA_GITHUB_APP_KEY_FILE")]
+    github_app_key_file: Option<std::path::PathBuf>,
+    /// The GitHub API base (`https://<host>/api/v3` for Enterprise Server).
+    #[arg(
+        long,
+        env = "ANTUMBRA_GITHUB_API_URL",
+        default_value = "https://api.github.com"
+    )]
+    github_api_url: String,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -459,6 +476,9 @@ async fn run() -> Result<()> {
         github_secret,
         cli.github_tenant.clone(),
         cli.github_repos.as_deref(),
+        cli.github_app_id.clone(),
+        cli.github_app_key_file.as_deref(),
+        &cli.github_api_url,
     )?;
     if github.is_some() && cli.http.is_none() {
         anyhow::bail!("the GitHub webhook receiver needs --http: deliveries arrive over the networked surface");

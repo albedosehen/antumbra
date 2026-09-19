@@ -211,6 +211,7 @@ dependencies = [
  "antumbra-critic",
  "antumbra-embed",
  "antumbra-gate",
+ "antumbra-ingest",
  "antumbra-loop",
  "antumbra-serve",
  "antumbra-store",
@@ -300,10 +301,26 @@ dependencies = [
  "chrono",
  "hex",
  "hmac",
+ "jsonwebtoken 11.0.0",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.20",
+ "tokio",
+ "ureq",
+]
+
+[[package]]
+name = "antumbra-ingest"
+version = "0.0.0"
+dependencies = [
+ "antumbra-copal",
+ "antumbra-core",
+ "antumbra-store",
+ "anyhow",
+ "chrono",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -328,6 +345,7 @@ dependencies = [
  "antumbra-core",
  "antumbra-embed",
  "antumbra-github",
+ "antumbra-ingest",
  "antumbra-rerank",
  "antumbra-serve",
  "antumbra-store",

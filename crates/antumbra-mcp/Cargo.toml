@@ -29,6 +29,7 @@ antumbra-rerank = { path = "../antumbra-rerank" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-copal = { path = "../antumbra-copal" }
 antumbra-github = { path = "../antumbra-github" }
+antumbra-ingest = { path = "../antumbra-ingest" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-std", "signal", "net", "sync"] }
 anyhow.workspace = true
@@ -46,6 +47,8 @@ jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 async-trait.workspace = true
 
 [dev-dependencies]
+# The canned GitHub transport and the throwaway App key the receiver's tests drive.
+antumbra-github = { path = "../antumbra-github", features = ["testing"] }
 # `oneshot` to drive the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
 # Read the SSE response body incrementally in the live-notification round-trip test.

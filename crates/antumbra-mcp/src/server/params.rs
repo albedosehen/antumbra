@@ -161,6 +161,10 @@ pub(super) struct IngestDocumentParams {
     /// Where the document came from (path / url / note).
     #[serde(default)]
     pub(super) source: Option<String>,
+    /// The git anchor the document describes, folded into every chunk's
+    /// source so a recalled chunk names the commit (see store_memory).
+    #[serde(default)]
+    pub(super) provenance: Option<ProvenanceParams>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -296,13 +300,6 @@ pub(super) struct RouteParams {
 /// the shared learned router, so they are matched directly by centroid; a
 /// per-private-expert learned boundary is the eventual refinement).
 pub(super) const PRIVATE_ROUTE_FLOOR: f32 = 0.3;
-
-/// Document chunking (P-3): target chunk size and inter-chunk overlap, in chars.
-/// ~1200 chars is roughly a paragraph or two: enough context per chunk for the
-/// 384-d model without diluting the embedding; the overlap keeps a fact that
-/// straddles a cut wholly present in one chunk.
-pub(super) const DOCUMENT_CHUNK_CHARS: usize = antumbra_core::document::DEFAULT_CHUNK_CHARS;
-pub(super) const DOCUMENT_CHUNK_OVERLAP: usize = antumbra_core::document::DEFAULT_CHUNK_OVERLAP;
 
 /// Inhibition radius for the legacy absolute-scope boundary path; mirrors
 /// `antumbra_gate::GateConfig::default().inhibition_radius`. Correction-derived

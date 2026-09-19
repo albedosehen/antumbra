@@ -22,9 +22,8 @@ use antumbra_core::{
     Scope,
 };
 use antumbra_core::{
-    Capability, ClusterConfig, Compartment, CompartmentId, DocumentChunk, DocumentChunkId,
-    EdgeType, ExpertId, Grant, Memory, MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId,
-    UserId,
+    Capability, ClusterConfig, Compartment, CompartmentId, DocumentChunk, EdgeType, ExpertId,
+    Grant, Memory, MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId, UserId,
 };
 use antumbra_store::repo::{boundary, compartment, document, edge, expert, memory, router};
 use antumbra_store::Store;
@@ -587,6 +586,26 @@ fn parse_network(s: &str) -> MemoryNetwork {
 /// plus a single process-global counter, so two sessions (even different
 /// tenants) minting their first id in the same nanosecond never collide; no
 /// extra deps.
+/// A caller-supplied anchor, validated: a repo slug without `@` (host/org/name),
+/// a 7-40 hex digit commit, a branch without `:`.
+fn anchor_from(prov: ProvenanceParams) -> Result<GitProvenance, ErrorData> {
+    let anchor = GitProvenance {
+        repo: prov.repo,
+        commit: prov.commit,
+        branch: prov.branch,
+        path: prov.path,
+    };
+    if !anchor.is_valid() {
+        return Err(ErrorData::invalid_params(
+            "provenance must have a repo slug without '@' (host/org/name), a 7-40 hex digit \
+             commit, and a branch without ':'"
+                .to_string(),
+            None,
+        ));
+    }
+    Ok(anchor)
+}
+
 fn next_id(prefix: &str) -> String {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -658,21 +677,7 @@ impl McpServer {
         .by(self.user.clone(), self.host.clone());
         let mut evidence = p.evidence.unwrap_or_default();
         if let Some(prov) = p.provenance {
-            let anchor = GitProvenance {
-                repo: prov.repo,
-                commit: prov.commit,
-                branch: prov.branch,
-                path: prov.path,
-            };
-            if !anchor.is_valid() {
-                return Err(ErrorData::invalid_params(
-                    "provenance must have a repo slug without ' (host/org/name), a 7-40 hex \
-                     digit commit, and a branch without ':'"
-                        .to_string(),
-                    None,
-                ));
-            }
-            evidence.push(anchor.to_evidence());
+            evidence.push(anchor_from(prov)?.to_evidence());
         }
         if !evidence.is_empty() {
             m = m.with_evidence(evidence);
@@ -827,65 +832,28 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<IngestDocumentParams>,
     ) -> Result<Json<IngestedOut>, ErrorData> {
-        // Document of record FIRST: when a copal archive is configured, the
-        // ORIGINAL content lands there before any chunk is stored -- and a
-        // failure fails the whole ingest, because a configured document of
-        // record that silently dropped originals would be worse than none.
-        // The session's workspace tenant scopes the archive identity (the
-        // idempotency key and path), so two workspaces sharing a title never
-        // revision each other's document; the copal tenant header stays the
-        // operator-configured one (see `antumbra_copal`).
-        let archived = match &self.copal {
-            Some(archive) => Some(
-                archive
-                    .archive_document(
-                        self.tenant.as_str(),
-                        &p.title,
-                        p.source.as_deref(),
-                        &p.content,
-                    )
-                    .await
-                    .map_err(|e| {
-                        err(format!(
-                            "copal document-of-record upload failed, nothing was ingested: {e}"
-                        ))
-                    })?,
-            ),
-            None => None,
+        let provenance = p.provenance.map(anchor_from).transpose()?;
+        let doc = antumbra_ingest::Document {
+            title: p.title.clone(),
+            source: p.source,
+            content: p.content,
+            provenance,
         };
-        let now = Utc::now();
-        let mut chunks = Vec::new();
-        for (ordinal, content) in
-            antumbra_core::chunk_text(&p.content, DOCUMENT_CHUNK_CHARS, DOCUMENT_CHUNK_OVERLAP)
-                .into_iter()
-                .enumerate()
-        {
-            let embedding = self.embedder.embed(&content).await.map_err(err)?;
-            let mut chunk = DocumentChunk {
-                id: DocumentChunkId::new(next_id("docchunk")),
-                tenant: self.tenant.clone(),
-                title: p.title.clone(),
-                source: p.source.clone(),
-                ordinal: ordinal as u32,
-                content,
-                embedding: Some(embedding),
-                created_at: now,
-                copal_file: None,
-                copal_digest: None,
-            };
-            // Every chunk carries its provenance back to the archived original.
-            if let Some(a) = &archived {
-                chunk = chunk.with_copal(a.file_id.clone(), a.digest.clone());
-            }
-            chunks.push(chunk);
-        }
-        let stored = chunks.len() as u32;
-        document::insert_chunks(&self.store, &chunks)
-            .await
-            .map_err(err)?;
+        // One ingest path for every door (`antumbra-ingest`): the original to
+        // copal first, fail closed; the title's chunks replaced in place; the
+        // anchor folded into every chunk's source.
+        let out = antumbra_ingest::ingest_text(
+            &self.store,
+            self.embedder.as_ref(),
+            &self.tenant,
+            self.copal.as_deref(),
+            &doc,
+        )
+        .await
+        .map_err(|e| err(format!("{e:#}")))?;
         Ok(Json(IngestedOut {
             title: p.title,
-            chunks: stored,
+            chunks: out.chunks,
         }))
     }
 
