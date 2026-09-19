@@ -157,6 +157,7 @@ struct HttpState {
     /// workspace's documents land in and how the calls authenticate (the
     /// tenant header, or `ck1` keys once copal runs its deployed auth mode).
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    profile: Option<Arc<crate::profile::ToolProfile>>,
     /// One MCP service per identity (provisioned once), all sharing `store`.
     /// Bounded so a host that sees many distinct identities cannot grow it without
     /// limit; an evicted identity rebuilds its service on the next request.
@@ -186,6 +187,7 @@ pub async fn serve(
     auto_consolidate: bool,
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    profile: Option<Arc<crate::profile::ToolProfile>>,
 ) -> Result<()> {
     let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -217,6 +219,7 @@ pub async fn serve(
         serve,
         reranker,
         copal,
+        profile,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
         registry: crate::notify::PeerRegistry::new(),
@@ -392,6 +395,9 @@ impl HttpState {
         }
         if let Some(archive) = self.copal.clone() {
             mcp = mcp.with_copal_archive(archive);
+        }
+        if let Some(profile) = self.profile.clone() {
+            mcp = mcp.with_tool_profile(profile);
         }
         Ok(mcp)
     }
@@ -638,6 +644,7 @@ mod tests {
             serve: None,
             reranker: None,
             copal: None,
+            profile: None,
             sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
             consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
             registry: crate::notify::PeerRegistry::new(),

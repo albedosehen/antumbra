@@ -20,6 +20,7 @@ ANTUMBRA_WORKSPACE_ID=<workspace>      # your tenant/workspace scope
 ANTUMBRA_TOKEN=<bearer-jwt>            # Authorization: Bearer <token>
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
 ANTUMBRA_PENALIZE_ORPHANS=0            # 1: bootstrap also penalizes memories whose branch is gone
+ANTUMBRA_TOOLS=agent                   # on the SERVER: advertise only the eight tools a coding agent needs
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:

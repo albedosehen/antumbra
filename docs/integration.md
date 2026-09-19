@@ -76,6 +76,8 @@ ANTUMBRA_API_KEY=<key>                 # for the hosted/networked surface
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamp on what it writes
 ```
 
+Start the server with `--tools agent` (or `ANTUMBRA_TOOLS=agent`) for a coding agent: it advertises and serves only `recall_memories`, `store_memory`, `reinforce_memory`, `penalize_memory`, `recall_documents`, `ingest_document`, `route`, and `answer`. The compartment, graph, and operator tools stay behind the CLI and console, and the agent's context carries eight tool descriptions instead of nineteen. `--tools agent,population` extends the profile; `all` is the default; an unknown name refuses at startup.
+
 ---
 
 ## Memories about code carry their anchor (provenance over extraction)

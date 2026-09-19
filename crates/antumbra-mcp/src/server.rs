@@ -78,6 +78,10 @@ pub struct McpServer {
     /// copal is unreachable) and stamps every stored chunk with the file id +
     /// digest. `None` = no archive; ingest behaves exactly as before.
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    /// Which tools this session advertises and serves (`--tools`). `None` =
+    /// every tool. Enforced at `tools/list`, at JSON-RPC `tools/call`, and at
+    /// the REST shim, so a tool outside the profile is neither seen nor run.
+    profile: Option<Arc<crate::profile::ToolProfile>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -210,6 +214,7 @@ impl McpServer {
             reranker: None,
             reranker_cache: Arc::new(tokio::sync::Mutex::new(RerankCache::new())),
             copal: None,
+            profile: None,
         }
     }
 
@@ -221,6 +226,47 @@ impl McpServer {
     pub fn with_copal_archive(mut self, archive: Arc<antumbra_copal::CopalArchive>) -> Self {
         self.copal = Some(archive);
         self
+    }
+
+    /// Narrow this session to a tool profile: only its tools are listed and
+    /// callable. Off by default (every tool).
+    pub fn with_tool_profile(mut self, profile: Arc<crate::profile::ToolProfile>) -> Self {
+        self.profile = Some(profile);
+        self
+    }
+
+    /// Every tool this server has, by name, profile or not: what `--tools`
+    /// is validated against.
+    pub fn all_tool_names() -> Vec<String> {
+        Self::tool_router()
+            .list_all()
+            .into_iter()
+            .map(|t| t.name.to_string())
+            .collect()
+    }
+
+    /// The tools this session advertises: everything, or the profile's subset.
+    pub fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+        let all = Self::tool_router().list_all();
+        match &self.profile {
+            Some(profile) => profile.filter(all, |t| t.name.as_ref()),
+            None => all,
+        }
+    }
+
+    /// Refuse a call to a tool outside the profile with an error that names
+    /// what is advertised, rather than running it or reporting it unknown.
+    fn check_profile(&self, name: &str) -> Result<(), ErrorData> {
+        match &self.profile {
+            Some(profile) if !profile.allows(name) => Err(ErrorData::invalid_params(
+                format!(
+                    "tool `{name}` is not in this server's tool profile; advertised: {}",
+                    profile.names().collect::<Vec<_>>().join(", ")
+                ),
+                None,
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// Enable the cross-encoder precision stage (P-2): after hybrid recall, the
@@ -1306,6 +1352,7 @@ impl McpServer {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, ErrorData> {
+        self.check_profile(name)?;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
         macro_rules! dispatch {
@@ -1358,6 +1405,39 @@ impl McpServer {
 
 #[tool_handler]
 impl ServerHandler for McpServer {
+    /// `tools/list` under the session's profile. Written out (the macro
+    /// generates it only when absent) so the profile is enforced where the
+    /// agent first sees the tools: the advertisement.
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
+        let supports_cache_hints = context
+            .protocol_version()
+            .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        Ok(rmcp::model::ListToolsResult {
+            result_type: Some(rmcp::model::ResultType::COMPLETE),
+            tools: self.advertised_tools(),
+            meta: None,
+            next_cursor: None,
+            ttl_ms: supports_cache_hints.then_some(0),
+            cache_scope: supports_cache_hints.then_some(rmcp::model::CacheScope::Public),
+        })
+    }
+
+    /// JSON-RPC `tools/call` under the session's profile: a tool outside it is
+    /// refused before the router sees the request.
+    async fn call_tool(
+        &self,
+        request: rmcp::model::CallToolRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
+        self.check_profile(&request.name)?;
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        Self::tool_router().call(tcc).await
+    }
+
     /// On initialize, record this session's peer under its (tenant, user) identity
     /// so the live-propagation watcher can push shared-memory changes to it (R-2).
     /// A no-op when no registry is wired (stdio / route-only / tests).

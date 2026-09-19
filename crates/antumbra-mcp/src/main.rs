@@ -30,6 +30,7 @@ mod auth {
 mod embed;
 mod http;
 mod notify;
+mod profile;
 mod server;
 use server::McpServer;
 
@@ -155,6 +156,15 @@ struct Cli {
     /// than landing in another tenant.
     #[arg(long, env = "ANTUMBRA_COPAL_KEYS")]
     copal_keys: Option<std::path::PathBuf>,
+    /// Which tools this server advertises and serves: `all` (default), `agent`
+    /// (the developer-agent profile: recall/store/reinforce/penalize memories,
+    /// recall/ingest documents, route, answer), or a comma-separated list of
+    /// tool names, in which `agent` expands (`agent,population`). Anything
+    /// outside the profile is neither listed nor callable, over JSON-RPC or
+    /// the REST shim: less description text in every session, and no operator
+    /// action (sharing, revoking, forgetting) one agent call away.
+    #[arg(long, env = "ANTUMBRA_TOOLS", default_value = "all")]
+    tools: String,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -388,6 +398,10 @@ async fn run() -> Result<()> {
         cli.copal_key,
         cli.copal_keys.as_deref(),
     )?;
+    // The tool profile, validated against the real tool list so a typo
+    // refuses at startup instead of silently hiding a tool.
+    let profile = profile::ToolProfile::parse(&cli.tools, &server::McpServer::all_tool_names())?
+        .map(Arc::new);
 
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
@@ -404,6 +418,7 @@ async fn run() -> Result<()> {
             cli.auto_consolidate,
             reranker,
             copal,
+            profile,
         )
         .await;
     }
@@ -430,6 +445,9 @@ async fn run() -> Result<()> {
     }
     if let Some(c) = copal {
         service = service.with_copal_archive(c);
+    }
+    if let Some(p) = profile {
+        service = service.with_tool_profile(p);
     }
     let running = service
         .serve((tokio::io::stdin(), tokio::io::stdout()))

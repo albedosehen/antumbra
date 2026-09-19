@@ -1197,3 +1197,46 @@ async fn provenance_is_stored_and_scopes_recall() {
         .await;
     assert!(bad.is_err());
 }
+
+/// A tool profile is enforced where the agent first sees the tools and where
+/// it calls them: `agent` advertises its eight, the REST dispatch serves those
+/// and refuses the rest by name, and no profile advertises everything.
+#[tokio::test]
+async fn a_tool_profile_narrows_what_is_advertised_and_served() {
+    let all = McpServer::all_tool_names();
+    assert_eq!(all.len(), 19, "{all:?}");
+    let profile = crate::profile::ToolProfile::parse("agent", &all)
+        .unwrap()
+        .expect("agent is a profile, not `all`");
+    let s = server().await.with_tool_profile(Arc::new(profile));
+    let advertised: Vec<String> = s
+        .advertised_tools()
+        .into_iter()
+        .map(|t| t.name.to_string())
+        .collect();
+    assert_eq!(advertised.len(), 8, "{advertised:?}");
+    assert!(advertised.iter().any(|n| n == "recall_memories"));
+    assert!(!advertised.iter().any(|n| n == "share_compartment"));
+
+    let stored = s
+        .call_tool(
+            "store_memory",
+            serde_json::json!({ "content": "deno, not npm, in acme-api", "network": "opinion" }),
+        )
+        .await
+        .unwrap();
+    assert!(stored["id"].as_str().unwrap().starts_with("memory:"));
+
+    let err = s
+        .call_tool("list_memories", serde_json::json!({}))
+        .await
+        .unwrap_err();
+    assert!(
+        err.message.contains("not in this server's tool profile")
+            && err.message.contains("recall_memories"),
+        "{}",
+        err.message
+    );
+
+    assert_eq!(server().await.advertised_tools().len(), 19);
+}
