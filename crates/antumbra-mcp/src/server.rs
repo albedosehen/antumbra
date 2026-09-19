@@ -57,10 +57,11 @@ pub struct McpServer {
     /// trigger). `None` = on-demand only (the `consolidate-compartment` CLI).
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
     auto_consolidate: Option<AutoConsolidateConfig>,
-    /// Compartments with a consolidation in flight, so a burst of reinforces
-    /// coalesces into one train instead of stacking GPU jobs.
+    /// Per-compartment consolidation state: what is in flight (so a burst of
+    /// reinforces coalesces into one train instead of stacking GPU jobs), what was
+    /// written to meanwhile, and what the gate last said.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
-    consolidating: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
+    consolidating: consolidation::SharedConsolidation,
     /// The serving engine the `answer` tool drives (route → serve through the
     /// expert's adapter). `None` = serving not configured (route-only surface).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
@@ -214,7 +215,7 @@ impl McpServer {
             default_compartment,
             auto_propose: None,
             auto_consolidate: None,
-            consolidating: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            consolidating: consolidation::SharedConsolidation::default(),
             serve,
             registry: None,
             reranker: None,
@@ -357,18 +358,15 @@ impl McpServer {
         self
     }
 
-    /// Share the in-flight consolidation guard across every per-identity server.
-    /// The HTTP server builds a fresh `McpServer` per request, so a per-instance
-    /// guard never coalesces; passing one shared set makes concurrent reinforces
-    /// of the same compartment collapse into a single train (and stops them
-    /// racing on the same model-weight download). Unset, each server keeps its
-    /// own (correct for stdio).
+    /// Share the consolidation state across every per-identity server. The HTTP
+    /// server builds a fresh `McpServer` per request, so per-instance state never
+    /// coalesces; passing one shared handle makes concurrent reinforces of the
+    /// same compartment collapse into a single train (and stops them racing on the
+    /// same model-weight download). Unset, each server keeps its own (correct for
+    /// stdio).
     #[must_use]
-    pub fn with_consolidating(
-        mut self,
-        inflight: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
-    ) -> Self {
-        self.consolidating = inflight;
+    pub fn with_consolidating(mut self, shared: consolidation::SharedConsolidation) -> Self {
+        self.consolidating = shared;
         self
     }
 
@@ -397,11 +395,11 @@ impl McpServer {
                 return;
             }
             let key = comp.as_str().to_string();
-            {
-                let mut inflight = self.consolidating.lock().await;
-                if !inflight.insert(key.clone()) {
-                    return; // already consolidating this compartment
-                }
+            // Already consolidating this compartment: the write is remembered, and
+            // the run in flight is followed by another (a memory that arrives
+            // during a train would otherwise never be looked at again).
+            if !self.consolidating.lock().await.begin(&key) {
+                return;
             }
             // Run the gather + provision + mint as OWNER on a stable connection,
             // not the per-request scoped `store` (which a detached task cannot
@@ -418,7 +416,7 @@ impl McpServer {
             // could not serve (owner-scoped), and attribute their training to
             // someone else.
             let user = self.user.clone();
-            let inflight = self.consolidating.clone();
+            let state = self.consolidating.clone();
             let serve = self.serve.clone();
             let policy = antumbra_serve::ConsolidationPolicy {
                 min_recurrence: acfg.min_recurrence,
@@ -433,44 +431,72 @@ impl McpServer {
                 replay_ratio: acfg.replay_ratio,
                 ..Default::default()
             };
-            tokio::spawn(async move {
-                let result = antumbra_serve::consolidate_compartment(
-                    &store,
-                    embedder.as_ref(),
-                    &tenant,
-                    &user,
-                    &comp,
-                    &policy,
-                    &cfg,
-                )
-                .await;
-                let trained = matches!(result, Ok(Some(_)));
-                match result {
-                    Ok(Some(o)) => {
-                        // Close the loop: hot-register the minted expert so the
-                        // `answer` tool can serve it now, with no server restart.
-                        if let Some(serve) = &serve {
-                            serve.register_expert(&o.expert, &o.adapter_uri);
+            // A train is minutes of synchronous compute inside an `async fn`. On a
+            // runtime worker it starves whatever queues behind it, the store's
+            // connection driver included, and every tool call hangs until it ends.
+            consolidation::spawn_heavy(async move {
+                use antumbra_serve::Consolidation;
+                loop {
+                    let result = antumbra_serve::consolidate_compartment(
+                        &store,
+                        embedder.as_ref(),
+                        &tenant,
+                        &user,
+                        &comp,
+                        &policy,
+                        &cfg,
+                    )
+                    .await;
+                    // Only a run that loaded the model cools down.
+                    let trained = matches!(
+                        result,
+                        Ok(Consolidation::Minted(_) | Consolidation::DidNotLearn { .. })
+                    );
+                    match result {
+                        Ok(Consolidation::Minted(o)) => {
+                            // Close the loop: hot-register the minted expert so the
+                            // `answer` tool can serve it now, with no server restart.
+                            let servable = match &serve {
+                                Some(serve) => {
+                                    serve.register_expert(&o.expert, &o.adapter_uri);
+                                    "now servable"
+                                }
+                                None => "not servable: this server has no serving engine",
+                            };
+                            state.lock().await.forget_report(&key);
+                            eprintln!(
+                                "[auto-consolidate] {} : {} graduated -> {} (internalized {:.2}, {servable})",
+                                comp.as_str(),
+                                o.graduated,
+                                o.expert.as_str(),
+                                o.fitness
+                            );
                         }
-                        eprintln!(
-                            "[auto-consolidate] {} : {} graduated -> {} (internalized {:.2}, now servable)",
-                            comp.as_str(),
-                            o.graduated,
-                            o.expert.as_str(),
-                            o.fitness
-                        );
+                        // The trigger fires on every write, so an unchanged
+                        // "nothing graduates" is said once, not per write.
+                        Ok(Consolidation::HeldBack(report)) => {
+                            let summary = report.summary();
+                            if state.lock().await.changed(&key, &summary) {
+                                eprintln!("[auto-consolidate] {} : {summary}", comp.as_str());
+                            }
+                        }
+                        Ok(Consolidation::DidNotLearn { graduated, fitness }) => eprintln!(
+                            "[auto-consolidate] {} : {graduated} graduated but the capture did not learn (fitness {fitness:.2}); no expert minted",
+                            comp.as_str()
+                        ),
+                        Err(e) => eprintln!("[auto-consolidate] {} failed: {e}", comp.as_str()),
                     }
-                    Ok(None) => {}
-                    Err(e) => eprintln!("[auto-consolidate] {} failed: {e}", comp.as_str()),
+                    // Debounce: after an actual train, hold the compartment's slot a
+                    // little longer so a burst of reinforces collapses into one train
+                    // instead of retraining the same expert on every reinforce. No
+                    // cooldown when nothing trained, so a later graduate is not delayed.
+                    if trained {
+                        tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+                    }
+                    if !state.lock().await.finish(&key) {
+                        break;
+                    }
                 }
-                // Debounce: after an actual train, hold the compartment's slot a
-                // little longer so a burst of reinforces collapses into one train
-                // instead of retraining the same expert on every reinforce. No
-                // cooldown when nothing trained, so a later graduate is not delayed.
-                if trained {
-                    tokio::time::sleep(std::time::Duration::from_secs(45)).await;
-                }
-                inflight.lock().await.remove(&key);
             });
         }
     }
@@ -668,6 +694,7 @@ fn default_capability() -> String {
     "reference".into()
 }
 
+pub(crate) mod consolidation;
 mod params;
 use self::params::*;
 
@@ -1193,13 +1220,16 @@ impl McpServer {
                 note: Some("covering expert not resident in the serving engine; escalate".into()),
             }));
         }
-        let out = serve
-            .act(ActRequest {
-                task_id: next_id("answer"),
-                prompt: p.task,
-                adapters: vec![expert],
-            })
+        // Generation is synchronous compute inside an `async fn`, like a train: it
+        // runs off the runtime's workers so other sessions' calls keep moving.
+        let request = ActRequest {
+            task_id: next_id("answer"),
+            prompt: p.task,
+            adapters: vec![expert],
+        };
+        let out = consolidation::spawn_heavy(async move { serve.act(request).await })
             .await
+            .map_err(err)?
             .map_err(err)?;
         Ok(Json(AnswerOut {
             answer: out.final_output,

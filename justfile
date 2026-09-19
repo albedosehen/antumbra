@@ -12,6 +12,14 @@ uninstall:
 test:
     cargo test --workspace
 
+# The GPU-gated tests (the consolidation loop, end to end). CI has no GPU, so this
+# is the only thing that runs them: use it on a GPU host before tagging a release.
+# `gpu` is how Docker is handed the card: a CDI device name (NixOS, or any daemon
+# without a named nvidia runtime) by default; pass `--gpus all` otherwise.
+test-gpu gpu="--device nvidia.com/gpu=all":
+    docker build -f docker/Dockerfile.cuda --target gpu-test -t antumbra-gpu-test .
+    docker run --rm {{gpu}} -v antumbra-gpu-test-weights:/weights antumbra-gpu-test
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
 

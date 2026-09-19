@@ -293,15 +293,20 @@ pub async fn consolidate_compartment(
     )
     .await?
     {
-        Some(o) => println!(
+        antumbra_serve::Consolidation::Minted(o) => println!(
             "compartment {} : {} graduated -> PRIVATE expert {} (internalized {:.2})",
             a.compartment,
             o.graduated,
             o.expert.as_str(),
             o.fitness
         ),
-        None => println!(
-            "compartment {} : nothing cleared the consolidation gate",
+        antumbra_serve::Consolidation::HeldBack(report) => println!(
+            "compartment {} : nothing cleared the consolidation gate: {}",
+            a.compartment,
+            report.summary()
+        ),
+        antumbra_serve::Consolidation::DidNotLearn { graduated, fitness } => println!(
+            "compartment {} : {graduated} graduated but the capture did not learn (fitness {fitness:.2}); no expert minted",
             a.compartment
         ),
     }

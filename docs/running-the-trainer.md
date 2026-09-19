@@ -123,7 +123,7 @@ The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds th
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 ```
 
-The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, adds `--auto-consolidate`, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). _This image is authored to the standard CUDA-on-Linux pattern but is not yet CI-validated; validate on a real GPU host._
+The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, adds `--auto-consolidate`, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). On a CDI host (NixOS, or any daemon without a named nvidia runtime) add `-f docker/docker-compose.gpu-cdi.yml` last. _The image is validated on a Linux GPU host (EXP-022) and still not built in CI, which has no GPU._
 
 **Native (e.g. a Windows GPU box):** build `antumbra-mcp` per the CUDA section above (`--features models,cuda`), then run it with the runtime `PATH` set:
 
@@ -135,3 +135,7 @@ target\release\antumbra-mcp.exe --http 127.0.0.1:8081 --url ws://127.0.0.1:8000/
 ```
 
 Either way, the gate defaults are deliberately conservative (recurrence ≥ 2, confidence ≥ 0.5; `world`/`bank` facts need a check, `opinion`s graduate on a ≥ 0.9 provenance tier). The autonomous capture is light (8 rounds) since it re-fires and supersedes; the manual `antumbra consolidate-compartment` keeps the heavier 40-round capture for a deliberate one-off.
+
+**What the server log tells you.** Every outcome of the trigger is one `[auto-consolidate]` line: `N graduated -> expert:... (internalized 1.00, now servable)` after a mint; `0 of 400 graduate (397 under-reinforced, 3 volatile)` when nothing clears the gate, said once per change and not on every write; `N graduated but the capture did not learn` when the verifier passed nothing. Recurrence is the reinforcement _count_, so memories that were each reinforced once are all under-reinforced: that one line is usually the answer to "why has nothing trained". A write that arrives while its compartment is training is not lost to the trigger; the run in flight is followed by another.
+
+**The GPU-gated tests.** CI has no GPU, so the tests that close this loop are `#[ignore]`d there. On a GPU host, `just test-gpu` builds the `gpu-test` target of `Dockerfile.cuda` and runs the server's whole test binary with them included (pass `gpu="--gpus all"` on a daemon with a named nvidia runtime). Run it before tagging a release.

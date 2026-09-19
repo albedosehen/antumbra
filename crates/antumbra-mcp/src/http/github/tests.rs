@@ -42,7 +42,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         profile: None,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     })
 }

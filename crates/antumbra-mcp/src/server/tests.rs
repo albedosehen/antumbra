@@ -252,15 +252,16 @@ async fn rerank_reorders_document_chunks_too() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs --features models + a GPU + python; run with --ignored"]
 async fn auto_consolidate_mints_a_private_expert_on_reinforce() {
-    use antumbra_core::ports::Serve;
     let store = Store::connect_memory(EMBED_DIM).await.unwrap();
     let comp = "comp:ws:test:auto";
-    // A real (empty) serve engine: the trigger should hot-register the minted
-    // expert into it, so `answer` could serve it with no restart.
-    let serve = Arc::new(antumbra_serve::MultiAdapterServe::new(
-        "Qwen/Qwen2.5-Coder-1.5B",
-        antumbra_serve::RaftConfig::default(),
-    ));
+    // The engine a server builds for itself on a fresh node, with no experts
+    // yet: the trigger must be able to hot-register the minted expert into it,
+    // so `answer` serves it with no restart. Hand-building an engine here hid
+    // the cold start, where the server came up with no engine at all (EXP-022).
+    let serve = crate::build_serve(&store)
+        .await
+        .unwrap()
+        .expect("a fresh node still gets a serving engine");
     let s = McpServer::new(
         store.clone(),
         Arc::new(FixedEmbedder::new(EMBED_DIM)),
@@ -268,7 +269,7 @@ async fn auto_consolidate_mints_a_private_expert_on_reinforce() {
         UserId::new("user:test"),
         "test-host".into(),
         CompartmentId::new(comp),
-        Some(serve.clone() as Arc<dyn antumbra_core::ports::Serve>),
+        Some(serve.clone()),
     )
     .with_auto_consolidate();
 
