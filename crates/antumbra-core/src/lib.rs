@@ -47,8 +47,9 @@ pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork, MemoryStatus};
 pub use orchestration::{ComposeStrategy, OrchestrationRun, OrchestrationStatus};
 pub use penumbra::{propose_compartments, ClusterConfig, ProposedCompartment};
 pub use provenance::{
-    demote_out_of_scope, normalize_repo, repo_slug_from_remote, scope_of, GitContext,
-    GitProvenance, Scope,
+    demote_out_of_scope, mark_orphaned, normalize_repo, orphan_of, reanchor, repo_slug_from_remote,
+    scope_from_str, scope_of, scope_of_evidence, BranchOrphan, GitContext, GitProvenance, Scope,
+    GIT_EVIDENCE_PREFIX, ORPHAN_EVIDENCE_PREFIX,
 };
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};

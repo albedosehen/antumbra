@@ -1,0 +1,21 @@
+[package]
+name = "antumbra-github"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "The native GitHub integration: webhook signature verification, the event shapes Antumbra acts on, and the pure handlers that re-anchor, orphan, and remember, so the platform's own events keep every memory's git anchor honest."
+
+[dependencies]
+antumbra-core = { path = "../antumbra-core" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+# Webhook signatures: HMAC-SHA256 over the raw delivery body, compared in
+# constant time (`Mac::verify_slice`).
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"

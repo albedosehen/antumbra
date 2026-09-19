@@ -99,6 +99,25 @@ antumbra git-facts --tenant ws:me --user user:me --compartment comp:repo --days 
 
 ---
 
+## The GitHub App tells Antumbra when an anchor goes stale
+
+The events that make an anchor stale, a merge and a branch deletion, happen on the hosting platform, so the platform reports them directly instead of a session hook noticing later ([ADR-0019](adr/0019-github-integration-and-evidence-graph.md)). The networked server serves `POST /github/webhook` when given the App's webhook secret and a repository-to-workspace map:
+
+```bash
+antumbra-mcp --http 0.0.0.0:8081 --jwt-secret-file /run/secrets/jwt \
+  --github-webhook-secret-file /run/secrets/github-webhook \
+  --github-repos /etc/antumbra/github-repos.json     # {"github.com/acme/orders": "ws:acme", ...}
+  # or --github-tenant ws:acme to land every repository the App sees in one workspace
+```
+
+| Delivery | What happens |
+| --- | --- |
+| `pull_request` merged | Every memory whose anchor sits on the merged branch is re-anchored to the merge commit on the base branch (its path kept, the old anchor kept behind it as history), so a squash merge no longer leaves them `not-on-head` forever. The pull request itself becomes a `bank` memory anchored to the merge commit, with the PR URL as evidence, under a deterministic id (a redelivery revises it). |
+| `delete` of a branch | Every memory whose anchor still sits on that branch gets a `git-orphaned:<repo>#<branch>@<when>` evidence entry. Recall judges it `orphaned` (demoted, never hidden) and every view carries `orphaned_at`. A memory the merge already moved to the base branch is untouched, so GitHub's delete-after-merge is safe. |
+| `ping`, anything else, an unmapped repository, a close without a merge | Acknowledged with the reason, so GitHub does not retry. |
+
+Every delivery is verified against the secret (HMAC-SHA256, constant-time) before anything is read; a delivery that does not verify gets a bare 401. The handlers write as the system user `user:github`, provisioned in the workspace on first contact. Ingesting the repository's documents on merge and the cold start on installation follow once the App reads repository contents.
+
 ## Two ways to run it
 
 Antumbra is the **same engine** in both modes; only the transport and identity differ.

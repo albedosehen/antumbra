@@ -17,7 +17,10 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
 
 use antumbra_core::ports::{ActRequest, Embedder};
-use antumbra_core::{demote_out_of_scope, scope_of, GitContext, GitProvenance, Scope};
+use antumbra_core::{
+    demote_out_of_scope, orphan_of, scope_from_str, scope_of_evidence, GitContext, GitProvenance,
+    Scope,
+};
 use antumbra_core::{
     Capability, ClusterConfig, Compartment, CompartmentId, DocumentChunk, DocumentChunkId,
     EdgeType, ExpertId, Grant, Memory, MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId,
@@ -806,12 +809,7 @@ impl McpServer {
             };
             let views: Vec<MemoryView> = hits.iter().map(|m| MemoryView::scoped(m, &ctx)).collect();
             demote_out_of_scope(views, |v| {
-                v.scope.as_deref().map_or(Scope::Unknown, |s| match s {
-                    "other_branch" => Scope::OtherBranch,
-                    "other_repo" => Scope::OtherRepo,
-                    "in_scope" => Scope::InScope,
-                    _ => Scope::Unknown,
-                })
+                v.scope.as_deref().map_or(Scope::Unknown, scope_from_str)
             })
         } else {
             hits.iter().map(MemoryView::from).collect()

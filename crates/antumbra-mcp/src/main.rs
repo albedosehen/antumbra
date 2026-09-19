@@ -174,6 +174,30 @@ struct Cli {
     /// action (sharing, revoking, forgetting) one agent call away.
     #[arg(long, env = "ANTUMBRA_TOOLS", default_value = "all")]
     tools: String,
+    /// Serve GitHub App webhooks at `POST /github/webhook` (HTTP transport
+    /// only), each delivery verified against this HMAC secret (the App's
+    /// webhook secret). A merged pull request re-anchors the merged branch's
+    /// memories to the merge commit and becomes a memory itself; a deleted
+    /// branch marks its memories orphaned. Needs --github-tenant or
+    /// --github-repos to say which workspace a repository's memories live in.
+    #[arg(long, env = "ANTUMBRA_GITHUB_WEBHOOK_SECRET", hide_env_values = true)]
+    github_webhook_secret: Option<String>,
+    /// Read the webhook secret from this file instead (see --jwt-secret-file).
+    #[arg(
+        long,
+        env = "ANTUMBRA_GITHUB_WEBHOOK_SECRET_FILE",
+        conflicts_with = "github_webhook_secret"
+    )]
+    github_webhook_secret_file: Option<std::path::PathBuf>,
+    /// Every repository the App delivers events for lives in this ONE
+    /// workspace (tenant).
+    #[arg(long, env = "ANTUMBRA_GITHUB_TENANT", conflicts_with = "github_repos")]
+    github_tenant: Option<String>,
+    /// Path to a JSON file mapping repository slug -> workspace tenant (e.g.
+    /// `{"github.com/acme/orders": "ws:acme"}`). A repository absent from the
+    /// map is acknowledged and ignored rather than landing somewhere else.
+    #[arg(long, env = "ANTUMBRA_GITHUB_REPOS")]
+    github_repos: Option<std::path::PathBuf>,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -423,6 +447,22 @@ async fn run() -> Result<()> {
     // refuses at startup instead of silently hiding a tool.
     let profile = profile::ToolProfile::parse(&cli.tools, &server::McpServer::all_tool_names())?
         .map(Arc::new);
+    // The GitHub App webhook receiver: its secret resolves like every other
+    // secret, and a repository must map to a workspace before an event can
+    // touch anything. Webhooks arrive over the network, so HTTP only.
+    let github_secret = secrets::resolve(
+        cli.github_webhook_secret.clone(),
+        cli.github_webhook_secret_file.as_deref(),
+        "GitHub webhook secret",
+    )?;
+    let github = http::GithubConfig::from_flags(
+        github_secret,
+        cli.github_tenant.clone(),
+        cli.github_repos.as_deref(),
+    )?;
+    if github.is_some() && cli.http.is_none() {
+        anyhow::bail!("the GitHub webhook receiver needs --http: deliveries arrive over the networked surface");
+    }
 
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
@@ -440,6 +480,7 @@ async fn run() -> Result<()> {
             reranker,
             copal,
             profile,
+            github,
         )
         .await;
     }

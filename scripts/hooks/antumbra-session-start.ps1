@@ -87,6 +87,9 @@ if ($commit) {
             $remote = ($LASTEXITCODE -eq 0)
             if (-not $local -and -not $remote) { $st = 'orphaned' }
         }
+        # The server already knows when GitHub deleted the branch (the App's delete
+        # event marks the memory), even if this clone still has a stale local ref.
+        if ($m.orphaned_at) { $st = 'orphaned' }
         $statuses[[string]$m.id] = $st
     }
 }
@@ -128,7 +131,7 @@ if ($commit) {
     $shownRepo   = if ($repo)   { $repo }   else { '?' }
     $gitLine = "Git context: repo=$shownRepo branch=$shownBranch commit=$commit. " +
                "When storing a memory about this code, pass provenance {repo: `"$repo`", commit: `"$commit`", branch: `"$branch`"} to store_memory (add path for a single file) so a later session can tell whether it still applies. " +
-               "Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin -- verify before relying on it, and penalize_memory if it is wrong.`n`n"
+               "Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin, or GitHub reported it deleted -- verify before relying on it, and penalize_memory if it is wrong.`n`n"
 }
 
 $additionalContext = "# Antumbra session bootstrap (host=$hostId)`n`n$gitLine$memText"
