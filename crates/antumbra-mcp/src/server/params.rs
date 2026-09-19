@@ -165,6 +165,13 @@ pub(super) struct IngestDocumentParams {
     /// source so a recalled chunk names the commit (see store_memory).
     #[serde(default)]
     pub(super) provenance: Option<ProvenanceParams>,
+    /// The compartment to keep the document in. Then only you and the people you
+    /// share that compartment with can recall it. Omit it for the workspace's
+    /// shared pool, which every member of the workspace can recall: that is the
+    /// right place for reference material, and the wrong place for anything
+    /// private.
+    #[serde(default)]
+    pub(super) compartment: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -195,6 +202,9 @@ pub(super) struct DocumentChunkView {
     /// The content digest copal reported for that archived original.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) copal_digest: Option<String>,
+    /// The compartment the document is kept in; omitted for the shared pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) compartment: Option<String>,
 }
 
 impl From<&DocumentChunk> for DocumentChunkView {
@@ -206,6 +216,7 @@ impl From<&DocumentChunk> for DocumentChunkView {
             content: c.content.clone(),
             copal_file: c.copal_file.clone(),
             copal_digest: c.copal_digest.clone(),
+            compartment: c.compartment.as_ref().map(|c| c.as_str().to_string()),
         }
     }
 }

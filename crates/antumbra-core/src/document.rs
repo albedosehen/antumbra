@@ -12,7 +12,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::ids::{DocumentChunkId, TenantId};
+use crate::ids::{CompartmentId, DocumentChunkId, TenantId};
 
 /// One embedded slice of a document. The document itself is identified by
 /// `title` (+ optional `source`); a chunk carries enough to recall it and name
@@ -38,6 +38,11 @@ pub struct DocumentChunk {
     /// The content digest copal reported for the archived original, so a chunk
     /// names not just *which* file it came from but *which bytes*.
     pub copal_digest: Option<String>,
+    /// The compartment the document lives in, which decides who may read it:
+    /// its owner and anyone the compartment is granted to (the same rule as a
+    /// memory). `None` = the tenant's shared pool, readable by every member,
+    /// which is where every document lived before documents had compartments.
+    pub compartment: Option<CompartmentId>,
 }
 
 impl DocumentChunk {
@@ -46,6 +51,12 @@ impl DocumentChunk {
     pub fn with_copal(mut self, file: impl Into<String>, digest: impl Into<String>) -> Self {
         self.copal_file = Some(file.into());
         self.copal_digest = Some(digest.into());
+        self
+    }
+
+    /// Place the chunk in a compartment (private to its owner and grantees).
+    pub fn in_compartment(mut self, compartment: impl Into<CompartmentId>) -> Self {
+        self.compartment = Some(compartment.into());
         self
     }
 }

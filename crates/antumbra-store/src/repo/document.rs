@@ -1,6 +1,7 @@
-//! Knowledge-document chunk repository (P-3). Tenant-isolated exactly like
-//! `memory`: the engine `PERMISSIONS ... WHERE tenant_id = $auth.tenant` scopes
-//! every row, and the repo also filters explicitly (defense-in-depth). HNSW
+//! Knowledge-document chunk repository (P-3). Isolated exactly like `memory`:
+//! the engine's compartment rule scopes every row (tenant, then the shared pool
+//! or a compartment the session owns or was granted), and the repo also filters
+//! by tenant explicitly (defense-in-depth). HNSW
 //! vector recall via surql-rs's `vector_search_indexed` builder, through
 //! `document_chunk_embedding_hnsw`; no raw SurrealQL.
 
@@ -11,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, query_records, upsert_record};
 use surql::query::helpers::fulltext_search_query;
-use surql::types::operators::{and_, eq};
+use surql::types::operators::{and_, eq, is_none};
 use surql::types::RecordID;
 
-use antumbra_core::{DocumentChunk, DocumentChunkId, Result, TenantId};
+use antumbra_core::{CompartmentId, DocumentChunk, DocumentChunkId, Result, TenantId};
 
 use crate::dto::parse_dt;
 use crate::error::map;
@@ -51,6 +52,11 @@ struct ChunkRow {
     copal_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     copal_digest: Option<String>,
+    // Absent (not null) when None so the engine sees `compartment = NONE` for
+    // the shared pool, which is also what every row written before documents
+    // had compartments looks like.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    compartment: Option<String>,
 }
 
 impl ChunkRow {
@@ -66,6 +72,7 @@ impl ChunkRow {
             created_at: c.created_at.to_rfc3339(),
             copal_file: c.copal_file.clone(),
             copal_digest: c.copal_digest.clone(),
+            compartment: c.compartment.as_ref().map(|c| c.as_str().to_string()),
         }
     }
 
@@ -81,6 +88,7 @@ impl ChunkRow {
             created_at: parse_dt(&self.created_at)?,
             copal_file: self.copal_file,
             copal_digest: self.copal_digest,
+            compartment: self.compartment.map(CompartmentId::new),
         })
     }
 }
@@ -97,12 +105,30 @@ pub async fn insert_chunks(store: &Store, chunks: &[DocumentChunk]) -> Result<()
     Ok(())
 }
 
-/// Drop every chunk of `title` within `tenant` (the tenant predicate is ANDed
-/// on, so no cross-tenant delete). Ingest calls this before writing a
-/// document's new generation, which is what makes a re-ingest an in-place
-/// replacement even when the document shrank.
-pub async fn delete_title(store: &Store, tenant: &TenantId, title: &str) -> Result<()> {
-    let condition = and_(eq("tenant_id", tenant.as_str()), eq("title", title));
+/// Drop every chunk of `title` within `tenant` and `compartment` (`None` = the
+/// shared pool). Ingest calls this before writing a document's new generation,
+/// which is what makes a re-ingest an in-place replacement even when the
+/// document shrank.
+///
+/// A document's identity is (tenant, compartment, title), so the compartment is
+/// part of the predicate: two members may each keep a private document under the
+/// same title, and replacing one must never reach the other. The engine's write
+/// rule guards the same line from the other side, since a scoped session cannot
+/// delete a row in a compartment it may not write to.
+pub async fn delete_title(
+    store: &Store,
+    tenant: &TenantId,
+    title: &str,
+    compartment: Option<&CompartmentId>,
+) -> Result<()> {
+    let placed = match compartment {
+        Some(c) => eq("compartment", c.as_str()),
+        None => is_none("compartment"),
+    };
+    let condition = and_(
+        and_(eq("tenant_id", tenant.as_str()), eq("title", title)),
+        placed,
+    );
     delete_records(store.client(), TABLE, Some(&condition))
         .await
         .map_err(map)?;
@@ -199,6 +225,35 @@ async fn sparse_recall(
     rows.into_iter().map(ChunkRow::into_domain).collect()
 }
 
+/// Whether any chunk of `title` is readable in `tenant` and `compartment`
+/// (`None` = the shared pool) on this session. Ingest asks after it writes: under
+/// a record session a write the engine refuses is silent, so without this an
+/// ingest into a compartment the session cannot write to would report its chunks
+/// as stored with none of them there.
+pub async fn title_exists(
+    store: &Store,
+    tenant: &TenantId,
+    title: &str,
+    compartment: Option<&CompartmentId>,
+) -> Result<bool> {
+    let placed = match compartment {
+        Some(c) => eq("compartment", c.as_str()),
+        None => is_none("compartment"),
+    };
+    let q = Query::new()
+        .select(None)
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(and_(
+            and_(eq("tenant_id", tenant.as_str()), eq("title", title)),
+            placed,
+        ))
+        .limit(1)
+        .map_err(map)?;
+    let rows: Vec<ChunkRow> = query_records(store.client(), &q).await.map_err(map)?;
+    Ok(!rows.is_empty())
+}
+
 /// Distinct document titles the tenant has ingested (the document list).
 pub async fn list_titles(store: &Store, tenant: &TenantId) -> Result<Vec<String>> {
     // Paged by id (see `Store::read_paged`): a tenant's whole chunk corpus, one
@@ -230,6 +285,7 @@ mod tests {
             created_at: Utc::now(),
             copal_file: None,
             copal_digest: None,
+            compartment: None,
         }
     }
 
@@ -309,6 +365,7 @@ mod delete_title_tests {
             created_at: Utc::now(),
             copal_file: None,
             copal_digest: None,
+            compartment: None,
         }
     }
 
@@ -326,7 +383,7 @@ mod delete_title_tests {
         )
         .await
         .unwrap();
-        delete_title(&store, &TenantId::new("ws:t"), "a")
+        delete_title(&store, &TenantId::new("ws:t"), "a", None)
             .await
             .unwrap();
         assert_eq!(
@@ -338,5 +395,119 @@ mod delete_title_tests {
             vec!["a".to_string()],
             "another tenant's document of the same title is untouched"
         );
+    }
+}
+
+#[cfg(test)]
+mod existing_database_tests {
+    use super::*;
+    use crate::repo::{compartment, principal};
+    use antumbra_core::{Compartment, UserId};
+    use chrono::Utc;
+    use surql::schema::table::{table_schema, TableMode};
+
+    const DIM: usize = 4;
+
+    fn chunk(id: &str, title: &str, content: &str, compartment: Option<&str>) -> DocumentChunk {
+        let c = DocumentChunk {
+            id: DocumentChunkId::new(id),
+            tenant: TenantId::new("ws:org"),
+            title: title.into(),
+            source: None,
+            ordinal: 0,
+            content: content.into(),
+            embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
+            created_at: Utc::now(),
+            copal_file: None,
+            copal_digest: None,
+            compartment: None,
+        };
+        match compartment {
+            Some(comp) => c.in_compartment(comp),
+            None => c,
+        }
+    }
+
+    async fn recallable(store: &Store, tenant: &TenantId) -> Result<Vec<String>> {
+        let mut seen: Vec<String> = recall(store, tenant, &[1.0, 0.0, 0.0, 0.0], 10)
+            .await?
+            .into_iter()
+            .map(|c| c.content)
+            .collect();
+        seen.sort();
+        Ok(seen)
+    }
+
+    /// The case a fresh-store test cannot see. A database that predates private
+    /// documents already has `document_chunk`, defined with the tenant-wide rule,
+    /// and the schema is applied `IF NOT EXISTS`: left at that, the new rule would
+    /// never reach it, however green the suite. Reconnecting has to bring the
+    /// rule, and must leave the rows and the vector index as they were.
+    #[tokio::test]
+    async fn an_existing_database_picks_up_the_rule_and_keeps_its_data() -> Result<()> {
+        let store = Store::connect_memory(DIM).await?;
+        let tenant = TenantId::new("ws:org");
+        let lily = UserId::new("user:lily");
+        let oslo = UserId::new("user:oslo");
+        principal::provision(&store, &tenant, &lily).await?;
+        principal::provision(&store, &tenant, &oslo).await?;
+        compartment::create(
+            &store,
+            &Compartment::new(
+                CompartmentId::new("comp:lily-private"),
+                tenant.clone(),
+                lily.clone(),
+                "lily private",
+                Utc::now(),
+            ),
+        )
+        .await?;
+
+        // Put the table back the way an older build defined it.
+        let as_it_was = table_schema(TABLE)
+            .with_mode(TableMode::Schemaless)
+            .with_permissions([
+                ("select", "tenant_id = $auth.tenant"),
+                ("create", "tenant_id = $auth.tenant"),
+                ("update", "tenant_id = $auth.tenant"),
+                ("delete", "tenant_id = $auth.tenant"),
+            ])
+            .to_surql_overwrite();
+        store.client().query(&as_it_was).await.map_err(map)?;
+        insert_chunks(
+            &store,
+            &[
+                chunk(
+                    "docchunk:private",
+                    "review",
+                    "lily's salary review",
+                    Some("comp:lily-private"),
+                ),
+                chunk("docchunk:pool", "handbook", "the team handbook", None),
+            ],
+        )
+        .await?;
+
+        // Under the old rule oslo reads lily's document: this is the hole.
+        store.signin(&tenant, &oslo).await?;
+        assert_eq!(recallable(&store, &tenant).await?.len(), 2);
+
+        // A newer build connects and applies its schema.
+        store.invalidate().await?;
+        store.ensure_schema().await?;
+
+        store.signin(&tenant, &oslo).await?;
+        assert_eq!(
+            recallable(&store, &tenant).await?,
+            vec!["the team handbook".to_string()],
+            "the rule reached the existing table"
+        );
+        store.invalidate().await?;
+        assert_eq!(
+            recallable(&store, &tenant).await?.len(),
+            2,
+            "both rows are still there and still recallable through the vector index"
+        );
+        Ok(())
     }
 }

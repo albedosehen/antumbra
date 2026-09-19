@@ -1107,6 +1107,7 @@ async fn run() -> anyhow::Result<()> {
             source,
             path,
             no_git,
+            compartment,
             run,
         } => {
             let (content, default_source) = match (file, run.is_empty()) {
@@ -1138,6 +1139,7 @@ async fn run() -> anyhow::Result<()> {
                     source: Some(source.unwrap_or(default_source)),
                     content,
                     provenance,
+                    compartment,
                 },
             )
             .await?;

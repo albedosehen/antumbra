@@ -480,6 +480,11 @@ pub enum Command {
         /// Do not stamp the current repository / commit / branch on the chunks.
         #[arg(long, default_value_t = false)]
         no_git: bool,
+        /// Keep the document in this compartment, so only its owner and the people
+        /// it is shared with can recall it. Omit it for the workspace's shared
+        /// pool, which every member can recall.
+        #[arg(long)]
+        compartment: Option<String>,
         /// The command whose stdout is the document, after `--`
         /// (`antumbra ingest --title routes -- deno task routes`).
         #[arg(last = true)]
