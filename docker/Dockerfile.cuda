@@ -5,9 +5,11 @@
 # (`--auto-consolidate`). The default docker/Dockerfile stays the light,
 # memory-only server for hosts without an NVIDIA GPU.
 #
-# Run via the `gpu` compose profile (it requests the GPU and enables the
-# trigger): `docker compose --profile gpu -f docker/docker-compose.yml up -d`.
-# Needs the NVIDIA Container Toolkit on the host (Linux, or Windows via WSL2).
+# Run via the GPU compose override (it requests the GPU and enables the
+# trigger): `docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d`,
+# adding `-f docker/docker-compose.gpu-cdi.yml` last on a CDI host (NixOS, or
+# any daemon without a named nvidia runtime). Needs the NVIDIA Container
+# Toolkit on the host (Linux, or Windows via WSL2).
 #
 # NOTE: authored to the standard CUDA-on-Linux pattern but NOT yet built/run in
 # CI; validate on a Linux/WSL2 GPU host. On Linux nvcc uses gcc as its host

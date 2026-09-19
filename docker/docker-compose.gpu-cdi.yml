@@ -1,0 +1,20 @@
+# CDI hosts: a Docker that hands out GPUs through the Container Device
+# Interface (NixOS with `hardware.nvidia-container-toolkit`, or any daemon with
+# CDI enabled and no named `nvidia` runtime). The classic request in
+# docker-compose.gpu.yml (`deploy.resources.reservations.devices` with
+# `driver: nvidia`) fails there with "could not select device driver nvidia";
+# this override resets that block and asks for the device by CDI name instead.
+# Layer it last:
+#
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.gpu.yml \
+#                  -f docker/docker-compose.gpu-cdi.yml up -d
+#
+# Everything else (the CUDA image, the replaced command, the weight and adapter
+# volumes) still comes from docker-compose.gpu.yml.
+
+services:
+  antumbra-mcp:
+    deploy: !reset null
+    devices:
+      - nvidia.com/gpu=all
