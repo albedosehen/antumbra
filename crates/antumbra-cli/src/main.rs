@@ -17,6 +17,7 @@ use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::Parser;
 
+mod claude;
 mod cli;
 mod commands;
 mod gitctx;
@@ -200,6 +201,23 @@ async fn run() -> anyhow::Result<()> {
         cli.copal_keys.as_deref(),
     )?);
     match cli.command {
+        Command::Claude {
+            action: cli::ClaudeAction::Doctor { dir },
+        } => {
+            let project = match dir {
+                Some(dir) => dir,
+                None => std::env::current_dir()?,
+            };
+            let home = std::env::var_os("USERPROFILE")
+                .or_else(|| std::env::var_os("HOME"))
+                .map(std::path::PathBuf::from);
+            let report = claude::examine(&claude::Inputs::gather(home.as_deref(), &project));
+            println!("{}", claude::render(&report));
+            let missing = report.required_missing();
+            if missing > 0 {
+                anyhow::bail!("{missing} required setting(s) missing");
+            }
+        }
         Command::Migrate => {
             connect(&cli.url).await?;
             println!("schema applied at {}", cli.url);

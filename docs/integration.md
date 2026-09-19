@@ -138,6 +138,19 @@ Offline is the default and the privacy floor: nothing leaves the building. The h
 
 ---
 
+## Claude Code with its telemetry off
+
+Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. [ADR-0021](adr/0021-sovereign-mode.md) calls the state sovereign mode and treats it as the normal case.
+
+```sh
+antumbra claude doctor            # judge the current project
+antumbra claude doctor --dir ../other-repo
+```
+
+It says whether the session is in sovereign mode and which variable, in which file, put it there; lists what that costs; checks the settings that bring some of it back; and names a project's `AGENTS.md` when it is not being read. It exits non-zero when a required setting is missing, which on Windows means the PowerShell tool (the host's dominant shell decides). It reads the agent's settings and never writes them: the file grants the agent its permissions, so the doctor prints the line to add and leaves the edit to you.
+
+It needs no running server and no store, so it works when nothing else does, including when a bad MCP tool schema is failing every request inside the agent. The rules are verified against a named Claude Code release, and the report says so when the installed one differs.
+
 ## Copal as the document of record (knowledge documents)
 
 `ingest_document` chunks, embeds, and stores a knowledge document for recall — and in v0 that is *all* it keeps: the chunks. Recall works, but the original bytes are gone. Point the MCP server at a **Copal** file service (content-addressed, versioned, sealed-at-rest file storage) and Copal becomes the **document of record**: on every ingest the original content is uploaded there first, and each stored chunk carries provenance back to it (`copal_file`, the archived file's id, and `copal_digest`, the content digest of exactly the bytes that were ingested) — so a `recall_documents` answer names not just what it remembers but the original it came from.
