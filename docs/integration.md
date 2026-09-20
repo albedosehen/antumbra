@@ -149,6 +149,15 @@ antumbra claude doctor --dir ../other-repo
 
 It says whether the session is in sovereign mode and which variable, in which file, put it there; lists what that costs; checks the settings that bring some of it back; and names a project's `AGENTS.md` when it is not being read. It exits non-zero when a required setting is missing, which on Windows means the PowerShell tool (the host's dominant shell decides). It reads the agent's settings and never writes them: the file grants the agent its permissions, so the doctor prints the line to add and leaves the edit to you.
 
+When you would rather not paste them by hand:
+
+```sh
+antumbra claude apply --dry-run     # say what would be written, and write nothing
+antumbra claude apply               # write it, after a backup
+```
+
+It adds the `env` names the doctor asks for to your own `~/.claude/settings.json`, and nothing else: only names it already knows, only ones the file does not set, and never anything under `permissions` — not even `permissions.defaultMode`, which the doctor asks for and this reports and leaves to you. Your key order and formatting survive, because the edit is textual rather than a reserialization. It backs the file up first, then reads it back and restores the backup unless the result is exactly what was there plus those names.
+
 When it names an `AGENTS.md` that is not being read, this fixes it:
 
 ```sh

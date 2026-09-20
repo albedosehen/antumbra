@@ -161,6 +161,26 @@ pub enum ClaudeAction {
         #[arg(long, default_value_t = 4)]
         each: u32,
     },
+    /// Write the `env` lines the doctor asks for into your own settings file,
+    /// and nothing else. Only names the matrix knows, only ones the file does
+    /// not already set, and never anything under `permissions` (not even
+    /// `defaultMode`, which the doctor asks for and this still leaves to you).
+    /// Backs the file up first, then re-reads it and restores the backup unless
+    /// the result is exactly what was there plus those names. Your key order and
+    /// formatting are left alone: the edit is textual, not a reserialization.
+    Apply {
+        /// The project whose settings are read to decide what is missing.
+        /// Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// The file to write. Defaults to your own `~/.claude/settings.json`,
+        /// which is the one the agent reads these from.
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+        /// Say what would be written, check it, and write nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     /// Count one use of a skill. Meant for two hooks, because a skill is used
     /// two ways and each hook sees only one: `PostToolUse` matching `Skill`
     /// (the agent called it) and `UserPromptExpansion` (you typed `/name`).

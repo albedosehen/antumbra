@@ -399,3 +399,126 @@ fn skill_used_by_hand_says_why_it_failed() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn apply_writes_only_the_env_names_and_keeps_a_backup() -> anyhow::Result<()> {
+    let scratch = Scratch::new("apply")?;
+    let settings = scratch.home().join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap_or(&scratch.home()))?;
+    // A file with the user's own order, their own indentation, and a permissions
+    // block that must come through untouched.
+    let before = "{\n\t\"permissions\": {\n\t\t\"defaultMode\": \"manual\",\n\t\t\"deny\": [\"Read(**/.env)\"]\n\t},\n\t\"env\": {\n\t\t\"ZZZ\": \"mine\",\n\t\t\"AAA\": \"mine\"\n\t}\n}\n";
+    std::fs::write(&settings, before)?;
+    let project = scratch.project();
+    let Some(dir) = project.to_str() else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+    let sovereign = [("DISABLE_TELEMETRY", "1")];
+
+    let dry = antumbra(
+        &scratch.home(),
+        &sovereign,
+        &["claude", "apply", "--dir", dir, "--dry-run"],
+    )?;
+    assert!(dry.status.success(), "{}", text(&dry.stderr));
+    assert!(
+        text(&dry.stdout).contains("dry run: nothing written"),
+        "{}",
+        text(&dry.stdout)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings)?,
+        before,
+        "a dry run wrote to the file"
+    );
+
+    let out = antumbra(
+        &scratch.home(),
+        &sovereign,
+        &["claude", "apply", "--dir", dir],
+    )?;
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let said = text(&out.stdout);
+    assert!(said.contains("MCP_PROTOCOL_NEGOTIATION"), "{said}");
+    assert!(said.contains("left     permissions.defaultMode"), "{said}");
+
+    let after = std::fs::read_to_string(&settings)?;
+    // The user's bytes are all still there, in their order, with their tabs.
+    assert!(
+        after.contains("\t\t\"ZZZ\": \"mine\",\n\t\t\"AAA\": \"mine\""),
+        "{after}"
+    );
+    assert!(after.contains("\"defaultMode\": \"manual\""), "{after}");
+    assert!(after.contains("\"deny\": [\"Read(**/.env)\"]"), "{after}");
+    assert!(
+        after.contains("\t\t\"MCP_PROTOCOL_NEGOTIATION\": \"auto\","),
+        "{after}"
+    );
+    let json: serde_json::Value = serde_json::from_str(&after)?;
+    // Nothing under permissions moved, and no permission was granted.
+    assert_eq!(
+        json.get("permissions"),
+        serde_json::from_str::<serde_json::Value>(before)?.get("permissions")
+    );
+
+    // The backup holds exactly what was there before.
+    let backups: Vec<_> = std::fs::read_dir(settings.parent().unwrap_or(&scratch.home()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.to_string_lossy().contains(".antumbra-"))
+        .collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    let Some(backup) = backups.first() else {
+        anyhow::bail!("no backup was kept");
+    };
+    assert_eq!(std::fs::read_to_string(backup)?, before);
+
+    // Running it again adds nothing, and keeps no second backup.
+    let again = antumbra(
+        &scratch.home(),
+        &sovereign,
+        &["claude", "apply", "--dir", dir],
+    )?;
+    assert!(again.status.success(), "{}", text(&again.stderr));
+    assert!(
+        text(&again.stdout).contains("nothing to add"),
+        "{}",
+        text(&again.stdout)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings)?,
+        after,
+        "a second run changed the file"
+    );
+    Ok(())
+}
+
+#[test]
+fn apply_refuses_a_settings_file_it_cannot_parse() -> anyhow::Result<()> {
+    let scratch = Scratch::new("apply-bad")?;
+    let settings = scratch.home().join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap_or(&scratch.home()))?;
+    let broken = "{ \"env\": { \"A\": \"1\" },, }";
+    std::fs::write(&settings, broken)?;
+    let project = scratch.project();
+    let Some(dir) = project.to_str() else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+    let out = antumbra(
+        &scratch.home(),
+        &[("DISABLE_TELEMETRY", "1")],
+        &["claude", "apply", "--dir", dir],
+    )?;
+    assert!(!out.status.success());
+    assert!(
+        text(&out.stderr).contains("not valid JSON"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings)?,
+        broken,
+        "the file was touched anyway"
+    );
+    Ok(())
+}
