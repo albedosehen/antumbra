@@ -1,6 +1,6 @@
 # ADR-0008 - The durable generational loop
 
-**Status:** Proposed · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundaries), 0005 (router)
+**Status:** Accepted (the loop runs unattended, resumes from its checkpoint, and holds the freeze) · **Date:** 2026-05-30 · **Related:** 0001 (experts), 0002 (shadows), 0003 (critic), 0004 (boundaries), 0005 (router)
 
 ## Context
 
@@ -44,3 +44,5 @@ stateDiagram-v2
 ## Validation
 
 Run the loop unattended across a deliberate kill/restart: it must resume from the `orchestration_run` / generation `status` checkpoint, and the population must grow while prior-skill fitness holds (the ADR-0001/0002 forgetting check, at scale). _Kill criterion:_ old skills regress as the population grows → forgetting has reappeared at scale; return to the ADR-0001/0002 gate.
+
+**Met.** The state value is the checkpoint, persisted after every transition, and `crates/antumbra-loop/tests/durable_loop.rs` drives the criterion directly: `grows_population_and_resumes_after_restart` kills and restarts the loop and has it continue from the persisted head; `the_freeze_holds_across_generations` and `a_drifted_frozen_expert_trips_the_no_forgetting_check` hold the forgetting gate this record points at, the second by failing when a frozen expert drifts. `an_operator_halt_stops_the_loop_at_a_generation_boundary` covers the cooperative halt. [EXP-022](../../experiments/README.md) then closed the same loop on the deployed genesis node, in its container, over the HTTP surface, against a remote store.

@@ -1,6 +1,6 @@
 # ADR-0016 - Control plane & product surface
 
-**Status:** Proposed · **Date:** 2026-06-06 · **Related:** 0009 (composition), 0012 (memory), 0013 (identity), 0014 (compartments), 0015 (MCP surface)
+**Status:** Accepted (in progress: hook auth, the REST shim, the per-workspace embedder, knowledge documents and hosted signup are in; the dashboard and the mixer are queued) · **Date:** 2026-06-06 · **Related:** 0009 (composition), 0012 (memory), 0013 (identity), 0014 (compartments), 0015 (MCP surface)
 
 ## Context
 
@@ -37,3 +37,5 @@ Sequence captured as roadmap items P-1…P-5 (see [`roadmap.md`](../roadmap.md))
 ## Validation
 
 Falsifiable kill criterion: if the read-only dashboard cannot be built purely on the existing engine-isolated MCP tools (i.e. it needs a privileged, ACL-bypassing path to render a tenant's own population and memory), then the "thin surface over the same APIs" decision is wrong and the control plane needs its own access model.
+
+**Standing.** Still open, and deliberately: the criterion is about the dashboard, which is queued as P-2 in the [roadmap](../roadmap.md). What has shipped went over the same engine-isolated tools with no privileged path, which is evidence for the decision without settling it: hook auth and the REST shim (`POST /mcp/call`), the per-workspace embedder registry (`set-embedder` / `get-embedder` / `reembed`), knowledge documents (`ingest_document` / `recall_documents`, P-3), and hosted signup with tenant provisioning (`antumbra-control`, `antumbra-control-server`, P-5). The expert mixer (P-4) and the rest of the hosted flow are queued behind the dashboard.
