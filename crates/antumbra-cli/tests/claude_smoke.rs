@@ -245,3 +245,68 @@ fn mcp_lint_gives_up_on_a_server_that_never_answers() -> anyhow::Result<()> {
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
     Ok(())
 }
+
+fn git(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
+    let status = Command::new("git").arg("-C").arg(dir).args(args).output()?;
+    anyhow::ensure!(
+        status.status.success(),
+        "git {args:?}: {}",
+        text(&status.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn auto_mode_env_drafts_from_remotes_and_writes_nothing() -> anyhow::Result<()> {
+    let scratch = Scratch::new("auto-mode")?;
+    let repos = scratch.0.join("repos");
+    for (name, remote) in [
+        ("other", "git@github.com:mine/other.git"),
+        ("borrowed", "https://github.com/upstream/library.git"),
+    ] {
+        let dir = repos.join(name);
+        std::fs::create_dir_all(&dir)?;
+        git(&dir, &["init", "-q"])?;
+        git(&dir, &["remote", "add", "origin", remote])?;
+    }
+    let project = scratch.project();
+    git(&project, &["init", "-q"])?;
+    git(
+        &project,
+        &["remote", "add", "origin", "git@github.com:mine/project.git"],
+    )?;
+    let (Some(project), Some(repos)) = (project.to_str(), repos.to_str()) else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+
+    let out = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "auto-mode-env",
+            "--dir",
+            project,
+            "--repos",
+            repos,
+            "--surface",
+            "http://127.0.0.1:1",
+        ],
+    )?;
+    // A surface that is not there is not a failure: the remotes still draft.
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let said = text(&out.stdout);
+    assert!(
+        said.contains("\"Source control: github.com/mine and all repos under it\""),
+        "{said}"
+    );
+    assert!(
+        said.contains("github.com/upstream: cloned over https"),
+        "{said}"
+    );
+    assert!(said.contains("Memory was not asked"), "{said}");
+    assert!(said.contains("Nothing was written"), "{said}");
+    let left_behind: Vec<_> = std::fs::read_dir(scratch.home())?.collect();
+    assert!(left_behind.is_empty(), "the home directory was written to");
+    Ok(())
+}

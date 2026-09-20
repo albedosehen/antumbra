@@ -168,6 +168,14 @@ antumbra claude mcp-lint --server github --from tools-list.json       # or a sav
 
 It runs the agent's two checks, prints the deny rule that keeps each offender out of the request (and leaves the edit to you), and also names tools that go missing without a word: one with `anyOf`, `oneOf` or `allOf` at its schema's root is skipped in this state, and one whose root `type` is not `"object"` costs its server every tool, in any state. With tool search on, which is the default, a bad tool breaks nothing until the agent first loads it, so a session that has always worked is not evidence of a clean server. It exits non-zero on a failure, so a server's maintainer can run it in CI.
 
+The agent's classifier decides what counts as leaving your boundary, and `/auto-mode-setup`, which drafts the entries that tell it, is one of the things that goes with the flags:
+
+```sh
+antumbra claude auto-mode-env --repos ~/repos     # prints a draft; writes nothing
+```
+
+It drafts `Source control` from the remotes of your working trees, proposing an owner only when you push there over ssh and it is plainly yours, and listing every other owner with the reason it was left out. With a surface to ask (`ANTUMBRA_URL`, `ANTUMBRA_TOKEN`) it also offers memories as candidates for the slots only prose can fill, such as which host is production and which is a test node. It reads no transcript. The block goes in your own `~/.claude/settings.json`; the classifier never reads `autoMode` from a project's settings.
+
 Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again.
 
 ## Who can recall a document

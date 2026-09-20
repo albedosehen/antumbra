@@ -132,6 +132,35 @@ pub enum ClaudeAction {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
+    /// Draft `autoMode.environment`, the prose that tells the agent's classifier
+    /// what is inside your boundary, so that pushing to your own repository is
+    /// not taken for exfiltration. The agent's own `/auto-mode-setup` is gone in
+    /// sovereign mode, and drafts from your session transcripts; this drafts
+    /// from your working trees' remotes and from what Antumbra remembers, and
+    /// reads no transcript. An owner is proposed only when you push there over
+    /// ssh and it is plainly yours; the rest are listed with the reason they
+    /// were left out. Prints the block. Never writes it.
+    AutoModeEnv {
+        /// The project. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// A directory whose child directories are your repositories.
+        #[arg(long)]
+        repos: Option<std::path::PathBuf>,
+        /// The Antumbra MCP surface to ask for memories, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// How many memories to offer for each slot.
+        #[arg(long, default_value_t = 4)]
+        each: u32,
+    },
     /// Check an MCP server's tools for input schemas the API refuses. In
     /// sovereign mode the agent no longer leaves such a tool out, so one of them
     /// fails every request with a 400 that names it only by position. Run this
