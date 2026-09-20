@@ -132,6 +132,28 @@ pub enum ClaudeAction {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
+    /// Check an MCP server's tools for input schemas the API refuses. In
+    /// sovereign mode the agent no longer leaves such a tool out, so one of them
+    /// fails every request with a 400 that names it only by position. Run this
+    /// from outside the agent: it is the way back in. Prints the deny rules
+    /// that fix it, and exits non-zero when any tool would break requests.
+    /// Also names tools the agent drops without a word (a combinator at the
+    /// schema's root). Give a saved `tools/list` answer with --from, or the
+    /// server's own command after `--`.
+    McpLint {
+        /// The server's name as the agent knows it, for the deny rules.
+        #[arg(long)]
+        server: String,
+        /// A saved `tools/list` answer (`-` for standard input).
+        #[arg(long, conflicts_with = "command")]
+        from: Option<std::path::PathBuf>,
+        /// How long to wait for each answer from a server started here.
+        #[arg(long, default_value_t = 30)]
+        timeout_secs: u64,
+        /// The stdio server's command, as the agent's configuration has it.
+        #[arg(last = true)]
+        command: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]

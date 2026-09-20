@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 pub mod bridge;
 pub mod brief;
 pub mod conventions;
+pub mod mcp_lint;
+pub mod mcp_stdio;
 pub mod run;
 
 /// The Claude Code release the rules below were verified against, the day, and
@@ -187,9 +189,16 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "mcp-schemas",
-            lost: "MCP tools whose input schema the API rejects are no longer excluded, so one bad tool fails every request",
+            lost: "MCP tools whose input schema the API rejects are no longer excluded, so one bad tool fails every request it is sent with",
             class: Restored,
-            response: "an MCP schema lint run outside the agent (queued); a deny rule on the bare tool name removes it from the request",
+            response: "`antumbra claude mcp-lint`, run outside the agent, names each such tool and prints the deny rule that keeps it out of the request",
+            unavailable: None,
+        },
+        Rule {
+            id: "mcp-root-combinators",
+            lost: "MCP tools whose input schema has anyOf, oneOf or allOf at its root are skipped instead of rewritten, and only a debug log says so (not on the vendor's list; measured)",
+            class: AcceptedLoss,
+            response: "`antumbra claude mcp-lint` names them; only the server can fix it, by flattening the schema",
             unavailable: None,
         },
         Rule {
