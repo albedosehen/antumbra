@@ -937,7 +937,6 @@ impl App {
         let idx = self.palette.selected.min(matches.len().saturating_sub(1));
         matches.get(idx).map(|c| c.action)
     }
-
 }
 
 #[cfg(test)]
