@@ -85,6 +85,24 @@ pub enum ClaudeAction {
         #[arg(long)]
         dir: Option<std::path::PathBuf>,
     },
+    /// Get a project's AGENTS.md read again in sovereign mode. Beside each
+    /// AGENTS.md the agent would have read, writes a CLAUDE.local.md that imports
+    /// it, and lists that file in the clone's own `.git/info/exclude`: nothing
+    /// the repository tracks is changed, so it is safe in a checkout you do not
+    /// own. Leaves alone any directory that has instructions of its own, where
+    /// the agent was never going to read AGENTS.md.
+    Bridge {
+        /// The project to bridge. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Say what would be done and write nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Take the bridges back out. Only a CLAUDE.local.md that is a bridge
+        /// and nothing else is deleted.
+        #[arg(long, default_value_t = false)]
+        remove: bool,
+    },
 }
 
 #[derive(Subcommand)]
