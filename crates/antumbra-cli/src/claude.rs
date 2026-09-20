@@ -15,6 +15,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub mod bridge;
+pub mod brief;
+pub mod conventions;
+pub mod run;
 
 /// The Claude Code release the rules below were verified against, the day, and
 /// the page that says so. The gated list changes between releases, so a rule is
@@ -165,6 +168,10 @@ pub struct Rule {
     pub class: Class,
     /// What Antumbra does, or why nothing is done.
     pub response: &'static str,
+    /// How an agent is told it cannot use this, in a list of such things. `None`
+    /// when an agent never reaches for it, or when its standing decides what is
+    /// said (see [`brief`]).
+    pub unavailable: Option<&'static str>,
 }
 
 /// The matrix of ADR-0021, in the order the report prints it.
@@ -176,84 +183,98 @@ pub fn rules() -> Vec<Rule> {
             lost: "AGENTS.md is no longer read as project instructions",
             class: Restored,
             response: "`antumbra claude bridge` writes an untracked CLAUDE.local.md that imports it, so it is read natively again",
+            unavailable: None,
         },
         Rule {
             id: "mcp-schemas",
             lost: "MCP tools whose input schema the API rejects are no longer excluded, so one bad tool fails every request",
             class: Restored,
             response: "an MCP schema lint run outside the agent (queued); a deny rule on the bare tool name removes it from the request",
+            unavailable: None,
         },
         Rule {
             id: "powershell-tool",
             lost: "the PowerShell tool is off on Windows when Git Bash is installed",
             class: Setting { required: true },
             response: "set CLAUDE_CODE_USE_POWERSHELL_TOOL=1",
+            unavailable: None,
         },
         Rule {
             id: "mcp-protocol-probe",
             lost: "claude.ai connector servers are not probed for MCP protocol 2026-07-28",
             class: Setting { required: false },
             response: "set MCP_PROTOCOL_NEGOTIATION=auto",
+            unavailable: None,
         },
         Rule {
             id: "auto-mode-default",
             lost: "sessions no longer start in auto mode by default",
             class: Setting { required: false },
             response: "set permissions.defaultMode to \"auto\" in your own settings file (it is ignored in a project's)",
+            unavailable: None,
         },
         Rule {
             id: "auto-mode-setup",
             lost: "/auto-mode-setup cannot draft autoMode.environment entries",
             class: Restored,
             response: "drafted from Antumbra's memories of your infrastructure (queued)",
+            unavailable: Some("/auto-mode-setup"),
         },
         Rule {
             id: "skill-doctor",
             lost: "/skill-doctor cannot report unused skills",
             class: Restored,
             response: "a hook counts skill use and the TUI shows it (queued)",
+            unavailable: Some("/skill-doctor"),
         },
         Rule {
             id: "remote-control",
             lost: "Remote Control, and messaging sessions on other machines",
             class: Restored,
             response: "in part and later: an asynchronous handoff compartment, no live control",
+            unavailable: Some("Remote Control and messaging sessions on other machines"),
         },
         Rule {
             id: "account-sync",
             lost: "skills and plugins enabled on the hosted account no longer sync",
             class: AcceptedLoss,
             response: "off is the sovereign default",
+            unavailable: None,
         },
         Rule {
             id: "vscode-starting-mode",
             lost: "the VS Code extension ignores every settings file for its starting permission mode",
             class: AcceptedLoss,
             response: "out of Antumbra's reach",
+            unavailable: None,
         },
         Rule {
             id: "advisor",
             lost: "the advisor tool",
             class: AcceptedLoss,
             response: "it sends the whole conversation to a stronger model on the vendor's infrastructure, the opposite of `route` and `answer`",
+            unavailable: Some("the advisor tool"),
         },
         Rule {
             id: "artifact-comments",
             lost: "reading and replying to comments on hosted artifacts",
             class: AcceptedLoss,
             response: "read them in the browser; ADR-0020 makes a comment a memory",
+            unavailable: Some("comments on hosted artifacts (the user reads them in the browser)"),
         },
         Rule {
             id: "drafted-feedback",
             lost: "vendor-bound drafted feedback",
             class: AcceptedLoss,
             response: "friction is kept locally as `bank` memories by the capture hook",
+            unavailable: Some("vendor-bound drafted feedback (keep friction as a `bank` memory instead)"),
         },
         Rule {
             id: "import",
             lost: "`claude import`",
             class: AcceptedLoss,
             response: "a one-time migration from other agents; nothing to compensate",
+            unavailable: None,
         },
     ]
 }
@@ -428,9 +449,18 @@ pub fn merge(sources: Vec<(Origin, BTreeMap<String, String>)>) -> BTreeMap<Strin
 }
 
 impl Inputs {
-    /// Read the environment, the settings files and the working directory. The
-    /// only function in this module that touches the machine.
+    /// Read the environment, the settings files and the working directory, and
+    /// ask the installed agent for its version.
     pub fn gather(home: Option<&Path>, project: &Path) -> Self {
+        Inputs {
+            installed_version: installed_version(),
+            ..Self::gather_without_version(home, project)
+        }
+    }
+
+    /// As [`Inputs::gather`], without asking the agent for its version. Asking
+    /// starts the agent's runtime, which a session-start hook has no time for.
+    pub fn gather_without_version(home: Option<&Path>, project: &Path) -> Self {
         let read = |path: PathBuf| {
             std::fs::read_to_string(&path)
                 .ok()
@@ -465,7 +495,7 @@ impl Inputs {
             instructions: bridge::standing(&repository_root(project), project, &|path| {
                 std::fs::read_to_string(path).ok()
             }),
-            installed_version: installed_version(),
+            installed_version: None,
         }
     }
 }

@@ -103,6 +103,35 @@ pub enum ClaudeAction {
         #[arg(long, default_value_t = false)]
         remove: bool,
     },
+    /// Print what an agent should know about the session it is starting in: a
+    /// few lines, for a session-start hook to pass on. Prints nothing outside
+    /// sovereign mode. Reads settings; writes nothing; never starts the agent.
+    Brief {
+        /// The project the session starts in. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+    },
+    /// Keep the rules as memories too, in a `claude-code` compartment of your
+    /// own, so an agent can recall why a feature is missing. Written through the
+    /// same surface an agent writes through. Volatile, so they never train an
+    /// expert. Safe to run again: a rule already there is kept, a changed one is
+    /// stored and the old text penalized, and nothing is deleted.
+    Remember {
+        /// The Antumbra MCP surface, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable:
+        /// a flag ends up in the shell's history.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Say what would be done and write nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
