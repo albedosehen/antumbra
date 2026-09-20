@@ -159,6 +159,17 @@ Beside each `AGENTS.md` the agent would have read, it writes a `CLAUDE.local.md`
 
 Neither command needs a running server or a store, so both work when nothing else does, including when a bad MCP tool schema is failing every request inside the agent. The rules are verified against a named Claude Code release, and the report says so when the installed one differs.
 
+That last case has its own command. With the flags off the agent still checks every MCP tool's input schema, logs the answer, and sends the schema anyway; the API then refuses the whole request with a 400 that names the tool only by its position.
+
+```sh
+antumbra claude mcp-lint --server github -- npx -y @some/mcp-server   # ask a stdio server
+antumbra claude mcp-lint --server github --from tools-list.json       # or a saved tools/list answer
+```
+
+It runs the agent's two checks, prints the deny rule that keeps each offender out of the request (and leaves the edit to you), and also names tools that go missing without a word: one with `anyOf`, `oneOf` or `allOf` at its schema's root is skipped in this state, and one whose root `type` is not `"object"` costs its server every tool, in any state. With tool search on, which is the default, a bad tool breaks nothing until the agent first loads it, so a session that has always worked is not evidence of a clean server. It exits non-zero on a failure, so a server's maintainer can run it in CI.
+
+Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again.
+
 ## Who can recall a document
 
 A document is kept the way a memory is: in a compartment, or in the workspace's shared pool. `ingest_document` takes a `compartment` (and `antumbra ingest` a `--compartment`); then only the compartment's owner and the people it is shared with can recall the document, enforced by the engine on every read, and a recalled chunk says which compartment it came from. Leave it out and the document goes to the shared pool, which every member of the workspace can recall. That is the right place for reference material (it is where the GitHub integration puts a repository's documents) and the wrong place for anything private.
