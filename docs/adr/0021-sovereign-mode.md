@@ -1,6 +1,6 @@
 # ADR-0021: Sovereign mode, or what a coding agent loses when you stop it phoning home
 
-**Status:** Accepted (in progress: detection, the doctor, the `AGENTS.md` bridge, the session-start block, the conventions compartment, the MCP schema lint, the trust-entry draft and skill usage are in; the TUI panel is next) · **Date:** 2026-09-19 · **Related:** 0013 (identity), 0015 (MCP runtime surface), 0017 (the memory fabric), 0018 (provenance over extraction), 0020 (sovereign artifacts)
+**Status:** Accepted (the order of work below says what is in) · **Date:** 2026-09-19 · **Related:** 0013 (identity), 0015 (MCP runtime surface), 0017 (the memory fabric), 0018 (provenance over extraction), 0020 (sovereign artifacts)
 
 > **`AGENTS.md` is bridged, not injected (2026-09-19).** This record first chose to supply the file through the session-start hook. That was wrong, and the vendor's own page says why: a hook's context is capped at 10,000 characters, and past the cap the agent receives a file path and a 2,000-character preview that it is never asked to open. The first real instruction file measured was 11,468 characters. It would have been cut to a fifth, silently. Hook context is also a system reminder and not project instructions, it is not restored after compaction, and it does not reach subagents, which is why the first plan needed three hooks.
 >
@@ -41,7 +41,7 @@ Three classes. **Restored**: Antumbra supplies it. **Setting**: a local setting 
 | MCP tools with `anyOf`, `oneOf` or `allOf` at the schema's root are rewritten into a form the API accepts | Accepted loss | Not on the vendor's list of gated features, and measured: with the flags off the agent skips the tool and says so only in a debug log. The lint names such tools. Only the server can fix it, by flattening the schema |
 | `/auto-mode-setup` drafting trust entries | Restored | `antumbra claude auto-mode-env` drafts `autoMode.environment` from the remotes of the user's working trees and from Antumbra's memories. It reads no transcript, prints the block and never writes it, and is never offered unprompted. An owner is proposed for `Source control` only when the user pushes there over ssh and it is plainly theirs (it owns the project, or more than one repository); a clone of someone else's repository is listed with the reason it was left out. For the slots only prose can fill, memory offers candidates and a person, or an agent, writes the line |
 | `/skill-doctor` unused-skill report | Restored | `antumbra claude skill-used`, run by two hooks, counts each use, and `antumbra claude skills` reports the skills never or no longer used. Two hooks because a skill is used two ways and each hook sees one (measured): the agent calls the `Skill` tool, which `PostToolUse` sees, or the user types `/name`, which never touches the tool and arrives as `UserPromptExpansion`. The count is one volatile memory per skill in the `claude-code` compartment, reinforced on each use, so `reinforcement` is the count and `updated_at` the last use: no table and no tool, private by compartment, and visible from every node the user runs. The hook never fails and never speaks. A panel in the TUI comes with item 6 |
-| Remote Control, messaging sessions on other machines | Restored, in part, later | An asynchronous handoff compartment over the networked tier. No live control |
+| Remote Control, messaging sessions on other machines | Restored, in part, later | An asynchronous handoff compartment over the networked tier, scoped as R-7 in the roadmap and resting on work that is already built (R-1 replication, R-2 live delivery). No live control, and not built here |
 | Skills and plugins synced from the hosted account | Accepted loss by intent | Off is the sovereign default |
 | PowerShell tool on Windows with Git Bash installed | Setting | `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`, required on Windows by principle 7 |
 | MCP protocol probe | Setting, advisory | `MCP_PROTOCOL_NEGOTIATION=auto` |
@@ -58,7 +58,9 @@ Three classes. **Restored**: Antumbra supplies it. **Setting**: a local setting 
 
 Detection follows the documented semantics exactly, because they differ. `DISABLE_TELEMETRY` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` count when set to any non-empty value, `0` and `false` included. `DO_NOT_TRACK` and `DISABLE_GROWTHBOOK` are ordinary booleans. A provider switch counts unless the host platform has declared that it manages the provider.
 
-It does not edit the agent's settings. The file is the user's, its key order is theirs, and Antumbra's JSON handling would re-sort it; the doctor prints the exact lines to add. An `apply` that writes them after a backup is left for later, and will never touch the permission lists.
+It does not edit the agent's settings. The file is the user's, its key order is theirs, and Antumbra's JSON handling would re-sort it; the doctor prints the exact lines to add.
+
+`antumbra claude apply` writes them, and only them. It keeps the reason the doctor gave rather than overruling it: nothing round-trips the file, because that is what would re-sort it. The text is parsed only to decide what is missing, and the edit is a textual insertion into the `env` object at the indentation already there; every other byte is left as it was. Three limits hold it in. **Only `env`, and only names from the compiled matrix**, never from an argument: nothing under `permissions` is touched, not even `permissions.defaultMode`, which the doctor asks for and this reports and leaves alone, because that object is what grants the agent its permissions. **Adding only**: a name the file already sets is left as it is, whatever its value, since a user who set it to `0` has answered. **A backup and a check that rolls back**: after writing, the file is read back from disk and compared with what was there, and unless it differs in exactly the names that were added and nowhere else, the backup is restored and the command fails.
 
 ### 4. Rules as memories
 
@@ -81,7 +83,7 @@ The three levels of rule that have no repository map onto 0017's hierarchy: a de
 4. The MCP schema lint (in). The constraints are the two the agent checks itself, by the vendor's own page, and they are what the lint runs.
 5. Trust entries drafted from remotes and memory (in); skill usage (in). Its storage was put to the user as a decision: a memory as the counter, a new table, or a file per device. The memory was chosen, knowing what it costs: reinforcement also moves a confidence that means nothing for a count, each use is two calls to the surface, and the counters are rows among the user's memories that are not knowledge. They are volatile, so they never graduate, and keyed, so anything listing memories can leave them out.
 6. A read-only panel in the TUI.
-7. `apply`, and the handoff compartment as a roadmap entry.
+7. `apply` (in), and the handoff compartment as a roadmap entry (in: R-7 in `docs/roadmap.md`).
 
 ## Consequences
 

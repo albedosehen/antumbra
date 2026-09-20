@@ -7,8 +7,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::{
-    auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, render, repository_root,
-    rules, skills, Inputs,
+    apply, auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, render,
+    repository_root, rules, skills, Inputs, Standing,
 };
 use crate::cli::ClaudeAction;
 
@@ -222,6 +222,35 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             };
             let owners = auto_mode::owners(&trees, &remembered);
             println!("{}", auto_mode::render(&owners, &memory));
+        }
+        ClaudeAction::Apply { dir, file, dry_run } => {
+            let home = home();
+            let report = examine(&Inputs::gather(home.as_deref(), &project(dir)?));
+            let path = match (file, home) {
+                (Some(path), _) => path,
+                (None, Some(home)) => home.join(".claude").join("settings.json"),
+                (None, None) => {
+                    anyhow::bail!("no home directory to find your settings in: give --file")
+                }
+            };
+            let settings = apply::wanted(&report);
+            let said = apply::apply(&path, &settings, dry_run)?;
+            if dry_run && !settings.is_empty() {
+                println!("dry run: nothing written");
+            }
+            for line in said {
+                println!("{line}");
+            }
+            // The doctor asks for this one too, and this deliberately does not.
+            if report.findings.iter().any(|finding| {
+                finding.rule.id == "auto-mode-default"
+                    && matches!(finding.standing, Standing::Missing { .. })
+            }) {
+                println!(
+                    "left     permissions.defaultMode: set it to \"auto\" yourself if you want \
+                     auto mode. Nothing here writes under `permissions`"
+                );
+            }
         }
         ClaudeAction::SkillUsed {
             name,
