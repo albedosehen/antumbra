@@ -53,6 +53,10 @@ pub const COMMANDS: &[Command] = &[
         action: Action::Page(Page::Evals),
     },
     Command {
+        label: "page · sovereign mode",
+        action: Action::Page(Page::Sovereign),
+    },
+    Command {
         label: "focus umbra · experts",
         action: Action::Focus(Focus::Experts),
     },

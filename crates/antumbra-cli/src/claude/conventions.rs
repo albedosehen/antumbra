@@ -27,7 +27,7 @@ pub const COMPARTMENT: &str = "claude-code";
 
 /// What opens every memory this module writes. It is how a later run knows a
 /// memory is one of these and which rule it states.
-const KEY_PREFIX: &str = "[claude-code:";
+const KEY_PREFIX: &str = antumbra_core::keyed::CLAUDE_CODE_RULE;
 
 /// The confidence these are stored at. One penalty takes a memory to three
 /// quarters of it, so anything clearly below has been judged, by an earlier run
@@ -59,7 +59,7 @@ fn convention_of(rule: &Rule) -> Convention {
         Class::Setting { required: false } => "A local setting brings it back",
         Class::AcceptedLoss => "It stays lost",
     };
-    let key = format!("{KEY_PREFIX}{}]", rule.id);
+    let key = antumbra_core::keyed::key(KEY_PREFIX, rule.id);
     Convention {
         content: format!(
             "{key} When Claude Code runs with feature-flag fetching off (DISABLE_TELEMETRY and \
@@ -73,7 +73,7 @@ fn convention_of(rule: &Rule) -> Convention {
 
 /// Every rule, and one memory saying what release they were checked against.
 pub fn conventions(rules: &[Rule]) -> Vec<Convention> {
-    let key = format!("{KEY_PREFIX}verified]");
+    let key = antumbra_core::keyed::key(KEY_PREFIX, "verified");
     let checked = Convention {
         content: format!(
             "{key} The claude-code rules in this compartment were checked against Claude Code \

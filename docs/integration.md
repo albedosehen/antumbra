@@ -187,6 +187,8 @@ It drafts `Source control` from the remotes of your working trees, proposing an 
 
 `/skill-doctor`, which finds the skills nobody uses, goes as well. `antumbra claude skills` reports the same from counters that two hooks keep ([hooks](../scripts/hooks/README.md)): one for a skill the agent calls and one for a skill you type, since neither hook sees the other's.
 
+The operator console shows both on its Sovereign page (`5`, or `antumbra-tui --page sovereign`): the rules, by how many workspaces hold each current or retired, and skill use across workspaces, stalest first. It is read-only and queries nothing new.
+
 Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again.
 
 ## Who can recall a document

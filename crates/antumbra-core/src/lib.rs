@@ -17,6 +17,7 @@ pub mod evaluation;
 pub mod expert;
 pub mod generational;
 pub mod ids;
+pub mod keyed;
 pub mod memory;
 pub mod orchestration;
 pub mod penumbra;

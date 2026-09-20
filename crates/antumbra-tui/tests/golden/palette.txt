@@ -5,6 +5,7 @@
 │  page · memory networks                              │
 │  page · generational loop                            │
 │  page · evaluations                                  │
+│  page · sovereign mode                               │
 │  focus umbra · experts                               │
 │  focus penumbra · shadows                            │
 │  focus antumbra · boundaries                         │
