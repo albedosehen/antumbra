@@ -93,6 +93,19 @@ If `AGENTS.md` was not loaded, the block tells the agent to read it before anyth
 
 `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own, for recall. It writes through this surface (`ANTUMBRA_URL`, `ANTUMBRA_TOKEN`), marks them volatile so they never train an expert, and is safe to run again.
 
+## Which skills are used
+
+`/skill-doctor` goes with the flags too. Two hooks count instead, because a skill is used two ways and each hook sees one: the agent calls the `Skill` tool (`PostToolUse`), or you type `/name`, which never touches the tool (`UserPromptExpansion`). Both run the same command, which reads the hook's input itself, so there is no script and nothing differs between shells. As a hook it never fails and never speaks, and `async` keeps a slow surface from delaying a skill:
+
+```json
+"PostToolUse": [{ "matcher": "Skill", "hooks": [
+  { "type": "command", "command": "antumbra claude skill-used", "async": true }]}],
+"UserPromptExpansion": [{ "hooks": [
+  { "type": "command", "command": "antumbra claude skill-used", "async": true }]}]
+```
+
+Each skill gets one volatile memory in your `claude-code` compartment, reinforced on every use. `antumbra claude skills` lists the skills installed for you and the project with their counts, the never-used first, and calls out one not used in `--days` (30).
+
 ## The 10,000-character limit
 
 Claude Code caps a hook's context at 10,000 characters. Past the cap the agent is handed a file path and a 2,000-character preview it is never asked to open, so an oversized bootstrap is a truncated one that says nothing about it. The bootstrap stays under 9,500: the session block and the git line go first, memories follow best first while they fit, and the rest are counted in a closing line so the agent knows to `recall_memories` for them.

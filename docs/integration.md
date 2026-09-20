@@ -176,6 +176,8 @@ antumbra claude auto-mode-env --repos ~/repos     # prints a draft; writes nothi
 
 It drafts `Source control` from the remotes of your working trees, proposing an owner only when you push there over ssh and it is plainly yours, and listing every other owner with the reason it was left out. With a surface to ask (`ANTUMBRA_URL`, `ANTUMBRA_TOKEN`) it also offers memories as candidates for the slots only prose can fill, such as which host is production and which is a test node. It reads no transcript. The block goes in your own `~/.claude/settings.json`; the classifier never reads `autoMode` from a project's settings.
 
+`/skill-doctor`, which finds the skills nobody uses, goes as well. `antumbra claude skills` reports the same from counters that two hooks keep ([hooks](../scripts/hooks/README.md)): one for a skill the agent calls and one for a skill you type, since neither hook sees the other's.
+
 Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again.
 
 ## Who can recall a document

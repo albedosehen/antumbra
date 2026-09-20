@@ -157,7 +157,7 @@ fn existing_memories(call: Call<'_>) -> anyhow::Result<Vec<Existing>> {
         .collect())
 }
 
-fn compartment_id(call: Call<'_>, create: bool) -> anyhow::Result<Option<String>> {
+pub(super) fn compartment_id(call: Call<'_>, create: bool) -> anyhow::Result<Option<String>> {
     let listed = call("list_compartments", json!({}))?;
     let found = listed
         .get("compartments")

@@ -97,6 +97,10 @@ pub(super) struct MemoryView {
     /// re-anchored the memory since.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) orphaned_at: Option<String>,
+    /// When the memory was last written: stored, reinforced, or penalized. With
+    /// `reinforcement`, this is what lets a memory serve as a counter that also
+    /// says when it last counted (ADR-0021, skill usage).
+    pub(super) updated_at: String,
 }
 
 /// A memory's git anchor as returned to a caller.
@@ -134,6 +138,7 @@ impl From<&Memory> for MemoryView {
                 .map(ProvenanceView::from),
             scope: None,
             orphaned_at: orphan_of(&m.evidence).map(|o| o.at.to_rfc3339()),
+            updated_at: m.updated_at.to_rfc3339(),
         }
     }
 }
