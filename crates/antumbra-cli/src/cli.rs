@@ -72,8 +72,29 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// What `antumbra claude` can do.
+#[derive(Subcommand)]
+pub enum ClaudeAction {
+    /// Say whether this Claude Code session is in sovereign mode (its telemetry
+    /// is off, which also turns off its feature flags), list what that costs,
+    /// and check the settings that bring some of it back. Exits non-zero when a
+    /// required setting is missing. Reads settings; never writes them.
+    Doctor {
+        /// The project to judge (its settings files, and whether its AGENTS.md
+        /// is being read). Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+    },
+}
+
 #[derive(Subcommand)]
 pub enum Command {
+    /// Claude Code with its telemetry off (ADR-0021): what that silently costs,
+    /// and what is done about it.
+    Claude {
+        #[command(subcommand)]
+        action: ClaudeAction,
+    },
     /// Apply the schema (idempotent).
     Migrate,
     /// Print the generated schema DDL (surql-rs builder output).

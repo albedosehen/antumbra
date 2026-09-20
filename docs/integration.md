@@ -138,6 +138,19 @@ Offline is the default and the privacy floor: nothing leaves the building. The h
 
 ---
 
+## Claude Code with its telemetry off
+
+Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. [ADR-0021](adr/0021-sovereign-mode.md) calls the state sovereign mode and treats it as the normal case.
+
+```sh
+antumbra claude doctor            # judge the current project
+antumbra claude doctor --dir ../other-repo
+```
+
+It says whether the session is in sovereign mode and which variable, in which file, put it there; lists what that costs; checks the settings that bring some of it back; and names a project's `AGENTS.md` when it is not being read. It exits non-zero when a required setting is missing, which on Windows means the PowerShell tool (the host's dominant shell decides). It reads the agent's settings and never writes them: the file grants the agent its permissions, so the doctor prints the line to add and leaves the edit to you.
+
+It needs no running server and no store, so it works when nothing else does, including when a bad MCP tool schema is failing every request inside the agent. The rules are verified against a named Claude Code release, and the report says so when the installed one differs.
+
 ## Who can recall a document
 
 A document is kept the way a memory is: in a compartment, or in the workspace's shared pool. `ingest_document` takes a `compartment` (and `antumbra ingest` a `--compartment`); then only the compartment's owner and the people it is shared with can recall the document, enforced by the engine on every read, and a recalled chunk says which compartment it came from. Leave it out and the document goes to the shared pool, which every member of the workspace can recall. That is the right place for reference material (it is where the GitHub integration puts a repository's documents) and the wrong place for anything private.
