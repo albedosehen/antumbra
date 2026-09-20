@@ -89,32 +89,63 @@ if [ "$PENALIZE_ORPHANS" = "1" ]; then
   done
 fi
 
+# --- what is different about this session (fail-open) ---------------------------
+# With its telemetry off the agent has also lost its feature flags, and the
+# features gated on them, and nothing tells it (ADR-0021). `antumbra claude brief`
+# prints a few lines when that is so and nothing when it is not. No antumbra on
+# the path, or any failure: no lines.
+BIN="${ANTUMBRA_BIN:-antumbra}"
+brief=""
+if command -v "$BIN" >/dev/null 2>&1; then
+  brief=$("$BIN" claude brief 2>/dev/null || true)
+fi
+
 # --- render ---------------------------------------------------------------------
 # The live /mcp/call answers with the tool's value at the TOP level
 # ({memories: [...]}); the .result envelope is tolerated for older shims.
-mem_text=$(printf '%s' "$resp" | jq -r --argjson st "$statuses" '
-  (.memories // .result.memories // []) as $m
-  | if ($m | length) > 0 then
-      [ $m[]
-        | ( [ ($st[.id] // ""), (.scope // "") ] | map(select(. != ""))
-            | if length > 0 then "[" + join(", ") + "] " else "" end )
-          + .content
-          + ( if .provenance
-              then "\n  (learned at " + .provenance.repo + "@" + .provenance.commit
-                   + (if .provenance.branch then "#" + .provenance.branch else "" end) + ")"
-              else "" end )
-      ] | join("\n\n---\n\n")
-    else "" end' 2>/dev/null || echo '')
+entries=$(printf '%s' "$resp" | jq -c --argjson st "$statuses" '
+  [ (.memories // .result.memories // [])[]
+    | ( [ ($st[.id] // ""), (.scope // "") ] | map(select(. != ""))
+        | if length > 0 then "[" + join(", ") + "] " else "" end )
+      + .content
+      + ( if .provenance
+          then "\n  (learned at " + .provenance.repo + "@" + .provenance.commit
+               + (if .provenance.branch then "#" + .provenance.branch else "" end) + ")"
+          else "" end )
+  ]' 2>/dev/null) || entries='[]'
+[ -n "$entries" ] || entries='[]'
 
 git_line=""
 if [ -n "$commit" ]; then
   git_line="Git context: repo=${repo:-?} branch=${branch:-(detached)} commit=${commit}. When storing a memory about this code, pass provenance {repo: \"${repo}\", commit: \"${commit}\", branch: \"${branch}\"} to store_memory (add path for a single file) so a later session can tell whether it still applies. Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin, or GitHub reported it deleted -- verify before relying on it, and penalize_memory if it is wrong."
 fi
 
-context=$(jq -nc --arg mem "$mem_text" --arg host "$HOST_ID" --arg git "$git_line" '
-  "# Antumbra session bootstrap (host=" + $host + ")\n\n"
-  + (if $git != "" then $git + "\n\n" else "" end)
-  + ($mem | if . == "" then "[Antumbra bootstrap empty / unreachable -- starting cold.]" else . end)
+# The agent caps a hook's context at 10,000 characters. Past the cap it is handed
+# a file path and a 2,000-character preview it is never asked to open, so an
+# oversized bootstrap is a truncated one that says nothing about it. What must
+# survive goes first; memories follow, best first, while they fit, and the rest
+# are counted so the agent knows to recall them.
+LIMIT=9500
+context=$(jq -nc --argjson entries "$entries" --arg host "$HOST_ID" --arg git "$git_line" \
+  --arg brief "$brief" --argjson limit "$LIMIT" '
+  ( "# Antumbra session bootstrap (host=" + $host + ")\n\n"
+    + (if $brief != "" then $brief + "\n\n" else "" end)
+    + (if $git != "" then $git + "\n\n" else "" end) ) as $head
+  | "\n\n---\n\n" as $sep
+  | ($limit - 160) as $room
+  | ( reduce $entries[] as $e ({kept: [], used: ($head | length), omitted: 0};
+        (($e | length) + ($sep | length)) as $cost
+        | if .used + $cost <= $room
+          then .kept += [$e] | .used += $cost
+          else .omitted += 1 end) ) as $fit
+  | $head
+    + ( if ($entries | length) == 0
+        then "[Antumbra bootstrap empty / unreachable -- starting cold.]"
+        else ($fit.kept | join($sep)) end )
+    + ( if $fit.omitted > 0
+        then $sep + "[" + ($fit.omitted | tostring)
+             + " more recalled but left out to stay under the 10,000-character limit on hook context; use recall_memories for them.]"
+        else "" end )
 ' 2>/dev/null) || context='"[Antumbra hook serialization error]"'
 
 jq -nc --argjson ctx "$context" '{hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:$ctx}}'

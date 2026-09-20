@@ -40,6 +40,9 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "ti
 anyhow.workspace = true
 chrono.workspace = true
 serde_json.workspace = true
+# `antumbra claude remember` writes through the MCP surface's REST shim, as the
+# hooks do: a blocking `ureq` POST run off the async runtime, as elsewhere.
+ureq = { version = "3", features = ["json"] }
 
 [features]
 default = []

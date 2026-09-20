@@ -94,6 +94,10 @@ jobs:
         run: |
           ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
           echo "$ctx" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' > /dev/null
+      - name: session-start stays under the agent's limit and says what is different first (.sh)
+        run: bash scripts/hooks/tests/session-start.sh
+      - name: session-start stays under the agent's limit and says what is different first (.ps1)
+        run: pwsh -NoProfile -File scripts/hooks/tests/session-start.ps1
 
   audit:
     name: cargo audit (advisories)

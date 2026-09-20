@@ -201,47 +201,9 @@ async fn run() -> anyhow::Result<()> {
         cli.copal_keys.as_deref(),
     )?);
     match cli.command {
-        Command::Claude {
-            action: cli::ClaudeAction::Doctor { dir },
-        } => {
-            let project = match dir {
-                Some(dir) => dir,
-                None => std::env::current_dir()?,
-            };
-            let home = std::env::var_os("USERPROFILE")
-                .or_else(|| std::env::var_os("HOME"))
-                .map(std::path::PathBuf::from);
-            let report = claude::examine(&claude::Inputs::gather(home.as_deref(), &project));
-            println!("{}", claude::render(&report));
-            let missing = report.required_missing();
-            if missing > 0 {
-                anyhow::bail!("{missing} required setting(s) missing");
-            }
-        }
-        Command::Claude {
-            action:
-                cli::ClaudeAction::Bridge {
-                    dir,
-                    dry_run,
-                    remove,
-                },
-        } => {
-            let project = match dir {
-                Some(dir) => dir,
-                None => std::env::current_dir()?,
-            };
-            let root = claude::repository_root(&project);
-            let said = if remove {
-                claude::bridge::remove_bridges(&root, &project, dry_run)?
-            } else {
-                claude::bridge::write_bridges(&root, &project, dry_run)?
-            };
-            if dry_run {
-                println!("dry run: nothing written");
-            }
-            for line in said {
-                println!("{line}");
-            }
+        Command::Claude { action } => {
+            // Blocking work (files, git, an HTTP surface): keep it off the runtime.
+            tokio::task::spawn_blocking(move || claude::run::run(action)).await??;
         }
         Command::Migrate => {
             connect(&cli.url).await?;
