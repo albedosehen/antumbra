@@ -1,14 +1,14 @@
 //! `antumbra claude ...`: the edge, where the machine is read and the surface is
 //! called. Everything it decides is decided in the modules beside it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
 use super::{
-    bridge, brief, conventions, examine, mcp_lint, mcp_stdio, render, repository_root, rules,
-    Inputs,
+    auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, render, repository_root,
+    rules, Inputs,
 };
 use crate::cli::ClaudeAction;
 
@@ -58,6 +58,45 @@ fn call_surface(
         (_, Some(said)) => anyhow::bail!("{tool}: {said}"),
         (false, None) => anyhow::bail!("{tool}: {url} answered {status}"),
     }
+}
+
+/// An HTTP agent for the surface that hands back a refusal's body, not just its
+/// status, so the surface's own words reach the user.
+fn surface_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(SURFACE_TIMEOUT))
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+/// A working tree's `origin` URL, when it has one.
+fn origin_of(dir: &Path) -> Option<String> {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["remote", "get-url", "origin"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|url| !url.is_empty())
+}
+
+/// The project, and every repository directly under `repos`.
+fn working_trees(project: &Path, repos: Option<&Path>) -> Vec<auto_mode::Seen> {
+    let children = repos
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.join(".git").exists());
+    std::iter::once((project.to_path_buf(), true))
+        .chain(children.map(|path| (path, false)))
+        .filter_map(|(dir, is_project)| auto_mode::seen(&origin_of(&dir)?, is_project))
+        .collect()
 }
 
 /// The `tools/list` answer to lint: a saved one, or a server asked just now.
@@ -120,11 +159,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             token,
             dry_run,
         } => {
-            let agent: ureq::Agent = ureq::Agent::config_builder()
-                .timeout_global(Some(SURFACE_TIMEOUT))
-                .http_status_as_error(false)
-                .build()
-                .into();
+            let agent = surface_agent();
             let call = |tool: &str, arguments: Value| {
                 call_surface(&agent, &surface, token.as_deref(), tool, arguments)
             };
@@ -134,6 +169,32 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             for line in conventions::remember(&call, &rules(), dry_run)? {
                 println!("{line}");
             }
+        }
+        ClaudeAction::AutoModeEnv {
+            dir,
+            repos,
+            surface,
+            token,
+            each,
+        } => {
+            let trees = working_trees(&project(dir)?, repos.as_deref());
+            let agent = surface_agent();
+            let call = |tool: &str, arguments: Value| {
+                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+            };
+            // Memory is a second opinion. Without it the remotes still draft.
+            let asked = auto_mode::remembered_repositories(&call).and_then(|remembered| {
+                Ok((
+                    remembered,
+                    auto_mode::candidates(&call, &auto_mode::slots(), each)?,
+                ))
+            });
+            let (remembered, memory) = match asked {
+                Ok((remembered, found)) => (remembered, auto_mode::Memory::Asked(found)),
+                Err(why) => (Vec::new(), auto_mode::Memory::NotAsked(why.to_string())),
+            };
+            let owners = auto_mode::owners(&trees, &remembered);
+            println!("{}", auto_mode::render(&owners, &memory));
         }
         ClaudeAction::McpLint {
             server,

@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub mod auto_mode;
 pub mod bridge;
 pub mod brief;
 pub mod conventions;
@@ -226,8 +227,8 @@ pub fn rules() -> Vec<Rule> {
             id: "auto-mode-setup",
             lost: "/auto-mode-setup cannot draft autoMode.environment entries",
             class: Restored,
-            response: "drafted from Antumbra's memories of your infrastructure (queued)",
-            unavailable: Some("/auto-mode-setup"),
+            response: "`antumbra claude auto-mode-env` drafts them from your working trees' remotes and Antumbra's memories, reads no transcript, and prints the block without writing it",
+            unavailable: Some("/auto-mode-setup (`antumbra claude auto-mode-env` drafts the same entries, from outside the agent)"),
         },
         Rule {
             id: "skill-doctor",
