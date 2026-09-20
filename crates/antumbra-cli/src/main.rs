@@ -218,6 +218,31 @@ async fn run() -> anyhow::Result<()> {
                 anyhow::bail!("{missing} required setting(s) missing");
             }
         }
+        Command::Claude {
+            action:
+                cli::ClaudeAction::Bridge {
+                    dir,
+                    dry_run,
+                    remove,
+                },
+        } => {
+            let project = match dir {
+                Some(dir) => dir,
+                None => std::env::current_dir()?,
+            };
+            let root = claude::repository_root(&project);
+            let said = if remove {
+                claude::bridge::remove_bridges(&root, &project, dry_run)?
+            } else {
+                claude::bridge::write_bridges(&root, &project, dry_run)?
+            };
+            if dry_run {
+                println!("dry run: nothing written");
+            }
+            for line in said {
+                println!("{line}");
+            }
+        }
         Command::Migrate => {
             connect(&cli.url).await?;
             println!("schema applied at {}", cli.url);

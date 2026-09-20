@@ -14,6 +14,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub mod bridge;
+
 /// The Claude Code release the rules below were verified against, the day, and
 /// the page that says so. The gated list changes between releases, so a rule is
 /// only as good as its last check; the report says when the installed version
@@ -77,8 +79,8 @@ pub struct Inputs {
     /// `permissions.defaultMode` from the USER's settings. The agent ignores
     /// `auto` there anywhere else.
     pub user_default_mode: Option<String>,
-    /// An `AGENTS.md` the agent would have read natively and now will not.
-    pub unread_instructions: Option<PathBuf>,
+    /// Whether an `AGENTS.md` here is unread, bridged, or not in question.
+    pub instructions: bridge::Instructions,
     /// The installed agent's version, when it could be asked.
     pub installed_version: Option<String>,
 }
@@ -173,7 +175,7 @@ pub fn rules() -> Vec<Rule> {
             id: "agents-md",
             lost: "AGENTS.md is no longer read as project instructions",
             class: Restored,
-            response: "supplied verbatim by the session-start hook (queued); until then, a CLAUDE.md containing `@AGENTS.md` is the vendor's documented bridge",
+            response: "`antumbra claude bridge` writes an untracked CLAUDE.local.md that imports it, so it is read natively again",
         },
         Rule {
             id: "mcp-schemas",
@@ -333,12 +335,17 @@ fn standing_of(rule: &Rule, inputs: &Inputs) -> Standing {
                 }
             }
         }
-        ("agents-md", _) => match &inputs.unread_instructions {
-            Some(path) => Standing::Attention(format!(
-                "{} is not being read: there is no CLAUDE.md at or above it",
+        ("agents-md", _) => match &inputs.instructions {
+            bridge::Instructions::Unread(path) => Standing::Attention(format!(
+                "{} is not being read. Run `antumbra claude bridge` here: it writes an untracked CLAUDE.local.md that imports it",
                 path.display()
             )),
-            None => Standing::Fine("no AGENTS.md here depends on it".into()),
+            bridge::Instructions::Bridged(path) => {
+                Standing::Fine(format!("imported natively by {}", path.display()))
+            }
+            bridge::Instructions::NotApplicable => {
+                Standing::Fine("no AGENTS.md here depends on it".into())
+            }
         },
         (_, Class::Restored) => Standing::Attention(rule.response.to_string()),
         (_, Class::AcceptedLoss) => Standing::Lost,
@@ -372,27 +379,6 @@ pub fn examine(inputs: &Inputs) -> Report {
         triggers,
         findings,
         unverified_version,
-    }
-}
-
-/// The files that count as a project's own instructions. One of them at or above
-/// the working directory means the agent was never going to read `AGENTS.md`.
-const CLAUDE_FILES: [&str; 3] = ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"];
-const AGENTS_FILES: [&str; 2] = ["AGENTS.md", ".claude/AGENTS.md"];
-
-/// The `AGENTS.md` the agent would have read natively for `start` and now will
-/// not: the nearest one at or above it, provided no `CLAUDE.md` of any kind sits
-/// at or above it either. `exists` is the only contact with the file system.
-pub fn unread_instructions(start: &Path, exists: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
-    let has = |names: &[&str]| {
-        start
-            .ancestors()
-            .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
-            .find(|candidate| exists(candidate))
-    };
-    match has(&CLAUDE_FILES) {
-        Some(_) => None,
-        None => has(&AGENTS_FILES),
     }
 }
 
@@ -476,10 +462,27 @@ impl Inputs {
             os: Os::current(),
             variables: merge(sources),
             user_default_mode,
-            unread_instructions: unread_instructions(project, &|path| path.is_file()),
+            instructions: bridge::standing(&repository_root(project), project, &|path| {
+                std::fs::read_to_string(path).ok()
+            }),
             installed_version: installed_version(),
         }
     }
+}
+
+/// The top of the repository `project` sits in, or `project` itself outside one.
+/// Nothing above it is ever read for instructions or written to.
+pub fn repository_root(project: &Path) -> PathBuf {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(project)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
+        .filter(|root| !root.as_os_str().is_empty())
+        .unwrap_or_else(|| project.to_path_buf())
 }
 
 /// Ask the installed agent for its version. Best effort: no agent on the path,
@@ -585,7 +588,7 @@ mod tests {
             os,
             variables: vars(pairs),
             user_default_mode: None,
-            unread_instructions: None,
+            instructions: bridge::Instructions::NotApplicable,
             installed_version: Some(VERIFIED_AGAINST.to_string()),
         }
     }
@@ -713,49 +716,10 @@ mod tests {
         }
     }
 
-    /// The vendor's default, case by case: `AGENTS.md` is read only when no
-    /// `CLAUDE.md` of any kind sits at or above the working directory.
-    #[test]
-    fn an_agents_md_is_unread_only_when_no_claude_md_sits_at_or_above_it() {
-        let start = Path::new("/work/repo/crates/core");
-        for (present, expected) in [
-            (vec!["/work/repo/AGENTS.md"], Some("/work/repo/AGENTS.md")),
-            (
-                vec!["/work/repo/AGENTS.md", "/work/repo/crates/core/AGENTS.md"],
-                Some("/work/repo/crates/core/AGENTS.md"),
-            ),
-            (
-                vec!["/work/repo/.claude/AGENTS.md"],
-                Some("/work/repo/.claude/AGENTS.md"),
-            ),
-            (vec!["/work/repo/AGENTS.md", "/work/repo/CLAUDE.md"], None),
-            (vec!["/work/repo/AGENTS.md", "/work/CLAUDE.local.md"], None),
-            (
-                vec!["/work/repo/AGENTS.md", "/work/repo/.claude/CLAUDE.md"],
-                None,
-            ),
-            // Names the agent never reads do not count.
-            (
-                vec!["/work/repo/AGENTS.local.md", "/work/repo/.agents/AGENTS.md"],
-                None,
-            ),
-            // A sibling's file is not above the working directory.
-            (vec!["/work/repo/crates/other/AGENTS.md"], None),
-            (vec![], None),
-        ] {
-            let exists = |path: &Path| present.iter().any(|p| Path::new(p) == path);
-            assert_eq!(
-                unread_instructions(start, &exists),
-                expected.map(PathBuf::from),
-                "{present:?}"
-            );
-        }
-    }
-
     #[test]
     fn an_unread_agents_md_is_called_out_by_path() -> Result<(), String> {
         let report = examine(&Inputs {
-            unread_instructions: Some(PathBuf::from("/work/repo/AGENTS.md")),
+            instructions: bridge::Instructions::Unread(PathBuf::from("/work/repo/AGENTS.md")),
             ..inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")])
         });
         let Some(Standing::Attention(what)) = standing(&report, "agents-md") else {

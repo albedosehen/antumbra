@@ -149,7 +149,15 @@ antumbra claude doctor --dir ../other-repo
 
 It says whether the session is in sovereign mode and which variable, in which file, put it there; lists what that costs; checks the settings that bring some of it back; and names a project's `AGENTS.md` when it is not being read. It exits non-zero when a required setting is missing, which on Windows means the PowerShell tool (the host's dominant shell decides). It reads the agent's settings and never writes them: the file grants the agent its permissions, so the doctor prints the line to add and leaves the edit to you.
 
-It needs no running server and no store, so it works when nothing else does, including when a bad MCP tool schema is failing every request inside the agent. The rules are verified against a named Claude Code release, and the report says so when the installed one differs.
+When it names an `AGENTS.md` that is not being read, this fixes it:
+
+```sh
+antumbra claude bridge            # --dry-run to see what it would do, --remove to take it back out
+```
+
+Beside each `AGENTS.md` the agent would have read, it writes a `CLAUDE.local.md` that imports it, and lists that file in the clone's own `.git/info/exclude`. The agent then reads the file natively again: at launch, in subdirectories, after compaction, and in subagents, with no size limit short of its own. Nothing the repository tracks changes, so it is safe in a checkout you do not own. It leaves alone any directory that already has instructions of its own, because the agent was never going to read `AGENTS.md` there, and `--remove` deletes only a file that is still a bridge and nothing else. It is not done through a hook on purpose: a hook's context is capped at 10,000 characters and cut to a preview past that, which a real instruction file exceeds.
+
+Neither command needs a running server or a store, so both work when nothing else does, including when a bad MCP tool schema is failing every request inside the agent. The rules are verified against a named Claude Code release, and the report says so when the installed one differs.
 
 ## Who can recall a document
 

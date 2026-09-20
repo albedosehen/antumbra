@@ -1,6 +1,12 @@
 # ADR-0021: Sovereign mode, or what a coding agent loses when you stop it phoning home
 
-**Status:** Accepted (in progress: detection and the doctor are in; instruction injection, the conventions compartment and the MCP schema lint are queued) · **Date:** 2026-09-19 · **Related:** 0013 (identity), 0015 (MCP runtime surface), 0017 (the memory fabric), 0018 (provenance over extraction), 0020 (sovereign artifacts)
+**Status:** Accepted (in progress: detection, the doctor and the `AGENTS.md` bridge are in; the conventions compartment and the MCP schema lint are queued) · **Date:** 2026-09-19 · **Related:** 0013 (identity), 0015 (MCP runtime surface), 0017 (the memory fabric), 0018 (provenance over extraction), 0020 (sovereign artifacts)
+
+> **`AGENTS.md` is bridged, not injected (2026-09-19).** This record first chose to supply the file through the session-start hook. That was wrong, and the vendor's own page says why: a hook's context is capped at 10,000 characters, and past the cap the agent receives a file path and a 2,000-character preview that it is never asked to open. The first real instruction file measured was 11,468 characters. It would have been cut to a fifth, silently. Hook context is also a system reminder and not project instructions, it is not restored after compaction, and it does not reach subagents, which is why the first plan needed three hooks.
+>
+> A `CLAUDE.local.md` beside the file, containing `@AGENTS.md`, has none of those problems: it is read natively with no cap short of the agent's own 4 MiB, at and above the working directory and in subdirectories as files there are read, it is re-read from disk after compaction, and subagents load it like any project instruction. The objection recorded below against a bridge file was that it changes repositories the user may not own. `CLAUDE.local.md` is the file the vendor designates for instructions that are _not_ committed, and one line in `.git/info/exclude`, which is itself untracked, keeps it out of `git status`. Nothing a repository tracks changes. `antumbra claude bridge` writes them, never on its own initiative, and `--remove` deletes only a file that is still a bridge and nothing else.
+>
+> Measured, not argued: a throwaway repository with a 23,403-character `AGENTS.md` whose last line held a passphrase, asked for it in a single turn, headless, under `DISABLE_TELEMETRY=1`. Without the bridge the agent answered `NONE`, which is also the first direct evidence of the loss this record is about. With it, the passphrase.
 
 ## Context
 
@@ -17,7 +23,7 @@ Call the state **sovereign mode**. It is the state Antumbra's users are most lik
 ### 1. Principles
 
 1. **Detect, do not assume.** One pure function decides whether a session is in sovereign mode, from the environment, the agent's settings files and the provider. Every compensation is gated on it, so nothing is supplied twice when the flags are available.
-2. **Rules are supplied verbatim from an authoritative source, never recalled.** An instruction file is a rule. Embedding recall is lossy and ranked, so rule text goes into context byte for byte, with its digest. The authoritative source is the working tree for a repository's rules and the archive for rules that have no repository (0020). A chunk is never a source of rules.
+2. **Rules reach the agent verbatim from an authoritative source, never recalled.** An instruction file is a rule. Embedding recall is lossy and ranked, so a rule is never a chunk. A repository's rules are read natively from the working tree, through an import when the agent will not read the file itself; rules that have no repository come from the archive, with their digest (0020).
 3. **Anchored to a version.** The gated list changes between releases of the agent. Every rule names the version it was verified against, the page that says so and the date, and is re-verified when the installed version changes.
 4. **No phoning home to compensate.** Antumbra does not fetch the flags itself and does not proxy a vendor-hosted feature.
 5. **Name the losses.** What lives on the vendor's infrastructure is an accepted loss and is reported as one.
@@ -30,7 +36,7 @@ Three classes. **Restored**: Antumbra supplies it. **Setting**: a local setting 
 
 | Lost with the flags off | Class | What Antumbra does |
 | --- | --- | --- |
-| `AGENTS.md` read as project instructions | Restored | The session-start hook supplies it verbatim, a hook on file reads covers subdirectories, and a hook on subagent start covers subagents, which receive no session-start context. Until that ships, the doctor names any project whose `AGENTS.md` is not being read |
+| `AGENTS.md` read as project instructions | Restored | `antumbra claude bridge` writes an untracked `CLAUDE.local.md` beside each `AGENTS.md` the agent would have read, importing it, so it is read natively again: at launch, in subdirectories, after compaction, and by subagents. The doctor names any project whose `AGENTS.md` is not being read |
 | MCP tools with a schema the API rejects are excluded | Restored | An MCP schema lint, run outside the agent, names the offenders and prints the deny rule. A deny rule on a bare tool name removes the tool from the request entirely, so it is a complete fix. It runs outside the agent because a bad schema makes every request inside it fail |
 | `/auto-mode-setup` drafting trust entries | Restored | Drafted from Antumbra's own memories of the user's infrastructure, not from session transcripts |
 | `/skill-doctor` unused-skill report | Restored | A hook counts skill use; the TUI shows it |
@@ -62,7 +68,7 @@ The three levels of rule that have no repository map onto 0017's hierarchy: a de
 ### Order of work
 
 1. Detection, the matrix and the doctor (this record's first increment).
-2. Instruction injection: session start, file reads, subagent start; both hook pairs.
+2. The `AGENTS.md` bridge (in).
 3. The conventions compartment and the session-start block.
 4. The MCP schema lint, after establishing which schema constraints the API rejects.
 5. Trust entries drafted from memory; skill usage.
@@ -79,11 +85,12 @@ The three levels of rule that have no repository map onto 0017's hierarchy: a de
 
 - **Leave telemetry on and keep the features.** Not a choice Antumbra gets to make for its users, and not one most of them would make.
 - **Recall the rules instead of injecting them.** A rule that is sometimes ranked fourth is not a rule.
-- **Write a `CLAUDE.md` that imports `AGENTS.md` into every repository.** It is the vendor's documented bridge and it works, but it changes repositories the user may not own and leaves a file behind in each. It stays available as an explicit, per-repository command and is never automatic.
+- **Supply `AGENTS.md` through the session-start hook.** This record's first choice. A hook's context is capped at 10,000 characters and degrades to a preview past it, it carries less standing than project instructions, it is lost on compaction, and it never reaches subagents. See the note at the top.
+- **Write a tracked `CLAUDE.md` that imports `AGENTS.md`.** The vendor's documented bridge, and it works, but it changes what a repository tracks, in repositories the user may not own. The untracked `CLAUDE.local.md` does the same job without that cost.
 - **Have the doctor fix the settings itself.** The settings file grants the agent its permissions. A tool that rewrites it on its own initiative is a tool to distrust, however narrow the edit.
 
 ## Validation
 
 - **Detection.** A table test over every trigger, with the values that must and must not count for each (`DISABLE_TELEMETRY=0` counts; `DO_NOT_TRACK=0` does not), the provider switches, and the host-managed exemption. _Kill criterion:_ a documented trigger the detector misses, or a value it misreads, on a release the matrix claims to be verified against.
 - **The doctor.** On a Windows host in sovereign mode without the PowerShell variable it exits non-zero and says which line to add; with it, zero. In a project whose only instruction file is `AGENTS.md` it says the file is not being read. _Kill criterion:_ it reports a session as healthy in which the agent is demonstrably not reading the project's instructions.
-- **Injection (next increment).** Against the documented default, case by case: `AGENTS.md` only, both files, a local `CLAUDE.md` present, a subdirectory's file, an import, the excluded names, an oversized file. _Kill criterion:_ the agent follows natively loaded instructions measurably better than the same text supplied by the hook. Then injection is the wrong mechanism and the bridge file becomes the recommendation.
+- **The bridge.** Planned against the documented default, case by case: `AGENTS.md` only, one at and one above the working directory, the `.claude/` form, a `CLAUDE.md` at or above (left alone: the agent never read `AGENTS.md` there), the user's own `CLAUDE.local.md` (left alone), a subdirectory judged by itself, the names the agent never reads, nothing above the repository. A bridge is transparent to the planner, so a second run changes nothing, and removal never deletes a file the user has added to. End to end, the passphrase experiment in the note at the top. _Kill criterion:_ a bridged `AGENTS.md` that the agent does not act on, or a bridge that shows up in `git status` or changes a tracked file. (The earlier criterion for hook injection, that natively loaded instructions would be followed better than supplied ones, was met before anything was built: the cap decides it.)
