@@ -6,7 +6,10 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{bridge, brief, conventions, examine, render, repository_root, rules, Inputs};
+use super::{
+    bridge, brief, conventions, examine, mcp_lint, mcp_stdio, render, repository_root, rules,
+    Inputs,
+};
 use crate::cli::ClaudeAction;
 
 const SURFACE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -55,6 +58,24 @@ fn call_surface(
         (_, Some(said)) => anyhow::bail!("{tool}: {said}"),
         (false, None) => anyhow::bail!("{tool}: {url} answered {status}"),
     }
+}
+
+/// The `tools/list` answer to lint: a saved one, or a server asked just now.
+fn listed_tools(
+    from: Option<PathBuf>,
+    command: &[String],
+    patience: Duration,
+) -> anyhow::Result<Vec<mcp_lint::Tool>> {
+    let answer = match from {
+        Some(path) if path.as_os_str() == "-" => serde_json::from_reader(std::io::stdin().lock())?,
+        Some(path) => {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
+            serde_json::from_str(&text)?
+        }
+        None => Value::Array(mcp_stdio::ask(command, patience)?),
+    };
+    mcp_lint::tools_in(&answer)
 }
 
 /// Run one `antumbra claude` action. Blocking: the caller keeps it off the
@@ -112,6 +133,22 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             }
             for line in conventions::remember(&call, &rules(), dry_run)? {
                 println!("{line}");
+            }
+        }
+        ClaudeAction::McpLint {
+            server,
+            from,
+            timeout_secs,
+            command,
+        } => {
+            let tools = listed_tools(from, &command, Duration::from_secs(timeout_secs))?;
+            let findings = mcp_lint::lint(&tools);
+            println!("{}", mcp_lint::render(&server, tools.len(), &findings));
+            let failures = mcp_lint::failures(&findings);
+            if failures > 0 {
+                anyhow::bail!(
+                    "{failures} tool(s) would break requests or cost the server its tools"
+                );
             }
         }
     }

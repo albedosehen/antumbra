@@ -115,3 +115,133 @@ fn remember_says_why_it_failed_and_never_shows_the_token() -> anyhow::Result<()>
     );
     Ok(())
 }
+
+fn fixture(name: &str) -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(name)
+        .display()
+        .to_string()
+}
+
+/// The fake server's command line: the PowerShell sibling on Windows, where
+/// `bash` may be anything or nothing, and the POSIX one everywhere else.
+fn fake_server() -> Vec<String> {
+    if cfg!(windows) {
+        vec![
+            "pwsh".to_string(),
+            "-NoProfile".to_string(),
+            "-File".to_string(),
+            fixture("fake_mcp_server.ps1"),
+        ]
+    } else {
+        vec!["bash".to_string(), fixture("fake_mcp_server.sh")]
+    }
+}
+
+fn assert_the_fixture_report(said: &str) {
+    assert!(said.contains("6 tool(s) checked"), "{said}");
+    assert!(said.contains("[FAIL] rootless"), "{said}");
+    assert!(!said.contains("mcp__my_server__rootless"), "{said}");
+    assert!(said.contains("[FAIL] breaks_names"), "{said}");
+    assert!(said.contains("[FAIL] breaks_schema"), "{said}");
+    assert!(said.contains("[note] dropped"), "{said}");
+    assert!(said.contains("[note] dated"), "{said}");
+    assert!(!said.contains("] sound"), "{said}");
+    assert!(
+        said.contains("\"mcp__my_server__breaks_names\", \"mcp__my_server__breaks_schema\""),
+        "{said}"
+    );
+    assert!(!said.contains("mcp__my_server__dropped"), "{said}");
+}
+
+#[test]
+fn mcp_lint_asks_a_live_server_and_fails_on_what_breaks_requests() -> anyhow::Result<()> {
+    let scratch = Scratch::new("lint-live")?;
+    let server = fake_server();
+    let mut args = vec!["claude", "mcp-lint", "--server", "my server", "--"];
+    args.extend(server.iter().map(String::as_str));
+    let out = antumbra(&scratch.home(), &[], &args)?;
+    assert!(!out.status.success(), "three tools fail");
+    assert_the_fixture_report(&text(&out.stdout));
+    assert!(
+        text(&out.stderr).contains("3 tool(s)"),
+        "{}",
+        text(&out.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn mcp_lint_reads_a_saved_answer_and_passes_a_clean_one() -> anyhow::Result<()> {
+    let scratch = Scratch::new("lint-file")?;
+    let saved = fixture("fake_tools.json");
+    let out = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "mcp-lint",
+            "--server",
+            "my server",
+            "--from",
+            &saved,
+        ],
+    )?;
+    assert!(!out.status.success());
+    assert_the_fixture_report(&text(&out.stdout));
+
+    let clean = scratch.project().join("clean.json");
+    std::fs::write(
+        &clean,
+        r#"{"result":{"tools":[{"name":"ok","inputSchema":{"type":"object"}}]}}"#,
+    )?;
+    let Some(clean) = clean.to_str() else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+    let out = antumbra(
+        &scratch.home(),
+        &[],
+        &["claude", "mcp-lint", "--server", "s", "--from", clean],
+    )?;
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("nothing the API would refuse"));
+    Ok(())
+}
+
+#[test]
+fn mcp_lint_gives_up_on_a_server_that_never_answers() -> anyhow::Result<()> {
+    let scratch = Scratch::new("lint-silent")?;
+    // A process that reads its input and says nothing, on either platform.
+    let silent: &[&str] = if cfg!(windows) {
+        &[
+            "pwsh",
+            "-NoProfile",
+            "-Command",
+            "[Console]::In.ReadToEnd() | Out-Null",
+        ]
+    } else {
+        &["cat"]
+    };
+    let mut args = vec![
+        "claude",
+        "mcp-lint",
+        "--server",
+        "s",
+        "--timeout-secs",
+        "2",
+        "--",
+    ];
+    args.extend(silent);
+    let started = std::time::Instant::now();
+    let out = antumbra(&scratch.home(), &[], &args)?;
+    assert!(!out.status.success());
+    assert!(
+        text(&out.stderr).contains("said nothing for 2 seconds"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    Ok(())
+}

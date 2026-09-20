@@ -43,6 +43,10 @@ serde_json.workspace = true
 # `antumbra claude remember` writes through the MCP surface's REST shim, as the
 # hooks do: a blocking `ureq` POST run off the async runtime, as elsewhere.
 ureq = { version = "3", features = ["json"] }
+# `antumbra claude mcp-lint` holds a tool's input schema to the draft 2020-12
+# meta-schema, as the agent does. No default features: the meta-schemas are
+# compiled in, and nothing is ever fetched over HTTP or read from a file.
+jsonschema = { version = "0.56.0", default-features = false }
 
 [features]
 default = []
