@@ -21,6 +21,7 @@ pub mod conventions;
 pub mod mcp_lint;
 pub mod mcp_stdio;
 pub mod run;
+pub mod skills;
 
 /// The Claude Code release the rules below were verified against, the day, and
 /// the page that says so. The gated list changes between releases, so a rule is
@@ -234,8 +235,8 @@ pub fn rules() -> Vec<Rule> {
             id: "skill-doctor",
             lost: "/skill-doctor cannot report unused skills",
             class: Restored,
-            response: "a hook counts skill use and the TUI shows it (queued)",
-            unavailable: Some("/skill-doctor"),
+            response: "`antumbra claude skill-used`, run by two hooks, counts each use as a reinforcement of one volatile memory per skill, and `antumbra claude skills` reports the ones never or no longer used",
+            unavailable: Some("/skill-doctor (`antumbra claude skills` reports the same, from outside the agent)"),
         },
         Rule {
             id: "remote-control",

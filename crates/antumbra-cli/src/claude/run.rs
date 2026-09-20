@@ -8,11 +8,14 @@ use serde_json::{json, Value};
 
 use super::{
     auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, render, repository_root,
-    rules, Inputs,
+    rules, skills, Inputs,
 };
 use crate::cli::ClaudeAction;
 
 const SURFACE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// A hook has seconds, not a minute, and is not worth waiting on.
+const HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn home() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE")
@@ -63,8 +66,12 @@ fn call_surface(
 /// An HTTP agent for the surface that hands back a refusal's body, not just its
 /// status, so the surface's own words reach the user.
 fn surface_agent() -> ureq::Agent {
+    surface_agent_within(SURFACE_TIMEOUT)
+}
+
+fn surface_agent_within(patience: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_global(Some(SURFACE_TIMEOUT))
+        .timeout_global(Some(patience))
         .http_status_as_error(false)
         .build()
         .into()
@@ -97,6 +104,26 @@ fn working_trees(project: &Path, repos: Option<&Path>) -> Vec<auto_mode::Seen> {
         .chain(children.map(|path| (path, false)))
         .filter_map(|(dir, is_project)| auto_mode::seen(&origin_of(&dir)?, is_project))
         .collect()
+}
+
+/// The skills installed for the user and for the project, by the name each
+/// declares (its directory's name when it declares none).
+fn installed_skills(home: Option<&Path>, project: &Path) -> Vec<String> {
+    let mut names: Vec<String> = home
+        .into_iter()
+        .chain(std::iter::once(project))
+        .map(|base| base.join(".claude").join("skills"))
+        .filter_map(|dir| std::fs::read_dir(dir).ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let text = std::fs::read_to_string(entry.path().join("SKILL.md")).ok()?;
+            skills::declared_name(&text).or_else(|| entry.file_name().into_string().ok())
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// The `tools/list` answer to lint: a saved one, or a server asked just now.
@@ -195,6 +222,59 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             };
             let owners = auto_mode::owners(&trees, &remembered);
             println!("{}", auto_mode::render(&owners, &memory));
+        }
+        ClaudeAction::SkillUsed {
+            name,
+            surface,
+            token,
+        } => {
+            let as_a_hook = name.is_none();
+            let agent = surface_agent_within(if as_a_hook {
+                HOOK_TIMEOUT
+            } else {
+                SURFACE_TIMEOUT
+            });
+            let call = |tool: &str, arguments: Value| {
+                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+            };
+            let counted = match name {
+                Some(name) => skills::record(&call, &name).map(|how| Some((name, how))),
+                // Input that names no skill is not an error: most hook events do not.
+                None => serde_json::from_reader::<_, Value>(std::io::stdin().lock())
+                    .map_err(anyhow::Error::from)
+                    .map(|input| skills::skill_in(&input))
+                    .and_then(|found| match found {
+                        Some(name) => skills::record(&call, &name).map(|how| Some((name, how))),
+                        None => Ok(None),
+                    }),
+            };
+            match (as_a_hook, counted) {
+                // Fail open, and silently: a counter must not stop a session.
+                (true, _) => {}
+                (false, Ok(Some((name, skills::Recorded::First)))) => {
+                    println!("{name}: first use counted");
+                }
+                (false, Ok(Some((name, skills::Recorded::Again)))) => {
+                    println!("{name}: counted");
+                }
+                (false, Ok(None)) => {}
+                (false, Err(why)) => return Err(why),
+            }
+        }
+        ClaudeAction::Skills {
+            dir,
+            days,
+            surface,
+            token,
+        } => {
+            let agent = surface_agent();
+            let call = |tool: &str, arguments: Value| {
+                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+            };
+            let used = skills::usage(&call)?;
+            let installed = installed_skills(home().as_deref(), &project(dir)?);
+            let cutoff = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+            println!("{}", skills::render(&installed, &used, Some(&cutoff)));
         }
         ClaudeAction::McpLint {
             server,

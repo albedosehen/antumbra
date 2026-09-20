@@ -95,6 +95,54 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
         .is_empty());
 }
 
+/// A memory's view says when it was last written, and reinforcing it moves that
+/// on. With `reinforcement`, that makes a memory a counter which also says when
+/// it last counted (ADR-0021, skill usage).
+#[tokio::test]
+async fn a_view_says_when_a_memory_was_last_written_and_reinforcing_moves_it() -> anyhow::Result<()>
+{
+    let s = server().await;
+    let said = |e: ErrorData| anyhow::anyhow!("{e:?}");
+    let stored = s
+        .store_memory(Parameters(StoreParams {
+            provenance: None,
+            content: "[skill-use:deploy] deploy".into(),
+            network: "world".into(),
+            confidence: Some(0.9),
+            evidence: None,
+            volatile: Some(true),
+            compartment: None,
+        }))
+        .await
+        .map_err(said)?;
+    let written = |listed: &Json<MemoriesOut>| {
+        listed
+            .0
+            .memories
+            .first()
+            .map(|m| m.updated_at.clone())
+            .ok_or_else(|| anyhow::anyhow!("the memory is not listed"))
+    };
+    let list = || s.list_memories(Parameters(ListParams { network: None }));
+
+    let before = written(&list().await.map_err(said)?)?;
+    let at = chrono::DateTime::parse_from_rfc3339(&before)?;
+    assert!(
+        (Utc::now() - at.with_timezone(&Utc)).num_seconds().abs() < 60,
+        "{before}"
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    s.reinforce_memory(Parameters(IdParams {
+        memory_id: stored.0.id.clone(),
+    }))
+    .await
+    .map_err(said)?;
+    let after = written(&list().await.map_err(said)?)?;
+    assert!(after > before, "{before} then {after}");
+    Ok(())
+}
+
 /// Seed several memories then recall: returns the recalled content list in
 /// order. Shared by the rerank tests so the control and reranked runs are
 /// over identical data.

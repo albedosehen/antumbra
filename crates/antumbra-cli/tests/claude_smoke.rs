@@ -310,3 +310,92 @@ fn auto_mode_env_drafts_from_remotes_and_writes_nothing() -> anyhow::Result<()> 
     assert!(left_behind.is_empty(), "the home directory was written to");
     Ok(())
 }
+
+/// Run the binary with `input` on its standard input, as a hook is run.
+fn antumbra_fed(home: &Path, input: &str, args: &[&str]) -> anyhow::Result<Output> {
+    use std::io::Write;
+    let mut command = Command::new(env!("CARGO_BIN_EXE_antumbra"));
+    for name in DECIDING {
+        command.env_remove(name);
+    }
+    let mut child = command
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env_remove("ANTUMBRA_TOKEN")
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let Some(mut stdin) = child.stdin.take() else {
+        anyhow::bail!("the child has no stdin");
+    };
+    stdin.write_all(input.as_bytes())?;
+    drop(stdin);
+    Ok(child.wait_with_output()?)
+}
+
+#[test]
+fn skill_used_as_a_hook_never_fails_and_never_speaks() -> anyhow::Result<()> {
+    let scratch = Scratch::new("skill-hook")?;
+    let dead = ["claude", "skill-used", "--surface", "http://127.0.0.1:1"];
+    let inputs = [
+        // A real use, and a surface that is not there.
+        r#"{"hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"elegant-design"}}"#,
+        r#"{"hook_event_name":"UserPromptExpansion","expansion_type":"slash_command","command_name":"elegant-design"}"#,
+        // Input that names no skill, input that is not JSON, and no input.
+        r#"{"hook_event_name":"PostToolUse","tool_name":"Bash"}"#,
+        "not json at all",
+        "",
+    ];
+    for input in inputs {
+        let out = antumbra_fed(&scratch.home(), input, &dead)?;
+        assert!(out.status.success(), "{input}: {}", text(&out.stderr));
+        assert_eq!(text(&out.stdout), "", "{input}");
+        assert_eq!(text(&out.stderr), "", "{input}");
+    }
+    Ok(())
+}
+
+#[test]
+fn skill_used_by_hand_says_why_it_failed() -> anyhow::Result<()> {
+    let scratch = Scratch::new("skill-hand")?;
+    let forged = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "skill-used",
+            "--name",
+            "two words",
+            "--surface",
+            "http://127.0.0.1:1",
+        ],
+    )?;
+    assert!(!forged.status.success());
+    assert!(
+        text(&forged.stderr).contains("not a skill's name"),
+        "{}",
+        text(&forged.stderr)
+    );
+
+    let unreachable = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "skill-used",
+            "--name",
+            "deploy",
+            "--surface",
+            "http://127.0.0.1:1",
+        ],
+    )?;
+    assert!(!unreachable.status.success());
+    assert!(
+        text(&unreachable.stderr).contains("could not reach"),
+        "{}",
+        text(&unreachable.stderr)
+    );
+    Ok(())
+}
