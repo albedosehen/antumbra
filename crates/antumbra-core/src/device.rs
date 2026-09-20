@@ -50,6 +50,43 @@ impl std::str::FromStr for DeviceRole {
     }
 }
 
+/// The video memory a node needs before genesis is dispatched to it. ADR-0006
+/// names the fleet: the 3090 Ti 24 GB is the v0 training target, the M4 Pro has
+/// 48 GB, and the 8 GB cards (a Pascal 1080, a Jetson Orin Nano) are called out
+/// there as weak at low-bit. 16 GiB is the line that admits the first two and
+/// the 16 GB variant of the 3080 mobile, and leaves the 8 GB machines as memory
+/// nodes, which is what they are.
+pub const GENESIS_MIN_VRAM_MIB: u64 = 16 * 1024;
+
+/// Whether a backend can train at all. This is the backend the *build* can
+/// drive, not merely the silicon present: a CUDA box running a binary compiled
+/// without the CUDA backend cannot train, and a node that says otherwise
+/// collects dispatches it will only escalate.
+pub fn backend_can_train(backend: &str) -> bool {
+    matches!(
+        backend.trim().to_ascii_lowercase().as_str(),
+        "cuda" | "metal" | "mlx"
+    )
+}
+
+/// The role a node's own hardware earns it (ADR-0017 A2: "derived from backend
+/// and VRAM").
+///
+/// Unknown VRAM does not demote a training backend. `None` means the node could
+/// not tell, and treating "did not know" as "has none" would make every machine
+/// whose memory we cannot read a memory node, which is the wrong default for
+/// the one field most likely to be unreadable. A *known* figure below the floor
+/// does demote: that is a measurement, not an absence.
+pub fn role_for(backend: &str, vram_mib: Option<u64>) -> DeviceRole {
+    if !backend_can_train(backend) {
+        return DeviceRole::Memory;
+    }
+    match vram_mib {
+        Some(mib) if mib < GENESIS_MIN_VRAM_MIB => DeviceRole::Memory,
+        _ => DeviceRole::Genesis,
+    }
+}
+
 /// One of a user's machines, as that machine describes itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceProfile {
@@ -93,6 +130,24 @@ impl DeviceProfile {
             vram_mib: None,
             role,
             updated_at: now,
+        }
+    }
+
+    /// A node describing itself from what it found, taking the role that
+    /// follows from it ([`role_for`]) rather than being told one.
+    pub fn detected(
+        tenant: TenantId,
+        user: UserId,
+        host: impl Into<String>,
+        backend: impl Into<String>,
+        vram_mib: Option<u64>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        let backend = backend.into();
+        let role = role_for(&backend, vram_mib);
+        Self {
+            vram_mib,
+            ..Self::new(tenant, user, host, backend, role, now)
         }
     }
 
@@ -159,6 +214,51 @@ mod tests {
         }
         assert!("trainer".parse::<DeviceRole>().is_err());
         Ok(())
+    }
+
+    #[test]
+    fn a_role_is_earned_by_a_backend_that_can_train_and_memory_enough_to_do_it() {
+        // ADR-0006's fleet, as each machine would report itself.
+        assert_eq!(role_for("cuda", Some(24_576)), DeviceRole::Genesis); // 3090 Ti
+        assert_eq!(role_for("metal", Some(49_152)), DeviceRole::Genesis); // M4 Pro
+        assert_eq!(role_for("cuda", Some(16_384)), DeviceRole::Genesis); // 3080 mobile 16
+        assert_eq!(role_for("cuda", Some(8_192)), DeviceRole::Memory); // 1080, Jetson
+                                                                       // A build that cannot drive the silicon cannot train on it, however
+                                                                       // much of it there is.
+        assert_eq!(role_for("cpu", Some(131_072)), DeviceRole::Memory);
+        assert_eq!(role_for("rocm", Some(24_576)), DeviceRole::Memory);
+        // Not knowing is not the same as having none.
+        assert_eq!(role_for("cuda", None), DeviceRole::Genesis);
+        assert_eq!(role_for("cpu", None), DeviceRole::Memory);
+        // What a node reports is what it found, however it spelled it.
+        assert_eq!(role_for("CUDA", None), DeviceRole::Genesis);
+    }
+
+    #[test]
+    fn a_detected_node_takes_the_role_its_hardware_earns_rather_than_one_it_is_told() {
+        let at = at();
+        let laptop = DeviceProfile::detected(
+            TenantId::new("ws:t"),
+            UserId::new("user:a"),
+            "laptop",
+            "cpu",
+            Some(8_192),
+            at,
+        );
+        assert_eq!(laptop.role, DeviceRole::Memory);
+        assert_eq!(laptop.vram_mib, Some(8_192));
+
+        let rig = DeviceProfile::detected(
+            TenantId::new("ws:t"),
+            UserId::new("user:a"),
+            "rig",
+            "cuda",
+            Some(24_576),
+            at,
+        );
+        assert!(rig.is_genesis());
+        // The same machine keeps the same row whichever constructor found it.
+        assert_eq!(rig.id, profile("ws:t", "user:a", "rig").id);
     }
 
     #[test]

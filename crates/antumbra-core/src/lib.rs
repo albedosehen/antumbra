@@ -37,7 +37,7 @@ pub use error::{AntumbraError, Result};
 // Re-export the load-bearing types at the crate root for ergonomic downstream use.
 pub use boundary::{governing_feature_from_pair, BoundaryFinding, FailureBoundary, Grain};
 pub use compartment::{Capability, Compartment, Grant, Origin};
-pub use device::{DeviceProfile, DeviceRole};
+pub use device::{backend_can_train, role_for, DeviceProfile, DeviceRole, GENESIS_MIN_VRAM_MIB};
 pub use document::{chunk_text, DocumentChunk};
 pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};
 pub use expert::{cosine_similarity, Expert};

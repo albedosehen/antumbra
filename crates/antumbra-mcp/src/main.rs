@@ -28,6 +28,7 @@ mod auth {
     pub use antumbra_auth::*;
 }
 mod embed;
+mod hardware;
 mod http;
 mod notify;
 mod profile;
@@ -310,6 +311,40 @@ pub(crate) async fn provision_identity(
     Ok(default_compartment)
 }
 
+/// Register this machine in the user's fabric (ADR-0017 A2): what backend the
+/// build can drive, how much video memory the device it would train on has, and
+/// the role that follows. Re-registering on every start is the point -- the
+/// answer changes when the binary is rebuilt with a GPU backend, or the card is
+/// pulled -- and the row is keyed per (tenant, user, host), so it updates.
+///
+/// A failed registration is reported and not fatal. The fabric is not why the
+/// operator started a memory server, and a node that cannot say where it is
+/// still recalls and stores perfectly well; it just will not be dispatched to.
+/// Reported rather than swallowed, because a fabric that quietly has no genesis
+/// node looks exactly like a fabric whose genesis node is a laptop.
+async fn register_node(store: &Store, tenant: &TenantId, user: &UserId, host: &str) {
+    let profile = antumbra_core::DeviceProfile::detected(
+        tenant.clone(),
+        user.clone(),
+        host,
+        hardware::backend(),
+        hardware::vram_mib(),
+        Utc::now(),
+    );
+    match antumbra_store::repo::device::upsert(store, &profile).await {
+        Ok(()) => eprintln!(
+            "antumbra-mcp: registered {host} as a {} node ({}{})",
+            profile.role.as_str(),
+            profile.backend,
+            match profile.vram_mib {
+                Some(mib) => format!(", {mib} MiB"),
+                None => String::new(),
+            }
+        ),
+        Err(e) => eprintln!("antumbra-mcp: could not register {host} in the fabric: {e}"),
+    }
+}
+
 /// Build a signed-in stdio session: one connection, provisioned and bound as
 /// `(tenant, user)` for the life of the process. (The HTTP transport instead
 /// shares one connection across identities (see [`http`]) because an embedded
@@ -326,6 +361,7 @@ async fn build_session(
     let store = connect(url, db_user, db_pass).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
+    register_node(&store, &tenant, &user, &host).await;
     // The `answer` tool serves through the routed expert. Build the engine from
     // the session's visible population (one connection; embedded is single-writer).
     let serve = build_serve(&store).await?;
@@ -592,6 +628,45 @@ mod tests {
             serving_base(Some("org/trained-on"), "org/base"),
             "org/trained-on"
         );
+    }
+
+    /// A node puts itself in the user's fabric on start, under its own record
+    /// session -- which is the whole point of ADR-0017's write rule: the row a
+    /// node writes is its own user's, and it writes it as that user rather than
+    /// as the owner.
+    #[tokio::test]
+    async fn a_node_registers_itself_as_the_user_it_serves() -> Result<()> {
+        let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
+        let tenant = TenantId::new("ws:fabric");
+        let user = UserId::new("user:lily");
+        provision_identity(&store, &tenant, &user).await?;
+        store.signin(&tenant, &user).await?;
+
+        register_node(&store, &tenant, &user, "her-laptop").await;
+
+        let fabric = antumbra_store::repo::device::list_for_user(&store, &tenant, &user).await?;
+        let [node] = fabric.as_slice() else {
+            anyhow::bail!("one machine, one row, got {}", fabric.len());
+        };
+        assert_eq!(node.host, "her-laptop");
+        assert_eq!(node.backend, hardware::backend());
+        // The role is the one the hardware earns, not one this test asserts
+        // into being: on a CPU build that is Memory, on a CUDA build with a big
+        // enough card it is Genesis, and either way it is derived.
+        assert_eq!(
+            node.role,
+            antumbra_core::role_for(hardware::backend(), hardware::vram_mib())
+        );
+
+        // Starting again is not a second machine.
+        register_node(&store, &tenant, &user, "her-laptop").await;
+        assert_eq!(
+            antumbra_store::repo::device::list_for_user(&store, &tenant, &user)
+                .await?
+                .len(),
+            1
+        );
+        Ok(())
     }
 
     /// The cold start: a node with no experts yet must still come up with a
