@@ -143,6 +143,81 @@ async fn a_view_says_when_a_memory_was_last_written_and_reinforcing_moves_it() -
     Ok(())
 }
 
+/// A recall says how close each memory is, and says it about the right memory
+/// even on the path that reorders the results. The demotion moves out-of-scope
+/// hits down, so a similarity attached after it would be paired with whichever
+/// memory happened to land in that slot.
+#[tokio::test]
+async fn a_recall_scores_each_memory_and_the_score_follows_it_through_the_demotion(
+) -> anyhow::Result<()> {
+    let s = server().await;
+    let said = |e: ErrorData| anyhow::anyhow!("{e:?}");
+    let store = |content: &str, repo: &str| {
+        s.store_memory(Parameters(StoreParams {
+            provenance: Some(ProvenanceParams {
+                repo: repo.into(),
+                commit: "abc1234".into(),
+                branch: Some("main".into()),
+                path: None,
+            }),
+            content: content.into(),
+            network: "world".into(),
+            confidence: Some(0.9),
+            evidence: None,
+            volatile: None,
+            compartment: None,
+        }))
+    };
+    // The first is what the query asks about; the second is elsewhere, and also
+    // in another repository, so the demotion will move it.
+    store(
+        "deno install is how dependencies are added",
+        "github.com/me/here",
+    )
+    .await
+    .map_err(said)?;
+    store("the kettle is in the kitchen", "github.com/me/elsewhere")
+        .await
+        .map_err(said)?;
+
+    let recalled = s
+        .recall_memories(Parameters(RecallParams {
+            repo: Some("github.com/me/here".into()),
+            branch: Some("main".into()),
+            query: "how do I add a dependency".into(),
+            top_k: Some(5),
+            network: None,
+        }))
+        .await
+        .map_err(said)?;
+    anyhow::ensure!(
+        recalled.0.memories.len() == 2,
+        "expected both memories back"
+    );
+
+    for view in &recalled.0.memories {
+        let Some(similarity) = view.similarity else {
+            anyhow::bail!("`{}` came back with no similarity", view.content);
+        };
+        anyhow::ensure!(
+            (-1.0..=1.0).contains(&similarity),
+            "{similarity} is not a cosine"
+        );
+        // The score belongs to THIS memory: re-embedding its own content must
+        // land closer to it than to the other one. That is what a score paired
+        // with the wrong row would fail.
+        let own = s.embedder.embed(&view.content).await?;
+        let query = s.embedder.embed("how do I add a dependency").await?;
+        let expected = antumbra_core::cosine_similarity(&query, &own);
+        anyhow::ensure!(
+            (similarity - expected).abs() < 1e-5,
+            "`{}` carries {similarity}, but its own content scores {expected}",
+            view.content
+        );
+    }
+    Ok(())
+}
+
 /// Seed several memories then recall: returns the recalled content list in
 /// order. Shared by the rerank tests so the control and reranked runs are
 /// over identical data.
