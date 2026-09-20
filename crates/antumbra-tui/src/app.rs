@@ -120,11 +120,20 @@ pub enum Page {
     Loop,
     /// Evaluation runs and the regression tripwire.
     Evals,
+    /// A coding agent with its feature flags off: the rules, and which skills
+    /// are used (ADR-0021). Read-only.
+    Sovereign,
 }
 
 impl Page {
     /// Every page, in tab order.
-    pub const ALL: [Page; 4] = [Page::Population, Page::Memory, Page::Loop, Page::Evals];
+    pub const ALL: [Page; 5] = [
+        Page::Population,
+        Page::Memory,
+        Page::Loop,
+        Page::Evals,
+        Page::Sovereign,
+    ];
 
     /// The lowercase tab label.
     pub fn title(self) -> &'static str {
@@ -133,7 +142,15 @@ impl Page {
             Page::Memory => "memory",
             Page::Loop => "loop",
             Page::Evals => "evals",
+            Page::Sovereign => "sovereign",
         }
+    }
+
+    /// The tab a number key selects: `1` is the first page. Asked of
+    /// [`Page::ALL`], so a page added to it cannot be left without its key.
+    pub fn index_for_key(key: char) -> Option<usize> {
+        let number = key.to_digit(10)? as usize;
+        (1..=Page::ALL.len()).contains(&number).then(|| number - 1)
     }
 
     /// Position in [`Page::ALL`] (the tab index).
@@ -162,6 +179,10 @@ pub struct App {
     pub edges: Vec<MemoryEdge>,
     /// Index into `memories` of the highlighted trace (Memory page).
     pub selected_memory: usize,
+    /// The Sovereign page's reading of `memories`, made once per reload.
+    pub sovereign: crate::sovereign::View,
+    /// Index into `sovereign.skills` of the highlighted row (Sovereign page).
+    pub selected_skill: usize,
     /// The generational loop heads (one per run), for the Loop page.
     pub loop_heads: Vec<GenerationHead>,
     /// Index into `loop_heads` of the run the Loop page is focused on.
@@ -319,6 +340,8 @@ impl App {
             memories: Vec::new(),
             edges: Vec::new(),
             selected_memory: 0,
+            sovereign: crate::sovereign::View::default(),
+            selected_skill: 0,
             loop_heads: Vec::new(),
             selected_loop: 0,
             loop_halt_pending: false,
@@ -393,6 +416,10 @@ impl App {
         self.boundaries = snap.boundaries;
         self.shadows = snap.shadows;
         self.memories = snap.memories;
+        self.sovereign = crate::sovereign::View::from_memories(&self.memories);
+        self.selected_skill = self
+            .selected_skill
+            .min(self.sovereign.skills.len().saturating_sub(1));
         self.edges = snap.edges;
         self.loop_heads = snap.loop_heads;
         self.loop_halt_pending = snap.loop_halt_pending;
@@ -1116,6 +1143,7 @@ impl App {
         match self.page {
             Page::Memory => return (self.memories.len(), self.selected_memory),
             Page::Evals => return (self.evals.len(), self.selected_eval),
+            Page::Sovereign => return (self.sovereign.skills.len(), self.selected_skill),
             Page::Loop => return (self.loop_heads.len(), self.selected_loop),
             Page::Population => {}
         }
@@ -1136,6 +1164,10 @@ impl App {
             }
             Page::Evals => {
                 self.selected_eval = idx;
+                return;
+            }
+            Page::Sovereign => {
+                self.selected_skill = idx;
                 return;
             }
             Page::Loop => {
@@ -1270,8 +1302,73 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() {
+        let keys: Vec<Option<usize>> = "0123456789x".chars().map(Page::index_for_key).collect();
+        let reached: Vec<usize> = keys.iter().flatten().copied().collect();
+        assert_eq!(reached, (0..Page::ALL.len()).collect::<Vec<_>>());
+        assert_eq!(Page::index_for_key('0'), None);
+        assert_eq!(Page::index_for_key('x'), None);
+        // The tab the key selects is the tab the bar numbers it as.
+        for (index, page) in Page::ALL.iter().enumerate() {
+            assert_eq!(page.index(), index);
+        }
+        assert_eq!(
+            Page::index_for_key('5').and_then(|i| Page::ALL.get(i)),
+            Some(&Page::Sovereign)
+        );
+    }
+
+    /// The whole path the page depends on: counters written to a store, read by
+    /// the snapshot the console loads, and driven by the keys every page shares.
+    #[tokio::test]
+    async fn the_sovereign_page_reads_counters_from_the_store_and_selects_among_them(
+    ) -> anyhow::Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let mut app = App::load(&store).await?;
+        app.set_page(Page::Sovereign);
+        // Nothing to select: the keys must not move a selection that is not there.
+        app.select_next();
+        assert_eq!((app.sovereign.skills.len(), app.selected_skill), (0, 0));
+
+        for skill in ["deploy", "review"] {
+            let counter = Memory::new(
+                format!("memory:{skill}"),
+                "ws:t",
+                MemoryNetwork::World,
+                format!("[skill-use:{skill}] {skill}"),
+                0.9,
+                Utc::now(),
+            );
+            memory::upsert(&store, &counter).await?;
+        }
+        app.apply_snapshot(Snapshot::load(&store).await?);
+        assert_eq!(app.sovereign.skills.len(), 2);
+        app.select_next();
+        assert_eq!(app.selected_skill, 1);
+        app.select_next();
+        assert_eq!(
+            app.selected_skill, 0,
+            "the selection wraps, as on every page"
+        );
+
+        // A reload that leaves fewer rows must not leave the selection past the end.
+        app.select_next();
+        memory::delete(
+            &store,
+            &TenantId::new("ws:t"),
+            &MemoryId::new("memory:review"),
+        )
+        .await?;
+        app.apply_snapshot(Snapshot::load(&store).await?);
+        assert!(app.selected_skill < app.sovereign.skills.len().max(1));
+        Ok(())
+    }
     use antumbra_core::generational::LoopState;
-    use antumbra_core::{EdgeType, EvalStatus, Generation, MemoryNetwork, RunId, SubjectKind};
+    use antumbra_core::{
+        EdgeType, EvalStatus, Generation, MemoryId, MemoryNetwork, RunId, SubjectKind, TenantId,
+    };
     use antumbra_store::EMBED_DIM;
     use chrono::Utc;
 

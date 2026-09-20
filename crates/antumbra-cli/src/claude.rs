@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub mod apply;
 pub mod auto_mode;
 pub mod bridge;
 pub mod brief;
@@ -164,6 +165,15 @@ pub enum Class {
     AcceptedLoss,
 }
 
+/// A variable in the agent's `env` block, and the value that settles a rule.
+/// These are the only names `antumbra claude apply` will ever write, and they
+/// come from the matrix below, never from an argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnvSetting {
+    pub name: &'static str,
+    pub value: &'static str,
+}
+
 /// One feature that goes when the flags go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rule {
@@ -176,6 +186,10 @@ pub struct Rule {
     /// when an agent never reaches for it, or when its standing decides what is
     /// said (see [`brief`]).
     pub unavailable: Option<&'static str>,
+    /// The `env` entry that brings it back, when one does. `None` for a rule no
+    /// environment variable settles, including the default permission mode:
+    /// that lives under `permissions`, which nothing here writes.
+    pub env: Option<EnvSetting>,
 }
 
 /// The matrix of ADR-0021, in the order the report prints it.
@@ -188,6 +202,7 @@ pub fn rules() -> Vec<Rule> {
             class: Restored,
             response: "`antumbra claude bridge` writes an untracked CLAUDE.local.md that imports it, so it is read natively again",
             unavailable: None,
+            env: None,
         },
         Rule {
             id: "mcp-schemas",
@@ -195,6 +210,7 @@ pub fn rules() -> Vec<Rule> {
             class: Restored,
             response: "`antumbra claude mcp-lint`, run outside the agent, names each such tool and prints the deny rule that keeps it out of the request",
             unavailable: None,
+            env: None,
         },
         Rule {
             id: "mcp-root-combinators",
@@ -202,6 +218,7 @@ pub fn rules() -> Vec<Rule> {
             class: AcceptedLoss,
             response: "`antumbra claude mcp-lint` names them; only the server can fix it, by flattening the schema",
             unavailable: None,
+            env: None,
         },
         Rule {
             id: "powershell-tool",
@@ -209,6 +226,7 @@ pub fn rules() -> Vec<Rule> {
             class: Setting { required: true },
             response: "set CLAUDE_CODE_USE_POWERSHELL_TOOL=1",
             unavailable: None,
+            env: Some(EnvSetting { name: "CLAUDE_CODE_USE_POWERSHELL_TOOL", value: "1" }),
         },
         Rule {
             id: "mcp-protocol-probe",
@@ -216,6 +234,7 @@ pub fn rules() -> Vec<Rule> {
             class: Setting { required: false },
             response: "set MCP_PROTOCOL_NEGOTIATION=auto",
             unavailable: None,
+            env: Some(EnvSetting { name: "MCP_PROTOCOL_NEGOTIATION", value: "auto" }),
         },
         Rule {
             id: "auto-mode-default",
@@ -223,6 +242,7 @@ pub fn rules() -> Vec<Rule> {
             class: Setting { required: false },
             response: "set permissions.defaultMode to \"auto\" in your own settings file (it is ignored in a project's)",
             unavailable: None,
+            env: None,
         },
         Rule {
             id: "auto-mode-setup",
@@ -230,6 +250,7 @@ pub fn rules() -> Vec<Rule> {
             class: Restored,
             response: "`antumbra claude auto-mode-env` drafts them from your working trees' remotes and Antumbra's memories, reads no transcript, and prints the block without writing it",
             unavailable: Some("/auto-mode-setup (`antumbra claude auto-mode-env` drafts the same entries, from outside the agent)"),
+            env: None,
         },
         Rule {
             id: "skill-doctor",
@@ -237,6 +258,7 @@ pub fn rules() -> Vec<Rule> {
             class: Restored,
             response: "`antumbra claude skill-used`, run by two hooks, counts each use as a reinforcement of one volatile memory per skill, and `antumbra claude skills` reports the ones never or no longer used",
             unavailable: Some("/skill-doctor (`antumbra claude skills` reports the same, from outside the agent)"),
+            env: None,
         },
         Rule {
             id: "remote-control",
@@ -244,6 +266,7 @@ pub fn rules() -> Vec<Rule> {
             class: Restored,
             response: "in part and later: an asynchronous handoff compartment, no live control",
             unavailable: Some("Remote Control and messaging sessions on other machines"),
+            env: None,
         },
         Rule {
             id: "account-sync",
@@ -251,6 +274,7 @@ pub fn rules() -> Vec<Rule> {
             class: AcceptedLoss,
             response: "off is the sovereign default",
             unavailable: None,
+            env: None,
         },
         Rule {
             id: "vscode-starting-mode",
@@ -258,6 +282,7 @@ pub fn rules() -> Vec<Rule> {
             class: AcceptedLoss,
             response: "out of Antumbra's reach",
             unavailable: None,
+            env: None,
         },
         Rule {
             id: "advisor",
@@ -265,6 +290,7 @@ pub fn rules() -> Vec<Rule> {
             class: AcceptedLoss,
             response: "it sends the whole conversation to a stronger model on the vendor's infrastructure, the opposite of `route` and `answer`",
             unavailable: Some("the advisor tool"),
+            env: None,
         },
         Rule {
             id: "artifact-comments",
@@ -272,6 +298,7 @@ pub fn rules() -> Vec<Rule> {
             class: AcceptedLoss,
             response: "read them in the browser; ADR-0020 makes a comment a memory",
             unavailable: Some("comments on hosted artifacts (the user reads them in the browser)"),
+            env: None,
         },
         Rule {
             id: "drafted-feedback",
@@ -279,6 +306,7 @@ pub fn rules() -> Vec<Rule> {
             class: AcceptedLoss,
             response: "friction is kept locally as `bank` memories by the capture hook",
             unavailable: Some("vendor-bound drafted feedback (keep friction as a `bank` memory instead)"),
+            env: None,
         },
         Rule {
             id: "import",
@@ -286,6 +314,7 @@ pub fn rules() -> Vec<Rule> {
             class: AcceptedLoss,
             response: "a one-time migration from other agents; nothing to compensate",
             unavailable: None,
+            env: None,
         },
     ]
 }
@@ -822,6 +851,33 @@ mod tests {
             merged.get("MCP_PROTOCOL_NEGOTIATION").map(|v| &v.origin),
             Some(&Origin::Settings(settings))
         );
+    }
+
+    /// The prose the doctor prints and the name `apply` writes must be the same
+    /// name, or the doctor asks for one thing and the tool does another.
+    #[test]
+    fn what_the_doctor_asks_for_is_what_apply_would_write() -> anyhow::Result<()> {
+        let report = examine(&inputs(Os::Windows, &[("DISABLE_TELEMETRY", "1")]));
+        let mut settled = 0;
+        for finding in &report.findings {
+            let Some(env) = finding.rule.env else {
+                continue;
+            };
+            settled += 1;
+            let Standing::Missing { fix, .. } = &finding.standing else {
+                anyhow::bail!("{} is not missing in a bare environment", finding.rule.id);
+            };
+            assert!(fix.contains(env.name), "{fix} does not name {}", env.name);
+            assert!(fix.contains(env.value), "{fix} does not give {}", env.value);
+        }
+        assert_eq!(settled, 2, "the matrix has two env settings");
+        // The default permission mode is asked for and deliberately not written.
+        let mode = report
+            .findings
+            .iter()
+            .find(|finding| finding.rule.id == "auto-mode-default");
+        assert_eq!(mode.and_then(|finding| finding.rule.env), None);
+        Ok(())
     }
 
     #[test]

@@ -149,6 +149,15 @@ antumbra claude doctor --dir ../other-repo
 
 It says whether the session is in sovereign mode and which variable, in which file, put it there; lists what that costs; checks the settings that bring some of it back; and names a project's `AGENTS.md` when it is not being read. It exits non-zero when a required setting is missing, which on Windows means the PowerShell tool (the host's dominant shell decides). It reads the agent's settings and never writes them: the file grants the agent its permissions, so the doctor prints the line to add and leaves the edit to you.
 
+When you would rather not paste them by hand:
+
+```sh
+antumbra claude apply --dry-run     # say what would be written, and write nothing
+antumbra claude apply               # write it, after a backup
+```
+
+It adds the `env` names the doctor asks for to your own `~/.claude/settings.json`, and nothing else: only names it already knows, only ones the file does not set, and never anything under `permissions` — not even `permissions.defaultMode`, which the doctor asks for and this reports and leaves to you. Your key order and formatting survive, because the edit is textual rather than a reserialization. It backs the file up first, then reads it back and restores the backup unless the result is exactly what was there plus those names.
+
 When it names an `AGENTS.md` that is not being read, this fixes it:
 
 ```sh
@@ -177,6 +186,8 @@ antumbra claude auto-mode-env --repos ~/repos     # prints a draft; writes nothi
 It drafts `Source control` from the remotes of your working trees, proposing an owner only when you push there over ssh and it is plainly yours, and listing every other owner with the reason it was left out. With a surface to ask (`ANTUMBRA_URL`, `ANTUMBRA_TOKEN`) it also offers memories as candidates for the slots only prose can fill, such as which host is production and which is a test node. It reads no transcript. The block goes in your own `~/.claude/settings.json`; the classifier never reads `autoMode` from a project's settings.
 
 `/skill-doctor`, which finds the skills nobody uses, goes as well. `antumbra claude skills` reports the same from counters that two hooks keep ([hooks](../scripts/hooks/README.md)): one for a skill the agent calls and one for a skill you type, since neither hook sees the other's.
+
+The operator console shows both on its Sovereign page (`5`, or `antumbra-tui --page sovereign`): the rules, by how many workspaces hold each current or retired, and skill use across workspaces, stalest first. It is read-only and queries nothing new.
 
 Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again.
 
