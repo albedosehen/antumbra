@@ -116,7 +116,7 @@ antumbra-mcp --http 0.0.0.0:8081 --jwt-secret-file /run/secrets/jwt \
 | --- | --- |
 | `pull_request` merged | Every memory whose anchor sits on the merged branch is re-anchored to the merge commit on the base branch (its path kept, the old anchor kept behind it as history), so a squash merge no longer leaves them `not-on-head` forever. The pull request itself becomes a `bank` memory anchored to the merge commit, with the PR URL as evidence, under a deterministic id (a redelivery revises it). |
 | `delete` of a branch | Every memory whose anchor still sits on that branch gets a `git-orphaned:<repo>#<branch>@<when>` evidence entry. Recall judges it `orphaned` (demoted, never hidden) and every view carries `orphaned_at`. A memory the merge already moved to the base branch is untouched, so GitHub's delete-after-merge is safe. |
-| `pull_request` merged, with App credentials | The knowledge documents the pull request changed (READMEs, docs, ADRs, OpenAPI and AsyncAPI specs; not source) are read at the merge commit through the contents API and ingested by the same path as `ingest_document` and `antumbra ingest`: original to copal first, the title (the path) replaced in place, every chunk anchored `git:<repo>@<merge>#<base>:<path>`. The response says how many were queued; the ingest itself runs after the response, because GitHub allows a receiver ten seconds. |
+| `pull_request` merged, with App credentials | The knowledge documents the pull request changed (READMEs, docs, ADRs, OpenAPI and AsyncAPI specs; not source) are read at the merge commit through the contents API and ingested by the same path as `ingest_document` and `antumbra ingest`: original to copal first, the title (`<repository>:<path>`, since one workspace holds many repositories and a bare path would make every repository's `README.md` the same document) replaced in place, every chunk anchored `git:<repo>@<merge>#<base>:<path>`. A document whose file the merge removed, or renamed away from, is dropped with it, so recall does not go on calling it live. Repository documents go to the workspace's shared pool. The response says how many were queued; the ingest itself runs after the response, because GitHub allows a receiver ten seconds. |
 | `installation` created, `installation_repositories` added | The cold start: every knowledge document in each mapped repository, at the head of its default branch, ingested and anchored the same way. |
 | `ping`, anything else, an unmapped repository, a close without a merge | Acknowledged with the reason, so GitHub does not retry. |
 
@@ -137,6 +137,67 @@ Antumbra is the **same engine** in both modes; only the transport and identity d
 Offline is the default and the privacy floor: nothing leaves the building. The hosted surface adds multi-tenant sharing, device sync, and live propagation. The ACL is enforced **in the database engine**, so a tenant can never see another tenant's rows even if a handler forgets a filter.
 
 ---
+
+## Claude Code with its telemetry off
+
+Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. [ADR-0021](adr/0021-sovereign-mode.md) calls the state sovereign mode and treats it as the normal case.
+
+```sh
+antumbra claude doctor            # judge the current project
+antumbra claude doctor --dir ../other-repo
+```
+
+It says whether the session is in sovereign mode and which variable, in which file, put it there; lists what that costs; checks the settings that bring some of it back; and names a project's `AGENTS.md` when it is not being read. It exits non-zero when a required setting is missing, which on Windows means the PowerShell tool (the host's dominant shell decides). It reads the agent's settings and never writes them: the file grants the agent its permissions, so the doctor prints the line to add and leaves the edit to you.
+
+When you would rather not paste them by hand:
+
+```sh
+antumbra claude apply --dry-run     # say what would be written, and write nothing
+antumbra claude apply               # write it, after a backup
+```
+
+It adds the `env` names the doctor asks for to your own `~/.claude/settings.json`, and nothing else: only names it already knows, only ones the file does not set, and never anything under `permissions` — not even `permissions.defaultMode`, which the doctor asks for and this reports and leaves to you. Your key order and formatting survive, because the edit is textual rather than a reserialization. It backs the file up first, then reads it back and restores the backup unless the result is exactly what was there plus those names.
+
+When it names an `AGENTS.md` that is not being read, this fixes it:
+
+```sh
+antumbra claude bridge            # --dry-run to see what it would do, --remove to take it back out
+```
+
+Beside each `AGENTS.md` the agent would have read, it writes a `CLAUDE.local.md` that imports it, and lists that file in the clone's own `.git/info/exclude`. The agent then reads the file natively again: at launch, in subdirectories, after compaction, and in subagents, with no size limit short of its own. Nothing the repository tracks changes, so it is safe in a checkout you do not own. It leaves alone any directory that already has instructions of its own, because the agent was never going to read `AGENTS.md` there, and `--remove` deletes only a file that is still a bridge and nothing else. It is not done through a hook on purpose: a hook's context is capped at 10,000 characters and cut to a preview past that, which a real instruction file exceeds.
+
+Neither command needs a running server or a store, so both work when nothing else does, including when a bad MCP tool schema is failing every request inside the agent. The rules are verified against a named Claude Code release, and the report says so when the installed one differs.
+
+That last case has its own command. With the flags off the agent still checks every MCP tool's input schema, logs the answer, and sends the schema anyway; the API then refuses the whole request with a 400 that names the tool only by its position.
+
+```sh
+antumbra claude mcp-lint --server github -- npx -y @some/mcp-server   # ask a stdio server
+antumbra claude mcp-lint --server github --from tools-list.json       # or a saved tools/list answer
+```
+
+It runs the agent's two checks, prints the deny rule that keeps each offender out of the request (and leaves the edit to you), and also names tools that go missing without a word: one with `anyOf`, `oneOf` or `allOf` at its schema's root is skipped in this state, and one whose root `type` is not `"object"` costs its server every tool, in any state. With tool search on, which is the default, a bad tool breaks nothing until the agent first loads it, so a session that has always worked is not evidence of a clean server. It exits non-zero on a failure, so a server's maintainer can run it in CI.
+
+The agent's classifier decides what counts as leaving your boundary, and `/auto-mode-setup`, which drafts the entries that tell it, is one of the things that goes with the flags:
+
+```sh
+antumbra claude auto-mode-env --repos ~/repos     # prints a draft; writes nothing
+```
+
+It drafts `Source control` from the remotes of your working trees, proposing an owner only when you push there over ssh and it is plainly yours, and listing every other owner with the reason it was left out. With a surface to ask (`ANTUMBRA_URL`, `ANTUMBRA_TOKEN`) it also offers memories as candidates for the slots only prose can fill, such as which host is production and which is a test node. It reads no transcript. The block goes in your own `~/.claude/settings.json`; the classifier never reads `autoMode` from a project's settings.
+
+`/skill-doctor`, which finds the skills nobody uses, goes as well. `antumbra claude skills` reports the same from counters that two hooks keep ([hooks](../scripts/hooks/README.md)): one for a skill the agent calls and one for a skill you type, since neither hook sees the other's.
+
+The operator console shows both on its Sovereign page (`5`, or `antumbra-tui --page sovereign`): the rules, by how many workspaces hold each current or retired, and skill use across workspaces, stalest first. It is read-only and queries nothing new.
+
+Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again.
+
+## Who can recall a document
+
+A document is kept the way a memory is: in a compartment, or in the workspace's shared pool. `ingest_document` takes a `compartment` (and `antumbra ingest` a `--compartment`); then only the compartment's owner and the people it is shared with can recall the document, enforced by the engine on every read, and a recalled chunk says which compartment it came from. Leave it out and the document goes to the shared pool, which every member of the workspace can recall. That is the right place for reference material (it is where the GitHub integration puts a repository's documents) and the wrong place for anything private.
+
+A compartment has to be one the caller can write to: their own, or one shared with them with `link`. The check happens before anything is archived or stored, so a refusal leaves nothing behind. A document's identity is its workspace, its compartment and its title, so two members can each keep a private document under one title: neither ingest touches the other's chunks, and each has its own archived original.
+
+Before this, every document in a workspace was recallable by every member. Documents ingested then have no compartment, so they are in the shared pool and exactly as recallable as they were; to make one private, ingest it again into a compartment. An existing database picks the rule up on its next start: the server re-asserts each table's permissions when it connects, since a definition applied `IF NOT EXISTS` would otherwise never change on a table that already exists.
 
 ## Copal as the document of record (knowledge documents)
 
@@ -160,7 +221,7 @@ Tenancy is the deployment's second choice: *which Copal tenant does a workspace'
 The contract:
 
 - **Upload first, fail closed.** The original lands in Copal *before* any chunk is stored, and an unreachable Copal fails the ingest with a clear error. A configured document of record that silently dropped originals would be worse than none. Under `--copal-keys`, a workspace with no mapped key fails the same way — refusing beats archiving into a tenant that is not the workspace's own.
-- **Re-ingest revisions, never litters.** The create carries an idempotency key derived from (workspace, title) — the *antumbra* workspace tenant, in every tenancy shape — so ingesting the same title again revisions the *same* Copal file, two workspaces sharing a title never revision each other's document (even inside a shared tenant), and moving a deployment between shapes never re-identifies a document. The version history is the document's history; the archived file's metadata names its owning workspace.
+- **Re-ingest revisions, never litters.** The create carries an idempotency key derived from (workspace, title), where the title of a document kept in a compartment carries that compartment, so two members' private documents of one title are two archived files and "the original" of one is never the other's text — the *antumbra* workspace tenant, in every tenancy shape — so ingesting the same title again revisions the *same* Copal file, two workspaces sharing a title never revision each other's document (even inside a shared tenant), and moving a deployment between shapes never re-identifies a document. The version history is the document's history; the archived file's metadata names its owning workspace.
 - **Absent means exactly today's behavior.** No `--copal-addr`, no archive: ingest keeps only the chunks, nothing new is required, and chunks written either way coexist (the provenance fields are simply absent on archive-less chunks).
 - **Every door archives the same way.** The CLI's `antumbra ingest` takes the same four flags (`--copal-addr`, `--copal-tenant`, `--copal-key`, `--copal-keys`, or the `ANTUMBRA_COPAL_*` envs) and follows the same upload-first, fail-closed contract through the shared `antumbra-copal` client, so a CI step that ingests a framework's lister output or a generated service doc lands a document of record too.
 

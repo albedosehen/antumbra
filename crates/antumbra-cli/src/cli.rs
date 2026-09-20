@@ -72,8 +72,191 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// What `antumbra claude` can do.
+#[derive(Subcommand)]
+pub enum ClaudeAction {
+    /// Say whether this Claude Code session is in sovereign mode (its telemetry
+    /// is off, which also turns off its feature flags), list what that costs,
+    /// and check the settings that bring some of it back. Exits non-zero when a
+    /// required setting is missing. Reads settings; never writes them.
+    Doctor {
+        /// The project to judge (its settings files, and whether its AGENTS.md
+        /// is being read). Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+    },
+    /// Get a project's AGENTS.md read again in sovereign mode. Beside each
+    /// AGENTS.md the agent would have read, writes a CLAUDE.local.md that imports
+    /// it, and lists that file in the clone's own `.git/info/exclude`: nothing
+    /// the repository tracks is changed, so it is safe in a checkout you do not
+    /// own. Leaves alone any directory that has instructions of its own, where
+    /// the agent was never going to read AGENTS.md.
+    Bridge {
+        /// The project to bridge. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Say what would be done and write nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Take the bridges back out. Only a CLAUDE.local.md that is a bridge
+        /// and nothing else is deleted.
+        #[arg(long, default_value_t = false)]
+        remove: bool,
+    },
+    /// Print what an agent should know about the session it is starting in: a
+    /// few lines, for a session-start hook to pass on. Prints nothing outside
+    /// sovereign mode. Reads settings; writes nothing; never starts the agent.
+    Brief {
+        /// The project the session starts in. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+    },
+    /// Keep the rules as memories too, in a `claude-code` compartment of your
+    /// own, so an agent can recall why a feature is missing. Written through the
+    /// same surface an agent writes through. Volatile, so they never train an
+    /// expert. Safe to run again: a rule already there is kept, a changed one is
+    /// stored and the old text penalized, and nothing is deleted.
+    Remember {
+        /// The Antumbra MCP surface, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable:
+        /// a flag ends up in the shell's history.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Say what would be done and write nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+    /// Draft `autoMode.environment`, the prose that tells the agent's classifier
+    /// what is inside your boundary, so that pushing to your own repository is
+    /// not taken for exfiltration. The agent's own `/auto-mode-setup` is gone in
+    /// sovereign mode, and drafts from your session transcripts; this drafts
+    /// from your working trees' remotes and from what Antumbra remembers, and
+    /// reads no transcript. An owner is proposed only when you push there over
+    /// ssh and it is plainly yours; the rest are listed with the reason they
+    /// were left out. Prints the block. Never writes it.
+    AutoModeEnv {
+        /// The project. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// A directory whose child directories are your repositories.
+        #[arg(long)]
+        repos: Option<std::path::PathBuf>,
+        /// The Antumbra MCP surface to ask for memories, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// How many memories to offer for each slot.
+        #[arg(long, default_value_t = 4)]
+        each: u32,
+    },
+    /// Write the `env` lines the doctor asks for into your own settings file,
+    /// and nothing else. Only names the matrix knows, only ones the file does
+    /// not already set, and never anything under `permissions` (not even
+    /// `defaultMode`, which the doctor asks for and this still leaves to you).
+    /// Backs the file up first, then re-reads it and restores the backup unless
+    /// the result is exactly what was there plus those names. Your key order and
+    /// formatting are left alone: the edit is textual, not a reserialization.
+    Apply {
+        /// The project whose settings are read to decide what is missing.
+        /// Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// The file to write. Defaults to your own `~/.claude/settings.json`,
+        /// which is the one the agent reads these from.
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+        /// Say what would be written, check it, and write nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+    /// Count one use of a skill. Meant for two hooks, because a skill is used
+    /// two ways and each hook sees only one: `PostToolUse` matching `Skill`
+    /// (the agent called it) and `UserPromptExpansion` (you typed `/name`).
+    /// With no --name it reads the hook's input on standard input, and then it
+    /// never fails and says nothing: a counter must not be able to stop a
+    /// session. The count is one volatile memory per skill in your
+    /// `claude-code` compartment, reinforced on each use.
+    SkillUsed {
+        /// The skill, when not run as a hook.
+        #[arg(long)]
+        name: Option<String>,
+        /// The Antumbra MCP surface, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+    },
+    /// Which of your skills are used, how often, and when last: the ones never
+    /// used come first. Reads the skills installed for you and for the project,
+    /// and the counters `skill-used` keeps. The agent's own `/skill-doctor` is
+    /// gone in sovereign mode.
+    Skills {
+        /// The project. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Call out a skill not used in this many days.
+        #[arg(long, default_value_t = 30)]
+        days: i64,
+        /// The Antumbra MCP surface, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+    },
+    /// Check an MCP server's tools for input schemas the API refuses. In
+    /// sovereign mode the agent no longer leaves such a tool out, so one of them
+    /// fails every request with a 400 that names it only by position. Run this
+    /// from outside the agent: it is the way back in. Prints the deny rules
+    /// that fix it, and exits non-zero when any tool would break requests.
+    /// Also names tools the agent drops without a word (a combinator at the
+    /// schema's root). Give a saved `tools/list` answer with --from, or the
+    /// server's own command after `--`.
+    McpLint {
+        /// The server's name as the agent knows it, for the deny rules.
+        #[arg(long)]
+        server: String,
+        /// A saved `tools/list` answer (`-` for standard input).
+        #[arg(long, conflicts_with = "command")]
+        from: Option<std::path::PathBuf>,
+        /// How long to wait for each answer from a server started here.
+        #[arg(long, default_value_t = 30)]
+        timeout_secs: u64,
+        /// The stdio server's command, as the agent's configuration has it.
+        #[arg(last = true)]
+        command: Vec<String>,
+    },
+}
+
 #[derive(Subcommand)]
 pub enum Command {
+    /// Claude Code with its telemetry off (ADR-0021): what that silently costs,
+    /// and what is done about it.
+    Claude {
+        #[command(subcommand)]
+        action: ClaudeAction,
+    },
     /// Apply the schema (idempotent).
     Migrate,
     /// Print the generated schema DDL (surql-rs builder output).
@@ -480,6 +663,11 @@ pub enum Command {
         /// Do not stamp the current repository / commit / branch on the chunks.
         #[arg(long, default_value_t = false)]
         no_git: bool,
+        /// Keep the document in this compartment, so only its owner and the people
+        /// it is shared with can recall it. Omit it for the workspace's shared
+        /// pool, which every member can recall.
+        #[arg(long)]
+        compartment: Option<String>,
         /// The command whose stdout is the document, after `--`
         /// (`antumbra ingest --title routes -- deno task routes`).
         #[arg(last = true)]

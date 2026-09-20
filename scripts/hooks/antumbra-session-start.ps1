@@ -105,10 +105,24 @@ if ($penalize -eq '1') {
     }
 }
 
+# --- what is different about this session (fail-open) ---------------------------
+# With its telemetry off the agent has also lost its feature flags, and the
+# features gated on them, and nothing tells it (ADR-0021). `antumbra claude brief`
+# prints a few lines when that is so and nothing when it is not. No antumbra on
+# the path, or any failure: no lines.
+$bin   = if ($env:ANTUMBRA_BIN) { $env:ANTUMBRA_BIN } else { 'antumbra' }
+$brief = ''
+if (Get-Command $bin -ErrorAction SilentlyContinue) {
+    try {
+        $said = & $bin claude brief 2>$null
+        if ($LASTEXITCODE -eq 0 -and $said) { $brief = ($said | Out-String).Trim() }
+    } catch { $brief = '' }
+}
+
 # --- render ---------------------------------------------------------------------
-$memText = ''
+$entries = @()
 if ($mems.Count -gt 0) {
-    $lines = foreach ($m in $mems) {
+    $entries = @(foreach ($m in $mems) {
         $tags = @()
         if ($statuses.ContainsKey([string]$m.id)) { $tags += $statuses[[string]$m.id] }
         if ($m.scope) { $tags += [string]$m.scope }
@@ -120,10 +134,8 @@ if ($mems.Count -gt 0) {
             $anchor += ')'
         }
         "$prefix$($m.content)$anchor"
-    }
-    $memText = $lines -join "`n`n---`n`n"
+    })
 }
-if (-not $memText) { $memText = '[Antumbra bootstrap empty / unreachable -- starting cold.]' }
 
 $gitLine = ''
 if ($commit) {
@@ -134,7 +146,31 @@ if ($commit) {
                "Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin, or GitHub reported it deleted -- verify before relying on it, and penalize_memory if it is wrong.`n`n"
 }
 
-$additionalContext = "# Antumbra session bootstrap (host=$hostId)`n`n$gitLine$memText"
+# The agent caps a hook's context at 10,000 characters. Past the cap it is handed
+# a file path and a 2,000-character preview it is never asked to open, so an
+# oversized bootstrap is a truncated one that says nothing about it. What must
+# survive goes first; memories follow, best first, while they fit, and the rest
+# are counted so the agent knows to recall them.
+$limit = 9500
+$sep   = "`n`n---`n`n"
+$head  = "# Antumbra session bootstrap (host=$hostId)`n`n"
+if ($brief) { $head += "$brief`n`n" }
+$head += $gitLine
+
+$room = $limit - 160
+$used = $head.Length
+$kept = @()
+$omitted = 0
+foreach ($entry in $entries) {
+    $cost = $entry.Length + $sep.Length
+    if ($used + $cost -le $room) { $kept += $entry; $used += $cost } else { $omitted++ }
+}
+$memText = if ($entries.Count -eq 0) { '[Antumbra bootstrap empty / unreachable -- starting cold.]' } else { $kept -join $sep }
+if ($omitted -gt 0) {
+    $memText += "${sep}[$omitted more recalled but left out to stay under the 10,000-character limit on hook context; use recall_memories for them.]"
+}
+
+$additionalContext = "$head$memText"
 
 @{
     hookSpecificOutput = @{

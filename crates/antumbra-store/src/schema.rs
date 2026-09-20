@@ -115,6 +115,22 @@ const MEMORY_WRITE_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NON
      OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
      OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
 
+/// `document_chunk` follows the compartment rules a memory does, because a
+/// document is shared the way a memory is: through its compartment. It used to
+/// carry [`TENANT_PERMS`], under which every document in a tenant was readable by
+/// every member, however privately it was ingested.
+///
+/// Delete takes the write rule, not the tenant-wide predicate `memory` keeps:
+/// ingest deletes a title's previous generation before writing the next, so a
+/// tenant-wide delete would let any member erase another's private document by
+/// naming its title.
+const DOCUMENT_PERMS: [(&str, &str); 4] = [
+    ("select", MEMORY_SELECT_RULE),
+    ("create", MEMORY_WRITE_RULE),
+    ("update", MEMORY_WRITE_RULE),
+    ("delete", MEMORY_WRITE_RULE),
+];
+
 /// The link-capability gate for `memory_edge` create/update: you may create an
 /// edge only when its *target* memory is in a compartment you may LINK into:
 /// the shared pool (un-compartmentalized), a compartment you own, or one granted
@@ -267,12 +283,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("memory_edge_created_at_idx", ["created_at"]),
             ]),
         // Knowledge documents (P-3): a document's embedded chunks, a distinct type
-        // from episodic `memory` but tenant-isolated the same way (engine
-        // PERMISSIONS + the repo filter). HNSW-indexed for semantic recall over
-        // reference material.
+        // from episodic `memory` but isolated the same way (the compartment rule
+        // in the engine + the repo's tenant filter). HNSW-indexed for semantic
+        // recall over reference material.
         table_schema("document_chunk")
             .with_mode(TableMode::Schemaless)
-            .with_permissions(TENANT_PERMS)
+            .with_permissions(DOCUMENT_PERMS)
             .with_indexes([
                 index("document_chunk_tenant_title_idx", ["tenant_id", "title"]),
                 index("document_chunk_created_at_idx", ["created_at"]),
@@ -356,10 +372,18 @@ pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
     // references it (the `memory` / `document_chunk` BM25 indexes), so emit it
     // first. Idempotent (`IF NOT EXISTS`), re-applied on every connect.
     out.extend(generate_analyzer_sql_with_options(&content_analyzer(), true).map_err(map)?);
-    for table in tables(embed_dim) {
+    let tables = tables(embed_dim);
+    for table in &tables {
         table.validate().map_err(map)?;
-        out.extend(generate_table_sql(&table, true));
+        out.extend(generate_table_sql(table, true));
     }
+    // `IF NOT EXISTS` skips a table that already exists, so on a database that
+    // predates a change to a table's PERMISSIONS the old rule would stay in force
+    // forever: a tightened rule would pass every test on a fresh store and never
+    // reach a deployed one. Re-assert each table's own definition. This is the
+    // `DEFINE TABLE` statement alone (mode, permissions), not its fields or
+    // indexes, so no index is rebuilt and no row is touched.
+    out.extend(tables.iter().map(TableDefinition::to_surql_overwrite));
     // The tenant record-access method (binds $auth.tenant), idempotent so a
     // persistent store can re-apply the schema on every connect.
     out.extend(generate_access_sql_with_options(&tenant_access(), true).map_err(map)?);

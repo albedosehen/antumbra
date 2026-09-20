@@ -91,12 +91,26 @@ pub struct ChangedFile {
     pub path: String,
     /// `added`, `modified`, `renamed`, `removed`, ...
     pub status: String,
+    /// Where a `renamed` file used to live.
+    #[serde(default, rename = "previous_filename")]
+    pub previous_path: Option<String>,
 }
 
 impl ChangedFile {
     /// Whether the file still exists after the change.
     pub fn is_present(&self) -> bool {
         self.status != "removed"
+    }
+
+    /// The path this change took out of the tree, if any: the file itself when
+    /// it was removed, its old path when it was renamed. A document ingested
+    /// from that path describes nothing that exists any more.
+    pub fn vacated_path(&self) -> Option<&str> {
+        match self.status.as_str() {
+            "removed" => Some(self.path.as_str()),
+            "renamed" => self.previous_path.as_deref(),
+            _ => None,
+        }
     }
 }
 

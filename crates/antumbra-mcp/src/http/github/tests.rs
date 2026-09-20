@@ -42,7 +42,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         profile: None,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        consolidating: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     })
 }
@@ -364,10 +364,31 @@ fn token_route(fake: FakeTransport) -> FakeTransport {
     )
 }
 
+/// A document already in the store, as an earlier ingest would have left it.
+async fn seed_document(state: &HttpState, title: &str, content: &str) -> anyhow::Result<()> {
+    antumbra_ingest::ingest_text(
+        &state.store,
+        &FixedEmbedder::new(EMBED_DIM),
+        &TenantId::new(TENANT),
+        None,
+        &antumbra_ingest::Document {
+            title: title.into(),
+            source: None,
+            content: content.into(),
+            provenance: None,
+            compartment: None,
+        },
+    )
+    .await?;
+    Ok(())
+}
+
 /// With App credentials, a merge reads the changed knowledge documents at
-/// the merge commit and ingests them, anchored, after the response.
+/// the merge commit and ingests them, anchored, after the response. One
+/// workspace holds many repositories, so a document is titled by repository and
+/// path, and a document whose file the merge took out of the tree goes with it.
 #[tokio::test]
-async fn a_merge_ingests_the_changed_documents_at_the_merge_commit() {
+async fn a_merge_ingests_the_changed_documents_at_the_merge_commit() -> anyhow::Result<()> {
     let fake = token_route(FakeTransport::new())
         .json(
             "GET",
@@ -377,8 +398,16 @@ async fn a_merge_ingests_the_changed_documents_at_the_merge_commit() {
                 {"filename": "docs/orders.md", "status": "modified"},
                 {"filename": "src/main.rs", "status": "modified"},
                 {"filename": "README.md", "status": "removed"},
-                {"filename": "docs/gone.md", "status": "added"}
+                {"filename": "docs/gone.md", "status": "added"},
+                {"filename": "docs/shipping.md", "status": "renamed", "previous_filename": "docs/delivery.md"},
+                {"filename": "src/old.rs", "status": "removed"}
             ]),
+        )
+        .route(
+            "GET",
+            &format!("{API}/repos/{FULL}/contents/docs/shipping.md?ref={MERGE_SHA}"),
+            200,
+            "# Shipping\n\nParcels leave the warehouse at noon.\n",
         )
         .route(
             "GET",
@@ -387,34 +416,51 @@ async fn a_merge_ingests_the_changed_documents_at_the_merge_commit() {
             "# Orders\n\nOrders are written through an outbox.\n",
         );
     let st = state(Some(with_app(fake))).await;
+    // What earlier ingests left behind: this repository's README and the
+    // document that is about to be renamed, and ANOTHER repository's README in
+    // the same workspace, which this merge has no business touching.
+    let readme = format!("{REPO}:README.md");
+    let delivery = format!("{REPO}:docs/delivery.md");
+    let other_readme = "github.com/acme/billing:README.md";
+    seed_document(&st, &readme, "orders readme").await?;
+    seed_document(&st, &delivery, "parcels leave at noon").await?;
+    seed_document(&st, other_readme, "billing readme").await?;
 
     let out = deliver(&st, "pull_request", &merged_pr()).await;
-    assert_eq!(out.ingest_queued, 2, "two documents survived the filter");
-    let titles = wait_for_titles(&st, &["docs/orders.md"]).await;
+    assert_eq!(out.ingest_queued, 3, "three documents survived the filter");
+    let orders = format!("{REPO}:docs/orders.md");
+    let shipping = format!("{REPO}:docs/shipping.md");
+    let titles = wait_for_titles(&st, &[&orders, &shipping]).await;
     assert_eq!(
         titles,
-        vec!["docs/orders.md".to_string()],
-        "the absent one was skipped"
+        vec![other_readme.to_string(), orders.clone(), shipping.clone(),],
+        "the removed README and the renamed-away document are gone, the absent \
+         one was skipped, and the other repository's README is untouched"
     );
 
     let embedder = FixedEmbedder::new(EMBED_DIM);
     let hits = document::recall(
         &st.store,
         &TenantId::new(TENANT),
-        &embedder.embed("outbox").await.unwrap(),
+        &embedder.embed("outbox").await?,
         5,
     )
-    .await
-    .unwrap();
-    assert_eq!(hits.len(), 1);
-    let source = hits[0].source.as_deref().unwrap();
+    .await?;
+    let Some(hit) = hits.iter().find(|h| h.title == orders) else {
+        anyhow::bail!("the orders document is not recallable under its repository-qualified title");
+    };
     assert_eq!(
-        source,
-        format!(
+        hit.source.clone(),
+        Some(format!(
             "https://github.com/{FULL}/blob/{MERGE_SHA}/docs/orders.md @ git:{REPO}@{MERGE_SHA}#main:docs/orders.md"
-        )
+        ))
     );
-    assert!(hits[0].content.contains("outbox"));
+    assert!(hit.content.contains("outbox"));
+    assert_eq!(
+        hit.compartment, None,
+        "repository documents are shared-pool"
+    );
+    Ok(())
 }
 
 /// Installing the App on a repository cold-starts it: every knowledge
@@ -478,7 +524,14 @@ async fn an_installation_cold_starts_the_repository() {
         out.ignored.as_deref(),
         Some("not mapped to a workspace: github.com/other/unmapped")
     );
-    let titles = wait_for_titles(&st, &["README.md", "docs/adr/0001-outbox.md"]).await;
+    let titles = wait_for_titles(
+        &st,
+        &[
+            &format!("{REPO}:README.md"),
+            &format!("{REPO}:docs/adr/0001-outbox.md"),
+        ],
+    )
+    .await;
     assert_eq!(titles.len(), 2);
     let embedder = FixedEmbedder::new(EMBED_DIM);
     let hits = document::recall(
@@ -552,6 +605,7 @@ async fn the_runner_reports_per_document_and_reuses_the_token() {
             "docs/forbidden.md".into(),
             "docs/missing.md".into(),
         ],
+        vacated: Vec::new(),
         truncated: false,
         token,
     };

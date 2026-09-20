@@ -1,0 +1,524 @@
+//! Drive the actual `antumbra claude ...` commands, with the machine they read
+//! pinned down: an empty home, a project made for the test, and every variable
+//! that decides sovereign mode removed or set on purpose.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+/// Every variable the detector reads. A developer's own shell may have any of
+/// them set, and the test must not depend on that.
+const DECIDING: [&str; 9] = [
+    "DISABLE_TELEMETRY",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "DO_NOT_TRACK",
+    "DISABLE_GROWTHBOOK",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+];
+
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> std::io::Result<Self> {
+        let dir = std::env::temp_dir().join(format!("antumbra-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("home"))?;
+        std::fs::create_dir_all(dir.join("project"))?;
+        Ok(Self(dir))
+    }
+    fn home(&self) -> PathBuf {
+        self.0.join("home")
+    }
+    fn project(&self) -> PathBuf {
+        self.0.join("project")
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        // Best effort: a leftover directory under the temp dir fails no test.
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn antumbra(home: &Path, set: &[(&str, &str)], args: &[&str]) -> std::io::Result<Output> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_antumbra"));
+    for name in DECIDING {
+        command.env_remove(name);
+    }
+    command
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .envs(set.iter().copied())
+        .args(args)
+        .output()
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[test]
+fn brief_is_silent_outside_sovereign_mode_and_speaks_inside_it() -> anyhow::Result<()> {
+    let scratch = Scratch::new("brief")?;
+    std::fs::write(scratch.project().join("AGENTS.md"), "# Rules\n")?;
+    let project = scratch.project();
+    let Some(dir) = project.to_str() else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+    let args = ["claude", "brief", "--dir", dir];
+
+    let quiet = antumbra(&scratch.home(), &[], &args)?;
+    assert!(quiet.status.success(), "{}", text(&quiet.stderr));
+    assert_eq!(text(&quiet.stdout).trim(), "");
+
+    // `0` counts: the vendor's table says any non-empty value turns the flags off.
+    let loud = antumbra(&scratch.home(), &[("DISABLE_TELEMETRY", "0")], &args)?;
+    assert!(loud.status.success(), "{}", text(&loud.stderr));
+    let said = text(&loud.stdout);
+    assert!(said.contains("Sovereign mode"), "{said}");
+    assert!(said.contains("AGENTS.md"), "{said}");
+    assert!(said.contains("Read it now"), "{said}");
+    Ok(())
+}
+
+#[test]
+fn remember_says_why_it_failed_and_never_shows_the_token() -> anyhow::Result<()> {
+    let scratch = Scratch::new("remember")?;
+    let token = "a-token-that-must-not-appear-anywhere";
+    let out = antumbra(
+        &scratch.home(),
+        &[("ANTUMBRA_TOKEN", token)],
+        &[
+            "claude",
+            "remember",
+            "--surface",
+            "http://127.0.0.1:1",
+            "--dry-run",
+        ],
+    )?;
+    assert!(!out.status.success());
+    let (stdout, stderr) = (text(&out.stdout), text(&out.stderr));
+    assert!(stderr.contains("could not reach"), "{stderr}");
+    assert!(!stdout.contains(token) && !stderr.contains(token));
+
+    let help = antumbra(
+        &scratch.home(),
+        &[("ANTUMBRA_TOKEN", token)],
+        &["claude", "remember", "--help"],
+    )?;
+    assert!(
+        !text(&help.stdout).contains(token),
+        "help must not print the token"
+    );
+    Ok(())
+}
+
+fn fixture(name: &str) -> String {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(name)
+        .display()
+        .to_string()
+}
+
+/// The fake server's command line: the PowerShell sibling on Windows, where
+/// `bash` may be anything or nothing, and the POSIX one everywhere else.
+fn fake_server() -> Vec<String> {
+    if cfg!(windows) {
+        vec![
+            "pwsh".to_string(),
+            "-NoProfile".to_string(),
+            "-File".to_string(),
+            fixture("fake_mcp_server.ps1"),
+        ]
+    } else {
+        vec!["bash".to_string(), fixture("fake_mcp_server.sh")]
+    }
+}
+
+fn assert_the_fixture_report(said: &str) {
+    assert!(said.contains("6 tool(s) checked"), "{said}");
+    assert!(said.contains("[FAIL] rootless"), "{said}");
+    assert!(!said.contains("mcp__my_server__rootless"), "{said}");
+    assert!(said.contains("[FAIL] breaks_names"), "{said}");
+    assert!(said.contains("[FAIL] breaks_schema"), "{said}");
+    assert!(said.contains("[note] dropped"), "{said}");
+    assert!(said.contains("[note] dated"), "{said}");
+    assert!(!said.contains("] sound"), "{said}");
+    assert!(
+        said.contains("\"mcp__my_server__breaks_names\", \"mcp__my_server__breaks_schema\""),
+        "{said}"
+    );
+    assert!(!said.contains("mcp__my_server__dropped"), "{said}");
+}
+
+#[test]
+fn mcp_lint_asks_a_live_server_and_fails_on_what_breaks_requests() -> anyhow::Result<()> {
+    let scratch = Scratch::new("lint-live")?;
+    let server = fake_server();
+    let mut args = vec!["claude", "mcp-lint", "--server", "my server", "--"];
+    args.extend(server.iter().map(String::as_str));
+    let out = antumbra(&scratch.home(), &[], &args)?;
+    assert!(!out.status.success(), "three tools fail");
+    assert_the_fixture_report(&text(&out.stdout));
+    assert!(
+        text(&out.stderr).contains("3 tool(s)"),
+        "{}",
+        text(&out.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn mcp_lint_reads_a_saved_answer_and_passes_a_clean_one() -> anyhow::Result<()> {
+    let scratch = Scratch::new("lint-file")?;
+    let saved = fixture("fake_tools.json");
+    let out = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "mcp-lint",
+            "--server",
+            "my server",
+            "--from",
+            &saved,
+        ],
+    )?;
+    assert!(!out.status.success());
+    assert_the_fixture_report(&text(&out.stdout));
+
+    let clean = scratch.project().join("clean.json");
+    std::fs::write(
+        &clean,
+        r#"{"result":{"tools":[{"name":"ok","inputSchema":{"type":"object"}}]}}"#,
+    )?;
+    let Some(clean) = clean.to_str() else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+    let out = antumbra(
+        &scratch.home(),
+        &[],
+        &["claude", "mcp-lint", "--server", "s", "--from", clean],
+    )?;
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    assert!(text(&out.stdout).contains("nothing the API would refuse"));
+    Ok(())
+}
+
+#[test]
+fn mcp_lint_gives_up_on_a_server_that_never_answers() -> anyhow::Result<()> {
+    let scratch = Scratch::new("lint-silent")?;
+    // A process that reads its input and says nothing, on either platform.
+    let silent: &[&str] = if cfg!(windows) {
+        &[
+            "pwsh",
+            "-NoProfile",
+            "-Command",
+            "[Console]::In.ReadToEnd() | Out-Null",
+        ]
+    } else {
+        &["cat"]
+    };
+    let mut args = vec![
+        "claude",
+        "mcp-lint",
+        "--server",
+        "s",
+        "--timeout-secs",
+        "2",
+        "--",
+    ];
+    args.extend(silent);
+    let started = std::time::Instant::now();
+    let out = antumbra(&scratch.home(), &[], &args)?;
+    assert!(!out.status.success());
+    assert!(
+        text(&out.stderr).contains("said nothing for 2 seconds"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+    Ok(())
+}
+
+fn git(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
+    let status = Command::new("git").arg("-C").arg(dir).args(args).output()?;
+    anyhow::ensure!(
+        status.status.success(),
+        "git {args:?}: {}",
+        text(&status.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn auto_mode_env_drafts_from_remotes_and_writes_nothing() -> anyhow::Result<()> {
+    let scratch = Scratch::new("auto-mode")?;
+    let repos = scratch.0.join("repos");
+    for (name, remote) in [
+        ("other", "git@github.com:mine/other.git"),
+        ("borrowed", "https://github.com/upstream/library.git"),
+    ] {
+        let dir = repos.join(name);
+        std::fs::create_dir_all(&dir)?;
+        git(&dir, &["init", "-q"])?;
+        git(&dir, &["remote", "add", "origin", remote])?;
+    }
+    let project = scratch.project();
+    git(&project, &["init", "-q"])?;
+    git(
+        &project,
+        &["remote", "add", "origin", "git@github.com:mine/project.git"],
+    )?;
+    let (Some(project), Some(repos)) = (project.to_str(), repos.to_str()) else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+
+    let out = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "auto-mode-env",
+            "--dir",
+            project,
+            "--repos",
+            repos,
+            "--surface",
+            "http://127.0.0.1:1",
+        ],
+    )?;
+    // A surface that is not there is not a failure: the remotes still draft.
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let said = text(&out.stdout);
+    assert!(
+        said.contains("\"Source control: github.com/mine and all repos under it\""),
+        "{said}"
+    );
+    assert!(
+        said.contains("github.com/upstream: cloned over https"),
+        "{said}"
+    );
+    assert!(said.contains("Memory was not asked"), "{said}");
+    assert!(said.contains("Nothing was written"), "{said}");
+    let left_behind: Vec<_> = std::fs::read_dir(scratch.home())?.collect();
+    assert!(left_behind.is_empty(), "the home directory was written to");
+    Ok(())
+}
+
+/// Run the binary with `input` on its standard input, as a hook is run.
+fn antumbra_fed(home: &Path, input: &str, args: &[&str]) -> anyhow::Result<Output> {
+    use std::io::Write;
+    let mut command = Command::new(env!("CARGO_BIN_EXE_antumbra"));
+    for name in DECIDING {
+        command.env_remove(name);
+    }
+    let mut child = command
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env_remove("ANTUMBRA_TOKEN")
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let Some(mut stdin) = child.stdin.take() else {
+        anyhow::bail!("the child has no stdin");
+    };
+    stdin.write_all(input.as_bytes())?;
+    drop(stdin);
+    Ok(child.wait_with_output()?)
+}
+
+#[test]
+fn skill_used_as_a_hook_never_fails_and_never_speaks() -> anyhow::Result<()> {
+    let scratch = Scratch::new("skill-hook")?;
+    let dead = ["claude", "skill-used", "--surface", "http://127.0.0.1:1"];
+    let inputs = [
+        // A real use, and a surface that is not there.
+        r#"{"hook_event_name":"PostToolUse","tool_name":"Skill","tool_input":{"skill":"elegant-design"}}"#,
+        r#"{"hook_event_name":"UserPromptExpansion","expansion_type":"slash_command","command_name":"elegant-design"}"#,
+        // Input that names no skill, input that is not JSON, and no input.
+        r#"{"hook_event_name":"PostToolUse","tool_name":"Bash"}"#,
+        "not json at all",
+        "",
+    ];
+    for input in inputs {
+        let out = antumbra_fed(&scratch.home(), input, &dead)?;
+        assert!(out.status.success(), "{input}: {}", text(&out.stderr));
+        assert_eq!(text(&out.stdout), "", "{input}");
+        assert_eq!(text(&out.stderr), "", "{input}");
+    }
+    Ok(())
+}
+
+#[test]
+fn skill_used_by_hand_says_why_it_failed() -> anyhow::Result<()> {
+    let scratch = Scratch::new("skill-hand")?;
+    let forged = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "skill-used",
+            "--name",
+            "two words",
+            "--surface",
+            "http://127.0.0.1:1",
+        ],
+    )?;
+    assert!(!forged.status.success());
+    assert!(
+        text(&forged.stderr).contains("not a skill's name"),
+        "{}",
+        text(&forged.stderr)
+    );
+
+    let unreachable = antumbra(
+        &scratch.home(),
+        &[],
+        &[
+            "claude",
+            "skill-used",
+            "--name",
+            "deploy",
+            "--surface",
+            "http://127.0.0.1:1",
+        ],
+    )?;
+    assert!(!unreachable.status.success());
+    assert!(
+        text(&unreachable.stderr).contains("could not reach"),
+        "{}",
+        text(&unreachable.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn apply_writes_only_the_env_names_and_keeps_a_backup() -> anyhow::Result<()> {
+    let scratch = Scratch::new("apply")?;
+    let settings = scratch.home().join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap_or(&scratch.home()))?;
+    // A file with the user's own order, their own indentation, and a permissions
+    // block that must come through untouched.
+    let before = "{\n\t\"permissions\": {\n\t\t\"defaultMode\": \"manual\",\n\t\t\"deny\": [\"Read(**/.env)\"]\n\t},\n\t\"env\": {\n\t\t\"ZZZ\": \"mine\",\n\t\t\"AAA\": \"mine\"\n\t}\n}\n";
+    std::fs::write(&settings, before)?;
+    let project = scratch.project();
+    let Some(dir) = project.to_str() else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+    let sovereign = [("DISABLE_TELEMETRY", "1")];
+
+    let dry = antumbra(
+        &scratch.home(),
+        &sovereign,
+        &["claude", "apply", "--dir", dir, "--dry-run"],
+    )?;
+    assert!(dry.status.success(), "{}", text(&dry.stderr));
+    assert!(
+        text(&dry.stdout).contains("dry run: nothing written"),
+        "{}",
+        text(&dry.stdout)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings)?,
+        before,
+        "a dry run wrote to the file"
+    );
+
+    let out = antumbra(
+        &scratch.home(),
+        &sovereign,
+        &["claude", "apply", "--dir", dir],
+    )?;
+    assert!(out.status.success(), "{}", text(&out.stderr));
+    let said = text(&out.stdout);
+    assert!(said.contains("MCP_PROTOCOL_NEGOTIATION"), "{said}");
+    assert!(said.contains("left     permissions.defaultMode"), "{said}");
+
+    let after = std::fs::read_to_string(&settings)?;
+    // The user's bytes are all still there, in their order, with their tabs.
+    assert!(
+        after.contains("\t\t\"ZZZ\": \"mine\",\n\t\t\"AAA\": \"mine\""),
+        "{after}"
+    );
+    assert!(after.contains("\"defaultMode\": \"manual\""), "{after}");
+    assert!(after.contains("\"deny\": [\"Read(**/.env)\"]"), "{after}");
+    assert!(
+        after.contains("\t\t\"MCP_PROTOCOL_NEGOTIATION\": \"auto\","),
+        "{after}"
+    );
+    let json: serde_json::Value = serde_json::from_str(&after)?;
+    // Nothing under permissions moved, and no permission was granted.
+    assert_eq!(
+        json.get("permissions"),
+        serde_json::from_str::<serde_json::Value>(before)?.get("permissions")
+    );
+
+    // The backup holds exactly what was there before.
+    let backups: Vec<_> = std::fs::read_dir(settings.parent().unwrap_or(&scratch.home()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.to_string_lossy().contains(".antumbra-"))
+        .collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    let Some(backup) = backups.first() else {
+        anyhow::bail!("no backup was kept");
+    };
+    assert_eq!(std::fs::read_to_string(backup)?, before);
+
+    // Running it again adds nothing, and keeps no second backup.
+    let again = antumbra(
+        &scratch.home(),
+        &sovereign,
+        &["claude", "apply", "--dir", dir],
+    )?;
+    assert!(again.status.success(), "{}", text(&again.stderr));
+    assert!(
+        text(&again.stdout).contains("nothing to add"),
+        "{}",
+        text(&again.stdout)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings)?,
+        after,
+        "a second run changed the file"
+    );
+    Ok(())
+}
+
+#[test]
+fn apply_refuses_a_settings_file_it_cannot_parse() -> anyhow::Result<()> {
+    let scratch = Scratch::new("apply-bad")?;
+    let settings = scratch.home().join(".claude").join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap_or(&scratch.home()))?;
+    let broken = "{ \"env\": { \"A\": \"1\" },, }";
+    std::fs::write(&settings, broken)?;
+    let project = scratch.project();
+    let Some(dir) = project.to_str() else {
+        anyhow::bail!("the temp dir is not UTF-8");
+    };
+    let out = antumbra(
+        &scratch.home(),
+        &[("DISABLE_TELEMETRY", "1")],
+        &["claude", "apply", "--dir", dir],
+    )?;
+    assert!(!out.status.success());
+    assert!(
+        text(&out.stderr).contains("not valid JSON"),
+        "{}",
+        text(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings)?,
+        broken,
+        "the file was touched anyway"
+    );
+    Ok(())
+}

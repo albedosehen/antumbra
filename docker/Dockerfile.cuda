@@ -11,9 +11,11 @@
 # any daemon without a named nvidia runtime). Needs the NVIDIA Container
 # Toolkit on the host (Linux, or Windows via WSL2).
 #
-# NOTE: authored to the standard CUDA-on-Linux pattern but NOT yet built/run in
-# CI; validate on a Linux/WSL2 GPU host. On Linux nvcc uses gcc as its host
-# compiler, so the Windows `cl.exe`/CUDA-13.3 toolchain dance does not apply.
+# Validated on a Linux GPU host (NixOS, CDI, RTX 3090 Ti; EXP-022): the image
+# builds, downloads the base on first use, trains, and serves. It is still not
+# built in CI, which has no GPU; the `gpu-test` target below is what runs the
+# GPU-gated tests (`just test-gpu`). On Linux nvcc uses gcc as its host compiler,
+# so the Windows `cl.exe`/CUDA-13.3 toolchain dance does not apply.
 
 # --- build stage: CUDA devel (nvcc + gcc) + pinned rust --------------------
 # CUDA 12.6 maps to cudarc's `cuda-12060`, so no CUDARC_CUDA_VERSION override is
@@ -42,6 +44,38 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --release -p antumbra-mcp --locked --features models,cuda \
     && cp /build/target/release/antumbra-mcp /build/antumbra-mcp
+
+# --- gpu-test stage: the GPU-gated tests (`--target gpu-test`) --------------
+# CI has no GPU, so the tests that close the consolidation loop are `#[ignore]`d
+# there and nothing else exercises them. This stage compiles the server's test
+# binary with the same features, the same release profile, and the same cache
+# mounts as the build above, so it reuses the compiled CUDA kernels. Building it
+# needs no GPU; running it does:
+#
+#   docker build -f docker/Dockerfile.cuda --target gpu-test -t antumbra-gpu-test .
+#   docker run --rm --device nvidia.com/gpu=all -v antumbra-gpu-test-weights:/weights antumbra-gpu-test
+#
+# (`--gpus all` in place of `--device` on a daemon with a named nvidia runtime.)
+# It runs as the server's uid against its own weights volume, so it cannot leave
+# files the server is unable to write beside.
+FROM builder AS gpu-test
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -u 65532 -m -s /usr/sbin/nologin nonroot
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo test --release -p antumbra-mcp --locked --features models,cuda --no-run \
+    && cp "$(ls -t /build/target/release/deps/antumbra_mcp-* | grep -v '\.d$' | head -1)" /usr/local/bin/antumbra-mcp-tests
+ENV HF_HOME=/weights
+WORKDIR /gpu-test
+RUN mkdir -p /weights /gpu-test && chown 65532:65532 /weights /gpu-test
+USER 65532
+# Everything in the binary, the ignored GPU tests included, one at a time: two
+# trains at once would contend for the card and the weight download.
+ENTRYPOINT ["/usr/local/bin/antumbra-mcp-tests", "--include-ignored", "--test-threads=1"]
 
 # --- runtime stage: CUDA runtime + python (the exec verifier) --------------
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04

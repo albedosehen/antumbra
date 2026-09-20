@@ -347,9 +347,15 @@ async fn build_session(
 /// Build the serving engine the `answer` tool drives: a resident
 /// [`MultiAdapterServe`](antumbra_serve::MultiAdapterServe) over the shared base,
 /// registered with every expert the `store` can currently see (routing scopes
-/// which a session may actually pick). `None` when the population is empty or the
-/// build has no model backend. Built once at startup; restart to pick up experts
-/// minted afterward.
+/// which a session may actually pick). `None` only when the build has no model
+/// backend.
+///
+/// An empty population still gets an engine. It used to get `None`, so a fresh
+/// node had nothing for the consolidation trigger to hot-register its first
+/// expert into: the train succeeded, the log said "now servable", and `answer`
+/// reported that serving was not configured until someone restarted the server
+/// (EXP-022). The engine is lazy, so an empty one costs no VRAM: the base loads on
+/// the first `answer` that has an adapter to serve.
 #[cfg(feature = "models")]
 pub(crate) async fn build_serve(
     store: &Store,
@@ -357,10 +363,12 @@ pub(crate) async fn build_serve(
     use antumbra_serve::{MultiAdapterServe, RaftConfig};
 
     let experts = antumbra_store::repo::expert::list(store).await?;
-    if experts.is_empty() {
-        return Ok(None);
-    }
-    let base = experts[0].base_model.clone();
+    // With no expert to name a base, use the one consolidation trains on, so the
+    // first minted adapter fits the resident model.
+    let base = serving_base(
+        experts.first().map(|e| e.base_model.as_str()),
+        &RaftConfig::default().base_model,
+    );
     // Serve the learned mode (greedy + repetition penalty + n-gram block +
     // nucleus), not the training-time exploration draw.
     let cfg = RaftConfig::for_serving(RaftConfig::default().max_new_tokens, 0.0);
@@ -376,6 +384,13 @@ pub(crate) async fn build_serve(
     _store: &Store,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     Ok(None)
+}
+
+/// The base model the serving engine loads: the population's, or `default` when
+/// there is no population yet.
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
+fn serving_base(population_base: Option<&str>, default: &str) -> String {
+    population_base.unwrap_or(default).to_string()
 }
 
 fn default_host(explicit: Option<String>) -> String {
@@ -564,4 +579,34 @@ fn build_verifier(
         v = v.with_audience(aud);
     }
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_population_still_names_a_base() {
+        assert_eq!(serving_base(None, "org/base"), "org/base");
+        assert_eq!(
+            serving_base(Some("org/trained-on"), "org/base"),
+            "org/trained-on"
+        );
+    }
+
+    /// The cold start: a node with no experts yet must still come up with a
+    /// serving engine, or the first expert it mints has nowhere to be registered.
+    #[cfg(feature = "models")]
+    #[tokio::test]
+    async fn a_fresh_node_gets_a_serving_engine() -> Result<()> {
+        let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
+        let Some(serve) = build_serve(&store).await? else {
+            anyhow::bail!("an empty population must still get a serving engine");
+        };
+        let minted = antumbra_core::ExpertId::new("expert:user:test:comp:fresh");
+        assert!(!serve.can_serve(&minted));
+        serve.register_expert(&minted, "adapters/fresh_g0.safetensors");
+        assert!(serve.can_serve(&minted), "hot-registration has a target");
+        Ok(())
+    }
 }

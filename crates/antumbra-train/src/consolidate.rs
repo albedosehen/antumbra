@@ -43,6 +43,28 @@ impl Default for ConsolidationPolicy {
     }
 }
 
+/// Which signal held a memory back. The per-memory `reason` carries the numbers
+/// (so every memory reads differently); this is the part that groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum HeldBack {
+    /// A fact that changes over time: it stays in the store by design.
+    Volatile,
+    /// Not reinforced often enough to be worth baking in.
+    UnderReinforced,
+    /// Below the confidence floor for its tier (verifiable, or opinion provenance).
+    LowConfidence,
+}
+
+impl HeldBack {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HeldBack::Volatile => "volatile",
+            HeldBack::UnderReinforced => "under-reinforced",
+            HeldBack::LowConfidence => "low confidence",
+        }
+    }
+}
+
 /// The gate's decision for one memory: whether it graduates, a ranking score,
 /// and a human-readable reason (so a dry run can explain every keep/skip).
 #[derive(Debug, Clone)]
@@ -50,6 +72,8 @@ pub struct Verdict {
     pub graduate: bool,
     pub score: f32,
     pub reason: String,
+    /// `None` exactly when the memory graduates.
+    pub held_back: Option<HeldBack>,
 }
 
 /// Whether a memory is checkable. An explicit `verifiable` wins; otherwise an
@@ -85,11 +109,14 @@ pub fn score_memory(record: &MemoryRecord, policy: &ConsolidationPolicy) -> Verd
     // Rank by confidence with a gentle recurrence boost.
     let score = confidence * (1.0 + (recurrence.min(8) as f32) / 8.0) / 2.0;
 
-    let (graduate, reason) = if !stable {
-        (false, "volatile: stays in the store".to_string())
+    let (held_back, reason) = if !stable {
+        (
+            Some(HeldBack::Volatile),
+            "volatile: stays in the store".to_string(),
+        )
     } else if !recurrence_ok {
         (
-            false,
+            Some(HeldBack::UnderReinforced),
             format!(
                 "under-reinforced ({recurrence} < {})",
                 policy.min_recurrence
@@ -102,7 +129,7 @@ pub fn score_memory(record: &MemoryRecord, policy: &ConsolidationPolicy) -> Verd
             policy.provenance_confidence
         };
         (
-            false,
+            Some(HeldBack::LowConfidence),
             format!(
                 "confidence {confidence:.2} below {bar:.2}{}",
                 if verifiable {
@@ -118,13 +145,62 @@ pub fn score_memory(record: &MemoryRecord, policy: &ConsolidationPolicy) -> Verd
         } else {
             "opinion via provenance"
         };
-        (true, format!("graduates ({how}, conf {confidence:.2})"))
+        (None, format!("graduates ({how}, conf {confidence:.2})"))
     };
 
     Verdict {
-        graduate,
+        graduate: held_back.is_none(),
         score,
         reason,
+        held_back,
+    }
+}
+
+/// Why a compartment did or did not clear the gate: how many memories were
+/// considered, how many graduate, and the rest grouped by what held them back.
+/// A gate that says nothing is indistinguishable from a trigger that never
+/// fired, so the caller logs this instead of returning quietly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateReport {
+    pub considered: usize,
+    pub graduating: usize,
+    /// Held-back counts, most common first (ties in a fixed order).
+    pub held_back: Vec<(HeldBack, usize)>,
+}
+
+impl GateReport {
+    /// One line for a log: `0 of 400 graduate (397 under-reinforced, 3 volatile)`.
+    pub fn summary(&self) -> String {
+        let head = format!("{} of {} graduate", self.graduating, self.considered);
+        if self.held_back.is_empty() {
+            return head;
+        }
+        let why: Vec<String> = self
+            .held_back
+            .iter()
+            .map(|(kind, n)| format!("{n} {}", kind.as_str()))
+            .collect();
+        format!("{head} ({})", why.join(", "))
+    }
+}
+
+/// Score every record against the gate and summarize the outcome.
+pub fn gate_report(records: &[MemoryRecord], policy: &ConsolidationPolicy) -> GateReport {
+    let mut counts: std::collections::BTreeMap<HeldBack, usize> = std::collections::BTreeMap::new();
+    let mut graduating = 0;
+    for record in records {
+        match score_memory(record, policy).held_back {
+            None => graduating += 1,
+            Some(kind) => *counts.entry(kind).or_default() += 1,
+        }
+    }
+    let mut held_back: Vec<(HeldBack, usize)> = counts.into_iter().collect();
+    // Stable sort over the BTreeMap's fixed order, so ties never reorder.
+    held_back.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    GateReport {
+        considered: records.len(),
+        graduating,
+        held_back,
     }
 }
 
@@ -286,6 +362,77 @@ mod tests {
         // A strongly-held opinion graduates on provenance.
         let v = score_memory(&mem("opinion", 0.95, 5), &policy);
         assert!(v.graduate, "{}", v.reason);
+    }
+
+    #[test]
+    fn the_verdict_names_what_held_a_memory_back() {
+        let policy = ConsolidationPolicy::default();
+        assert_eq!(score_memory(&mem("world", 0.8, 3), &policy).held_back, None);
+        assert_eq!(
+            score_memory(&mem("world", 0.8, 1), &policy).held_back,
+            Some(HeldBack::UnderReinforced)
+        );
+        assert_eq!(
+            score_memory(&mem("opinion", 0.6, 5), &policy).held_back,
+            Some(HeldBack::LowConfidence)
+        );
+        let mut volatile = mem("world", 1.0, 9);
+        volatile.volatile = Some(true);
+        assert_eq!(
+            score_memory(&volatile, &policy).held_back,
+            Some(HeldBack::Volatile)
+        );
+    }
+
+    /// The field case this exists for: hundreds of real memories, each
+    /// reinforced once, clear nothing. The report has to say so in one line.
+    #[test]
+    fn a_report_says_why_nothing_graduated() {
+        let policy = ConsolidationPolicy::default();
+        let mut records: Vec<MemoryRecord> = (0..397).map(|_| mem("world", 0.8, 1)).collect();
+        records.extend((0..3).map(|_| {
+            let mut m = mem("world", 0.9, 5);
+            m.volatile = Some(true);
+            m
+        }));
+        let report = gate_report(&records, &policy);
+        assert_eq!(report.considered, 400);
+        assert_eq!(report.graduating, 0);
+        assert_eq!(
+            report.held_back,
+            vec![(HeldBack::UnderReinforced, 397), (HeldBack::Volatile, 3)]
+        );
+        assert_eq!(
+            report.summary(),
+            "0 of 400 graduate (397 under-reinforced, 3 volatile)"
+        );
+    }
+
+    #[test]
+    fn a_report_counts_graduates_and_is_stable_on_ties() {
+        let policy = ConsolidationPolicy::default();
+        let mut volatile = mem("world", 1.0, 9);
+        volatile.volatile = Some(true);
+        let records = vec![
+            mem("world", 0.8, 3),
+            mem("opinion", 0.6, 5),
+            volatile,
+            mem("world", 0.8, 0),
+        ];
+        let report = gate_report(&records, &policy);
+        assert_eq!(report.graduating, 1);
+        // One each: ties keep the enum's declared order, run after run.
+        assert_eq!(
+            report.held_back,
+            vec![
+                (HeldBack::Volatile, 1),
+                (HeldBack::UnderReinforced, 1),
+                (HeldBack::LowConfidence, 1)
+            ]
+        );
+        assert_eq!(gate_report(&[], &policy).summary(), "0 of 0 graduate");
+        let all = gate_report(&[mem("world", 0.8, 3)], &policy);
+        assert_eq!(all.summary(), "1 of 1 graduate");
     }
 
     #[test]

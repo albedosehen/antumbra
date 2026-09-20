@@ -33,6 +33,9 @@ pub(super) struct IngestPlan {
     /// The branch that commit sits on.
     pub branch: String,
     pub paths: Vec<String>,
+    /// Knowledge documents the change took out of the tree (removed, or renamed
+    /// away from), whose chunks have to go with them.
+    pub vacated: Vec<String>,
     /// The listing GitHub returned was incomplete (a very large tree).
     pub truncated: bool,
     /// The installation token the reads authenticate with.
@@ -43,6 +46,8 @@ pub(super) struct IngestPlan {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct IngestReport {
     pub ingested: Vec<String>,
+    /// Documents dropped because their file is gone from the tree.
+    pub dropped: Vec<String>,
     /// Absent at the commit, binary, or over the size cap.
     pub skipped: Vec<String>,
     pub failed: Vec<(String, String)>,
@@ -75,6 +80,15 @@ pub(super) async fn plan_for_merge(
                 event.pull_request.number
             )
         })?;
+    // A removed or renamed document leaves chunks behind that describe a file
+    // which no longer exists, anchored to a commit that is an ancestor of HEAD,
+    // so recall would call them live. They go when the file goes.
+    let vacated = files
+        .iter()
+        .filter_map(|f| f.vacated_path())
+        .filter(|path| is_knowledge_document(path))
+        .map(str::to_string)
+        .collect();
     let paths = files
         .into_iter()
         .filter(|f| f.is_present() && is_knowledge_document(&f.path))
@@ -87,6 +101,7 @@ pub(super) async fn plan_for_merge(
         commit: merge.merge_commit.clone(),
         branch: merge.base_branch.clone(),
         paths,
+        vacated,
         truncated: false,
         token,
     }))
@@ -128,6 +143,8 @@ pub(super) async fn plan_for_repository(
             .into_iter()
             .filter(|p| is_knowledge_document(p))
             .collect(),
+        // A cold start reads the tree as it is; nothing has been taken out of it.
+        vacated: Vec::new(),
         truncated: tree.truncated,
         token,
     })
@@ -149,8 +166,9 @@ pub(super) fn spawn(state: Arc<HttpState>, plan: IngestPlan) {
     tokio::spawn(async move {
         let report = run(&state, plan).await;
         eprintln!(
-            "antumbra-mcp: github ingest {what}: {} ingested, {} skipped, {} failed",
+            "antumbra-mcp: github ingest {what}: {} ingested, {} dropped, {} skipped, {} failed",
             report.ingested.len(),
+            report.dropped.len(),
             report.skipped.len(),
             report.failed.len()
         );
@@ -180,6 +198,27 @@ pub(super) async fn run(state: &HttpState, plan: IngestPlan) -> IngestReport {
         }
         state.embedder_for(&plan.tenant).await
     };
+    for path in plan.vacated {
+        let title = document_title(&plan.slug, &path);
+        let result = {
+            let _guard = state.auth.lock().await;
+            match state.store.signin_root().await {
+                Ok(()) => antumbra_store::repo::document::delete_title(
+                    &state.store,
+                    &plan.tenant,
+                    &title,
+                    None,
+                )
+                .await
+                .map_err(anyhow::Error::from),
+                Err(e) => Err(anyhow::Error::from(e)),
+            }
+        };
+        match result {
+            Ok(()) => report.dropped.push(path),
+            Err(e) => report.failed.push((path, format!("{e:#}"))),
+        }
+    }
     for path in plan.paths {
         let text = match cfg
             .api()
@@ -197,7 +236,7 @@ pub(super) async fn run(state: &HttpState, plan: IngestPlan) -> IngestReport {
             }
         };
         let doc = Document {
-            title: path.clone(),
+            title: document_title(&plan.slug, &path),
             source: Some(cfg.api().blob_url(&plan.full_name, &plan.commit, &path)),
             content: text,
             provenance: Some(
@@ -205,6 +244,9 @@ pub(super) async fn run(state: &HttpState, plan: IngestPlan) -> IngestReport {
                     .on_branch(plan.branch.clone())
                     .at_path(path.clone()),
             ),
+            // Repository documents are the organization's reference material:
+            // the shared pool, readable by every member of the workspace.
+            compartment: None,
         };
         let result = {
             let _guard = state.auth.lock().await;
@@ -228,4 +270,14 @@ pub(super) async fn run(state: &HttpState, plan: IngestPlan) -> IngestReport {
         }
     }
     report
+}
+
+/// The title a repository's document is ingested under: the repository slug and
+/// the path. A document's identity is (workspace, title), and one workspace
+/// usually holds many repositories, so a bare path would make every repository's
+/// `README.md` the same document: the second ingest would delete the first one's
+/// chunks and revision its archived original, and at a cold start the last
+/// repository read would win every path the repositories share.
+pub(super) fn document_title(slug: &str, path: &str) -> String {
+    format!("{slug}:{path}")
 }

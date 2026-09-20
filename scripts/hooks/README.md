@@ -21,6 +21,7 @@ ANTUMBRA_TOKEN=<bearer-jwt>            # Authorization: Bearer <token>
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
 ANTUMBRA_PENALIZE_ORPHANS=0            # 1: bootstrap also penalizes memories whose branch is gone
 ANTUMBRA_TOOLS=agent                   # on the SERVER: advertise only the eight tools a coding agent needs
+ANTUMBRA_BIN=antumbra                  # the CLI the bootstrap asks for the sovereign-mode block (optional)
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
@@ -83,6 +84,33 @@ The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machi
 ```
 
 Note: (`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is cross-platform too; the `.sh` siblings are the native, dependency-light option.)
+
+## Sovereign mode: what the bootstrap says first
+
+Turning Claude Code's telemetry off also turns off its feature flags, and the features gated on them, without saying so (ADR-0021). When `antumbra` is on the path (or `ANTUMBRA_BIN` names it), the bootstrap opens with what `antumbra claude brief` prints: whether the project's `AGENTS.md` reached the agent, which shell is the host's, and what the agent must not offer because it is gone. Outside that state it prints nothing, and so does a missing or failing `antumbra`.
+
+If `AGENTS.md` was not loaded, the block tells the agent to read it before anything else. Measured on a 31,026-character file whose last line sets a rule for every reply: without the block the agent answered in one turn and never saw the rule; with it, the agent read the file, followed the rule, and told the user about `antumbra claude bridge`. The block is a fallback for the session in front of you. The bridge is the fix, because a hook reaches neither subagents nor the session after compaction.
+
+`antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own, for recall. It writes through this surface (`ANTUMBRA_URL`, `ANTUMBRA_TOKEN`), marks them volatile so they never train an expert, and is safe to run again.
+
+## Which skills are used
+
+`/skill-doctor` goes with the flags too. Two hooks count instead, because a skill is used two ways and each hook sees one: the agent calls the `Skill` tool (`PostToolUse`), or you type `/name`, which never touches the tool (`UserPromptExpansion`). Both run the same command, which reads the hook's input itself, so there is no script and nothing differs between shells. As a hook it never fails and never speaks, and `async` keeps a slow surface from delaying a skill:
+
+```json
+"PostToolUse": [{ "matcher": "Skill", "hooks": [
+  { "type": "command", "command": "antumbra claude skill-used", "async": true }]}],
+"UserPromptExpansion": [{ "hooks": [
+  { "type": "command", "command": "antumbra claude skill-used", "async": true }]}]
+```
+
+Each skill gets one volatile memory in your `claude-code` compartment, reinforced on every use. `antumbra claude skills` lists the skills installed for you and the project with their counts, the never-used first, and calls out one not used in `--days` (30).
+
+## The 10,000-character limit
+
+Claude Code caps a hook's context at 10,000 characters. Past the cap the agent is handed a file path and a 2,000-character preview it is never asked to open, so an oversized bootstrap is a truncated one that says nothing about it. The bootstrap stays under 9,500: the session block and the git line go first, memories follow best first while they fit, and the rest are counted in a closing line so the agent knows to `recall_memories` for them.
+
+`scripts/hooks/tests/session-start.sh` (bash, jq) and `scripts/hooks/tests/session-start.ps1` (pwsh) hold both siblings to this with no server and no `antumbra` installed.
 
 ## Git provenance: stale memories are visible, not silently wrong
 

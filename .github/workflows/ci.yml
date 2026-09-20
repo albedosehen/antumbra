@@ -69,6 +69,16 @@ jobs:
       - name: clippy --features models
         run: cargo clippy -p antumbra-train -p antumbra-serve -p antumbra-mcp -p antumbra-cli --features models --all-targets -- -D warnings
 
+  docs:
+    name: the ADR index agrees with the records
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The index drifted once in silence: five statuses disagreed with their
+      # own record and four records had no row, because nothing looked.
+      - name: ADR index check
+        run: bash scripts/adr-index-check.sh
+
   hooks:
     name: agent hook scripts
     runs-on: ubuntu-latest  # jq + curl preinstalled — exercises the POSIX .sh path
@@ -94,6 +104,10 @@ jobs:
         run: |
           ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
           echo "$ctx" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' > /dev/null
+      - name: session-start stays under the agent's limit and says what is different first (.sh)
+        run: bash scripts/hooks/tests/session-start.sh
+      - name: session-start stays under the agent's limit and says what is different first (.ps1)
+        run: pwsh -NoProfile -File scripts/hooks/tests/session-start.ps1
 
   audit:
     name: cargo audit (advisories)

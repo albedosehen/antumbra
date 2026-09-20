@@ -97,6 +97,10 @@ pub(super) struct MemoryView {
     /// re-anchored the memory since.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) orphaned_at: Option<String>,
+    /// When the memory was last written: stored, reinforced, or penalized. With
+    /// `reinforcement`, this is what lets a memory serve as a counter that also
+    /// says when it last counted (ADR-0021, skill usage).
+    pub(super) updated_at: String,
 }
 
 /// A memory's git anchor as returned to a caller.
@@ -134,6 +138,7 @@ impl From<&Memory> for MemoryView {
                 .map(ProvenanceView::from),
             scope: None,
             orphaned_at: orphan_of(&m.evidence).map(|o| o.at.to_rfc3339()),
+            updated_at: m.updated_at.to_rfc3339(),
         }
     }
 }
@@ -165,6 +170,13 @@ pub(super) struct IngestDocumentParams {
     /// source so a recalled chunk names the commit (see store_memory).
     #[serde(default)]
     pub(super) provenance: Option<ProvenanceParams>,
+    /// The compartment to keep the document in. Then only you and the people you
+    /// share that compartment with can recall it. Omit it for the workspace's
+    /// shared pool, which every member of the workspace can recall: that is the
+    /// right place for reference material, and the wrong place for anything
+    /// private.
+    #[serde(default)]
+    pub(super) compartment: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -195,6 +207,9 @@ pub(super) struct DocumentChunkView {
     /// The content digest copal reported for that archived original.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) copal_digest: Option<String>,
+    /// The compartment the document is kept in; omitted for the shared pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) compartment: Option<String>,
 }
 
 impl From<&DocumentChunk> for DocumentChunkView {
@@ -206,6 +221,7 @@ impl From<&DocumentChunk> for DocumentChunkView {
             content: c.content.clone(),
             copal_file: c.copal_file.clone(),
             copal_digest: c.copal_digest.clone(),
+            compartment: c.compartment.as_ref().map(|c| c.as_str().to_string()),
         }
     }
 }
