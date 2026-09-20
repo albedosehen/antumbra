@@ -97,6 +97,14 @@ pub(super) struct MemoryView {
     /// re-anchored the memory since.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) orphaned_at: Option<String>,
+    /// How close this memory is to the query, as cosine similarity in `[-1, 1]`,
+    /// on a recall that had a query to compare against. This is the dense
+    /// measure, not the fusion rank: rank says which came back first, and recall
+    /// always returns `top_k` whether or not anything was relevant, so only this
+    /// distinguishes a near match from the best of a bad lot. Absent when the
+    /// memory carries no embedding, and on the paths that never had a query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) similarity: Option<f32>,
     /// When the memory was last written: stored, reinforced, or penalized. With
     /// `reinforcement`, this is what lets a memory serve as a counter that also
     /// says when it last counted (ADR-0021, skill usage).
@@ -139,6 +147,7 @@ impl From<&Memory> for MemoryView {
             scope: None,
             orphaned_at: orphan_of(&m.evidence).map(|o| o.at.to_rfc3339()),
             updated_at: m.updated_at.to_rfc3339(),
+            similarity: None,
         }
     }
 }

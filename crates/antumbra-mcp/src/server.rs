@@ -431,17 +431,35 @@ impl McpServer {
         // in-scope ones, never hidden. The hook that boots a session goes
         // further with git in hand (is the commit on HEAD, does the branch
         // still exist); the server only knows what the caller told it.
+        // Say how close each one is while the hit is still in hand. Recall
+        // returns `top_k` whether or not anything was relevant, and the order
+        // alone cannot tell a near match from the best of a bad lot; the cosine
+        // can. Attached here rather than afterwards because the demotion below
+        // reorders the views, and a similarity paired with the wrong memory
+        // would be worse than none.
+        let with_similarity = |m: &Memory, mut view: MemoryView| {
+            view.similarity = m
+                .embedding
+                .as_deref()
+                .map(|e| antumbra_core::cosine_similarity(&q, e));
+            view
+        };
         let memories = if p.repo.is_some() || p.branch.is_some() {
             let ctx = GitContext {
                 repo: p.repo,
                 branch: p.branch,
             };
-            let views: Vec<MemoryView> = hits.iter().map(|m| MemoryView::scoped(m, &ctx)).collect();
+            let views: Vec<MemoryView> = hits
+                .iter()
+                .map(|m| with_similarity(m, MemoryView::scoped(m, &ctx)))
+                .collect();
             demote_out_of_scope(views, |v| {
                 v.scope.as_deref().map_or(Scope::Unknown, scope_from_str)
             })
         } else {
-            hits.iter().map(MemoryView::from).collect()
+            hits.iter()
+                .map(|m| with_similarity(m, MemoryView::from(m)))
+                .collect()
         };
         Ok(Json(MemoriesOut { memories }))
     }

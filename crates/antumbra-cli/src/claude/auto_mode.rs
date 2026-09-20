@@ -174,10 +174,14 @@ pub fn slots() -> Vec<Slot> {
 }
 
 /// One memory offered for a slot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
     pub id: String,
     pub content: String,
+    /// How close the surface said it was to the slot's question. Recall answers
+    /// whether or not anything is relevant, so without this every slot is
+    /// offered the same memories and nothing says which of them fit.
+    pub similarity: Option<f32>,
 }
 
 fn memories_in(answer: &Value) -> Vec<&Value> {
@@ -218,6 +222,11 @@ pub fn candidates(
                     Some(Candidate {
                         id: m.get("id")?.as_str()?.to_string(),
                         content: m.get("content")?.as_str()?.to_string(),
+                        // Narrowing on purpose: the surface speaks f32, JSON f64.
+                        similarity: m
+                            .get("similarity")
+                            .and_then(Value::as_f64)
+                            .map(|s| s as f32),
                     })
                 })
                 .collect();
@@ -227,7 +236,8 @@ pub fn candidates(
 }
 
 /// What memory had to say, or why it was not asked.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Not `Eq`: a candidate carries a similarity, and a float has no total equality.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Memory {
     Asked(Vec<(Slot, Vec<Candidate>)>),
     NotAsked(String),
@@ -306,9 +316,22 @@ pub fn render(owners: &[Owner], memory: &Memory) -> String {
                         .to_string(),
                 );
             }
+            // Closest first, and say how close: recall answers whatever it is
+            // asked, so the number is what separates a memory that fits the
+            // slot from one that merely came back.
+            offered.sort_by(|a, b| {
+                b.0.similarity
+                    .unwrap_or(f32::MIN)
+                    .total_cmp(&a.0.similarity.unwrap_or(f32::MIN))
+                    .then_with(|| a.0.id.cmp(&b.0.id))
+            });
             for (candidate, names) in offered {
+                let closeness = match candidate.similarity {
+                    Some(s) => format!("{s:.2}"),
+                    None => "   ?".to_string(),
+                };
                 out.push(format!(
-                    "  {}  {}",
+                    "  {closeness}  {}  {}",
                     candidate.id,
                     one_line(&candidate.content)
                 ));
@@ -456,6 +479,45 @@ mod tests {
         assert!(!text.contains("Source control"), "{text}");
     }
 
+    /// The whole reason the surface reports a similarity: the same memory comes
+    /// back for every slot, and only the number says which slot it belongs to.
+    #[test]
+    fn the_closest_candidate_is_offered_first_and_its_closeness_is_shown() -> anyhow::Result<()> {
+        let candidate = |id: &str, content: &str, similarity: f32| Candidate {
+            id: id.to_string(),
+            content: content.to_string(),
+            similarity: Some(similarity),
+        };
+        let far = candidate("memory:far", "the kettle is in the kitchen", 0.11);
+        let near = candidate("memory:near", "shaman is the production cluster", 0.88);
+        let unscored = Candidate {
+            id: "memory:old".to_string(),
+            content: "from a surface that does not score".to_string(),
+            similarity: None,
+        };
+        let Some(slot) = slots().first().copied() else {
+            anyhow::bail!("there are no slots");
+        };
+        let text = render(
+            &[],
+            &Memory::Asked(vec![(
+                slot,
+                vec![far.clone(), unscored.clone(), near.clone()],
+            )]),
+        );
+        let at = |needle: &str| {
+            text.find(needle)
+                .ok_or_else(|| anyhow::anyhow!("`{needle}` is not in:\n{text}"))
+        };
+        // Closest first, then the far one, and one with no score last rather
+        // than pretending it ranked.
+        let order = [at("memory:near")?, at("memory:far")?, at("memory:old")?];
+        assert!(order.windows(2).all(|p| p[0] < p[1]), "{text}");
+        assert!(text.contains("0.88"), "{text}");
+        assert!(text.contains("0.11"), "{text}");
+        Ok(())
+    }
+
     #[test]
     fn memory_is_asked_once_per_slot_and_an_empty_slot_is_still_shown() -> anyhow::Result<()> {
         let asked = std::cell::RefCell::new(Vec::new());
@@ -495,6 +557,7 @@ mod tests {
         let everything = Candidate {
             id: "memory:1".to_string(),
             content: "shaman is production".to_string(),
+            similarity: Some(0.42),
         };
         let found: Vec<(Slot, Vec<Candidate>)> = slots()
             .into_iter()
