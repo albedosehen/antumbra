@@ -17,6 +17,7 @@ mod loops;
 mod memory;
 mod overlays;
 mod panels;
+mod sovereign;
 mod table;
 
 use std::f64::consts::TAU;
@@ -83,6 +84,7 @@ fn page_body(f: &mut Frame, app: &App, area: Rect) {
         Page::Memory => memory::page(f, app, area),
         Page::Loop => loops::page(f, app, area),
         Page::Evals => evals::page(f, app, area),
+        Page::Sovereign => sovereign::page(f, app, area),
     }
 }
 

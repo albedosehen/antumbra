@@ -13,6 +13,7 @@ mod pacing;
 mod render;
 mod scroll;
 mod snapshot;
+mod sovereign;
 mod theme;
 mod transition;
 mod ui;
@@ -105,7 +106,7 @@ enum Command {
         /// Animation clock (ms) to freeze the frame at (deterministic output).
         #[arg(long, default_value_t = 1600.0)]
         at_ms: f64,
-        /// Top-level page to render: population, memory, loop, or evals.
+        /// Top-level page to render: population, memory, loop, evals, or sovereign.
         #[arg(long, default_value = "population")]
         page: String,
         /// Body layout to render: focused, dashboard, or graph.
@@ -168,6 +169,7 @@ async fn app_main() -> Result<()> {
                 "memory" => app::Page::Memory,
                 "loop" => app::Page::Loop,
                 "evals" => app::Page::Evals,
+                "sovereign" => app::Page::Sovereign,
                 _ => app::Page::Population,
             });
             app.set_layout(match layout.as_str() {
@@ -894,8 +896,10 @@ async fn run(
                                 app.cycle_page(-1);
                                 transition = Some(transition::layout_switch());
                             }
-                            KeyCode::Char(c @ '1'..='4') => {
-                                app.goto_page(c as usize - '1' as usize);
+                            KeyCode::Char(c) if app::Page::index_for_key(c).is_some() => {
+                                if let Some(index) = app::Page::index_for_key(c) {
+                                    app.goto_page(index);
+                                }
                                 transition = Some(transition::layout_switch());
                             }
                             KeyCode::Char('l') | KeyCode::Char('L') => {
