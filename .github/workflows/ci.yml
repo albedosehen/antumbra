@@ -69,6 +69,16 @@ jobs:
       - name: clippy --features models
         run: cargo clippy -p antumbra-train -p antumbra-serve -p antumbra-mcp -p antumbra-cli --features models --all-targets -- -D warnings
 
+  docs:
+    name: the ADR index agrees with the records
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The index drifted once in silence: five statuses disagreed with their
+      # own record and four records had no row, because nothing looked.
+      - name: ADR index check
+        run: bash scripts/adr-index-check.sh
+
   hooks:
     name: agent hook scripts
     runs-on: ubuntu-latest  # jq + curl preinstalled — exercises the POSIX .sh path
