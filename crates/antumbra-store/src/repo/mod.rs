@@ -6,6 +6,7 @@
 pub mod account;
 pub mod boundary;
 pub mod compartment;
+pub mod device;
 pub mod document;
 pub mod edge;
 pub mod embedder_config;

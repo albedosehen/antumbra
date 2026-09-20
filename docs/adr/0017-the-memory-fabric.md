@@ -1,6 +1,6 @@
 # ADR-0017 - The memory fabric: user nodes, and the tenant hive
 
-**Status:** Proposed. **Date:** 2026-09-02. **Gated on:** ADR-0006 v0 (single-GPU science) validated end to end. **Related:** 0006 (placement seam), 0007 (device_profile), 0012 (consolidation), 0013 (identity, umbra/penumbra), 0014 (compartments, grants), 0015 (MCP surface), 0016 (control plane). **Builds on:** antumbra-sync (R-1/R-2).
+**Status:** Proposed (the gate is cleared; the order of work below says what is in). **Date:** 2026-09-02. **Gated on:** ADR-0006 v0 (single-GPU science) validated end to end. **Related:** 0006 (placement seam), 0007 (device_profile), 0012 (consolidation), 0013 (identity, umbra/penumbra), 0014 (compartments, grants), 0015 (MCP surface), 0016 (control plane). **Builds on:** antumbra-sync (R-1/R-2).
 
 ## Context
 
@@ -191,6 +191,17 @@ The active hive is one composed predicate. HIVE_VISIBLE_RULE is appended as an O
 ## Validation
 
 (a) User fabric. A memory stored on a user's edge node appears on their hub, and the reverse. A reinforced compartment on the edge graduates an expert on that user's genesis node, and the edge answers through it. (b) Hive. With the owner's tenant toggle on and lily opted in, a compartment lily offers and the owner accepts is readable by oslo's agent. One the owner has not accepted is not. And nothing in the hive lets the owner invoke lily's or oslo's agents. Kill criterion: if the engine cannot express "read the active hive but not un-offered memory, and never invoke across users" through the existing record-access and grant model (ADR-0013, 0014), the hive needs its own access model instead of an extension of compartments.
+
+## Order of work
+
+Built in increments, each one shippable on its own. A box is ticked only when the thing is in `main` with a test that fails if it regresses.
+
+1. [x] The device registry. `DeviceProfile` / `DeviceRole` in antumbra-core, `repo::device` (upsert, list_for_user, genesis_for_user), `DEVICE_PERMS` and `device_user_idx` on the existing table. The write rule is the load-bearing part: opening the table so a node can register at all is what makes "a member cannot declare another's machine a trainer" something the engine has to enforce rather than something the app remembers to check (`tests/device_fabric.rs`). Roles are supplied by the caller here, not derived: nothing in the crates detects a backend or reads VRAM yet, and a role inferred from nothing is worse than a role declared.
+2. [ ] Role derivation on start. A node reads its own backend and VRAM and registers itself, rather than being told what it is.
+3. [ ] `placed_on`: where an expert lives, so serving knows which node holds it.
+4. [ ] Genesis dispatch. A compartment clearing the consolidation gate on a memory node is dispatched to that user's genesis node; a user with no genesis node escalates rather than failing.
+5. [ ] User-scoped sync. antumbra-sync hub-and-spoke reconciliation keyed by user, not tenant.
+6. [ ] The tenant hive (section B), which waits on the fabric being real.
 
 ## Out of scope (its own decision)
 
