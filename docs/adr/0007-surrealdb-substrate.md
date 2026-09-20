@@ -46,94 +46,76 @@ All four now render `Query::vector_search_indexed` (surql-rs 0.33), which emits 
 
 This also settles the **kill criterion** in Validation below, which asked whether HNSW KNN with a relational filter could be expressed performantly. It can, with one caveat that is a property of ANN rather than of this engine: beside an index-backed KNN, a `WHERE` is a **residual** filter. The graph walk returns its nearest neighbours across the whole table and the tenant equality (and the tombstone check) thin them afterwards, so a recall that asks for exactly `k` can come back short — or empty, for a tenant holding a small share of a large table. `antumbra_store::knn` sizes a wider candidate pool for the filtered paths and the answer is truncated to `k` after the thinning; the unfiltered paths (the shared expert and boundary populations) ask for `k` and get `k`. The exhaustive form did not have this property, which is the one thing it was better at, and it is why the change carries a regression test rather than only a plan assertion.
 
-### Schema (DDL)
+### Schema (surql-rs builders)
 
-```surql
--- Expert population (ADR-0001). Weights on disk; DB holds metadata + capability vector.
-DEFINE TABLE expert SCHEMAFULL;
-DEFINE FIELD name            ON expert TYPE string;
-DEFINE FIELD base_model      ON expert TYPE string;                  -- e.g. olmo3-7b, qwen3-1.7b
-DEFINE FIELD artifact_uri    ON expert TYPE string;                  -- gguf / safetensors / lora path
-DEFINE FIELD capability_card ON expert TYPE object DEFAULT {};       -- structured "what I do"
-DEFINE FIELD capability_vec  ON expert TYPE option<array<float>>;    -- learned, from eval behavior (0005)
-DEFINE FIELD fitness         ON expert TYPE float DEFAULT 0.0;
-DEFINE FIELD frozen_at       ON expert TYPE option<datetime>;        -- null = not yet frozen
-DEFINE FIELD generation      ON expert TYPE int DEFAULT 0;
-DEFINE FIELD created_at       ON expert TYPE datetime DEFAULT time::now();
-DEFINE INDEX expert_name_idx ON expert FIELDS name UNIQUE;
-DEFINE INDEX expert_cap_hnsw ON expert
-    FIELDS capability_vec HNSW DIMENSION 384 DIST COSINE TYPE F32;  -- routing-as-retrieval (0005)
+Authored the way the store is: surql-rs builders in `antumbra-store/schema.rs`, the single source of truth with migrations and drift detection. Tables are SCHEMALESS in v0, so there is no field DDL; the fields each table carries are documented in the comments below. The only hand-authored SurrealQL anywhere is the permission predicate strings passed to `.with_permissions(...)` (ADR-0013/0014). The domain id lives in a `key` field (SurrealDB `id` is reserved), so the unique indexes are on `key`. The graph relations (`graduated_into`, `explores`, `boundary_evidence`, `placed_on`) are created by `RELATE` at runtime, not defined here.
 
--- Shadow lifecycle (ADR-0002). The trainable penumbra.
-DEFINE TABLE shadow SCHEMAFULL;
-DEFINE FIELD parent_expert ON shadow TYPE option<record<expert>>;
-DEFINE FIELD adapter_uri   ON shadow TYPE option<string>;           -- LoRA checkpoint
-DEFINE FIELD status        ON shadow TYPE string
-    ASSERT $value IN ['spawning','exploring','scoring','graduated','pruned'];
-DEFINE FIELD generation    ON shadow TYPE int;
-DEFINE FIELD reward_curve  ON shadow TYPE array<float> DEFAULT [];
-DEFINE FIELD created_at     ON shadow TYPE datetime DEFAULT time::now();
-DEFINE INDEX shadow_status_idx ON shadow FIELDS status, generation;
-DEFINE TABLE graduated_into TYPE RELATION FROM shadow TO expert;     -- lineage
-DEFINE TABLE explores       TYPE RELATION FROM shadow TO expert;
+```rust
+// Expert population (ADR-0001). Fields: key, name, base_model, artifact_uri,
+// capability_card (object), capability_vec (learned via eval behavior, ADR-0005),
+// fitness, frozen_at, generation, created_at. Shared experts (owner = NONE) read
+// by all, private experts read by their owner only, owner/root writes.
+table_schema("expert")
+    .with_mode(TableMode::Schemaless)
+    .with_permissions(EXPERT_PERMS)
+    .with_indexes([
+        unique_index("expert_key_uq", ["key"]),
+        hnsw_index("expert_cap_hnsw", "capability_vec", embed_dim,
+            HnswDistanceType::Cosine, MTreeVectorType::F32, None, None),
+    ]),
 
--- Critic signal (ADR-0003). Dense per-step reward, verifiable-first.
-DEFINE TABLE reward_signal SCHEMAFULL;
-DEFINE FIELD run_id     ON reward_signal TYPE string;
-DEFINE FIELD step_idx   ON reward_signal TYPE int;
-DEFINE FIELD dimension  ON reward_signal TYPE string;               -- tests|schema|exec|critic|...
-DEFINE FIELD value      ON reward_signal TYPE float;
-DEFINE FIELD source     ON reward_signal TYPE string
-    ASSERT $value IN ['verifier','critic'];                        -- verifier = primary, critic = densifier
-DEFINE FIELD created_at ON reward_signal TYPE datetime DEFAULT time::now();
-DEFINE INDEX reward_run_idx ON reward_signal FIELDS run_id, step_idx;
+// Shadow lifecycle (ADR-0002), the trainable penumbra. Fields: key,
+// parent_expert, adapter_uri, status in {spawning, exploring, scoring,
+// graduated, pruned}, generation, reward_curve, created_at.
+table_schema("shadow")
+    .with_mode(TableMode::Schemaless)
+    .with_indexes([
+        unique_index("shadow_key_uq", ["key"]),
+        index("shadow_status_idx", ["status", "generation"]),
+    ]),
 
--- Inhibitory store (ADR-0004). Boundary, not just a negative. Survives generations.
-DEFINE TABLE failure_boundary SCHEMAFULL;
-DEFINE FIELD action          ON failure_boundary TYPE string;
-DEFINE FIELD fail_context    ON failure_boundary TYPE object;       -- where it fails (C)
-DEFINE FIELD near_ok_context ON failure_boundary TYPE option<object>; -- nearest where it doesn't (C')
-DEFINE FIELD context_vec     ON failure_boundary TYPE option<array<float>>;
-DEFINE FIELD confidence      ON failure_boundary TYPE float DEFAULT 0.5;
-DEFINE FIELD generation      ON failure_boundary TYPE int;
-DEFINE FIELD created_at       ON failure_boundary TYPE datetime DEFAULT time::now();
-DEFINE INDEX fb_ctx_hnsw ON failure_boundary
-    FIELDS context_vec HNSW DIMENSION 384 DIST COSINE TYPE F32;    -- inhibitory penalty lookup (0005)
-DEFINE TABLE boundary_evidence TYPE RELATION FROM failure_boundary TO shadow;
+// Critic signal (ADR-0003), verifier-first. Fields: run_id, step_idx, dimension
+// (tests, schema, exec, critic, ...), value, source in {verifier, critic},
+// created_at.
+table_schema("reward_signal")
+    .with_mode(TableMode::Schemaless)
+    .with_indexes([index("reward_run_idx", ["run_id", "step_idx"])]),
 
--- Durable orchestration + generational loop (ADR-0005/0008). State = checkpoint.
-DEFINE TABLE orchestration_run SCHEMAFULL;
-DEFINE FIELD task_id         ON orchestration_run TYPE string;
-DEFINE FIELD round           ON orchestration_run TYPE int DEFAULT 0;
-DEFINE FIELD status          ON orchestration_run TYPE string
-    ASSERT $value IN ['routing','executing','scoring','deciding','done','failed'];
-DEFINE FIELD chosen_experts  ON orchestration_run TYPE array<record<expert>> DEFAULT [];
-DEFINE FIELD compose_strategy ON orchestration_run TYPE option<string>;  -- parallel|cascade|vote|refine
-DEFINE FIELD updated_at      ON orchestration_run TYPE datetime DEFAULT time::now();
-DEFINE INDEX orun_status_idx ON orchestration_run FIELDS status, updated_at;  -- resume stalled runs
+// Inhibitory store (ADR-0004), the counterfactual boundary. Shared population
+// (any tenant reads, owner/root writes). Fields: key, action, fail_context (C),
+// near_ok_context (C'), context_vec, confidence, generation, created_at.
+table_schema("failure_boundary")
+    .with_mode(TableMode::Schemaless)
+    .with_permissions(SHARED_POPULATION_PERMS)
+    .with_indexes([
+        unique_index("fb_key_uq", ["key"]),
+        hnsw_index("fb_ctx_hnsw", "context_vec", embed_dim,
+            HnswDistanceType::Cosine, MTreeVectorType::F32, None, None),
+    ]),
 
--- Placement (ADR-0006) - defined now, used when the fleet wakes up.
-DEFINE TABLE device_profile SCHEMAFULL;
-DEFINE FIELD host         ON device_profile TYPE string;
-DEFINE FIELD backend      ON device_profile TYPE string;           -- cuda|metal|mlx|cpu
-DEFINE FIELD vram_gb      ON device_profile TYPE float;
-DEFINE FIELD capabilities ON device_profile TYPE object DEFAULT {};
-DEFINE INDEX device_host_idx ON device_profile FIELDS host, backend;
-DEFINE TABLE placed_on TYPE RELATION FROM expert TO device_profile;
+// Durable orchestration and generational loop (ADR-0005/0008). Fields: key,
+// task_id, round, status in {routing, executing, scoring, deciding, done,
+// failed}, chosen_experts, compose_strategy (parallel|cascade|vote|refine),
+// updated_at.
+table_schema("orchestration_run")
+    .with_mode(TableMode::Schemaless)
+    .with_indexes([
+        unique_index("orun_key_uq", ["key"]),
+        index("orun_status_idx", ["status", "updated_at"]),
+    ]),
 
--- Validation harness (the audit-trail pattern: one row per measured run).
-DEFINE TABLE evaluation_run SCHEMAFULL;
-DEFINE FIELD run_id        ON evaluation_run TYPE string;
-DEFINE FIELD subject_kind  ON evaluation_run TYPE string
-    ASSERT $value IN ['expert','shadow','router','composed'];
-DEFINE FIELD subject_id    ON evaluation_run TYPE string;
-DEFINE FIELD corpus_task_id ON evaluation_run TYPE string;
-DEFINE FIELD status        ON evaluation_run TYPE string
-    ASSERT $value IN ['pending','running','success','failure','error'];
-DEFINE FIELD metrics       ON evaluation_run TYPE option<object>;
-DEFINE FIELD regression_fingerprint ON evaluation_run TYPE option<string>;  -- sha256(canonical output)
-DEFINE FIELD created_at     ON evaluation_run TYPE datetime DEFAULT time::now();
-DEFINE INDEX eval_subject_idx ON evaluation_run FIELDS subject_kind, subject_id;
+// Placement registry (ADR-0006), inert until the fleet wakes (ADR-0017). Fields:
+// host, backend in {cuda, metal, mlx, cpu}, vram_gb, capabilities.
+table_schema("device_profile")
+    .with_mode(TableMode::Schemaless)
+    .with_indexes([index("device_host_idx", ["host", "backend"])]),
+
+// Validation harness. Fields: run_id, subject_kind in {expert, shadow, router,
+// composed}, subject_id, corpus_task_id, status in {pending, running, success,
+// failure, error}, metrics, regression_fingerprint (sha256), created_at.
+table_schema("evaluation_run")
+    .with_mode(TableMode::Schemaless)
+    .with_indexes([index("eval_subject_idx", ["subject_kind", "subject_id"])]),
 ```
 
 ## Consequences
