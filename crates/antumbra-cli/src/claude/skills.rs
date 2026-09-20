@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 
 use super::conventions::{compartment_id, Call};
 
-const KEY_PREFIX: &str = "[skill-use:";
+const KEY_PREFIX: &str = antumbra_core::keyed::SKILL_USE;
 
 /// A name worth keeping: what a skill can be called, and nothing a hook's input
 /// could smuggle into a memory.
@@ -48,7 +48,7 @@ pub fn skill_in(hook: &Value) -> Option<String> {
 /// The whole text of a skill's counter. The name comes twice on purpose: once in
 /// the key a later run matches on, once bare so that recall finds it by name.
 pub fn counter_text(name: &str) -> String {
-    format!("{KEY_PREFIX}{name}] {name}")
+    format!("{} {name}", antumbra_core::keyed::key(KEY_PREFIX, name))
 }
 
 /// What recording a use did.
@@ -117,9 +117,7 @@ pub fn usage(call: Call<'_>) -> anyhow::Result<BTreeMap<String, Usage>> {
         let Some(name) = memory
             .get("content")
             .and_then(Value::as_str)
-            .and_then(|content| content.strip_prefix(KEY_PREFIX))
-            .and_then(|rest| rest.split_once(']'))
-            .map(|(name, _)| name)
+            .and_then(|content| antumbra_core::keyed::name_in(content, KEY_PREFIX))
         else {
             continue;
         };

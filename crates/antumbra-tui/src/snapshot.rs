@@ -303,6 +303,8 @@ mod tests {
             memories: demo_memories(now),
             edges: demo_edges(now),
             selected_memory: 0,
+            sovereign: crate::sovereign::View::default(),
+            selected_skill: 0,
             loop_heads: demo_loop_heads(now),
             selected_loop: 0,
             loop_halt_pending: false,
@@ -436,6 +438,50 @@ mod tests {
         app.set_page(crate::app::Page::Memory);
         let buf = render(&mut app, 120, 36, 1600.0).unwrap();
         assert_golden("memory_page", &to_text(&buf));
+    }
+
+    // Golden the Sovereign page: the rules on the left, skill use on the right,
+    // stalest first. Fixed dates, so the frame does not depend on the clock (the
+    // clock only decides a colour, which the text golden does not see).
+    #[test]
+    fn golden_sovereign_page() -> anyhow::Result<()> {
+        use chrono::TimeZone;
+        let day = |d: u32| {
+            Utc.with_ymd_and_hms(2026, 9, d, 12, 0, 0)
+                .single()
+                .ok_or_else(|| anyhow::anyhow!("2026-09-{d} is not a date"))
+        };
+        let keyed = [
+            ("[claude-code:verified] The claude-code rules in this compartment were checked against Claude Code 2.1.278 on 2026-09-19.", 0.9, 0, 19),
+            ("[claude-code:agents-md] AGENTS.md is no longer read as project instructions.", 0.9, 0, 19),
+            ("[claude-code:agents-md] an earlier text of the same rule", 0.675, 0, 12),
+            ("[claude-code:mcp-schemas] MCP tools the API rejects are no longer excluded.", 0.9, 0, 19),
+            ("[claude-code:advisor] the advisor tool", 0.675, 0, 19),
+            ("[skill-use:elegant-design] elegant-design", 0.9, 11, 18),
+            ("[skill-use:code-review] code-review", 0.9, 2, 3),
+            ("[skill-use:deploy] deploy", 0.9, 0, 9),
+        ];
+        let mut app = demo_app();
+        for (n, (content, confidence, reinforcement, d)) in keyed.into_iter().enumerate() {
+            let when = day(d)?;
+            let mut m = Memory::new(
+                format!("memory:keyed-{n}"),
+                "ws:demo",
+                MemoryNetwork::World,
+                content,
+                confidence,
+                when,
+            );
+            m.reinforcement = reinforcement;
+            m.updated_at = when;
+            app.memories.push(m);
+        }
+        app.sovereign = crate::sovereign::View::from_memories(&app.memories);
+        app.set_page(crate::app::Page::Sovereign);
+        app.select_next();
+        let buf = render(&mut app, 120, 36, 1600.0)?;
+        assert_golden("sovereign_page", &to_text(&buf));
+        Ok(())
     }
 
     // Golden the sortable population table (full-width data grid, no animated
