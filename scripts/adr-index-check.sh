@@ -23,9 +23,12 @@ failed=0
 
 fail() { echo "  FAIL  $1"; failed=1; }
 
-# The status cell of a row, and the first word of it, markdown stripped.
+# The status cell of a row, and the class of a status: its first word, with
+# markdown and trailing punctuation gone. Records do not all separate their
+# header fields the same way (most use `·`, 0017 uses `.`), and that is a
+# prose choice this has no business policing.
 row_status() { sed -n "s/^| \[$1\]([^)]*) *| *[^|]*| *\([^|]*[^| ]\) *|.*/\1/p" "$index" | head -1; }
-first_word() { printf '%s' "$1" | tr -d '*' | awk '{print tolower($1)}'; }
+first_word() { printf '%s' "$1" | tr -d '*' | awk '{print tolower($1)}' | tr -d '.,;:'; }
 
 for file in "$adr"/0*.md; do
   n=$(basename "$file" | cut -d- -f1)
@@ -33,7 +36,7 @@ for file in "$adr"/0*.md; do
     fail "ADR $n has no row in the index"
     continue
   fi
-  file_status=$(sed -n 's/^\*\*Status:\*\* *//p' "$file" | head -1 | sed 's/ · \*\*Date.*//')
+  file_status=$(sed -n 's/^\*\*Status:\*\* *//p' "$file" | head -1 | sed 's/ *[·.] *\*\*Date.*//')
   if [ -z "$file_status" ]; then
     fail "ADR $n has no **Status:** line"
     continue
