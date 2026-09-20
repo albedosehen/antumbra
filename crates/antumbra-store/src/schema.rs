@@ -131,6 +131,20 @@ const DOCUMENT_PERMS: [(&str, &str); 4] = [
     ("delete", MEMORY_WRITE_RULE),
 ];
 
+/// A device profile is a machine describing itself into its owner's fabric
+/// (ADR-0017). Read is tenant-wide, because dispatch has to be able to find the
+/// user's genesis node from whichever node is asking. Write is the user's own:
+/// a node registers only the row keyed to the session running on it, so one
+/// tenant member cannot re-declare another's laptop a trainer and have work
+/// routed to it. The table was previously owner-only, under which a node could
+/// never register itself at all.
+const DEVICE_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("update", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("delete", "tenant_id = $auth.tenant AND user = $auth.user"),
+];
+
 /// The link-capability gate for `memory_edge` create/update: you may create an
 /// edge only when its *target* memory is in a compartment you may LINK into:
 /// the shared pool (un-compartmentalized), a compartment you own, or one granted
@@ -214,10 +228,16 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("eval_subject_idx", ["subject_kind", "subject_id"])]),
-        // Placement registry for hardware-adaptive serving (inert until the fleet wakes).
+        // A user's fabric: which of their machines an agent is running on, and
+        // which one of them can train (ADR-0017). Keyed per (tenant, user, host),
+        // so the user index is what dispatch looks their genesis node up by.
         table_schema("device_profile")
             .with_mode(TableMode::Schemaless)
-            .with_indexes([index("device_host_idx", ["host", "backend"])]),
+            .with_permissions(DEVICE_PERMS)
+            .with_indexes([
+                index("device_host_idx", ["host", "backend"]),
+                index("device_user_idx", ["user", "role"]),
+            ]),
         // Learned router singleton (the learned gate). Shared population: tenants read
         // it to route a task across the shared experts; the owner trains/writes
         // it. Previously auto-created (which defaulted to deny for record

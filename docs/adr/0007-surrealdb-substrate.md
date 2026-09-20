@@ -104,11 +104,18 @@ table_schema("orchestration_run")
         index("orun_status_idx", ["status", "updated_at"]),
     ]),
 
-// Placement registry (ADR-0006), inert until the fleet wakes (ADR-0017). Fields:
-// host, backend in {cuda, metal, mlx, cpu}, vram_gb, capabilities.
+// A user's fabric (ADR-0017 A). Fields: key, tenant_id, user, host, backend in
+// {cuda, metal, mlx, cpu}, vram_mib, role in {memory, genesis}, updated_at. The
+// permissions are DEVICE_PERMS: any tenant session reads (dispatch has to find
+// a user's genesis node from whichever node is asking), a user writes only
+// their own rows.
 table_schema("device_profile")
     .with_mode(TableMode::Schemaless)
-    .with_indexes([index("device_host_idx", ["host", "backend"])]),
+    .with_permissions(DEVICE_PERMS)
+    .with_indexes([
+        index("device_host_idx", ["host", "backend"]),
+        index("device_user_idx", ["user", "role"]),
+    ]),
 
 // Validation harness. Fields: run_id, subject_kind in {expert, shadow, router,
 // composed}, subject_id, corpus_task_id, status in {pending, running, success,
@@ -122,7 +129,7 @@ table_schema("evaluation_run")
 
 - **Positive:** one system for document + vector + graph + durable state; `surql-rs` matches the Rust plane; proven patterns (drift detection, migrations, `regression_fingerprint`) are reused, not reinvented.
 - **Negative:** single-DB coupling; the `failure_boundary` and memory tables grow unbounded → need a merge/decay policy (a learning problem inside the learning system); KNN-with-relational-filters is raw SurrealQL (the `surql-rs` query builder doesn't cover it) - acceptable. _(Superseded 2026-08-13: the builder covers it. What remains is that the filter is a residual, handled by over-fetching — see the implementation note above.)_
-- **Neutral:** `device_profile` / `placed_on` are defined now but inert until ADR-0006's fleet wakes up.
+- **Neutral:** `placed_on` is defined now but inert until ADR-0006's fleet wakes up. `device_profile` is no longer inert: ADR-0017 gave it a registry, a write rule, and a user index _(2026-09-20)_.
 
 ## Alternatives considered
 
