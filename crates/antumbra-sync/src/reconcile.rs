@@ -39,6 +39,10 @@ use crate::table::TableSpec;
 pub struct ReconcileStats {
     pub pushed: usize,
     pub pulled: usize,
+    /// Rows the session could read and could not write. Counted apart from
+    /// `pushed` because the engine refuses silently: without this, a collector
+    /// scoped to a user would report steady progress while landing nothing.
+    pub refused: usize,
 }
 
 impl ReconcileStats {
@@ -49,6 +53,7 @@ impl ReconcileStats {
     fn add(&mut self, other: ReconcileStats) {
         self.pushed += other.pushed;
         self.pulled += other.pulled;
+        self.refused += other.refused;
     }
 }
 
@@ -137,27 +142,37 @@ async fn reconcile_indexed(
     remote_rows: &BTreeMap<String, Value>,
 ) -> Result<ReconcileStats> {
     let mut stats = ReconcileStats::default();
+    // A refusal is counted, never confused with a write. The engine persists
+    // nothing and reports no error when a session may read a row it may not
+    // write, so this is the only place the difference is visible at all.
+    let record =
+        |stats: &mut ReconcileStats, written: row_repo::Written, pulled: bool| match written {
+            row_repo::Written::Yes if pulled => stats.pulled += 1,
+            row_repo::Written::Yes => stats.pushed += 1,
+            row_repo::Written::Refused => stats.refused += 1,
+            row_repo::Written::NoId => {}
+        };
     for (id, lrow) in local_rows {
         match remote_rows.get(id) {
             None => {
-                if row_repo::put_row(remote, lrow).await? {
-                    stats.pushed += 1;
-                }
+                let written = row_repo::put_row(remote, lrow).await?;
+                record(&mut stats, written, false);
             }
             Some(rrow) => {
                 if is_newer(lrow, rrow, spec) {
-                    if row_repo::put_row(remote, lrow).await? {
-                        stats.pushed += 1;
-                    }
-                } else if is_newer(rrow, lrow, spec) && row_repo::put_row(local, rrow).await? {
-                    stats.pulled += 1;
+                    let written = row_repo::put_row(remote, lrow).await?;
+                    record(&mut stats, written, false);
+                } else if is_newer(rrow, lrow, spec) {
+                    let written = row_repo::put_row(local, rrow).await?;
+                    record(&mut stats, written, true);
                 }
             }
         }
     }
     for (id, rrow) in remote_rows {
-        if !local_rows.contains_key(id) && row_repo::put_row(local, rrow).await? {
-            stats.pulled += 1;
+        if !local_rows.contains_key(id) {
+            let written = row_repo::put_row(local, rrow).await?;
+            record(&mut stats, written, true);
         }
     }
     Ok(stats)
@@ -301,7 +316,8 @@ mod tests {
             stats,
             ReconcileStats {
                 pushed: 1,
-                pulled: 1
+                pulled: 1,
+                refused: 0
             }
         );
 
@@ -336,7 +352,8 @@ mod tests {
             stats,
             ReconcileStats {
                 pushed: 0,
-                pulled: 1
+                pulled: 1,
+                refused: 0
             },
             "newer remote pulled to local"
         );
@@ -376,7 +393,8 @@ mod tests {
             stats,
             ReconcileStats {
                 pushed: 1,
-                pulled: 0
+                pulled: 0,
+                refused: 0
             },
             "tombstone pushed"
         );
@@ -450,7 +468,8 @@ mod tests {
             stats,
             ReconcileStats {
                 pushed: 1,
-                pulled: 0
+                pulled: 0,
+                refused: 0
             },
             "revocation pushed"
         );
@@ -496,7 +515,8 @@ mod tests {
             s,
             ReconcileStats {
                 pushed: 1,
-                pulled: 0
+                pulled: 0,
+                refused: 0
             }
         );
 
@@ -514,7 +534,8 @@ mod tests {
             s,
             ReconcileStats {
                 pushed: 1,
-                pulled: 0
+                pulled: 0,
+                refused: 0
             },
             "only B moved"
         );
@@ -561,7 +582,8 @@ mod tests {
             s,
             ReconcileStats {
                 pushed: 0,
-                pulled: 1
+                pulled: 1,
+                refused: 0
             },
             "remote-only update pulled"
         );
@@ -627,7 +649,8 @@ mod tests {
             stats,
             ReconcileStats {
                 pushed: 1,
-                pulled: 0
+                pulled: 0,
+                refused: 0
             }
         );
         assert!(
@@ -808,6 +831,141 @@ mod fabric_tests {
                 "{name} must not resurrect the pending row"
             );
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+    use antumbra_core::{DeviceProfile, DeviceRole, TenantId, UserId};
+    use antumbra_store::repo::{device, principal};
+    use antumbra_store::EMBED_DIM;
+
+    use crate::table::PENUMBRA_TABLES;
+
+    const DEVICE: &TableSpec = &TableSpec {
+        name: "device_profile",
+        version_field: "updated_at",
+    };
+
+    fn tenant() -> TenantId {
+        TenantId::new("ws:org")
+    }
+
+    /// Two members of one tenant, provisioned on both stores so either can sign
+    /// a session in.
+    async fn org() -> Result<(Store, Store, UserId, UserId)> {
+        let local = Store::connect_memory(EMBED_DIM).await?;
+        let remote = Store::connect_memory(EMBED_DIM).await?;
+        let lily = UserId::new("user:lily");
+        let oslo = UserId::new("user:oslo");
+        for store in [&local, &remote] {
+            principal::provision(store, &tenant(), &lily).await?;
+            principal::provision(store, &tenant(), &oslo).await?;
+        }
+        Ok((local, remote, lily, oslo))
+    }
+
+    /// The test ADR-0017 increment 5 asks for, and the reason the record-session
+    /// design is not sufficient on its own.
+    ///
+    /// `device_profile` is tenant-readable and own-write. Under lily's session
+    /// the collector can see oslo's node and cannot write it. The engine
+    /// refuses by persisting nothing and without an error, so before this the
+    /// row was counted pushed and never landed -- every cycle, forever.
+    #[tokio::test]
+    async fn a_row_the_session_may_read_and_not_write_is_refused_not_pushed() -> Result<()> {
+        let (local, remote, _lily, oslo) = org().await?;
+        let now = Utc::now();
+        // Oslo's machine, on the local store only.
+        device::upsert(
+            &local,
+            &DeviceProfile::new(
+                tenant(),
+                oslo.clone(),
+                "oslos-rig",
+                "cuda",
+                DeviceRole::Genesis,
+                now,
+            ),
+        )
+        .await?;
+
+        // As owner, it replicates: this is today's collector, and the control
+        // that proves the refusal below is about the session, not the row.
+        let owner_pass = reconcile_table(&local, &remote, DEVICE).await?;
+        assert_eq!((owner_pass.pushed, owner_pass.refused), (1, 0));
+
+        // Now the same row, from a store where it has not landed, under lily.
+        let (local, remote, lily, oslo) = org().await?;
+        device::upsert(
+            &local,
+            &DeviceProfile::new(
+                tenant(),
+                oslo.clone(),
+                "oslos-rig",
+                "cuda",
+                DeviceRole::Genesis,
+                now,
+            ),
+        )
+        .await?;
+        local.signin(&tenant(), &lily).await?;
+        remote.signin(&tenant(), &lily).await?;
+
+        let scoped = reconcile_table(&local, &remote, DEVICE).await?;
+        assert_eq!(
+            (scoped.pushed, scoped.refused),
+            (0, 1),
+            "lily may read oslo's node and may not write it"
+        );
+        // And the engine really did refuse: nothing crossed.
+        remote.invalidate().await?;
+        assert!(
+            device::list_for_user(&remote, &tenant(), &oslo)
+                .await?
+                .is_empty(),
+            "the row did not land, which is what `refused` is reporting"
+        );
+        Ok(())
+    }
+
+    /// The other half: a row the session owns crosses normally, so `refused` is
+    /// reporting the permission boundary and not simply every write under a
+    /// record session.
+    #[tokio::test]
+    async fn a_row_the_session_owns_still_crosses() -> Result<()> {
+        let (local, remote, lily, _oslo) = org().await?;
+        let now = Utc::now();
+        device::upsert(
+            &local,
+            &DeviceProfile::new(
+                tenant(),
+                lily.clone(),
+                "her-laptop",
+                "cpu",
+                DeviceRole::Memory,
+                now,
+            ),
+        )
+        .await?;
+        local.signin(&tenant(), &lily).await?;
+        remote.signin(&tenant(), &lily).await?;
+
+        let stats = reconcile_all(&local, &remote, PENUMBRA_TABLES).await?;
+        assert_eq!(
+            (stats.pushed, stats.refused),
+            (1, 0),
+            "her own node is hers to replicate"
+        );
+        remote.invalidate().await?;
+        assert_eq!(
+            device::list_for_user(&remote, &tenant(), &lily)
+                .await?
+                .len(),
+            1
+        );
         Ok(())
     }
 }

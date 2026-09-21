@@ -238,7 +238,11 @@ Built in increments, each one shippable on its own. A box is ticked only when th
 
    **The resolution: read scope must equal write scope, and the way to get there is a replication policy narrower than the read ACL.** A user's nodes carry what that user *owns* plus the shared tenant pool -- not what is merely granted to them. That is not a duplicate of `MEMORY_SELECT_RULE` and must not be written as one; it is a different statement. The ACL says what you may **see**, through the engine, live. The policy says what your other machines get a **copy** of. A grant is a live read, not a licence to take someone else's private compartment home on a laptop, and the narrower policy happens to coincide exactly with what the session can write back.
 
-   What that needs: an identity on `SyncConfig`, a sign-in after connect in `worker.rs`, and a per-table replication scope on `TableSpec` for the tables whose writable set is narrower than their readable one. Plus the test that would have caught the trap: a reconcile under a record session where a row the session may read and may not write is reported as refused rather than as pushed.
+   What that needs, in order:
+
+   1. [x] **Make a refusal visible.** `put_row` answers `Yes` / `Refused` / `NoId` instead of a bool that meant "had an id", and `ReconcileStats` counts `refused` apart from `pushed`. The engine is the only witness to a refused write and it does not speak: it persists nothing and returns no row, which is indistinguishable from success unless the returned record is checked. This lands first because every step below is unsafe without it -- a scoped collector with no refusal count reports progress it never made, and the existing tests could not catch that, since they all run in owner mode where no refusal is possible. The test is the one this increment asked for: under lily's session, oslo's `device_profile` row is readable, unwritable, and now counted `refused` with the row verified absent on the far side.
+   2. [ ] An identity on `SyncConfig` and a sign-in after connect in `worker.rs`.
+   3. [ ] A per-table replication scope on `TableSpec` for the tables whose writable set is narrower than their readable one, implementing the own-plus-pool policy above.
 6. [ ] The tenant hive (section B), which waits on the fabric being real.
 
 ## Out of scope (its own decision)
