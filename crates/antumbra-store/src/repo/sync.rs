@@ -60,10 +60,35 @@ pub async fn list_rows_since(
     store.read_paged(table, None, Some(&filter)).await
 }
 
+/// What became of a replicated row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Written {
+    /// The row landed.
+    Yes,
+    /// The engine persisted nothing. Under a record session that means the
+    /// caller may **read** this row and may not **write** it, which is not an
+    /// error and must not be counted as a write: the engine refuses silently,
+    /// so a caller that assumed success would report progress it never made,
+    /// on every cycle, forever.
+    Refused,
+    /// The row carried no usable id. Skipped, not an error.
+    NoId,
+}
+
+impl Written {
+    pub fn landed(self) -> bool {
+        matches!(self, Written::Yes)
+    }
+}
+
 /// Upsert a raw row (as returned by [`list_rows`]) into this store, recreating
 /// the same record it carries (idempotent `UPSERT ... CONTENT`). The id is
-/// addressed separately, so it is stripped from the written payload. Returns
-/// `false` if the row has no usable id (skipped, not an error).
+/// addressed separately, so it is stripped from the written payload.
+///
+/// The answer distinguishes a refusal from a success because the engine does
+/// not. A disallowed write persists nothing and returns no row, exactly as a
+/// permitted one that wrote nothing would look if we only checked for an
+/// error -- so the returned record is the only evidence either way.
 ///
 /// The row's own `id` target is reused **verbatim** rather than parsed back into
 /// a `RecordID` and re-rendered: SurrealDB's v3 id escaping (e.g. `⟨`uuid`⟩` for
@@ -71,18 +96,21 @@ pub async fn list_rows_since(
 /// re-render would double-escape and address a different record. Both stores
 /// render the same id identically, so the verbatim string also serves as the
 /// cross-store match key ([`row_id`]).
-pub async fn put_row(store: &Store, row: &Value) -> Result<bool> {
+pub async fn put_row(store: &Store, row: &Value) -> Result<Written> {
     let Some(target) = row_id(row) else {
-        return Ok(false);
+        return Ok(Written::NoId);
     };
     let mut data = row.clone();
     if let Value::Object(map) = &mut data {
         map.remove("id");
     }
-    upsert_record_target(store.client(), &target, data)
+    let written = upsert_record_target(store.client(), &target, data)
         .await
         .map_err(map)?;
-    Ok(true)
+    Ok(match written {
+        Value::Object(_) => Written::Yes,
+        _ => Written::Refused,
+    })
 }
 
 /// The stable match key for a row -- its record id target string, used both to
@@ -194,7 +222,7 @@ mod tests {
         let id = row_id(row).expect("row carries a record id");
         assert!(id.starts_with("memory:"), "id is a memory record: {id}");
 
-        assert!(put_row(&dst, row).await.unwrap(), "row replicated");
+        assert!(put_row(&dst, row).await.unwrap().landed(), "row replicated");
 
         let dst_rows = list_rows(&dst, "memory").await.unwrap();
         assert_eq!(dst_rows.len(), 1, "destination got exactly one row");
