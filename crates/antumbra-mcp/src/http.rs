@@ -369,6 +369,18 @@ impl HttpState {
             let _guard = self.auth.lock().await;
             self.store.signin_root().await?;
             let dc = crate::provision_identity(&self.store, &tenant, &user).await?;
+            // This machine is a node in that user's fabric (ADR-0017 A2). A
+            // hosted server is not "nobody's machine": the agent's recall and
+            // store really are happening here, and if this box can train then
+            // it is where that user's genesis belongs. Registered once per
+            // identity, because `mcp_for` is cached per identity.
+            //
+            // Written as owner rather than under the user's record session,
+            // like the principal and the default compartment either side of
+            // it: DEVICE_PERMS exists to stop one *member* re-roling another
+            // member's machine, and the owner provisioning on behalf of the
+            // identity it just created is the same act as the two around it.
+            crate::register_node(&self.store, &tenant, &user, &self.host).await;
             // Resolve the workspace's embedder under the owner connection (P-1c).
             let emb = self.embedder_for(&tenant).await;
             (dc, emb)

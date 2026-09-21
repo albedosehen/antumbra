@@ -781,3 +781,97 @@ async fn a_run_stays_where_it_is_when_there_is_nowhere_better_for_it() -> anyhow
     }
     Ok(())
 }
+
+async fn ask(
+    s: &McpServer,
+    compartment: &str,
+    from: &str,
+    at: chrono::DateTime<Utc>,
+) -> anyhow::Result<()> {
+    antumbra_store::repo::genesis::ask(
+        &s.store,
+        &antumbra_core::GenesisRequest::new(
+            s.tenant.clone(),
+            s.user.clone(),
+            CompartmentId::new(compartment),
+            from,
+            "the-rig",
+            at,
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
+/// ADR-0017 A2, the taking half. A node that can train clears what its user's
+/// other machines left for it before the compartment it happened to be handed,
+/// because a request has been waiting and the write has not.
+#[tokio::test]
+async fn a_trainer_takes_the_run_that_has_waited_longest() -> anyhow::Result<()> {
+    let rig = server_on("the-rig").await?;
+    let now = Utc::now();
+    ask(
+        &rig,
+        "comp:rust",
+        "her-laptop",
+        now - chrono::Duration::hours(1),
+    )
+    .await?;
+    ask(
+        &rig,
+        "comp:surql",
+        "his-laptop",
+        now - chrono::Duration::hours(3),
+    )
+    .await?;
+
+    let taken = rig
+        .claim_genesis_request(&rig.store)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("a waiting run must be taken"))?;
+    assert_eq!(taken.compartment.as_str(), "comp:surql", "oldest first");
+    assert_eq!(taken.status, antumbra_core::GenesisStatus::Claimed);
+
+    // Claiming is a write, so a second trainer in the same fabric takes the
+    // next one rather than the same one twice.
+    let also = rig
+        .claim_genesis_request(&rig.store)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the second run must be taken"))?;
+    assert_eq!(also.compartment.as_str(), "comp:rust");
+
+    // Nothing pending left, even though both are still open.
+    assert!(rig.claim_genesis_request(&rig.store).await.is_none());
+    assert_eq!(
+        antumbra_store::repo::genesis::list_open_for_user(&rig.store, &rig.tenant, &rig.user)
+            .await?
+            .len(),
+        2,
+        "claimed is not finished: a trainer that dies does not lose the work"
+    );
+    Ok(())
+}
+
+/// The ordinary case, and the only one in a fabric of a single node: there is
+/// nothing waiting, so the trainer gets on with what it was handed.
+#[tokio::test]
+async fn an_empty_queue_leaves_the_trainer_to_its_own_work() -> anyhow::Result<()> {
+    let alone = server_on("the-only-box").await?;
+    assert!(alone.claim_genesis_request(&alone.store).await.is_none());
+    // And another user's waiting run is not this user's to take.
+    let other = server_on("the-only-box").await?;
+    antumbra_store::repo::genesis::ask(
+        &other.store,
+        &antumbra_core::GenesisRequest::new(
+            other.tenant.clone(),
+            UserId::new("user:someone-else"),
+            CompartmentId::new("comp:theirs"),
+            "their-laptop",
+            "their-rig",
+            Utc::now(),
+        ),
+    )
+    .await?;
+    assert!(other.claim_genesis_request(&other.store).await.is_none());
+    Ok(())
+}
