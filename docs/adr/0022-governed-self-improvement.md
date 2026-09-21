@@ -1,6 +1,6 @@
 # ADR-0022: Governed self-improvement, and the anchor that does not move
 
-**Status:** Proposed · **Date:** 2026-09-20 · **Related:** 0021 (sovereign mode), 0001 (frozen experts), 0002 (shadows), 0003 (the critic and the verifier floor), 0004 (the boundary), 0005 (the gate), 0008 (the generational loop), 0011 (v1 efficiency), 0016 (control plane)
+**Status:** Proposed (the standing instruments are in; the order of work below says what is not) · **Date:** 2026-09-20 · **Related:** 0021 (sovereign mode), 0001 (frozen experts), 0002 (shadows), 0003 (the critic and the verifier floor), 0004 (the boundary), 0005 (the gate), 0008 (the generational loop), 0011 (v1 efficiency), 0016 (control plane)
 
 ## Context
 
@@ -193,6 +193,25 @@ Each seam ships behind its own switch and earns its place against a stated numbe
 
 _Kill criterion for the record as a whole:_ a synthesized verifier that reached trusted and then granted reward for an outcome an authored verifier would have failed, with no quarantine triggered, means the trust protocol does not work. Synthesis reverts to proposal-only and the anchor invariant is re-established by hand.
 
+## Order of work
+
+The record's own ordering, from Alternatives considered: "The standing instruments in Validation land first, before any seam, because they are how a seam is judged." Then S-1, S-5, S-3, S-4, with S-2 gated on the calibration instruments existing.
+
+1. [x] **The standing instruments**, as `antumbra-eclipse`. The slice partition (visible, held-out, audit, impossible) as a pure function of task id and seed, so a held-out slice cannot drift into the visible one between generations; the visible-minus-held-out gap banded by task size, with the bands taken from the sizes actually present rather than from a threshold invented here; the impossible set, where one pass fails the generation whole; the audit-slice trend, which reads a climbing search score against the slice no decision can reach; and isomorphic re-verification, where a re-verification that did not run is not a pass.
+
+   Two decisions worth recording because they were not obvious. The partition hash needed a finalizer: FNV-1a alone avalanches poorly in its high bits for short, similar keys, and task ids are exactly that, so without the mix `task:0` through `task:9` all landed in one slice and the shares came out half again over what was asked for. And the size bands cut half-open upwards, because closed cuts sweep the largest cluster into the middle band and leave the top one permanently empty, which would have silently deleted the band the gap is expected to show up in.
+
+   The crate grants no reward and exposes no reward type, which is the structural form of the record's rule that trace monitors stay out of the reward path. A measurement that becomes something to improve stops measuring.
+
+2. [ ] Wire the instruments into the loop: slices recorded per evaluation run, a report per generation, the audit slice on its k-generation schedule.
+3. [ ] S-1, the searched `TrainingRecipe` and the `recipe` rows behind it.
+4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
+5. [ ] S-3, the learned grow step.
+6. [ ] S-4, proposed verifiers and the trust protocol.
+7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
+8. Never: S-6.
+
 ## Notes on the evidence
+
 
 The research behind this record was gathered on 2026-09-20 and leans on work from 2024 through 2026. Several load-bearing citations postdate the last settled literature I can vouch for from memory and were verified by retrieval rather than from prior knowledge, in particular the coupled actor-and-critic architecture that S-2 borrows its influence-scaling mechanism from, the learnability estimator in S-3, and the visible-minus-held-out gap used throughout validation. Before this record moves from proposed to accepted, those should be read in the original rather than trusted from this summary. Two claims are contested in the literature and are flagged where they are used: whether tasks at zero or one success probability should be discarded from a curriculum at all, and whether adaptive rank in low-rank adaptation survives a properly tuned learning-rate baseline.

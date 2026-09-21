@@ -11,6 +11,7 @@ members = [
     "crates/antumbra-bench",
     "crates/antumbra-rerank",
     "crates/antumbra-critic",
+    "crates/antumbra-eclipse",
     "crates/antumbra-gate",
     "crates/antumbra-boundary",
     "crates/antumbra-loop",
