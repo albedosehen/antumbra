@@ -275,6 +275,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "antumbra-eclipse"
+version = "0.0.0"
+dependencies = [
+ "antumbra-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "antumbra-embed"
 version = "0.0.0"
 dependencies = [
