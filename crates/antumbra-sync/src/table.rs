@@ -33,4 +33,23 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
     TableSpec::new("grant", "updated_at"),
     TableSpec::new("memory", "updated_at"),
     TableSpec::new("memory_edge", "created_at"),
+    // The fabric itself (ADR-0017 A2). These two are what make a user's nodes
+    // more than a set of machines that happen to share a database.
+    //
+    // `device_profile` so a node can see the rest of the user's fabric at all:
+    // the whole of `genesis_for_user` is a read of rows another machine wrote,
+    // so without replication every node believes it is alone and nothing is
+    // ever dispatched anywhere.
+    //
+    // `genesis_request` because the queue IS the delivery mechanism. A laptop
+    // that cannot train writes a request and the trainer takes it; with the row
+    // stranded on the laptop, the asking half works, the taking half works, and
+    // no run ever crosses between them.
+    //
+    // Both carry `updated_at`, which is load-bearing rather than incidental: a
+    // re-registration and a claim are both in-place mutations, so last-write-
+    // wins has to order them. A claim that lost to a stale pending row would
+    // hand the same run to a second trainer.
+    TableSpec::new("device_profile", "updated_at"),
+    TableSpec::new("genesis_request", "updated_at"),
 ];
