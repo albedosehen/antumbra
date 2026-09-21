@@ -31,6 +31,10 @@ pub(crate) struct ExpertRow {
     pub owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compartment: Option<String>,
+    // Omitted when None so an expert minted before placement was recorded
+    // keeps reading as NONE rather than acquiring a null nobody wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placed_on: Option<String>,
     pub created_at: String,
 }
 
@@ -48,6 +52,7 @@ impl ExpertRow {
             generation: e.generation.0,
             owner: e.owner.as_ref().map(|u| u.as_str().to_string()),
             compartment: e.compartment.as_ref().map(|c| c.as_str().to_string()),
+            placed_on: e.placed_on.clone(),
             created_at: e.created_at.to_rfc3339(),
         }
     }
@@ -65,6 +70,7 @@ impl ExpertRow {
             generation: Generation(self.generation),
             owner: self.owner.map(UserId::new),
             compartment: self.compartment.map(CompartmentId::new),
+            placed_on: self.placed_on,
             created_at: parse_dt(&self.created_at)?,
         })
     }

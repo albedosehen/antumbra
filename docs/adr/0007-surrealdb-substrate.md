@@ -129,7 +129,7 @@ table_schema("evaluation_run")
 
 - **Positive:** one system for document + vector + graph + durable state; `surql-rs` matches the Rust plane; proven patterns (drift detection, migrations, `regression_fingerprint`) are reused, not reinvented.
 - **Negative:** single-DB coupling; the `failure_boundary` and memory tables grow unbounded → need a merge/decay policy (a learning problem inside the learning system); KNN-with-relational-filters is raw SurrealQL (the `surql-rs` query builder doesn't cover it) - acceptable. _(Superseded 2026-08-13: the builder covers it. What remains is that the filter is a residual, handled by over-fetching — see the implementation note above.)_
-- **Neutral:** `placed_on` is defined now but inert until ADR-0006's fleet wakes up. `device_profile` is no longer inert: ADR-0017 gave it a registry, a write rule, and a user index _(2026-09-20)_.
+- **Neutral:** `placed_on` became a field on `expert` rather than the graph relation sketched here, because placement is one-to-one while adapters stay out of sync scope; ADR-0017's order of work records why _(2026-09-21)_. `device_profile` is no longer inert: ADR-0017 gave it a registry, a write rule, and a user index _(2026-09-20)_.
 
 ## Alternatives considered
 

@@ -342,6 +342,9 @@ async fn seed_demo() -> Result<Store> {
                 generation: Generation::ZERO,
                 owner: None,
                 compartment: None,
+                // A `mem://` artifact is on nobody's disk: placed nowhere,
+                // servable anywhere, which is what a demo wants.
+                placed_on: None,
                 created_at: now,
             },
         )

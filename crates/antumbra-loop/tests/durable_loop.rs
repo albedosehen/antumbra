@@ -192,6 +192,7 @@ async fn a_drifted_frozen_expert_trips_the_no_forgetting_check() {
         generation: Generation::ZERO,
         owner: None,
         compartment: None,
+        placed_on: None,
         created_at: now,
     };
     expert::insert(&store, &expert).await.unwrap();

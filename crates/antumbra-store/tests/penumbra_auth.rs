@@ -39,6 +39,7 @@ async fn shared_population_is_readable_under_tenant_auth() {
             generation: Generation::ZERO,
             owner: None,
             compartment: None,
+            placed_on: None,
             created_at: now,
         },
     )
@@ -59,6 +60,7 @@ async fn shared_population_is_readable_under_tenant_auth() {
             generation: Generation::ZERO,
             owner: Some(UserId::new("user:other")),
             compartment: Some(antumbra_core::CompartmentId::new("comp:other")),
+            placed_on: None,
             created_at: now,
         },
     )

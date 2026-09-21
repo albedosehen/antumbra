@@ -201,6 +201,7 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
                     generation: Generation::ZERO,
                     owner: None,
                     compartment: None,
+                    placed_on: None,
                     created_at: now,
                 };
                 expert::delete(&store, &expert.id).await?; // supersede on re-run
@@ -505,6 +506,7 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
                 generation: Generation::ZERO,
                 owner: None,
                 compartment: None,
+                placed_on: None,
                 created_at: now,
             };
             expert::delete(&store, &expert.id).await?; // supersede on re-run

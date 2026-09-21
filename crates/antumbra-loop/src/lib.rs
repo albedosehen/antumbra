@@ -303,6 +303,10 @@ impl<'a> GenerationLoop<'a> {
             generation,
             owner: None,
             compartment: None,
+            // The weights land on this machine's disk and stay there
+            // (ADR-0017 keeps adapters out of sync scope), so the row says
+            // which machine that was.
+            placed_on: Some(antumbra_core::this_host()),
             created_at: now,
         };
         expert::insert(self.store, &expert).await?;

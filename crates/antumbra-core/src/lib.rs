@@ -39,8 +39,8 @@ pub use error::{AntumbraError, Result};
 pub use boundary::{governing_feature_from_pair, BoundaryFinding, FailureBoundary, Grain};
 pub use compartment::{Capability, Compartment, Grant, Origin};
 pub use device::{
-    backend_can_train, genesis_placement, role_for, DeviceProfile, DeviceRole, GenesisPlacement,
-    GENESIS_MIN_VRAM_MIB,
+    backend_can_train, genesis_placement, role_for, this_host, DeviceProfile, DeviceRole,
+    GenesisPlacement, GENESIS_MIN_VRAM_MIB,
 };
 pub use document::{chunk_text, DocumentChunk};
 pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};

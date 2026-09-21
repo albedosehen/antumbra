@@ -367,7 +367,7 @@ async fn build_session(
     register_node(&store, &tenant, &user, &host).await;
     // The `answer` tool serves through the routed expert. Build the engine from
     // the session's visible population (one connection; embedded is single-writer).
-    let serve = build_serve(&store).await?;
+    let serve = build_serve(&store, &host).await?;
     // The process outlives the record session, so a keeper re-signs the
     // connection in before it expires (checked at every tool call).
     let keeper = session::SessionKeeper::new(store.clone(), tenant.clone(), user.clone());
@@ -398,6 +398,7 @@ async fn build_session(
 #[cfg(feature = "models")]
 pub(crate) async fn build_serve(
     store: &Store,
+    host: &str,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     use antumbra_serve::{MultiAdapterServe, RaftConfig};
 
@@ -412,8 +413,21 @@ pub(crate) async fn build_serve(
     // nucleus), not the training-time exploration draw.
     let cfg = RaftConfig::for_serving(RaftConfig::default().max_new_tokens, 0.0);
     let mut engine = MultiAdapterServe::new(base, cfg);
-    for e in &experts {
+    // Only the adapters this machine can actually open (ADR-0017 A2). The row
+    // travels and the weights do not, so once a user's nodes reconcile, every
+    // node learns about every expert while exactly one holds each file.
+    // Registering them all would route to an adapter that is not here and fail
+    // at serve time, on a path that looks perfectly valid in the row.
+    let (mine, elsewhere): (Vec<_>, Vec<_>) = experts.iter().partition(|e| e.is_placed_on(host));
+    for e in &mine {
         engine.register(e.id.clone(), e.artifact_uri.clone());
+    }
+    if !elsewhere.is_empty() {
+        eprintln!(
+            "antumbra-mcp: {} of {} experts live on another node and are not served here",
+            elsewhere.len(),
+            experts.len()
+        );
     }
     Ok(Some(Arc::new(engine)))
 }
@@ -421,6 +435,7 @@ pub(crate) async fn build_serve(
 #[cfg(not(feature = "models"))]
 pub(crate) async fn build_serve(
     _store: &Store,
+    _host: &str,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     Ok(None)
 }
@@ -685,7 +700,7 @@ mod tests {
     #[tokio::test]
     async fn a_fresh_node_gets_a_serving_engine() -> Result<()> {
         let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
-        let Some(serve) = build_serve(&store).await? else {
+        let Some(serve) = build_serve(&store, "test-host").await? else {
             anyhow::bail!("an empty population must still get a serving engine");
         };
         let minted = antumbra_core::ExpertId::new("expert:user:test:comp:fresh");
