@@ -189,6 +189,63 @@ impl McpServer {
         self
     }
 
+    /// Leave this compartment's genesis run for the machine that can do it, and
+    /// say whether that happened (ADR-0017 A2). `true` means the caller should
+    /// not train: the work is recorded, waiting on another of the user's nodes.
+    ///
+    /// The request is a row rather than a log line because a node that only said
+    /// "this belongs on the rig" would have failed in a way indistinguishable,
+    /// from outside, from a compartment that never cleared the gate.
+    ///
+    /// Every failure here falls back to training locally. A fabric that cannot
+    /// be read, or a request that cannot be written, is a reason to do the work
+    /// badly rather than a reason to lose it.
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    pub(super) async fn escalate_genesis(&self, store: &Store, comp: &CompartmentId) -> bool {
+        let genesis =
+            match antumbra_store::repo::device::genesis_for_user(store, &self.tenant, &self.user)
+                .await
+            {
+                Ok(found) => found,
+                Err(e) => {
+                    eprintln!("[auto-consolidate] could not read the fabric, training here: {e}");
+                    None
+                }
+            };
+        let antumbra_core::GenesisPlacement::On(there) = antumbra_core::genesis_placement(
+            &self.host,
+            crate::hardware::role().can_train(),
+            genesis.as_ref(),
+        ) else {
+            return false;
+        };
+        let asking = antumbra_core::GenesisRequest::new(
+            self.tenant.clone(),
+            self.user.clone(),
+            comp.clone(),
+            self.host.clone(),
+            there.clone(),
+            chrono::Utc::now(),
+        );
+        match antumbra_store::repo::genesis::ask(store, &asking).await {
+            Ok(open) => {
+                eprintln!(
+                    "[auto-consolidate] {} : left for {there}, which can train it (waiting since {})",
+                    comp.as_str(),
+                    open.created_at.to_rfc3339()
+                );
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[auto-consolidate] {} : could not leave the run for {there}, training here: {e}",
+                    comp.as_str()
+                );
+                false
+            }
+        }
+    }
+
     /// Autonomous consolidation: if the just-written/reinforced `mem` belongs to
     /// a compartment, graduate that compartment into a private expert in the
     /// background (one train per compartment at a time; a burst coalesces). The
@@ -214,12 +271,6 @@ impl McpServer {
                 return;
             }
             let key = comp.as_str().to_string();
-            // Already consolidating this compartment: the write is remembered, and
-            // the run in flight is followed by another (a memory that arrives
-            // during a train would otherwise never be looked at again).
-            if !self.consolidating.lock().await.begin(&key) {
-                return;
-            }
             // Run the gather + provision + mint as OWNER on a stable connection,
             // not the per-request scoped `store` (which a detached task cannot
             // rely on); falls back to `store` for stdio / the embedded owner.
@@ -227,6 +278,18 @@ impl McpServer {
                 .consolidation_store
                 .clone()
                 .unwrap_or_else(|| self.store.clone());
+            // Where this run belongs (ADR-0017 A2). A node that cannot train
+            // does not grind the model on a CPU while the user's GPU box sits
+            // idle; it leaves the work where that machine will find it.
+            if self.escalate_genesis(&store, &comp).await {
+                return;
+            }
+            // Already consolidating this compartment: the write is remembered, and
+            // the run in flight is followed by another (a memory that arrives
+            // during a train would otherwise never be looked at again).
+            if !self.consolidating.lock().await.begin(&key) {
+                return;
+            }
             let embedder = self.embedder.clone();
             let tenant = self.tenant.clone();
             // The private expert is owned by the session user who reinforced the

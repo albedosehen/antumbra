@@ -145,6 +145,18 @@ const DEVICE_PERMS: [(&str, &str); 4] = [
     ("delete", "tenant_id = $auth.tenant AND user = $auth.user"),
 ];
 
+/// A genesis request is one node in a user's fabric asking another to run what
+/// it cannot (ADR-0017 A2). Same shape as [`DEVICE_PERMS`], and for the same
+/// reason: the asking node and the node that takes the work are two machines of
+/// one user, so `user = $auth.user` lets the trainer claim a request its own
+/// laptop wrote while barring another tenant member from touching it.
+const GENESIS_REQUEST_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("update", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("delete", "tenant_id = $auth.tenant AND user = $auth.user"),
+];
+
 /// The link-capability gate for `memory_edge` create/update: you may create an
 /// edge only when its *target* memory is in a compartment you may LINK into:
 /// the shared pool (un-compartmentalized), a compartment you own, or one granted
@@ -238,6 +250,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("device_host_idx", ["host", "backend"]),
                 index("device_user_idx", ["user", "role"]),
             ]),
+        // What a node could not run itself, left where the machine that can will
+        // find it (ADR-0017 A2). Indexed by the pair a trainer looks it up on.
+        table_schema("genesis_request")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(GENESIS_REQUEST_PERMS)
+            .with_indexes([index("genesis_user_idx", ["user", "status"])]),
         // Learned router singleton (the learned gate). Shared population: tenants read
         // it to route a task across the shared experts; the owner trains/writes
         // it. Previously auto-created (which defaulted to deny for record

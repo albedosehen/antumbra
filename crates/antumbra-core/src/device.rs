@@ -34,6 +34,10 @@ impl DeviceRole {
             DeviceRole::Genesis => "genesis",
         }
     }
+
+    pub fn can_train(self) -> bool {
+        matches!(self, DeviceRole::Genesis)
+    }
 }
 
 impl std::str::FromStr for DeviceRole {
@@ -84,6 +88,43 @@ pub fn role_for(backend: &str, vram_mib: Option<u64>) -> DeviceRole {
     match vram_mib {
         Some(mib) if mib < GENESIS_MIN_VRAM_MIB => DeviceRole::Memory,
         _ => DeviceRole::Genesis,
+    }
+}
+
+/// Where a genesis run belongs, decided on the node that is holding the work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenesisPlacement {
+    /// Run it here.
+    Here,
+    /// This node cannot train and another of the user's machines can, so the
+    /// work escalates to that host instead of grinding where it is.
+    On(String),
+}
+
+/// Where a compartment's genesis should run, seen from the node the write
+/// landed on. `genesis` is what the fabric names as the user's trainer, if
+/// anything does.
+///
+/// Work does not travel when it does not have to. A node that can train, does,
+/// even when the fabric names a different machine as the user's trainer: it is
+/// *a* trainer, the memories are already on it, and shipping the run elsewhere
+/// would buy nothing. Only a node that cannot train escalates, and only when it
+/// has somewhere to escalate to.
+///
+/// An empty fabric therefore behaves exactly as before this existed. That is
+/// deliberate: a single node that never registered (an HTTP server, a build
+/// from before the registry) must not lose consolidation because a row is
+/// missing. A missing row means "nothing better is known", not "do not train".
+pub fn genesis_placement(
+    here: &str,
+    here_can_train: bool,
+    genesis: Option<&DeviceProfile>,
+) -> GenesisPlacement {
+    match genesis {
+        Some(node) if node.host == here => GenesisPlacement::Here,
+        _ if here_can_train => GenesisPlacement::Here,
+        Some(node) => GenesisPlacement::On(node.host.clone()),
+        None => GenesisPlacement::Here,
     }
 }
 
@@ -259,6 +300,45 @@ mod tests {
         assert!(rig.is_genesis());
         // The same machine keeps the same row whichever constructor found it.
         assert_eq!(rig.id, profile("ws:t", "user:a", "rig").id);
+    }
+
+    #[test]
+    fn work_escalates_only_when_this_node_cannot_do_it_and_another_can() {
+        let rig = DeviceProfile::detected(
+            TenantId::new("ws:t"),
+            UserId::new("user:a"),
+            "rig",
+            "cuda",
+            Some(24_576),
+            at(),
+        );
+
+        // The laptop the write landed on cannot train, and the fabric names a
+        // machine that can.
+        assert_eq!(
+            genesis_placement("laptop", false, Some(&rig)),
+            GenesisPlacement::On("rig".to_string())
+        );
+        // The rig is the node holding the work: it runs it, it does not send
+        // the work to itself.
+        assert_eq!(
+            genesis_placement("rig", true, Some(&rig)),
+            GenesisPlacement::Here
+        );
+        // A second machine that can train keeps its own work, even though the
+        // fabric names another as the user's trainer. Work does not travel when
+        // it does not have to.
+        assert_eq!(
+            genesis_placement("other-rig", true, Some(&rig)),
+            GenesisPlacement::Here
+        );
+        // Nowhere to escalate to: an empty fabric behaves as it did before the
+        // registry existed, rather than losing the run to a missing row.
+        assert_eq!(
+            genesis_placement("laptop", false, None),
+            GenesisPlacement::Here
+        );
+        assert_eq!(genesis_placement("rig", true, None), GenesisPlacement::Here);
     }
 
     #[test]
