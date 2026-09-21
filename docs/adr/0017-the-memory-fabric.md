@@ -217,7 +217,26 @@ Built in increments, each one shippable on its own. A box is ticked only when th
 
    **Delivery (done).** `device_profile` and `genesis_request` now replicate, which is what turns increments 2 and 4 from correct into load-bearing. Without the first, `genesis_for_user` reads rows no other machine ever wrote, so every node believes it is alone and nothing is dispatched anywhere. Without the second, the asking half works, the taking half works, and no run crosses between them. Both carry `updated_at`, load-bearing rather than incidental: a re-registration and a claim are in-place mutations, so last-write-wins has to order them, and a claim that lost to a stale pending row would hand one run to two trainers.
 
-   **Scoping (still owed).** Replication is still tenant-wide, which this record says is wrong: "A tenant has many users, and each user has their own fabric. An earlier draft scoped the fabric to the tenant. That was wrong." The obvious fix -- filter each table on a user column -- does not work, because `memory` has no user column. A memory belongs to a user *through* its compartment, or to the shared tenant pool, which is exactly what `MEMORY_SELECT_RULE` already encodes. So the shape to build is reconciliation **under the user's own record session**, letting the engine scope the read rather than restating the ACL in the sync layer, where it would drift. That is a change to how the collector authenticates, not a filter, and it is why this is its own increment rather than a line in this one.
+   **Scoping (still owed).** Replication is still tenant-wide, which this record says is wrong: "A tenant has many users, and each user has their own fabric. An earlier draft scoped the fabric to the tenant. That was wrong."
+
+   Two designs were considered and one of them is a trap.
+
+   *Filter each table on a user column.* Does not work: `memory` has no user column. A memory belongs to a user through its compartment, or to the shared tenant pool.
+
+   *Reconcile under the user's own record session and let the engine scope the read.* Necessary, and **not sufficient**. On four of the six replicated tables the read scope is strictly wider than the write scope:
+
+   | table | readable by the session | writable by the session |
+   | --- | --- | --- |
+   | `memory` | own + `reference`-granted + pool | own + `link`-granted + pool |
+   | `grant` | tenant-wide | compartment owner only |
+   | `device_profile` | tenant-wide | own rows only |
+   | `genesis_request` | tenant-wide | own rows only |
+
+   The engine refuses a disallowed write by persisting nothing, **without an error** -- the same behaviour the document-privacy tests rely on. So a record-session collector reads those rows, counts them pushed, and they never land, on every cycle forever. A silent partial write repeated on a timer is worse than the tenant-wide replication it replaces, because it looks like it is working.
+
+   **The resolution: read scope must equal write scope, and the way to get there is a replication policy narrower than the read ACL.** A user's nodes carry what that user *owns* plus the shared tenant pool -- not what is merely granted to them. That is not a duplicate of `MEMORY_SELECT_RULE` and must not be written as one; it is a different statement. The ACL says what you may **see**, through the engine, live. The policy says what your other machines get a **copy** of. A grant is a live read, not a licence to take someone else's private compartment home on a laptop, and the narrower policy happens to coincide exactly with what the session can write back.
+
+   What that needs: an identity on `SyncConfig`, a sign-in after connect in `worker.rs`, and a per-table replication scope on `TableSpec` for the tables whose writable set is narrower than their readable one. Plus the test that would have caught the trap: a reconcile under a record session where a row the session may read and may not write is reported as refused rather than as pushed.
 6. [ ] The tenant hive (section B), which waits on the fabric being real.
 
 ## Out of scope (its own decision)
