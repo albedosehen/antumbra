@@ -322,7 +322,7 @@ pub(crate) async fn provision_identity(
 /// still recalls and stores perfectly well; it just will not be dispatched to.
 /// Reported rather than swallowed, because a fabric that quietly has no genesis
 /// node looks exactly like a fabric whose genesis node is a laptop.
-async fn register_node(store: &Store, tenant: &TenantId, user: &UserId, host: &str) {
+pub(crate) async fn register_node(store: &Store, tenant: &TenantId, user: &UserId, host: &str) {
     let profile = antumbra_core::DeviceProfile::detected(
         tenant.clone(),
         user.clone(),

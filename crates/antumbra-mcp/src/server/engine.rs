@@ -246,6 +246,56 @@ impl McpServer {
         }
     }
 
+    /// Take the genesis run that has waited longest, if this user's fabric left
+    /// one here (ADR-0017 A2, the taking half). `None` when the queue is empty,
+    /// which is the ordinary case and the only one in a fabric of one node.
+    ///
+    /// Claiming is a write, so two trainers in one fabric do not both take the
+    /// same run -- and a claim that cannot be recorded is not taken at all,
+    /// because a run this node believed it owned while the row still read
+    /// pending is exactly how the same compartment gets trained twice.
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    pub(super) async fn claim_genesis_request(
+        &self,
+        store: &Store,
+    ) -> Option<antumbra_core::GenesisRequest> {
+        let waiting = match antumbra_store::repo::genesis::list_open_for_user(
+            store,
+            &self.tenant,
+            &self.user,
+        )
+        .await
+        {
+            Ok(waiting) => waiting,
+            Err(e) => {
+                eprintln!("[auto-consolidate] could not read the genesis queue: {e}");
+                return None;
+            }
+        };
+        // Oldest first, and skip what another node already has in hand.
+        let next = waiting
+            .into_iter()
+            .find(|r| r.status == antumbra_core::GenesisStatus::Pending)?;
+        let now = chrono::Utc::now();
+        if let Err(e) = antumbra_store::repo::genesis::set_status(
+            store,
+            &next,
+            antumbra_core::GenesisStatus::Claimed,
+            now,
+        )
+        .await
+        {
+            eprintln!("[auto-consolidate] could not claim a waiting genesis run: {e}");
+            return None;
+        }
+        eprintln!(
+            "[auto-consolidate] {} : taking the run {} left here",
+            next.compartment.as_str(),
+            next.from_host
+        );
+        Some(next.with_status(antumbra_core::GenesisStatus::Claimed, now))
+    }
+
     /// Autonomous consolidation: if the just-written/reinforced `mem` belongs to
     /// a compartment, graduate that compartment into a private expert in the
     /// background (one train per compartment at a time; a burst coalesces). The
@@ -270,7 +320,6 @@ impl McpServer {
             if comp.as_str().ends_with(":default") {
                 return;
             }
-            let key = comp.as_str().to_string();
             // Run the gather + provision + mint as OWNER on a stable connection,
             // not the per-request scoped `store` (which a detached task cannot
             // rely on); falls back to `store` for stdio / the embedded owner.
@@ -284,6 +333,16 @@ impl McpServer {
             if self.escalate_genesis(&store, &comp).await {
                 return;
             }
+            // This node is training. Clear what it was *asked* to do before what
+            // it happened to be handed: a request has been waiting on another of
+            // the user's machines, and this write has not waited at all. The
+            // memory's own compartment is not lost -- the next write reaches it,
+            // and by then the queue is shorter.
+            let (comp, request) = match self.claim_genesis_request(&store).await {
+                Some(waiting) => (waiting.compartment.clone(), Some(waiting)),
+                None => (comp, None),
+            };
+            let key = comp.as_str().to_string();
             // Already consolidating this compartment: the write is remembered, and
             // the run in flight is followed by another (a memory that arrives
             // during a train would otherwise never be looked at again).
@@ -377,6 +436,27 @@ impl McpServer {
                     }
                     if !state.lock().await.finish(&key) {
                         break;
+                    }
+                }
+                // The trainer has looked, whatever it concluded. A request is
+                // closed by being serviced, not by producing an expert: if the
+                // compartment held nothing back today and is reinforced again
+                // tomorrow, the asking node raises a fresh request, which is
+                // the loop working rather than a request that never closes.
+                if let Some(request) = request {
+                    if let Err(e) = antumbra_store::repo::genesis::set_status(
+                        &store,
+                        &request,
+                        antumbra_core::GenesisStatus::Done,
+                        chrono::Utc::now(),
+                    )
+                    .await
+                    {
+                        eprintln!(
+                            "[auto-consolidate] ran {} for {} but could not close the request: {e}",
+                            request.compartment.as_str(),
+                            request.from_host
+                        );
                     }
                 }
             });
