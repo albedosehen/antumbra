@@ -27,7 +27,22 @@ pub fn backend() -> &'static str {
 /// the node cannot tell. Only asked on a CUDA build, where `nvidia-smi` ships
 /// with the driver; a Metal node's memory is unified and is not the same
 /// quantity, so it is left unanswered rather than answered wrongly.
+///
+/// Asked once. The answer does not change while the process runs, and the
+/// consolidation trigger consults the role on every write.
 pub fn vram_mib() -> Option<u64> {
+    static VRAM: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *VRAM.get_or_init(probe_vram_mib)
+}
+
+/// What this node is, from what it found. The same derivation the registry
+/// records, so the role a node advertises and the role it acts on are one
+/// answer rather than two that can drift.
+pub fn role() -> antumbra_core::DeviceRole {
+    antumbra_core::role_for(backend(), vram_mib())
+}
+
+fn probe_vram_mib() -> Option<u64> {
     if backend() != "cuda" {
         return None;
     }

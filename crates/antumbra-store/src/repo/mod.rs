@@ -13,6 +13,7 @@ pub mod embedder_config;
 pub mod evaluation;
 pub mod expert;
 pub mod generation;
+pub mod genesis;
 pub mod invite;
 pub mod loop_control;
 pub mod magic_use;

@@ -92,7 +92,7 @@ sequenceDiagram
 
 ## Schema (extends ADR-0007 and 0014)
 
-Authored the way the store already is (antumbra-store/schema.rs): surql-rs builders, tables SCHEMALESS in v0 with no field DDL, and the only hand-authored SurrealQL is the permission predicate strings handed to with_permissions. The additions are a permissions clause and a user index on the existing device_profile for A, three tables for B, and one OR-branch appended to the ADR-0014 memory read rule.
+Authored the way the store already is (antumbra-store/schema.rs): surql-rs builders, tables SCHEMALESS in v0 with no field DDL, and the only hand-authored SurrealQL is the permission predicate strings handed to with_permissions. The additions are a permissions clause and a user index on the existing device_profile plus one new table for A, three tables for B, and one OR-branch appended to the ADR-0014 memory read rule.
 
 ```rust
 // Permission predicate strings: the one hand-authored SurrealQL (ADR-0007),
@@ -101,6 +101,17 @@ Authored the way the store already is (antumbra-store/schema.rs): surql-rs build
 // A node self-registers: any tenant session reads device rows (to find a user's
 // genesis node), a user writes only their own. device_profile was owner-internal.
 const DEVICE_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("update", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("delete", "tenant_id = $auth.tenant AND user = $auth.user"),
+];
+
+// What a node could not run itself, left for the machine that can (A2). Same
+// shape as DEVICE_PERMS and for the same reason: the node that asks and the
+// node that takes the work are two machines of one user, so `user = $auth.user`
+// lets the trainer claim a request its own laptop wrote, and bars anyone else.
+const GENESIS_REQUEST_PERMS: [(&str, &str); 4] = [
     ("select", "tenant_id = $auth.tenant"),
     ("create", "tenant_id = $auth.tenant AND user = $auth.user"),
     ("update", "tenant_id = $auth.tenant AND user = $auth.user"),
@@ -199,7 +210,7 @@ Built in increments, each one shippable on its own. A box is ticked only when th
 1. [x] The device registry. `DeviceProfile` / `DeviceRole` in antumbra-core, `repo::device` (upsert, list_for_user, genesis_for_user), `DEVICE_PERMS` and `device_user_idx` on the existing table. The write rule is the load-bearing part: opening the table so a node can register at all is what makes "a member cannot declare another's machine a trainer" something the engine has to enforce rather than something the app remembers to check (`tests/device_fabric.rs`). Roles are supplied by the caller here, not derived: nothing in the crates detects a backend or reads VRAM yet, and a role inferred from nothing is worse than a role declared.
 2. [x] Role derivation on start. `role_for(backend, vram_mib)` in antumbra-core, the probe in antumbra-mcp, and a stdio session that registers itself the moment it signs in. The backend reported is the one the *build* can drive, not the silicon present: a binary compiled without the CUDA backend cannot train on a CUDA box, and a node that said otherwise would collect dispatches it could only escalate. Unknown VRAM does not demote a training backend, because `None` is "could not tell" and the floor is a measurement. Not done here: the HTTP transport, which serves many identities per process and is a hub rather than any one user's node -- where its machine belongs in a user's fabric is a question increment 4 has to answer anyway.
 3. [ ] `placed_on`: where an expert lives, so serving knows which node holds it.
-4. [ ] Genesis dispatch. A compartment clearing the consolidation gate on a memory node is dispatched to that user's genesis node; a user with no genesis node escalates rather than failing.
+4. [~] Genesis dispatch, the asking half. A compartment clearing the gate on a node that cannot train is no longer ground out on a CPU while the user's GPU box sits idle: `genesis_placement` decides, and the run is left as a `genesis_request` row keyed per (tenant, user, compartment). A row rather than a log line, because a node that only said "this belongs on the rig" would have failed in a way indistinguishable, from outside, from a compartment that never cleared the gate. Work does not travel when it does not have to: a node that can train, does, even when the fabric names another machine. An empty fabric behaves exactly as it did before the registry existed, so a missing row cannot cost anyone their consolidation. **Still open: the taking half.** Nothing drains the queue yet; a genesis node has to claim a request and run it, which is where increment 5 (a user's nodes actually sharing a store) starts to matter, and where the HTTP transport's place in a user's fabric has to be settled.
 5. [ ] User-scoped sync. antumbra-sync hub-and-spoke reconciliation keyed by user, not tenant.
 6. [ ] The tenant hive (section B), which waits on the fabric being real.
 

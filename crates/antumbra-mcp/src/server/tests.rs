@@ -676,3 +676,108 @@ async fn call_tool_dispatches_a_named_tool() {
 }
 
 mod workspace;
+
+/// A server pinned to a named host, for the fabric tests: which machine a run
+/// belongs on is decided by comparing this against what the registry says.
+async fn server_on(host: &str) -> anyhow::Result<McpServer> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    Ok(McpServer::new(
+        store,
+        Arc::new(FixedEmbedder::new(EMBED_DIM)),
+        TenantId::new("ws:test"),
+        UserId::new("user:test"),
+        host.into(),
+        CompartmentId::new("comp:test:default"),
+        None,
+    ))
+}
+
+async fn register(
+    s: &McpServer,
+    host: &str,
+    role: antumbra_core::DeviceRole,
+) -> anyhow::Result<()> {
+    antumbra_store::repo::device::upsert(
+        &s.store,
+        &antumbra_core::DeviceProfile::new(
+            s.tenant.clone(),
+            s.user.clone(),
+            host,
+            if role.can_train() { "cuda" } else { "cpu" },
+            role,
+            Utc::now(),
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn waiting(s: &McpServer) -> anyhow::Result<Vec<antumbra_core::GenesisRequest>> {
+    Ok(antumbra_store::repo::genesis::list_open_for_user(&s.store, &s.tenant, &s.user).await?)
+}
+
+/// ADR-0017 A2. A node that cannot train does not grind the model while the
+/// user's GPU box sits idle, and it does not drop the work either: it leaves a
+/// request where the machine that can train will find it.
+#[tokio::test]
+async fn a_node_that_cannot_train_leaves_the_run_for_the_one_that_can() -> anyhow::Result<()> {
+    let s = server_on("her-laptop").await?;
+    let comp = CompartmentId::new("comp:rust");
+    register(&s, "her-laptop", antumbra_core::DeviceRole::Memory).await?;
+    register(&s, "the-rig", antumbra_core::DeviceRole::Genesis).await?;
+
+    assert!(
+        s.escalate_genesis(&s.store, &comp).await,
+        "the laptop must not take a run the rig is for"
+    );
+    assert_eq!(
+        waiting(&s)
+            .await?
+            .iter()
+            .map(|r| (
+                r.compartment.as_str(),
+                r.from_host.as_str(),
+                r.to_host.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        vec![("comp:rust", "her-laptop", "the-rig")],
+        "the work is recorded, not merely reported"
+    );
+
+    // Reinforced again: one piece of work, one request.
+    assert!(s.escalate_genesis(&s.store, &comp).await);
+    assert_eq!(waiting(&s).await?.len(), 1);
+    Ok(())
+}
+
+/// The other side of the same decision, and the reason an empty fabric is safe:
+/// a node with nowhere better to send the work keeps it.
+#[tokio::test]
+async fn a_run_stays_where_it_is_when_there_is_nowhere_better_for_it() -> anyhow::Result<()> {
+    let comp = CompartmentId::new("comp:rust");
+
+    // Nothing registered at all: the single-node case, and every build from
+    // before the registry existed.
+    let alone = server_on("the-only-box").await?;
+    assert!(!alone.escalate_genesis(&alone.store, &comp).await);
+
+    // Registered, and this node is the one the fabric names.
+    let rig = server_on("the-rig").await?;
+    register(&rig, "the-rig", antumbra_core::DeviceRole::Genesis).await?;
+    assert!(!rig.escalate_genesis(&rig.store, &comp).await);
+
+    // A fabric of memory nodes only: nobody can train, so the work stays with
+    // whoever has it rather than waiting on a machine that does not exist.
+    let laptop = server_on("her-laptop").await?;
+    register(&laptop, "her-laptop", antumbra_core::DeviceRole::Memory).await?;
+    register(&laptop, "his-laptop", antumbra_core::DeviceRole::Memory).await?;
+    assert!(!laptop.escalate_genesis(&laptop.store, &comp).await);
+
+    for s in [&alone, &rig, &laptop] {
+        assert!(
+            waiting(s).await?.is_empty(),
+            "nothing is left waiting when nothing was escalated"
+        );
+    }
+    Ok(())
+}
