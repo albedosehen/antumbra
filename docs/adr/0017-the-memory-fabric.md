@@ -223,14 +223,16 @@ Built in increments, each one shippable on its own. A box is ticked only when th
 
    *Filter each table on a user column.* Does not work: `memory` has no user column. A memory belongs to a user through its compartment, or to the shared tenant pool.
 
-   *Reconcile under the user's own record session and let the engine scope the read.* Necessary, and **not sufficient**. On four of the six replicated tables the read scope is strictly wider than the write scope:
+   *Reconcile under the user's own record session and let the engine scope the read.* Necessary, and **not sufficient**. On five of the six replicated tables the read scope is strictly wider than the write scope. Only `compartment` is symmetric:
 
    | table | readable by the session | writable by the session |
    | --- | --- | --- |
    | `memory` | own + `reference`-granted + pool | own + `link`-granted + pool |
+   | `memory_edge` | tenant-wide | edge whose **target** is own + `link`-granted + pool |
    | `grant` | tenant-wide | compartment owner only |
    | `device_profile` | tenant-wide | own rows only |
    | `genesis_request` | tenant-wide | own rows only |
+   | `compartment` | tenant-wide | tenant-wide |
 
    The engine refuses a disallowed write by persisting nothing, **without an error** -- the same behaviour the document-privacy tests rely on. So a record-session collector reads those rows, counts them pushed, and they never land, on every cycle forever. A silent partial write repeated on a timer is worse than the tenant-wide replication it replaces, because it looks like it is working.
 
