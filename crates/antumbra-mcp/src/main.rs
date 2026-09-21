@@ -56,9 +56,12 @@ struct Cli {
     /// actor). Ignored with `--http`.
     #[arg(long, default_value = "user:default")]
     user: String,
-    /// The host/device this session runs on (stamped as memory provenance).
-    /// Defaults to the machine name.
-    #[arg(long)]
+    /// The host/device this session runs on: stamped as memory provenance, and
+    /// the name this machine registers under in its user's fabric (ADR-0017).
+    /// Defaults to the machine name, which inside a container is the container
+    /// ID -- ephemeral, so a recreate would register the same machine as a new
+    /// node every time. Set it to the real host there.
+    #[arg(long, env = "ANTUMBRA_HOST")]
     host: Option<String>,
     /// Serve the networked multi-tenant HTTP surface on this address
     /// (e.g. `0.0.0.0:8081`) instead of stdio. Requires a JWT key.
@@ -429,6 +432,13 @@ fn serving_base(population_base: Option<&str>, default: &str) -> String {
     population_base.unwrap_or(default).to_string()
 }
 
+/// The machine name, or whatever the operator named it.
+///
+/// Inside a container the hostname is the container ID, which changes on every
+/// recreate. Since a node's row is keyed on (tenant, user, host), taking that
+/// as the name would register the same machine as a new node each time and
+/// leave the old rows behind still claiming to be trainers. `--host` /
+/// `ANTUMBRA_HOST` is how a containerised deployment says what it really is.
 fn default_host(explicit: Option<String>) -> String {
     explicit.unwrap_or_else(|| {
         std::env::var("COMPUTERNAME")

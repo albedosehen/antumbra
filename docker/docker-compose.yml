@@ -69,6 +69,10 @@ services:
     environment:
       - ANTUMBRA_JWT_SECRET=${ANTUMBRA_JWT_SECRET:?set ANTUMBRA_JWT_SECRET in docker/.env}
       - ANTUMBRA_DB_PASS=${SURREAL_PASS}
+      # The node name in its users' fabrics (ADR-0017). Without it the
+      # container ID is the name, and every recreate registers this machine
+      # as a brand new node while the old rows go on claiming to be trainers.
+      - ANTUMBRA_HOST=${ANTUMBRA_HOST:-${HOSTNAME}}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
