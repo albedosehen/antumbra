@@ -321,6 +321,9 @@ async fn run() -> anyhow::Result<()> {
                     generation: Generation::ZERO,
                     owner: None,
                     compartment: None,
+                    // A `mem://` artifact is on nobody's disk, so it is placed
+                    // nowhere and servable anywhere, which is what a demo wants.
+                    placed_on: None,
                     created_at: now,
                 };
                 expert::insert(&store, &e).await?;

@@ -383,7 +383,7 @@ async fn auto_consolidate_mints_a_private_expert_on_reinforce() {
     // yet: the trigger must be able to hot-register the minted expert into it,
     // so `answer` serves it with no restart. Hand-building an engine here hid
     // the cold start, where the server came up with no engine at all (EXP-022).
-    let serve = match crate::build_serve(&store).await {
+    let serve = match crate::build_serve(&store, "test-host").await {
         Ok(Some(serve)) => serve,
         other => panic!(
             "a fresh node must still get a serving engine, got {:?}",
@@ -561,6 +561,7 @@ async fn route_escalates_without_router_then_routes_with_one() {
             generation: Generation::ZERO,
             owner: Some(UserId::new("user:test")),
             compartment: Some(CompartmentId::new("comp:test")),
+            placed_on: None,
             created_at: now,
         },
     )

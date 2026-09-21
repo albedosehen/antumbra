@@ -113,8 +113,37 @@ mod tests {
             generation: Generation::ZERO,
             owner: None,
             compartment: None,
+            placed_on: None,
             created_at: Utc::now(),
         }
+    }
+
+    /// Placement has to survive the store, or a node reads every expert as
+    /// servable and routes to adapters it does not hold.
+    #[tokio::test]
+    async fn placement_survives_the_round_trip() -> antumbra_core::Result<()> {
+        let s = Store::connect_memory(EMBED_DIM).await?;
+        let mut v = vec![0.0f32; EMBED_DIM];
+        v[0] = 1.0;
+        let mut placed = expert("expert:placed", v.clone());
+        placed.placed_on = Some("the-rig".into());
+        insert(&s, &placed).await?;
+        insert(&s, &expert("expert:unplaced", v)).await?;
+
+        let found = list(&s).await?;
+        let placed_on = |id: &str| {
+            found
+                .iter()
+                .find(|e| e.id.as_str() == id)
+                .and_then(|e| e.placed_on.clone())
+        };
+        assert_eq!(placed_on("expert:placed"), Some("the-rig".to_string()));
+        assert_eq!(
+            placed_on("expert:unplaced"),
+            None,
+            "an unplaced expert stays unplaced rather than acquiring a host"
+        );
+        Ok(())
     }
 
     #[tokio::test]

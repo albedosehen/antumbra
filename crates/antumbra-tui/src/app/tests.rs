@@ -200,6 +200,7 @@ async fn freeze_toggles_the_expert_and_raises_events() {
             generation: Generation::ZERO,
             owner: None,
             compartment: None,
+            placed_on: None,
             created_at: Utc::now(),
         },
     )
@@ -251,6 +252,7 @@ fn an_expert(id: &str, name: &str, fitness: f32, gen: u32) -> Expert {
         generation: Generation(gen),
         owner: None,
         compartment: None,
+        placed_on: None,
         created_at: Utc::now(),
     }
 }

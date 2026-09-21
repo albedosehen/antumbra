@@ -193,6 +193,7 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
                 generation: Generation::ZERO,
                 owner: None,
                 compartment: None,
+                placed_on: None,
                 created_at: now,
             };
             expert::delete(&store, &e.id).await?; // supersede on re-run

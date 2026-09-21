@@ -213,7 +213,7 @@ pub async fn serve(
     };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
-    let serve = crate::build_serve(&store).await?;
+    let serve = crate::build_serve(&store, &host).await?;
     let state = Arc::new(HttpState {
         store,
         serving,

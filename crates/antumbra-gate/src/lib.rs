@@ -171,6 +171,7 @@ mod tests {
             generation: Generation::ZERO,
             owner: None,
             compartment: None,
+            placed_on: None,
             created_at: Utc::now(),
         }
     }

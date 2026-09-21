@@ -26,6 +26,7 @@ fn expert_at(key: &str, vec: Vec<f32>) -> Expert {
         generation: Generation::ZERO,
         owner: None,
         compartment: None,
+        placed_on: None,
         created_at: Utc::now(),
     }
 }

@@ -130,6 +130,10 @@ pub async fn consolidate_compartment(
         generation: Generation::ZERO,
         owner: Some(user.clone()),
         compartment: Some(compartment.clone()),
+        // The adapter was just written to this machine's disk and stays there:
+        // ADR-0017 keeps adapters out of sync scope, so the row records which
+        // machine can open it.
+        placed_on: Some(antumbra_core::this_host()),
         created_at: now,
     };
     expert::delete(store, &e.id).await?; // supersede on re-run

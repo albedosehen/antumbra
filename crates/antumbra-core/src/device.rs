@@ -212,6 +212,24 @@ impl DeviceProfile {
     }
 }
 
+/// What this machine calls itself, for provenance and for placement.
+///
+/// `ANTUMBRA_HOST` first, because inside a container the hostname is the
+/// container id: ephemeral, and a node's identity is keyed on its host, so
+/// taking that would make every recreate a new machine. Then the OS name, and
+/// finally `local`, which is honest about knowing nothing rather than
+/// inventing something that looks like a hostname.
+pub fn this_host() -> String {
+    std::env::var("ANTUMBRA_HOST")
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "local".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

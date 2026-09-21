@@ -139,6 +139,7 @@ fn demo_app() -> App {
         generation: Generation::ZERO,
         owner: None,
         compartment: None,
+        placed_on: None,
         created_at: now,
     };
     App {
@@ -346,6 +347,7 @@ fn golden_population_table() {
         generation: Generation(gen),
         owner: None,
         compartment: None,
+        placed_on: None,
         created_at: now,
     };
     let mut app = demo_app();
