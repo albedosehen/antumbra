@@ -76,7 +76,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:8081:8081"
+      # Loopback by default: the surface is JWT-authenticated, but a default of
+      # "reachable from the network" is not one to inherit by accident. A node
+      # whose agents run on OTHER machines sets ANTUMBRA_MCP_BIND to the address
+      # it should answer on (e.g. 10.0.0.132) in docker/.env, which is the file a
+      # redeploy preserves -- so the exposure survives a rebuild instead of being
+      # silently reverted to loopback by the next deploy, taking every remote
+      # hook down with it.
+      - "${ANTUMBRA_MCP_BIND:-127.0.0.1}:8081:8081"
     security_opt:
       - no-new-privileges:true
     cap_drop:
