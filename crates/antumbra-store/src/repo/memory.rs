@@ -372,9 +372,19 @@ pub async fn recall_hybrid(
             score(b).total_cmp(&score(a))
         });
     }
-    let sparse = sparse_recall(store, tenant, query_text, pool, network)
-        .await
-        .unwrap_or_default();
+    // Best-effort, but never SILENTLY: a failing lexical leg degrades recall to
+    // dense-only, which looks exactly like a ranking quirk from the outside. That
+    // is not hypothetical -- a missing `ORDER BY` in this very function went
+    // unnoticed for months because the symptom was indistinguishable from "the
+    // embedding is bad at this query". Say so, the way the rerank stage already
+    // says so when it falls back to RRF order.
+    let sparse = match sparse_recall(store, tenant, query_text, pool, network).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("antumbra-store: lexical leg failed, recall is dense-only: {e}");
+            Vec::new()
+        }
+    };
 
     // Nothing lexical to fuse: dense already is the answer (and `rrf_fuse` over a
     // single list is order-preserving, but skip the allocation).

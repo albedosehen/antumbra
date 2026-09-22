@@ -46,15 +46,28 @@ pub const PROBE_TEXTS: [&str; 6] = [
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Baseline {
     pub mean: f32,
-    /// Standard deviation, floored away from zero so it is always safe to divide
-    /// by. A degenerate text that scores identically against every probe carries
-    /// no spread to normalise by, and the floor turns that into a large z rather
-    /// than an infinity.
+    /// Standard deviation, floored at [`MIN_SD`].
     pub sd: f32,
 }
 
-/// The smallest spread worth dividing by (see [`Baseline::sd`]).
-const MIN_SD: f32 = 1e-6;
+/// The smallest spread worth dividing by.
+///
+/// This is a floor on the SCALE OF REAL SPREAD, not merely a guard against
+/// dividing by zero, and the difference matters. A hub -- a text that sits near
+/// everything -- scores almost identically against every probe, so its measured
+/// spread collapses toward zero; dividing by that turns a trivial deviation into
+/// an enormous z, and the hub climbs back up the very ranking this correction
+/// exists to remove. Observed live: after calibration the hub stopped leading any
+/// nonsense query but still surfaced around rank 2, which is this effect.
+///
+/// 0.02 is the bottom of the spread real texts show: baselines measured over six
+/// probes on memories of 66, 172 and 1058 characters had standard deviations of
+/// 0.026, 0.019 and 0.027. Flooring here says "no text is more consistent than
+/// the most consistent one we have seen", so a text whose spread is
+/// indistinguishable from zero is scored as though it had ordinary spread -- and
+/// a hub, whose similarity to this query is no higher than to any other, lands
+/// near z = 0 where it belongs.
+const MIN_SD: f32 = 0.02;
 
 /// Estimate `embedding`'s baseline against `probes`.
 ///
@@ -153,6 +166,32 @@ mod tests {
             "the memory that answers the query must outrank the hub once calibrated \
              (hub raw={raw_hub:.3} cal={cal_hub:.3}, specific raw={raw_specific:.3} \
              cal={cal_specific:.3})"
+        );
+    }
+
+    /// The hub case, which is the whole reason [`MIN_SD`] is a real number rather
+    /// than an epsilon: a text that scores nearly the same against everything must
+    /// land near zero, not be amplified by its own lack of spread.
+    #[test]
+    fn a_hub_is_not_amplified_by_its_own_flatness() {
+        let d = 16;
+        let probes: Vec<Vec<f32>> = (0..5).map(|i| axis(d, i)).collect();
+        // Almost exactly equidistant from every probe, with a whisper of variation
+        // so the measured sd is tiny but not zero -- the realistic hub.
+        let hub: Vec<f32> = {
+            let mut v = vec![0.0; d];
+            for (i, w) in [1.0, 1.001, 0.999, 1.0005, 0.9995].iter().enumerate() {
+                v[i] = *w;
+            }
+            let n = (v.iter().map(|x| x * x).sum::<f32>()).sqrt();
+            v.iter().map(|x| x / n).collect()
+        };
+        // A query the hub is no more related to than it is to the probes.
+        let query = axis(d, 1);
+        let z = calibrated_score(&query, &hub, &probes);
+        assert!(
+            z.abs() < 25.0,
+            "a flat hub must not be amplified into a huge score by a vanishing sd, got {z}"
         );
     }
 
