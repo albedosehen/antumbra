@@ -339,8 +339,8 @@ impl McpServer {
     /// How many candidates to pull from hybrid recall before reranking: a wide
     /// pool when the cross-encoder is configured (so it has room to reorder),
     /// else just the caller's `k`.
-    fn recall_pool(&self, k: usize) -> usize {
-        if self.reranker.is_some() {
+    fn recall_pool(&self, k: usize, scoped: bool) -> usize {
+        if self.reranker.is_some() || scoped {
             k.max(1).saturating_mul(10).clamp(20, RERANK_POOL_MAX)
         } else {
             k
@@ -407,21 +407,40 @@ impl McpServer {
         // Hybrid recall: dense (HNSW) + sparse (BM25 full-text) fused by RRF, so
         // exact tokens the embedding drops still surface. Pull a wide pool when a
         // reranker is configured, then re-score + truncate to k.
+        //
+        // Also pull a wide pool when the caller named a repo or branch, because
+        // scope is applied by DEMOTING out-of-scope hits (below) and a demotion
+        // can only reorder what already survived into the top k. With pool == k
+        // the scoping is cosmetic: a session-start bootstrap in the antumbra repo
+        // recalled twelve memories, none of them about antumbra and every one
+        // tagged `[unknown]`, while eight provenance-anchored ones existed and
+        // never reached the pool. Retrieval has to give them a chance to compete
+        // before the ordering can prefer them.
+        let scoped = p.repo.is_some() || p.branch.is_some();
         let hits = memory::recall_hybrid(
             &self.store,
             &self.tenant,
             &p.query,
             &q,
-            self.recall_pool(k),
+            self.recall_pool(k, scoped),
             net,
         )
         .await
         .map_err(err)?;
+        // Truncate to k only once scope has had its say: when scoping is on, the
+        // wide pool is carried through the rerank so `demote_out_of_scope` can
+        // still promote an in-scope memory that dense+BM25 ranked low -- otherwise
+        // the widening above buys nothing.
+        let keep = if scoped {
+            self.recall_pool(k, scoped)
+        } else {
+            k
+        };
         let hits = self
             .rerank_to_k(
                 &p.query,
                 hits,
-                k,
+                keep,
                 |m| m.id.as_str().to_string(),
                 |m| m.content.clone(),
             )
@@ -453,9 +472,14 @@ impl McpServer {
                 .iter()
                 .map(|m| with_similarity(m, MemoryView::scoped(m, &ctx)))
                 .collect();
+            // Scope first, THEN truncate: this is the line that decides whether a
+            // repo-anchored memory reaches the caller at all.
             demote_out_of_scope(views, |v| {
                 v.scope.as_deref().map_or(Scope::Unknown, scope_from_str)
             })
+            .into_iter()
+            .take(k)
+            .collect()
         } else {
             hits.iter()
                 .map(|m| with_similarity(m, MemoryView::from(m)))
@@ -537,7 +561,14 @@ impl McpServer {
         // Hybrid recall (dense HNSW + sparse BM25, RRF-fused), like memory recall;
         // wide pool + cross-encoder rerank when configured.
         let hits =
-            document::recall_hybrid(&self.store, &self.tenant, &p.query, &q, self.recall_pool(k))
+            // Documents carry no git scope, so only a reranker widens this pool.
+            document::recall_hybrid(
+                &self.store,
+                &self.tenant,
+                &p.query,
+                &q,
+                self.recall_pool(k, false),
+            )
                 .await
                 .map_err(err)?;
         let hits = self
