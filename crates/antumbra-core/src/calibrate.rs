@@ -142,8 +142,8 @@ mod tests {
         // anything else asked of it.
         let hub: Vec<f32> = {
             let mut v = vec![0.0; d];
-            for i in 0..4 {
-                v[i] = 1.0;
+            for slot in v.iter_mut().take(4) {
+                *slot = 1.0;
             }
             let n = (v.iter().map(|x| x * x).sum::<f32>()).sqrt();
             v.iter().map(|x| x / n).collect()
@@ -204,8 +204,8 @@ mod tests {
         // Equidistant from all three probes.
         let flat: Vec<f32> = {
             let mut v = vec![0.0; d];
-            for i in 0..3 {
-                v[i] = 1.0;
+            for slot in v.iter_mut().take(3) {
+                *slot = 1.0;
             }
             let n = (v.iter().map(|x| x * x).sum::<f32>()).sqrt();
             v.iter().map(|x| x / n).collect()

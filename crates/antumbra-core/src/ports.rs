@@ -215,6 +215,10 @@ pub enum Question {
 /// weakness. Sixteen leaves headroom under the ceiling rather than sitting on it.
 pub const MAX_CHOICE_OPTIONS: usize = 16;
 
+// The record's ceiling, checked at compile time rather than by a test: raising
+// the constant past twenty should fail the build, not a test run.
+const _: () = assert!(MAX_CHOICE_OPTIONS < 20);
+
 impl Question {
     /// Whether this question can be answered well, as opposed to merely answered.
     ///
@@ -294,10 +298,6 @@ mod typed_decisions {
     /// cheaply.
     #[test]
     fn a_choice_answer_space_is_bounded() {
-        assert!(
-            MAX_CHOICE_OPTIONS < 20,
-            "the record's ceiling is twenty; this must stay under it"
-        );
         let ok = Question::Choice {
             options: (0..MAX_CHOICE_OPTIONS).map(|i| i.to_string()).collect(),
         };
