@@ -264,6 +264,20 @@ pub fn shape_problems(schema: &Value) -> Vec<Problem> {
     // and the first version of this rule flagged a field that explains itself
     // perfectly ("only when the autonomous propose trigger is enabled and
     // fired") for not using the word "empty".
+    // The size rule reads the description for a SIZE, for the same reason the
+    // empty rule reads it for an absence: otherwise adding a sentence about one
+    // question silences the other, and a server can quiet the whole report with
+    // prose that answers neither. A string field's escape hatch stays lenient,
+    // because "cut to a prefix unless you asked for `full`" is the bound.
+    fn describes_size(node: &Value) -> bool {
+        const SIZE: [&str; 6] = ["at most", "up to", "no more than", "limit", "top_k", "default"];
+        node.get("description")
+            .and_then(Value::as_str)
+            .map(|d| d.to_ascii_lowercase())
+            .is_some_and(|d| {
+                d.chars().any(|c| c.is_ascii_digit()) || SIZE.iter().any(|w| d.contains(w))
+            })
+    }
     fn describes_empty(node: &Value) -> bool {
         const ABSENCE: [&str; 5] = ["empty", "absent", "omitted", "none", "only when"];
         node.get("description")
@@ -293,7 +307,7 @@ pub fn shape_problems(schema: &Value) -> Vec<Problem> {
         let ty = node.get("type").and_then(Value::as_str);
 
         if ty == Some("array") {
-            let unbounded = node.get("maxItems").is_none() && !described(node);
+            let unbounded = node.get("maxItems").is_none() && !describes_size(node);
             if unbounded {
                 out.push(Problem::UnboundedCollection(path.to_string()));
             }
@@ -943,6 +957,28 @@ mod output_shape {
             shape_problems(&schema),
             vec![Problem::IndistinguishableEmpty(".rows".into())],
             "the size description satisfies the bound rule and not this one"
+        );
+    }
+
+    /// The converse, and the reason each rule reads the description for its own
+    /// question: saying what an empty result means must not pass off as saying
+    /// how many a full one returns, or one sentence quiets the whole report.
+    #[test]
+    fn a_description_about_emptiness_does_not_answer_the_size_question() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "description": "empty when nothing matched",
+                    "items": { "type": "object", "properties": {} }
+                }
+            }
+        });
+        assert_eq!(
+            shape_problems(&schema),
+            vec![Problem::UnboundedCollection(".rows".into())],
+            "the empty-state description satisfies that rule and not the bound"
         );
     }
 
