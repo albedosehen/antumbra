@@ -64,6 +64,11 @@ pub(super) struct RecallParams {
     pub(super) repo: Option<String>,
     /// The caller's checked-out branch, to scope results by branch as well.
     pub(super) branch: Option<String>,
+    /// Return each memory's whole `content` instead of the bounded prefix.
+    /// Default `false`: a recall is a survey, and a survey that spends the
+    /// context window cannot be followed by the work it was for. Ask for `true`
+    /// once a row is known to be the one that matters.
+    pub(super) full: Option<bool>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -97,14 +102,29 @@ pub(super) struct MemoryView {
     /// re-anchored the memory since.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) orphaned_at: Option<String>,
-    /// How close this memory is to the query, as cosine similarity in `[-1, 1]`,
-    /// on a recall that had a query to compare against. This is the dense
-    /// measure, not the fusion rank: rank says which came back first, and recall
-    /// always returns `top_k` whether or not anything was relevant, so only this
-    /// distinguishes a near match from the best of a bad lot. Absent when the
-    /// memory carries no embedding, and on the paths that never had a query.
+    /// The dense cosine between the query and this memory, in `[-1, 1]`, on a
+    /// recall that had a query. Absent when the memory carries no embedding, and
+    /// on the paths that never had a query.
+    ///
+    /// DO NOT READ THIS AS RELEVANCE, and do not threshold on it. It is not the
+    /// ordering key: results are ranked by fusion over a dense and a lexical leg
+    /// (and a cross-encoder where one is configured), so the first row routinely
+    /// carries the lowest number here. Worse, it tracks a memory's LENGTH more
+    /// than its topic -- a 66-character row scores 0.774 against a query about
+    /// banana bread, while a 1058-character row scores 0.224 against a query
+    /// about its own contents. Measured on a 5,538-memory store; see ADR-0023
+    /// B-2, which corrects an earlier plan to build a relevance floor on exactly
+    /// this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) similarity: Option<f32>,
+    /// How long `content` is in the store, in characters. Always present, so a
+    /// caller can tell a short memory from a long one it is seeing the front of.
+    pub(super) content_chars: u32,
+    /// Present, and `true`, exactly when `content` above is a prefix of the
+    /// stored text. Absent when the row is whole. Re-request with `full: true`
+    /// to get the rest.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) truncated: bool,
     /// When the memory was last written: stored, reinforced, or penalized. With
     /// `reinforcement`, this is what lets a memory serve as a counter that also
     /// says when it last counted (ADR-0021, skill usage).
@@ -148,9 +168,22 @@ impl From<&Memory> for MemoryView {
             orphaned_at: orphan_of(&m.evidence).map(|o| o.at.to_rfc3339()),
             updated_at: m.updated_at.to_rfc3339(),
             similarity: None,
+            content_chars: m.content.chars().count() as u32,
+            truncated: false,
         }
     }
 }
+
+/// How much of a memory's `content` a recall returns before it is cut.
+///
+/// Recall returns `top_k` rows and a memory runs to thousands of characters, so
+/// the default answer was unbounded in the one place an agent cannot afford it:
+/// five rows of a thousand characters is most of a session-start budget spent
+/// before the session has begun. 900 is what the shipped hooks already cut at,
+/// so this makes the surface agree with its own clients rather than inventing a
+/// second number, and five of them sit comfortably inside the 10,000-character
+/// limit a hook's context has.
+pub(super) const RECALL_CONTENT_CHARS: usize = 900;
 
 impl MemoryView {
     /// The view of `m` judged against the caller's git context.
@@ -158,6 +191,25 @@ impl MemoryView {
         let mut view = Self::from(m);
         view.scope = Some(scope_of_evidence(&m.evidence, ctx).as_str().to_string());
         view
+    }
+
+    /// Cut `content` to a prefix of `max` characters unless `full`.
+    ///
+    /// A prefix, never a summary: no model belongs in the recall path, and two
+    /// identical recalls must return identical text. The cut counts CHARACTERS
+    /// rather than bytes, so it can never land inside a multi-byte codepoint.
+    pub(super) fn bounded(mut self, full: bool, max: usize) -> Self {
+        if full {
+            return self;
+        }
+        // `content_chars` is the stored length and is set before any cut, so it
+        // stays true whichever branch runs.
+        if self.content.chars().count() > max {
+            let cut: String = self.content.chars().take(max).collect();
+            self.content = cut;
+            self.truncated = true;
+        }
+        self
     }
 }
 

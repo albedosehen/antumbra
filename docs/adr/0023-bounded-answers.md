@@ -101,7 +101,7 @@ The hook's total becomes checkable. With a bound on each memory and a count of m
 
 ## Order of work
 
-1. [ ] **B-1, the bound.** `full` on `RecallParams`, the prefix cut, the marker and the original length on `MemoryView`, and validations 1 to 3. This is the defect; it goes first and is shippable alone.
+1. [x] **B-1, the bound.** `full` on `RecallParams`, the prefix cut, the marker and the original length on `MemoryView`, and validations 1 to 3. This is the defect; it goes first and is shippable alone.
 2. [ ] **The hook's worst case.** Validation 5, which is the reason the bound matters and is a test rather than a feature.
 3. [ ] **B-2, the floor.** The relevance floor and validation 4.
 4. [ ] **B-3, the lint.** Output-shape rules in `mcp-lint` and validation 6. Last because it is the generalisation, and generalising before the specific case is settled would encode a guess.

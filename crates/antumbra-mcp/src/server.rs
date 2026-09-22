@@ -462,12 +462,16 @@ impl McpServer {
         // can. Attached here rather than afterwards because the demotion below
         // reorders the views, and a similarity paired with the wrong memory
         // would be worse than none.
+        // Bound the prose unless the caller asked for all of it (ADR-0023 B-1).
+        // Applied here, where the view is built, so every path out of recall is
+        // bounded by construction rather than by each caller remembering to.
+        let full = p.full.unwrap_or(false);
         let with_similarity = |m: &Memory, mut view: MemoryView| {
             view.similarity = m
                 .embedding
                 .as_deref()
                 .map(|e| antumbra_core::cosine_similarity(&q, e));
-            view
+            view.bounded(full, params::RECALL_CONTENT_CHARS)
         };
         let memories = if p.repo.is_some() || p.branch.is_some() {
             let ctx = GitContext {

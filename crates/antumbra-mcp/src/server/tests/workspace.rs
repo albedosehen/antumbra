@@ -698,6 +698,7 @@ async fn provenance_is_stored_and_scopes_recall() {
             query: "orders route".into(),
             top_k: Some(5),
             network: None,
+            full: None,
         }))
         .await
         .unwrap();
@@ -720,6 +721,7 @@ async fn provenance_is_stored_and_scopes_recall() {
             query: "orders route".into(),
             top_k: Some(5),
             network: None,
+            full: None,
         }))
         .await
         .unwrap();
