@@ -58,6 +58,13 @@ pub enum Problem {
     /// it returns (ADR-0023 B-3). A caller cannot budget for a collection whose
     /// size is stated nowhere.
     UnboundedCollection(String),
+    /// A collection that can come back empty, with nothing beside it to say why
+    /// (ADR-0023 B-3, generalising B-2). An empty array answers "no rows" and
+    /// not "no rows BECAUSE", so the agent cannot tell a query that matched
+    /// nothing from one whose matches a filter or a threshold removed. The two
+    /// want opposite responses — rephrase, or widen — and guessing wrong costs a
+    /// round trip each time. The string names the path to the collection.
+    IndistinguishableEmpty(String),
 }
 
 impl Problem {
@@ -80,7 +87,9 @@ impl Problem {
     pub fn is_shape(&self) -> bool {
         matches!(
             self,
-            Problem::UnboundedText(_) | Problem::UnboundedCollection(_)
+            Problem::UnboundedText(_)
+                | Problem::UnboundedCollection(_)
+                | Problem::IndistinguishableEmpty(_)
         )
     }
 }
@@ -114,6 +123,10 @@ impl std::fmt::Display for Problem {
             Problem::UnboundedCollection(path) => write!(
                 f,
                 "returns `{path}` without `maxItems` or any description of how many: a caller cannot budget for a collection whose size is stated nowhere"
+            ),
+            Problem::IndistinguishableEmpty(path) => write!(
+                f,
+                "returns `{path}` empty with nothing beside it to say why: an agent cannot tell \"nothing matched\" from \"matches were filtered out\", and those want opposite next moves (add a flag, a status or a count alongside it, or say in its description what an empty one means)"
             ),
         }
     }
@@ -243,6 +256,21 @@ pub fn shape_problems(schema: &Value) -> Vec<Problem> {
             .and_then(Value::as_str)
             .is_some_and(|d| !d.trim().is_empty())
     }
+    // Deliberately NOT `described`. A description that says how many rows come
+    // back satisfies the bound rule and says nothing about what no rows means,
+    // so reusing it would let one sentence silence two different questions.
+    //
+    // More than one word, because a server says absence in its own vocabulary
+    // and the first version of this rule flagged a field that explains itself
+    // perfectly ("only when the autonomous propose trigger is enabled and
+    // fired") for not using the word "empty".
+    fn describes_empty(node: &Value) -> bool {
+        const ABSENCE: [&str; 5] = ["empty", "absent", "omitted", "none", "only when"];
+        node.get("description")
+            .and_then(Value::as_str)
+            .map(|d| d.to_ascii_lowercase())
+            .is_some_and(|d| ABSENCE.iter().any(|w| d.contains(w)))
+    }
     fn resolve<'a>(node: &'a Value, root: &'a Value) -> &'a Value {
         node.get("$ref")
             .and_then(Value::as_str)
@@ -295,15 +323,31 @@ pub fn shape_problems(schema: &Value) -> Vec<Problem> {
         }
 
         if let Some(props) = node.get("properties").and_then(Value::as_object) {
+            // An empty collection explains itself only if something BESIDE it
+            // varies with the reason it is empty. A boolean, an enumerated
+            // status and a count all can — `nothing_cleared_the_floor` is the
+            // shape B-2 landed, and a `total` that disagrees with the rows
+            // carries the same news. A second collection cannot.
+            let explained_by_sibling = props.values().any(|p| {
+                let p = resolve(p, root);
+                matches!(
+                    p.get("type").and_then(Value::as_str),
+                    Some("boolean" | "integer" | "number")
+                ) || p.get("enum").is_some()
+            });
             for (name, child) in props {
-                walk(
-                    child,
-                    root,
-                    &format!("{path}.{name}"),
-                    in_row,
-                    depth + 1,
-                    out,
-                );
+                let child_path = format!("{path}.{name}");
+                let resolved = resolve(child, root);
+                // Only RESULT collections. An empty `tags` inside a row is an
+                // ordinary absence, not an ambiguous answer, and flagging every
+                // one of them would bury the case that matters.
+                let is_result_collection = !in_row
+                    && resolved.get("type").and_then(Value::as_str) == Some("array")
+                    && resolved.get("minItems").and_then(Value::as_u64).unwrap_or(0) == 0;
+                if is_result_collection && !explained_by_sibling && !describes_empty(resolved) {
+                    out.push(Problem::IndistinguishableEmpty(child_path.clone()));
+                }
+                walk(child, root, &child_path, in_row, depth + 1, out);
             }
         }
         for key in ["anyOf", "oneOf", "allOf"] {
@@ -418,11 +462,14 @@ pub fn render(server: &str, checked: usize, findings: &[Finding]) -> String {
     if shape > 0 {
         out.push(String::new());
         out.push(format!(
-            "{shape} tool(s) return a shape that spends context you did not budget: prose no one \
-             bounded, or a collection that never says how many rows it returns. Nothing here \
-             fails a request, so nothing here fails this command. Only the server can fix it, \
-             and a server that returns rows of unbounded text will empty a window whatever the \
-             agent does with it."
+            "{shape} tool(s) return a shape that costs you something you did not budget: prose \
+             no one bounded, a collection that never says how many rows it returns, or a \
+             collection that comes back empty without saying why. The first two spend context; \
+             the third spends a round trip, because an agent that cannot tell \"nothing matched\" \
+             from \"everything was filtered\" has to guess which one to retry. Nothing here fails \
+             a request, so nothing here fails this command. Only the server can fix it, and a \
+             server that returns rows of unbounded text will empty a window whatever the agent \
+             does with it."
         ));
     }
     out.join("\n")
@@ -676,6 +723,11 @@ mod output_shape {
         let schema = json!({
             "type": "object",
             "properties": {
+                // Keeps this fixture about the text bound: without a sibling
+                // that explains an empty result it would also trip the
+                // empty-state rule, and a test that asserts two rules at once
+                // stops naming which one broke.
+                "matched": { "type": "integer" },
                 "memories": {
                     "type": "array",
                     "maxItems": 50,
@@ -710,6 +762,7 @@ mod output_shape {
         let schema = json!({
             "type": "object",
             "properties": {
+                "matched": { "type": "integer" },
                 "memories": {
                     "type": "array",
                     "maxItems": 50,
@@ -734,6 +787,7 @@ mod output_shape {
         let schema = json!({
             "type": "object",
             "properties": {
+                "matched": { "type": "integer" },
                 "rows": {
                     "type": "array",
                     "items": { "type": "object", "properties": {} }
@@ -760,6 +814,7 @@ mod output_shape {
             },
             "type": "object",
             "properties": {
+                "matched": { "type": "integer" },
                 "rows": {
                     "type": "array",
                     "maxItems": 10,
@@ -772,6 +827,168 @@ mod output_shape {
             vec![Problem::UnboundedText(".rows[].prose".into())],
             "the walk follows a local $ref or it checks nothing a generator emits"
         );
+    }
+
+    /// ADR-0023 B-3's third rule, which generalises B-2. A bare collection
+    /// answers "no rows" and never "no rows BECAUSE", so the agent cannot tell
+    /// a query that matched nothing from one whose matches a floor removed.
+    #[test]
+    fn a_collection_with_nothing_to_explain_an_empty_one_is_flagged() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "memories": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": { "type": "object", "properties": {} }
+                }
+            }
+        });
+        assert_eq!(
+            shape_problems(&schema),
+            vec![Problem::IndistinguishableEmpty(".memories".into())]
+        );
+    }
+
+    /// The shape B-2 actually landed in `antumbra-mcp`: a boolean beside the
+    /// rows that is true exactly when something was retrieved and then floored.
+    /// This is the fixture that says what the rule is asking for.
+    #[test]
+    fn a_boolean_beside_the_rows_passes() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "nothing_cleared_the_floor": { "type": "boolean" },
+                "memories": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": { "type": "object", "properties": {} }
+                }
+            }
+        });
+        assert!(shape_problems(&schema).is_empty());
+    }
+
+    /// An enumerated status carries the same news as a boolean, and is how a
+    /// server with more than two outcomes would say it.
+    #[test]
+    fn an_enumerated_status_passes() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "status": { "enum": ["ok", "no_match", "all_filtered"] },
+                "rows": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": { "type": "object", "properties": {} }
+                }
+            }
+        });
+        assert!(shape_problems(&schema).is_empty());
+    }
+
+    /// The documented escape hatch, matching the posture of the rules beside
+    /// this one: a server may say in prose what a schema cannot express.
+    #[test]
+    fn a_description_that_says_what_empty_means_passes() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "description": "empty only when nothing matched; filtered matches are returned with a lower score",
+                    "items": { "type": "object", "properties": {} }
+                }
+            }
+        });
+        assert!(shape_problems(&schema).is_empty());
+    }
+
+    /// A server says absence in its own vocabulary. This is `store_memory`'s
+    /// `auto_proposed` verbatim, which explains itself completely and which the
+    /// first version of this rule flagged for not using the word "empty".
+    #[test]
+    fn a_field_that_explains_its_absence_in_other_words_passes() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "auto_proposed": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "description": "Compartment ids the antumbra auto-created from the inbox on this write (only when the autonomous propose trigger is enabled and fired).",
+                    "items": { "type": "string", "maxLength": 64 }
+                }
+            }
+        });
+        assert!(shape_problems(&schema).is_empty());
+    }
+
+    /// A description that says HOW MANY must not silence a rule about WHY NONE.
+    /// The two rules share a keyword and ask different questions, so they read
+    /// the description differently on purpose.
+    #[test]
+    fn a_description_about_size_does_not_answer_the_empty_question() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "description": "at most 20 rows",
+                    "items": { "type": "object", "properties": {} }
+                }
+            }
+        });
+        assert_eq!(
+            shape_problems(&schema),
+            vec![Problem::IndistinguishableEmpty(".rows".into())],
+            "the size description satisfies the bound rule and not this one"
+        );
+    }
+
+    /// Only RESULT collections. An empty `tags` inside a row is an ordinary
+    /// absence rather than an ambiguous answer, and flagging every one of them
+    /// would bury the case that matters under noise.
+    #[test]
+    fn an_empty_collection_inside_a_row_is_not_flagged() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "matched": { "type": "integer" },
+                "rows": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tags": {
+                                "type": "array",
+                                "maxItems": 8,
+                                "items": { "type": "string", "maxLength": 32 }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        assert!(shape_problems(&schema).is_empty());
+    }
+
+    /// A collection that cannot be empty has no empty state to describe.
+    #[test]
+    fn a_collection_with_a_minimum_is_not_flagged() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "items": { "type": "object", "properties": {} }
+                }
+            }
+        });
+        assert!(shape_problems(&schema).is_empty());
     }
 
     /// A string OUTSIDE a collection is one field once, not one per row, so it
