@@ -42,6 +42,14 @@ B-2 asked for a definitive empty state and could not say how to decide emptiness
 
 Note what this does **not** change: hybrid recall stays. BM25 is currently the only reason a verbatim query returns the right memory at all, and a typed head re-ranks what recall retrieves rather than replacing retrieval.
 
+**The obvious cheaper answer was tried first, and does not work.** Since this record's Context was written, recall gained two corrections: the dense leg is re-ranked by a per-text calibration before fusion, and a cross-encoder (`BAAI/bge-reranker-base`, served by text-embeddings-inference) re-scores the fused pool. A cross-encoder emits a relevance score per `(query, memory)` pair, which is superficially the instrument D-2 asks for, and it is already in the serving path. If it could carry the floor, this record's D-2 would be unnecessary.
+
+It cannot, and the reason is the same shape as the defect it was brought in to fix. Measured on ten real memories: against one fixed nonsense query the separation looks perfect, every irrelevant pair landing within 3.741e-5 to 3.744e-5 while every on-topic pair scored at least 8.6 times higher. Vary the nonsense instead, and the floor moves: the same memory scores 3.7e-5 against "banana bread recipe" and 7.9e-4 against "which strings to use on a fretless bass", a spread of twenty-one times. The weakest genuine match in the first set scored 3.2e-4, which sits *inside* that band. A fixed threshold therefore admits some nonsense and rejects some answers, whichever value it takes.
+
+The cross-encoder is reliable for ORDERING candidates within one query and unreliable as an absolute magnitude ACROSS queries. A floor is an across-query comparison by construction — it must mean the same thing for every query the caller asks. That is precisely the distinction between a ranking signal and a calibrated probability, and it is why `noul` is specified as the latter. The same finding applies to `similarity` (ADR-0023 B-2) and now to the reranker: this system has two ranking signals and no calibrated one.
+
+One consequence for the order of work below. The cross-encoder is a better control than the raw threshold, because it is deployed, it is free to measure, and temperature calibration on its output is a far cheaper experiment than adopting a 421M head. Validation 1's swept threshold remains the bar for D-1's gate; for D-2 the bar is a temperature-calibrated cross-encoder, and this record is only justified for recall if a typed head beats that.
+
 ### D-3 · The boundary probe
 
 ADR-0004 models the context-scope of a behaviour as right-here versus wrong-there plus a governing feature. That is a `choice` and a `score`, and `AcceptabilityProbe` is already a port, so the seam exists. This lands after D-1 and D-2, because the thesis of the system is the wrong place to learn how a new instrument behaves.
@@ -85,7 +93,7 @@ The failure mode to watch is a head that is well calibrated on the slices a veri
 ## Order of work
 
 1. [ ] **The measurement, before any integration.** Validation 1 and 2, offline, against existing verifier outcomes. If the head does not beat a tuned threshold, stop here and record it.
-2. [ ] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated.
+2. [ ] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated. Its control is a temperature-calibrated cross-encoder rather than a swept threshold, for the reason recorded in D-2; if calibrating the deployed reranker clears the bar, this item closes without a new model and the record says so.
 3. [ ] **D-1, the gate.** Two questions, with the margin retained as fallback and control.
 4. [ ] **D-3, the boundary probe**, once D-1 and D-2 have a calibration history.
 5. [ ] **D-4, the critic**, after ADR-0022's S-2, not before.
@@ -95,5 +103,7 @@ The failure mode to watch is a head that is well calibrated on the slices a veri
 Laya's figures are from its own model card and are quoted with its own caveats: 0.766 on typed decisions after fine-tuning against a 0.735 teacher-agreement ceiling, 0.362 zero-shot, sharp degradation past roughly twenty options, weak ordinal scoring, and over-confidence before temperature calibration. The launch benchmarks against Jev were published by one party without access to the other's API, and on Banking77's 77 labels Laya scored 0.425 against Jev's 0.870, which is the large-label-space weakness showing up exactly where the model card says it will. None of those numbers are load-bearing here, because Validation requires Antumbra's own measurement on Antumbra's own outcomes.
 
 The recall figures in Context were measured directly against `ws:default` on 2026-09-22 and are reproducible: store any short stub, query anything unrelated, and watch it rank first.
+
+Those figures predate the corrections landed later the same day and should be read as the diagnosis that prompted them rather than as current behaviour. Three things have since changed under this record: the lexical leg was returning an arbitrary slice of its matches rather than its best ones (a missing `ORDER BY`), the dense leg is now re-ranked by a per-text calibration that lifted top-1 from 2/30 to 13/30 on a thirty-memory benchmark, and a cross-encoder re-scores the fused pool. The stub no longer leads any query. What has NOT changed is the part D-2 rests on: there is still no signal whose magnitude means the same thing across two different queries, which is what the cross-encoder measurement in D-2 establishes and what a floor requires.
 
 The priority dispute around Jev's originality (arXiv:2503.23303 and arXiv:2510.01237, the latter being confidence-aware routing into local, retrieval, larger-model and human pathways) is noted because the routing paper is close to what ADR-0005 already does, and because it is the kind of thing worth knowing before citing either system in front of a customer. It does not bear on the decision.
