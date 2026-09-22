@@ -178,6 +178,78 @@ mod tests {
         a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>()
     }
 
+    /// Is the length bias PREDICTABLE enough to subtract?
+    ///
+    /// Every fix measured so far tries to change the vectors (a different model, a
+    /// different pooling). This asks a cheaper question: the raw cosine is useless
+    /// ACROSS lengths, but if a text's similarity to an ARBITRARY query is a stable
+    /// function of its length, then that expectation can be estimated per text and
+    /// subtracted, and what remains is topicality. That is a calibration, not a
+    /// model change -- no re-embedding, no schema, and it applies to the short
+    /// stubs too, which is the half chunking cannot reach.
+    ///
+    /// Method: for each text, score it against several MUTUALLY UNRELATED queries
+    /// to get a baseline mean and spread, then express the TOPICAL query's score as
+    /// a z-score against that text's own baseline. If calibration works, the long
+    /// passage's z must beat the stub's z, even though its raw cosine is far lower.
+    #[tokio::test]
+    #[ignore = "downloads model weights"]
+    async fn is_the_length_bias_predictable_enough_to_subtract() {
+        let stub = "[Project] data-core-hub-parent - Part of WTS-Paradigm organization";
+        let medium = "The sparse leg of hybrid recall must order by relevance. Without ORDER BY \
+                      the engine returns matches in record order and the limit truncates to an \
+                      arbitrary subset of them.";
+        let long = format!(
+            "Antumbra recall fuses a dense HNSW leg and a BM25 lexical leg with reciprocal \
+             rank fusion. {} The lexical leg is what rescues identifiers and error codes that \
+             a 384-dimensional vector silently drops. {}",
+            "Each leg pulls a candidate pool wider than the caller's k so fusion has room to \
+             reorder before truncating. "
+                .repeat(4),
+            "Provenance is stored as a git evidence entry and judged at recall time. ".repeat(6)
+        );
+        // Deliberately unrelated to each other AND to every text, so their spread
+        // estimates "what this text scores against an arbitrary query".
+        let baseline_queries = [
+            "banana bread recipe",
+            "the weather in Reykjavik on a Tuesday",
+            "kubernetes ingress TLS renewal",
+            "how to repot a fiddle leaf fig",
+            "tax deadlines for sole traders",
+            "which strings to use on a fretless bass",
+        ];
+        let topical = "reciprocal rank fusion dense and lexical retrieval legs";
+
+        let e = BertEmbedder::load().expect("load model");
+        let q_top = e.embed(topical).await.expect("topical");
+        let mut baselines = Vec::new();
+        for q in baseline_queries {
+            baselines.push(e.embed(q).await.expect("baseline query"));
+        }
+
+        println!("\n  text      len    raw_topical  baseline_mean  sd      z-score");
+        for (label, text) in [
+            ("stub  ", stub),
+            ("medium", medium),
+            ("long  ", long.as_str()),
+        ] {
+            let v = e.embed(text).await.expect("passage");
+            let sims: Vec<f32> = baselines.iter().map(|b| cosine(b, &v)).collect();
+            let n = sims.len() as f32;
+            let mean = sims.iter().sum::<f32>() / n;
+            let sd = (sims.iter().map(|s| (s - mean).powi(2)).sum::<f32>() / n)
+                .sqrt()
+                .max(1e-6);
+            let raw = cosine(&q_top, &v);
+            println!(
+                "  {label}  {:<5}  {raw:.3}        {mean:.3}          {sd:.3}   {:+.2}",
+                text.len(),
+                (raw - mean) / sd
+            );
+        }
+        println!("\n  calibration works if `long` has the highest z despite the lowest raw score.");
+    }
+
     /// Does chunk-and-max-pool lift a long passage over a short off-topic stub,
     /// and at what chunk size?
     ///
