@@ -22,6 +22,7 @@ use surql::query::helpers::fulltext_search_query;
 use surql::types::operators::{and_, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
+use antumbra_core::calibrate::calibrated_score;
 use antumbra_core::{
     CompartmentId, ExpertId, Memory, MemoryId, MemoryNetwork, MemoryStatus, Result, TenantId,
     UserId,
@@ -337,6 +338,9 @@ pub async fn recall(
 /// drops. The sparse leg is best-effort: if the full-text query errors (e.g. the
 /// index is still building, or an older store predates it), recall degrades to
 /// dense-only rather than failing. A blank `query_text` is dense-only by design.
+/// `probes` calibrates the DENSE leg: see [`antumbra_core::calibrate`]. Pass an
+/// empty slice to rank it by raw cosine, which is what every caller did before
+/// the calibration existed and what a caller with no embedder still does.
 pub async fn recall_hybrid(
     store: &Store,
     tenant: &TenantId,
@@ -344,13 +348,30 @@ pub async fn recall_hybrid(
     query_vec: &[f32],
     k: usize,
     network: Option<MemoryNetwork>,
+    probes: &[Vec<f32>],
 ) -> Result<Vec<Memory>> {
     // Pull a wider candidate pool from each leg than the final k, so fusion has
     // room to reorder before truncating. The same sizing the dense leg uses
     // against its own residual filters, for the same reason.
     let pool = candidate_pool(k);
 
-    let dense = recall(store, tenant, query_vec, pool, network).await?;
+    let mut dense = recall(store, tenant, query_vec, pool, network).await?;
+    // The index retrieves by raw cosine, which is the right RECALL stage -- it is
+    // a superset, and cheap. Ranking is the part raw cosine gets wrong: it tracks
+    // a memory's LENGTH more than its topic, so short rows lead every result. So
+    // re-rank the pool the index returned, and do it HERE, before fusion: sorting
+    // the FUSED list by a dense score would throw away the lexical leg, which is
+    // currently the only thing surfacing the right answers at all.
+    if !probes.is_empty() {
+        dense.sort_by(|a, b| {
+            let score = |m: &Memory| {
+                m.embedding
+                    .as_deref()
+                    .map_or(f32::MIN, |e| calibrated_score(query_vec, e, probes))
+            };
+            score(b).total_cmp(&score(a))
+        });
+    }
     let sparse = sparse_recall(store, tenant, query_text, pool, network)
         .await
         .unwrap_or_default();
@@ -627,6 +648,121 @@ mod tests {
     use crate::repo::sync as rows;
     use crate::schema::EMBED_DIM;
 
+    /// Calibrating the dense leg has to change what comes back, and change it the
+    /// right way: the memory that answers the query must displace a hub that is
+    /// merely close to everything.
+    ///
+    /// Built so the LEXICAL leg cannot decide the outcome -- the query text
+    /// matches neither memory, so `sparse_recall` returns nothing and the fused
+    /// order is the dense order alone. That isolates the thing under test, and it
+    /// is also why the probes are passed as vectors rather than an embedder: the
+    /// store never needs to embed anything to calibrate.
+    #[tokio::test]
+    async fn calibrating_the_dense_leg_displaces_a_hub() -> Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let tenant = TenantId::new("t");
+        let unit = |f: &dyn Fn(usize) -> f32| -> Vec<f32> {
+            let raw: Vec<f32> = (0..EMBED_DIM).map(f).collect();
+            let n = raw.iter().map(|x| x * x).sum::<f32>().sqrt();
+            raw.iter().map(|x| x / n).collect()
+        };
+        // Axes 0..4 are the probe directions; axis 40 is the query's own subject.
+        // Weights across the probe axes are UNEQUAL on purpose: a text with
+        // identical similarity to every probe has no spread, and dividing by a
+        // floored sd would make its z meaningless.
+        let probe_w = [1.0f32, 0.8, 0.6, 0.4];
+        let probes: Vec<Vec<f32>> = (0..4)
+            .map(|i| unit(&|j| if j == i { 1.0 } else { 0.0 }))
+            .collect();
+        // The hub sits mostly in the probe subspace: close to those queries, and
+        // to this one, without being about anything.
+        let hub = unit(&|j| {
+            if j < 4 {
+                0.6 * probe_w[j]
+            } else if j == 40 {
+                0.4
+            } else {
+                0.0
+            }
+        });
+        // The specific memory is about axis 40 and barely touches the probes.
+        let specific = unit(&|j| {
+            if j < 4 {
+                0.05 * probe_w[j]
+            } else if j == 40 {
+                0.95
+            } else {
+                0.0
+            }
+        });
+        // The query leans toward the probe subspace enough that raw cosine
+        // prefers the hub -- which is the defect, reproduced.
+        let query = unit(&|j| {
+            if j < 4 {
+                0.7 * probe_w[j]
+            } else if j == 40 {
+                0.3
+            } else {
+                0.0
+            }
+        });
+
+        for (id, content, emb) in [
+            ("66666666-0000-0000-0000-000000000001", "hub", &hub),
+            (
+                "66666666-0000-0000-0000-000000000002",
+                "specific",
+                &specific,
+            ),
+        ] {
+            let mut m = Memory::new(
+                id,
+                tenant.clone(),
+                MemoryNetwork::World,
+                content,
+                0.9,
+                chrono::Utc::now(),
+            );
+            m.embedding = Some(emb.clone());
+            upsert(&store, &m).await?;
+        }
+
+        // A query whose text matches no stored content, so the lexical leg is
+        // silent and the dense order is the whole answer.
+        let uncalibrated = recall_hybrid(
+            &store,
+            &tenant,
+            "zzzz-no-lexical-match",
+            &query,
+            2,
+            None,
+            &[],
+        )
+        .await?;
+        let calibrated = recall_hybrid(
+            &store,
+            &tenant,
+            "zzzz-no-lexical-match",
+            &query,
+            2,
+            None,
+            &probes,
+        )
+        .await?;
+
+        assert_eq!(
+            uncalibrated.first().map(|m| m.content.as_str()),
+            Some("hub"),
+            "raw cosine prefers the hub -- this is the defect being corrected"
+        );
+        assert_eq!(
+            calibrated.first().map(|m| m.content.as_str()),
+            Some("specific"),
+            "calibrated, the memory that answers the query leads"
+        );
+        Ok(())
+    }
+
     /// Counting must not depend on materializing rows, and must agree with what
     /// `list` reports -- tombstones excluded.
     #[tokio::test]
@@ -841,6 +977,7 @@ mod tests {
             &vec![0.0; EMBED_DIM],
             5,
             None,
+            &[],
         )
         .await?;
         assert!(
@@ -1100,7 +1237,7 @@ mod tests {
 
         // Hybrid recall with the rare token as query text: the BM25 sparse leg
         // finds it by exact token, and RRF lifts it into the top-3.
-        let hybrid = recall_hybrid(&store, &tenant, "florbnugget", &qvec, 3, None)
+        let hybrid = recall_hybrid(&store, &tenant, "florbnugget", &qvec, 3, None, &[])
             .await
             .unwrap();
         assert!(

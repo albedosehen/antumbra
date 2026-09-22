@@ -216,7 +216,8 @@ async fn evaluate(
         for label in &domain.labels {
             let qv = embedder.embed(&label.query).await?;
             let hits =
-                memory::recall_hybrid(&store, &tenant, &label.query, &qv, deepest, None).await?;
+                memory::recall_hybrid(&store, &tenant, &label.query, &qv, deepest, None, &[])
+                    .await?;
             let rank = rank_of(&hits, &label.relevant_doc_id);
             metrics.record(rank);
         }

@@ -89,6 +89,11 @@ pub struct McpServer {
     /// duration (see `session`); checked at every tool call. `None` where the
     /// transport signs in per request (the embedded networked surface).
     session: Option<Arc<crate::session::SessionKeeper>>,
+    /// The probe vectors the dense leg is calibrated against
+    /// ([`antumbra_core::calibrate`]), embedded once on first recall by THIS
+    /// server's embedder -- so a tenant configured with a different model
+    /// calibrates in its own space rather than someone else's.
+    probes: Arc<tokio::sync::OnceCell<Vec<Vec<f32>>>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -424,6 +429,7 @@ impl McpServer {
             &q,
             self.recall_pool(k, scoped),
             net,
+            self.probe_vectors().await,
         )
         .await
         .map_err(err)?;
