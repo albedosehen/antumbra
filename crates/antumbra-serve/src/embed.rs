@@ -178,6 +178,115 @@ mod tests {
         a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>()
     }
 
+    /// The real-corpus validation the three-text probe could not provide: does
+    /// calibrated ranking beat raw cosine on ACTUAL memories, scored the way recall
+    /// scores them?
+    ///
+    /// Protocol. `ANTUMBRA_CALIB_SAMPLE` points at a JSON array of real memory
+    /// texts spanning the length range. For each one a query is cut from ~60%
+    /// THROUGH it -- deliberately not the head, because the head is what dominates
+    /// a mean-pooled vector, and a query answerable from the head would flatter the
+    /// uncalibrated score. The correct answer is known by construction: the memory
+    /// the snippet came from. Every memory is then ranked against that query twice,
+    /// by raw cosine and by z-score against its own baseline, and the two are
+    /// scored on top-1 accuracy and MRR.
+    ///
+    /// This is the measurement that decides whether the two-float schema change is
+    /// worth making. It is skipped, not failed, when the sample file is absent.
+    #[tokio::test]
+    #[ignore = "needs ANTUMBRA_CALIB_SAMPLE and downloads model weights"]
+    async fn calibrated_ranking_beats_raw_cosine_on_the_real_corpus() {
+        let Ok(path) = std::env::var("ANTUMBRA_CALIB_SAMPLE") else {
+            println!("ANTUMBRA_CALIB_SAMPLE unset -- skipped");
+            return;
+        };
+        let raw = std::fs::read_to_string(&path).expect("read sample");
+        let texts: Vec<String> = serde_json::from_str(&raw).expect("parse sample");
+        assert!(texts.len() >= 5, "need a few memories to rank against");
+
+        let baseline_queries = [
+            "banana bread recipe",
+            "the weather in Reykjavik on a Tuesday",
+            "how to repot a fiddle leaf fig",
+            "tax deadlines for sole traders",
+            "which strings to use on a fretless bass",
+            "the offside rule explained simply",
+        ];
+
+        let e = BertEmbedder::load().expect("load model");
+        let mut vecs = Vec::new();
+        let mut base = Vec::new(); // (mean, sd) per memory
+        let mut probes = Vec::new();
+        for q in baseline_queries {
+            probes.push(e.embed(q).await.expect("probe"));
+        }
+        for t in &texts {
+            let v = e.embed(t).await.expect("memory");
+            let sims: Vec<f32> = probes.iter().map(|p| cosine(p, &v)).collect();
+            let n = sims.len() as f32;
+            let mean = sims.iter().sum::<f32>() / n;
+            let sd = (sims.iter().map(|s| (s - mean).powi(2)).sum::<f32>() / n)
+                .sqrt()
+                .max(1e-6);
+            base.push((mean, sd));
+            vecs.push(v);
+        }
+
+        // A query cut from ~60% through each memory, on word boundaries.
+        let query_of = |t: &str| -> String {
+            let words: Vec<&str> = t.split_whitespace().collect();
+            let start = (words.len() as f32 * 0.6) as usize;
+            words[start..(start + 12).min(words.len())].join(" ")
+        };
+
+        let (mut raw_top1, mut cal_top1) = (0usize, 0usize);
+        let (mut raw_mrr, mut cal_mrr) = (0.0f32, 0.0f32);
+        for (i, t) in texts.iter().enumerate() {
+            let q = query_of(t);
+            if q.split_whitespace().count() < 6 {
+                continue;
+            }
+            let qv = e.embed(&q).await.expect("query");
+            let mut by_raw: Vec<(usize, f32)> = vecs
+                .iter()
+                .enumerate()
+                .map(|(j, v)| (j, cosine(&qv, v)))
+                .collect();
+            let mut by_cal: Vec<(usize, f32)> = by_raw
+                .iter()
+                .map(|(j, s)| (*j, (s - base[*j].0) / base[*j].1))
+                .collect();
+            by_raw.sort_by(|a, b| b.1.total_cmp(&a.1));
+            by_cal.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let rank_of =
+                |v: &[(usize, f32)]| v.iter().position(|(j, _)| *j == i).map_or(v.len(), |p| p) + 1;
+            let (rr, rc) = (rank_of(&by_raw), rank_of(&by_cal));
+            if rr == 1 {
+                raw_top1 += 1;
+            }
+            if rc == 1 {
+                cal_top1 += 1;
+            }
+            raw_mrr += 1.0 / rr as f32;
+            cal_mrr += 1.0 / rc as f32;
+        }
+        let n = texts.len() as f32;
+        println!(
+            "\n  {} memories, query cut from 60% through each",
+            texts.len()
+        );
+        println!(
+            "  RAW COSINE   top1={raw_top1}/{}  MRR={:.3}",
+            texts.len(),
+            raw_mrr / n
+        );
+        println!(
+            "  CALIBRATED   top1={cal_top1}/{}  MRR={:.3}",
+            texts.len(),
+            cal_mrr / n
+        );
+    }
+
     /// Is the length bias PREDICTABLE enough to subtract?
     ///
     /// Every fix measured so far tries to change the vectors (a different model, a
