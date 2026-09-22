@@ -100,9 +100,42 @@ const GRANT_PERMS: [(&str, &str); 4] = [
 /// engine per row via subqueries over the (tenant-readable) compartment/grant
 /// tables, so a forgotten app filter cannot leak and a revoke takes effect at
 /// once.
-const MEMORY_SELECT_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
+/// The active-hive read branch (ADR-0017 B), one more OR in the same shape as
+/// the owner and grant subqueries beside it. A memory is hive-visible when its
+/// compartment has an **accepted** offer, from a member who **opted in**, in a
+/// tenant whose hive the owner **enabled**.
+///
+/// All three conditions, every time. Dropping any one of them would make the
+/// hive something other than what ADR-0017 B decided: without `accepted` a
+/// member publishes unilaterally, without `opted_in` an owner conscripts a
+/// member's memory by accepting an offer they have since withdrawn consent for,
+/// and without `enabled` a member publishes into an org that never opened one.
+///
+/// Read only. The write rule is deliberately untouched: the hive is a shared
+/// read layer, so a member seeing another's offered compartment cannot write
+/// into it. That asymmetry is intentional here, unlike the ones ADR-0017
+/// increment 5 had to remove -- and the replication scope already handles it,
+/// because a user's nodes carry what they own rather than what they can read.
+const HIVE_VISIBLE_RULE: &str = "compartment IN (SELECT VALUE subject_id FROM hive_offer \
+     WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' \
+     AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) \
+     AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true))";
+
+/// What a session may read without the hive: the shared pool, its own
+/// compartments, and the ones granted to it.
+const MEMORY_SELECT_WITHOUT_HIVE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
      OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE))";
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE)";
+
+/// The read rule the `memory` and `document_chunk` tables carry: the private
+/// rule above, with the active hive OR'd in and the group closed.
+///
+/// Composed rather than written out twice. Two copies of an ACL is how the copy
+/// that matters stops matching the one that is read, and this one is read on
+/// every recall in the system.
+fn memory_select_rule() -> String {
+    format!("{MEMORY_SELECT_WITHOUT_HIVE} OR {HIVE_VISIBLE_RULE})")
+}
 
 /// The write rule for `memory` (create/update). A session may write a memory only
 /// into a compartment it may contribute to: the shared pool (un-compartmentalized),
@@ -124,12 +157,14 @@ const MEMORY_WRITE_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NON
 /// ingest deletes a title's previous generation before writing the next, so a
 /// tenant-wide delete would let any member erase another's private document by
 /// naming its title.
-const DOCUMENT_PERMS: [(&str, &str); 4] = [
-    ("select", MEMORY_SELECT_RULE),
-    ("create", MEMORY_WRITE_RULE),
-    ("update", MEMORY_WRITE_RULE),
-    ("delete", MEMORY_WRITE_RULE),
-];
+fn document_perms() -> [(&'static str, String); 4] {
+    [
+        ("select", memory_select_rule()),
+        ("create", MEMORY_WRITE_RULE.to_string()),
+        ("update", MEMORY_WRITE_RULE.to_string()),
+        ("delete", MEMORY_WRITE_RULE.to_string()),
+    ]
+}
 
 /// A device profile is a machine describing itself into its owner's fabric
 /// (ADR-0017). Read is tenant-wide, because dispatch has to be able to find the
@@ -336,10 +371,10 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("memory")
             .with_mode(TableMode::Schemaless)
             .with_permissions([
-                ("select", MEMORY_SELECT_RULE),
-                ("create", MEMORY_WRITE_RULE),
-                ("update", MEMORY_WRITE_RULE),
-                ("delete", "tenant_id = $auth.tenant"),
+                ("select", memory_select_rule()),
+                ("create", MEMORY_WRITE_RULE.to_string()),
+                ("update", MEMORY_WRITE_RULE.to_string()),
+                ("delete", "tenant_id = $auth.tenant".to_string()),
             ])
             .with_indexes([
                 unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
@@ -388,7 +423,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // recall over reference material.
         table_schema("document_chunk")
             .with_mode(TableMode::Schemaless)
-            .with_permissions(DOCUMENT_PERMS)
+            .with_permissions(document_perms())
             .with_indexes([
                 index("document_chunk_tenant_title_idx", ["tenant_id", "title"]),
                 index("document_chunk_created_at_idx", ["created_at"]),

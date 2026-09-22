@@ -1,6 +1,6 @@
 # ADR-0017 - The memory fabric: user nodes, and the tenant hive
 
-**Status:** Proposed (the gate is cleared; the order of work below says what is in). **Date:** 2026-09-02. **Gated on:** ADR-0006 v0 (single-GPU science) validated end to end. **Related:** 0006 (placement seam), 0007 (device_profile), 0012 (consolidation), 0013 (identity, umbra/penumbra), 0014 (compartments, grants), 0015 (MCP surface), 0016 (control plane). **Builds on:** antumbra-sync (R-1/R-2).
+**Status:** Accepted (the order of work below is complete). **Date:** 2026-09-02. **Gated on:** ADR-0006 v0 (single-GPU science) validated end to end. **Related:** 0006 (placement seam), 0007 (device_profile), 0012 (consolidation), 0013 (identity, umbra/penumbra), 0014 (compartments, grants), 0015 (MCP surface), 0016 (control plane). **Builds on:** antumbra-sync (R-1/R-2).
 
 ## Context
 
@@ -247,13 +247,17 @@ Built in increments, each one shippable on its own. A box is ticked only when th
       `memory_edge` is the sixth and takes `Replicate::EngineDecides`. An edge row carries `from_id`, `to_id` and no compartment, so whether it belongs on this node is a property of memories it only references -- the policy cannot judge it and the write rule can. Refusals there are counted as `declined` rather than `refused`, because they are the system working; `refused` is reserved for a narrowed table, where it should be zero and a non-zero value means the policy and the ACL disagree.
 
       Grants follow the compartment **owner**, not the grantee. The owner's machines need them to resolve their own ACL; a grantee reads through the engine rather than from a copy taken home.
-6. [~] The tenant hive (section B). **The gates and the ledger are in**; the read layer is not.
+6. [x] The tenant hive (section B).
 
    Done: the three tables with their permissions, the domain types, and the repositories. All three denials that make the design mean anything are permission predicates rather than conventions, and each has an engine-level test. A member cannot open the tenant gate; a member cannot opt another member in; and, the load-bearing one, **a member cannot accept their own offer** -- `update` is `false` for every record session, so acceptance is an owner-mode write. Loosening that one predicate to the create rule makes the test fail with the member having published into the org unilaterally, which is exactly what it is there to stop.
 
    Two smaller decisions worth the record. An offer is keyed on (tenant, kind, subject) and deliberately not on the offerer, because one compartment is one decision for the owner rather than two competing rows. And a declined offer is kept rather than deleted, so a member can see their offer was considered -- an absent row cannot say that.
 
-   Still open: the read layer. `HIVE_VISIBLE_RULE` appends an OR-branch to `MEMORY_SELECT_RULE`, which is the ACL every recall in the system already depends on, so it lands on its own with the existing compartment-privacy tests as the guard against widening it too far. Note also that the hive tables are **not** replicated: they are tenant-level rather than part of any one user's fabric, and whether an edge node needs a copy to resolve the read rule locally is a question that belongs with the read layer, not before it.
+   The read layer is in too. `HIVE_VISIBLE_RULE` is one more OR-branch on `MEMORY_SELECT_RULE`, in the same shape as the owner and grant subqueries beside it, and `document_chunk` inherits it because a document is shared the way a memory is. All three conditions -- accepted, opted in, enabled -- are load-bearing in the rule itself, not merely in the fixtures: dropping any one of them individually makes `tests/hive_read.rs` fail with another member's compartment visible. Read only; the write rule is untouched, so seeing an offered compartment does not make it writable.
+
+   Because the rule is evaluated per read rather than cached into a grant, withdrawing consent takes effect at once: a member who opts out takes their contribution with them, and an owner who closes the tenant gate shuts the whole hive, both on the next query.
+
+   The hive tables are deliberately **not** replicated. They are tenant-level rather than part of any one user's fabric, and a hive-visible memory is read live through the engine rather than copied -- which the increment 5 replication scope already gets right, since a user's nodes carry what they *own* rather than what they can *read*.
 
 ## Out of scope (its own decision)
 
