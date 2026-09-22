@@ -183,10 +183,171 @@ pub trait Reranker: Send + Sync {
     async fn rerank(&self, query: &str, candidates: &[(String, String)]) -> Result<Vec<String>>;
 }
 
+/// A question with a known answer space, asked of a [`TypedDecider`] (ADR-0024).
+///
+/// The point of naming the answer space is that the answer comes back as a
+/// calibrated probability rather than as a distance the caller has to interpret.
+/// Most of what this system decides is not text — route or escalate, in scope or
+/// not, does this memory answer this query — and each has been answered by
+/// comparing an uncalibrated scalar against a hand-set threshold.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Question {
+    /// Pick one option, with a distribution over all of them.
+    ///
+    /// The answer space is bounded deliberately: accuracy collapses on large
+    /// label spaces, so ADR-0024 requires every `Choice` in the system to offer
+    /// fewer than twenty options and asserts it with a test.
+    Choice { options: Vec<String> },
+    /// An expectation on an ordinal scale, for "how much" rather than "which".
+    Score { low: f32, high: f32 },
+    /// Is this statement true, as a calibrated probability. The primitive the
+    /// relevance floor needs (ADR-0023 B-2): "does this memory answer this
+    /// query" is a `Noul`, and the floor reads its probability.
+    Noul,
+}
+
+/// The most options a [`Question::Choice`] may offer.
+///
+/// ADR-0024 Validation 6 caps this at twenty, on two grounds that agree:
+/// options share a fixed token budget, and accuracy on typed decisions degrades
+/// sharply past roughly twenty labels — the model card this design follows
+/// scores 0.425 on a 77-label benchmark against 0.870 for a system without that
+/// weakness. Sixteen leaves headroom under the ceiling rather than sitting on it.
+pub const MAX_CHOICE_OPTIONS: usize = 16;
+
+// The record's ceiling, checked at compile time rather than by a test: raising
+// the constant past twenty should fail the build, not a test run.
+const _: () = assert!(MAX_CHOICE_OPTIONS < 20);
+
+impl Question {
+    /// Whether this question can be answered well, as opposed to merely answered.
+    ///
+    /// A caller checks this before spending a forward pass. Refusing here is the
+    /// point: a `Choice` over fifty labels returns a confident number that means
+    /// nothing, and that is worse than no answer, because the caller's next move
+    /// is a threshold.
+    pub fn is_answerable(&self) -> bool {
+        match self {
+            // Two or more, and not past the bound: one option is not a decision,
+            // and none is a caller error.
+            Question::Choice { options } => (2..=MAX_CHOICE_OPTIONS).contains(&options.len()),
+            // A scale needs width, or the expectation it asks for is a constant.
+            Question::Score { low, high } => high > low,
+            Question::Noul => true,
+        }
+    }
+}
+
+/// What a [`TypedDecider`] answers.
+///
+/// Every variant carries a probability rather than a score, because the caller's
+/// next move is a threshold and a threshold on an uncalibrated number is the
+/// defect ADR-0024 exists to remove.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Answer {
+    /// The chosen index into the question's options, and the full distribution.
+    /// The distribution is the part that matters: it is what distinguishes
+    /// "ambiguous between two good options" from "none of these fit", which one
+    /// scalar margin conflates and no threshold over it can separate.
+    Choice { index: usize, probs: Vec<f32> },
+    /// The expectation on the requested scale.
+    Score { expected: f32 },
+    /// The probability that the statement is true.
+    Noul { probability: f32 },
+}
+
+/// Answers questions with known answer spaces, as calibrated probabilities
+/// (ADR-0024).
+///
+/// The contract that makes this worth having is the training objective rather
+/// than the interface: an implementation must be trained against a strictly
+/// proper scoring rule over outcomes a VERIFIER produced, so that reporting an
+/// honest probability is the only way to score well. A head trained on its own
+/// past answers, or on a critic's, violates ADR-0022's anchor invariant and is
+/// not an admissible implementation of this port however well it performs.
+///
+/// Answering a batch in one call is deliberate: the questions about one state
+/// share an encoding, so asking them together is what makes this cheap enough to
+/// sit in a serving path at all.
+#[async_trait]
+pub trait TypedDecider: Send + Sync {
+    /// Answer every question about `state`, in order. The returned vector is the
+    /// same length as `questions`, and each answer's variant matches its
+    /// question's.
+    async fn decide(&self, state: &str, questions: &[Question]) -> Result<Vec<Answer>>;
+}
+
 /// Replays the frozen population to judge whether a behavior is acceptable in a
 /// given context. This is what makes counterfactual search affordable:
 /// cheap, repeatable re-probing over frozen experts.
 #[async_trait]
 pub trait AcceptabilityProbe: Send + Sync {
     async fn acceptable(&self, behavior: &str, context: &serde_json::Value) -> Result<bool>;
+}
+
+#[cfg(test)]
+mod typed_decisions {
+    use super::*;
+
+    /// ADR-0024 Validation 6: every `Choice` in the system offers fewer than
+    /// twenty options, because accuracy collapses on large label spaces and the
+    /// options share a fixed token budget.
+    ///
+    /// The bound is asserted here, on the type, rather than left to each caller
+    /// to remember. A question that cannot be answered well is not worth asking
+    /// cheaply.
+    #[test]
+    fn a_choice_answer_space_is_bounded() {
+        let ok = Question::Choice {
+            options: (0..MAX_CHOICE_OPTIONS).map(|i| i.to_string()).collect(),
+        };
+        assert!(ok.is_answerable(), "a question at the bound is answerable");
+        let too_many = Question::Choice {
+            options: (0..MAX_CHOICE_OPTIONS + 1).map(|i| i.to_string()).collect(),
+        };
+        assert!(
+            !too_many.is_answerable(),
+            "past the bound the question must be refused rather than answered badly"
+        );
+    }
+
+    /// An empty or single-option choice is not a decision, and asking it wastes a
+    /// forward pass on an answer the caller already has.
+    #[test]
+    fn a_choice_with_nothing_to_choose_is_not_answerable() {
+        assert!(!Question::Choice { options: vec![] }.is_answerable());
+        assert!(!Question::Choice {
+            options: vec!["only".into()]
+        }
+        .is_answerable());
+    }
+
+    /// A scale has to have width, or the expectation it asks for is a constant.
+    #[test]
+    fn a_score_needs_a_real_scale() {
+        assert!(Question::Score {
+            low: 0.0,
+            high: 1.0
+        }
+        .is_answerable());
+        assert!(!Question::Score {
+            low: 1.0,
+            high: 1.0
+        }
+        .is_answerable());
+        assert!(
+            !Question::Score {
+                low: 1.0,
+                high: 0.0
+            }
+            .is_answerable(),
+            "an inverted scale is a caller error, not a question"
+        );
+    }
+
+    /// A `Noul` is always answerable: its answer space is fixed.
+    #[test]
+    fn a_noul_is_always_answerable() {
+        assert!(Question::Noul.is_answerable());
+    }
 }

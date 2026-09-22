@@ -89,12 +89,33 @@ pub struct McpServer {
     /// duration (see `session`); checked at every tool call. `None` where the
     /// transport signs in per request (the embedded networked surface).
     session: Option<Arc<crate::session::SessionKeeper>>,
+    /// The typed decider that answers "does this memory answer this query" as a
+    /// calibrated probability (ADR-0024 D-2), which is what lets recall say
+    /// nothing rather than return the best of a bad lot. `None` = no floor runs
+    /// and every recalled row is returned, which is the behaviour before this
+    /// existed and the behaviour a deployment without a head keeps.
+    decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
+    /// The probe vectors the dense leg is calibrated against
+    /// ([`antumbra_core::calibrate`]), embedded once on first recall by THIS
+    /// server's embedder -- so a tenant configured with a different model
+    /// calibrates in its own space rather than someone else's.
+    probes: Arc<tokio::sync::OnceCell<Vec<Vec<f32>>>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
 /// truncates to the caller's k. ~100 candidates is the precision/latency knee for
 /// a cross-encoder (one batched POST).
 const RERANK_POOL_MAX: usize = 100;
+
+/// The probability a memory must reach to be counted as answering the query
+/// (ADR-0023 B-2). A default the caller may move with `floor`, never the only
+/// option, because "the best of a bad lot" is occasionally what is wanted.
+///
+/// Half is the honest starting point for a calibrated probability: it is the
+/// value at which a decider is saying "more likely than not". It is deliberately
+/// not tuned, because tuning it against the current signal would bake in the
+/// miscalibration this floor exists to stop reading.
+const DEFAULT_RELEVANCE_FLOOR: f32 = 0.5;
 
 /// Bounded cache of `(query, sorted candidate ids) -> reranked id order`. A plain
 /// insertion-ordered map capped at `CAP`; on overflow the oldest entry is
@@ -339,8 +360,8 @@ impl McpServer {
     /// How many candidates to pull from hybrid recall before reranking: a wide
     /// pool when the cross-encoder is configured (so it has room to reorder),
     /// else just the caller's `k`.
-    fn recall_pool(&self, k: usize) -> usize {
-        if self.reranker.is_some() {
+    fn recall_pool(&self, k: usize, scoped: bool) -> usize {
+        if self.reranker.is_some() || scoped {
             k.max(1).saturating_mul(10).clamp(20, RERANK_POOL_MAX)
         } else {
             k
@@ -407,21 +428,41 @@ impl McpServer {
         // Hybrid recall: dense (HNSW) + sparse (BM25 full-text) fused by RRF, so
         // exact tokens the embedding drops still surface. Pull a wide pool when a
         // reranker is configured, then re-score + truncate to k.
+        //
+        // Also pull a wide pool when the caller named a repo or branch, because
+        // scope is applied by DEMOTING out-of-scope hits (below) and a demotion
+        // can only reorder what already survived into the top k. With pool == k
+        // the scoping is cosmetic: a session-start bootstrap in the antumbra repo
+        // recalled twelve memories, none of them about antumbra and every one
+        // tagged `[unknown]`, while eight provenance-anchored ones existed and
+        // never reached the pool. Retrieval has to give them a chance to compete
+        // before the ordering can prefer them.
+        let scoped = p.repo.is_some() || p.branch.is_some();
         let hits = memory::recall_hybrid(
             &self.store,
             &self.tenant,
             &p.query,
             &q,
-            self.recall_pool(k),
+            self.recall_pool(k, scoped),
             net,
+            self.probe_vectors().await,
         )
         .await
         .map_err(err)?;
+        // Truncate to k only once scope has had its say: when scoping is on, the
+        // wide pool is carried through the rerank so `demote_out_of_scope` can
+        // still promote an in-scope memory that dense+BM25 ranked low -- otherwise
+        // the widening above buys nothing.
+        let keep = if scoped {
+            self.recall_pool(k, scoped)
+        } else {
+            k
+        };
         let hits = self
             .rerank_to_k(
                 &p.query,
                 hits,
-                k,
+                keep,
                 |m| m.id.as_str().to_string(),
                 |m| m.content.clone(),
             )
@@ -437,14 +478,18 @@ impl McpServer {
         // can. Attached here rather than afterwards because the demotion below
         // reorders the views, and a similarity paired with the wrong memory
         // would be worse than none.
+        // Bound the prose unless the caller asked for all of it (ADR-0023 B-1).
+        // Applied here, where the view is built, so every path out of recall is
+        // bounded by construction rather than by each caller remembering to.
+        let full = p.full.unwrap_or(false);
         let with_similarity = |m: &Memory, mut view: MemoryView| {
             view.similarity = m
                 .embedding
                 .as_deref()
                 .map(|e| antumbra_core::cosine_similarity(&q, e));
-            view
+            view.bounded(full, params::RECALL_CONTENT_CHARS)
         };
-        let memories = if p.repo.is_some() || p.branch.is_some() {
+        let memories: Vec<MemoryView> = if p.repo.is_some() || p.branch.is_some() {
             let ctx = GitContext {
                 repo: p.repo,
                 branch: p.branch,
@@ -453,15 +498,93 @@ impl McpServer {
                 .iter()
                 .map(|m| with_similarity(m, MemoryView::scoped(m, &ctx)))
                 .collect();
+            // Scope first, THEN truncate: this is the line that decides whether a
+            // repo-anchored memory reaches the caller at all.
             demote_out_of_scope(views, |v| {
                 v.scope.as_deref().map_or(Scope::Unknown, scope_from_str)
             })
+            .into_iter()
+            .take(k)
+            .collect()
         } else {
             hits.iter()
                 .map(|m| with_similarity(m, MemoryView::from(m)))
                 .collect()
         };
-        Ok(Json(MemoriesOut { memories }))
+
+        // The relevance floor (ADR-0023 B-2, answered by ADR-0024 D-2). Asked as
+        // one batch because the questions share a state: the query is encoded
+        // once whatever the candidate count.
+        let had_rows = !memories.is_empty();
+        let memories = match &self.decider {
+            Some(decider) => {
+                let floor = p.floor.unwrap_or(DEFAULT_RELEVANCE_FLOOR).clamp(0.0, 1.0);
+                self.above_floor(decider.as_ref(), &p.query, memories, floor)
+                    .await
+            }
+            None => memories,
+        };
+        Ok(Json(MemoriesOut {
+            // Only claim the floor emptied the result when it had something to
+            // empty. A store with no matching rows at all is a different answer,
+            // and saying "nothing cleared the floor" about it would be a lie the
+            // caller cannot check.
+            nothing_cleared_the_floor: had_rows && memories.is_empty(),
+            memories,
+        }))
+    }
+
+    /// Keep the memories a typed decider judges relevant to `query`.
+    ///
+    /// A decider that fails takes nothing with it: the rows are returned
+    /// unfiltered and the failure is said on stderr, because a floor that cannot
+    /// be computed must not be enforced. That is the same posture the rerank
+    /// stage takes, and ADR-0024 asks for it explicitly — a head that fails to
+    /// load degrades to the path it replaced rather than to nothing.
+    async fn above_floor(
+        &self,
+        decider: &dyn antumbra_core::ports::TypedDecider,
+        query: &str,
+        memories: Vec<MemoryView>,
+        floor: f32,
+    ) -> Vec<MemoryView> {
+        use antumbra_core::ports::{Answer, Question};
+        if memories.is_empty() {
+            return memories;
+        }
+        // One question per candidate, in order, against a state that names both
+        // sides of the judgement.
+        let questions = vec![Question::Noul; memories.len()];
+        let state = memories
+            .iter()
+            .map(|m| format!("QUERY: {query}\nMEMORY: {}", m.content))
+            .collect::<Vec<_>>()
+            .join("\n---\n");
+        match decider.decide(&state, &questions).await {
+            Ok(answers) if answers.len() == memories.len() => memories
+                .into_iter()
+                .zip(answers)
+                .filter(|(_, a)| match a {
+                    Answer::Noul { probability } => *probability >= floor,
+                    // A decider that answers the wrong variant is misbehaving,
+                    // not judging; keep the row rather than silently dropping it.
+                    _ => true,
+                })
+                .map(|(m, _)| m)
+                .collect(),
+            Ok(answers) => {
+                eprintln!(
+                    "antumbra-mcp: decider returned {} answers for {} memories, floor not applied",
+                    answers.len(),
+                    memories.len()
+                );
+                memories
+            }
+            Err(e) => {
+                eprintln!("antumbra-mcp: relevance floor unavailable, returning unfiltered: {e}");
+                memories
+            }
+        }
     }
 
     /// Ingest a knowledge document: chunk, embed, and store it for recall. A
@@ -537,7 +660,14 @@ impl McpServer {
         // Hybrid recall (dense HNSW + sparse BM25, RRF-fused), like memory recall;
         // wide pool + cross-encoder rerank when configured.
         let hits =
-            document::recall_hybrid(&self.store, &self.tenant, &p.query, &q, self.recall_pool(k))
+            // Documents carry no git scope, so only a reranker widens this pool.
+            document::recall_hybrid(
+                &self.store,
+                &self.tenant,
+                &p.query,
+                &q,
+                self.recall_pool(k, false),
+            )
                 .await
                 .map_err(err)?;
         let hits = self
@@ -581,10 +711,11 @@ impl McpServer {
         description = "At-a-glance counts for your workspace: memories, knowledge documents, visible experts, boundaries, and your compartments."
     )]
     async fn workspace_stats(&self) -> Result<Json<StatsOut>, ErrorData> {
-        let memories = memory::list(&self.store, &self.tenant)
+        // Counted by the engine: listing the rows to call `.len()` pulls every
+        // embedding over the wire and resets the connection on a real corpus.
+        let memories = memory::count(&self.store, &self.tenant)
             .await
-            .map_err(err)?
-            .len() as u32;
+            .map_err(err)?;
         let documents = document::list_titles(&self.store, &self.tenant)
             .await
             .map_err(err)?
@@ -708,6 +839,8 @@ impl McpServer {
         };
         Ok(Json(MemoriesOut {
             memories: mems.iter().map(MemoryView::from).collect(),
+            // list_memories has no query, so there is nothing to floor.
+            nothing_cleared_the_floor: false,
         }))
     }
 

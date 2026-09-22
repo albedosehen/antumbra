@@ -304,3 +304,184 @@ mod tests {
             .unwrap());
     }
 }
+
+/// A [`TypedDecider`](crate::ports::TypedDecider) whose answers are decided by a
+/// substring rule, so a caller's use of the port can be tested before any head
+/// exists (ADR-0024).
+///
+/// It is deliberately honest about its own confidence: the probability it
+/// reports is the one it was configured with, not 1.0, because a caller that
+/// only ever sees certainty will not exercise the threshold that is the whole
+/// reason for asking a typed question.
+pub struct ScriptedDecider {
+    /// A state containing this substring is judged true / in-scope.
+    token: String,
+    /// What to report when the token is present. The complement is reported when
+    /// it is absent, so a caller sees both sides of its threshold.
+    confidence: f32,
+    fail: bool,
+}
+
+impl ScriptedDecider {
+    /// Answers `Noul` with `confidence` when `token` is in the state, and with
+    /// `1 - confidence` when it is not; `Choice` picks the option containing the
+    /// token, and `Score` returns the midpoint of the requested scale.
+    pub fn on_substring(token: impl Into<String>, confidence: f32) -> Self {
+        Self {
+            token: token.into(),
+            confidence,
+            fail: false,
+        }
+    }
+
+    /// A decider that always returns `Err`, so a caller's degrade path can be
+    /// tested. ADR-0024 requires a head that fails to load to fall back to the
+    /// path it replaced rather than to nothing.
+    pub fn failing() -> Self {
+        Self {
+            token: String::new(),
+            confidence: 0.0,
+            fail: true,
+        }
+    }
+}
+
+#[async_trait]
+impl crate::ports::TypedDecider for ScriptedDecider {
+    async fn decide(
+        &self,
+        state: &str,
+        questions: &[crate::ports::Question],
+    ) -> Result<Vec<crate::ports::Answer>> {
+        use crate::ports::{Answer, Question};
+        if self.fail {
+            return Err(crate::AntumbraError::other("scripted decider: failing"));
+        }
+        let hit = !self.token.is_empty() && state.contains(&self.token);
+        Ok(questions
+            .iter()
+            .map(|q| match q {
+                Question::Noul => Answer::Noul {
+                    probability: if hit {
+                        self.confidence
+                    } else {
+                        1.0 - self.confidence
+                    },
+                },
+                Question::Score { low, high } => Answer::Score {
+                    expected: (low + high) / 2.0,
+                },
+                Question::Choice { options } => {
+                    let index = options
+                        .iter()
+                        .position(|o| !self.token.is_empty() && o.contains(&self.token))
+                        .unwrap_or(0);
+                    // Mass on the pick, the rest spread evenly: a distribution a
+                    // caller can actually read, rather than a one-hot that hides
+                    // whether the head was torn between two options.
+                    let n = options.len().max(1);
+                    let rest = if n > 1 {
+                        (1.0 - self.confidence) / (n - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    let probs = (0..n)
+                        .map(|i| if i == index { self.confidence } else { rest })
+                        .collect();
+                    Answer::Choice { index, probs }
+                }
+            })
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod scripted_decider {
+    use super::*;
+    use crate::ports::{Answer, Question, TypedDecider};
+
+    /// The seam works before any head exists, which is the point of defining the
+    /// port first: a caller of ADR-0024's D-2 floor can be written and tested
+    /// against this, and the trained head drops in as the only changed piece.
+    #[tokio::test]
+    async fn a_noul_answers_both_sides_of_a_threshold() {
+        let d = ScriptedDecider::on_substring("relevant", 0.9);
+        let hit = d
+            .decide("this is relevant", &[Question::Noul])
+            .await
+            .unwrap();
+        let miss = d.decide("this is not", &[Question::Noul]).await.unwrap();
+        match (&hit[0], &miss[0]) {
+            (Answer::Noul { probability: a }, Answer::Noul { probability: b }) => {
+                assert!(*a > 0.8 && *b < 0.2, "got {a} and {b}");
+            }
+            other => panic!("a Noul question must get a Noul answer, got {other:?}"),
+        }
+    }
+
+    /// A choice returns a DISTRIBUTION, not just a pick. That is the half the
+    /// prototype margin could not express: "torn between two good options" and
+    /// "none of these fit" are different answers, and only the distribution
+    /// distinguishes them.
+    #[tokio::test]
+    async fn a_choice_returns_a_distribution_and_not_only_a_pick() {
+        let d = ScriptedDecider::on_substring("rust", 0.7);
+        let q = Question::Choice {
+            options: vec![
+                "python expert".into(),
+                "rust expert".into(),
+                "go expert".into(),
+            ],
+        };
+        let out = d.decide("write a rust trait", &[q]).await.unwrap();
+        match &out[0] {
+            Answer::Choice { index, probs } => {
+                assert_eq!(*index, 1, "the rust option is chosen");
+                assert_eq!(probs.len(), 3);
+                let total: f32 = probs.iter().sum();
+                assert!(
+                    (total - 1.0).abs() < 1e-5,
+                    "probs must sum to 1, got {total}"
+                );
+                assert!(probs[1] > probs[0] && probs[1] > probs[2]);
+            }
+            other => panic!("expected a Choice answer, got {other:?}"),
+        }
+    }
+
+    /// One state, several questions, one call: the questions about a state share
+    /// an encoding, and answering them together is what makes this affordable in
+    /// a serving path.
+    #[tokio::test]
+    async fn a_batch_answers_in_order_and_matches_each_variant() {
+        let d = ScriptedDecider::on_substring("x", 0.8);
+        let out = d
+            .decide(
+                "x",
+                &[
+                    Question::Noul,
+                    Question::Score {
+                        low: 0.0,
+                        high: 10.0,
+                    },
+                    Question::Choice {
+                        options: vec!["a".into(), "x".into()],
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.len(), 3, "one answer per question, in order");
+        assert!(matches!(out[0], Answer::Noul { .. }));
+        assert!(matches!(out[1], Answer::Score { expected } if (expected - 5.0).abs() < 1e-6));
+        assert!(matches!(out[2], Answer::Choice { index: 1, .. }));
+    }
+
+    /// ADR-0024 requires a head that fails to load to degrade to the path it
+    /// replaced rather than to nothing, so the failure has to be visible.
+    #[tokio::test]
+    async fn a_failing_decider_reports_the_failure() {
+        let d = ScriptedDecider::failing();
+        assert!(d.decide("anything", &[Question::Noul]).await.is_err());
+    }
+}

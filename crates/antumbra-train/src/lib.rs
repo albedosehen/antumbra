@@ -18,6 +18,7 @@ pub mod compose;
 pub mod config;
 pub mod consolidate;
 pub mod corpus;
+pub mod decision;
 pub mod decode;
 pub mod device;
 pub mod eval;

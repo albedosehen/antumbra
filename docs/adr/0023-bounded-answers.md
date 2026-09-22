@@ -46,9 +46,19 @@ Three consequences of that rule, in the order they should be built.
 
 ### B-2 · Nothing is said as nothing
 
-Recall gains a relevance floor. When nothing clears it, the answer says so in a form the agent can branch on, rather than returning `top_k` rows for the caller to judge. Results that clear the floor are unchanged, and `similarity` stays exactly as it is: the floor decides whether there is an answer, and the number still says how good the answer is.
+Recall gains a relevance floor. When nothing clears it, the answer says so in a form the agent can branch on, rather than returning `top_k` rows for the caller to judge. Results that clear the floor are unchanged.
 
 The floor is a default the caller may lower, because "the best of a bad lot" is occasionally what a caller wants. What it may not be is the only option.
+
+**The floor is on the fused score, and never on `similarity`.** This paragraph corrects the one it replaces, which said `similarity` "still says how good the answer is". It does not, and a floor built on it would cut correct answers and keep nonsense. Two measurements on the live store settle it.
+
+First, `similarity` is not the ordering key. `recall_memories` ranks by reciprocal rank fusion over a dense leg and a BM25 leg; the number attached to each row is the raw dense cosine, computed after fusion for display. Results routinely come back with the first hit scoring lowest, which reads as a ranking fault and is not one.
+
+Second, that number tracks a memory's LENGTH more than its topic. A 66-character stub scores 0.774 against "banana bread recipe", a query it has nothing to do with, while a 1058-character memory scores 0.224 against a query about its own contents. The curve is monotonic: 66 chars 0.774, 130 chars 0.655, 180 to 250 chars 0.42 to 0.48, 300 to 330 chars 0.31 to 0.40, 1000 to 1900 chars 0.05 to 0.17. On one real recall the two on-topic memories held the two lowest cosines in the result (0.219 and 0.104) while three off-topic rows scored higher (0.866, 0.720, 0.561). A floor anywhere between those bands deletes both correct answers and keeps all three wrong ones. The correlation is not weak; it is inverted.
+
+The cause is mean-pooling, not a bad row and not the import: re-storing the worst-behaving memory as a fresh row reproduced its score to the digit. It is a property of averaging a passage into one vector, so no floor on a per-row cosine can be made safe by tuning the threshold.
+
+Two corrections followed and are in the tree: the dense leg is now re-ranked by a per-text calibration before fusion (`antumbra-core/src/calibrate.rs`), and a cross-encoder re-scores the fused pool where one is configured. Both produce a score that survives a comparison across lengths. The floor belongs on that score, after fusion and after any rerank, which is also the only place it can be compared against a threshold that means the same thing for a stub and for a thousand-word memory.
 
 ### B-3 · The output shape is linted, and not only Antumbra's
 
@@ -91,14 +101,18 @@ The hook's total becomes checkable. With a bound on each memory and a count of m
 
 ## Order of work
 
-1. [ ] **B-1, the bound.** `full` on `RecallParams`, the prefix cut, the marker and the original length on `MemoryView`, and validations 1 to 3. This is the defect; it goes first and is shippable alone.
-2. [ ] **The hook's worst case.** Validation 5, which is the reason the bound matters and is a test rather than a feature.
-3. [ ] **B-2, the floor.** The relevance floor and validation 4.
-4. [ ] **B-3, the lint.** Output-shape rules in `mcp-lint` and validation 6. Last because it is the generalisation, and generalising before the specific case is settled would encode a guess.
+1. [x] **B-1, the bound.** `full` on `RecallParams`, the prefix cut, the marker and the original length on `MemoryView`, and validations 1 to 3. This is the defect; it goes first and is shippable alone.
+2. [x] **The hook's worst case.** Validation 5, which is the reason the bound matters and is a test rather than a feature. Found already satisfied, on both platforms, and predating this record: each session-start hook caps its own output at 9,500 characters and lists what it left out, and `scripts/hooks/tests/session-start.{ps1,sh}` drive twelve 1,500-character memories (18,000 in all) through them asserting the context stays under 10,000, that the best memory survives, that the omitted count and the kept count sum to twelve, and that the brief precedes any memory. Both suites re-run green after B-1. The item stands as a record of where the guarantee lives, since it is enforced in the hook rather than in the crate and would otherwise be looked for in the wrong place.
+3. [~] **B-2, the floor.** The relevance floor and validation 4.
+4. [~] **B-3, the lint.** Output-shape rules in `mcp-lint` and validation 6. Last because it is the generalisation, and generalising before the specific case is settled would encode a guess. TWO OF THE THREE RULES ARE IN, being the two that generalise from B-1 now that B-1 is settled: an unbounded text field in a collection row, and a collection with no stated bound. The third, an empty result indistinguishable from an unmatched one, generalises from B-2 and waits with it. Pointed at antumbra-mcp's own `tools/list`, the two rules report 9 of 19 tools, which is the record's own claim that this was "forgotten by Antumbra's own" surface, measured.
 
 ## Notes on the evidence
 
 The defect and the quotations above were found by reading the tree on 2026-09-22: `params.rs:81` for `MemoryView`, `brief.rs:10-19` for the budget and its test, `bridge.rs:4-9` for the measured overflow behaviour, and a search for truncation across `antumbra-mcp` that returned nothing touching memory content.
+
+The numbers in B-2 came later the same day, from a 5,538-memory store rather than from reading the tree, and they are the reason that section now says something different from what it first said. Three of them are reproducible from the repository: `antumbra-serve`'s ignored tests `length_curve_across_models`, `chunk_and_max_pool_across_chunk_sizes` and `is_the_length_bias_predictable_enough_to_subtract` print the curve, the chunking trade-off, and the calibration that corrects it. They are ignored because they download model weights, and they are the benchmark to re-run against any future change to this surface rather than reasoning about it. A fourth, `calibrated_ranking_beats_raw_cosine_on_the_real_corpus`, needs a sample of real memories and measured 2/30 top-1 for raw cosine against 13/30 for the calibrated score.
+
+Recording this because the first version of B-2 was written from the tree and was wrong about the tree's behaviour, which is a failure mode worth naming: `similarity` is a plausible thing to floor, the field is right there, and nothing in the code says it is length-dominated. It took a query about banana bread to find out.
 
 The framing came from [AXI](https://axi.md) (Kun Chen), a ten-principle spec for agent-facing CLI tools. Its principles 3 (truncate by default, with an escape hatch) and 5 (definitive empty states) are B-1 and B-2, and the debt is acknowledged here rather than absorbed silently.
 

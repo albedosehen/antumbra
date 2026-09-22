@@ -73,10 +73,22 @@ services:
       # container ID is the name, and every recreate registers this machine
       # as a brand new node while the old rows go on claiming to be trainers.
       - ANTUMBRA_HOST=${ANTUMBRA_HOST:-${HOSTNAME}}
+      # The cross-encoder precision stage. Unset = off, and recall returns the
+      # RRF order as before. With the `rerank` profile started, the service is
+      # reachable on the compose network by name:
+      #   ANTUMBRA_RERANK_URL=http://rerank/rerank
+      - ANTUMBRA_RERANK_URL=${ANTUMBRA_RERANK_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:8081:8081"
+      # Loopback by default: the surface is JWT-authenticated, but a default of
+      # "reachable from the network" is not one to inherit by accident. A node
+      # whose agents run on OTHER machines sets ANTUMBRA_MCP_BIND to the address
+      # it should answer on (e.g. 10.0.0.132) in docker/.env, which is the file a
+      # redeploy preserves -- so the exposure survives a rebuild instead of being
+      # silently reverted to loopback by the next deploy, taking every remote
+      # hook down with it.
+      - "${ANTUMBRA_MCP_BIND:-127.0.0.1}:8081:8081"
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -163,3 +175,57 @@ services:
     tmpfs:
       - /tmp
     restart: unless-stopped
+
+  # The cross-encoder that re-scores hybrid recall's fused pool (the precision
+  # stage). It reads each (query, memory) PAIR rather than comparing two
+  # independently-built vectors, which is why it is immune to the length bias
+  # that makes a short stub outrank a long answer: measured on that exact pair,
+  # the answer scored 0.9904 and the stub 0.0000375.
+  #
+  # OPT-IN, because the model is a few hundred megabytes and recall works
+  # without it -- antumbra-mcp falls back to the fused RRF order and says so on
+  # stderr. Start it with:
+  #   docker compose -f docker/docker-compose.yml --profile rerank up -d rerank
+  # then point ANTUMBRA_RERANK_URL at http://rerank/rerank in docker/.env.
+  #
+  # `restart: unless-stopped` is what makes it survive a host reboot once
+  # started; a profile only governs which services a compose COMMAND acts on,
+  # not whether an already-running container comes back.
+  rerank:
+    # The cpu-1.5 tag fails with "Could not download model artifacts / relative
+    # URL without a base" and setting HF_ENDPOINT does not help. cpu-latest
+    # resolves an ONNX build and works; it needs ~2 minutes to become ready.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    container_name: antumbra-rerank
+    profiles: ["rerank"]
+    command:
+      - --model-id
+      - ${ANTUMBRA_RERANK_MODEL:-BAAI/bge-reranker-base}
+    environment:
+      # Cache the weights in the named volume so a recreate does not re-download.
+      - HUGGINGFACE_HUB_CACHE=/data
+    volumes:
+      - antumbra-rerank-cache:/data
+    ports:
+      # Loopback only, and only for probing it by hand -- antumbra-mcp reaches it
+      # by service name on the compose network. NOT 8090: antumbra-control-server
+      # already binds that.
+      - "127.0.0.1:8091:80"
+    # The image ships curl and a shell, so it can probe itself. Worth having:
+    # when this endpoint is unreachable, recall quietly loses its precision stage
+    # and falls back to the fused RRF order -- correct behaviour, but the only
+    # other signal is a line on antumbra-mcp's stderr. An unhealthy container is
+    # visible in `docker ps` without reading logs. The model takes ~2 minutes to
+    # download and load on a cold volume, hence the long start_period.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  antumbra-rerank-cache:

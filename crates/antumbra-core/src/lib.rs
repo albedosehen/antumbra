@@ -10,6 +10,7 @@
 //! - **antumbra** = the counterfactual boundary, the ([`boundary`])
 
 pub mod boundary;
+pub mod calibrate;
 pub mod compartment;
 pub mod device;
 pub mod document;
