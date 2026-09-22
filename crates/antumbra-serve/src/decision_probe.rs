@@ -47,6 +47,29 @@ pub struct Scored {
     pub f1: f32,
 }
 
+/// How a pair is turned into features for the head.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pairing {
+    /// One encoder pass over both texts joined, mean-pooled. Measured at 0.519
+    /// F1 against a 0.782 control — chance is 0.500.
+    Joined,
+    /// Encode each side separately and hand the head `[u, v, |u-v|, u*v]`, the
+    /// standard bi-encoder recipe for sentence-pair classification.
+    ///
+    /// Added to test the explanation `Joined`'s result was first given: that
+    /// mean-pooling a concatenation destroys the relationship, and supplying the
+    /// interaction terms explicitly would recover it. **It does not.** 0.548
+    /// accuracy and 0.520 F1, three points of accuracy and nothing in F1.
+    ///
+    /// So the pairing is not the binding constraint. A frozen MiniLM vector of a
+    /// long memory is a mean-pool of up to 512 tokens into 384 dimensions, and
+    /// the twelve-word span a query was cut from does not survive it. No
+    /// function of `u` and `v` recovers what neither vector contains. The routes
+    /// left are cross-attention over the pair, or chunking so an indexed unit is
+    /// short enough that its vector still describes it.
+    Separate,
+}
+
 /// How a pair is presented to the encoder.
 ///
 /// Both sides in one string, so the pooled vector describes the PAIR rather than
@@ -65,14 +88,35 @@ async fn encode(
     embedder: &dyn Embedder,
     pairs: &[LabelledPair],
     dim: usize,
+    how: Pairing,
 ) -> Result<(Vec<f32>, Vec<f32>)> {
-    let mut xs = Vec::with_capacity(pairs.len() * dim);
+    let mut xs = Vec::with_capacity(pairs.len() * feature_dim(dim, how));
     let mut ys = Vec::with_capacity(pairs.len() * 2);
     for p in pairs {
-        xs.extend_from_slice(&embedder.embed(&pair_text(&p.query, &p.memory)).await?);
+        match how {
+            Pairing::Joined => {
+                xs.extend_from_slice(&embedder.embed(&pair_text(&p.query, &p.memory)).await?);
+            }
+            Pairing::Separate => {
+                let u = embedder.embed(&p.query).await?;
+                let v = embedder.embed(&p.memory).await?;
+                xs.extend_from_slice(&u);
+                xs.extend_from_slice(&v);
+                xs.extend(u.iter().zip(&v).map(|(a, b)| (a - b).abs()));
+                xs.extend(u.iter().zip(&v).map(|(a, b)| a * b));
+            }
+        }
         ys.extend_from_slice(if p.relevant { &[1.0, 0.0] } else { &[0.0, 1.0] });
     }
     Ok((xs, ys))
+}
+
+/// How wide the head's input is for a given pairing: `u, v, |u-v|, u*v`.
+fn feature_dim(dim: usize, how: Pairing) -> usize {
+    match how {
+        Pairing::Joined => dim,
+        Pairing::Separate => dim * 4,
+    }
 }
 
 /// Train a head on `train` and score it on `test`.
@@ -86,21 +130,23 @@ pub async fn train_and_score(
     train: &[LabelledPair],
     test: &[LabelledPair],
     epochs: usize,
+    how: Pairing,
 ) -> Result<Scored> {
     let dev = Device::Cpu;
     let dim = embedder.dim();
+    let width = feature_dim(dim, how);
 
-    let (train_x, train_y) = encode(embedder, train, dim).await?;
-    let (test_x, _test_y) = encode(embedder, test, dim).await?;
+    let (train_x, train_y) = encode(embedder, train, dim, how).await?;
+    let (test_x, _test_y) = encode(embedder, test, dim, how).await?;
     let map_err = |e: candle_core::Error| antumbra_core::AntumbraError::other(e.to_string());
 
-    let tx = Tensor::from_vec(train_x, (train.len(), dim), &dev).map_err(map_err)?;
+    let tx = Tensor::from_vec(train_x, (train.len(), width), &dev).map_err(map_err)?;
     let ty = Tensor::from_vec(train_y, (train.len(), 2), &dev).map_err(map_err)?;
-    let ex = Tensor::from_vec(test_x, (test.len(), dim), &dev).map_err(map_err)?;
+    let ex = Tensor::from_vec(test_x, (test.len(), width), &dev).map_err(map_err)?;
 
     let varmap = VarMap::new();
     let vb = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-    let head = DecisionHead::new(dim, dim, 2, vb).map_err(map_err)?;
+    let head = DecisionHead::new(width, dim, 2, vb).map_err(map_err)?;
     let mut opt = AdamW::new(
         varmap.all_vars(),
         ParamsAdamW {
@@ -196,21 +242,22 @@ mod tests {
             test.len()
         );
         let e = BertEmbedder::load().expect("load encoder");
-        let got = train_and_score(&e, &train, &test, 400)
-            .await
-            .expect("train");
-        println!(
-            "  HEAD (MiniLM frozen + 2-layer)  acc={:.3} prec={:.3} rec={:.3} F1={:.3}",
-            got.accuracy, got.precision, got.recall, got.f1
-        );
-        println!("  CONTROL (cross-encoder threshold)                          F1=0.782");
-        println!(
-            "  => {}",
-            if got.f1 > 0.782 {
-                "beats the control"
-            } else {
-                "does NOT beat the control"
-            }
-        );
+        for (label, how) in [
+            ("joined, mean-pooled ", Pairing::Joined),
+            ("separate [u,v,|u-v|,u*v]", Pairing::Separate),
+        ] {
+            let got = train_and_score(&e, &train, &test, 400, how)
+                .await
+                .expect("train");
+            println!(
+                "  {label}  acc={:.3} prec={:.3} rec={:.3} F1={:.3}  {}",
+                got.accuracy,
+                got.precision,
+                got.recall,
+                got.f1,
+                if got.f1 > 0.782 { "BEATS 0.782" } else { "" }
+            );
+        }
+        println!("  CONTROL (cross-encoder threshold)                       F1=0.782");
     }
 }
