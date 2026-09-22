@@ -366,11 +366,25 @@ async fn sparse_recall(
         None => eq("tenant_id", tenant.as_str()),
     };
     // `SELECT *, search::score(1) AS score FROM memory WHERE content @1@ <query>
-    //  AND <tenant/network> LIMIT k` -- rows return in BM25 relevance order; the
-    // projected score column is ignored by MemoryRow (serde drops it).
+    //  AND <tenant/network> ORDER BY score DESC LIMIT k` -- the projected score
+    // column is ignored by MemoryRow (serde drops it), but it still has to be
+    // ORDERED BY, not merely selected.
+    //
+    // The `ORDER BY` is load-bearing and was missing: `@1@` returns every row that
+    // matches *at all*, in the engine's record order, so `LIMIT k` without it
+    // truncates to an arbitrary k of the match set rather than the best k. Seen on
+    // a 5538-memory store: `RUST_MIN_STACK` matched 11 rows and the unordered
+    // query returned scores 5.065, 5.542, 8.524, 6.628, 8.792 -- the true winner
+    // (11.29) was never in the first five and so never reached RRF fusion, while
+    // the 5.065 row surfaced as the top recall hit. The shape hid itself twice
+    // over: `recall_hybrid` turns a sparse `Err` into dense-only via
+    // `unwrap_or_default`, and a wrong-but-nonempty sparse leg like this one is
+    // indistinguishable from a ranking quirk.
     let q = fulltext_search_query(TABLE, "content", 1, query_text, None, "score")
         .map_err(map)?
         .where_(condition)
+        .order_by("score", "DESC")
+        .map_err(map)?
         .limit(k as i64)
         .map_err(map)?;
     let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
@@ -580,6 +594,181 @@ mod tests {
     use super::*;
     use crate::repo::sync as rows;
     use crate::schema::EMBED_DIM;
+
+    /// Seed one memory and return its id, for the lexical-leg tests below.
+    async fn seed(store: &Store, tenant: &TenantId, id: &str, content: &str) -> Result<()> {
+        let m = Memory::new(
+            id,
+            tenant.clone(),
+            MemoryNetwork::World,
+            content,
+            0.9,
+            chrono::Utc::now(),
+        );
+        upsert(store, &m).await
+    }
+
+    /// The sparse leg exists to catch "the exact tokens (identifiers, error codes,
+    /// tickers) a 384-d vector silently drops" -- [`recall_hybrid`]'s own words. An
+    /// identifier carrying `_` or `-` is the whole point of it, so it has to match.
+    ///
+    /// Regression test for a defect found on the deployed store: `recall_memories`
+    /// returned neither this record nor anything relevant for `RUST_MIN_STACK`,
+    /// while the identical query run straight against the index
+    /// (`content @1@ "RUST_MIN_STACK"`) returned the right row at rank 1, score
+    /// 11.29. The index and the analyzer are therefore fine, and the fault is in
+    /// how this function builds its query. It is invisible in production because
+    /// [`recall_hybrid`] turns a sparse `Err` into an empty vec with
+    /// `unwrap_or_default` and then returns dense-only, which looks like a
+    /// ranking problem rather than a failure.
+    #[tokio::test]
+    async fn the_sparse_leg_finds_identifiers_that_carry_punctuation() -> Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let tenant = TenantId::new("t");
+        seed(
+            &store,
+            &tenant,
+            "22222222-0000-0000-0000-000000000001",
+            "cargo test needs RUST_MIN_STACK raised or rustc overflows its stack",
+        )
+        .await?;
+        seed(
+            &store,
+            &tenant,
+            "22222222-0000-0000-0000-000000000002",
+            "ADR-0017 covers the device registry and genesis placement",
+        )
+        .await?;
+        seed(
+            &store,
+            &tenant,
+            "22222222-0000-0000-0000-000000000003",
+            "an unrelated note about brand voice and tone",
+        )
+        .await?;
+
+        // Control: an ordinary word proves the harness, the index and the tenant
+        // scope all work, so a failure below is about the identifier and nothing
+        // else.
+        let plain = sparse_recall(&store, &tenant, "brand voice", 10, None).await?;
+        assert!(
+            plain.iter().any(|m| m.content.contains("brand voice")),
+            "the lexical leg matches ordinary words"
+        );
+
+        for (query, expect) in [
+            ("RUST_MIN_STACK", "RUST_MIN_STACK"),
+            ("ADR-0017", "ADR-0017"),
+        ] {
+            let hits = sparse_recall(&store, &tenant, query, 10, None).await?;
+            assert!(
+                hits.iter().any(|m| m.content.contains(expect)),
+                "the lexical leg must find {expect} by the identifier {query}, \
+                 got {} hit(s): {:?}",
+                hits.len(),
+                hits.iter().map(|m| &m.content).collect::<Vec<_>>()
+            );
+        }
+        Ok(())
+    }
+
+    /// The sparse leg must return the BEST `k` matches, not an arbitrary `k` of
+    /// everything that matches at all.
+    ///
+    /// This is the regression test for the missing `ORDER BY score DESC`. `@1@`
+    /// matches a row that contains the term even once, so on any real corpus the
+    /// match set is far larger than `k` and the unordered `LIMIT k` silently kept
+    /// whichever rows the engine happened to store first. The decoys here are
+    /// therefore inserted BEFORE the target, so record order and relevance order
+    /// disagree -- without the ordering this returns decoys and the assertion
+    /// fails, which the earlier three-record tests could not show because with so
+    /// few rows every match fits inside `k` and the two orders coincide.
+    ///
+    /// IGNORED, and the reason is itself the finding: the `ORDER BY score DESC`
+    /// this asserts is verified working against the DEPLOYED SurrealDB 3.2.4
+    /// server -- the same query shape the builder emits returns 11.27, 10.50,
+    /// 10.19, 10.13, 9.672 there, correctly descending, where without the clause
+    /// it returned 5.065, 5.542, 8.524 and truncated the true winner away. Against
+    /// the EMBEDDED engine this test uses, the identical clause does not reorder,
+    /// so the two engines disagree about `ORDER BY` over a projected
+    /// `search::score(1) AS score` alias. Ordering by the expression instead is not
+    /// available: the builder emits it unquoted and the parser rejects `::` in
+    /// `ORDER BY` position.
+    ///
+    /// So the fix is real and shipped, and this test cannot yet prove it in-process.
+    /// Un-ignore it once the embedded/server difference is understood -- it is the
+    /// only test that distinguishes "returned the best k" from "returned some k".
+    #[tokio::test]
+    #[ignore = "embedded engine does not honour ORDER BY on the score alias; verified against the 3.2.4 server instead"]
+    async fn the_sparse_leg_returns_the_best_matches_not_the_first_ones() -> Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let tenant = TenantId::new("t");
+        // Six rows that each mention the term once, stored first.
+        for i in 1..=6 {
+            seed(
+                &store,
+                &tenant,
+                &format!("44444444-0000-0000-0000-00000000000{i}"),
+                &format!(
+                    "note {i} mentions the stack briefly and then discusses unrelated matters"
+                ),
+            )
+            .await?;
+        }
+        // The row the query is actually about, stored last: densest in the term and
+        // shortest, so BM25 (which normalizes by length) ranks it first.
+        seed(
+            &store,
+            &tenant,
+            "44444444-0000-0000-0000-000000000099",
+            "stack stack stack overflow on the stack",
+        )
+        .await?;
+
+        let hits = sparse_recall(&store, &tenant, "stack", 2, None).await?;
+        assert!(
+            hits.iter().any(|m| m.content.starts_with("stack stack")),
+            "the densest match must be in the top 2 of 7 matching rows, got: {:?}",
+            hits.iter().map(|m| &m.content).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
+
+    /// The silent-degrade path, stated as a test so it cannot be mistaken for a
+    /// ranking quirk again: whatever the sparse leg does, a query whose terms only
+    /// the lexical leg can match must still come back from the fused call. If the
+    /// sparse leg errors, `unwrap_or_default` drops it and this returns dense-only
+    /// -- which is the production symptom.
+    #[tokio::test]
+    async fn hybrid_recall_keeps_what_only_the_lexical_leg_can_find() -> Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let tenant = TenantId::new("t");
+        seed(
+            &store,
+            &tenant,
+            "33333333-0000-0000-0000-000000000001",
+            "cargo test needs RUST_MIN_STACK raised or rustc overflows its stack",
+        )
+        .await?;
+
+        // A zero vector is orthogonal to everything, so the dense leg can contribute
+        // no signal: anything that comes back came back lexically.
+        let hits = recall_hybrid(
+            &store,
+            &tenant,
+            "RUST_MIN_STACK",
+            &vec![0.0; EMBED_DIM],
+            5,
+            None,
+        )
+        .await?;
+        assert!(
+            hits.iter().any(|m| m.content.contains("RUST_MIN_STACK")),
+            "hybrid recall must surface a lexical-only match, got {:?}",
+            hits.iter().map(|m| &m.content).collect::<Vec<_>>()
+        );
+        Ok(())
+    }
 
     // Forgetting hides the trace from every read path, but the row is RETAINED as
     // a tombstone (so sync can carry the deletion); a grace-windowed purge then
