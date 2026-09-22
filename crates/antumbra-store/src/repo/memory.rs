@@ -160,6 +160,38 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
         .collect()
 }
 
+/// How many live memories `tenant` holds, counted by the ENGINE.
+///
+/// `list(store, tenant).await?.len()` is the obvious way to get this and is a
+/// trap: it materializes every row, and a `MemoryRow` carries its 384-float
+/// `embedding`. Counting a 5538-memory tenant that way drags roughly 2.1 million
+/// floats across `ws://` to produce one integer, which is how `workspace_stats`
+/// came to fail with "connection error: Connection reset" on a store where every
+/// other tool worked -- it had been fine at 9 memories and could not survive the
+/// migrated corpus. The same hazard is already recorded on
+/// [`all_unscoped_without_embeddings`]; this is the counting case of it.
+///
+/// Tombstones are excluded here rather than in Rust, because the whole point is
+/// that no row crosses the wire.
+pub async fn count(store: &Store, tenant: &TenantId) -> Result<u32> {
+    #[derive(Deserialize)]
+    struct CountRow {
+        count: u64,
+    }
+    let query = Query::new()
+        .select(Some(vec!["count()".to_string()]))
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(and_(
+            eq("tenant_id", tenant.as_str()),
+            is_none("deleted_at"),
+        ))
+        .group_all();
+    let rows: Vec<CountRow> = query_records(store.client(), &query).await.map_err(map)?;
+    // `GROUP ALL` over an empty match set returns no row at all, not a zero.
+    Ok(rows.first().map_or(0, |r| r.count as u32))
+}
+
 /// Every memory across all tenants, with NO tenant filter. As an owner/root
 /// session this is the cross-tenant view (profiling / training across tenants);
 /// as a tenant-authenticated session the engine's row-level PERMISSIONS still
@@ -594,6 +626,55 @@ mod tests {
     use super::*;
     use crate::repo::sync as rows;
     use crate::schema::EMBED_DIM;
+
+    /// Counting must not depend on materializing rows, and must agree with what
+    /// `list` reports -- tombstones excluded.
+    #[tokio::test]
+    async fn count_matches_list_and_excludes_tombstones() -> Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let tenant = TenantId::new("t");
+        let other = TenantId::new("other");
+        assert_eq!(
+            count(&store, &tenant).await?,
+            0,
+            "GROUP ALL over nothing is 0"
+        );
+
+        for i in 1..=3 {
+            seed(
+                &store,
+                &tenant,
+                &format!("55555555-0000-0000-0000-00000000000{i}"),
+                "a trace",
+            )
+            .await?;
+        }
+        seed(
+            &store,
+            &other,
+            "55555555-0000-0000-0000-000000000099",
+            "another tenant",
+        )
+        .await?;
+        assert_eq!(count(&store, &tenant).await?, 3, "tenant-scoped");
+        assert_eq!(
+            count(&store, &tenant).await? as usize,
+            list(&store, &tenant).await?.len()
+        );
+
+        let gone = MemoryId::new("55555555-0000-0000-0000-000000000001");
+        soft_delete(&store, &tenant, &gone, chrono::Utc::now()).await?;
+        assert_eq!(
+            count(&store, &tenant).await?,
+            2,
+            "a tombstone is not counted"
+        );
+        assert_eq!(
+            count(&store, &tenant).await? as usize,
+            list(&store, &tenant).await?.len()
+        );
+        Ok(())
+    }
 
     /// Seed one memory and return its id, for the lexical-leg tests below.
     async fn seed(store: &Store, tenant: &TenantId, id: &str, content: &str) -> Result<()> {

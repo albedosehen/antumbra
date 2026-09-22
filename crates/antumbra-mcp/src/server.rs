@@ -581,10 +581,11 @@ impl McpServer {
         description = "At-a-glance counts for your workspace: memories, knowledge documents, visible experts, boundaries, and your compartments."
     )]
     async fn workspace_stats(&self) -> Result<Json<StatsOut>, ErrorData> {
-        let memories = memory::list(&self.store, &self.tenant)
+        // Counted by the engine: listing the rows to call `.len()` pulls every
+        // embedding over the wire and resets the connection on a real corpus.
+        let memories = memory::count(&self.store, &self.tenant)
             .await
-            .map_err(err)?
-            .len() as u32;
+            .map_err(err)?;
         let documents = document::list_titles(&self.store, &self.tenant)
             .await
             .map_err(err)?
