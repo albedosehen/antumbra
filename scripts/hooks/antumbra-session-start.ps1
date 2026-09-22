@@ -17,7 +17,18 @@
 param()
 
 $url       = if ($env:ANTUMBRA_URL)              { $env:ANTUMBRA_URL }              else { 'http://127.0.0.1:8081' }
-$token     = if ($env:ANTUMBRA_TOKEN)            { $env:ANTUMBRA_TOKEN }            else { '' }
+# The bearer, from the environment or from a file. The file is the better home
+# for it: a hook's environment usually comes from the agent's own settings file,
+# which is shared, diffed and backed up, and a long-lived credential does not
+# belong there. ANTUMBRA_TOKEN_FILE names it; ~/.antumbra/token.txt is the
+# default so the common case needs no configuration at all. Read failures are
+# swallowed deliberately -- a bootstrap that cannot authenticate says so by
+# starting cold, and must never break the session it is opening.
+$token = if ($env:ANTUMBRA_TOKEN) { $env:ANTUMBRA_TOKEN } else {
+    $file = if ($env:ANTUMBRA_TOKEN_FILE) { $env:ANTUMBRA_TOKEN_FILE }
+            else { Join-Path $HOME '.antumbra/token.txt' }
+    try { if (Test-Path $file) { (Get-Content $file -Raw).Trim() } else { '' } } catch { '' }
+}
 $hostId    = if ($env:ANTUMBRA_HOST_ID)          { $env:ANTUMBRA_HOST_ID }          else { 'local' }
 $penalize  = if ($env:ANTUMBRA_PENALIZE_ORPHANS) { $env:ANTUMBRA_PENALIZE_ORPHANS } else { '0' }
 

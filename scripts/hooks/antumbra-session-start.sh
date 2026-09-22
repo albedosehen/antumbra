@@ -23,7 +23,18 @@ set -u
 command -v jq >/dev/null 2>&1 || { printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[Antumbra bootstrap: jq not installed]"}}'; exit 0; }
 
 URL="${ANTUMBRA_URL:-http://127.0.0.1:8081}"
+# The bearer, from the environment or from a file. The file is the better home
+# for it: a hook's environment usually comes from the agent's own settings file,
+# which is shared, diffed and backed up, and a long-lived credential does not
+# belong there. ANTUMBRA_TOKEN_FILE names it; ~/.antumbra/token.txt is the
+# default so the common case needs no configuration at all. A read failure is
+# swallowed deliberately -- a bootstrap that cannot authenticate says so by
+# starting cold, and must never break the session it is opening.
 TOKEN="${ANTUMBRA_TOKEN:-}"
+if [ -z "$TOKEN" ]; then
+    TOKEN_FILE="${ANTUMBRA_TOKEN_FILE:-$HOME/.antumbra/token.txt}"
+    [ -r "$TOKEN_FILE" ] && TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE" 2>/dev/null || true)"
+fi
 HOST_ID="${ANTUMBRA_HOST_ID:-local}"
 PENALIZE_ORPHANS="${ANTUMBRA_PENALIZE_ORPHANS:-0}"
 
