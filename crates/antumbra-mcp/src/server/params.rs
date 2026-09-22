@@ -85,6 +85,14 @@ pub(super) struct IdParams {
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct MemoryView {
     pub(super) id: String,
+    /// The memory's text, cut to a 900-character prefix unless the call asked
+    /// for `full`. `content_chars` is always the STORED length and `truncated`
+    /// says whether this is a prefix, so a reader never has to infer the cut.
+    ///
+    /// Deliberately carries no `maxLength`: the bound is a default a caller may
+    /// lift, and a schema asserting 900 would be false on every `full: true`
+    /// response. The bound is documented here instead, which is what a consumer
+    /// reading the schema actually needs.
     pub(super) content: String,
     pub(super) network: String,
     pub(super) confidence: f32,
