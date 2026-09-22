@@ -48,7 +48,13 @@ It cannot, and the reason is the same shape as the defect it was brought in to f
 
 The cross-encoder is reliable for ORDERING candidates within one query and unreliable as an absolute magnitude ACROSS queries. A floor is an across-query comparison by construction — it must mean the same thing for every query the caller asks. That is precisely the distinction between a ranking signal and a calibrated probability, and it is why `noul` is specified as the latter. The same finding applies to `similarity` (ADR-0023 B-2) and now to the reranker: this system has two ranking signals and no calibrated one.
 
-One consequence for the order of work below. The cross-encoder is a better control than the raw threshold, because it is deployed, it is free to measure, and temperature calibration on its output is a far cheaper experiment than adopting a 421M head. Validation 1's swept threshold remains the bar for D-1's gate; for D-2 the bar is a temperature-calibrated cross-encoder, and this record is only justified for recall if a typed head beats that.
+**And calibrating it does not rescue it, which is the result that justifies this record for recall.** The obvious next move was a temperature on the reranker's output, since it is deployed and far cheaper than a 421M head. It cannot work, and the reason is structural rather than a matter of finding the right temperature.
+
+The full matrix is ten memories against one on-topic query each and five unrelated ones: ten positive pairs, fifty negative. The weakest genuine match scores 3.2e-4 and the strongest irrelevant pair scores 3.5e-3, ten times higher, and **thirteen of the fifty negatives outscore the weakest positive**. The best accuracy any single threshold achieves on that set is 0.950, against 0.833 for a rule that simply rejects everything — most of the apparent skill is the class imbalance, not the signal.
+
+Those thirteen are ORDERING violations, and temperature scaling is a monotone transform: it changes how sharp the distribution is and cannot change which pair outranks which. No recalibration of this reranker's output, at any temperature, moves a single one of them. The control therefore fails on its own terms, and it fails for a reason that also rules out the cheaper fixes in its family.
+
+What this does not establish is that a typed head succeeds. It establishes that the cheap alternative has been measured rather than assumed, and that Validation 2's bar for D-2 is now a known quantity: 0.950 accuracy from the best fixed threshold over a deployed cross-encoder, with 13/50 ordering violations underneath it. A head that cannot beat that is not worth its place in the serving path, and this measurement is what makes that judgeable rather than arguable.
 
 ### D-3 · The boundary probe
 
@@ -93,7 +99,7 @@ The failure mode to watch is a head that is well calibrated on the slices a veri
 ## Order of work
 
 1. [ ] **The measurement, before any integration.** Validation 1 and 2, offline, against existing verifier outcomes. If the head does not beat a tuned threshold, stop here and record it.
-2. [ ] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated. Its control is a temperature-calibrated cross-encoder rather than a swept threshold, for the reason recorded in D-2; if calibrating the deployed reranker clears the bar, this item closes without a new model and the record says so.
+2. [ ] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated. Its control has been measured and is recorded in D-2: the best fixed threshold over the deployed cross-encoder reaches 0.950 accuracy with thirteen of fifty negatives outranking the weakest positive, and no temperature fixes an ordering violation. That number is the bar.
 3. [ ] **D-1, the gate.** Two questions, with the margin retained as fallback and control.
 4. [ ] **D-3, the boundary probe**, once D-1 and D-2 have a calibration history.
 5. [ ] **D-4, the critic**, after ADR-0022's S-2, not before.
