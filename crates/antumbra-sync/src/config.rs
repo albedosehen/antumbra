@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use surql::connection::ConnectionConfig;
 
-use antumbra_core::{AntumbraError, Result};
+use antumbra_core::{AntumbraError, Result, TenantId, UserId};
 use antumbra_store::{Store, EMBED_DIM};
 
 /// One side of the sync: a SurrealDB endpoint. `username`/`password` are the
@@ -68,11 +68,50 @@ impl Endpoint {
     }
 }
 
+/// Whose fabric a collector replicates (ADR-0017 A1: "A tenant has many users,
+/// and each user has their own fabric").
+///
+/// Set it and the collector signs both connections in as that user, so the
+/// engine scopes what it can read and, more to the point, what it can write.
+/// Leave it unset and the collector runs as owner over the whole tenant, which
+/// is what every deployment does today.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fabric {
+    pub tenant: TenantId,
+    pub user: UserId,
+}
+
+impl Fabric {
+    pub fn new(tenant: impl Into<String>, user: impl Into<String>) -> Self {
+        Self {
+            tenant: TenantId::new(tenant),
+            user: UserId::new(user),
+        }
+    }
+
+    /// Sign a connection in as this user. The principal must already exist --
+    /// provisioning is owner work and a collector is not an owner, so a missing
+    /// principal is a configuration error and should read as one.
+    pub async fn bind(&self, store: &Store) -> Result<()> {
+        store.signin(&self.tenant, &self.user).await
+    }
+}
+
 /// The collector's full configuration.
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
     pub local: Endpoint,
     pub remote: Endpoint,
+    /// Whose fabric to replicate. `None` is owner mode over the whole tenant.
+    ///
+    /// **Not yet safe to set.** Signing in scopes the read, but on five of the
+    /// six replicated tables the write scope is narrower still, so rows the
+    /// session may read and may not write are refused -- visibly, in
+    /// `ReconcileStats::refused`, but refused. ADR-0017 increment 5 step 3 adds
+    /// the per-table replication scope that brings the read down to match the
+    /// write. Until then this exists so that step can be built and tested
+    /// against something, not so a deployment can turn it on.
+    pub fabric: Option<Fabric>,
     /// Delay between reconcile cycles once connected.
     pub interval: Duration,
     /// Reconnect backoff bounds after a lost connection.
@@ -99,6 +138,7 @@ impl SyncConfig {
         Self {
             local,
             remote,
+            fabric: None,
             interval: Duration::from_secs(15),
             min_backoff: Duration::from_millis(500),
             max_backoff: Duration::from_secs(30),
@@ -162,5 +202,38 @@ mod tests {
         assert_eq!(cfg.gc_every, 240);
         let cfg = cfg.with_interval(Duration::from_secs(2));
         assert_eq!(cfg.interval, Duration::from_secs(2));
+    }
+}
+
+#[cfg(test)]
+mod fabric_tests {
+    use super::*;
+    use antumbra_store::repo::principal;
+
+    /// Binding is a real sign-in against the engine, not a stored label: an
+    /// unprovisioned principal is a configuration error and has to read as one,
+    /// because the alternative is a collector that silently runs as whatever it
+    /// was already signed in as.
+    #[tokio::test]
+    async fn binding_needs_a_principal_that_exists() -> Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let fabric = Fabric::new("ws:org", "user:lily");
+        assert!(
+            fabric.bind(&store).await.is_err(),
+            "an unprovisioned user cannot be bound"
+        );
+
+        principal::provision(&store, &fabric.tenant, &fabric.user).await?;
+        fabric.bind(&store).await?;
+        Ok(())
+    }
+
+    /// The default is owner mode over the whole tenant, which is what every
+    /// deployment runs today. Scoping is opt-in and stays that way until the
+    /// per-table replication scope exists to make it lossless.
+    #[test]
+    fn a_collector_is_unscoped_unless_it_is_told_otherwise() {
+        let cfg = SyncConfig::new(Endpoint::embedded("mem://"), Endpoint::embedded("mem://"));
+        assert_eq!(cfg.fabric, None);
     }
 }

@@ -17,8 +17,7 @@ use crate::table::PENUMBRA_TABLES;
 /// Useful for a one-shot `sync --once` and for tests; the long-running collector
 /// is [`run`].
 pub async fn run_once(cfg: &SyncConfig) -> Result<ReconcileStats> {
-    let local = cfg.local.connect().await?;
-    let remote = cfg.remote.connect().await?;
+    let (local, remote) = connect_both(cfg).await?;
     reconcile_all(&local, &remote, PENUMBRA_TABLES).await
 }
 
@@ -64,8 +63,19 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
             match reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, cfg.lookback)
                 .await
             {
-                Ok(stats) if stats.total() > 0 => {
+                Ok(stats) if stats.total() > 0 || stats.refused > 0 => {
                     eprintln!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
+                    // Loud, and every cycle rather than once: a refusal means
+                    // rows the collector can see and cannot write, so it is
+                    // silently replicating less than it appears to. The engine
+                    // says nothing about this, so this line is the only notice
+                    // anyone gets.
+                    if stats.refused > 0 {
+                        eprintln!(
+                            "sync: WARNING {} row(s) refused: the session may read them and not write them, so this cycle replicated less than it appears to",
+                            stats.refused
+                        );
+                    }
                 }
                 Ok(_) => {}
                 Err(e) => {
@@ -105,6 +115,13 @@ async fn collect_garbage(cfg: &SyncConfig, local: &Store, remote: &Store, cycle:
 async fn connect_both(cfg: &SyncConfig) -> Result<(Store, Store)> {
     let local = cfg.local.connect().await?;
     let remote = cfg.remote.connect().await?;
+    // Both sides, or neither: a collector signed in on one connection and
+    // running as owner on the other would replicate a scoped read into an
+    // unscoped write, which is the asymmetry this exists to remove.
+    if let Some(fabric) = &cfg.fabric {
+        fabric.bind(&local).await?;
+        fabric.bind(&remote).await?;
+    }
     Ok((local, remote))
 }
 
