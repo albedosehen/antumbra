@@ -178,6 +178,68 @@ mod tests {
         a.iter().zip(b).map(|(x, y)| x * y).sum::<f32>()
     }
 
+    /// Does chunk-and-max-pool lift a long passage over a short off-topic stub,
+    /// and at what chunk size?
+    ///
+    /// The bar is concrete: the 66-char stub scores ~0.774 against a NONSENSE
+    /// query, and a long topical passage scores ~0.194 as one vector. For chunking
+    /// to fix recall, the best-matching CHUNK of that passage has to beat the
+    /// stub's nonsense score, or the stub still wins every query.
+    ///
+    /// Chunk size is the variable, and the answer is not free: `document_chunk`
+    /// uses DEFAULT_CHUNK_CHARS = 1200, which is itself deep in the diluted regime,
+    /// so memory chunking cannot simply reuse the document constant. This prints
+    /// the curve so the size is chosen from evidence rather than inherited.
+    #[tokio::test]
+    #[ignore = "downloads model weights"]
+    async fn chunk_and_max_pool_across_chunk_sizes() {
+        let long = format!(
+            "Antumbra recall fuses a dense HNSW leg and a BM25 lexical leg with reciprocal \
+             rank fusion. {} The lexical leg is what rescues identifiers and error codes that \
+             a 384-dimensional vector silently drops, and it carried recall alone while the \
+             dense leg ranked by length. {}",
+            "Each leg pulls a candidate pool wider than the caller's k so fusion has room to \
+             reorder before truncating. "
+                .repeat(4),
+            "Provenance is stored as a git evidence entry and judged at recall time. ".repeat(6)
+        );
+        let e = BertEmbedder::load().expect("load model");
+        let q_top = e
+            .embed("reciprocal rank fusion dense and lexical legs")
+            .await
+            .expect("q");
+        let q_non = e.embed("banana bread recipe").await.expect("q");
+
+        // The score to beat: the short stub against a query about nothing.
+        let stub = e
+            .embed("[Project] data-core-hub-parent - Part of WTS-Paradigm organization")
+            .await
+            .expect("stub");
+        let bar = cosine(&q_non, &stub);
+        println!("\nbar to beat (66-char stub vs nonsense query): {bar:.3}");
+        println!("whole passage as one vector: len={}", long.len());
+
+        for size in [120usize, 200, 300, 600, 1200] {
+            let chunks: Vec<&str> = long
+                .as_bytes()
+                .chunks(size)
+                .filter_map(|c| std::str::from_utf8(c).ok())
+                .collect();
+            let (mut best_top, mut best_non) = (f32::MIN, f32::MIN);
+            for c in &chunks {
+                let v = e.embed(c).await.expect("chunk");
+                best_top = best_top.max(cosine(&q_top, &v));
+                best_non = best_non.max(cosine(&q_non, &v));
+            }
+            println!(
+                "  chunk={size:<5} n={:<3} max_topical={best_top:.3}  max_nonsense={best_non:.3}  \
+                 beats_stub={}",
+                chunks.len(),
+                best_top > bar
+            );
+        }
+    }
+
     /// Does a model trained for query-to-passage retrieval flatten the length
     /// curve? Prints, for each model, the similarity of a NONSENSE query to texts
     /// of increasing length, and of a TOPICAL query to the one text it is about.
@@ -207,7 +269,8 @@ mod tests {
              a 384-dimensional vector silently drops, and it carried recall alone while the \
              dense leg ranked by length. {}",
             "Each leg pulls a candidate pool wider than the caller's k so fusion has room to \
-             reorder before truncating. ".repeat(4),
+             reorder before truncating. "
+                .repeat(4),
             "Provenance is stored as a git evidence entry and judged at recall time. ".repeat(6)
         );
         let nonsense = "banana bread recipe";
