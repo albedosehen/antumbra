@@ -1163,3 +1163,31 @@ mod relevance_floor {
         );
     }
 }
+
+/// Takes the `tools/list` capture ADR-0023 B-3's lint is pointed at, without
+/// standing a server up.
+///
+/// The lint lives in `antumbra-cli` and this surface lives here, and neither
+/// crate depends on the other, so the two meet through a file. `tool_router()`
+/// is a static accessor over the macro-generated table, which is the same table
+/// `advertised_tools` filters, so a capture taken this way is what an unfiltered
+/// session would be advertised.
+///
+/// Ignored because it writes a file. Take the capture and lint it with:
+///   ANTUMBRA_TOOLS_LIST_OUT=/tmp/tools-list.json \
+///   cargo test -p antumbra-mcp -- --ignored capture_the_tool_list
+///   ANTUMBRA_TOOLS_LIST=/tmp/tools-list.json \
+///   cargo test -p antumbra-cli -- --ignored --nocapture report_what_a_live_server_returns
+#[test]
+#[ignore = "writes a capture; set ANTUMBRA_TOOLS_LIST_OUT"]
+fn capture_the_tool_list() {
+    let Ok(out) = std::env::var("ANTUMBRA_TOOLS_LIST_OUT") else {
+        println!("ANTUMBRA_TOOLS_LIST_OUT unset -- skipped");
+        return;
+    };
+    let tools = McpServer::tool_router().list_all();
+    let body = serde_json::json!({ "tools": tools });
+    std::fs::write(&out, serde_json::to_string_pretty(&body).expect("serialize"))
+        .expect("write the capture");
+    println!("wrote {} tool(s) to {out}", tools.len());
+}

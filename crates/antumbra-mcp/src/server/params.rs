@@ -316,6 +316,9 @@ impl From<&DocumentChunk> for DocumentChunkView {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct DocumentChunksOut {
+    /// At most `top_k` chunks (default 5), best match first. Empty means
+    /// nothing matched: there is no relevance floor on this path, so an empty
+    /// answer is not one whose matches were rejected.
     pub(super) chunks: Vec<DocumentChunkView>,
 }
 
@@ -332,6 +335,9 @@ pub(super) struct ExpertView {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct PopulationOut {
+    /// One row per expert visible to you: the shared population plus your own
+    /// private ones. Empty means the population has never been seeded, not that
+    /// a filter hid it -- the ACL scopes this list and does not empty it.
     pub(super) experts: Vec<ExpertView>,
 }
 
@@ -388,6 +394,11 @@ pub(super) struct NeighborView {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct NeighborsOut {
+    /// Every relation on the memory, or every one of the requested `edge_type`.
+    /// Empty means the memory has no relations at all when `edge_type` was
+    /// omitted, and none of that type when it was given -- so an empty answer
+    /// to a filtered call is worth retrying unfiltered before concluding the
+    /// memory is isolated.
     pub(super) neighbors: Vec<NeighborView>,
 }
 
@@ -469,6 +480,9 @@ pub(super) struct CompartmentView {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct CompartmentsOut {
+    /// One row per compartment you can see: your own, plus any shared with you.
+    /// Empty means none exist rather than none matched, since this lists rather
+    /// than searches.
     pub(super) compartments: Vec<CompartmentView>,
 }
 
@@ -536,5 +550,9 @@ pub(super) struct ProposalView {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct ProposalsOut {
+    /// One row per cluster found among your uncompartmented memories. Empty is
+    /// ambiguous on purpose and the two readings want different moves: either
+    /// there is nothing uncompartmented to cluster, or nothing clustered at this
+    /// `similarity_threshold` and `min_size`, which a lower threshold may fix.
     pub(super) proposals: Vec<ProposalView>,
 }

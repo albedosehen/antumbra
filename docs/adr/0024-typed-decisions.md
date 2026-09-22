@@ -71,6 +71,39 @@ It is also a lossy floor, and the losses are the argument for going further. Rec
 
 So Validation 2's bar for D-2 is 0.782 F1, and a typed head earns its place in the serving path by beating it. That is now a number rather than an argument.
 
+**The cheap head was tried against that bar and fails, for a reason that rules out a whole class of shortcut.** Before paying for a 400M encoder, the question worth asking is whether the one already in this stack carries enough signal: all-MiniLM-L6-v2 is 22M, loaded, tested, and free. A two-layer head over its frozen output, trained on 800 constructed pairs with the split taken by MEMORY rather than by pair — so the same passage never appears on both sides — scores **0.525 F1, accuracy 0.530** on the held-out half. Balanced classes make chance 0.500. It is barely distinguishable from guessing.
+
+The first explanation offered for that was the pooling: `BertEmbedder::encode_pooled` mean-pools, so feeding it `query: … passage: …` yields a blend of two texts rather than a representation of their relationship. **That explanation was tested and is wrong**, which matters more than the original number.
+
+If pooling a concatenation were the constraint, handing the head the two vectors and their interaction terms explicitly should recover most of it — `[u, v, |u-v|, u⊙v]` is the standard bi-encoder recipe for sentence-pair classification and exists precisely to supply the comparison a cross-encoder gets from attention. Measured on the same 800 pairs and the same split:
+
+| features | accuracy | F1 |
+|---|---|---|
+| joined, mean-pooled | 0.517 | 0.519 |
+| separate, `[u, v, \|u-v\|, u⊙v]` | 0.548 | **0.520** |
+| control (cross-encoder threshold) | — | **0.782** |
+
+Both sit on chance. The interaction terms buy three points of accuracy and nothing at all in F1, so **the pairing is not the binding constraint**.
+
+What is left is the representation itself, and it is a defect this record's own Context already measured from the other side. A frozen MiniLM vector of a long memory is a mean-pool of up to 512 tokens into 384 dimensions, and that is the same dilution that makes a 66-character stub score 0.774 against a query about nothing while a 1058-character memory scores 0.224 against a query about its own contents. **The specific twelve-word span the query was cut from does not survive into the vector.** No function of `u` and `v` can recover information neither vector contains, which is why a better pairing changes nothing and why a larger encoder pooled the same way would not help either.
+
+That leaves two routes, and they are the two this session has already found by other paths. Cross-attention: the model reads both texts together and attention locates the matching span, which is what a fine-tuned `ModernBertClassifier` with `ClassifierPooling` does and what the reference design is. Or chunking, so each indexed unit is short enough that its vector still describes it — which is the `memory` / `document_chunk` asymmetry named under D-2 above.
+
+**Chunking was measured, and it is the first thing that moves the number without moving the model.** Chunking each memory at 300 characters, embedding every chunk with the same frozen encoder, and handing the head the chunk that best matches the query:
+
+| features (frozen MiniLM, 120 pairs, 60 held out) | accuracy | F1 |
+|---|---|---|
+| joined, mean-pooled | 0.467 | 0.385 |
+| separate, `[u, v, \|u-v\|, u⊙v]` | 0.550 | 0.542 |
+| best chunk at 300 characters | **0.650** | **0.588** |
+| control (cross-encoder threshold) | — | **0.782** |
+
+The ordering is the result and the absolute values are not: this is a smaller sample than the 800-pair runs above, sixty pairs held out, and the same `joined` configuration scores 0.519 there against 0.385 here. What survives the noise is the direction, and it is the direction the corrected explanation predicts — shorter units preserve the span, so chunking recovers signal that no rearrangement of the whole-memory vectors could.
+
+It is still short of the control. So chunking is **necessary and not sufficient**, which is exactly what an earlier measurement of chunk-and-max-pool concluded about ranking, arrived at here by a different route and about a different question. The two findings agree: a frozen encoder over shorter units is better than a frozen encoder over long ones, and neither is a cross-encoder. Chunking composes with a trained pair encoder rather than replacing it, and the record's design stands.
+
+So the shortcut is closed, and closing it cost two ignored tests rather than an adoption — one to find the number, one to find that the reason first given for it was wrong.
+
 ### D-3 · The boundary probe
 
 ADR-0004 models the context-scope of a behaviour as right-here versus wrong-there plus a governing feature. That is a `choice` and a `score`, and `AcceptabilityProbe` is already a port, so the seam exists. This lands after D-1 and D-2, because the thesis of the system is the wrong place to learn how a new instrument behaves.
@@ -127,8 +160,14 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
 
 1. [~] **The measurement, before any integration.** Validation 1 and 2, offline, against existing verifier outcomes. If the head does not beat a tuned threshold, stop here and record it.
 
-   Split by what the labels need. **D-2's half is done**: its labels are constructible from the store by a deterministic verifier (see D-2), so the control is measured and the bar is 0.782 F1 over 240 balanced pairs. **D-1's half is blocked, on data rather than on effort**: sweeping `coverage_threshold` needs routing outcomes, and this deployment holds zero evaluation runs, shadows, boundaries and reward signals because the generational loop has never run on it. That half waits for a loop run, and no amount of care with the gate's code substitutes for it.
-2. [ ] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated. Its control has been measured and is recorded in D-2: the best fixed threshold over the deployed cross-encoder reaches 0.950 accuracy with thirteen of fifty negatives outranking the weakest positive, and no temperature fixes an ordering violation. That number is the bar.
+   Split by what the labels need. **D-2's half is done, and it returned a negative result, which is the outcome this item explicitly provides for.** Its labels are constructible from the store by a deterministic verifier (see D-2), so the control is measured and the bar is 0.782 F1 over 240 balanced pairs. The cheapest candidate — a two-layer head over the frozen MiniLM already in the stack — was then measured against that bar and does not approach it, in three separate featurings. So this item's own instruction applies: the finding is recorded rather than integrated, and D-2 does not ship on a frozen encoder.
+
+   **D-1's half is blocked, on data rather than on effort**: sweeping `coverage_threshold` needs routing outcomes, and this deployment holds zero evaluation runs, shadows, boundaries and reward signals because the generational loop has never run on it. That half waits for a loop run, and no amount of care with the gate's code substitutes for it.
+2. [~] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated.
+
+   What is settled: the bar is **0.782 F1** (D-2's table), the frozen-encoder shortcut is closed, and chunking is established as necessary and not sufficient. What remains is the part that was never cheap — a pair encoder that reads both texts together, which is `ModernBertClassifier` with `ClassifierPooling` from the `candle-transformers` already in the tree, fine-tuned on constructed pairs. `scripts/d2-labels.sh` produces its training data today and `crates/antumbra-serve/src/decision_probe.rs` already holds the training and scoring harness to judge it by, so what is missing is the encoder and the fine-tuning run, not the measurement apparatus.
+
+   Two constraints on doing it, both learned rather than assumed. It needs a GPU: the 22M encoder took 161 minutes on CPU for an 800-pair three-way run and did not finish, and ModernBERT-large is 400M with a training pass rather than inference only. And the floor it feeds must sit on the fused score, never on `similarity` — ADR-0023's B-2 correction, which holds for the reranker too.
 3. [ ] **D-1, the gate.** Two questions, with the margin retained as fallback and control.
 4. [ ] **D-3, the boundary probe**, once D-1 and D-2 have a calibration history.
 5. [ ] **D-4, the critic**, after ADR-0022's S-2, not before.
