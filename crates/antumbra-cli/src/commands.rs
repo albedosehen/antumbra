@@ -347,6 +347,7 @@ pub async fn memory_import(url: &str, args: MemoryImportArgs) -> anyhow::Result<
             let loop_cfg = LoopConfig {
                 graduate_threshold: 0.3,
                 base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                ..LoopConfig::default()
             };
             let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
             let reports = lp.run_until(&RunId::new(run), 1).await?;
@@ -822,6 +823,7 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
                 let loop_cfg = LoopConfig {
                     graduate_threshold: 0.3,
                     base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                    ..LoopConfig::default()
                 };
                 let lp = GenerationLoop::new(store, &trainer, embedder, loop_cfg);
                 let reports = lp.run_until(&RunId::new(run.clone()), 1).await?;

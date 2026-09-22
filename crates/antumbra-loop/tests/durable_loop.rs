@@ -26,6 +26,7 @@ async fn grows_population_and_resumes_after_restart() {
     let cfg = LoopConfig {
         graduate_threshold: 0.5,
         base_model: "code-base".into(),
+        ..LoopConfig::default()
     };
     let run = RunId::new("run:loop");
 
@@ -344,4 +345,82 @@ async fn a_captured_correction_persists_an_actionable_boundary() {
     // The two context embeddings differ (C vs C'), so the relative margin is
     // meaningful rather than degenerate.
     assert_ne!(b.context_vec, b.ok_context_vec);
+}
+
+/// ADR-0022 step 2. A generation is read through the standing instruments, and
+/// the slice a task lands in comes from its id alone -- so nothing the loop
+/// decides can move a task across the anchor.
+#[tokio::test]
+async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Result<()> {
+    use antumbra_core::ports::TaskOutcome;
+    use antumbra_eclipse::Slice;
+
+    let store = Store::connect_memory(8).await?;
+    let partition = antumbra_eclipse::Partition::default();
+    // Tasks chosen so the default partition puts them on both sides of the
+    // anchor; the ids are the ones eclipse's own pinning test names.
+    let per_task = vec![
+        TaskOutcome {
+            task_id: "task:0".into(),
+            passed: true,
+            size: 10,
+        },
+        TaskOutcome {
+            task_id: "task:1".into(),
+            passed: false,
+            size: 10,
+        },
+        TaskOutcome {
+            task_id: "task:19".into(),
+            passed: true,
+            size: 10,
+        },
+    ];
+    assert_eq!(partition.of("task:0"), Slice::Visible);
+    assert_eq!(partition.of("task:1"), Slice::HeldOut);
+    assert_eq!(partition.of("task:19"), Slice::Audit);
+
+    let trainer = ScriptedTrainer {
+        per_task: per_task.clone(),
+        ..ScriptedTrainer::graduating()
+    };
+    let embedder = FixedEmbedder::new(8);
+    let cfg = LoopConfig {
+        partition,
+        ..LoopConfig::default()
+    };
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg);
+    let run = RunId::new("run:instrumented");
+    let mut head = lp.resume_or_init(&run).await?;
+    let report = lp.run_generation(&mut head).await?;
+
+    let measured = report
+        .instruments
+        .ok_or_else(|| antumbra_core::AntumbraError::other("the generation was not measured"))?;
+    // The visible task passed and the held-out one did not, which is the gap
+    // the record calls the primary hacking alarm.
+    assert_eq!(measured.widest_gap().map(|(_, w)| w), Some(1.0));
+    // The audit slice is counted apart from anything that chooses.
+    assert_eq!(measured.audit.rate(), Some(1.0));
+    assert!(!measured.failed(), "no impossible task was passed");
+    Ok(())
+}
+
+/// A trainer that reports only aggregate fitness leaves the generation
+/// unmeasured, and the loop says so rather than inventing a report from one
+/// number. That distinction is the whole reason the instruments exist.
+#[tokio::test]
+async fn a_generation_with_no_per_task_results_is_not_measured() -> antumbra_core::Result<()> {
+    let store = Store::connect_memory(8).await?;
+    let trainer = ScriptedTrainer::graduating();
+    let embedder = FixedEmbedder::new(8);
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
+    let run = RunId::new("run:unmeasured");
+    let mut head = lp.resume_or_init(&run).await?;
+    let report = lp.run_generation(&mut head).await?;
+    assert!(
+        report.instruments.is_none(),
+        "a report synthesised from aggregate fitness would look like a measurement"
+    );
+    Ok(())
 }

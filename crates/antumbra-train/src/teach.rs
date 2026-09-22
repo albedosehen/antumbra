@@ -7,7 +7,7 @@
 //! Discovery and capture are two ways competence enters the brain; both are
 //! gated on ground truth, neither trusts unverified teacher text.
 
-use antumbra_core::ports::{TrainOutcome, Verifier, VerifyRequest};
+use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{governing_feature_from_pair, BoundaryFinding, Result, RunId};
 use serde_json::json;
 
@@ -128,6 +128,22 @@ pub async fn capture_corrections(
         final_fitness: learned.pass_rate,
         capability_exemplars: solved,
         boundary_findings: findings,
+        // The eval already carries per-task counts, so this maps rather than
+        // recomputes. A task counts as passed when any sample of it verified,
+        // the same reading RAFT and GRPO take.
+        per_task: learned
+            .per_task
+            .iter()
+            .map(|r| TaskOutcome {
+                task_id: r.id.clone(),
+                passed: r.passed > 0,
+                size: tasks
+                    .iter()
+                    .find(|t| t.id == r.id)
+                    .map(|t| t.prompt.chars().count() as u32)
+                    .unwrap_or(0),
+            })
+            .collect(),
     })
 }
 

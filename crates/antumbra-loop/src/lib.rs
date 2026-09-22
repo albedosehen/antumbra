@@ -18,11 +18,13 @@ use sha2::{Digest, Sha256};
 
 use antumbra_boundary::finding_to_boundary;
 use antumbra_core::generational::{GenerationHead, LoopCommand, LoopState};
-use antumbra_core::ports::{Embedder, TrainOutcome, TrainRequest, Trainer};
+use antumbra_core::ports::{Embedder, TaskOutcome, TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::{
     BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Grain,
     Result, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind,
 };
+use antumbra_eclipse::instrument::GenerationReport as InstrumentReport;
+use antumbra_eclipse::{Outcome, Partition};
 use antumbra_store::repo::{
     boundary, evaluation, expert, generation, loop_control, reward, shadow,
 };
@@ -50,6 +52,11 @@ pub struct LoopConfig {
     pub graduate_threshold: f32,
     /// The shared base every adapter rides on (the frozen-expert population).
     pub base_model: String,
+    /// How the corpus is split for the standing instruments (ADR-0022): which
+    /// tasks selection may see, which are held out, which are audited. Carried
+    /// in the config rather than derived, because the seed decides what every
+    /// measurement means and a generation has to record which one it ran under.
+    pub partition: Partition,
 }
 
 impl Default for LoopConfig {
@@ -57,6 +64,7 @@ impl Default for LoopConfig {
         Self {
             graduate_threshold: 0.5,
             base_model: "code-base".into(),
+            partition: Partition::default(),
         }
     }
 }
@@ -75,6 +83,43 @@ pub struct GenerationReport {
     /// no-forgetting kill criterion firing. Empty when the freeze held
     /// (the expected case); a non-empty list is a serious integrity alarm.
     pub regressions: Vec<ExpertId>,
+    /// What the standing instruments made of this generation (ADR-0022): the
+    /// visible-minus-held-out gap banded by task size, the audit slice, and the
+    /// impossible set. `None` when the trainer reported no per-task results,
+    /// which is the honest answer -- a report computed from aggregate fitness
+    /// would be a number that looks like a measurement and is not.
+    pub instruments: Option<InstrumentReport>,
+}
+
+impl GenerationLoop<'_> {
+    /// Read this generation through the standing instruments (ADR-0022).
+    ///
+    /// `None` when the trainer reported no per-task results. That is the honest
+    /// answer and not a degraded one: the gap between what selection can see
+    /// and what it cannot is undefined over a single aggregate number, and a
+    /// report synthesised from `final_fitness` would be exactly the kind of
+    /// figure the record warns about -- one that looks like a measurement.
+    ///
+    /// The slice comes from the task id alone, through the configured
+    /// partition, so it cannot drift between generations and nothing the loop
+    /// decides can move a task across the anchor.
+    fn measure(&self, per_task: &[TaskOutcome]) -> Option<InstrumentReport> {
+        if per_task.is_empty() {
+            return None;
+        }
+        let outcomes: Vec<Outcome> = per_task
+            .iter()
+            .map(|t| {
+                Outcome::new(
+                    t.task_id.clone(),
+                    self.cfg.partition.of(&t.task_id),
+                    t.passed,
+                    t.size,
+                )
+            })
+            .collect();
+        Some(InstrumentReport::of(&outcomes))
+    }
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -201,6 +246,7 @@ impl<'a> GenerationLoop<'a> {
             graduated,
             reward_curve: outcome.reward_curve.clone(),
             regressions,
+            instruments: self.measure(&outcome.per_task),
         })
     }
 
@@ -262,7 +308,17 @@ impl<'a> GenerationLoop<'a> {
             } else {
                 EvalStatus::Failure
             },
-            metrics: Some(serde_json::json!({ "fitness": fitness })),
+            // The instruments ride with the fitness they qualify, so a reader
+            // of this row cannot get the score without the measurement of
+            // whether the score means anything (ADR-0022). The partition seed
+            // goes with them: a reseed repartitions the corpus and invalidates
+            // every gap measured before it, so a generation has to say which
+            // split it was read under.
+            metrics: Some(serde_json::json!({
+                "fitness": fitness,
+                "partition_seed": self.cfg.partition.seed,
+                "instruments": self.measure(&outcome.per_task),
+            })),
             regression_fingerprint: Some(outcome.adapter_uri.clone()),
             created_at: Utc::now(),
         };
