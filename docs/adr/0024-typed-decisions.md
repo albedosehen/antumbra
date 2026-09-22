@@ -121,6 +121,16 @@ The failure mode to watch is a head that is well calibrated on the slices a veri
 
 ## Notes on the evidence
 
+**What adopting it would actually cost, read off the artefact rather than the card.** Checked on 2026-09-22, because "adopt the open one" is the load-bearing half of the Jev comparison and the shape of the repository decides how much of it transfers.
+
+The weights are not where the name suggests. `convaiinnovations/laya` is card-only — a README and logo assets, no config and no tensors. The artefact is `convaiinnovations/laya-typed-decisions`, which carries `model.safetensors`, `tokenizer/`, and two configs. Apache-2.0 as claimed. Both repositories report zero downloads through the HF API, which is not evidence of quality either way but is worth knowing before citing the model in front of a customer.
+
+`rl_agent_config.json` confirms the card's architecture and adds the parts that decide the port: `encoder: answerdotai/ModernBERT-large`, `head_layers: 2`, `max_len: 1024`, `head_max_len: 256`, `max_prefixes: 6`, and an RL cost structure (`act_costs.escalate: 0.5`, `cost_wrong_act: 3.0`, `amp_dtype: bf16`). **The encoder is referenced, not vendored**, so adopting Laya means fetching ModernBERT-large separately; it is Apache-2.0 too, so this is a step rather than an obstacle.
+
+It also ships its temperature calibration — a `temperature` array and a `temperature_by_options` map keyed by how many options a question offers. So the card's over-confidence caveat is something the artefact addresses rather than something an adopter inherits, and the per-option-count keying is itself an argument that calibration varies with answer-space size, which is what Validation 4 asks to be sliced by.
+
+**The encoder path is in-stack and the head is not.** `candle-transformers` 0.10.2 ships `modernbert.rs` with `ModernBertClassifier`, `ClassifierConfig` and `ClassifierPooling`, so serving a ModernBERT classifier in-process needs no new dependency and no second runtime. Laya's head is not that classifier: it is a custom two-layer decision head with typed-question prefixes and its own RL configuration, so it must be ported rather than loaded. The honest estimate is therefore encoder free, head written, and the calibration table usable as data.
+
 Laya's figures are from its own model card and are quoted with its own caveats: 0.766 on typed decisions after fine-tuning against a 0.735 teacher-agreement ceiling, 0.362 zero-shot, sharp degradation past roughly twenty options, weak ordinal scoring, and over-confidence before temperature calibration. The launch benchmarks against Jev were published by one party without access to the other's API, and on Banking77's 77 labels Laya scored 0.425 against Jev's 0.870, which is the large-label-space weakness showing up exactly where the model card says it will. None of those numbers are load-bearing here, because Validation requires Antumbra's own measurement on Antumbra's own outcomes.
 
 The recall figures in Context were measured directly against `ws:default` on 2026-09-22 and are reproducible: store any short stub, query anything unrelated, and watch it rank first.
