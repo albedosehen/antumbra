@@ -63,7 +63,8 @@ async fn incremental_cursors_converge_over_ws() {
         ReconcileStats {
             pushed: 1,
             pulled: 0,
-            refused: 0
+            refused: 0,
+            declined: 0
         },
         "first pass seeds A to ws://"
     );
@@ -84,7 +85,8 @@ async fn incremental_cursors_converge_over_ws() {
         ReconcileStats {
             pushed: 1,
             pulled: 0,
-            refused: 0
+            refused: 0,
+            declined: 0
         },
         "only B moves on the incremental pass"
     );
@@ -103,7 +105,8 @@ async fn incremental_cursors_converge_over_ws() {
         ReconcileStats {
             pushed: 0,
             pulled: 1,
-            refused: 0
+            refused: 0,
+            declined: 0
         },
         "remote-only update pulls back"
     );

@@ -20,11 +20,16 @@ pub mod config;
 pub mod gc;
 pub mod propagate;
 pub mod reconcile;
+pub mod scope;
 pub mod table;
 pub mod worker;
 
-pub use config::{Endpoint, SyncConfig};
+pub use config::{Endpoint, Fabric, SyncConfig};
 pub use propagate::{audience, resolve_change, watch_shared_memories, MemoryChange};
-pub use reconcile::{reconcile_all, reconcile_all_since, reconcile_table, Cursors, ReconcileStats};
+pub use reconcile::{
+    reconcile_all, reconcile_all_scoped, reconcile_all_since, reconcile_all_since_scoped,
+    reconcile_table, Cursors, ReconcileStats,
+};
+pub use scope::{Replicate, Scope};
 pub use table::{TableSpec, PENUMBRA_TABLES};
 pub use worker::run;
