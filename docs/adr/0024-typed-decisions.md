@@ -48,13 +48,26 @@ It cannot, and the reason is the same shape as the defect it was brought in to f
 
 The cross-encoder is reliable for ORDERING candidates within one query and unreliable as an absolute magnitude ACROSS queries. A floor is an across-query comparison by construction — it must mean the same thing for every query the caller asks. That is precisely the distinction between a ranking signal and a calibrated probability, and it is why `noul` is specified as the latter. The same finding applies to `similarity` (ADR-0023 B-2) and now to the reranker: this system has two ranking signals and no calibrated one.
 
-**And calibrating it does not rescue it, which is the result that justifies this record for recall.** The obvious next move was a temperature on the reranker's output, since it is deployed and far cheaper than a 421M head. It cannot work, and the reason is structural rather than a matter of finding the right temperature.
+**So the control was measured, on a set built the way D-2's own labels have to be.** The obvious cheaper move is a threshold on the reranker's output. Whether it suffices is an empirical question, and answering it needed labelled data this deployment does not have — no evaluation run, shadow, boundary or reward signal exists in the store, because the generational loop has never run here.
 
-The full matrix is ten memories against one on-topic query each and five unrelated ones: ten positive pairs, fifty negative. The weakest genuine match scores 3.2e-4 and the strongest irrelevant pair scores 3.5e-3, ten times higher, and **thirteen of the fifty negatives outscore the weakest positive**. The best accuracy any single threshold achieves on that set is 0.950, against 0.833 for a rule that simply rejects everything — most of the apparent skill is the class imbalance, not the signal.
+That blocker is real for D-1 and not for D-2, and the difference is worth stating because it is what makes this record partly measurable today. **D-2's labels can be constructed by a deterministic verifier over the store itself.** A query cut from inside a memory has that memory as its answer and does not have any other memory as its answer. The verifier is substring provenance: checkable, reproducible, and not derived from any model, which is exactly what the typed-decision rule demands of a label. No loop is required.
 
-Those thirteen are ORDERING violations, and temperature scaling is a monotone transform: it changes how sharp the distribution is and cannot change which pair outranks which. No recalibration of this reranker's output, at any temperature, moves a single one of them. The control therefore fails on its own terms, and it fails for a reason that also rules out the cheaper fixes in its family.
+Built that way over 120 memories, with a hard negative for each — the same query against a different memory, rather than a nonsense query nothing would match — the deployed cross-encoder gives:
 
-What this does not establish is that a typed head succeeds. It establishes that the cheap alternative has been measured rather than assumed, and that Validation 2's bar for D-2 is now a known quantity: 0.950 accuracy from the best fixed threshold over a deployed cross-encoder, with 13/50 ordering violations underneath it. A head that cannot beat that is not worth its place in the serving path, and this measurement is what makes that judgeable rather than arguable.
+| | |
+|---|---|
+| best single threshold | 6.35e-4 |
+| accuracy | 0.800 |
+| precision | 0.860 |
+| recall | 0.717 |
+| F1 | 0.782 |
+| always-reject baseline | 0.500 (classes balanced, 120/120) |
+
+**That is the bar, and it is a real one.** An earlier pass of this measurement used ten positives against fifty nonsense negatives and reported 0.950 accuracy against an 0.833 always-reject baseline, which read as failure; the number was an artefact of the class imbalance and of negatives too easy to be informative. On a balanced set with hard negatives the control is a usable floor rather than a broken one.
+
+It is also a lossy floor, and the losses are the argument for going further. Recall 0.717 means **more than a quarter of genuine answers fall below the best threshold** and would be reported as "nothing matched". The score ranges overlap at the bottom — the weakest positive and the weakest negative are both 3.73e-5 — so no threshold separates them cleanly and no monotone recalibration can, since temperature scaling cannot reorder a pair. Four of 120 hard negatives still outscore the median positive.
+
+So Validation 2's bar for D-2 is 0.782 F1, and a typed head earns its place in the serving path by beating it. That is now a number rather than an argument.
 
 ### D-3 · The boundary probe
 
@@ -98,7 +111,9 @@ The failure mode to watch is a head that is well calibrated on the slices a veri
 
 ## Order of work
 
-1. [ ] **The measurement, before any integration.** Validation 1 and 2, offline, against existing verifier outcomes. If the head does not beat a tuned threshold, stop here and record it.
+1. [~] **The measurement, before any integration.** Validation 1 and 2, offline, against existing verifier outcomes. If the head does not beat a tuned threshold, stop here and record it.
+
+   Split by what the labels need. **D-2's half is done**: its labels are constructible from the store by a deterministic verifier (see D-2), so the control is measured and the bar is 0.782 F1 over 240 balanced pairs. **D-1's half is blocked, on data rather than on effort**: sweeping `coverage_threshold` needs routing outcomes, and this deployment holds zero evaluation runs, shadows, boundaries and reward signals because the generational loop has never run on it. That half waits for a loop run, and no amount of care with the gate's code substitutes for it.
 2. [ ] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated. Its control has been measured and is recorded in D-2: the best fixed threshold over the deployed cross-encoder reaches 0.950 accuracy with thirteen of fifty negatives outranking the weakest positive, and no temperature fixes an ordering violation. That number is the bar.
 3. [ ] **D-1, the gate.** Two questions, with the margin retained as fallback and control.
 4. [ ] **D-3, the boundary probe**, once D-1 and D-2 have a calibration history.
