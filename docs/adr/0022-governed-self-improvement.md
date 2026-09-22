@@ -203,7 +203,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    The crate grants no reward and exposes no reward type, which is the structural form of the record's rule that trace monitors stay out of the reward path. A measurement that becomes something to improve stops measuring.
 
-2. [ ] Wire the instruments into the loop: slices recorded per evaluation run, a report per generation, the audit slice on its k-generation schedule.
+2. [~] Wire the instruments into the loop. **A report per generation is in**; the k-generation audit schedule is not.
+
+   The gap this closed first was not wiring at all. `TrainOutcome` carried only aggregate fitness, and a generation cannot be sliced from one number -- a visible-minus-held-out gap computed from `final_fitness` would be a figure that looks like a measurement and is not. The trainer knew the per-task answer already, because it is what it averages to get fitness; it simply threw it away. So `TaskOutcome { task_id, passed, size }` now rides out of all three training paths (RAFT, GRPO, and capture, the last mapping the per-task counts `eval_pass_rate` was already returning).
+
+   The loop reads those through the configured `Partition` and attaches an instrument report to the generation, persisted in the evaluation run alongside the fitness it qualifies -- so a reader cannot get the score without the measurement of whether the score means anything. The partition seed is stored with it, because a reseed repartitions the corpus and invalidates every gap measured before it.
+
+   A trainer that reports no per-task results leaves `instruments: None`, and the loop says so rather than synthesising a report. That distinction is the whole reason the instruments exist, and it has its own test.
+
+   Still open: the audit slice on a k-generation schedule (it is currently measured every generation, which is more often than the record asks and costs nothing yet), and the trend across generations -- `Watch::read` exists and nothing calls it, because it needs a history of generations to read.
 3. [ ] S-1, the searched `TrainingRecipe` and the `recipe` rows behind it.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
 5. [ ] S-3, the learned grow step.

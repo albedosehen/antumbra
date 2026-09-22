@@ -117,6 +117,11 @@ pub struct ScriptedTrainer {
     pub curve: Vec<f32>,
     pub capability_exemplars: Vec<String>,
     pub boundary_findings: Vec<crate::BoundaryFinding>,
+    /// Per-task results the loop slices for the standing instruments. Empty by
+    /// default, which is what a trainer that reports only aggregate fitness
+    /// looks like -- and the loop has to stay honest about that rather than
+    /// inventing a report from one number.
+    pub per_task: Vec<crate::ports::TaskOutcome>,
 }
 
 impl ScriptedTrainer {
@@ -127,6 +132,7 @@ impl ScriptedTrainer {
             curve: vec![0.1, 0.4, 0.7, 0.9],
             capability_exemplars: Vec::new(),
             boundary_findings: Vec::new(),
+            per_task: Vec::new(),
         }
     }
 
@@ -137,6 +143,7 @@ impl ScriptedTrainer {
             curve: vec![0.0, 0.0, 0.0],
             capability_exemplars: Vec::new(),
             boundary_findings: Vec::new(),
+            per_task: Vec::new(),
         }
     }
 
@@ -168,6 +175,7 @@ impl Trainer for ScriptedTrainer {
             final_fitness: self.final_fitness,
             capability_exemplars: self.capability_exemplars.clone(),
             boundary_findings: self.boundary_findings.clone(),
+            per_task: self.per_task.clone(),
         })
     }
 }

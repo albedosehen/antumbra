@@ -73,6 +73,23 @@ pub struct TrainRequest {
     pub corpus_task_ids: Vec<String>,
 }
 
+/// One corpus task, as the final training round found it.
+///
+/// The loop needs this to say anything honest about a generation. Aggregate
+/// fitness cannot be sliced -- a visible-minus-held-out gap computed from one
+/// number is not a measurement of anything (ADR-0022) -- and the trainer knows
+/// the per-task answer already, because it is what it averages to get fitness.
+/// It simply used to throw it away.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskOutcome {
+    pub task_id: String,
+    pub passed: bool,
+    /// What the corpus counts as the size of this task. The instruments never
+    /// interpret it beyond ordering, so any consistent measure will do; the
+    /// trainer supplies prompt length, which is a proxy rather than a claim.
+    pub size: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrainOutcome {
     pub adapter_uri: String,
@@ -89,6 +106,10 @@ pub struct TrainOutcome {
     /// surfaces these from corrections; discovery-only runs leave it empty.
     #[serde(default)]
     pub boundary_findings: Vec<BoundaryFinding>,
+    /// Per-task results from the final round, in corpus order. The same round
+    /// `capability_exemplars` reflects, so the two describe one adapter.
+    #[serde(default)]
+    pub per_task: Vec<TaskOutcome>,
 }
 
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;

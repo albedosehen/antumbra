@@ -7,7 +7,7 @@
 
 use serde_json::json;
 
-use antumbra_core::ports::{TrainOutcome, Verifier, VerifyRequest};
+use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{Result, RunId};
 
 use crate::config::RaftConfig;
@@ -25,14 +25,23 @@ pub async fn raft_train(
     // The prompts solved in the final round become the expert's capability
     // exemplars: what it provably does, learned from evaluated behavior.
     let mut capability_exemplars: Vec<String> = Vec::new();
+    // Per-task results from the final round, kept for the standing instruments
+    // (ADR-0022): a generation cannot be sliced into visible, held-out and
+    // audit from one aggregate number, and this is where the per-task answer
+    // exists. It was already being computed and discarded.
+    let mut per_task: Vec<TaskOutcome> = Vec::new();
 
     for _round in 0..cfg.rounds {
         let mut winners: Vec<SftExample> = Vec::new();
         let mut solved: Vec<String> = Vec::new();
         let (mut total, mut passed) = (0usize, 0usize);
+        let mut round_tasks: Vec<TaskOutcome> = Vec::new();
 
         for task in tasks {
             let samples = model.generate(&task.prompt, cfg.samples_per_task).await?;
+            // A task counts as passed when any sample of it verified, which is
+            // the same reading `solved` takes: the adapter can do it.
+            let mut task_passed = false;
             for (i, sample) in samples.iter().enumerate() {
                 total += 1;
                 let req = VerifyRequest {
@@ -48,6 +57,7 @@ pub async fn raft_train(
                 };
                 if verifier.verify(&req).await?.passed {
                     passed += 1;
+                    task_passed = true;
                     if !solved.contains(&task.prompt) {
                         solved.push(task.prompt.clone());
                     }
@@ -57,6 +67,13 @@ pub async fn raft_train(
                     });
                 }
             }
+            round_tasks.push(TaskOutcome {
+                task_id: task.id.clone(),
+                passed: task_passed,
+                // Prompt length as the size proxy: the corpus declares no size
+                // of its own, and the instruments only order by it.
+                size: task.prompt.chars().count() as u32,
+            });
         }
 
         reward_curve.push(if total == 0 {
@@ -64,8 +81,10 @@ pub async fn raft_train(
         } else {
             passed as f32 / total as f32
         });
-        // Keep the latest round's solved set (reflects the trained adapter).
+        // Keep the latest round's solved set (reflects the trained adapter),
+        // and its per-task results for the same reason.
         capability_exemplars = solved;
+        per_task = round_tasks;
 
         // Anti-collapse (shadow plasticity discipline): only train on verified positives; an empty
         // winner set means no update this round (never reinforce nothing).
@@ -88,6 +107,7 @@ pub async fn raft_train(
         capability_exemplars,
         // RAFT discovers skills, not scopes; boundaries come from the capture path.
         boundary_findings: Vec::new(),
+        per_task,
     })
 }
 
