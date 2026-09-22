@@ -73,6 +73,11 @@ services:
       # container ID is the name, and every recreate registers this machine
       # as a brand new node while the old rows go on claiming to be trainers.
       - ANTUMBRA_HOST=${ANTUMBRA_HOST:-${HOSTNAME}}
+      # The cross-encoder precision stage. Unset = off, and recall returns the
+      # RRF order as before. Point it at a TEI `/rerank` endpoint, e.g.
+      # http://host.docker.internal:8090/rerank for a text-embeddings-inference
+      # container on the host running BAAI/bge-reranker-base.
+      - ANTUMBRA_RERANK_URL=${ANTUMBRA_RERANK_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
