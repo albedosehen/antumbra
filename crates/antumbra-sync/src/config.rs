@@ -102,15 +102,14 @@ impl Fabric {
 pub struct SyncConfig {
     pub local: Endpoint,
     pub remote: Endpoint,
-    /// Whose fabric to replicate. `None` is owner mode over the whole tenant.
+    /// Whose fabric to replicate. `None` is owner mode over the whole tenant,
+    /// which is what every deployment runs today.
     ///
-    /// **Not yet safe to set.** Signing in scopes the read, but on five of the
-    /// six replicated tables the write scope is narrower still, so rows the
-    /// session may read and may not write are refused -- visibly, in
-    /// `ReconcileStats::refused`, but refused. ADR-0017 increment 5 step 3 adds
-    /// the per-table replication scope that brings the read down to match the
-    /// write. Until then this exists so that step can be built and tested
-    /// against something, not so a deployment can turn it on.
+    /// Set it and the collector carries one user's fabric: their own
+    /// compartments and the shared pool, which is both the privacy answer and
+    /// exactly what their session can write back. `ReconcileStats::refused`
+    /// should stay at zero -- a refusal on a narrowed table means the
+    /// replication policy and the engine ACL disagree.
     pub fabric: Option<Fabric>,
     /// Delay between reconcile cycles once connected.
     pub interval: Duration,

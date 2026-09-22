@@ -10,7 +10,8 @@ use antumbra_core::Result;
 use antumbra_store::Store;
 
 use crate::config::SyncConfig;
-use crate::reconcile::{reconcile_all, reconcile_all_since, Cursors, ReconcileStats};
+use crate::reconcile::{reconcile_all_scoped, reconcile_all_since_scoped, Cursors, ReconcileStats};
+use crate::scope::Scope;
 use crate::table::PENUMBRA_TABLES;
 
 /// Connect both endpoints and run one reconcile pass over every penumbra table.
@@ -18,7 +19,19 @@ use crate::table::PENUMBRA_TABLES;
 /// is [`run`].
 pub async fn run_once(cfg: &SyncConfig) -> Result<ReconcileStats> {
     let (local, remote) = connect_both(cfg).await?;
-    reconcile_all(&local, &remote, PENUMBRA_TABLES).await
+    let scope = resolve_scope(cfg, &local).await?;
+    reconcile_all_scoped(&local, &remote, PENUMBRA_TABLES, scope.as_ref()).await
+}
+
+/// The replication scope for this collector, or `None` when it runs as owner.
+/// Resolved from the LOCAL store, which is already signed in: the owned-
+/// compartment set is read through the engine, so it is the user's own answer
+/// rather than one assembled around them.
+async fn resolve_scope(cfg: &SyncConfig, local: &Store) -> Result<Option<Scope>> {
+    match &cfg.fabric {
+        Some(fabric) => Ok(Some(Scope::resolve(local, fabric).await?)),
+        None => Ok(None),
+    }
 }
 
 /// Run the collector until `shutdown` is set. Reconciles every `cfg.interval`
@@ -52,6 +65,17 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
         };
         backoff = cfg.min_backoff; // connected: reset the backoff
 
+        // Resolved once per connection, like the cursors: a compartment created
+        // mid-run is picked up on the next reconnect, which is the same
+        // freshness every other part of a cadence-based collector has.
+        let scope = match resolve_scope(&cfg, &local).await {
+            Ok(scope) => scope,
+            Err(e) => {
+                eprintln!("sync: could not resolve the replication scope: {e}; reconnecting");
+                continue;
+            }
+        };
+
         // Fresh watermarks per connection: the first pass after (re)connecting is
         // a full scan -- the backstop that re-syncs anything changed while down --
         // then later passes move only what changed.
@@ -60,10 +84,17 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
 
         // Reconcile on the cadence until a cycle fails or shutdown is requested.
         loop {
-            match reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, cfg.lookback)
-                .await
+            match reconcile_all_since_scoped(
+                &local,
+                &remote,
+                PENUMBRA_TABLES,
+                &mut cursors,
+                cfg.lookback,
+                scope.as_ref(),
+            )
+            .await
             {
-                Ok(stats) if stats.total() > 0 || stats.refused > 0 => {
+                Ok(stats) if stats.total() > 0 || stats.refused > 0 || stats.declined > 0 => {
                     eprintln!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
                     // Loud, and every cycle rather than once: a refusal means
                     // rows the collector can see and cannot write, so it is

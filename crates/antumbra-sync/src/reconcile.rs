@@ -31,6 +31,7 @@ use antumbra_core::Result;
 use antumbra_store::repo::sync as row_repo;
 use antumbra_store::Store;
 
+use crate::scope::Scope;
 use crate::table::TableSpec;
 
 /// Per-cycle counts: rows written to the remote (`pushed`) and to the local
@@ -39,10 +40,15 @@ use crate::table::TableSpec;
 pub struct ReconcileStats {
     pub pushed: usize,
     pub pulled: usize,
-    /// Rows the session could read and could not write. Counted apart from
-    /// `pushed` because the engine refuses silently: without this, a collector
-    /// scoped to a user would report steady progress while landing nothing.
+    /// Rows refused on a table this collector believed it had already narrowed.
+    /// Apart from `pushed` because the engine refuses silently, and apart from
+    /// `declined` because **this should be zero**: a refusal here means the
+    /// replication policy and the engine ACL disagree, which is a bug in one.
     pub refused: usize,
+    /// Rows refused on a table whose scope the engine decides. Expected, not a
+    /// fault: `memory_edge` carries no compartment, so whether an edge belongs
+    /// here is a property of memories it only references.
+    pub declined: usize,
 }
 
 impl ReconcileStats {
@@ -54,6 +60,7 @@ impl ReconcileStats {
         self.pushed += other.pushed;
         self.pulled += other.pulled;
         self.refused += other.refused;
+        self.declined += other.declined;
     }
 }
 
@@ -145,10 +152,12 @@ async fn reconcile_indexed(
     // A refusal is counted, never confused with a write. The engine persists
     // nothing and reports no error when a session may read a row it may not
     // write, so this is the only place the difference is visible at all.
+    let expected = spec.replicate.refusal_is_expected();
     let record =
         |stats: &mut ReconcileStats, written: row_repo::Written, pulled: bool| match written {
             row_repo::Written::Yes if pulled => stats.pulled += 1,
             row_repo::Written::Yes => stats.pushed += 1,
+            row_repo::Written::Refused if expected => stats.declined += 1,
             row_repo::Written::Refused => stats.refused += 1,
             row_repo::Written::NoId => {}
         };
@@ -187,6 +196,7 @@ async fn reconcile_table_since(
     spec: &TableSpec,
     cursor: &str,
     lookback: Duration,
+    scope: Option<&Scope>,
 ) -> Result<(ReconcileStats, String)> {
     let since = lookback_floor(cursor, lookback);
     let local_rows =
@@ -194,7 +204,22 @@ async fn reconcile_table_since(
     let remote_rows = index_by_id(
         row_repo::list_rows_since(remote, spec.name, spec.version_field, &since).await?,
     );
-    let stats = reconcile_indexed(local, remote, spec, &local_rows, &remote_rows).await?;
+    // Narrow before comparing, not after: a row outside this user's scope is
+    // not a row that is missing from the other side, so it must not look like
+    // one. Filtering afterwards would leave the pair logic deciding to push
+    // rows it had already agreed not to carry.
+    //
+    // The watermark is taken from the UNNARROWED rows below, on purpose. The
+    // cursor tracks how far this pass read, not how much it carried; advancing
+    // it only past rows in scope would re-read everything else forever.
+    let (local_kept, remote_kept) = match scope {
+        Some(scope) => (
+            narrow(&local_rows, spec, scope),
+            narrow(&remote_rows, spec, scope),
+        ),
+        None => (local_rows.clone(), remote_rows.clone()),
+    };
+    let stats = reconcile_indexed(local, remote, spec, &local_kept, &remote_kept).await?;
 
     let mut hwm = cursor.to_string();
     for rows in [&local_rows, &remote_rows] {
@@ -209,6 +234,18 @@ async fn reconcile_table_since(
     Ok((stats, hwm))
 }
 
+/// The rows a scoped collector carries from `spec`'s table.
+fn narrow(
+    rows: &BTreeMap<String, Value>,
+    spec: &TableSpec,
+    scope: &Scope,
+) -> BTreeMap<String, Value> {
+    rows.iter()
+        .filter(|(_, row)| spec.replicate.admits(scope, row))
+        .map(|(id, row)| (id.clone(), row.clone()))
+        .collect()
+}
+
 /// Reconcile one table across both stores, last-write-wins (a full scan). Returns
 /// what moved. For the incremental, cursor-tracked path the collector runs, see
 /// [`reconcile_all_since`].
@@ -218,7 +255,7 @@ pub async fn reconcile_table(
     spec: &TableSpec,
 ) -> Result<ReconcileStats> {
     Ok(
-        reconcile_table_since(local, remote, spec, "", Duration::ZERO)
+        reconcile_table_since(local, remote, spec, "", Duration::ZERO, None)
             .await?
             .0,
     )
@@ -231,9 +268,23 @@ pub async fn reconcile_all(
     remote: &Store,
     tables: &[TableSpec],
 ) -> Result<ReconcileStats> {
+    reconcile_all_scoped(local, remote, tables, None).await
+}
+
+/// [`reconcile_all`], narrowed to one user's fabric.
+pub async fn reconcile_all_scoped(
+    local: &Store,
+    remote: &Store,
+    tables: &[TableSpec],
+    scope: Option<&Scope>,
+) -> Result<ReconcileStats> {
     let mut stats = ReconcileStats::default();
     for spec in tables {
-        stats.add(reconcile_table(local, remote, spec).await?);
+        stats.add(
+            reconcile_table_since(local, remote, spec, "", Duration::ZERO, scope)
+                .await?
+                .0,
+        );
     }
     Ok(stats)
 }
@@ -249,10 +300,23 @@ pub async fn reconcile_all_since(
     cursors: &mut Cursors,
     lookback: Duration,
 ) -> Result<ReconcileStats> {
+    reconcile_all_since_scoped(local, remote, tables, cursors, lookback, None).await
+}
+
+/// [`reconcile_all_since`], narrowed to one user's fabric. `None` is owner mode
+/// over the whole tenant, which is what [`reconcile_all_since`] passes.
+pub async fn reconcile_all_since_scoped(
+    local: &Store,
+    remote: &Store,
+    tables: &[TableSpec],
+    cursors: &mut Cursors,
+    lookback: Duration,
+    scope: Option<&Scope>,
+) -> Result<ReconcileStats> {
     let mut stats = ReconcileStats::default();
     for spec in tables {
         let cursor = cursors.get(spec.name);
-        let (s, hwm) = reconcile_table_since(local, remote, spec, &cursor, lookback).await?;
+        let (s, hwm) = reconcile_table_since(local, remote, spec, &cursor, lookback, scope).await?;
         cursors.advance(spec.name, hwm);
         stats.add(s);
     }
@@ -273,9 +337,12 @@ mod tests {
     use antumbra_store::EMBED_DIM;
     use chrono::Duration as ChronoDuration;
 
+    use crate::scope::Replicate;
+
     const MEMORY: &TableSpec = &TableSpec {
         name: "memory",
         version_field: "updated_at",
+        replicate: Replicate::Owned(|scope: &Scope, row| scope.holds_memory(row)),
     };
 
     async fn mem_store() -> Store {
@@ -317,7 +384,8 @@ mod tests {
             ReconcileStats {
                 pushed: 1,
                 pulled: 1,
-                refused: 0
+                refused: 0,
+                declined: 0
             }
         );
 
@@ -353,7 +421,8 @@ mod tests {
             ReconcileStats {
                 pushed: 0,
                 pulled: 1,
-                refused: 0
+                refused: 0,
+                declined: 0
             },
             "newer remote pulled to local"
         );
@@ -394,7 +463,8 @@ mod tests {
             ReconcileStats {
                 pushed: 1,
                 pulled: 0,
-                refused: 0
+                refused: 0,
+                declined: 0
             },
             "tombstone pushed"
         );
@@ -421,6 +491,7 @@ mod tests {
         const GRANT: &TableSpec = &TableSpec {
             name: "grant",
             version_field: "updated_at",
+            replicate: Replicate::Owned(|scope: &Scope, row| scope.grants_own_compartment(row)),
         };
         let (local, remote) = (mem_store().await, mem_store().await);
         let tenant = TenantId::new("t");
@@ -469,7 +540,8 @@ mod tests {
             ReconcileStats {
                 pushed: 1,
                 pulled: 0,
-                refused: 0
+                refused: 0,
+                declined: 0
             },
             "revocation pushed"
         );
@@ -516,7 +588,8 @@ mod tests {
             ReconcileStats {
                 pushed: 1,
                 pulled: 0,
-                refused: 0
+                refused: 0,
+                declined: 0
             }
         );
 
@@ -535,7 +608,8 @@ mod tests {
             ReconcileStats {
                 pushed: 1,
                 pulled: 0,
-                refused: 0
+                refused: 0,
+                declined: 0
             },
             "only B moved"
         );
@@ -583,7 +657,8 @@ mod tests {
             ReconcileStats {
                 pushed: 0,
                 pulled: 1,
-                refused: 0
+                refused: 0,
+                declined: 0
             },
             "remote-only update pulled"
         );
@@ -626,6 +701,7 @@ mod tests {
         const COMPARTMENT: &TableSpec = &TableSpec {
             name: "compartment",
             version_field: "updated_at",
+            replicate: Replicate::Owned(|scope: &Scope, row| scope.owns_compartment(row)),
         };
         let (local, remote) = (mem_store().await, mem_store().await);
         let tenant = TenantId::new("t");
@@ -650,7 +726,8 @@ mod tests {
             ReconcileStats {
                 pushed: 1,
                 pulled: 0,
-                refused: 0
+                refused: 0,
+                declined: 0
             }
         );
         assert!(
@@ -842,11 +919,13 @@ mod refusal_tests {
     use antumbra_store::repo::{device, principal};
     use antumbra_store::EMBED_DIM;
 
+    use crate::scope::Replicate;
     use crate::table::PENUMBRA_TABLES;
 
     const DEVICE: &TableSpec = &TableSpec {
         name: "device_profile",
         version_field: "updated_at",
+        replicate: Replicate::Owned(|scope: &Scope, row| scope.is_own_user(row)),
     };
 
     fn tenant() -> TenantId {
@@ -965,6 +1044,118 @@ mod refusal_tests {
                 .await?
                 .len(),
             1
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod scoped_tests {
+    use super::*;
+    use antumbra_core::{Compartment, DeviceProfile, DeviceRole, TenantId, UserId};
+    use antumbra_store::repo::{compartment, device, principal};
+    use antumbra_store::EMBED_DIM;
+
+    use crate::config::Fabric;
+    use crate::table::PENUMBRA_TABLES;
+
+    fn tenant() -> TenantId {
+        TenantId::new("ws:org")
+    }
+
+    /// Two members, each with a compartment and a machine, on the local store.
+    async fn org() -> Result<(Store, Store, UserId, UserId)> {
+        let local = Store::connect_memory(EMBED_DIM).await?;
+        let remote = Store::connect_memory(EMBED_DIM).await?;
+        let lily = UserId::new("user:lily");
+        let oslo = UserId::new("user:oslo");
+        for store in [&local, &remote] {
+            principal::provision(store, &tenant(), &lily).await?;
+            principal::provision(store, &tenant(), &oslo).await?;
+        }
+        let now = Utc::now();
+        for (id, owner) in [("comp:hers", &lily), ("comp:his", &oslo)] {
+            compartment::create(
+                &local,
+                &Compartment::new(id, tenant(), (*owner).clone(), id, now),
+            )
+            .await?;
+        }
+        for (host, owner, role) in [
+            ("her-laptop", &lily, DeviceRole::Memory),
+            ("his-rig", &oslo, DeviceRole::Genesis),
+        ] {
+            device::upsert(
+                &local,
+                &DeviceProfile::new(tenant(), (*owner).clone(), host, "cpu", role, now),
+            )
+            .await?;
+        }
+        Ok((local, remote, lily, oslo))
+    }
+
+    /// The whole point of increment 5. A collector scoped to lily carries her
+    /// compartment and her machine, leaves oslo's behind, and refuses nothing --
+    /// `refused` is the number that must be zero, because a refusal on a table
+    /// the policy already narrowed means the policy and the ACL disagree.
+    #[tokio::test]
+    async fn a_scoped_collector_carries_one_fabric_and_refuses_nothing() -> Result<()> {
+        let (local, remote, lily, oslo) = org().await?;
+        let fabric = Fabric::new("ws:org", "user:lily");
+        fabric.bind(&local).await?;
+        fabric.bind(&remote).await?;
+        let scope = Scope::resolve(&local, &fabric).await?;
+
+        let stats = reconcile_all_scoped(&local, &remote, PENUMBRA_TABLES, Some(&scope)).await?;
+        assert_eq!(
+            stats.refused, 0,
+            "a refusal here means the policy and the engine disagree"
+        );
+        assert!(stats.pushed > 0, "her own rows crossed");
+
+        // Hers landed; his did not.
+        remote.invalidate().await?;
+        assert_eq!(
+            device::list_for_user(&remote, &tenant(), &lily)
+                .await?
+                .len(),
+            1,
+            "her machine is in her fabric"
+        );
+        assert!(
+            device::list_for_user(&remote, &tenant(), &oslo)
+                .await?
+                .is_empty(),
+            "his machine is not"
+        );
+        remote.signin(&tenant(), &oslo).await?;
+        assert!(
+            compartment::get(
+                &remote,
+                &tenant(),
+                &antumbra_core::CompartmentId::new("comp:his")
+            )
+            .await?
+            .is_none(),
+            "his compartment was never carried into her fabric"
+        );
+        Ok(())
+    }
+
+    /// The control. Without a scope the same pass is tenant-wide, which is what
+    /// every deployment does today -- so the narrowing is doing the work, not
+    /// some accident of the fixture.
+    #[tokio::test]
+    async fn an_unscoped_collector_still_carries_the_whole_tenant() -> Result<()> {
+        let (local, remote, _lily, oslo) = org().await?;
+        let stats = reconcile_all(&local, &remote, PENUMBRA_TABLES).await?;
+        assert_eq!(stats.refused, 0);
+        assert_eq!(
+            device::list_for_user(&remote, &tenant(), &oslo)
+                .await?
+                .len(),
+            1,
+            "owner mode carries his machine too"
         );
         Ok(())
     }

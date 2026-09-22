@@ -1,5 +1,8 @@
-//! Which tables the collector replicates, and the field on each that carries its
-//! version (the last-write-wins tiebreaker).
+//! Which tables the collector replicates, the field on each that carries its
+//! version (the last-write-wins tiebreaker), and what a user-scoped collector
+//! carries from it.
+
+use crate::scope::{Replicate, Scope};
 
 /// A table to replicate and the row field whose RFC3339 timestamp orders writes
 /// for last-write-wins. `memory` is mutated in place (reinforce, consolidate),
@@ -9,13 +12,17 @@
 pub struct TableSpec {
     pub name: &'static str,
     pub version_field: &'static str,
+    /// What a user-scoped collector carries from this table. Ignored entirely
+    /// when the collector runs as owner, which is every deployment today.
+    pub replicate: Replicate,
 }
 
 impl TableSpec {
-    const fn new(name: &'static str, version_field: &'static str) -> Self {
+    const fn new(name: &'static str, version_field: &'static str, replicate: Replicate) -> Self {
         Self {
             name,
             version_field,
+            replicate,
         }
     }
 }
@@ -27,12 +34,24 @@ impl TableSpec {
 pub const PENUMBRA_TABLES: &[TableSpec] = &[
     // compartment carries `updated_at` (bumped on delete) so a deletion
     // out-versions a stale live row and propagates under LWW.
-    TableSpec::new("compartment", "updated_at"),
+    TableSpec::new(
+        "compartment",
+        "updated_at",
+        Replicate::Owned(|scope: &Scope, row| scope.owns_compartment(row)),
+    ),
     // grant carries `updated_at` (bumped on revoke) so a revocation out-versions a
     // stale live grant and propagates under LWW.
-    TableSpec::new("grant", "updated_at"),
-    TableSpec::new("memory", "updated_at"),
-    TableSpec::new("memory_edge", "created_at"),
+    TableSpec::new(
+        "grant",
+        "updated_at",
+        Replicate::Owned(|scope: &Scope, row| scope.grants_own_compartment(row)),
+    ),
+    TableSpec::new(
+        "memory",
+        "updated_at",
+        Replicate::Owned(|scope: &Scope, row| scope.holds_memory(row)),
+    ),
+    TableSpec::new("memory_edge", "created_at", Replicate::EngineDecides),
     // The fabric itself (ADR-0017 A2). These two are what make a user's nodes
     // more than a set of machines that happen to share a database.
     //
@@ -50,6 +69,14 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
     // re-registration and a claim are both in-place mutations, so last-write-
     // wins has to order them. A claim that lost to a stale pending row would
     // hand the same run to a second trainer.
-    TableSpec::new("device_profile", "updated_at"),
-    TableSpec::new("genesis_request", "updated_at"),
+    TableSpec::new(
+        "device_profile",
+        "updated_at",
+        Replicate::Owned(|scope: &Scope, row| scope.is_own_user(row)),
+    ),
+    TableSpec::new(
+        "genesis_request",
+        "updated_at",
+        Replicate::Owned(|scope: &Scope, row| scope.is_own_user(row)),
+    ),
 ];
