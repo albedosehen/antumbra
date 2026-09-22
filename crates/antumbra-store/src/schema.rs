@@ -157,6 +157,51 @@ const GENESIS_REQUEST_PERMS: [(&str, &str); 4] = [
     ("delete", "tenant_id = $auth.tenant AND user = $auth.user"),
 ];
 
+/// The tenant's hive gate (ADR-0017 B). Any member reads whether the hive is
+/// open, because the read rule they are subject to depends on it; nobody with a
+/// record session writes it. `false` on all three writes is what makes the
+/// owner's decision the owner's: a record session is denied outright, and the
+/// rootful owner bypasses permissions entirely.
+const HIVE_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "false"),
+    ("update", "false"),
+    ("delete", "false"),
+];
+
+/// The member's hive gate. A member reads who has joined -- the read rule needs
+/// it, and a hive whose membership were secret could not be audited by the
+/// people in it -- and writes only their own row. So an owner cannot opt a
+/// member in on their behalf, which is the half of the two-gate design that
+/// protects the member.
+const HIVE_MEMBERSHIP_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("update", "tenant_id = $auth.tenant AND user = $auth.user"),
+    ("delete", "tenant_id = $auth.tenant AND user = $auth.user"),
+];
+
+/// Offer and curation, engine-enforced, and the dual of [`GRANT_PERMS`].
+///
+/// A member creates and withdraws their own offers. **Update is `false` for
+/// every record session**, and that is the whole curation boundary: the flip to
+/// `accepted` is the only thing that puts a subject in the active hive, so
+/// denying update to members means contribution is theirs and curation is the
+/// owner's, enforced rather than agreed. Without it a member could accept their
+/// own offer and publish into the org unilaterally.
+const HIVE_OFFER_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    (
+        "create",
+        "tenant_id = $auth.tenant AND offered_by = $auth.user",
+    ),
+    ("update", "false"),
+    (
+        "delete",
+        "tenant_id = $auth.tenant AND offered_by = $auth.user",
+    ),
+];
+
 /// The link-capability gate for `memory_edge` create/update: you may create an
 /// edge only when its *target* memory is in a compartment you may LINK into:
 /// the shared pool (un-compartmentalized), a compartment you own, or one granted
@@ -250,6 +295,23 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("device_host_idx", ["host", "backend"]),
                 index("device_user_idx", ["user", "role"]),
             ]),
+        // The tenant hive (ADR-0017 B): two gates and an offer ledger. One hive
+        // row per tenant, so the gate cannot be ambiguous.
+        table_schema("hive")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(HIVE_PERMS)
+            .with_indexes([unique_index("hive_tenant_uq", ["tenant_id"])]),
+        table_schema("hive_membership")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(HIVE_MEMBERSHIP_PERMS)
+            .with_indexes([unique_index("hive_member_uq", ["tenant_id", "user"])]),
+        table_schema("hive_offer")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(HIVE_OFFER_PERMS)
+            .with_indexes([index(
+                "hive_offer_idx",
+                ["tenant_id", "subject_kind", "subject_id"],
+            )]),
         // What a node could not run itself, left where the machine that can will
         // find it (ADR-0017 A2). Indexed by the pair a trainer looks it up on.
         table_schema("genesis_request")

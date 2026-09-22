@@ -247,7 +247,13 @@ Built in increments, each one shippable on its own. A box is ticked only when th
       `memory_edge` is the sixth and takes `Replicate::EngineDecides`. An edge row carries `from_id`, `to_id` and no compartment, so whether it belongs on this node is a property of memories it only references -- the policy cannot judge it and the write rule can. Refusals there are counted as `declined` rather than `refused`, because they are the system working; `refused` is reserved for a narrowed table, where it should be zero and a non-zero value means the policy and the ACL disagree.
 
       Grants follow the compartment **owner**, not the grantee. The owner's machines need them to resolve their own ACL; a grantee reads through the engine rather than from a copy taken home.
-6. [ ] The tenant hive (section B), which waits on the fabric being real.
+6. [~] The tenant hive (section B). **The gates and the ledger are in**; the read layer is not.
+
+   Done: the three tables with their permissions, the domain types, and the repositories. All three denials that make the design mean anything are permission predicates rather than conventions, and each has an engine-level test. A member cannot open the tenant gate; a member cannot opt another member in; and, the load-bearing one, **a member cannot accept their own offer** -- `update` is `false` for every record session, so acceptance is an owner-mode write. Loosening that one predicate to the create rule makes the test fail with the member having published into the org unilaterally, which is exactly what it is there to stop.
+
+   Two smaller decisions worth the record. An offer is keyed on (tenant, kind, subject) and deliberately not on the offerer, because one compartment is one decision for the owner rather than two competing rows. And a declined offer is kept rather than deleted, so a member can see their offer was considered -- an absent row cannot say that.
+
+   Still open: the read layer. `HIVE_VISIBLE_RULE` appends an OR-branch to `MEMORY_SELECT_RULE`, which is the ACL every recall in the system already depends on, so it lands on its own with the existing compartment-privacy tests as the guard against widening it too far. Note also that the hive tables are **not** replicated: they are tenant-level rather than part of any one user's fabric, and whether an edge node needs a copy to resolve the read rule locally is a question that belongs with the read layer, not before it.
 
 ## Out of scope (its own decision)
 
