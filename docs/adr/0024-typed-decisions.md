@@ -87,7 +87,20 @@ Both sit on chance. The interaction terms buy three points of accuracy and nothi
 
 What is left is the representation itself, and it is a defect this record's own Context already measured from the other side. A frozen MiniLM vector of a long memory is a mean-pool of up to 512 tokens into 384 dimensions, and that is the same dilution that makes a 66-character stub score 0.774 against a query about nothing while a 1058-character memory scores 0.224 against a query about its own contents. **The specific twelve-word span the query was cut from does not survive into the vector.** No function of `u` and `v` can recover information neither vector contains, which is why a better pairing changes nothing and why a larger encoder pooled the same way would not help either.
 
-That leaves two routes, and they are the two this session has already found by other paths. Cross-attention: the model reads both texts together and attention locates the matching span, which is what a fine-tuned `ModernBertClassifier` with `ClassifierPooling` does and what the reference design is. Or chunking, so each indexed unit is short enough that its vector still describes it — which is the `memory` / `document_chunk` asymmetry named under D-2 above. The two compose; neither is optional in the way a pairing trick would have been.
+That leaves two routes, and they are the two this session has already found by other paths. Cross-attention: the model reads both texts together and attention locates the matching span, which is what a fine-tuned `ModernBertClassifier` with `ClassifierPooling` does and what the reference design is. Or chunking, so each indexed unit is short enough that its vector still describes it — which is the `memory` / `document_chunk` asymmetry named under D-2 above.
+
+**Chunking was measured, and it is the first thing that moves the number without moving the model.** Chunking each memory at 300 characters, embedding every chunk with the same frozen encoder, and handing the head the chunk that best matches the query:
+
+| features (frozen MiniLM, 120 pairs, 60 held out) | accuracy | F1 |
+|---|---|---|
+| joined, mean-pooled | 0.467 | 0.385 |
+| separate, `[u, v, \|u-v\|, u⊙v]` | 0.550 | 0.542 |
+| best chunk at 300 characters | **0.650** | **0.588** |
+| control (cross-encoder threshold) | — | **0.782** |
+
+The ordering is the result and the absolute values are not: this is a smaller sample than the 800-pair runs above, sixty pairs held out, and the same `joined` configuration scores 0.519 there against 0.385 here. What survives the noise is the direction, and it is the direction the corrected explanation predicts — shorter units preserve the span, so chunking recovers signal that no rearrangement of the whole-memory vectors could.
+
+It is still short of the control. So chunking is **necessary and not sufficient**, which is exactly what an earlier measurement of chunk-and-max-pool concluded about ranking, arrived at here by a different route and about a different question. The two findings agree: a frozen encoder over shorter units is better than a frozen encoder over long ones, and neither is a cross-encoder. Chunking composes with a trained pair encoder rather than replacing it, and the record's design stands.
 
 So the shortcut is closed, and closing it cost two ignored tests rather than an adoption — one to find the number, one to find that the reason first given for it was wrong.
 

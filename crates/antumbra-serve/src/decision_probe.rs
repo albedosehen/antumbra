@@ -68,6 +68,34 @@ pub enum Pairing {
     /// left are cross-attention over the pair, or chunking so an indexed unit is
     /// short enough that its vector still describes it.
     Separate,
+    /// Chunk the memory, embed each chunk, and use the chunk that best matches
+    /// the query as `v` — then the same `[u, v, |u-v|, u*v]` features.
+    ///
+    /// This tests the surviving explanation directly and cheaply. If the twelve-
+    /// word span a query was cut from is lost because it is mean-pooled with
+    /// four thousand characters of other text, then a chunk SHORT ENOUGH to be
+    /// mostly that span should carry it, and the head should recover. No new
+    /// model and no fine-tuning: the same frozen encoder, applied to shorter
+    /// units.
+    ///
+    /// The size matters and is not arbitrary. An earlier measurement of
+    /// chunk-and-max-pool found discrimination best in the MIDDLE — a
+    /// topical/nonsense gap of 0.149 at 300 characters against 0.083 unchunked
+    /// and 0.091 at 120 — because very small chunks raise every score, relevant
+    /// or not. 300 is that peak.
+    ///
+    /// **It is the first thing that moved the number.** On 120 pairs with sixty
+    /// held out: 0.650 accuracy and 0.588 F1, against 0.550/0.542 for `Separate`
+    /// and 0.467/0.385 for `Joined` on that same sample. The ordering is the
+    /// result and the values are not — this sample is small, and `Joined` scores
+    /// 0.519 on the 800-pair set against 0.385 here. What survives the noise is
+    /// the direction, and it is the direction the explanation above predicts.
+    ///
+    /// Still short of the 0.782 control, so chunking is NECESSARY AND NOT
+    /// SUFFICIENT — the same conclusion an earlier measurement reached about
+    /// ranking, by a different route. It composes with a trained pair encoder
+    /// rather than replacing one.
+    BestChunk { chunk_chars: usize },
 }
 
 /// How a pair is presented to the encoder.
@@ -92,6 +120,8 @@ async fn encode(
 ) -> Result<(Vec<f32>, Vec<f32>)> {
     let mut xs = Vec::with_capacity(pairs.len() * feature_dim(dim, how));
     let mut ys = Vec::with_capacity(pairs.len() * 2);
+    let mut cache: std::collections::HashMap<String, Vec<Vec<f32>>> =
+        std::collections::HashMap::new();
     for p in pairs {
         match how {
             Pairing::Joined => {
@@ -100,10 +130,35 @@ async fn encode(
             Pairing::Separate => {
                 let u = embedder.embed(&p.query).await?;
                 let v = embedder.embed(&p.memory).await?;
-                xs.extend_from_slice(&u);
-                xs.extend_from_slice(&v);
-                xs.extend(u.iter().zip(&v).map(|(a, b)| (a - b).abs()));
-                xs.extend(u.iter().zip(&v).map(|(a, b)| a * b));
+                push_pair(&mut xs, &u, &v);
+            }
+            Pairing::BestChunk { chunk_chars } => {
+                let u = embedder.embed(&p.query).await?;
+                // Embedding every chunk of every memory is the expensive part,
+                // and each memory appears in two pairs, so cache by text.
+                let chunks = match cache.get(&p.memory) {
+                    Some(c) => c.clone(),
+                    None => {
+                        let mut c = Vec::new();
+                        for t in antumbra_core::chunk_text(&p.memory, chunk_chars, chunk_chars / 4)
+                        {
+                            c.push(embedder.embed(&t).await?);
+                        }
+                        cache.insert(p.memory.clone(), c.clone());
+                        c
+                    }
+                };
+                // The best-matching chunk stands for the memory. If the span the
+                // query came from survives anywhere, it survives here.
+                let v = chunks
+                    .iter()
+                    .max_by(|a, b| {
+                        antumbra_core::cosine_similarity(&u, a)
+                            .total_cmp(&antumbra_core::cosine_similarity(&u, b))
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| vec![0.0; dim]);
+                push_pair(&mut xs, &u, &v);
             }
         }
         ys.extend_from_slice(if p.relevant { &[1.0, 0.0] } else { &[0.0, 1.0] });
@@ -111,11 +166,21 @@ async fn encode(
     Ok((xs, ys))
 }
 
+/// `[u, v, |u-v|, u*v]`: the two vectors and the interaction terms between
+/// them, which is where a bi-encoder puts the comparison a cross-encoder gets
+/// from attention.
+fn push_pair(xs: &mut Vec<f32>, u: &[f32], v: &[f32]) {
+    xs.extend_from_slice(u);
+    xs.extend_from_slice(v);
+    xs.extend(u.iter().zip(v).map(|(a, b)| (a - b).abs()));
+    xs.extend(u.iter().zip(v).map(|(a, b)| a * b));
+}
+
 /// How wide the head's input is for a given pairing: `u, v, |u-v|, u*v`.
 fn feature_dim(dim: usize, how: Pairing) -> usize {
     match how {
         Pairing::Joined => dim,
-        Pairing::Separate => dim * 4,
+        Pairing::Separate | Pairing::BestChunk { .. } => dim * 4,
     }
 }
 
@@ -207,6 +272,14 @@ mod tests {
     /// Ignored: it needs the label file and downloads the encoder. Run with
     ///   ANTUMBRA_D2_LABELS=/path/to/d2-labels.json \
     ///   cargo test -p antumbra-serve --features models --lib -- --ignored --nocapture d2_head
+    ///
+    /// SIZE THE LABEL FILE BEFORE RUNNING IT. `BestChunk` is not cheaper per
+    /// unit than the passes above it: MiniLM pads a batch to a fixed shape, so a
+    /// 300-character chunk costs nearly what a 4000-character memory costs, and
+    /// chunking multiplies the number of passes rather than shrinking them. On
+    /// CPU an 800-pair three-way run did not finish in 161 minutes and was
+    /// abandoned; 120 pairs completes. The numbers above came from the small
+    /// set, which is why they are read as an ordering.
     #[tokio::test]
     #[ignore = "needs ANTUMBRA_D2_LABELS and downloads model weights"]
     async fn d2_head_against_the_control() {
@@ -245,6 +318,10 @@ mod tests {
         for (label, how) in [
             ("joined, mean-pooled ", Pairing::Joined),
             ("separate [u,v,|u-v|,u*v]", Pairing::Separate),
+            (
+                "best chunk, 300 chars   ",
+                Pairing::BestChunk { chunk_chars: 300 },
+            ),
         ] {
             let got = train_and_score(&e, &train, &test, 400, how)
                 .await
