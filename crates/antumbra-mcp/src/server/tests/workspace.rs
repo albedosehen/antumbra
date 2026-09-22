@@ -699,6 +699,7 @@ async fn provenance_is_stored_and_scopes_recall() {
             top_k: Some(5),
             network: None,
             full: None,
+            floor: None,
         }))
         .await
         .unwrap();
@@ -722,6 +723,7 @@ async fn provenance_is_stored_and_scopes_recall() {
             top_k: Some(5),
             network: None,
             full: None,
+            floor: None,
         }))
         .await
         .unwrap();

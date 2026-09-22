@@ -42,8 +42,25 @@ impl McpServer {
             copal: None,
             profile: None,
             session: None,
+            decider: None,
             probes: Arc::new(tokio::sync::OnceCell::new()),
         }
+    }
+
+    /// Give recall a relevance floor (ADR-0024 D-2, closing ADR-0023 B-2).
+    ///
+    /// Off by default, and off is not a degraded mode: without a decider recall
+    /// returns every row it found, which is what it did before this existed.
+    ///
+    /// Reached only from tests until a head exists to pass it. The seam is built
+    /// first on purpose (the port, the fake, this setter, the floor and its
+    /// tests), so the trained head lands as the one changed piece rather than as
+    /// a change to the recall path at the same time.
+    #[must_use]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_decider(mut self, decider: Arc<dyn antumbra_core::ports::TypedDecider>) -> Self {
+        self.decider = Some(decider);
+        self
     }
 
     /// The calibration probe vectors, embedded once and reused.

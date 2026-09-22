@@ -89,6 +89,12 @@ pub struct McpServer {
     /// duration (see `session`); checked at every tool call. `None` where the
     /// transport signs in per request (the embedded networked surface).
     session: Option<Arc<crate::session::SessionKeeper>>,
+    /// The typed decider that answers "does this memory answer this query" as a
+    /// calibrated probability (ADR-0024 D-2), which is what lets recall say
+    /// nothing rather than return the best of a bad lot. `None` = no floor runs
+    /// and every recalled row is returned, which is the behaviour before this
+    /// existed and the behaviour a deployment without a head keeps.
+    decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
     /// The probe vectors the dense leg is calibrated against
     /// ([`antumbra_core::calibrate`]), embedded once on first recall by THIS
     /// server's embedder -- so a tenant configured with a different model
@@ -100,6 +106,16 @@ pub struct McpServer {
 /// truncates to the caller's k. ~100 candidates is the precision/latency knee for
 /// a cross-encoder (one batched POST).
 const RERANK_POOL_MAX: usize = 100;
+
+/// The probability a memory must reach to be counted as answering the query
+/// (ADR-0023 B-2). A default the caller may move with `floor`, never the only
+/// option, because "the best of a bad lot" is occasionally what is wanted.
+///
+/// Half is the honest starting point for a calibrated probability: it is the
+/// value at which a decider is saying "more likely than not". It is deliberately
+/// not tuned, because tuning it against the current signal would bake in the
+/// miscalibration this floor exists to stop reading.
+const DEFAULT_RELEVANCE_FLOOR: f32 = 0.5;
 
 /// Bounded cache of `(query, sorted candidate ids) -> reranked id order`. A plain
 /// insertion-ordered map capped at `CAP`; on overflow the oldest entry is
@@ -473,7 +489,7 @@ impl McpServer {
                 .map(|e| antumbra_core::cosine_similarity(&q, e));
             view.bounded(full, params::RECALL_CONTENT_CHARS)
         };
-        let memories = if p.repo.is_some() || p.branch.is_some() {
+        let memories: Vec<MemoryView> = if p.repo.is_some() || p.branch.is_some() {
             let ctx = GitContext {
                 repo: p.repo,
                 branch: p.branch,
@@ -495,7 +511,80 @@ impl McpServer {
                 .map(|m| with_similarity(m, MemoryView::from(m)))
                 .collect()
         };
-        Ok(Json(MemoriesOut { memories }))
+
+        // The relevance floor (ADR-0023 B-2, answered by ADR-0024 D-2). Asked as
+        // one batch because the questions share a state: the query is encoded
+        // once whatever the candidate count.
+        let had_rows = !memories.is_empty();
+        let memories = match &self.decider {
+            Some(decider) => {
+                let floor = p.floor.unwrap_or(DEFAULT_RELEVANCE_FLOOR).clamp(0.0, 1.0);
+                self.above_floor(decider.as_ref(), &p.query, memories, floor)
+                    .await
+            }
+            None => memories,
+        };
+        Ok(Json(MemoriesOut {
+            // Only claim the floor emptied the result when it had something to
+            // empty. A store with no matching rows at all is a different answer,
+            // and saying "nothing cleared the floor" about it would be a lie the
+            // caller cannot check.
+            nothing_cleared_the_floor: had_rows && memories.is_empty(),
+            memories,
+        }))
+    }
+
+    /// Keep the memories a typed decider judges relevant to `query`.
+    ///
+    /// A decider that fails takes nothing with it: the rows are returned
+    /// unfiltered and the failure is said on stderr, because a floor that cannot
+    /// be computed must not be enforced. That is the same posture the rerank
+    /// stage takes, and ADR-0024 asks for it explicitly — a head that fails to
+    /// load degrades to the path it replaced rather than to nothing.
+    async fn above_floor(
+        &self,
+        decider: &dyn antumbra_core::ports::TypedDecider,
+        query: &str,
+        memories: Vec<MemoryView>,
+        floor: f32,
+    ) -> Vec<MemoryView> {
+        use antumbra_core::ports::{Answer, Question};
+        if memories.is_empty() {
+            return memories;
+        }
+        // One question per candidate, in order, against a state that names both
+        // sides of the judgement.
+        let questions = vec![Question::Noul; memories.len()];
+        let state = memories
+            .iter()
+            .map(|m| format!("QUERY: {query}\nMEMORY: {}", m.content))
+            .collect::<Vec<_>>()
+            .join("\n---\n");
+        match decider.decide(&state, &questions).await {
+            Ok(answers) if answers.len() == memories.len() => memories
+                .into_iter()
+                .zip(answers)
+                .filter(|(_, a)| match a {
+                    Answer::Noul { probability } => *probability >= floor,
+                    // A decider that answers the wrong variant is misbehaving,
+                    // not judging; keep the row rather than silently dropping it.
+                    _ => true,
+                })
+                .map(|(m, _)| m)
+                .collect(),
+            Ok(answers) => {
+                eprintln!(
+                    "antumbra-mcp: decider returned {} answers for {} memories, floor not applied",
+                    answers.len(),
+                    memories.len()
+                );
+                memories
+            }
+            Err(e) => {
+                eprintln!("antumbra-mcp: relevance floor unavailable, returning unfiltered: {e}");
+                memories
+            }
+        }
     }
 
     /// Ingest a knowledge document: chunk, embed, and store it for recall. A
@@ -750,6 +839,8 @@ impl McpServer {
         };
         Ok(Json(MemoriesOut {
             memories: mems.iter().map(MemoryView::from).collect(),
+            // list_memories has no query, so there is nothing to floor.
+            nothing_cleared_the_floor: false,
         }))
     }
 

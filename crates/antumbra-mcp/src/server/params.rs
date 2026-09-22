@@ -64,6 +64,14 @@ pub(super) struct RecallParams {
     pub(super) repo: Option<String>,
     /// The caller's checked-out branch, to scope results by branch as well.
     pub(super) branch: Option<String>,
+    /// Lower (or raise) the relevance floor for this call, as a probability in
+    /// `[0, 1]`. Only meaningful where a typed decider is configured; without
+    /// one no floor runs and every recalled row is returned.
+    ///
+    /// The floor is a default rather than a rule, because "the best of a bad
+    /// lot" is occasionally what a caller wants. What it may not be is the only
+    /// option (ADR-0023 B-2).
+    pub(super) floor: Option<f32>,
     /// Return each memory's whole `content` instead of the bounded prefix.
     /// Default `false`: a recall is a survey, and a survey that spends the
     /// context window cannot be followed by the work it was for. Ask for `true`
@@ -224,6 +232,17 @@ impl MemoryView {
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct MemoriesOut {
     pub(super) memories: Vec<MemoryView>,
+    /// Present, and `true`, when a relevance floor ran and NOTHING cleared it
+    /// (ADR-0023 B-2). Absent otherwise, including when no floor ran at all.
+    ///
+    /// This is the difference between "nothing here answers you" and "here are
+    /// five weak rows, you decide", which an empty list alone cannot express and
+    /// a caller would otherwise have to infer from scores it should not be
+    /// reading. An agent that cannot tell those apart re-runs the query with
+    /// different flags to find out, which costs a turn and more context than the
+    /// answer would have.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) nothing_cleared_the_floor: bool,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
