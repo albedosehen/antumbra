@@ -71,6 +71,12 @@ It is also a lossy floor, and the losses are the argument for going further. Rec
 
 So Validation 2's bar for D-2 is 0.782 F1, and a typed head earns its place in the serving path by beating it. That is now a number rather than an argument.
 
+**The cheap head was tried against that bar and fails, for a reason that rules out a whole class of shortcut.** Before paying for a 400M encoder, the question worth asking is whether the one already in this stack carries enough signal: all-MiniLM-L6-v2 is 22M, loaded, tested, and free. A two-layer head over its frozen output, trained on 800 constructed pairs with the split taken by MEMORY rather than by pair — so the same passage never appears on both sides — scores **0.525 F1, accuracy 0.530** on the held-out half. Balanced classes make chance 0.500. It is barely distinguishable from guessing.
+
+The failure is mechanical rather than a matter of capacity, and that is what makes it informative. `BertEmbedder::encode_pooled` mean-pools: `hidden.sum(1) / n_tokens`. Feeding it `query: … passage: …` and averaging over every token yields a BLEND of the two texts, not a representation of their relationship. A cross-encoder outperforms a bi-encoder precisely because attention runs across the pair and the classifier reads a position that has seen both; mean-pooling discards exactly that. No amount of head capacity recovers information the pooling threw away, and a larger frozen encoder pooled the same way would fail the same way.
+
+This is an argument FOR the record's design as written rather than against it. The encoder must produce a pair representation — a classifier pooling over a model trained for the task, fine-tuned rather than frozen — which is what `candle-transformers`' `ModernBertClassifier` and its `ClassifierPooling` exist for, and what the reference design does. The shortcut is closed, and closing it cost one ignored test rather than an adoption.
+
 ### D-3 · The boundary probe
 
 ADR-0004 models the context-scope of a behaviour as right-here versus wrong-there plus a governing feature. That is a `choice` and a `score`, and `AcceptabilityProbe` is already a port, so the seam exists. This lands after D-1 and D-2, because the thesis of the system is the wrong place to learn how a new instrument behaves.

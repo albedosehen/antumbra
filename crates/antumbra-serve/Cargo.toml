@@ -9,6 +9,7 @@ description = "Hardware-adaptive S-LoRA-style multi-adapter serving over one res
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 async-trait.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 # The real candle embedder (all-MiniLM-L6-v2) lives here behind the `models`
 # feature so the default serve build stays light. Mirrors antumbra-train.

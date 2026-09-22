@@ -402,6 +402,7 @@ dependencies = [
  "candle-transformers",
  "chrono",
  "hf-hub",
+ "serde",
  "serde_json",
  "tokenizers",
  "tokio",
