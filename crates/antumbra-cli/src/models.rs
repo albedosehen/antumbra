@@ -358,6 +358,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         let loop_cfg = LoopConfig {
             graduate_threshold: 0.3,
             base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+            ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
         let reports = lp.run_until(&RunId::new(run), generations).await?;
@@ -438,6 +439,7 @@ pub async fn teach(url: &str, args: TeachArgs) -> anyhow::Result<()> {
         let loop_cfg = LoopConfig {
             graduate_threshold: 0.3,
             base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+            ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
         let reports = lp.run_until(&RunId::new(run), generations).await?;

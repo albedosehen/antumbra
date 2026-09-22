@@ -12,7 +12,7 @@ use candle_core::Tensor;
 use candle_nn::ops::log_softmax;
 use serde_json::json;
 
-use antumbra_core::ports::{TrainOutcome, Verifier, VerifyRequest};
+use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{Result, RunId};
 
 use crate::config::RaftConfig;
@@ -130,12 +130,18 @@ pub async fn grpo_train(
 ) -> Result<TrainOutcome> {
     let mut reward_curve = Vec::with_capacity(cfg.rounds);
     let mut capability_exemplars: Vec<String> = Vec::new();
+    // Per-task results from the final round, for the standing instruments
+    // (ADR-0022). The same reading RAFT takes: a task passed when any sample
+    // of it verified.
+    let mut per_task: Vec<TaskOutcome> = Vec::new();
 
     for _round in 0..cfg.rounds {
         let mut solved: Vec<String> = Vec::new();
         let (mut total, mut passed) = (0usize, 0usize);
+        let mut round_tasks: Vec<TaskOutcome> = Vec::new();
 
         for task in tasks {
+            let mut task_passed = false;
             let samples = model
                 .sample_group(&task.prompt, cfg.samples_per_task)
                 .await?;
@@ -158,6 +164,7 @@ pub async fn grpo_train(
                 rewards.push(if won { 1.0 } else { 0.0 });
                 if won {
                     passed += 1;
+                    task_passed = true;
                     if !solved.contains(&task.prompt) {
                         solved.push(task.prompt.clone());
                     }
@@ -184,6 +191,11 @@ pub async fn grpo_train(
                 });
             }
             model.grpo_step(&task.prompt, &group, cfg).await?;
+            round_tasks.push(TaskOutcome {
+                task_id: task.id.clone(),
+                passed: task_passed,
+                size: task.prompt.chars().count() as u32,
+            });
         }
 
         reward_curve.push(if total == 0 {
@@ -192,6 +204,7 @@ pub async fn grpo_train(
             passed as f32 / total as f32
         });
         capability_exemplars = solved;
+        per_task = round_tasks;
     }
 
     let safe = run_id.as_str().replace([':', '/', '\\'], "_");
@@ -204,6 +217,7 @@ pub async fn grpo_train(
         reward_curve,
         final_fitness,
         capability_exemplars,
+        per_task,
         boundary_findings: Vec::new(),
     })
 }
