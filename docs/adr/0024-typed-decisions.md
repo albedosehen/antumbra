@@ -28,7 +28,9 @@ The governing rule:
 
 The second clause is not decoration. ADR-0022's anchor invariant forbids reward originating from a signal never checked outside the loop, and a decision head trained on its own past answers, or on the critic's, is precisely that. A head trained on verifier outcomes is anchored and admissible. There is no third option, and this record does not create one.
 
-Three primitives, following Laya's surface because it is the one with open weights: `choice` returns one option from a set with a distribution over all of them, `score` returns an expectation on an ordinal scale, and `noul` returns a calibrated probability that a statement is true.
+Three primitives, named after Laya's surface because it is the one that demonstrated them: `choice` returns one option from a set with a distribution over all of them, `score` returns an expectation on an ordinal scale, and `noul` returns a calibrated probability that a statement is true.
+
+The head is Antumbra's own, for the reasons set out under Alternatives: the encoder is Apache-2.0 and comes from elsewhere either way, the head is two layers, the calibration objective is a loss rather than an artefact, and a checkpoint that scores near chance zero-shot must be trained on this system's verifier outcomes to be worth anything. Borrowing the vocabulary is free; borrowing the weights buys a warm start and costs ownership of a judgment this system exists to own.
 
 ### D-1 · The gate asks two questions instead of reading one number
 
@@ -95,7 +97,19 @@ The failure mode to watch is a head that is well calibrated on the slices a veri
 
 **Wait for ADR-0009's composed model.** That is the resolution the gate header names, and it remains the better long-term answer for blending adapters. It is a north star with no date. This record buys the separation now at 421M.
 
-**Train a head from scratch rather than adopting one.** Rejected on cost, not principle. The decision head is two transformer layers over an encoder; the expensive part is the encoder and the calibration objective, both of which arrive under Apache 2.0.
+**Train a head from scratch rather than adopting one.** Originally rejected on cost, on the grounds that "the expensive part is the encoder and the calibration objective, both of which arrive under Apache 2.0". **Reading the artefact overturns the premise, and this is now the recommended path.** The question that settles it is what Laya supplies that this system cannot build, taken item by item.
+
+*The encoder does not come from Laya.* `rl_agent_config.json` names `answerdotai/ModernBERT-large` and the repository does not vendor it. Antumbra fetches the same Apache-2.0 weights from the same place whether it adopts Laya or not. That half of the stated cost was never Laya's to charge.
+
+*The head is two layers.* This record says so itself. `candle-transformers` already ships `modernbert.rs` with `ModernBertClassifier`, so the encoder path needs no dependency and no second runtime; what remains is a small head, and Laya's is custom enough that adopting it means porting rather than loading.
+
+*The calibration objective is a loss, not an artefact.* A strictly proper scoring rule is a published technique, and `antumbra-train/src/objective.rs` is already the place where this system writes a loss against candle tensors. It arrives under Apache 2.0 in the sense that a textbook does.
+
+*The pretrained weights are the only irreplaceable part, and this record already prices them at near zero.* Laya scores 0.362 zero-shot, near chance, which is why "use it zero-shot" is rejected above. Validation requires a head fine-tuned on Antumbra's own verifier outcomes. If the checkpoint must be retrained on this system's data to be useful, it is a warm start rather than a capability.
+
+There is a thesis argument underneath the arithmetic, and it is the same one that rejects Jev. Antumbra's whole claim is that a customer's judgment becomes an asset they hold, built by training small specialists on verified outcomes. **A typed decision head is exactly that specialist.** Building it in-house is not a detour from the architecture; it is the architecture applied to a new question type. Adopting someone else's decision model — even an open one — puts a judgment this system was built to own inside an artefact it did not train and cannot re-derive.
+
+What Laya is still worth is INFORMATION rather than dependency: evidence the approach works at all (0.766 after fine-tuning against a 0.735 teacher-agreement ceiling), a reference head shape, its shipped temperature table as a sanity check on our own calibration, and the degradation past roughly twenty options that Validation 6 already encodes. Read it, measure against it, do not depend on it.
 
 **Use it zero-shot.** Rejected by the vendor's own number: 0.362 on typed decisions, near chance. Laya is a base to fine-tune. That is fatal for an adopter wanting a drop-in API and irrelevant here, because training small specialists on verified outcomes is what this system already is.
 
