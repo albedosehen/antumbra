@@ -186,9 +186,10 @@ impl Store {
             .await
     }
 
-    /// [`read_paged`](Self::read_paged) with the page size named, so paging
-    /// itself can be tested with pages of a few rows.
-    async fn read_in_pages_of<T: DeserializeOwned>(
+    /// [`read_paged`](Self::read_paged) with the page size named: for a
+    /// projection whose rows are far smaller than a memory's, and so fit many
+    /// more to a page, and for testing paging itself with pages of a few rows.
+    pub(crate) async fn read_in_pages_of<T: DeserializeOwned>(
         &self,
         page_rows: i64,
         table: &str,
