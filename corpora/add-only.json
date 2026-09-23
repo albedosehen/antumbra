@@ -5,7 +5,14 @@
     "verify": {
       "program": "python",
       "extract_code": true,
-      "args": ["-c", "import os,sys; ns={}; exec(os.environ['ANTUMBRA_COMPLETION'], ns); sys.exit(0 if ns.get('add',lambda *_:None)(2,3)==5 else 1)"]
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add",
+        "[[2, 3], [0, 0], [-4, 9], [10, -3]]",
+        "32a609c6f1dc441813cfe5ff11e04d8e6ca79f7950fa239cd94df4d5ecee1cd6"
+      ]
     }
   }
 ]

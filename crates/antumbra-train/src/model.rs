@@ -29,6 +29,11 @@ pub struct CorpusTask {
     /// correction to an actionable boundary of competence. `None` for a plain
     /// correction or a RAFT task.
     pub scope: Option<TaskScope>,
+    /// A task whose specification cannot be satisfied (ADR-0022). It is never
+    /// learned from and never counted in fitness; under a holdout it is
+    /// measured, and a pass fails the whole generation, because a pass here is
+    /// proof of a shortcut rather than a near miss.
+    pub impossible: bool,
 }
 
 /// The contrastive scope a correction carries: the context where the behavior is
@@ -52,7 +57,14 @@ impl CorpusTask {
             completion: None,
             skill: None,
             scope: None,
+            impossible: false,
         }
+    }
+
+    /// Mark this task as unsatisfiable by construction.
+    pub fn impossible(mut self) -> Self {
+        self.impossible = true;
+        self
     }
 
     pub fn with_verify(mut self, verify: serde_json::Value) -> Self {

@@ -183,7 +183,7 @@ impl Trainer for ScriptedTrainer {
         let per_task = self
             .per_task
             .iter()
-            .filter(|t| holdout.is_none_or(|h| h.measures(&t.task_id)))
+            .filter(|t| holdout.is_none_or(|h| t.impossible || h.measures(&t.task_id)))
             .cloned()
             .collect();
         Ok(TrainOutcome {

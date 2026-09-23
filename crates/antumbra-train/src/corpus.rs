@@ -58,6 +58,10 @@ impl JsonCorpus {
                     .map(str::to_string),
                 skill: t.get("skill").and_then(|v| v.as_str()).map(str::to_string),
                 scope: parse_scope(t),
+                impossible: t
+                    .get("impossible")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
             })
             .collect();
         Ok(Self { tasks })
@@ -93,6 +97,22 @@ mod tests {
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].id, "b");
         assert_eq!(one[0].verify["program"], "true");
+    }
+
+    #[test]
+    fn an_impossible_marker_is_read_and_defaults_to_false() {
+        let path = std::env::temp_dir().join("antumbra_corpus_impossible_test.json");
+        std::fs::write(
+            &path,
+            r#"[{"id":"a","prompt":"p"},{"id":"b","prompt":"p","impossible":true}]"#,
+        )
+        .unwrap();
+        let tasks = JsonCorpus::from_file(path.to_str().unwrap())
+            .unwrap()
+            .tasks(&[]);
+        std::fs::remove_file(&path).ok();
+        assert!(!tasks[0].impossible);
+        assert!(tasks[1].impossible);
     }
 
     #[test]

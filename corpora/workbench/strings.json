@@ -1,0 +1,960 @@
+[
+  {
+    "id": "strings/swap-in",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'i' replaced by 'n' and every 'n' replaced by 'i'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"ini\"], [\"zuiqzn\"], [\"IN in\"], [\"\"], [\"sbpvvc kh zr kaxg nni\"], [\"o match here 123\"]]",
+        "46a9cebb47f7518b684e236c089fc06d4f07c220f6fde6fc67530edc80641b59"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('in', 'ni'))\n"
+  },
+  {
+    "id": "strings/swap-fr",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'f' replaced by 'r' and every 'r' replaced by 'f'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"frf\"], [\"uumqksftexidr\"], [\"FR fr\"], [\"\"], [\"qkzyxb eyvf ouqorcn hts vhtu rrf\"], [\"no match hee 123\"]]",
+        "ab0045c7a84c4cc1f8b21b94046116b7628e865b3c0d49ce107485e27933440e"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('fr', 'rf'))\n"
+  },
+  {
+    "id": "strings/swap-gv",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'g' replaced by 'v' and every 'v' replaced by 'g'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"gvg\"], [\"fchycgxroikav\"], [\"GV gv\"], [\"\"], [\"jsxgya spbxviz sndrr qw cqadijb vvg\"], [\"no match here 123\"]]",
+        "b5b5ac68695994ec8a920fdd9c6266ca61d6b4d374e95e4724a21c5e8d461e1e"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('gv', 'vg'))\n"
+  },
+  {
+    "id": "strings/swap-jk",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'j' replaced by 'k' and every 'k' replaced by 'j'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"jkj\"], [\"olmbijosyk\"], [\"JK jk\"], [\"\"], [\"pul blydcu wmldexe vubss alvjrxd kkj\"], [\"no match here 123\"]]",
+        "56172892b4472568f21b19f73b161bd3c69f4a3d2a51d4de04e70711c72c24b3"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('jk', 'kj'))\n"
+  },
+  {
+    "id": "strings/swap-fq",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'f' replaced by 'q' and every 'q' replaced by 'f'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"fqf\"], [\"ynqtcsfoqqjq\"], [\"FQ fq\"], [\"\"], [\"lcz rhphfj dxdmg chxfua qqf\"], [\"no match here 123\"]]",
+        "b93c1a315f0bc2a9545771fedada34fe393601e14a264652fdc85d30c60566c3"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('fq', 'qf'))\n"
+  },
+  {
+    "id": "strings/swap-kv",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'k' replaced by 'v' and every 'v' replaced by 'k'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"kvk\"], [\"gnnskkdhcrv\"], [\"KV kv\"], [\"\"], [\"nrkkau hechjci dpkypa vvk\"], [\"no match here 123\"]]",
+        "ccf4a473eb5ad5403895e445c23c30c37b60b145f4745ec43924de0139aee0c0"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('kv', 'vk'))\n"
+  },
+  {
+    "id": "strings/swap-nt",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'n' replaced by 't' and every 't' replaced by 'n'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"ntn\"], [\"etiknjesqwst\"], [\"NT nt\"], [\"\"], [\"qpj pcrjmef myrj lb cn ttn\"], [\"o mach here 123\"]]",
+        "bcc62da3518b2d4988a153713a52736d9c95c1cf6c17d3f4011cb74a731f5f58"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('nt', 'tn'))\n"
+  },
+  {
+    "id": "strings/swap-ep",
+    "skill": "strings",
+    "level": "small",
+    "family": "swap",
+    "prompt": "# Write a Python function `swap_letters(s)` that returns `s` with every 'e' replaced by 'p' and every 'p' replaced by 'e'.\n# Only these two lowercase letters change; uppercase letters and everything else stay as they are.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "swap_letters",
+        "[[\"epe\"], [\"wmvwlyeuyosp\"], [\"EP ep\"], [\"\"], [\"ivmkyt gfon fego ppe\"], [\"no match hr 123\"]]",
+        "8bd552614afff4cd6d6311184e3c9b14607441acc8e3f31f7d4821514b24e50f"
+      ]
+    },
+    "completion": "def swap_letters(s):\n    return s.translate(str.maketrans('ep', 'pe'))\n"
+  },
+  {
+    "id": "strings/count-cnw",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'c', 'n', 'w', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"vnb hpH iBdPBVg EhrgjL hl\"], [\"hGJ jeudGp\"], [\"nzhogXk jh\"], [\"cAniV xnpLwy\"], [\"kvvfMz JieQt cTyyV oNvudZQ SUdzqix\"], [\"\"], [\"CNWCNW\"]]",
+        "a04648dab1bd31b8d4d989a0ae82ab43f546b525b869f650702af7f0ad0ca099"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'cnw')\n"
+  },
+  {
+    "id": "strings/count-csw",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'c', 's', 'w', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"iXkd qHffive uFo\"], [\"qSsFfg OnSmwaD aCPFAnl swPqlF cAlz zmyeI hsuny\"], [\"JqTxr Qdny oeg fieKz\"], [\"ix Mtfs FrzdlLv fbO xl xa qduw\"], [\"lz su ci RKrpuvz\"], [\"\"], [\"CSWCSW\"]]",
+        "eeb32843b6dce95f2134e02ba71ac79086dca2074d130ccad78f161bdfcdf944"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'csw')\n"
+  },
+  {
+    "id": "strings/count-cet",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'c', 'e', 't', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"PLfiWM apzaej nGJHiU ufrhHf CtKSkk\"], [\"VJLOP dIlfy VgYkc\"], [\"ywVd dLYq XcEgmb hMth rZrZ\"], [\"pYktGGo QT\"], [\"sLnRl edrvRe dkQYVDc eQClag avxHsv tJO\"], [\"\"], [\"CETCET\"]]",
+        "b3234bbb263c8e9574b32e2959eb64b7aaa34e907b6fa99a7959ab943bc1f269"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'cet')\n"
+  },
+  {
+    "id": "strings/count-ptv",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'p', 't', 'v', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"ddI aCIVlZa Jinmjul lasoLtd NjS\"], [\"yQj EOi ofhJir Tnyu bnsHvmD\"], [\"pmh crzr Xr ehcggpw cois\"], [\"dMymT PuccIb WBlD Kndv yuxaM lyggc yxFW\"], [\"dYnKtd fZ qqwpKnQ pcqN BoGqI Ef\"], [\"\"], [\"PTVPTV\"]]",
+        "637dfc1a70f4c02048d128dc986927f9d5cd838a426deb86e81eb8194a6b963c"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'ptv')\n"
+  },
+  {
+    "id": "strings/count-dik",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'd', 'i', 'k', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"xfnzZ DvkjEQ zxaXdKl vaoi rcFbhb yiLfma qPbhZy\"], [\"vqZlIcQ VLm qAH fZke hTGcMt qNU\"], [\"dx Unugrl juEEJ Dd gwpuAhN qjl sPl\"], [\"fj Nlbpax sZyqu\"], [\"ikMaBLE cEMt zkheH ysh\"], [\"\"], [\"DIKDIK\"]]",
+        "45610144d8c536587ef350227877c7ea20981cd489016b7884cb952e36243a35"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'dik')\n"
+  },
+  {
+    "id": "strings/count-csx",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'c', 's', 'x', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"xkwv Ji smsyNs maykPtv trVznR jdO sjw\"], [\"FiNnt QqTxGnY vSkfp uea mHtv\"], [\"is aqpmrtn kLBoTv dUqvT\"], [\"xME fXvh\"], [\"NilD cOKta pxcLynz nj mfoNW\"], [\"\"], [\"CSXCSX\"]]",
+        "297c9986208bc252a68b3f03faf67c582fc2587014b8107d0d2eacde26fa42ad"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'csx')\n"
+  },
+  {
+    "id": "strings/count-hot",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'h', 'o', 't', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"btFn AqzQmth AbvvI\"], [\"Zk zx kfrk\"], [\"hfqw hEbipt rmgdKlK Xgr rfpDu\"], [\"ecu Wfl\"], [\"Dlq myGe bd\"], [\"\"], [\"HOTHOT\"]]",
+        "01cf979c0ac57e077f71d1c21045953efaeba489c8021681453b43e1f4840e39"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'hot')\n"
+  },
+  {
+    "id": "strings/count-kmy",
+    "skill": "strings",
+    "level": "small",
+    "family": "count",
+    "prompt": "# Write a Python function `count_of(s)` that returns how many characters of `s` are one of 'k', 'm', 'y', ignoring case.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "count_of",
+        "[[\"EeNzcc ggIwIpu wJxzfk dKyi\"], [\"nyuKy kXxeA rsvCcqm djCl TtsmB sLESJQ Frqad\"], [\"ysZ nSmlDU VzFhzV yuaDmge vkeu tc iPmb\"], [\"vo jVoZz mw injIZc nrRsV RlgvItQ\"], [\"me ssgf cQp CYrN jjTf\"], [\"\"], [\"KMYKMY\"]]",
+        "86b5bfcf51aa3d7ba4adb3fa8f4e6b428518ba95c44453854eadaa2f8b8fa557"
+      ]
+    },
+    "completion": "def count_of(s):\n    return sum(1 for c in s.lower() if c in 'kmy')\n"
+  },
+  {
+    "id": "strings/caesar-6",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 6 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('Amxc zhF!') returns 'Gsdi fnL!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"Amxc zhF!\"], [\"gmccPs wTdtv oVxBXw!\"], [\"WckYjza mDMmf pKcjppN!\"], [\"Sbhwhdq rOxvD!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "854a18cf704b25c40afa2e7fba00f37357779c76fe49a92fee9cea7e8f0a1ca6"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 6) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 6) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/caesar-17",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 17 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('rmIode NqyMsb!') returns 'idZfuv EhpDjs!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"rmIode NqyMsb!\"], [\"rGvabc sKFH WmoE!\"], [\"lz Bg ncJJ ooAiI!\"], [\"hxHyK Udv lgky!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "39b5c61e026d549d36bdea2bd1adfd3220f2a6eccbf12ef670424c55d5f8fba6"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 17) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 17) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/caesar-23",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 23 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('doy Dquus ApS ouHvBbg JpoR!') returns 'alv Anrrp XmP lrEsYyd GmlO!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"doy Dquus ApS ouHvBbg JpoR!\"], [\"evykv isckW kgj zsfcOBV jrtz!\"], [\"yX mTHfjS ZJVb eLkxyEj Nm!\"], [\"nlYurmm exfg ykn hDyvN!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "db967233792c565f32a466cc2bb591ed2fd224b42f669be0195ce77216314007"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 23) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 23) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/caesar-9",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 9 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('znE vwY Arrt ju nam!') returns 'iwN efH Jaac sd wjv!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"znE vwY Arrt ju nam!\"], [\"qrafG ggbLoD lTcz aT!\"], [\"tWk wlvYjr Cjn gwJXooS mM!\"], [\"cpQf rph iw!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "3b20a0a44433c277c092ec9bd964146e9f53cda0d2852ad90eee7b545ec08f1f"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 9) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 9) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/caesar-18",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 18 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('VY bJkEb bniL xywl!') returns 'NQ tBcWt tfaD pqod!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"VY bJkEb bniL xywl!\"], [\"tmWa JShgB pnX hr!\"], [\"yc ew!\"], [\"wHWoxi xnViiO duYoo zzQAffl!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "f70117029e61f2135a616a5b284f7488196b96202b28ca74f29e55306edd643f"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 18) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 18) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/caesar-20",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 20 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('fr DtLsy wqCjcr!') returns 'zl XnFms qkWdwl!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"fr DtLsy wqCjcr!\"], [\"iKs kkUna ya daAYz!\"], [\"QG efsjbHz ak vxbRBAe!\"], [\"oszRUrb bd nMRfaUz qEWkAp!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "94544326af8fe7676d1f172a1626773ed2fbbd592219e62d1b3395eea8d64eb2"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 20) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 20) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/caesar-22",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 22 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('konlpX kt XH!') returns 'gkjhlT gp TD!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"konlpX kt XH!\"], [\"eydI WgUc SAy pyraJ!\"], [\"TfzhHC HjwqAjx!\"], [\"mtfxAUc LUnlJAx kwD mlweed!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "1387b2bb98e4047dcdc3b3214d6c5f01df974404c8a36411129594b587d0eb32"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 22) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 22) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/caesar-15",
+    "skill": "strings",
+    "level": "medium",
+    "family": "caesar",
+    "prompt": "# Write a Python function `caesar(s)` that shifts every letter of `s` forward by 15 places in the alphabet, wrapping from 'z' back to 'a'.\n# Uppercase letters stay uppercase and lowercase letters stay lowercase.\n# Characters that are not letters are unchanged.\n# For example, caesar('Qfy QibwUDw!') returns 'Fun FxqlJSl!'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "caesar",
+        "[[\"Qfy QibwUDw!\"], [\"key fuF wP lXgz!\"], [\"seHvct rgil mGQT iZgYfF!\"], [\"hgFmKfW yPkyno!\"], [\"xyz ABC\"], [\"\"], [\"Zz 9?\"]]",
+        "32bffec57d733662db2dab5b88a49d42e05a940dd1118f9019b9a0dfb246c543"
+      ]
+    },
+    "completion": "def caesar(s):\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 15) % 26 + 97))\n        elif 'A' <= c <= 'Z':\n            out.append(chr((ord(c) - 65 + 15) % 26 + 65))\n        else:\n            out.append(c)\n    return ''.join(out)\n"
+  },
+  {
+    "id": "strings/run-length-cn-none",
+    "skill": "strings",
+    "level": "medium",
+    "family": "run-length",
+    "prompt": "# Write a Python function `run_length(s)` that encodes each run of a repeated character in `s` as the character followed by its length.\n# The encoded runs are written in order, with nothing between them.\n# An empty string encodes to ''.\n# For example, run_length('aaabcc') returns 'a3b1c2'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "run_length",
+        "[[\"aaabcc\"], [\"\"], [\"a\"], [\"zzzzzzzzzzzz\"], [\"aaabbaaaa\"], [\"xyyyxzxxyyzy\"]]",
+        "3b3bb9e56a31d27ba424239c09a457a3ea98a51b36beec3fed0be2e0d311f1f9"
+      ]
+    },
+    "completion": "def run_length(s):\n    runs = []\n    i = 0\n    while i < len(s):\n        j = i\n        while j < len(s) and s[j] == s[i]:\n            j += 1\n        runs.append(f'{s[i]}{j - i}')\n        i = j\n    return ''.join(runs)\n"
+  },
+  {
+    "id": "strings/run-length-cn-,",
+    "skill": "strings",
+    "level": "medium",
+    "family": "run-length",
+    "prompt": "# Write a Python function `run_length(s)` that encodes each run of a repeated character in `s` as the character followed by its length.\n# The encoded runs are written in order, separated by ','.\n# An empty string encodes to ''.\n# For example, run_length('aaabcc') returns 'a3,b1,c2'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "run_length",
+        "[[\"aaabcc\"], [\"\"], [\"a\"], [\"zzzzzzzzzzzz\"], [\"babbbabab\"], [\"yyzzxzzyzyyy\"]]",
+        "af2aaa48cb4239a8842562a99dd73ce330983bcf1dc520013ba718a3cb023339"
+      ]
+    },
+    "completion": "def run_length(s):\n    runs = []\n    i = 0\n    while i < len(s):\n        j = i\n        while j < len(s) and s[j] == s[i]:\n            j += 1\n        runs.append(f'{s[i]}{j - i}')\n        i = j\n    return ','.join(runs)\n"
+  },
+  {
+    "id": "strings/run-length-cn--",
+    "skill": "strings",
+    "level": "medium",
+    "family": "run-length",
+    "prompt": "# Write a Python function `run_length(s)` that encodes each run of a repeated character in `s` as the character followed by its length.\n# The encoded runs are written in order, separated by '-'.\n# An empty string encodes to ''.\n# For example, run_length('aaabcc') returns 'a3-b1-c2'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "run_length",
+        "[[\"aaabcc\"], [\"\"], [\"a\"], [\"zzzzzzzzzzzz\"], [\"bababaaba\"], [\"xzyzxyxzyxyz\"]]",
+        "e1c1b73f712bda3298646de05ed8dfa128a76fb83d4846f46acffd91362d92c8"
+      ]
+    },
+    "completion": "def run_length(s):\n    runs = []\n    i = 0\n    while i < len(s):\n        j = i\n        while j < len(s) and s[j] == s[i]:\n            j += 1\n        runs.append(f'{s[i]}{j - i}')\n        i = j\n    return '-'.join(runs)\n"
+  },
+  {
+    "id": "strings/run-length-nc-none",
+    "skill": "strings",
+    "level": "medium",
+    "family": "run-length",
+    "prompt": "# Write a Python function `run_length(s)` that encodes each run of a repeated character in `s` as its length followed by the character.\n# The encoded runs are written in order, with nothing between them.\n# An empty string encodes to ''.\n# For example, run_length('aaabcc') returns '3a1b2c'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "run_length",
+        "[[\"aaabcc\"], [\"\"], [\"a\"], [\"zzzzzzzzzzzz\"], [\"aabaaaabb\"], [\"xxxyyxxzxzxy\"]]",
+        "e2dac6bbf53f6d2420642b5e93f47a9c2d6a1bcf173735fb48b5929ef2802cad"
+      ]
+    },
+    "completion": "def run_length(s):\n    runs = []\n    i = 0\n    while i < len(s):\n        j = i\n        while j < len(s) and s[j] == s[i]:\n            j += 1\n        runs.append(f'{j - i}{s[i]}')\n        i = j\n    return ''.join(runs)\n"
+  },
+  {
+    "id": "strings/run-length-nc-,",
+    "skill": "strings",
+    "level": "medium",
+    "family": "run-length",
+    "prompt": "# Write a Python function `run_length(s)` that encodes each run of a repeated character in `s` as its length followed by the character.\n# The encoded runs are written in order, separated by ','.\n# An empty string encodes to ''.\n# For example, run_length('aaabcc') returns '3a,1b,2c'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "run_length",
+        "[[\"aaabcc\"], [\"\"], [\"a\"], [\"zzzzzzzzzzzz\"], [\"abbaaabbb\"], [\"zzxxzzzxxyxz\"]]",
+        "dec04261c8f7ba4a8dd6a892746a3de6671232d2975bd820037702445ce73f5a"
+      ]
+    },
+    "completion": "def run_length(s):\n    runs = []\n    i = 0\n    while i < len(s):\n        j = i\n        while j < len(s) and s[j] == s[i]:\n            j += 1\n        runs.append(f'{j - i}{s[i]}')\n        i = j\n    return ','.join(runs)\n"
+  },
+  {
+    "id": "strings/run-length-nc--",
+    "skill": "strings",
+    "level": "medium",
+    "family": "run-length",
+    "prompt": "# Write a Python function `run_length(s)` that encodes each run of a repeated character in `s` as its length followed by the character.\n# The encoded runs are written in order, separated by '-'.\n# An empty string encodes to ''.\n# For example, run_length('aaabcc') returns '3a-1b-2c'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "run_length",
+        "[[\"aaabcc\"], [\"\"], [\"a\"], [\"zzzzzzzzzzzz\"], [\"babbbbaab\"], [\"yzzyyzyyxxxx\"]]",
+        "a1dbb4b39ae324e02650f93132af42d6bb5801d57fcb680f4276f14000c0798f"
+      ]
+    },
+    "completion": "def run_length(s):\n    runs = []\n    i = 0\n    while i < len(s):\n        j = i\n        while j < len(s) and s[j] == s[i]:\n            j += 1\n        runs.append(f'{j - i}{s[i]}')\n        i = j\n    return '-'.join(runs)\n"
+  },
+  {
+    "id": "strings/wrap-12",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 12 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 12 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('idqpr rd havy') returns ['idqpr rd', 'havy'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"idqpr rd havy\"], [\"zmd unzwk lu krselu xstb xxxxxxxxxxxxxxx cv\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"hcvjzl qycxmfi oq ljyeeil so zly rzi qmamis ietzk elirbsq rq gvny\"]]",
+        "3e34af780b6f0eb720471ecb63175a1a0c6d354410ea9467f4c175684affb243"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 12:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/wrap-11",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 11 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 11 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('gdegmlc ahh ue bligr vqxky medfhlx ll') returns ['gdegmlc ahh', 'ue bligr', 'vqxky', 'medfhlx ll'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"gdegmlc ahh ue bligr vqxky medfhlx ll\"], [\"kug erxzjdi upwqq xxxxxxxxxxxxxx hhmtwa ub\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"tawav ir oual mbuyp dkwt fieq mbqybx xegbbmm rkxw\"]]",
+        "9f4a2d6521e7efe0629f9973be365a663bbcd3dfa8dcd14b1ce0047227ed585b"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 11:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/wrap-7",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 7 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 7 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('bjzm akr xsctu ohnzle tdki bz odh tnd udcwqtf ilvzy') returns ['bjzm', 'akr', 'xsctu', 'ohnzle', 'tdki bz', 'odh tnd', 'udcwqtf', 'ilvzy'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"bjzm akr xsctu ohnzle tdki bz odh tnd udcwqtf ilvzy\"], [\"cswhnko hvfkps tz xxxxxxxxxx zldc flxmt\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"hfqa fod yanik kmboeae tdif ip iweg szxddk roqwk\"]]",
+        "d46ce34391fea5fa2ffcfdcdac9d7907ea0354a0295a82e97e4c237001e9fd54"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 7:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/wrap-16",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 16 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 16 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('rb eyy xvikeu') returns ['rb eyy xvikeu'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"rb eyy xvikeu\"], [\"prxga saeie lgsu dcgmscf tqc xxxxxxxxxxxxxxxxxxx aikh ynogir uapv\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"ceisoio pz znoj kq uwyzg dstrhnz zsd istk fpulzs epwivx pop otruqs vkym\"]]",
+        "fe356733f7b5ead8a9f1d9edeed2da791b8451dd514c30439d96341909dc17b8"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 16:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/wrap-10",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 10 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 10 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('tn gtx jey mcgjh egtm qln') returns ['tn gtx jey', 'mcgjh egtm', 'qln'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"tn gtx jey mcgjh egtm qln\"], [\"baf zq paqpxhz pik jhccdz xxxxxxxxxxxxx znogrx ktxl xsclgdj\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"mbsx ljz lyjsic dkkdhyf ttrzre mcbp jtxmenp ocvs\"]]",
+        "13eeb28b0ebaa29ebfbceea7364f154a59c4aef67aa030ed6d9abdbec2e17fb1"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 10:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/wrap-6",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 6 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 6 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('sceuxjq nu fuod fofgh jutayhe') returns ['sceuxjq', 'nu', 'fuod', 'fofgh', 'jutayhe'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"sceuxjq nu fuod fofgh jutayhe\"], [\"mmonj preglhe dpj xxxxxxxxx losr\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"qqrs hlyelq uoifwo gcfilbj ihut nyk ezpdwxl lggckuj ndyo kwohxuj oalglid ihnrrri\"]]",
+        "584c361a5f093d7b39d77f9bbfde5bf45477044808a55ec32e23edf1b1ddabde"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 6:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/wrap-8",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 8 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 8 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('ef om wdvm yb') returns ['ef om', 'wdvm yb'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"ef om wdvm yb\"], [\"dnjwhes uopfls czmug llffh xxxxxxxxxxx trnabgz uu ahpu\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"gldk shvx qgvihz yc fgxxx jf ylkhqhh kqxmhf\"]]",
+        "e1d8ba008d72ffd3b32c4a132af6deede4f60988690dc95131549714ef12541b"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 8:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/wrap-13",
+    "skill": "strings",
+    "level": "large",
+    "family": "wrap",
+    "prompt": "# Write a Python function `wrap_words(text)` that splits `text` into lines of at most 13 characters, breaking only between words and filling each line with as many words as fit.\n# Words are separated by any run of whitespace in `text`; within a line they are joined by single spaces.\n# A word longer than 13 characters goes on a line of its own, unbroken.\n# Return the lines as a list of strings; text with no words returns [].\n# For example, wrap_words('rvrgncx ebijgn kx lsf') returns ['rvrgncx', 'ebijgn kx lsf'].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "wrap_words",
+        "[[\"rvrgncx ebijgn kx lsf\"], [\"lkzkk gau xtwlgjl xxxxxxxxxxxxxxxx jdy klbbvcv ghtkf\"], [\"  spaced   out\\ttext  here \"], [\"\"], [\"   \"], [\"jso gwjhh lp gp xzwc smzneo yo dbyz kz dgkm ewfqfst zhzrbo\"]]",
+        "e15e0fbb9689797b9d45ef65129bb29bcddf4d4d2b68b3cd42ca10fa68210281"
+      ]
+    },
+    "completion": "def wrap_words(text):\n    lines = []\n    line = ''\n    for w in text.split():\n        if not line:\n            line = w\n        elif len(line) + 1 + len(w) <= 13:\n            line += ' ' + w\n        else:\n            lines.append(line)\n            line = w\n    if line:\n        lines.append(line)\n    return lines\n"
+  },
+  {
+    "id": "strings/title-and-in-to",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'and', 'in', 'to'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('VZy XGWxey UmqoqCB BPZ anD gFMukug PaGY') returns 'Vzy Xgwxey Umqoqcb Bpz and Gfmukug Pagy'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"VZy XGWxey UmqoqCB BPZ anD gFMukug PaGY\"], [\"to fg In\"], [\"vv Kc MxHEoxr\"], [\"XejneGG OgQC to\"], [\"and fdayafj in  jr\"], [\"\"], [\"ONE\"]]",
+        "63894f636274bfe75e7d3c05393e6d338632047805804fee0d73b3a74cd9affa"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('and', 'in', 'to')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/title-for-on-or",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'for', 'on', 'or'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('aV on QVFFy MhR FOR zQablE for') returns 'Av on Qvffy Mhr for Zqable for'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"aV on QVFFy MhR FOR zQablE for\"], [\"or for Or pGBF naV\"], [\"uS OjnpG or zemjk ON on QxpT\"], [\"on oR dYbXS\"], [\"for jkucx on  fi\"], [\"\"], [\"ONE\"]]",
+        "c5b694ab1b05884b4b26f4026aa7d1bea12d53785bc984594c351a2ac40c23d9"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('for', 'on', 'or')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/title-in-on-or",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'in', 'on', 'or'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('HxyBer bvbqepc Or Or vpmZnxf in wlWMfx') returns 'Hxyber Bvbqepc or or Vpmznxf in Wlwmfx'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"HxyBer bvbqepc Or Or vpmZnxf in wlWMfx\"], [\"MJz ng on\"], [\"in imlgfw ukvhbck ON frbnkg Or\"], [\"ON nO odMS iN Or In On\"], [\"in skictby on  usyx\"], [\"\"], [\"ONE\"]]",
+        "6333050c39583ee15502a129b693f2f43606926bc7d2ca5f06a8e97603c4c4e8"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('in', 'on', 'or')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/title-in-of-or",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'in', 'of', 'or'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('mO VMPpJfe gcavbd oF DKvUdM') returns 'Mo Vmppjfe Gcavbd of Dkvudm'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"mO VMPpJfe gcavbd oF DKvUdM\"], [\"in wjyqoQ in hrvczY\"], [\"oF in Of bbPwO hzpOziP\"], [\"iN asKf cr OF or\"], [\"in lxbg of  kwwijy\"], [\"\"], [\"ONE\"]]",
+        "8684b16921ebad9e3aa450cd43546c58412cd94fa333de1a5caaed269364f202"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('in', 'of', 'or')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/title-of-on-or",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'of', 'on', 'or'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('On of wwC ighwh TeawcNM oN') returns 'On of Wwc Ighwh Teawcnm on'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"On of wwC ighwh TeawcNM oN\"], [\"hLF of YR oR\"], [\"OF oN koR PfhOls or on\"], [\"of On on KSZs or OR\"], [\"of zl on  lnhq\"], [\"\"], [\"ONE\"]]",
+        "7f20c9375f278833f8fa2805a80926a6795bb2871f616b0fe71ef1235de28241"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('of', 'on', 'or')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/title-a-in-the",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'a', 'in', 'the'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('gFjNysy VE the TTWjU bwa a thE') returns 'Gfjnysy Ve the Ttwju Bwa a the'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"gFjNysy VE the TTWjU bwa a thE\"], [\"EGgb Ldj In elava\"], [\"In dznmwG a FEQfzJ ntkZGNh a a\"], [\"WCW a Wd WqtmnTM The dh iN\"], [\"a bram in  ly\"], [\"\"], [\"ONE\"]]",
+        "51cdd571b52af5cca0e671ba2a8103b5fa8e448b89c2c5e649bdaa7665bacdbb"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('a', 'in', 'the')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/title-an-of-on",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'an', 'of', 'on'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('an uY LauyGE on FTQu ep') returns 'An Uy Lauyge on Ftqu Ep'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"an uY LauyGE on FTQu ep\"], [\"of Of of erj aHR Of An\"], [\"OF gePKbud mqjlluu\"], [\"Of ewqi eqbdBw yWeYu aN of\"], [\"an htn of  uba\"], [\"\"], [\"ONE\"]]",
+        "8841ce53766e484699c84f99ae07bea63b25332153170b2227ebb6e001ca73be"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('an', 'of', 'on')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/title-an-in-on",
+    "skill": "strings",
+    "level": "large",
+    "family": "title",
+    "prompt": "# Write a Python function `title_except(text)` that returns `text` in title case, except for the small words 'an', 'in', 'on'.\n# Split `text` on whitespace and join the words with single spaces.\n# Each word gets its first letter uppercased and the rest lowercased, except that the small words are written entirely in lowercase.\n# The first word is always capitalised, even when it is a small word.\n# For example, title_except('an an iN Oa bpohc') returns 'An an in Oa Bpohc'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "title_except",
+        "[[\"an an iN Oa bpohc\"], [\"lXd on ap glcA gkbELn Wvchb\"], [\"PhLf Es upgudh uHUWk uytPj\"], [\"in aN aN\"], [\"an hsk in  zte\"], [\"\"], [\"ONE\"]]",
+        "00d8b76edab2b7ebea566b7865cc1a2488487f583f8bab4eff8bf72275dfbf1e"
+      ]
+    },
+    "completion": "def title_except(text):\n    small = ('an', 'in', 'on')\n    out = []\n    for i, w in enumerate(text.split()):\n        lw = w.lower()\n        if i > 0 and lw in small:\n            out.append(lw)\n        else:\n            out.append(lw[:1].upper() + lw[1:])\n    return ' '.join(out)\n"
+  },
+  {
+    "id": "strings/impossible-longer-and-shorter",
+    "skill": "strings",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `longer_and_shorter(s)` that returns a string that is strictly longer than `s` and also strictly shorter than `s`.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "longer_and_shorter",
+        "[[\"abc\"], [\"hello world\"], [\"x\"]]",
+        "37beb2d08c5c6c0c2974179582e82c2c991cf6053ccdea7df3cbc85b826c0eb0"
+      ]
+    }
+  },
+  {
+    "id": "strings/impossible-beats-itself",
+    "skill": "strings",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `beats_itself(s)` that returns the character of `s` that occurs more times in `s` than every character of `s` does, itself included.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "beats_itself",
+        "[[\"banana\"], [\"mississippi\"], [\"abc\"]]",
+        "7d6d302d11e092185e7fd05a25fd4a65c35d3811bfe8db524221c0542248a1c9"
+      ]
+    }
+  }
+]

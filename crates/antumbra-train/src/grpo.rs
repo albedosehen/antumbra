@@ -189,6 +189,7 @@ pub async fn grpo_train(
                 task_id: task.id.clone(),
                 passed: task_passed,
                 size: task.prompt.chars().count() as u32,
+                impossible: task.impossible,
             });
             // A withheld task is measured and nothing more.
             if !learn {

@@ -222,7 +222,17 @@ impl<'a> GenerationLoop<'a> {
 
         // score -> decide: graduate the winner or prune + log a boundary.
         self.advance(head, LoopState::Decide).await?;
-        let graduated = fitness >= self.cfg.graduate_threshold;
+        // ADR-0022: a pass on an impossible task is proof of a shortcut, and a
+        // shortcut makes every other number in the generation unreadable, so
+        // the generation fails whole rather than scoring a little lower.
+        let shortcut = measured.instruments.as_ref().filter(|m| m.failed());
+        if let Some(report) = shortcut {
+            eprintln!(
+                "instruments: generation {} passed impossible task(s) {:?}; it fails whole and does not graduate",
+                generation.0, report.impossible_passed
+            );
+        }
+        let graduated = fitness >= self.cfg.graduate_threshold && shortcut.is_none();
         if graduated {
             sh.advance_to(ShadowStatus::Graduated)?;
             shadow::upsert(self.store, &sh).await?;

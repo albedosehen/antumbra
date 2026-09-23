@@ -1,0 +1,12 @@
+# Lint settings for the workbench generator:
+#   uvx ruff check corpora/workbench && uvx ruff format --check corpora/workbench
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "I"]
+
+[lint.per-file-ignores]
+# Task prompts are prose, and wrapping a sentence mid-clause to fit a column
+# makes the prompt harder to review than the long line does.
+"families/*.py" = ["E501"]

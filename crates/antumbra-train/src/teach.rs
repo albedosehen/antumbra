@@ -149,15 +149,14 @@ pub async fn capture_corrections(
             .per_task
             .iter()
             .chain(measured.iter())
-            .map(|r| TaskOutcome {
-                task_id: r.id.clone(),
-                passed: r.passed > 0,
-                size: tasks
-                    .iter()
-                    .chain(withheld.iter())
-                    .find(|t| t.id == r.id)
-                    .map(|t| t.prompt.chars().count() as u32)
-                    .unwrap_or(0),
+            .map(|r| {
+                let task = tasks.iter().chain(withheld.iter()).find(|t| t.id == r.id);
+                TaskOutcome {
+                    task_id: r.id.clone(),
+                    passed: r.passed > 0,
+                    size: task.map_or(0, |t| t.prompt.chars().count() as u32),
+                    impossible: task.is_some_and(|t| t.impossible),
+                }
             })
             .collect(),
         holdout: None,

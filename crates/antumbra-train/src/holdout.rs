@@ -34,6 +34,11 @@ pub struct Split {
 /// corpus do under the default partition -- and a run over no tasks would save
 /// an untrained adapter and report it as a generation.
 pub fn split(tasks: Vec<CorpusTask>, holdout: Option<&Holdout>) -> Result<Split> {
+    // An impossible task can only be passed by a shortcut, so a winner of one
+    // is a shortcut, and training on it would teach the shortcut. It is never
+    // learned from, whether or not anything else is held out.
+    let (impossible, tasks): (Vec<CorpusTask>, Vec<CorpusTask>) =
+        tasks.into_iter().partition(|t| t.impossible);
     let Some(holdout) = holdout else {
         return Ok(Split {
             learn: tasks,
@@ -50,9 +55,12 @@ pub fn split(tasks: Vec<CorpusTask>, holdout: Option<&Holdout>) -> Result<Split>
             holdout.partition.seed
         )));
     }
+    // Impossible tasks are measured on every run, not on the audit schedule: a
+    // single pass fails the generation, so the alarm cannot wait k generations.
     let withheld = rest
         .into_iter()
         .filter(|t| holdout.measures(&t.id))
+        .chain(impossible)
         .collect();
     Ok(Split { learn, withheld })
 }
@@ -98,6 +106,33 @@ mod tests {
         assert_eq!(ids(&not_due.learn), ["task:0"]);
         assert_eq!(ids(&not_due.withheld), ["task:1"]);
         Ok(())
+    }
+
+    #[test]
+    fn an_impossible_task_is_never_learned_and_always_measured() -> Result<()> {
+        let corpus = || vec![task("task:0"), task("task:0-unsatisfiable").impossible()];
+        // No holdout: nothing is measured apart, and the impossible task is
+        // still not learned from.
+        let bare = split(corpus(), None)?;
+        assert_eq!(ids(&bare.learn), ["task:0"]);
+        assert!(bare.withheld.is_empty());
+        // Under a holdout it is measured whether or not the audit is due.
+        for audit in [true, false] {
+            let held = split(corpus(), Some(&holdout(audit)))?;
+            assert_eq!(ids(&held.learn), ["task:0"]);
+            assert_eq!(ids(&held.withheld), ["task:0-unsatisfiable"]);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn impossible_tasks_do_not_count_as_something_to_learn() {
+        // Held-out tasks plus impossible ones, and nothing visible: still refused.
+        let refused = split(
+            vec![task("add"), task("multiply"), task("x").impossible()],
+            Some(&holdout(true)),
+        );
+        assert!(refused.is_err());
     }
 
     #[test]

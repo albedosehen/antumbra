@@ -1,0 +1,792 @@
+[
+  {
+    "id": "grids/reshape-transpose",
+    "skill": "grids",
+    "level": "small",
+    "family": "reshape",
+    "prompt": "# Write a Python function `transpose(g)` that returns the transpose of the grid `g`: row i of the result is column i of `g`.\n# `g` is a non-empty list of equally long, non-empty rows, or [] which returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "transpose",
+        "[[[[3, 4, 6], [-8, 3, 5], [-2, 5, -9]]], [[[-7, 2]]], [[[-1, 5, 9, -6]]], [[[7, 1, -5], [-3, 7, -8], [9, 9, -2]]], [[[-7, 9, -8, 1]]], [[]], [[[1, 2, 3]]]]",
+        "5212072e6cbb41229244502896bf031bb06f75a830ba4c3a082c1ec6c5572440"
+      ]
+    },
+    "completion": "def transpose(g):\n    return [list(r) for r in zip(*g)]\n"
+  },
+  {
+    "id": "grids/reshape-mirror",
+    "skill": "grids",
+    "level": "small",
+    "family": "reshape",
+    "prompt": "# Write a Python function `mirror(g)` that returns the grid `g` mirrored left to right: each row reversed.\n# `g` is a non-empty list of equally long, non-empty rows, or [] which returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "mirror",
+        "[[[[5, 3, -7], [-7, 5, 8]]], [[[-5, -5, 2], [-1, -3, -3], [2, -9, 9], [-6, 8, 9]]], [[[-7], [-3], [1]]], [[[-7, -9, -8, -2], [7, 0, 1, 4], [3, 7, -5, 5], [-3, -8, 3, -3]]], [[[6, 7, -4, 7], [-8, -4, 2, -8], [3, 4, 2, -5]]], [[]], [[[1, 2, 3]]]]",
+        "9befb96397fadbeab7ed3ea0d3651b9de909566c3f965ec7e14c553f44bc715d"
+      ]
+    },
+    "completion": "def mirror(g):\n    return [row[::-1] for row in g]\n"
+  },
+  {
+    "id": "grids/reshape-flip",
+    "skill": "grids",
+    "level": "small",
+    "family": "reshape",
+    "prompt": "# Write a Python function `flip(g)` that returns the grid `g` flipped top to bottom: its rows in reverse order.\n# `g` is a non-empty list of equally long, non-empty rows, or [] which returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flip",
+        "[[[[-7], [-6]]], [[[-9, -1]]], [[[8, -2, 5], [6, 2, -3]]], [[[-4, -2], [3, 2], [5, -4], [-2, 0]]], [[[-6], [-7], [5]]], [[]], [[[1, 2, 3]]]]",
+        "bfad42cd33032a7d3148a3749d9cf42ae34e337b53321562953474283877f863"
+      ]
+    },
+    "completion": "def flip(g):\n    return [list(row) for row in g[::-1]]\n"
+  },
+  {
+    "id": "grids/reshape-anti-transpose",
+    "skill": "grids",
+    "level": "small",
+    "family": "reshape",
+    "prompt": "# Write a Python function `anti_transpose(g)` that returns the grid `g` reflected across its anti-diagonal, the diagonal from its top-right corner to its bottom-left corner.\n# `g` is a non-empty list of equally long, non-empty rows, or [] which returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "anti_transpose",
+        "[[[[1, 2], [2, 0], [-3, -6]]], [[[-5, -9], [0, 0], [2, 6], [-4, 5]]], [[[-3, 7], [-4, -6], [-2, -6]]], [[[-9, -3], [-6, -8], [9, 8], [0, 4]]], [[[-7, -6, 6], [7, -1, 0], [-3, 6, -1]]], [[]], [[[1, 2, 3]]]]",
+        "3d77f626f7ef04518d2f46286815a73d14ac89661480cd6fefd1d206af66cbbe"
+      ]
+    },
+    "completion": "def anti_transpose(g):\n    if not g:\n        return []\n    rows, cols = len(g), len(g[0])\n    return [[g[rows - 1 - j][cols - 1 - i] for j in range(rows)] for i in range(cols)]\n"
+  },
+  {
+    "id": "grids/reshape-diagonal",
+    "skill": "grids",
+    "level": "small",
+    "family": "reshape",
+    "prompt": "# Write a Python function `diagonal(g)` that returns the values on the main diagonal of the grid `g` as a list: g[0][0], g[1][1], and so on while both indices are inside the grid.\n# `g` is a non-empty list of equally long, non-empty rows, or [] which returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "diagonal",
+        "[[[[8]]], [[[7], [3], [-9]]], [[[-9, 1, 5, -4], [6, -1, -4, 2]]], [[[-2, -7, 4, -2], [7, 2, -3, 6]]], [[[-1, 3], [-7, 2], [7, 4]]], [[]], [[[1, 2, 3]]]]",
+        "494f306a8c46fe668771f2237ac91324395e9834ef2bd583362865f3a598c9d2"
+      ]
+    },
+    "completion": "def diagonal(g):\n    return [g[i][i] for i in range(min(len(g), len(g[0]) if g else 0))]\n"
+  },
+  {
+    "id": "grids/reshape-anti-diagonal",
+    "skill": "grids",
+    "level": "small",
+    "family": "reshape",
+    "prompt": "# Write a Python function `anti_diagonal(g)` that returns the values on the anti-diagonal of the grid `g` as a list, starting at its top-right corner: g[0][c - 1], g[1][c - 2], and so on while both indices are inside the grid, where c is the number of columns.\n# `g` is a non-empty list of equally long, non-empty rows, or [] which returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "anti_diagonal",
+        "[[[[9, -2], [9, 0], [0, -2]]], [[[4, -2]]], [[[-9, 9, -4, 8], [-3, 8, -6, 8], [5, 3, -6, 6]]], [[[-3]]], [[[4, -9, 5, -8], [9, 1, 0, 5], [3, 2, 7, 0], [8, 9, -4, -3]]], [[]], [[[1, 2, 3]]]]",
+        "80006fa41f033a8c114ff9007ecfaf49507ae64257905c5b1d9595999c485be4"
+      ]
+    },
+    "completion": "def anti_diagonal(g):\n    if not g:\n        return []\n    cols = len(g[0])\n    return [g[i][cols - 1 - i] for i in range(min(len(g), cols))]\n"
+  },
+  {
+    "id": "grids/lines-row-sums",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the sum of each row of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[-7, 2, 1], [-3, -5, -2], [-2, -8, -5], [-9, 8, -6]]], [[[8, 3, 0, -1], [-3, -7, 4, -8], [3, 7, -7, 9], [4, 7, 6, 2]]], [[[-5, 6, -2, 5], [-3, -1, 4, -6], [-3, -6, 4, 8]]], [[[-7, 6], [-2, -3]]], [[[3, -1], [1, -6]]], [[]], [[[4]]]]",
+        "b1369ce6ae2525e479f0727ad7ced33eb1b78af34ef956150085a0c3d97a1389"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [sum(row) for row in g]\n"
+  },
+  {
+    "id": "grids/lines-column-sums",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the sum of each column of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[9, 4, 6, -6], [-2, -2, -1, 5]]], [[[9, 4, -6], [1, 6, -8], [0, -3, 0]]], [[[7, -9, 7]]], [[[-3, 9, 5], [-2, -5, 9], [7, -1, 0], [4, -8, -4]]], [[[7], [9]]], [[]], [[[4]]]]",
+        "b9f89d8531811717917cf93f6b56717f325c9000c2d5fa654d7cb0964e30119e"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [sum(col) for col in zip(*g)]\n"
+  },
+  {
+    "id": "grids/lines-row-max",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the largest value in each row of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[5, 7], [-5, 0]]], [[[-9, 8, -5]]], [[[1, -9]]], [[[-5, -7, -8], [-1, -9, 0]]], [[[-7], [3], [8], [-5]]], [[]], [[[4]]]]",
+        "78af29ca4145cead856a38aa49a731c5e97a1e351a6e8066c73a20a0414057c6"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [max(row) for row in g]\n"
+  },
+  {
+    "id": "grids/lines-column-min",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the smallest value in each column of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[6, -6, 9, 2], [-3, -9, 9, -3], [-7, -8, 1, -3]]], [[[-7, 7]]], [[[9, 1, -7], [-8, -1, 4], [-4, 9, -7]]], [[[-8, 2], [-8, 1], [-7, -9]]], [[[6, 4, -5], [2, -1, 3], [5, -9, 3]]], [[]], [[[4]]]]",
+        "40013f9a3e652890258f611a67b3615f03081685d1ccb356326f15d4b9e11242"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [min(col) for col in zip(*g)]\n"
+  },
+  {
+    "id": "grids/lines-row-spread",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the largest minus the smallest value in each row of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[3, 4, -7], [5, 6, 3], [9, 2, -9]]], [[[7, -7, 9], [9, -5, 4]]], [[[3], [-5], [6]]], [[[4, -9], [3, 7], [-4, 6]]], [[[-7, 6], [-9, -7], [-8, -8], [1, -9]]], [[]], [[[4]]]]",
+        "7a00d97076f603664883c046b21cd989f94adb53cb937efa9d66d17d9647d646"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [max(row) - min(row) for row in g]\n"
+  },
+  {
+    "id": "grids/lines-column-max",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the largest value in each column of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[0, -3]]], [[[-4], [2], [-3], [1]]], [[[-4], [8], [-5], [8]]], [[[-9, 1, 7], [7, 6, 2], [6, 6, -8]]], [[[0, 3, -8], [0, -8, 9], [4, 2, -7]]], [[]], [[[4]]]]",
+        "b0cc6e873a293a3d725d70819d077b04c743ccb6b6497ae3e5cf9563721705f3"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [max(col) for col in zip(*g)]\n"
+  },
+  {
+    "id": "grids/lines-row-min",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the smallest value in each row of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[5], [5], [-5], [9]]], [[[0, 8, 7, -6], [2, 2, -4, 0]]], [[[-1, -1, -7], [-8, -3, -3]]], [[[-6]]], [[[7, 3], [2, -2], [0, -1]]], [[]], [[[4]]]]",
+        "2074af06dd60393eed057195747b4394637a38c5fe82842fe0654fb736abcac0"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [min(row) for row in g]\n"
+  },
+  {
+    "id": "grids/lines-column-spread",
+    "skill": "grids",
+    "level": "small",
+    "family": "line-totals",
+    "prompt": "# Write a Python function `line_totals(g)` that returns a list holding the largest minus the smallest value in each column of the grid `g`, in order.\n# `g` is a list of equally long, non-empty rows; an empty grid returns [].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "line_totals",
+        "[[[[-9], [9], [1]]], [[[-4, 9, -3], [0, -2, 4], [-1, -3, 2], [-7, 6, -2]]], [[[-6, 9, -5, 2]]], [[[4, 3, -6, 1], [8, 8, -6, 4], [-9, 0, 0, -9], [6, -5, 0, -7]]], [[[-8, -9, -4, -3], [-8, -5, -9, 7], [-7, -1, 2, 0], [-3, 0, -4, 7]]], [[]], [[[4]]]]",
+        "c421b05dd85eeaa263c68270435d51a2346c256926525eba0f9bf64b65d9458b"
+      ]
+    },
+    "completion": "def line_totals(g):\n    return [max(col) - min(col) for col in zip(*g)]\n"
+  },
+  {
+    "id": "grids/rotate-clockwise",
+    "skill": "grids",
+    "level": "medium",
+    "family": "rotate",
+    "prompt": "# Write a Python function `rotate_grid(g)` that returns a new grid: the grid `g` rotated 90 degrees clockwise.\n# `g` may be rectangular rather than square; an empty grid returns [].\n# For example, rotate_grid([[1, 9, 6], [-7, 2, -3], [4, 8, 7], [1, -3, 2]]) returns [[1, 4, -7, 1], [-3, 8, 2, 9], [2, 7, -3, 6]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "rotate_grid",
+        "[[[[1, 9, 6], [-7, 2, -3], [4, 8, 7], [1, -3, 2]]], [[[8, -8], [-7, -1], [-4, 5], [5, 6]]], [[[3, 8, 5, -5], [9, 3, -7, 9], [7, -4, 9, 3]]], [[[-7, -8, -5, -9], [-8, -9, 8, 5], [-3, 1, -5, 3]]], [[[6], [0], [6]]], [[]], [[[1, 2], [3, 4], [5, 6]]]]",
+        "b02ccf60b6003ea747f25c5c082c2bb31106cd71da4c250d63e9fd8f401f60b5"
+      ]
+    },
+    "completion": "def rotate_grid(g):\n    return [list(r) for r in zip(*g[::-1])]\n"
+  },
+  {
+    "id": "grids/rotate-counterclockwise",
+    "skill": "grids",
+    "level": "medium",
+    "family": "rotate",
+    "prompt": "# Write a Python function `rotate_grid(g)` that returns a new grid: the grid `g` rotated 90 degrees counter-clockwise.\n# `g` may be rectangular rather than square; an empty grid returns [].\n# For example, rotate_grid([[-1, -3]]) returns [[-3], [-1]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "rotate_grid",
+        "[[[[-1, -3]]], [[[6, 6], [-3, 4], [-5, -5]]], [[[2, 5, -2]]], [[[8], [-5], [-6]]], [[[3, -7, -2]]], [[]], [[[1, 2], [3, 4], [5, 6]]]]",
+        "f0f489a46f6cb9e7ad5657eb387a82d99d318f55cf5113f425b564214e492704"
+      ]
+    },
+    "completion": "def rotate_grid(g):\n    return [list(r) for r in zip(*g)][::-1]\n"
+  },
+  {
+    "id": "grids/rotate-half-turn",
+    "skill": "grids",
+    "level": "medium",
+    "family": "rotate",
+    "prompt": "# Write a Python function `rotate_grid(g)` that returns a new grid: the grid `g` rotated 180 degrees.\n# `g` may be rectangular rather than square; an empty grid returns [].\n# For example, rotate_grid([[-4, 6, 3], [7, -3, -8]]) returns [[-8, -3, 7], [3, 6, -4]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "rotate_grid",
+        "[[[[-4, 6, 3], [7, -3, -8]]], [[[9], [4]]], [[[5, -2, -1]]], [[[9]]], [[[7], [8], [0], [-6]]], [[]], [[[1, 2], [3, 4], [5, 6]]]]",
+        "c9e0b7e4c845596e8bb2f65cfe80ede0fa0d09fdbeb68faf14b95918965ed0f0"
+      ]
+    },
+    "completion": "def rotate_grid(g):\n    return [row[::-1] for row in g[::-1]]\n"
+  },
+  {
+    "id": "grids/neighbours-4-sum",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns the sum of the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the up to 4 cells directly above, below, left and right of it, ignoring positions outside the grid; the cell itself is not a neighbour.\n# For example, neighbours([[7, 3, 9, 9], [9, 6, 6, 6], [2, 8, 5, 2]], 2, 0) returns 17.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[7, 3, 9, 9], [9, 6, 6, 6], [2, 8, 5, 2]], 2, 0], [[[2, 0, 4, 5], [8, 8, 5, 2], [1, 1, 4, 0]], 1, 2], [[[5, 3, 6]], 0, 0], [[[7, 0, 3, 2], [7, 2, 8, 7], [0, 6, 6, 7]], 0, 0], [[[6], [0], [9], [6]], 2, 0], [[[8, 2, 8, 9], [6, 8, 3, 5]], 0, 1], [[[5]], 0, 0]]",
+        "45601e397f56d27c6c680f2fe0953720202c83f607f8cd45598335585eb67241"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return sum(values)\n"
+  },
+  {
+    "id": "grids/neighbours-4-nonzero",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns how many are non-zero among the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the up to 4 cells directly above, below, left and right of it, ignoring positions outside the grid; the cell itself is not a neighbour.\n# For example, neighbours([[7, 7, 5]], 0, 2) returns 1.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[7, 7, 5]], 0, 2], [[[0, 3, 9, 3]], 0, 0], [[[8], [0], [8]], 0, 0], [[[0, 0, 7], [1, 9, 7]], 1, 1], [[[5, 1, 6], [6, 9, 5], [8, 1, 9]], 1, 2], [[[9], [9], [3]], 1, 0], [[[5]], 0, 0]]",
+        "98570537c82d14de91d5ad30e7a18b713a74e2f6138157aee427be8a332902d9"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return sum(1 for v in values if v != 0)\n"
+  },
+  {
+    "id": "grids/neighbours-4-max",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns the largest of the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the up to 4 cells directly above, below, left and right of it, ignoring positions outside the grid; the cell itself is not a neighbour. Return None when the cell has no neighbours.\n# For example, neighbours([[2, 7]], 0, 1) returns 2.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[2, 7]], 0, 1], [[[1, 4, 6, 7], [5, 7, 0, 2], [5, 5, 1, 7]], 2, 0], [[[7, 4, 5, 2], [7, 5, 0, 8]], 0, 2], [[[7, 4, 7], [6, 0, 5]], 0, 0], [[[8, 2]], 0, 1], [[[2], [0], [6]], 0, 0], [[[5]], 0, 0]]",
+        "f33ee81c8ba42391fcfbd7ab30da24783cc40b9b6a88130bc71160587b797f67"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return max(values) if values else None\n"
+  },
+  {
+    "id": "grids/neighbours-4-min",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns the smallest of the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the up to 4 cells directly above, below, left and right of it, ignoring positions outside the grid; the cell itself is not a neighbour. Return None when the cell has no neighbours.\n# For example, neighbours([[9]], 0, 0) returns None.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[9]], 0, 0], [[[5, 2]], 0, 0], [[[7, 2]], 0, 1], [[[9, 7, 9], [8, 0, 2], [0, 9, 3]], 0, 1], [[[3, 5, 6]], 0, 2], [[[4, 1], [9, 5]], 1, 0], [[[5]], 0, 0]]",
+        "fe9995a23fcf06969642db88927df991fb482081375210851bee7884889ed262"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return min(values) if values else None\n"
+  },
+  {
+    "id": "grids/neighbours-8-sum",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns the sum of the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the 8 surrounding cells, diagonals included, ignoring positions outside the grid; the cell itself is not a neighbour.\n# For example, neighbours([[3, 7, 9, 9], [7, 0, 9, 5], [4, 5, 8, 5]], 2, 3) returns 22.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[3, 7, 9, 9], [7, 0, 9, 5], [4, 5, 8, 5]], 2, 3], [[[4, 3, 3], [8, 1, 5], [3, 7, 9], [0, 2, 0]], 3, 0], [[[4, 9], [8, 6], [9, 7], [8, 9]], 0, 1], [[[3, 0, 3], [4, 3, 2], [7, 5, 0], [5, 6, 3]], 3, 2], [[[0, 3, 2], [8, 9, 8], [9, 4, 8], [6, 8, 9]], 3, 2], [[[4, 7, 9], [8, 2, 4], [4, 9, 1], [5, 1, 3]], 3, 0], [[[5]], 0, 0]]",
+        "9590e0bee63e8898c428136fac1a5fa307c79b74a7a94168db54868fb54292f1"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return sum(values)\n"
+  },
+  {
+    "id": "grids/neighbours-8-nonzero",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns how many are non-zero among the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the 8 surrounding cells, diagonals included, ignoring positions outside the grid; the cell itself is not a neighbour.\n# For example, neighbours([[0, 8], [7, 2], [4, 7], [0, 9]], 3, 1) returns 2.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[0, 8], [7, 2], [4, 7], [0, 9]], 3, 1], [[[6]], 0, 0], [[[0, 4], [5, 3], [1, 0]], 0, 1], [[[0, 1], [6, 4], [8, 9], [1, 9]], 3, 0], [[[3, 5, 2, 6], [2, 6, 2, 6], [9, 2, 1, 5], [3, 6, 9, 4]], 1, 3], [[[5, 5, 5], [1, 7, 3], [1, 9, 4]], 0, 2], [[[5]], 0, 0]]",
+        "46e66ba4a80cec7736a62ea7f768dd655cb9f7148728c0d7922de712fe9714a6"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return sum(1 for v in values if v != 0)\n"
+  },
+  {
+    "id": "grids/neighbours-8-max",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns the largest of the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the 8 surrounding cells, diagonals included, ignoring positions outside the grid; the cell itself is not a neighbour. Return None when the cell has no neighbours.\n# For example, neighbours([[2, 6, 1], [3, 2, 9], [8, 4, 9]], 1, 0) returns 8.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[2, 6, 1], [3, 2, 9], [8, 4, 9]], 1, 0], [[[8, 1], [1, 6]], 0, 1], [[[3, 5, 4, 7], [1, 4, 0, 4]], 1, 0], [[[5, 1, 6], [6, 7, 6], [3, 0, 5], [6, 9, 9]], 1, 1], [[[1, 9, 4, 5], [3, 0, 0, 1], [6, 7, 0, 2], [2, 0, 4, 6]], 3, 2], [[[3, 5], [8, 5], [2, 2]], 0, 1], [[[5]], 0, 0]]",
+        "1a4f8af96c0b07df7a48420ba74421e894198874e147562ffaf5a71b2ad68703"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return max(values) if values else None\n"
+  },
+  {
+    "id": "grids/neighbours-8-min",
+    "skill": "grids",
+    "level": "medium",
+    "family": "neighbours",
+    "prompt": "# Write a Python function `neighbours(g, r, c)` that returns the smallest of the values of the neighbours of the cell at row `r`, column `c` of the grid `g`.\n# The neighbours are the 8 surrounding cells, diagonals included, ignoring positions outside the grid; the cell itself is not a neighbour. Return None when the cell has no neighbours.\n# For example, neighbours([[9, 7, 9], [7, 7, 2], [0, 1, 2], [3, 9, 4]], 2, 0) returns 1.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "neighbours",
+        "[[[[9, 7, 9], [7, 7, 2], [0, 1, 2], [3, 9, 4]], 2, 0], [[[8, 7, 0], [4, 6, 6], [7, 0, 7]], 1, 1], [[[9, 3, 4, 8]], 0, 3], [[[7]], 0, 0], [[[4, 5, 3, 6], [3, 1, 8, 8], [4, 2, 5, 4], [9, 1, 4, 3]], 2, 0], [[[0, 0, 7], [7, 0, 9], [4, 9, 3]], 2, 1], [[[5]], 0, 0]]",
+        "613fa5cc194e9f507ba453b4504e5a7e2b245360055eaf24575e745d3186c90f"
+      ]
+    },
+    "completion": "def neighbours(g, r, c):\n    values = []\n    for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n        i, j = r + dr, c + dc\n        if 0 <= i < len(g) and 0 <= j < len(g[0]):\n            values.append(g[i][j])\n    return min(values) if values else None\n"
+  },
+  {
+    "id": "grids/islands-4-count-one",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns how many islands there are in the grid `g`.\n# A cell holding the value 1 is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch horizontally or vertically, not diagonally.\n# For example, islands([[1, 2], [2, 1]]) returns 2.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[1, 2], [2, 1]]], [[[0, 2, 2], [0, 2, 2], [1, 1, 2], [0, 0, 2], [0, 1, 2], [0, 0, 1]]], [[[2, 0, 0, 1], [2, 1, 0, 1], [2, 0, 2, 0]]], [[[0, 2, 0, 0, 2, 1], [0, 0, 2, 1, 2, 0], [0, 0, 0, 2, 2, 1], [1, 2, 2, 0, 0, 1], [2, 0, 2, 2, 1, 2]]], [[[1, 0, 1], [0, 1, 2], [2, 2, 1]]], [[[2, 0, 2], [2, 1, 0], [1, 2, 2], [2, 0, 1], [1, 0, 0]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "09a4c3c96d1e54251c0d2d11023c55dded718c61d43762f7aebb4ccc742910ad"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] == 1):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] == 1:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return len(sizes)\n"
+  },
+  {
+    "id": "grids/islands-4-count-nonzero",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns how many islands there are in the grid `g`.\n# A cell holding any non-zero value is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch horizontally or vertically, not diagonally.\n# For example, islands([[1, 2], [1, 2], [2, 1]]) returns 1.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[1, 2], [1, 2], [2, 1]]], [[[1, 1, 0, 1, 2], [2, 1, 0, 0, 1], [2, 1, 1, 2, 1]]], [[[0, 1, 0, 2, 1], [1, 1, 1, 2, 0], [1, 2, 1, 1, 1], [2, 2, 0, 1, 1], [1, 0, 2, 2, 1]]], [[[2, 0], [1, 2], [1, 1], [1, 1], [0, 0], [1, 0]]], [[[2, 2, 1, 0, 0, 2], [1, 1, 2, 0, 0, 0], [0, 2, 1, 1, 2, 1], [0, 0, 1, 0, 0, 2], [1, 1, 1, 0, 1, 1]]], [[[2, 2, 0, 1], [0, 0, 1, 2], [1, 0, 0, 2]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "41744926439e23a5b20d3b6b688ce51c2bff927621cae9217408c72289f45581"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] != 0):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] != 0:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return len(sizes)\n"
+  },
+  {
+    "id": "grids/islands-4-largest-one",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns the number of cells in the largest island (0 when there is none) in the grid `g`.\n# A cell holding the value 1 is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch horizontally or vertically, not diagonally.\n# For example, islands([[2, 2, 1, 2, 0, 0], [1, 0, 2, 1, 0, 1], [1, 1, 1, 1, 0, 2], [2, 1, 2, 0, 0, 0], [1, 1, 1, 2, 0, 1]]) returns 10.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[2, 2, 1, 2, 0, 0], [1, 0, 2, 1, 0, 1], [1, 1, 1, 1, 0, 2], [2, 1, 2, 0, 0, 0], [1, 1, 1, 2, 0, 1]]], [[[0, 1, 1, 2], [1, 1, 1, 1], [1, 0, 0, 1], [2, 1, 0, 0]]], [[[0, 2, 0, 2, 2], [2, 1, 1, 2, 1]]], [[[0, 1, 2, 0, 1, 1], [0, 2, 2, 0, 1, 2], [1, 2, 1, 2, 2, 0]]], [[[1, 2, 2, 0, 0, 2], [0, 2, 1, 2, 1, 2], [2, 0, 1, 1, 2, 2], [2, 1, 2, 2, 2, 0], [0, 2, 0, 2, 0, 2]]], [[[0, 0, 0, 0], [0, 2, 1, 1], [0, 2, 0, 2], [2, 1, 0, 0], [1, 0, 2, 0]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "b38b50d1174ad00b68e0198efb9830c154ac996c7831806d8aa6f3d0c639b343"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] == 1):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] == 1:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return max(sizes, default=0)\n"
+  },
+  {
+    "id": "grids/islands-4-largest-nonzero",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns the number of cells in the largest island (0 when there is none) in the grid `g`.\n# A cell holding any non-zero value is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch horizontally or vertically, not diagonally.\n# For example, islands([[0, 1, 2], [1, 1, 1]]) returns 5.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[0, 1, 2], [1, 1, 1]]], [[[2, 2, 2, 2], [2, 2, 2, 1], [1, 0, 2, 0], [2, 2, 0, 2], [2, 0, 2, 2], [0, 0, 0, 0]]], [[[0, 0, 0], [2, 1, 1], [1, 2, 1], [1, 2, 0]]], [[[0, 0, 0, 1, 2], [1, 0, 0, 0, 0]]], [[[2, 2], [0, 2], [2, 0]]], [[[0, 2, 0, 1, 0], [2, 2, 2, 1, 0], [1, 1, 2, 0, 2], [0, 0, 2, 2, 0], [2, 1, 0, 1, 1]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "2b24eff44ccfaf120b3161dfe6a5401d022131b6366d0395b8ee7017889de655"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] != 0):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] != 0:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return max(sizes, default=0)\n"
+  },
+  {
+    "id": "grids/islands-8-count-one",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns how many islands there are in the grid `g`.\n# A cell holding the value 1 is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch including diagonally.\n# For example, islands([[1, 2, 2], [2, 2, 1], [2, 2, 1], [2, 2, 1], [0, 1, 1]]) returns 2.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[1, 2, 2], [2, 2, 1], [2, 2, 1], [2, 2, 1], [0, 1, 1]]], [[[1, 0, 1], [2, 0, 2], [1, 1, 1], [2, 0, 2], [2, 0, 0], [1, 0, 0]]], [[[1, 2, 0, 2], [2, 2, 1, 0], [0, 0, 0, 1], [1, 2, 1, 2], [2, 0, 0, 0], [1, 0, 1, 2]]], [[[1, 1, 1, 1], [0, 0, 1, 2], [2, 2, 0, 1], [2, 1, 2, 0]]], [[[0, 2, 0, 1], [2, 2, 1, 0]]], [[[1, 1], [1, 2], [1, 2]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "9b7de23c4235a9834ff88c4080d4b7fe5f6755a6dfd7bc8dfe456f7db9d12d84"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] == 1):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] == 1:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return len(sizes)\n"
+  },
+  {
+    "id": "grids/islands-8-count-nonzero",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns how many islands there are in the grid `g`.\n# A cell holding any non-zero value is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch including diagonally.\n# For example, islands([[0, 1, 1, 0, 0], [2, 1, 2, 0, 2]]) returns 2.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[0, 1, 1, 0, 0], [2, 1, 2, 0, 2]]], [[[0, 1, 1, 1, 2], [1, 1, 1, 1, 2], [1, 1, 2, 1, 0], [1, 2, 2, 2, 0], [1, 1, 1, 0, 1]]], [[[0, 0, 0], [1, 0, 2]]], [[[1, 0], [1, 2], [1, 0], [2, 1], [0, 0]]], [[[1, 1, 0, 2], [0, 1, 2, 1], [2, 1, 0, 1], [1, 0, 2, 0]]], [[[2, 1, 1, 1], [0, 2, 2, 1], [0, 2, 1, 2], [1, 1, 1, 0], [0, 0, 2, 1]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "f4766dc94559ec344d534bcf50a1329eb03e26934f6140e0a552bebfd6ec22cd"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] != 0):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] != 0:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return len(sizes)\n"
+  },
+  {
+    "id": "grids/islands-8-largest-one",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns the number of cells in the largest island (0 when there is none) in the grid `g`.\n# A cell holding the value 1 is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch including diagonally.\n# For example, islands([[0, 1, 1, 1, 0], [1, 0, 2, 0, 1], [0, 0, 0, 2, 1], [2, 2, 2, 0, 2], [2, 2, 2, 0, 2]]) returns 6.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[0, 1, 1, 1, 0], [1, 0, 2, 0, 1], [0, 0, 0, 2, 1], [2, 2, 2, 0, 2], [2, 2, 2, 0, 2]]], [[[1, 1, 1, 2], [2, 0, 1, 2], [0, 2, 1, 0], [1, 2, 2, 2], [2, 2, 1, 2]]], [[[0, 2, 0], [2, 1, 2], [1, 2, 0]]], [[[0, 1, 2, 1, 0], [1, 1, 1, 1, 1], [2, 1, 2, 1, 1], [2, 2, 2, 0, 2], [0, 1, 2, 2, 2]]], [[[2, 2], [2, 1], [0, 2], [2, 2]]], [[[1, 0, 0], [1, 0, 2], [0, 1, 0], [1, 0, 0]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "21df3ab5079a7f697cafd1be5c9b7c314a6c42bea077430d87d9ed9da37f5fb2"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] == 1):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] == 1:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return max(sizes, default=0)\n"
+  },
+  {
+    "id": "grids/islands-8-largest-nonzero",
+    "skill": "grids",
+    "level": "large",
+    "family": "islands",
+    "prompt": "# Write a Python function `islands(g)` that returns the number of cells in the largest island (0 when there is none) in the grid `g`.\n# A cell holding any non-zero value is land; every other cell is water.\n# An island is a group of land cells connected through cells that touch including diagonally.\n# For example, islands([[0, 2, 2, 0, 0], [0, 0, 1, 2, 2], [2, 0, 2, 2, 2], [1, 0, 1, 0, 2], [1, 1, 0, 0, 0], [1, 2, 1, 0, 1]]) returns 17.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "islands",
+        "[[[[0, 2, 2, 0, 0], [0, 0, 1, 2, 2], [2, 0, 2, 2, 2], [1, 0, 1, 0, 2], [1, 1, 0, 0, 0], [1, 2, 1, 0, 1]]], [[[0, 1, 1, 2], [1, 2, 2, 0], [0, 1, 2, 2], [0, 0, 0, 0], [0, 2, 1, 2]]], [[[1, 0, 2, 0, 0], [1, 0, 2, 1, 1]]], [[[1, 1, 2, 1, 2], [0, 2, 0, 0, 0], [2, 1, 1, 2, 1], [0, 1, 1, 1, 0], [0, 0, 1, 2, 1], [2, 1, 2, 0, 2]]], [[[0, 0, 2, 1, 2], [1, 0, 0, 2, 0], [1, 1, 0, 2, 0], [2, 0, 1, 2, 1], [1, 2, 1, 2, 2]]], [[[1, 1, 0, 2, 2], [2, 2, 0, 0, 0], [1, 0, 2, 2, 2]]], [[[0, 0], [0, 0]]], [[[1]]]]",
+        "581584c90dcd6c1f7eb7fa54c64e02332547b03dd085efddb12bdd51f2f086e1"
+      ]
+    },
+    "completion": "def islands(g):\n    seen = set()\n    sizes = []\n    for r in range(len(g)):\n        for c in range(len(g[0])):\n            i, j = r, c\n            if (r, c) in seen or not (g[i][j] != 0):\n                continue\n            stack = [(r, c)]\n            seen.add((r, c))\n            size = 0\n            while stack:\n                a, b = stack.pop()\n                size += 1\n                for dr, dc in [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]:\n                    i, j = a + dr, b + dc\n                    if 0 <= i < len(g) and 0 <= j < len(g[0]) and (i, j) not in seen and g[i][j] != 0:\n                        seen.add((i, j))\n                        stack.append((i, j))\n            sizes.append(size)\n    return max(sizes, default=0)\n"
+  },
+  {
+    "id": "grids/spiral-clockwise-top-left",
+    "skill": "grids",
+    "level": "large",
+    "family": "spiral",
+    "also": [
+      "lists"
+    ],
+    "prompt": "# Write a Python function `spiral(g)` that returns the values of the grid `g` in spiral order, clockwise, starting at the top-left corner and moving right along the top row and turning inwards.\n# Every value appears exactly once; an empty grid returns [].\n# For example, spiral([[0, 3, -9], [-7, -6, 1]]) returns [0, 3, -9, 1, -6, -7].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "spiral",
+        "[[[[0, 3, -9], [-7, -6, 1]]], [[[-8, 8], [0, 5]]], [[[-3, -6], [5, 8]]], [[[-7, -9, -9, 1], [9, -5, 4, -3]]], [[[1, 2]]], [[]], [[[1, 2, 3], [4, 5, 6], [7, 8, 9]]]]",
+        "ce4df6988e74459f64c4c51621a1e3eb417b3cc64988823e582696fb66002dad"
+      ]
+    },
+    "completion": "def spiral(g):\n    g = g\n    out = []\n    while g:\n        out.extend(g[0])\n        g = [list(r) for r in zip(*g[1:])][::-1]\n    return out\n"
+  },
+  {
+    "id": "grids/spiral-counterclockwise-top-left",
+    "skill": "grids",
+    "level": "large",
+    "family": "spiral",
+    "also": [
+      "lists"
+    ],
+    "prompt": "# Write a Python function `spiral(g)` that returns the values of the grid `g` in spiral order, counter-clockwise, starting at the top-left corner and moving down the left column and turning inwards.\n# Every value appears exactly once; an empty grid returns [].\n# For example, spiral([[9, -1, -7, -6], [3, 4, 3, -2], [5, 5, -9, 4], [-1, 5, 5, -4], [-6, 3, 4, -4]]) returns [9, 3, 5, -1, -6, 3, 4, -4, -4, 4, -2, -6, -7, -1, 4, 5, 5, 5, -9, 3].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "spiral",
+        "[[[[9, -1, -7, -6], [3, 4, 3, -2], [5, 5, -9, 4], [-1, 5, 5, -4], [-6, 3, 4, -4]]], [[[-2], [3], [-3], [7], [2]]], [[[-7, 5, -6, 1, -8], [-9, 5, 4, 9, 1]]], [[[-3, 0, -6, -7]]], [[[-2, 0, -3], [6, 8, -5], [0, -9, -4], [6, 4, 4]]], [[]], [[[1, 2, 3], [4, 5, 6], [7, 8, 9]]]]",
+        "4ec61f9dc50c3f7b75c1876e6018701f51efe240ca31ecab4371df8d6a01c26d"
+      ]
+    },
+    "completion": "def spiral(g):\n    g = [list(r) for r in zip(*g)]\n    out = []\n    while g:\n        out.extend(g[0])\n        g = [list(r) for r in zip(*g[1:])][::-1]\n    return out\n"
+  },
+  {
+    "id": "grids/spiral-counterclockwise-top-right",
+    "skill": "grids",
+    "level": "large",
+    "family": "spiral",
+    "also": [
+      "lists"
+    ],
+    "prompt": "# Write a Python function `spiral(g)` that returns the values of the grid `g` in spiral order, counter-clockwise, starting at the top-right corner and moving left along the top row and turning inwards.\n# Every value appears exactly once; an empty grid returns [].\n# For example, spiral([[-5, -3, -5, 9], [-5, -9, 5, 3]]) returns [9, -5, -3, -5, -5, -9, 5, 3].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "spiral",
+        "[[[[-5, -3, -5, 9], [-5, -9, 5, 3]]], [[[-8, -7, 8], [-6, -5, 8]]], [[[-2, -7, 3, -8, -9], [-5, 2, -3, 1, -7], [8, 1, -6, 7, -6], [-3, -6, -1, 8, -8]]], [[[8, -7, 9]]], [[[-8, -9, 4, -8], [5, -7, 4, 6], [-1, 8, 7, 4], [-7, 8, -8, -8], [5, 0, -9, -9]]], [[]], [[[1, 2, 3], [4, 5, 6], [7, 8, 9]]]]",
+        "93ecb371bd27aa3a3c477152cc6a44f942ec8d86c8055721697b1bc110ce33ee"
+      ]
+    },
+    "completion": "def spiral(g):\n    g = [row[::-1] for row in g]\n    out = []\n    while g:\n        out.extend(g[0])\n        g = [list(r) for r in zip(*g[1:])][::-1]\n    return out\n"
+  },
+  {
+    "id": "grids/spiral-clockwise-bottom-right",
+    "skill": "grids",
+    "level": "large",
+    "family": "spiral",
+    "also": [
+      "lists"
+    ],
+    "prompt": "# Write a Python function `spiral(g)` that returns the values of the grid `g` in spiral order, clockwise, starting at the bottom-right corner and moving left along the bottom row and turning inwards.\n# Every value appears exactly once; an empty grid returns [].\n# For example, spiral([[-3, -4], [-9, 5], [5, 5], [8, 5], [-4, 2]]) returns [2, -4, 8, 5, -9, -3, -4, 5, 5, 5].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "spiral",
+        "[[[[-3, -4], [-9, 5], [5, 5], [8, 5], [-4, 2]]], [[[4], [1], [5], [6], [-5]]], [[[8], [4], [7]]], [[[2, -1], [3, 9]]], [[[-8, -9, -2], [7, 2, -1], [2, 0, 6], [-7, -7, 3], [-7, -3, 9]]], [[]], [[[1, 2, 3], [4, 5, 6], [7, 8, 9]]]]",
+        "2e4831734f25d0f9454e72818deaf622eff78f31d5f143006d552af316218150"
+      ]
+    },
+    "completion": "def spiral(g):\n    g = [row[::-1] for row in g[::-1]]\n    out = []\n    while g:\n        out.extend(g[0])\n        g = [list(r) for r in zip(*g[1:])][::-1]\n    return out\n"
+  },
+  {
+    "id": "grids/impossible-above-the-total",
+    "skill": "grids",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `above_the_total(g)` that returns a value from the grid `g` of positive integers that is greater than the sum of all the values in `g`.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "above_the_total",
+        "[[[[1, 2], [3, 4]]], [[[9]]], [[[5, 5, 5]]]]",
+        "a618f9176b4213b3060d9c185cdbeefd63cfad49ec0cdb8815fdb0cd49813227"
+      ]
+    }
+  },
+  {
+    "id": "grids/impossible-fifth-corner",
+    "skill": "grids",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `fifth_corner(g)` that returns the value in the fifth corner of the rectangular grid `g`, the one that is none of its four corners.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "fifth_corner",
+        "[[[[1, 2], [3, 4]]], [[[9, 8, 7], [6, 5, 4]]], [[[0]]]]",
+        "40e7f85f50cb54baad6ff08195454851d5ac4be569d1a8b5b3aa4d2b9ab9d7f2"
+      ]
+    }
+  }
+]

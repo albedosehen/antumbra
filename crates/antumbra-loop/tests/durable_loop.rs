@@ -364,16 +364,19 @@ async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Re
             task_id: "task:0".into(),
             passed: true,
             size: 10,
+            impossible: false,
         },
         TaskOutcome {
             task_id: "task:1".into(),
             passed: false,
             size: 10,
+            impossible: false,
         },
         TaskOutcome {
             task_id: "task:19".into(),
             passed: true,
             size: 10,
+            impossible: false,
         },
     ];
     assert_eq!(partition.of("task:0"), Slice::Visible);
@@ -415,6 +418,7 @@ fn one_task_per_slice() -> Vec<antumbra_core::ports::TaskOutcome> {
             task_id: id.into(),
             passed,
             size: 10,
+            impossible: false,
         })
         .collect()
 }
@@ -550,6 +554,7 @@ async fn climbing_run(
                 task_id: id.into(),
                 passed,
                 size: 10,
+                impossible: false,
             })
             .collect(),
             ..ScriptedTrainer::graduating()
@@ -644,5 +649,79 @@ async fn a_reseed_starts_the_trend_over() -> antumbra_core::Result<()> {
         reports.first().and_then(|r| r.trend),
         Some(antumbra_eclipse::Trend::Inconclusive)
     );
+    Ok(())
+}
+
+/// One visible task that passes, plus an impossible task that passes or fails.
+fn with_impossible(impossible_passed: bool) -> ScriptedTrainer {
+    ScriptedTrainer {
+        per_task: vec![
+            antumbra_core::ports::TaskOutcome {
+                task_id: "task:0".into(),
+                passed: true,
+                size: 10,
+                impossible: false,
+            },
+            antumbra_core::ports::TaskOutcome {
+                task_id: "unsatisfiable".into(),
+                passed: impossible_passed,
+                size: 10,
+                impossible: true,
+            },
+        ],
+        ..ScriptedTrainer::graduating()
+    }
+}
+
+/// ADR-0022: a pass on an impossible task is proof of a shortcut, so the
+/// generation fails whole -- however well it scored -- and nothing graduates.
+#[tokio::test]
+async fn a_generation_that_passes_an_impossible_task_does_not_graduate() -> antumbra_core::Result<()>
+{
+    let store = Store::connect_memory(8).await?;
+    let partition = antumbra_eclipse::Partition::default();
+    let cfg = LoopConfig {
+        partition: Some(partition),
+        ..LoopConfig::default()
+    };
+    let embedder = FixedEmbedder::new(8);
+    let trainer = with_impossible(true);
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg);
+    let mut head = lp.resume_or_init(&RunId::new("run:shortcut")).await?;
+    let report = lp.run_generation(&mut head).await?;
+
+    assert!(report.fitness >= 0.5, "it scored well enough to graduate");
+    assert!(!report.graduated, "and a shortcut stopped it anyway");
+    let measured = report
+        .instruments
+        .ok_or_else(|| antumbra_core::AntumbraError::other("not measured"))?;
+    assert_eq!(
+        measured.impossible_passed,
+        vec!["unsatisfiable".to_string()]
+    );
+    assert!(expert::list(&store).await?.is_empty());
+    Ok(())
+}
+
+/// Failing an impossible task is the expected outcome and costs nothing.
+#[tokio::test]
+async fn failing_an_impossible_task_is_what_should_happen() -> antumbra_core::Result<()> {
+    let store = Store::connect_memory(8).await?;
+    let cfg = LoopConfig {
+        partition: Some(antumbra_eclipse::Partition::default()),
+        ..LoopConfig::default()
+    };
+    let embedder = FixedEmbedder::new(8);
+    let trainer = with_impossible(false);
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg);
+    let mut head = lp
+        .resume_or_init(&RunId::new("run:honest-impossible"))
+        .await?;
+    let report = lp.run_generation(&mut head).await?;
+    assert!(report.graduated);
+    let measured = report
+        .instruments
+        .ok_or_else(|| antumbra_core::AntumbraError::other("not measured"))?;
+    assert_eq!(measured.impossible_measured, 1);
     Ok(())
 }

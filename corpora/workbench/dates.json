@@ -1,0 +1,760 @@
+[
+  {
+    "id": "dates/weekday-ymd-name",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(y, m, d)` that returns, for the date with year `y`, month `m` and day `d`, the English name of its day of the week, such as 'Monday'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[2036, 12, 23], [1986, 12, 29], [1982, 8, 28], [1992, 12, 20], [1988, 6, 28], [1993, 1, 18], [2000, 2, 29]]",
+        "2c018f2ee6779a3e73fb084f87261006e1d59661ec4449413a42b327696f27d9"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(y, m, d):\n    d = datetime.date(y, m, d)\n    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d.weekday()]\n"
+  },
+  {
+    "id": "dates/weekday-ymd-short",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(y, m, d)` that returns, for the date with year `y`, month `m` and day `d`, the first three letters of its day of the week, such as 'Mon'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[1957, 12, 2], [2058, 4, 15], [2053, 6, 9], [2014, 3, 3], [2049, 7, 7], [1973, 6, 9], [2000, 2, 29]]",
+        "c36b5aca7e9401e156c39198862d5b2cbeb7342114a887edf1a667ea089abd28"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(y, m, d):\n    d = datetime.date(y, m, d)\n    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d.weekday()][:3]\n"
+  },
+  {
+    "id": "dates/weekday-ymd-monday-zero",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(y, m, d)` that returns, for the date with year `y`, month `m` and day `d`, its day of the week as a number, Monday being 0 and Sunday 6.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[1963, 9, 11], [1999, 10, 23], [2022, 4, 23], [2055, 9, 24], [1952, 11, 8], [1999, 1, 28], [2000, 2, 29]]",
+        "fe6010df0385591c07e6f0d16929dc2ba0e3d799cf6c798aff8921f7fd7928e1"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(y, m, d):\n    d = datetime.date(y, m, d)\n    return d.weekday()\n"
+  },
+  {
+    "id": "dates/weekday-ymd-iso",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(y, m, d)` that returns, for the date with year `y`, month `m` and day `d`, its ISO day of the week, Monday being 1 and Sunday 7.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[1988, 7, 11], [2037, 7, 13], [1978, 1, 24], [2016, 9, 25], [2055, 3, 13], [2001, 9, 9], [2000, 2, 29]]",
+        "80aab1137be93eff0100953c116fc6a26251dc699bbce205501b4cedc484975f"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(y, m, d):\n    d = datetime.date(y, m, d)\n    return d.isoweekday()\n"
+  },
+  {
+    "id": "dates/weekday-iso-name",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(s)` that returns, for the date `s`, written as YYYY-MM-DD, the English name of its day of the week, such as 'Monday'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[\"1982-04-06\"], [\"1960-02-02\"], [\"2056-05-30\"], [\"2020-01-09\"], [\"1999-04-27\"], [\"2020-04-11\"], [\"2000-02-29\"]]",
+        "a4fab68561b4e12fdd69961d2640b6cd02423b85e43c327f7365ef7342e02ef7"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(s):\n    d = datetime.date.fromisoformat(s)\n    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d.weekday()]\n"
+  },
+  {
+    "id": "dates/weekday-iso-short",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(s)` that returns, for the date `s`, written as YYYY-MM-DD, the first three letters of its day of the week, such as 'Mon'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[\"2017-07-10\"], [\"2042-05-22\"], [\"2036-04-01\"], [\"1956-03-08\"], [\"2060-10-01\"], [\"2011-04-05\"], [\"2000-02-29\"]]",
+        "82a55a7959aebbfcd2c56770c3311fed8c4d007f758fbf38e074538a894540ab"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(s):\n    d = datetime.date.fromisoformat(s)\n    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d.weekday()][:3]\n"
+  },
+  {
+    "id": "dates/weekday-iso-monday-zero",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(s)` that returns, for the date `s`, written as YYYY-MM-DD, its day of the week as a number, Monday being 0 and Sunday 6.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[\"2043-11-08\"], [\"2007-02-14\"], [\"1999-08-26\"], [\"2035-08-06\"], [\"1969-12-12\"], [\"2014-10-15\"], [\"2000-02-29\"]]",
+        "3503db57674dd3df7eaa9ac09b5b6fa3c06a5363549fa476ce0cf1f7f2ed782f"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(s):\n    d = datetime.date.fromisoformat(s)\n    return d.weekday()\n"
+  },
+  {
+    "id": "dates/weekday-iso-iso",
+    "skill": "dates",
+    "level": "small",
+    "family": "weekday",
+    "prompt": "# Write a Python function `weekday(s)` that returns, for the date `s`, written as YYYY-MM-DD, its ISO day of the week, Monday being 1 and Sunday 7.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weekday",
+        "[[\"1985-08-15\"], [\"2026-08-22\"], [\"2056-09-21\"], [\"2023-11-25\"], [\"2049-04-18\"], [\"1975-06-23\"], [\"2000-02-29\"]]",
+        "d02b4135dda8b4fbc9cbc2b8acbcc981d430cc27bd3f49ad61ce0f7d3e0f1254"
+      ]
+    },
+    "completion": "import datetime\ndef weekday(s):\n    d = datetime.date.fromisoformat(s)\n    return d.isoweekday()\n"
+  },
+  {
+    "id": "dates/iso-week",
+    "skill": "dates",
+    "level": "small",
+    "family": "calendar-position",
+    "prompt": "# Write a Python function `calendar_position(s)` that returns, for the date `s` written as YYYY-MM-DD, its ISO 8601 week number, from 1 to 53.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "calendar_position",
+        "[[\"2007-08-18\"], [\"1992-01-19\"], [\"2055-09-06\"], [\"1951-03-23\"], [\"2033-07-16\"], [\"2021-01-01\"], [\"2024-12-30\"], [\"2024-12-31\"]]",
+        "2d8ad6197b8ab73e298301be32ccbb81c00c65ed275b0bd46aa8fa539c3f481f"
+      ]
+    },
+    "completion": "import datetime\ndef calendar_position(s):\n    d = datetime.date.fromisoformat(s)\n    return d.isocalendar()[1]\n"
+  },
+  {
+    "id": "dates/iso-week-string",
+    "skill": "dates",
+    "level": "small",
+    "family": "calendar-position",
+    "prompt": "# Write a Python function `calendar_position(s)` that returns, for the date `s` written as YYYY-MM-DD, its ISO 8601 week written as YYYY-Www, such as '2024-W05', using the ISO week-numbering year.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "calendar_position",
+        "[[\"2016-02-06\"], [\"1958-10-30\"], [\"2057-04-08\"], [\"2045-05-21\"], [\"1952-02-25\"], [\"2021-01-01\"], [\"2024-12-30\"], [\"2024-12-31\"]]",
+        "1b563a05c8d68039588a575376cda2a950aabc5d4d16eb3bd8421c42c6781b6d"
+      ]
+    },
+    "completion": "import datetime\ndef calendar_position(s):\n    d = datetime.date.fromisoformat(s)\n    return f'{d.isocalendar()[0]}-W{d.isocalendar()[1]:02d}'\n"
+  },
+  {
+    "id": "dates/day-of-year",
+    "skill": "dates",
+    "level": "small",
+    "family": "calendar-position",
+    "prompt": "# Write a Python function `calendar_position(s)` that returns, for the date `s` written as YYYY-MM-DD, its day of the year, 1 for 1 January.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "calendar_position",
+        "[[\"2050-11-07\"], [\"2040-08-30\"], [\"2054-03-08\"], [\"1991-01-14\"], [\"2022-04-09\"], [\"2021-01-01\"], [\"2024-12-30\"], [\"2024-12-31\"]]",
+        "46c87f07b1b61700df3894be5545f93611611cdbb5652913ac904f3597efd314"
+      ]
+    },
+    "completion": "import datetime\ndef calendar_position(s):\n    d = datetime.date.fromisoformat(s)\n    return d.timetuple().tm_yday\n"
+  },
+  {
+    "id": "dates/quarter",
+    "skill": "dates",
+    "level": "small",
+    "family": "calendar-position",
+    "prompt": "# Write a Python function `calendar_position(s)` that returns, for the date `s` written as YYYY-MM-DD, its quarter of the year, 1 for January to March through 4 for October to December.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "calendar_position",
+        "[[\"2008-10-15\"], [\"1951-01-12\"], [\"2005-01-21\"], [\"1982-08-27\"], [\"2031-04-22\"], [\"2021-01-01\"], [\"2024-12-30\"], [\"2024-12-31\"]]",
+        "748838b6d37b44e828c2983e2af526e0cb234bf61ce75ff70e4c07eced741d84"
+      ]
+    },
+    "completion": "import datetime\ndef calendar_position(s):\n    d = datetime.date.fromisoformat(s)\n    return (d.month - 1) // 3 + 1\n"
+  },
+  {
+    "id": "dates/weeks-between-iso-abs",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `weeks_between(a, b)` that returns how many whole weeks lie between the dates `a` and `b`: the number of days between them, ignoring which comes first, divided by 7 and rounded down.\n# Both dates are written as YYYY-MM-DD.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weeks_between",
+        "[[\"2034-03-31\", \"1997-03-28\"], [\"2041-08-06\", \"2013-02-01\"], [\"1999-05-17\", \"2009-04-09\"], [\"1983-04-29\", \"1953-08-10\"], [\"2053-06-30\", \"1951-04-12\"], [\"2024-02-28\", \"2024-03-01\"], [\"2034-03-31\", \"2034-03-31\"]]",
+        "e49a7d7f9a4550d1ed917b0be490fdebbb22df97418066b01510af9113401757"
+      ]
+    },
+    "completion": "import datetime\ndef weeks_between(a, b):\n    a = datetime.datetime.strptime(a, '%Y-%m-%d').date()\n    b = datetime.datetime.strptime(b, '%Y-%m-%d').date()\n    days = (b - a).days\n    return abs(days) // 7\n"
+  },
+  {
+    "id": "dates/days-between-iso-abs",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `days_between(a, b)` that returns how many days apart the dates `a` and `b` are, as a non-negative number.\n# Both dates are written as YYYY-MM-DD.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "days_between",
+        "[[\"2034-03-31\", \"1997-03-28\"], [\"2041-08-06\", \"2013-02-01\"], [\"1999-05-17\", \"2009-04-09\"], [\"1983-04-29\", \"1953-08-10\"], [\"2053-06-30\", \"1951-04-12\"], [\"2024-02-28\", \"2024-03-01\"], [\"2034-03-31\", \"2034-03-31\"]]",
+        "91029e65403bf0a1f6782e480b99876cd6d223ecbdeab351ae41dd896ec9c993"
+      ]
+    },
+    "completion": "import datetime\ndef days_between(a, b):\n    a = datetime.datetime.strptime(a, '%Y-%m-%d').date()\n    b = datetime.datetime.strptime(b, '%Y-%m-%d').date()\n    return abs((b - a).days)\n"
+  },
+  {
+    "id": "dates/weeks-between-iso-signed",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `weeks_between(a, b)` that returns the number of whole weeks from date `a` to date `b`: the signed number of days from `a` to `b` divided by 7, rounded towards zero.\n# Both dates are written as YYYY-MM-DD.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weeks_between",
+        "[[\"1997-10-06\", \"1992-01-25\"], [\"2005-08-09\", \"1996-05-25\"], [\"2041-04-07\", \"2060-12-30\"], [\"1952-04-06\", \"2047-07-20\"], [\"2003-02-08\", \"2033-09-03\"], [\"2024-02-28\", \"2024-03-01\"], [\"1997-10-06\", \"1997-10-06\"]]",
+        "f05a66fd908027dd2afc5ddcccdf1f939ca33c150424475879c223bcd8401304"
+      ]
+    },
+    "completion": "import datetime\ndef weeks_between(a, b):\n    a = datetime.datetime.strptime(a, '%Y-%m-%d').date()\n    b = datetime.datetime.strptime(b, '%Y-%m-%d').date()\n    days = (b - a).days\n    return int(days / 7)\n"
+  },
+  {
+    "id": "dates/days-between-iso-signed",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `days_between(a, b)` that returns the number of days from date `a` to date `b`, negative when `b` is before `a`.\n# Both dates are written as YYYY-MM-DD.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "days_between",
+        "[[\"1997-10-06\", \"1992-01-25\"], [\"2005-08-09\", \"1996-05-25\"], [\"2041-04-07\", \"2060-12-30\"], [\"1952-04-06\", \"2047-07-20\"], [\"2003-02-08\", \"2033-09-03\"], [\"2024-02-28\", \"2024-03-01\"], [\"1997-10-06\", \"1997-10-06\"]]",
+        "cb0f630047757acc55fdaaf04c07afc8641b1f6b53ee439a645dd78c4b12d274"
+      ]
+    },
+    "completion": "import datetime\ndef days_between(a, b):\n    a = datetime.datetime.strptime(a, '%Y-%m-%d').date()\n    b = datetime.datetime.strptime(b, '%Y-%m-%d').date()\n    return (b - a).days\n"
+  },
+  {
+    "id": "dates/weeks-between-dmy-abs",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `weeks_between(a, b)` that returns how many whole weeks lie between the dates `a` and `b`: the number of days between them, ignoring which comes first, divided by 7 and rounded down.\n# Both dates are written as DD/MM/YYYY.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weeks_between",
+        "[[\"04/02/2055\", \"22/02/2027\"], [\"16/01/2045\", \"08/06/2056\"], [\"10/02/1955\", \"06/10/2041\"], [\"12/01/2027\", \"03/03/1994\"], [\"11/12/2021\", \"10/02/2009\"], [\"28/02/2024\", \"01/03/2024\"], [\"04/02/2055\", \"04/02/2055\"]]",
+        "39dddbbec4e82a3c48ffcee65e3f2ef15c5780ace8a71471e3d381d9450cbc42"
+      ]
+    },
+    "completion": "import datetime\ndef weeks_between(a, b):\n    a = datetime.datetime.strptime(a, '%d/%m/%Y').date()\n    b = datetime.datetime.strptime(b, '%d/%m/%Y').date()\n    days = (b - a).days\n    return abs(days) // 7\n"
+  },
+  {
+    "id": "dates/days-between-dmy-abs",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `days_between(a, b)` that returns how many days apart the dates `a` and `b` are, as a non-negative number.\n# Both dates are written as DD/MM/YYYY.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "days_between",
+        "[[\"04/02/2055\", \"22/02/2027\"], [\"16/01/2045\", \"08/06/2056\"], [\"10/02/1955\", \"06/10/2041\"], [\"12/01/2027\", \"03/03/1994\"], [\"11/12/2021\", \"10/02/2009\"], [\"28/02/2024\", \"01/03/2024\"], [\"04/02/2055\", \"04/02/2055\"]]",
+        "de3a6f257a391bb8d791bfa944cd09bd6c841bcf7757c4d92776a166f764ff52"
+      ]
+    },
+    "completion": "import datetime\ndef days_between(a, b):\n    a = datetime.datetime.strptime(a, '%d/%m/%Y').date()\n    b = datetime.datetime.strptime(b, '%d/%m/%Y').date()\n    return abs((b - a).days)\n"
+  },
+  {
+    "id": "dates/weeks-between-dmy-signed",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `weeks_between(a, b)` that returns the number of whole weeks from date `a` to date `b`: the signed number of days from `a` to `b` divided by 7, rounded towards zero.\n# Both dates are written as DD/MM/YYYY.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "weeks_between",
+        "[[\"06/09/1969\", \"05/06/1964\"], [\"07/03/1992\", \"10/07/1989\"], [\"09/06/1953\", \"21/12/2043\"], [\"17/12/1984\", \"19/07/2020\"], [\"06/06/2033\", \"22/08/1996\"], [\"28/02/2024\", \"01/03/2024\"], [\"06/09/1969\", \"06/09/1969\"]]",
+        "715ba423e5ee86ffc027da210de695dec75b5778ce214f4c4e4f5d84178e1d22"
+      ]
+    },
+    "completion": "import datetime\ndef weeks_between(a, b):\n    a = datetime.datetime.strptime(a, '%d/%m/%Y').date()\n    b = datetime.datetime.strptime(b, '%d/%m/%Y').date()\n    days = (b - a).days\n    return int(days / 7)\n"
+  },
+  {
+    "id": "dates/days-between-dmy-signed",
+    "skill": "dates",
+    "level": "small",
+    "family": "days-between",
+    "prompt": "# Write a Python function `days_between(a, b)` that returns the number of days from date `a` to date `b`, negative when `b` is before `a`.\n# Both dates are written as DD/MM/YYYY.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "days_between",
+        "[[\"06/09/1969\", \"05/06/1964\"], [\"07/03/1992\", \"10/07/1989\"], [\"09/06/1953\", \"21/12/2043\"], [\"17/12/1984\", \"19/07/2020\"], [\"06/06/2033\", \"22/08/1996\"], [\"28/02/2024\", \"01/03/2024\"], [\"06/09/1969\", \"06/09/1969\"]]",
+        "65c3bc6add46577a8edc7f23f10e72490f1385b021b75f3601cc4b98846d7ffa"
+      ]
+    },
+    "completion": "import datetime\ndef days_between(a, b):\n    a = datetime.datetime.strptime(a, '%d/%m/%Y').date()\n    b = datetime.datetime.strptime(b, '%d/%m/%Y').date()\n    return (b - a).days\n"
+  },
+  {
+    "id": "dates/add-days-iso",
+    "skill": "dates",
+    "level": "medium",
+    "family": "add-days",
+    "prompt": "# Write a Python function `add_days(s, n)` that returns the date `n` days after the date `s`, written as YYYY-MM-DD.\n# `s` is written as YYYY-MM-DD; `n` may be negative or zero.\n# For example, add_days('2006-11-05', 329) returns '2007-09-30'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_days",
+        "[[\"2006-11-05\", 329], [\"1963-10-11\", -98], [\"1980-06-13\", 189], [\"2010-05-16\", 371], [\"1957-03-19\", 21], [\"2023-12-31\", 1], [\"2024-02-28\", 1], [\"2024-03-01\", 0]]",
+        "31deac7396f285ccb05de2f5fcfdcaceb181894520d549f9601c46432defffd6"
+      ]
+    },
+    "completion": "import datetime\ndef add_days(s, n):\n    d = datetime.date.fromisoformat(s) + datetime.timedelta(days=n * 1)\n    return d.strftime('%Y-%m-%d')\n"
+  },
+  {
+    "id": "dates/add-weeks-iso",
+    "skill": "dates",
+    "level": "medium",
+    "family": "add-days",
+    "prompt": "# Write a Python function `add_weeks(s, n)` that returns the date `n` weeks after the date `s`, written as YYYY-MM-DD.\n# `s` is written as YYYY-MM-DD; `n` may be negative or zero.\n# For example, add_weeks('2013-10-17', 45) returns '2014-08-28'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_weeks",
+        "[[\"2013-10-17\", 45], [\"1987-02-06\", -51], [\"1987-04-30\", 21], [\"2000-02-23\", 18], [\"1954-04-20\", -33], [\"2023-12-31\", 1], [\"2024-02-28\", 1], [\"2024-03-01\", 0]]",
+        "ab72bac8b3e129274aae358b256677f6c1905a00af50cdb6045e7b365f8c6e49"
+      ]
+    },
+    "completion": "import datetime\ndef add_weeks(s, n):\n    d = datetime.date.fromisoformat(s) + datetime.timedelta(days=n * 7)\n    return d.strftime('%Y-%m-%d')\n"
+  },
+  {
+    "id": "dates/add-days-dotted",
+    "skill": "dates",
+    "level": "medium",
+    "family": "add-days",
+    "prompt": "# Write a Python function `add_days(s, n)` that returns the date `n` days after the date `s`, written as DD.MM.YYYY.\n# `s` is written as YYYY-MM-DD; `n` may be negative or zero.\n# For example, add_days('2004-02-11', 140) returns '30.06.2004'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_days",
+        "[[\"2004-02-11\", 140], [\"1976-04-06\", 322], [\"2019-08-27\", -154], [\"1997-09-28\", 28], [\"1995-03-04\", 378], [\"2023-12-31\", 1], [\"2024-02-28\", 1], [\"2024-03-01\", 0]]",
+        "c1bb61c0ffafd17785a6a7c0ee21a8defad537e70daa942a9f400a63278aaaea"
+      ]
+    },
+    "completion": "import datetime\ndef add_days(s, n):\n    d = datetime.date.fromisoformat(s) + datetime.timedelta(days=n * 1)\n    return d.strftime('%d.%m.%Y')\n"
+  },
+  {
+    "id": "dates/add-weeks-dotted",
+    "skill": "dates",
+    "level": "medium",
+    "family": "add-days",
+    "prompt": "# Write a Python function `add_weeks(s, n)` that returns the date `n` weeks after the date `s`, written as DD.MM.YYYY.\n# `s` is written as YYYY-MM-DD; `n` may be negative or zero.\n# For example, add_weeks('2005-03-16', 17) returns '13.07.2005'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_weeks",
+        "[[\"2005-03-16\", 17], [\"2002-12-13\", 21], [\"1968-09-25\", 7], [\"2044-01-22\", 36], [\"1965-12-28\", -11], [\"2023-12-31\", 1], [\"2024-02-28\", 1], [\"2024-03-01\", 0]]",
+        "591f76bd6982c9f627a0ac19f9c1171575890400cdba055999aa590668d7f094"
+      ]
+    },
+    "completion": "import datetime\ndef add_weeks(s, n):\n    d = datetime.date.fromisoformat(s) + datetime.timedelta(days=n * 7)\n    return d.strftime('%d.%m.%Y')\n"
+  },
+  {
+    "id": "dates/add-days-us",
+    "skill": "dates",
+    "level": "medium",
+    "family": "add-days",
+    "prompt": "# Write a Python function `add_days(s, n)` that returns the date `n` days after the date `s`, written as MM/DD/YYYY.\n# `s` is written as YYYY-MM-DD; `n` may be negative or zero.\n# For example, add_days('1992-07-15', 0) returns '07/15/1992'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_days",
+        "[[\"1992-07-15\", 0], [\"2044-08-16\", 91], [\"2004-09-01\", -77], [\"2037-03-21\", -231], [\"1953-03-22\", -91], [\"2023-12-31\", 1], [\"2024-02-28\", 1], [\"2024-03-01\", 0]]",
+        "f5625453d520a4c588b147cceaaa959067e1837099fd9469bafd33333a3f6d0a"
+      ]
+    },
+    "completion": "import datetime\ndef add_days(s, n):\n    d = datetime.date.fromisoformat(s) + datetime.timedelta(days=n * 1)\n    return d.strftime('%m/%d/%Y')\n"
+  },
+  {
+    "id": "dates/add-weeks-us",
+    "skill": "dates",
+    "level": "medium",
+    "family": "add-days",
+    "prompt": "# Write a Python function `add_weeks(s, n)` that returns the date `n` weeks after the date `s`, written as MM/DD/YYYY.\n# `s` is written as YYYY-MM-DD; `n` may be negative or zero.\n# For example, add_weeks('2010-12-05', 5) returns '01/09/2011'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_weeks",
+        "[[\"2010-12-05\", 5], [\"2028-04-16\", -42], [\"2048-04-15\", -26], [\"1968-05-02\", -49], [\"2017-12-01\", -56], [\"2023-12-31\", 1], [\"2024-02-28\", 1], [\"2024-03-01\", 0]]",
+        "f96536f1e5d33925ef73295cd666899e98642dcff0d454d0843c645adab4ab36"
+      ]
+    },
+    "completion": "import datetime\ndef add_weeks(s, n):\n    d = datetime.date.fromisoformat(s) + datetime.timedelta(days=n * 7)\n    return d.strftime('%m/%d/%Y')\n"
+  },
+  {
+    "id": "dates/month-end-date",
+    "skill": "dates",
+    "level": "medium",
+    "family": "month-end",
+    "prompt": "# Write a Python function `month_end(y, m)` that returns, for month `m` (1 to 12) of year `y`, the date of the last day of that month, written as YYYY-MM-DD.\n# Leap years follow the Gregorian calendar.\n# For example, month_end(1956, 11) returns '1956-11-30'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "month_end",
+        "[[1956, 11], [2016, 10], [2057, 7], [2013, 9], [2050, 2], [2024, 2], [2023, 2], [1900, 2], [2000, 12]]",
+        "7f6db739d450dda03fbb114666fb9b6fb6480f9124f6a02512ce84060b34243b"
+      ]
+    },
+    "completion": "import datetime\ndef month_end(y, m):\n    first_of_next = datetime.date(y + m // 12, m % 12 + 1, 1)\n    last = first_of_next - datetime.timedelta(days=1)\n    return last.isoformat()\n"
+  },
+  {
+    "id": "dates/month-end-length",
+    "skill": "dates",
+    "level": "medium",
+    "family": "month-end",
+    "prompt": "# Write a Python function `month_end(y, m)` that returns, for month `m` (1 to 12) of year `y`, how many days that month has.\n# Leap years follow the Gregorian calendar.\n# For example, month_end(2023, 11) returns 30.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "month_end",
+        "[[2023, 11], [2015, 12], [1950, 3], [2010, 10], [2004, 8], [2024, 2], [2023, 2], [1900, 2], [2000, 12]]",
+        "71a51bfa85e6403cda78dbbe8605ecb61bd4862f1709e78374df4141578b3e47"
+      ]
+    },
+    "completion": "import datetime\ndef month_end(y, m):\n    first_of_next = datetime.date(y + m // 12, m % 12 + 1, 1)\n    last = first_of_next - datetime.timedelta(days=1)\n    return last.day\n"
+  },
+  {
+    "id": "dates/month-end-weekday",
+    "skill": "dates",
+    "level": "medium",
+    "family": "month-end",
+    "prompt": "# Write a Python function `month_end(y, m)` that returns, for month `m` (1 to 12) of year `y`, the English name of the day of the week its last day falls on.\n# Leap years follow the Gregorian calendar.\n# For example, month_end(2000, 2) returns 'Tuesday'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "month_end",
+        "[[2000, 2], [2049, 2], [1985, 3], [1971, 2], [1970, 1], [2024, 2], [2023, 2], [1900, 2], [2000, 12]]",
+        "7870dcf416af829bc745c103499f66190d346f0a19b1496617a63666d06e0902"
+      ]
+    },
+    "completion": "import datetime\ndef month_end(y, m):\n    first_of_next = datetime.date(y + m // 12, m % 12 + 1, 1)\n    last = first_of_next - datetime.timedelta(days=1)\n    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][last.weekday()]\n"
+  },
+  {
+    "id": "dates/month-end-first-weekday",
+    "skill": "dates",
+    "level": "medium",
+    "family": "month-end",
+    "prompt": "# Write a Python function `month_end(y, m)` that returns, for month `m` (1 to 12) of year `y`, the English name of the day of the week its first day falls on.\n# Leap years follow the Gregorian calendar.\n# For example, month_end(2005, 8) returns 'Monday'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "month_end",
+        "[[2005, 8], [1957, 11], [1995, 7], [1975, 6], [1952, 3], [2024, 2], [2023, 2], [1900, 2], [2000, 12]]",
+        "f5256887830bced7b2936b59b7ad8991ecce0302988a6355ecada8d665d32caf"
+      ]
+    },
+    "completion": "import datetime\ndef month_end(y, m):\n    first_of_next = datetime.date(y + m // 12, m % 12 + 1, 1)\n    last = first_of_next - datetime.timedelta(days=1)\n    return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][datetime.date(y, m, 1).weekday()]\n"
+  },
+  {
+    "id": "dates/month-end-weekend-days",
+    "skill": "dates",
+    "level": "medium",
+    "family": "month-end",
+    "prompt": "# Write a Python function `month_end(y, m)` that returns, for month `m` (1 to 12) of year `y`, how many of its days are Saturdays or Sundays.\n# Leap years follow the Gregorian calendar.\n# For example, month_end(1979, 5) returns 8.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "month_end",
+        "[[1979, 5], [2023, 1], [1976, 3], [1995, 3], [2031, 5], [2024, 2], [2023, 2], [1900, 2], [2000, 12]]",
+        "9b66e5a3f4049751ce7f4e91bca13b22658bb08693f8a2c7a637fb8786d74e1c"
+      ]
+    },
+    "completion": "import datetime\ndef month_end(y, m):\n    first_of_next = datetime.date(y + m // 12, m % 12 + 1, 1)\n    last = first_of_next - datetime.timedelta(days=1)\n    return sum(1 for k in range(1, last.day + 1) if datetime.date(y, m, k).weekday() >= 5)\n"
+  },
+  {
+    "id": "dates/business-days-sat-sun",
+    "skill": "dates",
+    "level": "large",
+    "family": "business-days",
+    "prompt": "# Write a Python function `add_business_days(s, n)` that returns the date reached by moving forward `n` business days from the date `s`, where the weekend is Saturday and Sunday.\n# Dates are written as YYYY-MM-DD. Step forward one day at a time and count only the days that are not weekend days, stopping when `n` have been counted.\n# `n` == 0 returns `s` itself even when it falls on a weekend; a negative `n` raises ValueError.\n# For example, add_business_days('2033-04-18', 16) returns '2033-05-10'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_business_days",
+        "[[\"2033-04-18\", 16], [\"2007-10-16\", 14], [\"2005-05-30\", 30], [\"2011-01-30\", 23], [\"2033-12-29\", 20], [\"2026-09-26\", 0], [\"2026-09-25\", 1], [\"2026-09-23\", -1]]",
+        "05bbee0defcae6e5a6f492d829a4cff53933ec26a153c05d767d75fa7b2029f3"
+      ]
+    },
+    "completion": "import datetime\ndef add_business_days(s, n):\n    if n < 0:\n        raise ValueError(n)\n    d = datetime.date.fromisoformat(s)\n    while n > 0:\n        d += datetime.timedelta(days=1)\n        if d.weekday() not in (5, 6):\n            n -= 1\n    return d.isoformat()\n"
+  },
+  {
+    "id": "dates/business-days-fri-sat",
+    "skill": "dates",
+    "level": "large",
+    "family": "business-days",
+    "prompt": "# Write a Python function `add_business_days(s, n)` that returns the date reached by moving forward `n` business days from the date `s`, where the weekend is Friday and Saturday.\n# Dates are written as YYYY-MM-DD. Step forward one day at a time and count only the days that are not weekend days, stopping when `n` have been counted.\n# `n` == 0 returns `s` itself even when it falls on a weekend; a negative `n` raises ValueError.\n# For example, add_business_days('2012-01-09', 1) returns '2012-01-10'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_business_days",
+        "[[\"2012-01-09\", 1], [\"2003-07-05\", 22], [\"2033-05-17\", 20], [\"2018-01-22\", 14], [\"2001-01-20\", 25], [\"2026-09-26\", 0], [\"2026-09-25\", 1], [\"2026-09-23\", -1]]",
+        "954c20beaf094df1502e33c532d519cd238780a282a6e97c76606f2b8fe265fb"
+      ]
+    },
+    "completion": "import datetime\ndef add_business_days(s, n):\n    if n < 0:\n        raise ValueError(n)\n    d = datetime.date.fromisoformat(s)\n    while n > 0:\n        d += datetime.timedelta(days=1)\n        if d.weekday() not in (4, 5):\n            n -= 1\n    return d.isoformat()\n"
+  },
+  {
+    "id": "dates/business-days-sun",
+    "skill": "dates",
+    "level": "large",
+    "family": "business-days",
+    "prompt": "# Write a Python function `add_business_days(s, n)` that returns the date reached by moving forward `n` business days from the date `s`, where the weekend is Sunday.\n# Dates are written as YYYY-MM-DD. Step forward one day at a time and count only the days that are not weekend days, stopping when `n` have been counted.\n# `n` == 0 returns `s` itself even when it falls on a weekend; a negative `n` raises ValueError.\n# For example, add_business_days('2008-09-27', 5) returns '2008-10-03'.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "add_business_days",
+        "[[\"2008-09-27\", 5], [\"2018-01-09\", 1], [\"2014-05-07\", 20], [\"2001-01-26\", 15], [\"2000-10-12\", 12], [\"2026-09-26\", 0], [\"2026-09-25\", 1], [\"2026-09-23\", -1]]",
+        "21757a5d2a99baa71b0535443f612442669c24226d7f645aa84be78dfbbfac16"
+      ]
+    },
+    "completion": "import datetime\ndef add_business_days(s, n):\n    if n < 0:\n        raise ValueError(n)\n    d = datetime.date.fromisoformat(s)\n    while n > 0:\n        d += datetime.timedelta(days=1)\n        if d.weekday() not in (6,):\n            n -= 1\n    return d.isoformat()\n"
+  },
+  {
+    "id": "dates/age-on-march",
+    "skill": "dates",
+    "level": "large",
+    "family": "age-on",
+    "prompt": "# Write a Python function `age_on(birth, on)` that returns the age in whole years, on the date `on`, of someone born on the date `birth`.\n# Both dates are written as YYYY-MM-DD. The age goes up by one on each birthday.\n# Someone born on 29 February has their birthday on 1 March in years that are not leap years.\n# `on` earlier than `birth` raises ValueError.\n# For example, age_on('1986-07-12', '2008-08-05') returns 22.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "age_on",
+        "[[\"1986-07-12\", \"2008-08-05\"], [\"1982-02-02\", \"2033-05-09\"], [\"1940-05-06\", \"2047-10-15\"], [\"1990-01-16\", \"2014-08-29\"], [\"2000-02-29\", \"2023-02-28\"], [\"2000-02-29\", \"2023-03-01\"], [\"1990-06-15\", \"1990-06-15\"], [\"2010-01-01\", \"2009-12-31\"]]",
+        "87ed5fb8f57cdcd048a8831908aacbcb92570d46b50d44e63bee3495635c090a"
+      ]
+    },
+    "completion": "import datetime\ndef age_on(birth, on):\n    b = datetime.date.fromisoformat(birth)\n    d = datetime.date.fromisoformat(on)\n    if d < b:\n        raise ValueError('before birth')\n    years = d.year - b.year\n    try:\n        birthday = b.replace(year=d.year)\n    except ValueError:\n        birthday = datetime.date(d.year, 3, 1)\n    if d < birthday:\n        years -= 1\n    return years\n"
+  },
+  {
+    "id": "dates/age-on-february",
+    "skill": "dates",
+    "level": "large",
+    "family": "age-on",
+    "prompt": "# Write a Python function `age_on(birth, on)` that returns the age in whole years, on the date `on`, of someone born on the date `birth`.\n# Both dates are written as YYYY-MM-DD. The age goes up by one on each birthday.\n# Someone born on 29 February has their birthday on 28 February in years that are not leap years.\n# `on` earlier than `birth` raises ValueError.\n# For example, age_on('1973-07-13', '2002-06-16') returns 28.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "age_on",
+        "[[\"1973-07-13\", \"2002-06-16\"], [\"1990-08-26\", \"2022-08-06\"], [\"1967-03-08\", \"2004-02-08\"], [\"1987-10-09\", \"2002-07-25\"], [\"2000-02-29\", \"2023-02-28\"], [\"2000-02-29\", \"2023-03-01\"], [\"1990-06-15\", \"1990-06-15\"], [\"2010-01-01\", \"2009-12-31\"]]",
+        "302daa70d9b40367df6584aa3e99f7f09a03e24324163849a99eeb87a66c9824"
+      ]
+    },
+    "completion": "import datetime\ndef age_on(birth, on):\n    b = datetime.date.fromisoformat(birth)\n    d = datetime.date.fromisoformat(on)\n    if d < b:\n        raise ValueError('before birth')\n    years = d.year - b.year\n    try:\n        birthday = b.replace(year=d.year)\n    except ValueError:\n        birthday = datetime.date(d.year, 2, 28)\n    if d < birthday:\n        years -= 1\n    return years\n"
+  },
+  {
+    "id": "dates/impossible-february-thirtieth",
+    "skill": "dates",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `february_thirtieth(y)` that returns the date of 30 February in the Gregorian year `y`, written as YYYY-MM-DD.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "february_thirtieth",
+        "[[2024], [2023], [1900]]",
+        "2f515349b6116f8118b7c60b382f764de19f7f41d88abaf6a5c9fa523ee98e61"
+      ]
+    }
+  },
+  {
+    "id": "dates/impossible-before-and-after",
+    "skill": "dates",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `before_and_after(s)` that returns a date, written as YYYY-MM-DD, that is both strictly before and strictly after the date `s`.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "before_and_after",
+        "[[\"2024-01-15\"], [\"1999-12-31\"], [\"2030-06-01\"]]",
+        "7e51910551784f111b73f1ff546b81fdd49c25786b69552a89d7e44204879bc5"
+      ]
+    }
+  }
+]

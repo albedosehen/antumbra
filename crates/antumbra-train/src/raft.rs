@@ -91,6 +91,7 @@ pub async fn raft_train(
                 // Prompt length as the size proxy: the corpus declares no size
                 // of its own, and the instruments only order by it.
                 size: task.prompt.chars().count() as u32,
+                impossible: task.impossible,
             });
         }
 
