@@ -320,6 +320,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("eval_subject_idx", ["subject_kind", "subject_id"])]),
+        // The recipe search (ADR-0022 S-1): one row per shadow's training
+        // recipe, read back by run in generation order.
+        table_schema("recipe")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("recipe_run_idx", ["run_id", "generation"])]),
         // A user's fabric: which of their machines an agent is running on, and
         // which one of them can train (ADR-0017). Keyed per (tenant, user, host),
         // so the user index is what dispatch looks their genesis node up by.

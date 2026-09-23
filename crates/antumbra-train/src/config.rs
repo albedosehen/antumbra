@@ -3,6 +3,8 @@
 
 use candle_core::DType;
 
+use antumbra_core::TrainingRecipe;
+
 /// Compute precision. Ampere (3090 Ti) does f16/bf16 well; Pascal (1080) is
 /// gimped at f16, so f32 is the fallback there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,13 +89,14 @@ pub struct RaftConfig {
     /// sets it `> 0` to rehearse already-consolidated skills and resist
     /// catastrophic interference (the complementary-learning-systems fix).
     pub replay_ratio: f64,
-    /// Accumulate gradients over the whole SFT batch and apply **one** optimizer
-    /// step (the mean gradient), instead of one step per example (batch-of-1
-    /// SGD). True mini-batch descent: the gradient is far less noisy, so a higher
+    /// Verified winners per optimizer step. `1` (the default, the validated
+    /// recipe) steps on each example in turn. `n > 1` steps on the mean loss of
+    /// `n` at a time: true mini-batch descent, far less noisy, so a higher
     /// learning rate is stable and the adapter no longer over-updates toward
-    /// whatever example it saw last ("Beware of the Batch Size"). `false` keeps
-    /// the per-example path. Off by default so the validated recipe is unchanged.
-    pub grad_accumulation: bool,
+    /// whatever example it saw last ("Beware of the Batch Size"). Each example
+    /// in a step keeps its forward graph until the backward, so memory grows
+    /// with `n`; 4 fits beside the frozen 1.5B base on a 24 GB card.
+    pub batch_size: usize,
 }
 
 impl Default for RaftConfig {
@@ -123,12 +126,33 @@ impl Default for RaftConfig {
             quantize_base: false,
             parent_adapter: None,
             replay_ratio: 0.0,
-            grad_accumulation: false,
+            batch_size: 1,
         }
     }
 }
 
 impl RaftConfig {
+    /// The searched part of this configuration (ADR-0022 S-1): what a run
+    /// trains under when its request names no recipe.
+    pub fn recipe(&self) -> TrainingRecipe {
+        TrainingRecipe {
+            learning_rate: self.learning_rate,
+            batch_size: u32::try_from(self.batch_size).unwrap_or(u32::MAX),
+            kl_beta: self.kl_beta,
+        }
+    }
+
+    /// This configuration with `recipe` in place of its searched part. Nothing
+    /// outside the recipe changes, rank least of all.
+    pub fn with_recipe(&self, recipe: &TrainingRecipe) -> Self {
+        Self {
+            learning_rate: recipe.learning_rate,
+            batch_size: recipe.batch_size as usize,
+            kl_beta: recipe.kl_beta,
+            ..self.clone()
+        }
+    }
+
     /// LoRA scaling factor `alpha / rank`. A rank-0 adapter (an empty or corrupt
     /// load) scales to `0.0` rather than `0/0 = NaN`, so a bad adapter contributes
     /// nothing instead of poisoning every logit with NaN.
@@ -183,7 +207,38 @@ mod tests {
         assert_eq!(cfg.top_p, 1.0);
         assert_eq!(cfg.repetition_penalty, 1.0);
         assert_eq!(cfg.no_repeat_ngram_size, 0);
-        assert!(!cfg.grad_accumulation);
+        assert_eq!(
+            cfg.batch_size, 1,
+            "one step per example is the validated recipe"
+        );
+    }
+
+    #[test]
+    fn a_recipe_replaces_only_the_searched_settings() {
+        let base = RaftConfig::default();
+        let recipe = TrainingRecipe {
+            learning_rate: 3e-4,
+            batch_size: 4,
+            kl_beta: 0.1,
+        };
+        let cfg = base.with_recipe(&recipe);
+        assert_eq!(cfg.recipe(), recipe);
+        assert_eq!(
+            (
+                cfg.lora_rank,
+                cfg.lora_alpha,
+                cfg.rounds,
+                cfg.samples_per_task
+            ),
+            (
+                base.lora_rank,
+                base.lora_alpha,
+                base.rounds,
+                base.samples_per_task
+            ),
+            "rank, alpha and the rest stay as configured"
+        );
+        assert_eq!(base.with_recipe(&base.recipe()).recipe(), base.recipe());
     }
 
     #[test]

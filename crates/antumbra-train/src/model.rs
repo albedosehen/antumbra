@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 
-use antumbra_core::Result;
+use antumbra_core::{Result, TrainingRecipe};
 
 /// A verifiable task drawn from the corpus (your repo): a prompt to complete,
 /// plus the per-task `verify` spec passed through to the verifier. For
@@ -140,7 +140,23 @@ pub trait CausalLm {
 #[async_trait]
 pub trait ModelLoader: Send + Sync {
     type Model: CausalLm + Send;
-    async fn load(&self, base_model: &str, parent_adapter: Option<&str>) -> Result<Self::Model>;
+
+    /// Build the model to train under `recipe`, or under the loader's own
+    /// configuration when `None`. Required, so every loader decides what a
+    /// recipe means for it: one that took a recipe and quietly trained under
+    /// something else would make the recipe echoed back to the loop a lie.
+    async fn load_trained(
+        &self,
+        base_model: &str,
+        parent_adapter: Option<&str>,
+        recipe: Option<&TrainingRecipe>,
+    ) -> Result<Self::Model>;
+
+    /// Build the model under the loader's own configuration: inference, and any
+    /// training that searches nothing.
+    async fn load(&self, base_model: &str, parent_adapter: Option<&str>) -> Result<Self::Model> {
+        self.load_trained(base_model, parent_adapter, None).await
+    }
 }
 
 /// Resolves corpus task ids (from a `TrainRequest`) to verifiable prompts.

@@ -13,7 +13,7 @@ use candle_nn::ops::log_softmax;
 use serde_json::json;
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{Result, RunId};
+use antumbra_core::{Result, RunId, TrainingRecipe};
 
 use crate::config::RaftConfig;
 use crate::model::CorpusTask;
@@ -115,7 +115,23 @@ pub trait GrpoLm {
 #[async_trait]
 pub trait GrpoModelLoader: Send + Sync {
     type Model: GrpoLm + Send;
-    async fn load(&self, base_model: &str, parent_adapter: Option<&str>) -> Result<Self::Model>;
+
+    /// Build the model to train under `recipe`, or under the loader's own
+    /// configuration when `None`. Required, so every loader decides what a
+    /// recipe means for it: one that took a recipe and quietly trained under
+    /// something else would make the recipe echoed back to the loop a lie.
+    async fn load_trained(
+        &self,
+        base_model: &str,
+        parent_adapter: Option<&str>,
+        recipe: Option<&TrainingRecipe>,
+    ) -> Result<Self::Model>;
+
+    /// Build the model under the loader's own configuration: inference, and any
+    /// training that searches nothing.
+    async fn load(&self, base_model: &str, parent_adapter: Option<&str>) -> Result<Self::Model> {
+        self.load_trained(base_model, parent_adapter, None).await
+    }
 }
 
 /// Run GRPO for `cfg.rounds` rounds (group size = `cfg.samples_per_task`) and
@@ -240,6 +256,7 @@ pub async fn grpo_train(
         per_task,
         boundary_findings: Vec::new(),
         holdout: None,
+        recipe: None,
     })
 }
 

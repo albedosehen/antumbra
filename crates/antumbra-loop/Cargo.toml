@@ -20,5 +20,6 @@ serde_json.workspace = true
 sha2 = "0.11"
 
 [dev-dependencies]
+async-trait.workspace = true
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

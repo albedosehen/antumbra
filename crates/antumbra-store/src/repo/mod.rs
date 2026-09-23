@@ -20,6 +20,7 @@ pub mod loop_control;
 pub mod magic_use;
 pub mod memory;
 pub mod principal;
+pub mod recipe;
 pub mod reward;
 pub mod router;
 pub mod shadow;

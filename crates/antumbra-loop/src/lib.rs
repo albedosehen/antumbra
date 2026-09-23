@@ -22,7 +22,7 @@ use antumbra_core::ports::{Embedder, TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::slice::Partition;
 use antumbra_core::{
     BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Grain,
-    Result, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind,
+    Result, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind, TrainingRecipe,
 };
 use antumbra_eclipse::instrument::GenerationReport as InstrumentReport;
 use antumbra_eclipse::{Trend, Watch};
@@ -32,7 +32,14 @@ use antumbra_store::repo::{
 use antumbra_store::Store;
 
 mod measure;
+mod recipe;
 use measure::Measurement;
+
+/// The shadow a generation of a run trains. It also names that generation's
+/// recipe row, so the two are found from each other.
+pub(crate) fn shadow_id(run_id: &RunId, generation: Generation) -> ShadowId {
+    ShadowId::new(format!("{run_id}:g{}", generation.0))
+}
 
 /// Confidence stamped on a correction-derived boundary. The context pair is
 /// ground-truth verified, so the scope is trustworthy -- but confidence tempers
@@ -77,6 +84,11 @@ pub struct LoopConfig {
     /// hold at least 5 multiples of 2 but only 3 of 3. A test holds the two
     /// dials together. Zero is read as one.
     pub audit_every: u32,
+    /// The recipe each generation's shadow trains under (ADR-0022 S-1).
+    /// `None` (the default) trains under the trainer's own settings, as every
+    /// run did before the recipe was searched. Either way the trainer reports
+    /// the recipe it used, and that is what the generation's recipe row holds.
+    pub recipe: Option<TrainingRecipe>,
     /// How the audit-slice trend is read across generations: the window, how
     /// many audited generations it needs, and the share of a search gain the
     /// audit slice must show for the gain to count as carried.
@@ -91,6 +103,7 @@ impl Default for LoopConfig {
             partition: None,
             audit_every: 2,
             watch: Watch::default(),
+            recipe: None,
         }
     }
 }
@@ -121,6 +134,9 @@ pub struct GenerationReport {
     /// competence the loop cannot select for. `None` when this generation was
     /// not measured; `Inconclusive` until enough generations have been.
     pub trend: Option<Trend>,
+    /// The recipe the shadow trained under, as its trainer reported it. `None`
+    /// when the trainer did not say, in which case no recipe row was written.
+    pub recipe: Option<TrainingRecipe>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -182,7 +198,7 @@ impl<'a> GenerationLoop<'a> {
     pub async fn run_generation(&self, head: &mut GenerationHead) -> Result<GenerationReport> {
         let run_id = head.run_id.clone();
         let generation = head.generation;
-        let shadow_id = ShadowId::new(format!("{run_id}:g{}", generation.0));
+        let shadow_id = shadow_id(&run_id, generation);
 
         // grow -> explore: spawn the shadow that holds the plasticity.
         let mut sh = Shadow::spawn(shadow_id.clone(), generation, None, Utc::now());
@@ -201,10 +217,14 @@ impl<'a> GenerationLoop<'a> {
                 base_model: self.cfg.base_model.clone(),
                 corpus_task_ids: Vec::new(),
                 holdout,
+                recipe: self.cfg.recipe,
             })
             .await?;
         let measured = self
             .measure(&run_id, generation, holdout.as_ref(), &outcome)
+            .await?;
+        let recipe = self
+            .record_recipe(&run_id, generation, holdout.as_ref(), &outcome)
             .await?;
         sh.adapter_uri = Some(outcome.adapter_uri.clone());
         sh.reward_curve = outcome.reward_curve.clone();
@@ -265,6 +285,7 @@ impl<'a> GenerationLoop<'a> {
             regressions,
             instruments: measured.instruments,
             trend: measured.trend,
+            recipe,
         })
     }
 

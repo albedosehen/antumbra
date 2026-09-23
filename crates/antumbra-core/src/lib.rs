@@ -28,6 +28,7 @@ pub mod penumbra;
 pub mod platt;
 pub mod ports;
 pub mod provenance;
+pub mod recipe;
 pub mod reward;
 pub mod router;
 pub mod shadow;
@@ -64,6 +65,7 @@ pub use provenance::{
     scope_from_str, scope_of, scope_of_evidence, BranchOrphan, GitContext, GitProvenance, Scope,
     GIT_EVIDENCE_PREFIX, ORPHAN_EVIDENCE_PREFIX,
 };
+pub use recipe::{RecipeRecord, TrainingRecipe};
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};
 pub use shadow::{Shadow, ShadowStatus};

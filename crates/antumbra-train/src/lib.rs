@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 
-use antumbra_core::{AntumbraError, Result};
+use antumbra_core::{AntumbraError, Result, TrainingRecipe};
 
 pub mod compose;
 pub mod config;
@@ -117,8 +117,12 @@ impl CandleModelLoader {
         &self,
         base_model: &str,
         parent_adapter: Option<&str>,
+        recipe: Option<&TrainingRecipe>,
     ) -> Result<models::QwenCausalLm> {
-        let mut config = self.config.clone();
+        let mut config = match recipe {
+            Some(recipe) => self.config.with_recipe(recipe),
+            None => self.config.clone(),
+        };
         config.base_model = base_model.to_string();
         let device = device::best_device().map_err(|e| AntumbraError::other(e.to_string()))?;
         let mut model = models::QwenCausalLm::load(device, config)?;
@@ -134,8 +138,13 @@ impl CandleModelLoader {
 impl ModelLoader for CandleModelLoader {
     type Model = models::QwenCausalLm;
 
-    async fn load(&self, base: &str, parent: Option<&str>) -> Result<models::QwenCausalLm> {
-        self.load_qwen(base, parent)
+    async fn load_trained(
+        &self,
+        base: &str,
+        parent: Option<&str>,
+        recipe: Option<&TrainingRecipe>,
+    ) -> Result<models::QwenCausalLm> {
+        self.load_qwen(base, parent, recipe)
     }
 }
 
@@ -144,8 +153,13 @@ impl ModelLoader for CandleModelLoader {
 impl GrpoModelLoader for CandleModelLoader {
     type Model = models::QwenCausalLm;
 
-    async fn load(&self, base: &str, parent: Option<&str>) -> Result<models::QwenCausalLm> {
-        self.load_qwen(base, parent)
+    async fn load_trained(
+        &self,
+        base: &str,
+        parent: Option<&str>,
+        recipe: Option<&TrainingRecipe>,
+    ) -> Result<models::QwenCausalLm> {
+        self.load_qwen(base, parent, recipe)
     }
 }
 
@@ -154,7 +168,12 @@ impl GrpoModelLoader for CandleModelLoader {
 impl GrpoModelLoader for CandleModelLoader {
     type Model = PendingModel;
 
-    async fn load(&self, _base: &str, _parent: Option<&str>) -> Result<PendingModel> {
+    async fn load_trained(
+        &self,
+        _base: &str,
+        _parent: Option<&str>,
+        _recipe: Option<&TrainingRecipe>,
+    ) -> Result<PendingModel> {
         Err(AntumbraError::Unimplemented(
             "candle GRPO load requires antumbra-train built with --features models",
         ))
@@ -166,7 +185,12 @@ impl GrpoModelLoader for CandleModelLoader {
 impl ModelLoader for CandleModelLoader {
     type Model = PendingModel;
 
-    async fn load(&self, _base_model: &str, _parent_adapter: Option<&str>) -> Result<PendingModel> {
+    async fn load_trained(
+        &self,
+        _base_model: &str,
+        _parent_adapter: Option<&str>,
+        _recipe: Option<&TrainingRecipe>,
+    ) -> Result<PendingModel> {
         Err(AntumbraError::Unimplemented(
             "candle Qwen2.5-Coder load requires antumbra-train built with --features models",
         ))
