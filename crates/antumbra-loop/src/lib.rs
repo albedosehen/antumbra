@@ -33,6 +33,7 @@ use antumbra_store::Store;
 
 mod measure;
 mod recipe;
+pub mod search;
 use measure::Measurement;
 
 /// The shadow a generation of a run trains. It also names that generation's

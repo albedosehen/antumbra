@@ -228,7 +228,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    It follows the pattern step 2 settled on. The recipe reaches the trainer on `TrainRequest`. The trainer builds its model and optimizer under it, or under its own configuration when none is asked for, and echoes the one it used on `TrainOutcome`. The loop records only that echo, as a `recipe` row keyed by the shadow, descending from the previous generation's row. A trainer that reports no recipe leaves no row, and one that trained under something else is recorded as it trained, so the search can never rank settings no shadow used. The row keeps the partition seed only when the trainer confirmed the holdout, since only then is its fitness over that split's visible tasks. Each row carries one evaluation and no variance, which is what one evaluation supports. The loaders gained a required `load_trained` for this, so that no loader can take a recipe and quietly build under another. `load`, which every inference caller uses, is now `load_trained` with no recipe.
 
-   What remains for this step is the search itself. That means a cohort of shadows per generation under PB2 selection over those three axes, ranking shrunk toward the generational mean by evaluation count, and graduation on a fresh slice, a new seed and at least three repeats.
+   **The search's model and proposals are in, and not yet wired into the loop.** `antumbra_loop::search` has four parts:
+   - a `RecipeSpace` that places a recipe in the unit cube, with learning rate on a log scale, batch sizes snapped to the ones the card can hold, and an axis held fixed when its bounds are equal, as KL is under RAFT by default;
+   - a Gaussian process over recipe and generation, with PB2's time-varying kernel;
+   - batch proposals that maximize an upper confidence bound, each pick added as a fantasized observation so a cohort spreads out;
+   - ranking shrunk toward each generation's mean by evaluation count.
+
+   A cohort's first member is the incumbent, so the recipe behind the best shadow propagates. Proposals are a pure function of the history and a seed, so a resumed run proposes what a continuous one would. On a synthetic landscape with one good region, six generations of four, noisy, carried forward a recipe whose true fitness averaged 0.898 over twelve seeds, against 0.882 for random search on the same budget. The worst seeds were 0.891 and 0.840, and the optimum is 0.900. The test holds the search to beating random search on both the mean and the worst seed.
+
+   Still to come for this step: training a cohort per generation, and graduation on a fresh slice with a new seed and at least three repeats. Also open is whether cohort members start from fresh adapters, carrying only the recipe forward, or from the winner's weights as PBT's exploitation does. That choice decides whether the frozen population is independent skills or successive refinements of one adapter, so it is settled before the wiring.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.
