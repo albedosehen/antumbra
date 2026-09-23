@@ -24,6 +24,7 @@ pub mod device;
 pub mod eval;
 pub mod grpo;
 pub mod harness;
+pub mod holdout;
 pub mod lora;
 pub mod memory;
 pub mod model;
@@ -48,6 +49,7 @@ pub use harness::{
     metabolize, normalize_traces, parse_traces as parse_harness_traces, HarnessStep, HarnessTrace,
     MetabolizePolicy,
 };
+pub use holdout::{split as split_holdout, Split};
 pub use memory::{import as import_memories, ImportPolicy, ImportedTask, Intake, MemoryRecord};
 pub use model::{CausalLm, Corpus, CorpusTask, ModelLoader, SftExample};
 pub use raft::raft_train;

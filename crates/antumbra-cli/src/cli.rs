@@ -421,6 +421,13 @@ pub enum Command {
         /// instead of fresh factors. Monolithic arm.
         #[arg(long)]
         parent: Option<String>,
+        /// Withhold a held-out and an audit slice of the corpus from training
+        /// (ADR-0022), so each generation reports the visible-minus-held-out
+        /// gap. Changes what is learned: about three tasks in ten are measured
+        /// and never trained on. Refused when the corpus is too small to leave
+        /// any task visible, as several shipped demo corpora are.
+        #[arg(long)]
+        holdout: bool,
     },
     /// Score a saved adapter's pass-rate on a corpus, with no training.
     /// Needs --features models + a GPU + python.

@@ -31,6 +31,7 @@ pub mod provenance;
 pub mod reward;
 pub mod router;
 pub mod shadow;
+pub mod slice;
 pub mod vector;
 
 #[cfg(any(test, feature = "testing"))]

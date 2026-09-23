@@ -455,6 +455,7 @@ async fn run() -> anyhow::Result<()> {
             algo,
             quantize_base,
             parent,
+            holdout,
         } => {
             models::train(
                 &cli.url,
@@ -468,6 +469,7 @@ async fn run() -> anyhow::Result<()> {
                     algo,
                     quantize_base,
                     parent,
+                    holdout,
                 },
             )
             .await?;

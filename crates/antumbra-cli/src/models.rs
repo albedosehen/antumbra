@@ -322,6 +322,8 @@ pub struct TrainArgs {
     pub algo: String,
     pub quantize_base: bool,
     pub parent: Option<String>,
+    /// Hold the default partition out of training and measure against it.
+    pub holdout: bool,
 }
 
 pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
@@ -334,6 +336,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     let algo = args.algo;
     let quantize_base = args.quantize_base;
     let parent = args.parent;
+    let holdout = args.holdout;
     #[cfg(feature = "models")]
     {
         let store = connect(url).await?;
@@ -358,6 +361,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         let loop_cfg = LoopConfig {
             graduate_threshold: 0.3,
             base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+            partition: holdout.then(antumbra_core::slice::Partition::default),
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -372,6 +376,19 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                 r.fitness,
                 r.graduated
             );
+            if let Some(m) = &r.instruments {
+                let gap = m
+                    .widest_gap()
+                    .map(|(band, w)| format!("{w:+.2} ({} tasks)", band.as_str()))
+                    .unwrap_or_else(|| "not measured".into());
+                let audit = m
+                    .audit
+                    .rate()
+                    .map(|a| format!("{a:.2} over {}", m.audit.measured))
+                    .unwrap_or_else(|| "not due".into());
+                let trend = r.trend.map_or("not read", |t| t.as_str());
+                println!("        widest held-out gap {gap}, audit {audit}, trend {trend}");
+            }
         }
         println!("population: {} experts", expert::list(&store).await?.len());
         // Self-maintaining gate: keep the learned router current with the
@@ -394,6 +411,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &algo,
             quantize_base,
             &parent,
+            holdout,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

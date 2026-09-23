@@ -172,6 +172,7 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
                     &mut model,
                     &verifier,
                     &gtasks,
+                    &[],
                     &RunId::new(name.clone()),
                     &cfg,
                 )
@@ -467,7 +468,7 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
             };
             let run_id = RunId::new(format!("{run}-g{gen}"));
             println!("  training {} gap task(s)", gaps.len());
-            let out = raft_train(&mut model, &verifier, &gaps, &run_id, &cfg).await?;
+            let out = raft_train(&mut model, &verifier, &gaps, &[], &run_id, &cfg).await?;
             println!(
                 "  trained gen {gen}: round-final {:.2} -> {}",
                 out.final_fitness, out.adapter_uri

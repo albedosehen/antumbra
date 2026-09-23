@@ -18,17 +18,21 @@ use sha2::{Digest, Sha256};
 
 use antumbra_boundary::finding_to_boundary;
 use antumbra_core::generational::{GenerationHead, LoopCommand, LoopState};
-use antumbra_core::ports::{Embedder, TaskOutcome, TrainOutcome, TrainRequest, Trainer};
+use antumbra_core::ports::{Embedder, TrainOutcome, TrainRequest, Trainer};
+use antumbra_core::slice::Partition;
 use antumbra_core::{
     BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Grain,
     Result, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind,
 };
 use antumbra_eclipse::instrument::GenerationReport as InstrumentReport;
-use antumbra_eclipse::{Outcome, Partition};
+use antumbra_eclipse::{Trend, Watch};
 use antumbra_store::repo::{
     boundary, evaluation, expert, generation, loop_control, reward, shadow,
 };
 use antumbra_store::Store;
+
+mod measure;
+use measure::Measurement;
 
 /// Confidence stamped on a correction-derived boundary. The context pair is
 /// ground-truth verified, so the scope is trustworthy -- but confidence tempers
@@ -56,7 +60,27 @@ pub struct LoopConfig {
     /// tasks selection may see, which are held out, which are audited. Carried
     /// in the config rather than derived, because the seed decides what every
     /// measurement means and a generation has to record which one it ran under.
-    pub partition: Partition,
+    ///
+    /// The trainer is asked to enforce it, so it changes what a run learns:
+    /// held-out and audit tasks are measured and never trained on, and fitness
+    /// is computed over visible tasks alone. `None` (the default) trains on
+    /// every task and leaves generations unmeasured, which is the honest shape
+    /// for a run with nothing held out. It is off by default because the corpora
+    /// shipped with the repository are a handful of tasks each, and several hash
+    /// entirely into the withheld slices.
+    pub partition: Option<Partition>,
+    /// The audit slice is measured every `audit_every` generations, counting
+    /// from generation 0, and skipped in between (ADR-0022: "evaluated every k
+    /// generations and only logged"). The record names no k. The default is
+    /// the largest one the default [`Watch`] can always read: it asks for 4
+    /// audited generations in a window of 10, and 10 consecutive generations
+    /// hold at least 5 multiples of 2 but only 3 of 3. A test holds the two
+    /// dials together. Zero is read as one.
+    pub audit_every: u32,
+    /// How the audit-slice trend is read across generations: the window, how
+    /// many audited generations it needs, and the share of a search gain the
+    /// audit slice must show for the gain to count as carried.
+    pub watch: Watch,
 }
 
 impl Default for LoopConfig {
@@ -64,7 +88,9 @@ impl Default for LoopConfig {
         Self {
             graduate_threshold: 0.5,
             base_model: "code-base".into(),
-            partition: Partition::default(),
+            partition: None,
+            audit_every: 2,
+            watch: Watch::default(),
         }
     }
 }
@@ -85,41 +111,16 @@ pub struct GenerationReport {
     pub regressions: Vec<ExpertId>,
     /// What the standing instruments made of this generation (ADR-0022): the
     /// visible-minus-held-out gap banded by task size, the audit slice, and the
-    /// impossible set. `None` when the trainer reported no per-task results,
-    /// which is the honest answer -- a report computed from aggregate fitness
-    /// would be a number that looks like a measurement and is not.
+    /// impossible set. `None` when nothing was held out, when the trainer did
+    /// not confirm it withheld what was asked, or when it reported no per-task
+    /// results -- in each case a report would be a number that looks like a
+    /// measurement and is not.
     pub instruments: Option<InstrumentReport>,
-}
-
-impl GenerationLoop<'_> {
-    /// Read this generation through the standing instruments (ADR-0022).
-    ///
-    /// `None` when the trainer reported no per-task results. That is the honest
-    /// answer and not a degraded one: the gap between what selection can see
-    /// and what it cannot is undefined over a single aggregate number, and a
-    /// report synthesised from `final_fitness` would be exactly the kind of
-    /// figure the record warns about -- one that looks like a measurement.
-    ///
-    /// The slice comes from the task id alone, through the configured
-    /// partition, so it cannot drift between generations and nothing the loop
-    /// decides can move a task across the anchor.
-    fn measure(&self, per_task: &[TaskOutcome]) -> Option<InstrumentReport> {
-        if per_task.is_empty() {
-            return None;
-        }
-        let outcomes: Vec<Outcome> = per_task
-            .iter()
-            .map(|t| {
-                Outcome::new(
-                    t.task_id.clone(),
-                    self.cfg.partition.of(&t.task_id),
-                    t.passed,
-                    t.size,
-                )
-            })
-            .collect();
-        Some(InstrumentReport::of(&outcomes))
-    }
+    /// What the audit slice says across this run's measured generations,
+    /// ending at this one: whether a climbing search score is carrying
+    /// competence the loop cannot select for. `None` when this generation was
+    /// not measured; `Inconclusive` until enough generations have been.
+    pub trend: Option<Trend>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -190,14 +191,20 @@ impl<'a> GenerationLoop<'a> {
         sh.advance_to(ShadowStatus::Exploring)?;
         shadow::upsert(self.store, &sh).await?;
 
-        // train on verified outcomes.
+        // train on verified outcomes, withholding what the partition keeps
+        // from selection.
+        let holdout = self.holdout_for(generation);
         let outcome = self
             .trainer
             .train_shadow(TrainRequest {
                 shadow: shadow_id.clone(),
                 base_model: self.cfg.base_model.clone(),
                 corpus_task_ids: Vec::new(),
+                holdout,
             })
+            .await?;
+        let measured = self
+            .measure(&run_id, generation, holdout.as_ref(), &outcome)
             .await?;
         sh.adapter_uri = Some(outcome.adapter_uri.clone());
         sh.reward_curve = outcome.reward_curve.clone();
@@ -227,7 +234,7 @@ impl<'a> GenerationLoop<'a> {
             self.log_open_boundary(generation, &shadow_id).await?;
         }
         self.record_evaluation(
-            &run_id, &shadow_id, generation, fitness, graduated, &outcome,
+            &run_id, &shadow_id, generation, graduated, &outcome, &measured,
         )
         .await?;
 
@@ -246,7 +253,8 @@ impl<'a> GenerationLoop<'a> {
             graduated,
             reward_curve: outcome.reward_curve.clone(),
             regressions,
-            instruments: self.measure(&outcome.per_task),
+            instruments: measured.instruments,
+            trend: measured.trend,
         })
     }
 
@@ -294,9 +302,9 @@ impl<'a> GenerationLoop<'a> {
         run_id: &RunId,
         shadow_id: &ShadowId,
         generation: Generation,
-        fitness: f32,
         graduated: bool,
         outcome: &TrainOutcome,
+        measured: &Measurement,
     ) -> Result<()> {
         let eval = EvaluationRun {
             run_id: run_id.clone(),
@@ -315,9 +323,10 @@ impl<'a> GenerationLoop<'a> {
             // every gap measured before it, so a generation has to say which
             // split it was read under.
             metrics: Some(serde_json::json!({
-                "fitness": fitness,
-                "partition_seed": self.cfg.partition.seed,
-                "instruments": self.measure(&outcome.per_task),
+                "fitness": outcome.final_fitness,
+                "partition_seed": self.cfg.partition.map(|p| p.seed),
+                "instruments": measured.instruments,
+                "trend": measured.trend,
             })),
             regression_fingerprint: Some(outcome.adapter_uri.clone()),
             created_at: Utc::now(),
