@@ -322,6 +322,17 @@ impl QwenCausalLm {
     /// the model is prompted the way it was tuned (a `user` turn, then the open
     /// `assistant` turn it completes). A plain base sees the prompt unchanged.
     /// Applied at *every* prompt-encoding site so training and serving agree.
+    /// Trim generated text to the completion that is verified and trained on.
+    /// A chat model's code sits inside a fence, which the completion-model
+    /// stops would cut away; see [`crate::decode::trim_chat_answer`].
+    fn trim(&self, text: &str) -> String {
+        if self.chat {
+            crate::decode::trim_chat_answer(text)
+        } else {
+            crate::decode::truncate_at_stops(text, crate::decode::DEFAULT_STOPS)
+        }
+    }
+
     fn wrap_prompt(&self, prompt: &str) -> String {
         if self.chat {
             format!("<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n")
@@ -384,10 +395,7 @@ impl QwenCausalLm {
             .decode(&tokens[prompt_len..], true)
             .map_err(|e| AntumbraError::other(format!("decode: {e}")))?;
         // Trim the run-on so the verified, trained-on completion is the clean one.
-        Ok(crate::decode::truncate_at_stops(
-            &text,
-            crate::decode::DEFAULT_STOPS,
-        ))
+        Ok(self.trim(&text))
     }
 
     /// Full-sequence logits `(1, seq, vocab)` in f32, LoRA on (the policy) or
@@ -458,7 +466,7 @@ impl QwenCausalLm {
             .decode(&gen_tokens, true)
             .map_err(|e| AntumbraError::other(format!("decode: {e}")))?;
         Ok(GrpoSample {
-            completion: crate::decode::truncate_at_stops(&text, crate::decode::DEFAULT_STOPS),
+            completion: self.trim(&text),
             tokens: gen_tokens,
             old_logprobs,
         })

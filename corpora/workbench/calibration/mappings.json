@@ -1,0 +1,215 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/mappings.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.5375000238418579,
+  "passed": 86,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "mappings/invert-first",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/invert-last",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/invert-all",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/invert-count",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-gt-3",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-gt-4",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-ge-1",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-ge-6",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-gt-6",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-gt-2",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-ge-2",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/above-ge-5",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/group-first-nocase",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "mappings/group-first-case",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "mappings/group-last-nocase",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/group-last-case",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/group-prefix-nocase",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "mappings/group-prefix-case",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/merge-sum",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "mappings/merge-max",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "mappings/merge-min",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "mappings/merge-product",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/merge-difference",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/merge-keep-a",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/top-2-alpha",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/top-2-first-seen",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/top-3-alpha",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/top-3-first-seen",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/top-4-alpha",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "mappings/top-4-first-seen",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-dot-drop",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-dot-keep",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-slash-drop",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-slash-keep",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-underscore-drop",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-underscore-keep",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-colon-drop",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "mappings/flatten-colon-keep",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "mappings/impossible-beats-every-key",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "mappings/impossible-fewer-keys",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 160
+}

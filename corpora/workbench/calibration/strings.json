@@ -1,0 +1,255 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/strings.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.3385416567325592,
+  "passed": 65,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "strings/swap-in",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/swap-fr",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/swap-gv",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/swap-jk",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/swap-fq",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/swap-kv",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/swap-nt",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/swap-ep",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/count-cnw",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/count-csw",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "strings/count-cet",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "strings/count-ptv",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "strings/count-dik",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "strings/count-csx",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "strings/count-hot",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "strings/count-kmy",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-6",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-17",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-23",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-9",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-18",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-20",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-22",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "strings/caesar-15",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/run-length-cn-none",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/run-length-cn-,",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "strings/run-length-cn--",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/run-length-nc-none",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/run-length-nc-,",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/run-length-nc--",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-12",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-11",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-7",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-16",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-10",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-6",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-8",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/wrap-13",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "strings/title-and-in-to",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/title-for-on-or",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/title-in-on-or",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/title-in-of-or",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/title-of-on-or",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/title-a-in-the",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/title-an-of-on",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/title-an-in-on",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/impossible-longer-and-shorter",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "strings/impossible-beats-itself",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 192
+}

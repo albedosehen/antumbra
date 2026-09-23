@@ -439,13 +439,33 @@ pub enum Command {
         /// the bare base: the prior floor.
         #[arg(long)]
         adapter: Option<String>,
-        #[arg(long, default_value = "Qwen/Qwen2.5-Coder-1.5B")]
-        base_model: String,
+        /// Base model to score. Defaults to the one training loads
+        /// (Qwen2.5-Coder-1.5B-Instruct), so an eval measures the model a run
+        /// would start from.
+        #[arg(long)]
+        base_model: Option<String>,
         /// Completions sampled per task (the pass-rate denominator is tasks x K).
         #[arg(long, default_value_t = 8)]
         samples: usize,
-        #[arg(long, default_value_t = 64)]
+        /// Tokens generated per completion. The training default, so a function
+        /// long enough to pass training is not cut short here.
+        #[arg(long, default_value_t = 256)]
         max_new_tokens: usize,
+        /// Write every task's result (passes out of samples) to this JSON file.
+        #[arg(long)]
+        report: Option<String>,
+        /// Sampling temperature. Defaults to training's, so the eval sees the
+        /// draws a run would; 0 is greedy.
+        #[arg(long)]
+        temperature: Option<f64>,
+        /// Nucleus cutoff. Defaults to training's (1.0, off).
+        #[arg(long)]
+        top_p: Option<f64>,
+        /// Compute precision on the GPU: f32, bf16 or f16. Defaults to
+        /// training's (bf16). Comparing f32 with bf16 on the same draws is how
+        /// to tell a numerics problem from a model that cannot do the task.
+        #[arg(long)]
+        dtype: Option<String>,
     },
     /// Capture a supplied, verifier-checked correction into a frozen expert (the
     /// other intake path beside `train`, the capture intake into the umbra). The corpus carries a

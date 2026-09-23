@@ -1,0 +1,205 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/dates.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.30263158679008484,
+  "passed": 46,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "dates/weekday-ymd-name",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/weekday-ymd-short",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "dates/weekday-ymd-monday-zero",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/weekday-ymd-iso",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/weekday-iso-name",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "dates/weekday-iso-short",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "dates/weekday-iso-monday-zero",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "dates/weekday-iso-iso",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "dates/iso-week",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/iso-week-string",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/day-of-year",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/quarter",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "dates/weeks-between-iso-abs",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/days-between-iso-abs",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/weeks-between-iso-signed",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/days-between-iso-signed",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "dates/weeks-between-dmy-abs",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/days-between-dmy-abs",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/weeks-between-dmy-signed",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/days-between-dmy-signed",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/add-days-iso",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/add-weeks-iso",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/add-days-dotted",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/add-weeks-dotted",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/add-days-us",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/add-weeks-us",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/month-end-date",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/month-end-length",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/month-end-weekday",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/month-end-first-weekday",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/month-end-weekend-days",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/business-days-sat-sun",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "dates/business-days-fri-sat",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/business-days-sun",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/age-on-march",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/age-on-february",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "dates/impossible-february-thirtieth",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "dates/impossible-before-and-after",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 152
+}

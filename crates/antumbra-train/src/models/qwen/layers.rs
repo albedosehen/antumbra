@@ -178,14 +178,23 @@ impl RotaryEmbedding {
             .map(|i| 1f32 / cfg.rope_theta.powf(i as f64 / dim as f64) as f32)
             .collect();
         let inv_freq_len = inv_freq.len();
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?.to_dtype(dtype)?;
+        // Positions and angles are computed in f32 whatever the model computes
+        // in, and only the finished sin/cos tables take the model's dtype. bf16
+        // carries 8 bits of mantissa: position 257 is 256 in it, and past 512
+        // positions come in steps of four, so neighbouring tokens were rotated
+        // as if they sat at the same place -- and an angle of a few hundred
+        // radians keeps almost none of its fraction, so the fast-rotating
+        // dimensions got sin and cos of the wrong angle. On the GPU that showed
+        // up as duplicated tokens under greedy decoding ("than than", "+= +=")
+        // that an f32 run of the same prompt did not produce.
+        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?;
         let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(dtype)?
+            .to_dtype(DType::F32)?
             .reshape((max_seq_len, 1))?;
         let freqs = t.matmul(&inv_freq)?;
         Ok(Self {
-            sin: freqs.sin()?,
-            cos: freqs.cos()?,
+            sin: freqs.sin()?.to_dtype(dtype)?,
+            cos: freqs.cos()?.to_dtype(dtype)?,
         })
     }
 
@@ -497,5 +506,68 @@ impl DecoderLayer {
     pub(super) fn quantize_base(&mut self, device: &Device) -> CResult<()> {
         self.self_attn.quantize_base(device)?;
         self.mlp.quantize_base(device)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> Config {
+        Config {
+            vocab_size: 16,
+            hidden_size: 128,
+            intermediate_size: 128,
+            num_hidden_layers: 1,
+            num_attention_heads: 2,
+            num_key_value_heads: 2,
+            max_position_embeddings: 2048,
+            rope_theta: 1_000_000.0,
+            rms_norm_eps: 1e-6,
+            hidden_act: Activation::Silu,
+            tie_word_embeddings: true,
+        }
+    }
+
+    fn largest_gap(a: &Tensor, b: &Tensor) -> CResult<f32> {
+        (a - b.to_dtype(DType::F32)?)?
+            .abs()?
+            .flatten_all()?
+            .max(0)?
+            .to_scalar::<f32>()
+    }
+
+    /// The rotary table is a function of position, not of the precision the
+    /// model computes in: a bf16 model gets the f32 table rounded to bf16,
+    /// which is within a few thousandths everywhere. Built in bf16 it was off
+    /// by whole units at long positions, which is the difference between a
+    /// token's position and some other token's.
+    #[test]
+    fn the_rotary_table_does_not_depend_on_the_compute_precision() -> CResult<()> {
+        let dev = Device::Cpu;
+        let exact = RotaryEmbedding::new(DType::F32, &config(), &dev)?;
+        let half = RotaryEmbedding::new(DType::BF16, &config(), &dev)?;
+        let sin = largest_gap(&exact.sin, &half.sin)?;
+        let cos = largest_gap(&exact.cos, &half.cos)?;
+        assert!(
+            sin < 0.01 && cos < 0.01,
+            "bf16 table drifts: sin {sin}, cos {cos}"
+        );
+        Ok(())
+    }
+
+    /// Neighbouring positions past 256 are distinct in the bf16 table. bf16
+    /// cannot hold 257, so positions computed in it collapsed pairwise.
+    #[test]
+    fn neighbouring_long_positions_stay_distinct_in_bf16() -> CResult<()> {
+        let half = RotaryEmbedding::new(DType::BF16, &config(), &Device::Cpu)?;
+        let a = half.sin.get(300)?.to_dtype(DType::F32)?;
+        let b = half.sin.get(301)?.to_dtype(DType::F32)?;
+        let gap = (a - b)?.abs()?.max(0)?.to_scalar::<f32>()?;
+        assert!(
+            gap > 0.1,
+            "positions 300 and 301 are nearly the same rotation: {gap}"
+        );
+        Ok(())
     }
 }

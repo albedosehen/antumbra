@@ -1,0 +1,265 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/parsing.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.25999999046325684,
+  "passed": 52,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "parsing/pairs-semicolon-eq",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/pairs-semicolon-colon",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/pairs-comma-eq",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/pairs-comma-colon",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/pairs-amp-eq",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/pairs-amp-colon",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/pairs-pipe-eq",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/pairs-pipe-colon",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-colon-minutes",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-colon-seconds",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-dot-minutes",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-dot-seconds",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-h-minutes",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-h-seconds",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-dash-minutes",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "parsing/clock-dash-seconds",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-hms-seconds",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-dhm-minutes",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-hms-minutes",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-wd-hours",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-hm-minutes",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-dh-hours",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-wdh-days",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/duration-dhms-hours",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dot-sign-pad",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dot-sign-exact",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dot-words-pad",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dot-words-exact",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dash-sign-pad",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dash-sign-exact",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dash-words-pad",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "parsing/semver-dash-words-exact",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-anycase-zero-raise",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-anycase-strict-raise",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-upper-zero-raise",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-upper-strict-raise",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-anycase-zero-none",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-anycase-strict-none",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-upper-zero-none",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/roman-upper-strict-none",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-amp-raw-exact",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-amp-raw-lower",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-amp-plus-exact",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-amp-plus-lower",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-semicolon-raw-exact",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-semicolon-raw-lower",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-semicolon-plus-exact",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/query-semicolon-plus-lower",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/impossible-thirteenth-month",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "parsing/impossible-both-signs",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 200
+}

@@ -481,17 +481,31 @@ async fn run() -> anyhow::Result<()> {
             base_model,
             samples,
             max_new_tokens,
+            report,
+            temperature,
+            top_p,
+            dtype,
         } => {
             #[cfg(feature = "models")]
             {
                 use antumbra_train::{eval_pass_rate, Corpus, ModelLoader};
+                let defaults = RaftConfig::default();
                 let cfg = RaftConfig {
                     samples_per_task: samples,
                     max_new_tokens,
-                    ..RaftConfig::default()
+                    temperature: temperature.unwrap_or(defaults.temperature),
+                    top_p: top_p.unwrap_or(defaults.top_p),
+                    dtype: match dtype.as_deref() {
+                        Some(name) => name.parse()?,
+                        None => defaults.dtype,
+                    },
+                    ..defaults
                 };
                 let corpus_doc = JsonCorpus::from_file(&corpus)?;
                 let tasks = corpus_doc.tasks(&[]);
+                let base_model = base_model.unwrap_or_else(|| cfg.base_model.clone());
+                let (cfg_temperature, cfg_top_p, cfg_dtype) =
+                    (cfg.temperature, cfg.top_p, cfg.dtype);
                 let loader = CandleModelLoader::new(cfg);
                 let mut model = ModelLoader::load(&loader, &base_model, adapter.as_deref()).await?;
                 let verifier = antumbra_critic::CommandVerifier;
@@ -510,10 +524,35 @@ async fn run() -> anyhow::Result<()> {
                 for (i, ex) in out.examples.iter().enumerate() {
                     println!("  sample[{i}]: {}", ex.replace('\n', " ").trim());
                 }
+                if let Some(path) = &report {
+                    let mut record = antumbra_train::eval::report(
+                        &corpus,
+                        &base_model,
+                        adapter.as_deref(),
+                        samples,
+                        max_new_tokens,
+                        &out,
+                    );
+                    record["temperature"] = serde_json::json!(cfg_temperature);
+                    record["top_p"] = serde_json::json!(cfg_top_p);
+                    record["dtype"] = serde_json::json!(format!("{cfg_dtype:?}"));
+                    std::fs::write(path, serde_json::to_vec_pretty(&record)?)?;
+                    println!("per-task results -> {path}");
+                }
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&corpus, &adapter, &base_model, samples, max_new_tokens);
+                let _ = (
+                    &corpus,
+                    &adapter,
+                    &base_model,
+                    samples,
+                    max_new_tokens,
+                    &report,
+                    temperature,
+                    top_p,
+                    &dtype,
+                );
                 anyhow::bail!("`eval` requires building with --features models (candle + a GPU)");
             }
         }

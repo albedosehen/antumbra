@@ -1,0 +1,265 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/numbers.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.24500000476837158,
+  "passed": 49,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "numbers/multiples-of-2",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "numbers/multiples-of-3",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/multiples-of-4",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "numbers/multiples-of-5",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/multiples-of-6",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/multiples-of-7",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "numbers/multiples-of-8",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "numbers/multiples-of-9",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-11",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-2",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-7",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-9",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-12",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-10",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-3",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/next-multiple-6",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-2",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-3",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-4",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-5",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-6",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-7",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-8",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "numbers/to-base-9",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-1-list",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-1-count",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-3-list",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-3-count",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-7-list",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-7-count",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-9-list",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/primes-ending-9-count",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-10-space",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-10-dash",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-7-space",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-7-dash",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-9-space",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-9-dash",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-11-space",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/luhn-11-dash",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-tilde-space",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-colon-comma",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-dots-semicolon",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-tilde-comma",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-colon-semicolon",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-tilde-semicolon",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-dots-comma",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/ranges-dots-space",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/impossible-largest-prime",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "numbers/impossible-even-and-odd",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 200
+}
