@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::{
-    apply, auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, render,
+    apply, auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, reanchor, render,
     repository_root, rules, skills, Inputs, Standing,
 };
 use crate::cli::ClaudeAction;
@@ -89,6 +89,24 @@ fn origin_of(dir: &Path) -> Option<String> {
         .filter(|out| out.status.success())
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|url| !url.is_empty())
+}
+
+/// The newest `limit` merged pull requests of `repo` (a `host/org/name`
+/// slug, which `gh` accepts as it is), as `gh pr list --json` writes them.
+fn merged_pull_requests(repo: &str, limit: u32) -> anyhow::Result<String> {
+    let out = std::process::Command::new("gh")
+        .args(["pr", "list", "--repo", repo, "--state", "merged"])
+        .args(["--limit", &limit.to_string(), "--json", reanchor::GH_FIELDS])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| anyhow::anyhow!("could not run gh, the GitHub CLI: {e}"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "gh pr list failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(out.stdout)?)
 }
 
 /// The project, and every repository directly under `repos`.
@@ -304,6 +322,34 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             let installed = installed_skills(home().as_deref(), &project(dir)?);
             let cutoff = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
             println!("{}", skills::render(&installed, &used, Some(&cutoff)));
+        }
+        ClaudeAction::Reanchor {
+            dir,
+            limit,
+            dry_run,
+            surface,
+            token,
+        } => {
+            let project = project(dir)?;
+            let repo = origin_of(&project)
+                .and_then(|url| antumbra_core::repo_slug_from_remote(&url))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{} has no origin remote to name its repository by",
+                        project.display()
+                    )
+                })?;
+            let merges = reanchor::merges_in(&merged_pull_requests(&repo, limit)?)?;
+            let agent = surface_agent();
+            let call = |tool: &str, arguments: Value| {
+                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+            };
+            if dry_run {
+                println!("dry run: nothing written");
+            }
+            for line in reanchor::report(&call, &repo, &merges, dry_run)? {
+                println!("{line}");
+            }
         }
         ClaudeAction::McpLint {
             server,

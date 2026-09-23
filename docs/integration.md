@@ -76,7 +76,7 @@ ANTUMBRA_API_KEY=<key>                 # for the hosted/networked surface
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamp on what it writes
 ```
 
-Start the server with `--tools agent` (or `ANTUMBRA_TOOLS=agent`) for a coding agent: it advertises and serves only `recall_memories`, `store_memory`, `reinforce_memory`, `penalize_memory`, `recall_documents`, `ingest_document`, `route`, and `answer`. The compartment, graph, and operator tools stay behind the CLI and console, and the agent's context carries eight tool descriptions instead of nineteen. `--tools agent,population` extends the profile; `all` is the default; an unknown name refuses at startup.
+Start the server with `--tools agent` (or `ANTUMBRA_TOOLS=agent`) for a coding agent: it advertises and serves only `recall_memories`, `store_memory`, `reinforce_memory`, `penalize_memory`, `recall_documents`, `ingest_document`, `route`, and `answer`. The compartment, graph, and operator tools stay behind the CLI and console, and the agent's context carries eight tool descriptions instead of twenty. `--tools agent,population` extends the profile; `all` is the default; an unknown name refuses at startup.
 
 ---
 
@@ -121,6 +121,8 @@ antumbra-mcp --http 0.0.0.0:8081 --jwt-secret-file /run/secrets/jwt \
 | `ping`, anything else, an unmapped repository, a close without a merge | Acknowledged with the reason, so GitHub does not retry. |
 
 Every delivery is verified against the secret (HMAC-SHA256, constant-time) before anything is read; a delivery that does not verify gets a bare 401. The handlers write as the system user `user:github`, provisioned in the workspace on first contact. Reading contents needs the App's id and private key: the receiver signs a short-lived App token, exchanges it for an installation token (cached until it is about to expire), and reads through that. Without them the receiver still re-anchors, orphans, and remembers pull requests.
+
+A server GitHub cannot reach, such as one on a private network, gets merges reported instead. `antumbra claude reanchor` (in a clone, with `gh` signed in and `ANTUMBRA_URL` / `ANTUMBRA_TOKEN` set) reads the repository's merged pull requests and reports each one to the `record_merge` tool. That tool applies the webhook's merge rule as the caller, so it moves only memories the caller can write. A memory moves if it was created before the merge, or if it is anchored at one of the branch's own commits, as happens when a session is still on the branch after it merges. Running it again moves nothing new; `--dry-run` lists the merges it would report.
 
 ## Two ways to run it
 

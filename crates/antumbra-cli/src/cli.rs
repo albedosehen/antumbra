@@ -225,6 +225,32 @@ pub enum ClaudeAction {
         #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
         token: Option<String>,
     },
+    /// Move the memories of merged branches onto the branch each merged into,
+    /// so recall from there counts them in scope. Reads the repository's merged
+    /// pull requests with the GitHub CLI (`gh`, signed in) and reports each to
+    /// the surface, which is what the GitHub webhook does for a server GitHub
+    /// can reach. Safe to run again: memories already moved are left alone.
+    Reanchor {
+        /// The repository, by its working tree. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// How many of the most recent merged pull requests to report.
+        #[arg(long, default_value_t = 30)]
+        limit: u32,
+        /// Say which merges would be reported and write nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// The Antumbra MCP surface, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+    },
     /// Check an MCP server's tools for input schemas the API refuses. In
     /// sovereign mode the agent no longer leaves such a tool out, so one of them
     /// fails every request with a 400 that names it only by position. Run this
