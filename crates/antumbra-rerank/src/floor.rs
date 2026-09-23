@@ -47,10 +47,7 @@ const MEMORY_PREFIX: &str = "MEMORY: ";
 /// text-embeddings-inference), and a different model or a very different corpus
 /// wants a refit — which is why [`CalibratedFloor::with_calibration`] exists and
 /// why the fitting procedure ships beside the numbers.
-pub const FITTED: Platt = Platt {
-    a: 1.630,
-    b: 5.362,
-};
+pub const FITTED: Platt = Platt { a: 1.630, b: 5.362 };
 
 /// Answers "does this memory answer this query" as a calibrated probability, by
 /// scoring the pair with a cross-encoder and mapping the score through [`FITTED`].
@@ -90,7 +87,10 @@ impl CalibratedFloor {
             .filter_map(|chunk| {
                 let rest = chunk.strip_prefix(QUERY_PREFIX)?;
                 let (query, memory) = rest.split_once('\n')?;
-                Some((query.to_string(), memory.strip_prefix(MEMORY_PREFIX)?.to_string()))
+                Some((
+                    query.to_string(),
+                    memory.strip_prefix(MEMORY_PREFIX)?.to_string(),
+                ))
             })
             .collect()
     }
@@ -201,7 +201,13 @@ mod tests {
     async fn a_question_it_cannot_answer_is_refused() {
         let floor = CalibratedFloor::new(Arc::new(FixedScorer(vec![1.0])));
         let err = floor
-            .decide(&state("q", &["m"]), &[Question::Score { low: 0.0, high: 1.0 }])
+            .decide(
+                &state("q", &["m"]),
+                &[Question::Score {
+                    low: 0.0,
+                    high: 1.0,
+                }],
+            )
             .await;
         assert!(err.is_err(), "a Score question must be refused");
     }
@@ -212,7 +218,9 @@ mod tests {
     #[tokio::test]
     async fn a_state_that_does_not_parse_is_reported() {
         let floor = CalibratedFloor::new(Arc::new(FixedScorer(vec![1.0, 1.0])));
-        let err = floor.decide("not a state at all", &vec![Question::Noul; 2]).await;
+        let err = floor
+            .decide("not a state at all", &vec![Question::Noul; 2])
+            .await;
         assert!(err.is_err());
     }
 }

@@ -1187,7 +1187,10 @@ fn capture_the_tool_list() {
     };
     let tools = McpServer::tool_router().list_all();
     let body = serde_json::json!({ "tools": tools });
-    std::fs::write(&out, serde_json::to_string_pretty(&body).expect("serialize"))
-        .expect("write the capture");
+    std::fs::write(
+        &out,
+        serde_json::to_string_pretty(&body).expect("serialize"),
+    )
+    .expect("write the capture");
     println!("wrote {} tool(s) to {out}", tools.len());
 }
