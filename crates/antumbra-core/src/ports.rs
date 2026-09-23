@@ -94,6 +94,11 @@ pub struct TaskOutcome {
     /// interpret it beyond ordering, so any consistent measure will do; the
     /// trainer supplies prompt length, which is a proxy rather than a claim.
     pub size: u32,
+    /// The corpus marked this task unsatisfiable. The partition never assigns
+    /// that slice -- such a task is authored, not drawn -- so it has to travel
+    /// with the result for the instruments to see it.
+    #[serde(default)]
+    pub impossible: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

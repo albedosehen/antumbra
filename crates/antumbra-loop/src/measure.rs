@@ -3,11 +3,13 @@
 //! and what the audit slice says across the generations before it.
 //!
 //! Nothing here decides anything. The loop records these readings beside the
-//! fitness they qualify and says so when the trend reads as overtuning; no
-//! number measured here reaches graduation, training, or reward.
+//! fitness they qualify and says so when the trend reads as overtuning. One
+//! rule reaches a decision, and the record states it rather than this module
+//! choosing it: a generation that passed an impossible task fails whole, so it
+//! does not graduate. No number measured here reaches training or reward.
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome};
-use antumbra_core::slice::Holdout;
+use antumbra_core::slice::{Holdout, Slice};
 use antumbra_core::{EvaluationRun, Generation, Result, RunId, SubjectKind};
 use antumbra_eclipse::instrument::GenerationReport as InstrumentReport;
 use antumbra_eclipse::{Outcome, Point, Trend};
@@ -70,12 +72,14 @@ impl GenerationLoop<'_> {
             .per_task
             .iter()
             .map(|t: &TaskOutcome| {
-                Outcome::new(
-                    t.task_id.clone(),
-                    asked.partition.of(&t.task_id),
-                    t.passed,
-                    t.size,
-                )
+                // The partition never assigns the impossible slice: such a
+                // task is authored, so the result says what it is.
+                let slice = if t.impossible {
+                    Slice::Impossible
+                } else {
+                    asked.partition.of(&t.task_id)
+                };
+                Outcome::new(t.task_id.clone(), slice, t.passed, t.size)
             })
             .collect();
         Some(InstrumentReport::of(&outcomes))
