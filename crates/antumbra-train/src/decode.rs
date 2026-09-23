@@ -145,6 +145,27 @@ pub fn truncate_at_stops(text: &str, stops: &[&str]) -> String {
     text[..cut].trim_end().to_string()
 }
 
+/// Trim a chat model's answer.
+///
+/// [`DEFAULT_STOPS`] are for a completion model continuing code in place, and
+/// they cut at the first fence. A chat model writes code *inside* a fence, so
+/// those stops leave it the sentence introducing the code, or nothing when the
+/// answer opens with the fence: measured on the Instruct base, three draws in
+/// four came back empty and every draw failed. The answer is kept through the
+/// end of its first fenced block instead, which is what a verifier that extracts
+/// code reads. A fence cut short by the token budget keeps what there is, and an
+/// answer with no fence is trimmed exactly as before.
+pub fn trim_chat_answer(text: &str) -> String {
+    let Some(open) = text.find("```") else {
+        return truncate_at_stops(text, DEFAULT_STOPS);
+    };
+    let body = open + 3;
+    match text[body..].find("```") {
+        Some(close) => text[..body + close + 3].trim_end().to_string(),
+        None => text.trim_end().to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,6 +177,40 @@ mod tests {
             truncate_at_stops(raw, DEFAULT_STOPS),
             "def add(a, b):\n    return a + b"
         );
+    }
+
+    #[test]
+    fn a_chat_answer_keeps_its_fenced_code() {
+        let answer =
+            "Here's the function:\n```python\ndef add(a, b):\n    return a + b\n```\nIt adds them.";
+        assert_eq!(
+            trim_chat_answer(answer),
+            "Here's the function:\n```python\ndef add(a, b):\n    return a + b\n```"
+        );
+        // The completion-model stops would have left only the introduction.
+        assert_eq!(
+            truncate_at_stops(answer, DEFAULT_STOPS),
+            "Here's the function:"
+        );
+    }
+
+    #[test]
+    fn a_chat_answer_that_opens_with_a_fence_is_not_emptied() {
+        let answer = "```python\ndef f():\n    return 1\n```";
+        assert_eq!(trim_chat_answer(answer), answer);
+        assert_eq!(truncate_at_stops(answer, DEFAULT_STOPS), "");
+    }
+
+    #[test]
+    fn a_fence_cut_short_by_the_budget_keeps_what_there_is() {
+        let answer = "```python\ndef f():\n    return";
+        assert_eq!(trim_chat_answer(answer), answer);
+    }
+
+    #[test]
+    fn a_chat_answer_without_a_fence_is_trimmed_as_before() {
+        let answer = "deno install lodash\n\n\nThat is all.";
+        assert_eq!(trim_chat_answer(answer), "deno install lodash");
     }
 
     #[test]
