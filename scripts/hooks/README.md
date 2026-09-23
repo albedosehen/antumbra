@@ -17,7 +17,7 @@ Hooks talk to a running Antumbra **MCP HTTP surface**, either a local one you st
 ```sh
 ANTUMBRA_URL=http://127.0.0.1:8081     # the antumbra-mcp engine
 ANTUMBRA_WORKSPACE_ID=<workspace>      # your tenant/workspace scope
-ANTUMBRA_TOKEN=<bearer-jwt>            # Authorization: Bearer <token>
+ANTUMBRA_TOKEN=<bearer-jwt>            # or leave unset: every hook reads ~/.antumbra/token.txt (ANTUMBRA_TOKEN_FILE)
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
 ANTUMBRA_PENALIZE_ORPHANS=0            # 1: bootstrap also penalizes memories whose branch is gone
 ANTUMBRA_TOOLS=agent                   # on the SERVER: advertise only the eight tools a coding agent needs
@@ -34,6 +34,22 @@ antumbra-mcp --mint-token --tenant <workspace> --user <user> \
 ```
 
 It prints a bearer JWT signed with the same HS256 secret the server verifies with (an RS256 deployment mints via its own auth service's private key instead). The token _is_ the identity (it grants exactly `(tenant, user)`) and carries a finite `exp`, so it is long-lived, never an eternal standing key. For a purely **offline**, single identity you can instead run the **stdio** server and have your agent connect directly; then the capture/bootstrap tools are called in-band and the `SessionStart` script is optional.
+
+### The MCP connection, with the token in a file
+
+The agent's own connection to the surface needs the bearer too. Rather than a static `Authorization: Bearer ${ANTUMBRA_TOKEN}` header, which needs the token in the settings file's `env` block, point the server entry at `antumbra-mcp-headers` as its `headersHelper`. It prints the header from the same token file the hooks read, so the token can live only in that file:
+
+```sh
+# macOS / Linux
+claude mcp add-json antumbra --scope user   '{"type":"http","url":"http://127.0.0.1:8081/mcp","headersHelper":"bash ~/.claude/antumbra-mcp-headers.sh"}'
+```
+
+```powershell
+# Windows
+claude mcp add-json antumbra --scope user '{"type":"http","url":"http://127.0.0.1:8081/mcp","headersHelper":"powershell -NoProfile -NonInteractive -File C:\Users\<you>\.claude\antumbra-mcp-headers.ps1"}'
+```
+
+Claude Code runs the helper each time it connects and sends the header it prints. With no token in the file, the helper exits non-zero and the connection fails visibly rather than sending a header that cannot authenticate.
 
 ## Why disable built-in and additional external memory?
 
