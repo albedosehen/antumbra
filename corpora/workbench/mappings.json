@@ -1,0 +1,836 @@
+[
+  {
+    "id": "mappings/invert-first",
+    "skill": "mappings",
+    "level": "small",
+    "family": "invert",
+    "prompt": "# Write a Python function `invert(d)` that returns a dict that maps each value of the dict `d` back to a key.\n# The values of `d` are strings; when several keys share a value, the key that comes first in `d` wins.\n# For example, invert({'gbbzy': 'w', 'wjmjo': 'z', 'obp': 'w', 'lnm': 'y', 'ru': 'z'}) returns {'w': 'gbbzy', 'z': 'wjmjo', 'y': 'lnm'}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "invert",
+        "[[{\"gbbzy\": \"w\", \"wjmjo\": \"z\", \"obp\": \"w\", \"lnm\": \"y\", \"ru\": \"z\"}], [{\"hjff\": \"z\", \"tmkunm\": \"x\", \"skrtj\": \"x\", \"rieqf\": \"x\", \"thk\": \"w\"}], [{\"ko\": \"w\", \"tfnpo\": \"z\", \"kwsf\": \"x\", \"inefasn\": \"y\", \"ujf\": \"w\", \"uq\": \"w\"}], [{\"mhgjmh\": \"z\", \"edpvgms\": \"z\", \"catwlt\": \"x\", \"ti\": \"y\", \"nzrpied\": \"w\", \"tthndxq\": \"x\"}], [{}], [{\"a\": \"same\", \"b\": \"same\", \"c\": \"other\"}]]",
+        "457a2c843a7423c302525f0c779afabf09bba6a0c08fbe1d2b5a91b58715107b"
+      ]
+    },
+    "completion": "def invert(d):\n    out = {}\n    for k, v in d.items():\n        out.setdefault(v, k)\n    return out\n"
+  },
+  {
+    "id": "mappings/invert-last",
+    "skill": "mappings",
+    "level": "small",
+    "family": "invert",
+    "prompt": "# Write a Python function `invert(d)` that returns a dict that maps each value of the dict `d` back to a key.\n# The values of `d` are strings; when several keys share a value, the key that comes last in `d` wins.\n# For example, invert({'frok': 'z', 'coawd': 'x', 'tlpdt': 'w', 'cwdgen': 'y', 'msdyqpk': 'y', 'yuhxlcy': 'x'}) returns {'z': 'frok', 'x': 'yuhxlcy', 'w': 'tlpdt', 'y': 'msdyqpk'}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "invert",
+        "[[{\"frok\": \"z\", \"coawd\": \"x\", \"tlpdt\": \"w\", \"cwdgen\": \"y\", \"msdyqpk\": \"y\", \"yuhxlcy\": \"x\"}], [{\"bjqg\": \"x\", \"bi\": \"z\", \"kkutkj\": \"z\"}], [{\"ycwwb\": \"x\", \"peuun\": \"w\", \"mh\": \"z\", \"jwsc\": \"y\", \"pwkwtz\": \"w\"}], [{\"tnrkpmu\": \"x\", \"eds\": \"z\", \"qisfoof\": \"w\", \"cc\": \"y\"}], [{}], [{\"a\": \"same\", \"b\": \"same\", \"c\": \"other\"}]]",
+        "dcde952e987941f0bb509e175e1ea7cd9e853cdda74fef2ffd406b30416d0581"
+      ]
+    },
+    "completion": "def invert(d):\n    out = {}\n    for k, v in d.items():\n        out[v] = k\n    return out\n"
+  },
+  {
+    "id": "mappings/invert-all",
+    "skill": "mappings",
+    "level": "small",
+    "family": "invert",
+    "prompt": "# Write a Python function `invert(d)` that returns a dict that maps each value of the dict `d` back to a key.\n# The values of `d` are strings; each value maps to the list of all keys that had it, in the order they appear in `d`.\n# For example, invert({'josb': 'w', 'ftjo': 'y', 'aytpcqj': 'x'}) returns {'w': ['josb'], 'y': ['ftjo'], 'x': ['aytpcqj']}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "invert",
+        "[[{\"josb\": \"w\", \"ftjo\": \"y\", \"aytpcqj\": \"x\"}], [{\"szt\": \"y\", \"voiagic\": \"z\", \"dlvjm\": \"z\", \"po\": \"w\", \"lj\": \"y\"}], [{\"wuxs\": \"w\", \"oi\": \"x\", \"fber\": \"y\"}], [{\"thxc\": \"x\", \"ni\": \"y\", \"csxbn\": \"y\", \"yayb\": \"w\", \"up\": \"y\", \"yz\": \"y\"}], [{}], [{\"a\": \"same\", \"b\": \"same\", \"c\": \"other\"}]]",
+        "0c6d8e41689cb40c36fe558acb082bb42bdb8fed72facb9a9eabdd6f58ff78bb"
+      ]
+    },
+    "completion": "def invert(d):\n    out = {}\n    for k, v in d.items():\n        out.setdefault(v, []).append(k)\n    return out\n"
+  },
+  {
+    "id": "mappings/invert-count",
+    "skill": "mappings",
+    "level": "small",
+    "family": "invert",
+    "prompt": "# Write a Python function `invert(d)` that returns a dict that maps each value of the dict `d` back to a key.\n# The values of `d` are strings; each value maps to how many keys had it.\n# For example, invert({'sj': 'z', 'yxzacau': 'x', 'mmv': 'w', 'zkbx': 'y'}) returns {'z': 1, 'x': 1, 'w': 1, 'y': 1}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "invert",
+        "[[{\"sj\": \"z\", \"yxzacau\": \"x\", \"mmv\": \"w\", \"zkbx\": \"y\"}], [{\"wzdzbvq\": \"w\", \"iw\": \"z\", \"xsykwh\": \"x\", \"bzx\": \"w\", \"cdyql\": \"z\"}], [{\"xxb\": \"z\", \"guxslrg\": \"w\", \"nawts\": \"x\", \"kvedjd\": \"w\"}], [{\"thcfgm\": \"y\", \"oessgpa\": \"w\", \"cgwza\": \"y\", \"nl\": \"z\", \"ihpaa\": \"w\"}], [{}], [{\"a\": \"same\", \"b\": \"same\", \"c\": \"other\"}]]",
+        "4d97074d68e58058f773bd96c01dd340ac887f2be333999dd717e2dabf731235"
+      ]
+    },
+    "completion": "def invert(d):\n    out = {}\n    for v in d.values():\n        out[v] = out.get(v, 0) + 1\n    return out\n"
+  },
+  {
+    "id": "mappings/above-gt-3",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is greater than 3, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"wnz\": 9, \"nk\": 2, \"qchp\": 7}], [{\"sj\": 3, \"dx\": 4, \"bc\": 9, \"hvk\": 6, \"hto\": 4, \"qo\": 0}], [{\"yjgj\": 6, \"rt\": 3, \"no\": 6, \"ijoq\": 0}], [{\"huh\": 2, \"fjg\": 4, \"ykjo\": 6, \"t\": 2, \"j\": 5, \"byq\": 0}], [{\"mr\": 4, \"t\": 6, \"mt\": 9, \"nvk\": 1, \"qgh\": 8}], [{}], [{\"only\": 3}]]",
+        "06e2ee87e1e174cd9cbf867140e1462a9e87b0fb25cda51404701311ee6e3f66"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v > 3)\n"
+  },
+  {
+    "id": "mappings/above-gt-4",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is greater than 4, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"wd\": 5, \"vrvg\": 1, \"tjy\": 4, \"qep\": 6}], [{\"v\": 2, \"woxv\": 4, \"of\": 9, \"zhox\": 7, \"gti\": 1}], [{\"o\": 5, \"nhq\": 8, \"j\": 9}], [{\"ob\": 9, \"dao\": 4, \"ulxa\": 0, \"s\": 4, \"a\": 5}], [{\"afqx\": 5, \"m\": 0, \"j\": 0, \"cefs\": 9, \"pvn\": 3, \"uryr\": 9, \"kzq\": 9}], [{}], [{\"only\": 4}]]",
+        "6b0b7909a04c7d0d1b3f7eddff39227c5506eb8fd5bf698e4ae56c9a73beb439"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v > 4)\n"
+  },
+  {
+    "id": "mappings/above-ge-1",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is at least 1, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"nqts\": 8, \"mm\": 9, \"qycj\": 5, \"gs\": 6}], [{\"kec\": 7, \"tsxm\": 8, \"im\": 9, \"mcxx\": 2, \"iut\": 8}], [{\"b\": 8, \"rjwy\": 7, \"ffw\": 3, \"ffuv\": 3}], [{\"opfd\": 8, \"lsbi\": 1, \"uocu\": 6, \"up\": 7}], [{\"rm\": 8, \"fc\": 8, \"r\": 0}], [{}], [{\"only\": 1}]]",
+        "cf0cfd8fde7cc8fa96aaca743eef343eb7e856f57bb901d9555e780f9c369185"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v >= 1)\n"
+  },
+  {
+    "id": "mappings/above-ge-6",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is at least 6, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"zdj\": 5, \"fbcu\": 9, \"lh\": 4, \"dm\": 2, \"lf\": 8, \"y\": 4}], [{\"ln\": 8, \"j\": 1, \"lgah\": 9}], [{\"jilu\": 9, \"esni\": 1, \"j\": 6, \"rikp\": 6}], [{\"zq\": 5, \"ktg\": 2, \"bc\": 1, \"vie\": 9, \"xz\": 0}], [{\"su\": 5, \"fwaw\": 8, \"m\": 4, \"lhee\": 6, \"xvxq\": 5}], [{}], [{\"only\": 6}]]",
+        "f209488f80c6d7f7425f8d0d4b604a0cf6680750db189f5e1b2168a6bc9f40fc"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v >= 6)\n"
+  },
+  {
+    "id": "mappings/above-gt-6",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is greater than 6, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"kq\": 9, \"zf\": 6, \"y\": 2, \"lvsd\": 4, \"eycz\": 3}], [{\"ua\": 3, \"ymu\": 8, \"f\": 9, \"akxp\": 1, \"igu\": 8, \"wytt\": 6}], [{\"jaf\": 9, \"ic\": 9, \"dk\": 9, \"pe\": 3, \"tyfc\": 2, \"kb\": 0, \"qy\": 8, \"sour\": 1}], [{\"p\": 7, \"yc\": 4, \"nis\": 8, \"e\": 1, \"re\": 0, \"hi\": 2}], [{\"kt\": 5, \"kd\": 9, \"evj\": 1, \"r\": 6, \"us\": 2, \"ajj\": 7, \"kk\": 6, \"qnga\": 0}], [{}], [{\"only\": 6}]]",
+        "411f41aa8ac7a3d7c1b3830a2ef48697d2a93c86a3e40b2b22bb3f2315c9137c"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v > 6)\n"
+  },
+  {
+    "id": "mappings/above-gt-2",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is greater than 2, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"wz\": 3, \"svq\": 8, \"nvhv\": 4}], [{\"se\": 8, \"gy\": 8, \"itgh\": 7, \"y\": 3, \"q\": 6, \"elib\": 1}], [{\"x\": 9, \"fpof\": 0, \"l\": 8, \"u\": 7, \"mzo\": 0, \"cb\": 8}], [{\"akl\": 2, \"y\": 6, \"wumu\": 5, \"kf\": 7, \"hu\": 7, \"sh\": 2, \"duwk\": 7}], [{\"rgmm\": 1, \"obk\": 7, \"ut\": 4}], [{}], [{\"only\": 2}]]",
+        "6fe0e470e742d1fb84bb6e67e4acaa9ae289da2ce0be8b9229362b78aa9e2497"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v > 2)\n"
+  },
+  {
+    "id": "mappings/above-ge-2",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is at least 2, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"j\": 7, \"fuqq\": 1, \"lgvq\": 3, \"gu\": 6, \"x\": 3, \"rijx\": 2}], [{\"wpg\": 0, \"opw\": 8, \"kle\": 0}], [{\"ggdf\": 7, \"we\": 8, \"z\": 6, \"sl\": 4, \"cwjy\": 7}], [{\"armz\": 3, \"fq\": 3, \"ob\": 3, \"fhbi\": 9, \"hr\": 5, \"tuzk\": 8}], [{\"rvi\": 6, \"qe\": 1, \"hlg\": 2, \"kmu\": 7, \"bt\": 1}], [{}], [{\"only\": 2}]]",
+        "fd1918d91f6a08675592b2ad204909da494a76183bde52dd70a317eb04362925"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v >= 2)\n"
+  },
+  {
+    "id": "mappings/above-ge-5",
+    "skill": "mappings",
+    "level": "small",
+    "family": "keys-above",
+    "prompt": "# Write a Python function `keys_above(d)` that returns the keys of the dict `d` whose value is at least 5, sorted alphabetically.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "keys_above",
+        "[[{\"mx\": 0, \"d\": 9, \"p\": 6}], [{\"bjtl\": 1, \"ms\": 3, \"j\": 7, \"r\": 4, \"zm\": 8}], [{\"cdo\": 9, \"y\": 4, \"jmu\": 6, \"gie\": 5, \"zey\": 9, \"q\": 1, \"r\": 9}], [{\"xlq\": 7, \"dkk\": 6, \"mion\": 9, \"amd\": 4, \"gya\": 1}], [{\"vdzk\": 4, \"fiom\": 5, \"vdo\": 3, \"pck\": 2, \"mlfd\": 6, \"shiy\": 4, \"lfth\": 6, \"e\": 3}], [{}], [{\"only\": 5}]]",
+        "4ce4732ec0e7e2f27e8d7f0d42853ae41082adda544b19dd4321017695158396"
+      ]
+    },
+    "completion": "def keys_above(d):\n    return sorted(k for k, v in d.items() if v >= 5)\n"
+  },
+  {
+    "id": "mappings/group-first-nocase",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "group-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `group_words(words)` that groups the non-empty strings in the list `words` by its first letter, returning a dict from that letter to the list of words.\n# Compare letters without regard to case and use the lowercase letter as the key; the words themselves are kept as written.\n# Within each list, words keep the order they have in `words`; an empty list returns {}.\n# For example, group_words(['pC', 'zqxA', 'eovFn', 'GmfTe', 'AR', 'Wbaxn']) returns {'p': ['pC'], 'z': ['zqxA'], 'e': ['eovFn'], 'g': ['GmfTe'], 'a': ['AR'], 'w': ['Wbaxn']}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "group_words",
+        "[[[\"pC\", \"zqxA\", \"eovFn\", \"GmfTe\", \"AR\", \"Wbaxn\"]], [[\"fhPi\", \"hqtc\", \"ysy\", \"pvub\", \"zKZg\", \"gazgi\", \"Eiv\"]], [[\"ZAfRphW\", \"xTN\", \"NXAH\", \"mg\", \"hlr\", \"noaqZ\", \"nIN\", \"qx\"]], [[\"pwADZw\", \"wcWPEK\", \"tRQLv\", \"jS\", \"GsvRAGm\", \"Dys\"]], [[]], [[\"Apple\", \"avocado\", \"Banana\"]]]",
+        "a748c726655a5bb8e114d70e4164e6fdadc1a8c86962eac3a32b944c91c81854"
+      ]
+    },
+    "completion": "def group_words(words):\n    out = {}\n    for w in words:\n        out.setdefault(w[0].lower(), []).append(w)\n    return out\n"
+  },
+  {
+    "id": "mappings/group-first-case",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "group-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `group_words(words)` that groups the non-empty strings in the list `words` by its first letter, returning a dict from that letter to the list of words.\n# Letters are case-sensitive: 'A' and 'a' are different keys.\n# Within each list, words keep the order they have in `words`; an empty list returns {}.\n# For example, group_words(['nlc', 'xd', 'zKsrrd', 'iJ', 'ay', 'qHvLuib', 'km']) returns {'n': ['nlc'], 'x': ['xd'], 'z': ['zKsrrd'], 'i': ['iJ'], 'a': ['ay'], 'q': ['qHvLuib'], 'k': ['km']}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "group_words",
+        "[[[\"nlc\", \"xd\", \"zKsrrd\", \"iJ\", \"ay\", \"qHvLuib\", \"km\"]], [[\"oharlaP\", \"zAr\", \"vy\", \"RlHRyFW\", \"ZJaVg\", \"cwWb\", \"LogRj\"]], [[\"yrjNxRa\", \"Gbq\", \"sdK\", \"hbyswFX\"]], [[\"pzQ\", \"ig\", \"zoxXKU\", \"kAlfF\", \"Aa\"]], [[]], [[\"Apple\", \"avocado\", \"Banana\"]]]",
+        "4577e0d0e585cd11d28904784c48063a75b65b62d10c0ffbef6b6caf6e1f82fb"
+      ]
+    },
+    "completion": "def group_words(words):\n    out = {}\n    for w in words:\n        out.setdefault(w[0], []).append(w)\n    return out\n"
+  },
+  {
+    "id": "mappings/group-last-nocase",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "group-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `group_words(words)` that groups the non-empty strings in the list `words` by its last letter, returning a dict from that letter to the list of words.\n# Compare letters without regard to case and use the lowercase letter as the key; the words themselves are kept as written.\n# Within each list, words keep the order they have in `words`; an empty list returns {}.\n# For example, group_words(['fgu', 'VHRP', 'Lmzvxo', 'mwD', 'cjtpyU', 'HIzVtSv', 'bkhyv', 'wlJgTun']) returns {'u': ['fgu', 'cjtpyU'], 'p': ['VHRP'], 'o': ['Lmzvxo'], 'd': ['mwD'], 'v': ['HIzVtSv', 'bkhyv'], 'n': ['wlJgTun']}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "group_words",
+        "[[[\"fgu\", \"VHRP\", \"Lmzvxo\", \"mwD\", \"cjtpyU\", \"HIzVtSv\", \"bkhyv\", \"wlJgTun\"]], [[\"xtJRLyJ\", \"SbsOsa\", \"kHq\", \"aCqdvlV\", \"toPU\", \"LY\", \"ekeNzt\", \"wdPeWY\", \"OEQs\"]], [[\"xADcqc\", \"hm\", \"Xj\", \"endgWyn\", \"oYEQ\", \"YZPaHz\", \"fEVFU\"]], [[\"kcugH\", \"ukgB\", \"NacPA\", \"uaHPe\", \"aA\", \"tizl\", \"HjHeB\", \"nw\", \"ZDds\"]], [[]], [[\"Apple\", \"avocado\", \"Banana\"]]]",
+        "0a3dccff24c842245c6391e149da6f97ac15ea895aba1e4e64ee5af351ed1cb2"
+      ]
+    },
+    "completion": "def group_words(words):\n    out = {}\n    for w in words:\n        out.setdefault(w[-1].lower(), []).append(w)\n    return out\n"
+  },
+  {
+    "id": "mappings/group-last-case",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "group-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `group_words(words)` that groups the non-empty strings in the list `words` by its last letter, returning a dict from that letter to the list of words.\n# Letters are case-sensitive: 'A' and 'a' are different keys.\n# Within each list, words keep the order they have in `words`; an empty list returns {}.\n# For example, group_words(['fqY', 'xrs', 'iCcAxw', 'qDSnFY', 'fcI', 'Qd', 'eO']) returns {'Y': ['fqY', 'qDSnFY'], 's': ['xrs'], 'w': ['iCcAxw'], 'I': ['fcI'], 'd': ['Qd'], 'O': ['eO']}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "group_words",
+        "[[[\"fqY\", \"xrs\", \"iCcAxw\", \"qDSnFY\", \"fcI\", \"Qd\", \"eO\"]], [[\"NncqxGh\", \"oddtp\", \"VV\", \"Sncp\", \"Cx\", \"Tekqzw\", \"WjbdkAm\"]], [[\"urv\", \"ysZ\", \"BUNXjdt\", \"swdyyqF\", \"ScDygMT\"]], [[\"EqBig\", \"guVNe\", \"MSxC\", \"jnj\", \"kh\", \"wl\", \"nDkBL\"]], [[]], [[\"Apple\", \"avocado\", \"Banana\"]]]",
+        "ff5dbd22d51339f4b8af36ce0b589fee71aced175aaf8f8a08994268da59277b"
+      ]
+    },
+    "completion": "def group_words(words):\n    out = {}\n    for w in words:\n        out.setdefault(w[-1], []).append(w)\n    return out\n"
+  },
+  {
+    "id": "mappings/group-prefix-nocase",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "group-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `group_words(words)` that groups the non-empty strings in the list `words` by its first two letters, returning a dict from that letter to the list of words.\n# Compare letters without regard to case and use the lowercase letter as the key; the words themselves are kept as written.\n# Within each list, words keep the order they have in `words`; an empty list returns {}.\n# For example, group_words(['Jaz', 'xUon', 'tzwonz', 'ghjwypu', 'Avhygfh', 'kuQEar', 'quyER', 'Junxqd', 'hMf']) returns {'ja': ['Jaz'], 'xu': ['xUon'], 'tz': ['tzwonz'], 'gh': ['ghjwypu'], 'av': ['Avhygfh'], 'ku': ['kuQEar'], 'qu': ['quyER'], 'ju': ['Junxqd'], 'hm': ['hMf']}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "group_words",
+        "[[[\"Jaz\", \"xUon\", \"tzwonz\", \"ghjwypu\", \"Avhygfh\", \"kuQEar\", \"quyER\", \"Junxqd\", \"hMf\"]], [[\"Ees\", \"qqVarU\", \"am\", \"tuUnFoD\", \"inNiU\"]], [[\"bb\", \"dZAEpih\", \"sochq\", \"lsKsxko\", \"lv\", \"oj\", \"dWUPzlb\", \"syIk\", \"EOyWqsG\"]], [[\"aiNj\", \"BkpxPrb\", \"jp\", \"ekhj\", \"xgPmDAv\"]], [[]], [[\"Apple\", \"avocado\", \"Banana\"]]]",
+        "07bfa8aa81b40e49df44ddc9354fc9f7a099a103dabdf91fc3fe472d3553a956"
+      ]
+    },
+    "completion": "def group_words(words):\n    out = {}\n    for w in words:\n        out.setdefault(w[:2].lower(), []).append(w)\n    return out\n"
+  },
+  {
+    "id": "mappings/group-prefix-case",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "group-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `group_words(words)` that groups the non-empty strings in the list `words` by its first two letters, returning a dict from that letter to the list of words.\n# Letters are case-sensitive: 'A' and 'a' are different keys.\n# Within each list, words keep the order they have in `words`; an empty list returns {}.\n# For example, group_words(['qWDm', 'OO', 'qAejs', 'cxdk', 'xlbS', 'rTLI', 'ycty', 'nlXjtkS', 'ImbXpj']) returns {'qW': ['qWDm'], 'OO': ['OO'], 'qA': ['qAejs'], 'cx': ['cxdk'], 'xl': ['xlbS'], 'rT': ['rTLI'], 'yc': ['ycty'], 'nl': ['nlXjtkS'], 'Im': ['ImbXpj']}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "group_words",
+        "[[[\"qWDm\", \"OO\", \"qAejs\", \"cxdk\", \"xlbS\", \"rTLI\", \"ycty\", \"nlXjtkS\", \"ImbXpj\"]], [[\"elf\", \"ym\", \"XyCRpfy\", \"GJ\"]], [[\"MW\", \"NWIkNf\", \"qawfs\", \"lrmk\", \"mCrlw\", \"gcjUh\", \"Ws\"]], [[\"Uooz\", \"DYvjwTx\", \"Oy\", \"lQvbvu\", \"bd\", \"paC\", \"qkb\", \"mMuozn\", \"ZKKyu\"]], [[]], [[\"Apple\", \"avocado\", \"Banana\"]]]",
+        "966c0a127a4834efb39ff5382463a6b0c9a371d50fac8c8f1988c68509e7d41b"
+      ]
+    },
+    "completion": "def group_words(words):\n    out = {}\n    for w in words:\n        out.setdefault(w[:2], []).append(w)\n    return out\n"
+  },
+  {
+    "id": "mappings/merge-sum",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "merge",
+    "prompt": "# Write a Python function `merge(a, b)` that returns a new dict holding every key of the dicts `a` and `b`.\n# A key in only one of them keeps its value; a key in both maps to their sum of its two values.\n# Neither `a` nor `b` is modified.\n# For example, merge({'jyq': -3, 'er': -4}, {'qapn': 1, 'n': 6, 'uozn': 7}) returns {'jyq': -3, 'er': -4, 'qapn': 1, 'n': 6, 'uozn': 7}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "merge",
+        "[[{\"jyq\": -3, \"er\": -4}, {\"qapn\": 1, \"n\": 6, \"uozn\": 7}], [{\"sb\": 9, \"zpt\": -5, \"ev\": 4, \"wy\": 5, \"tl\": -5}, {\"pq\": 6, \"w\": -4, \"dd\": -3}], [{\"wlu\": 7, \"usnd\": 9}, {\"ctfm\": 9, \"sxe\": 1, \"vjm\": 6, \"h\": -4, \"q\": -3}], [{\"wgs\": 7, \"catq\": 6, \"le\": -4, \"q\": -2, \"gswp\": 6}, {\"jalr\": 3, \"zxoh\": -3, \"yskp\": 9, \"qab\": 6, \"g\": 3}], [{}, {\"a\": 1}], [{\"a\": 2, \"b\": 3}, {\"a\": 4, \"c\": -1}], [{}, {}]]",
+        "c244e7c62b451df3d2ea485465ffdbca746ba21aa97e6f2cf31030f3d13c948f"
+      ]
+    },
+    "completion": "def merge(a, b):\n    out = dict(a)\n    for k, v in b.items():\n        out[k] = out[k] + v if k in out else v\n    return out\n"
+  },
+  {
+    "id": "mappings/merge-max",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "merge",
+    "prompt": "# Write a Python function `merge(a, b)` that returns a new dict holding every key of the dicts `a` and `b`.\n# A key in only one of them keeps its value; a key in both maps to the larger value of its two values.\n# Neither `a` nor `b` is modified.\n# For example, merge({'s': 0, 'oful': -2, 'afi': 3, 'yz': 7, 'yji': 6}, {'wnru': -1, 'x': 8, 'cb': 6}) returns {'s': 0, 'oful': -2, 'afi': 3, 'yz': 7, 'yji': 6, 'wnru': -1, 'x': 8, 'cb': 6}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "merge",
+        "[[{\"s\": 0, \"oful\": -2, \"afi\": 3, \"yz\": 7, \"yji\": 6}, {\"wnru\": -1, \"x\": 8, \"cb\": 6}], [{\"kv\": 3, \"njds\": -4, \"jjpb\": 3, \"xtex\": 3, \"eb\": 9}, {\"pfsl\": 6, \"skql\": 2, \"ra\": 7, \"df\": 7}], [{\"z\": 0, \"sq\": 7, \"omo\": -5, \"ecxe\": -2}, {\"qcah\": -3, \"c\": -4, \"mpl\": -4}], [{\"na\": -3, \"u\": -4, \"mfbu\": 1, \"h\": 3}, {\"s\": -1, \"f\": -5, \"d\": -4}], [{}, {\"a\": 1}], [{\"a\": 2, \"b\": 3}, {\"a\": 4, \"c\": -1}], [{}, {}]]",
+        "d1a342b43204e4a9e4d1035b9f2dd955c0de61e1251af1630d593b3f2dd478ec"
+      ]
+    },
+    "completion": "def merge(a, b):\n    out = dict(a)\n    for k, v in b.items():\n        out[k] = max(out[k], v) if k in out else v\n    return out\n"
+  },
+  {
+    "id": "mappings/merge-min",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "merge",
+    "prompt": "# Write a Python function `merge(a, b)` that returns a new dict holding every key of the dicts `a` and `b`.\n# A key in only one of them keeps its value; a key in both maps to the smaller value of its two values.\n# Neither `a` nor `b` is modified.\n# For example, merge({'b': -3, 'ixa': 8, 'ivzt': 7, 'gxf': 4, 'uhk': -4}, {'kov': -1, 'w': 9, 'pc': 0}) returns {'b': -3, 'ixa': 8, 'ivzt': 7, 'gxf': 4, 'uhk': -4, 'kov': -1, 'w': 9, 'pc': 0}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "merge",
+        "[[{\"b\": -3, \"ixa\": 8, \"ivzt\": 7, \"gxf\": 4, \"uhk\": -4}, {\"kov\": -1, \"w\": 9, \"pc\": 0}], [{\"hlm\": -4, \"jaw\": 2, \"nyw\": 4, \"rg\": 3, \"t\": -5}, {\"iei\": 2, \"txf\": -3, \"zqs\": 9}], [{\"in\": -4, \"fib\": 1, \"l\": 5, \"atup\": 3, \"w\": -5}, {\"qe\": -4, \"zr\": 6, \"h\": 0}], [{\"t\": 8, \"omuw\": 7, \"qbbb\": 8}, {\"enba\": 1, \"y\": 6}], [{}, {\"a\": 1}], [{\"a\": 2, \"b\": 3}, {\"a\": 4, \"c\": -1}], [{}, {}]]",
+        "8118a56bfe855638006fa21bf9c82411cb378acccb7cd0797013014aa38a60a8"
+      ]
+    },
+    "completion": "def merge(a, b):\n    out = dict(a)\n    for k, v in b.items():\n        out[k] = min(out[k], v) if k in out else v\n    return out\n"
+  },
+  {
+    "id": "mappings/merge-product",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "merge",
+    "prompt": "# Write a Python function `merge(a, b)` that returns a new dict holding every key of the dicts `a` and `b`.\n# A key in only one of them keeps its value; a key in both maps to their product of its two values.\n# Neither `a` nor `b` is modified.\n# For example, merge({'qspf': 7, 'u': -1}, {'th': -5, 'oog': 5, 'qk': 7, 'mpe': 4}) returns {'qspf': 7, 'u': -1, 'th': -5, 'oog': 5, 'qk': 7, 'mpe': 4}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "merge",
+        "[[{\"qspf\": 7, \"u\": -1}, {\"th\": -5, \"oog\": 5, \"qk\": 7, \"mpe\": 4}], [{\"jll\": 6, \"httv\": 6}, {\"g\": 9, \"fq\": 8, \"klio\": -3}], [{\"mlpw\": 8, \"o\": -3}, {\"r\": 2, \"t\": -5, \"s\": -5, \"pp\": 3}], [{\"kw\": 8, \"d\": -5, \"szk\": 5, \"bedd\": 1}, {\"oi\": 8, \"muj\": -3}], [{}, {\"a\": 1}], [{\"a\": 2, \"b\": 3}, {\"a\": 4, \"c\": -1}], [{}, {}]]",
+        "1182114de24f251b3843e77e39f4b9e4ab48a65e96380d7ff5ed6b7c9117d7be"
+      ]
+    },
+    "completion": "def merge(a, b):\n    out = dict(a)\n    for k, v in b.items():\n        out[k] = out[k] * v if k in out else v\n    return out\n"
+  },
+  {
+    "id": "mappings/merge-difference",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "merge",
+    "prompt": "# Write a Python function `merge(a, b)` that returns a new dict holding every key of the dicts `a` and `b`.\n# A key in only one of them keeps its value; a key in both maps to the value from `a` minus the value from `b` of its two values.\n# Neither `a` nor `b` is modified.\n# For example, merge({'rmw': 0, 'pn': -1, 'ypzd': 0}, {'rgr': 6, 'q': 3, 'pfbx': 0, 'jssi': 3, 'azt': -3}) returns {'rmw': 0, 'pn': -1, 'ypzd': 0, 'rgr': 6, 'q': 3, 'pfbx': 0, 'jssi': 3, 'azt': -3}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "merge",
+        "[[{\"rmw\": 0, \"pn\": -1, \"ypzd\": 0}, {\"rgr\": 6, \"q\": 3, \"pfbx\": 0, \"jssi\": 3, \"azt\": -3}], [{\"osu\": 3, \"mfnf\": 8, \"dmqb\": -2, \"d\": 3, \"b\": 7}, {\"b\": 0, \"ovu\": -5, \"tzt\": 4, \"qbmv\": 3, \"jnmq\": -2}], [{\"gui\": 8, \"j\": 3}, {\"mb\": 4, \"rhl\": -4, \"lq\": 5, \"dueh\": -1}], [{\"yzcj\": -5, \"q\": -1, \"ke\": -5}, {\"beqr\": -3, \"zclw\": 8, \"jzv\": -4, \"s\": 3}], [{}, {\"a\": 1}], [{\"a\": 2, \"b\": 3}, {\"a\": 4, \"c\": -1}], [{}, {}]]",
+        "b8e536a24c88c8cc764231c74e9405a31d2479829bb4ca2b873707ddd5438250"
+      ]
+    },
+    "completion": "def merge(a, b):\n    out = dict(a)\n    for k, v in b.items():\n        out[k] = out[k] - v if k in out else v\n    return out\n"
+  },
+  {
+    "id": "mappings/merge-keep-a",
+    "skill": "mappings",
+    "level": "medium",
+    "family": "merge",
+    "prompt": "# Write a Python function `merge(a, b)` that returns a new dict holding every key of the dicts `a` and `b`.\n# A key in only one of them keeps its value; a key in both maps to the value from `a` of its two values.\n# Neither `a` nor `b` is modified.\n# For example, merge({'ab': 2, 'zoy': 6, 'erv': -4, 'b': -2}, {'otp': 3, 'qgyw': 3, 'tdk': 3, 'o': -1}) returns {'ab': 2, 'zoy': 6, 'erv': -4, 'b': -2, 'otp': 3, 'qgyw': 3, 'tdk': 3, 'o': -1}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "merge",
+        "[[{\"ab\": 2, \"zoy\": 6, \"erv\": -4, \"b\": -2}, {\"otp\": 3, \"qgyw\": 3, \"tdk\": 3, \"o\": -1}], [{\"mi\": -3, \"bd\": 7, \"yj\": 8}, {\"pgk\": -4, \"s\": -3}], [{\"mf\": 6, \"thn\": 5}, {\"hwi\": 2, \"nl\": 0, \"kjqv\": 0}], [{\"p\": 1, \"ny\": 4, \"uh\": 5, \"kppt\": 2}, {\"eqy\": -5, \"wnee\": 0, \"wenu\": 8, \"n\": -1, \"zqgh\": -2}], [{}, {\"a\": 1}], [{\"a\": 2, \"b\": 3}, {\"a\": 4, \"c\": -1}], [{}, {}]]",
+        "40629fa721281f59f2eb168e4ff0a75d4b52705ccb224b52ccf49e44e2ab9a00"
+      ]
+    },
+    "completion": "def merge(a, b):\n    out = dict(a)\n    for k, v in b.items():\n        out[k] = out[k] if k in out else v\n    return out\n"
+  },
+  {
+    "id": "mappings/top-2-alpha",
+    "skill": "mappings",
+    "level": "large",
+    "family": "top-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `top_words(text)` that returns the 2 most frequent words in `text` as a list of [word, count] pairs.\n# Words are separated by whitespace and compared in lowercase; return them in lowercase.\n# Order by count, highest first, and break ties alphabetically.\n# If there are fewer than 2 distinct words, return all of them; an empty text returns [].\n# For example, top_words('nsd ck dfbki svnlnxh DfBki nSd cK dFbkI dfBki dfbki') returns [['dfbki', 5], ['ck', 2]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "top_words",
+        "[[\"nsd ck dfbki svnlnxh DfBki nSd cK dFbkI dfBki dfbki\"], [\"DfbkI svnLnxh nsd ck ck nSd nsd svnlNxh\"], [\"ck Nsd dFBkI svnlnxh DfbKI ck nsD ck\"], [\"cK ck nsd dfbki svnlnxh dfbkI nsD svnlnxH ck nsd nsd nSd Ck nsd\"], [\"\"], [\"solo\"], [\"vmlvxbc jdeg tbzqrm\"]]",
+        "c1970d6c08eb71fb81527e8127e9dd6ff57066cd7edf43edd6172fd4c83ac56b"
+      ]
+    },
+    "completion": "def top_words(text):\n    counts = {}\n    first = {}\n    for i, w in enumerate(text.lower().split()):\n        counts[w] = counts.get(w, 0) + 1\n        first.setdefault(w, i)\n    order = sorted(counts, key=lambda w: (-counts[w], w))\n    return [[w, counts[w]] for w in order[:2]]\n"
+  },
+  {
+    "id": "mappings/top-2-first-seen",
+    "skill": "mappings",
+    "level": "large",
+    "family": "top-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `top_words(text)` that returns the 2 most frequent words in `text` as a list of [word, count] pairs.\n# Words are separated by whitespace and compared in lowercase; return them in lowercase.\n# Order by count, highest first, and break ties by which word appears first in the text.\n# If there are fewer than 2 distinct words, return all of them; an empty text returns [].\n# For example, top_words('uPe jp wtqIUn WTqIun jp wtqiuN') returns [['wtqiun', 3], ['jp', 2]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "top_words",
+        "[[\"uPe jp wtqIUn WTqIun jp wtqiuN\"], [\"jp Ubloxy jp ublOxy bvGo ubLoxy bVGO bvgo bVGO JP bvgo WtQiun bVgO\"], [\"sP sP bvGo wTqIUn sp Upe bVgo WtQiun upe jp\"], [\"wtqiUn wtQIUn bvGO jP upe sp wtQIun ubloXY jP JP bvgo JP UBloXy sp\"], [\"\"], [\"solo\"], [\"jq bjataq daxrhw\"]]",
+        "34d8c8c612662902c88e1613af35e13cfb819e79adb7a26afd4c7e7fbd125d2f"
+      ]
+    },
+    "completion": "def top_words(text):\n    counts = {}\n    first = {}\n    for i, w in enumerate(text.lower().split()):\n        counts[w] = counts.get(w, 0) + 1\n        first.setdefault(w, i)\n    order = sorted(counts, key=lambda w: (-counts[w], first[w]))\n    return [[w, counts[w]] for w in order[:2]]\n"
+  },
+  {
+    "id": "mappings/top-3-alpha",
+    "skill": "mappings",
+    "level": "large",
+    "family": "top-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `top_words(text)` that returns the 3 most frequent words in `text` as a list of [word, count] pairs.\n# Words are separated by whitespace and compared in lowercase; return them in lowercase.\n# Order by count, highest first, and break ties alphabetically.\n# If there are fewer than 3 distinct words, return all of them; an empty text returns [].\n# For example, top_words('pT pmeu LnA lNa OK Lna yZe ok lna pt Yze yZe yZe yZe') returns [['yze', 5], ['lna', 4], ['ok', 2]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "top_words",
+        "[[\"pT pmeu LnA lNa OK Lna yZe ok lna pt Yze yZe yZe yZe\"], [\"yZe yze oK lNa pt yZE Lna Ok pmeu\"], [\"pMEu pt Pt lnA lna Pt\"], [\"Ok lna pmEu OK Yze pt pt lNa pmeu lna\"], [\"\"], [\"solo\"], [\"bnbjpb sxtja hfvrml\"]]",
+        "60a8ecce16927d44c25edc74d73f843afdc1956a3804bb3e88a12b32ea3f6c8f"
+      ]
+    },
+    "completion": "def top_words(text):\n    counts = {}\n    first = {}\n    for i, w in enumerate(text.lower().split()):\n        counts[w] = counts.get(w, 0) + 1\n        first.setdefault(w, i)\n    order = sorted(counts, key=lambda w: (-counts[w], w))\n    return [[w, counts[w]] for w in order[:3]]\n"
+  },
+  {
+    "id": "mappings/top-3-first-seen",
+    "skill": "mappings",
+    "level": "large",
+    "family": "top-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `top_words(text)` that returns the 3 most frequent words in `text` as a list of [word, count] pairs.\n# Words are separated by whitespace and compared in lowercase; return them in lowercase.\n# Order by count, highest first, and break ties by which word appears first in the text.\n# If there are fewer than 3 distinct words, return all of them; an empty text returns [].\n# For example, top_words('OCCVXh xq EwwxOX xq xq MbqQ eWwxoX xq Mbqq') returns [['xq', 4], ['ewwxox', 2], ['mbqq', 2]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "top_words",
+        "[[\"OCCVXh xq EwwxOX xq xq MbqQ eWwxoX xq Mbqq\"], [\"EWwXOX aij aij OccvXh OccvxH mBqq oCcvxh aij eWwXOx\"], [\"occvxh xq mbqq Aij OCCvxh aij OccVxH eWwxoX EwWXox\"], [\"ewWXOx Aij OccvXh EWwxOx OcCVXh AiJ EWwxOx occVxh Xq aiJ occvxH xq MbqQ\"], [\"\"], [\"solo\"], [\"dhmgav ys xwckzg\"]]",
+        "b6244e36ecc86e33ec507144a7dd390cb73dbc65406ff0424c462a8867afbf42"
+      ]
+    },
+    "completion": "def top_words(text):\n    counts = {}\n    first = {}\n    for i, w in enumerate(text.lower().split()):\n        counts[w] = counts.get(w, 0) + 1\n        first.setdefault(w, i)\n    order = sorted(counts, key=lambda w: (-counts[w], first[w]))\n    return [[w, counts[w]] for w in order[:3]]\n"
+  },
+  {
+    "id": "mappings/top-4-alpha",
+    "skill": "mappings",
+    "level": "large",
+    "family": "top-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `top_words(text)` that returns the 4 most frequent words in `text` as a list of [word, count] pairs.\n# Words are separated by whitespace and compared in lowercase; return them in lowercase.\n# Order by count, highest first, and break ties alphabetically.\n# If there are fewer than 4 distinct words, return all of them; an empty text returns [].\n# For example, top_words('VOeC Capiay voEc caPiaY capiay mcueD Mcued') returns [['capiay', 3], ['mcued', 2], ['voec', 2]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "top_words",
+        "[[\"VOeC Capiay voEc caPiaY capiay mcueD Mcued\"], [\"WsgjKBw capiAy wSgJkbw voec CAPiay caPiAy WSGJkbW capiay Mcued McUed wsGJkbw wsGJkBw caPiay\"], [\"Capiay VOec Capiay voec WSGjKBw cAPiAY caPIAY\"], [\"mcued mcUeD voeC voeC VOEc wsGjkbw VOeC VOEc Voec mcUed WsGjkbw caPIay wsgjkbW cApIaY\"], [\"\"], [\"solo\"], [\"ndsqhyo mj kqmzp\"]]",
+        "3e2ad7bfd2bb6ced17b91dc7268c42b3868ecd8136aeb6ab7fd9b9a10d1ba10d"
+      ]
+    },
+    "completion": "def top_words(text):\n    counts = {}\n    first = {}\n    for i, w in enumerate(text.lower().split()):\n        counts[w] = counts.get(w, 0) + 1\n        first.setdefault(w, i)\n    order = sorted(counts, key=lambda w: (-counts[w], w))\n    return [[w, counts[w]] for w in order[:4]]\n"
+  },
+  {
+    "id": "mappings/top-4-first-seen",
+    "skill": "mappings",
+    "level": "large",
+    "family": "top-words",
+    "also": [
+      "strings"
+    ],
+    "prompt": "# Write a Python function `top_words(text)` that returns the 4 most frequent words in `text` as a list of [word, count] pairs.\n# Words are separated by whitespace and compared in lowercase; return them in lowercase.\n# Order by count, highest first, and break ties by which word appears first in the text.\n# If there are fewer than 4 distinct words, return all of them; an empty text returns [].\n# For example, top_words('MJ dfvkbF dfvkbf mj dtHdkTh mJ dtHdktH mj IxiQsHi DTHDKTh dfVkbF dfvkbF dfvkBF dthdktH') returns [['dfvkbf', 5], ['mj', 4], ['dthdkth', 4], ['ixiqshi', 1]].\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "top_words",
+        "[[\"MJ dfvkbF dfvkbf mj dtHdkTh mJ dtHdktH mj IxiQsHi DTHDKTh dfVkbF dfvkbF dfvkBF dthdktH\"], [\"DthdktH ixIqshi mJ Glp dfVkbf dthdkth IxIqshi dThDkth glp DtHdkTh\"], [\"DfvKBf gLp mj gLP iXIqShI dFvkbF glp DThdKTh MJ DFvkbF dtHDktH dFvkbf\"], [\"dThdKth glp GlP DfVKBf dthdKth dFVkbf\"], [\"\"], [\"solo\"], [\"aeapxbb rdgrsnr fbdqzln\"]]",
+        "7d8e92abe80941a921b0f461c4c6df4619495a372ee1901f2049eb0d1c6ef1a5"
+      ]
+    },
+    "completion": "def top_words(text):\n    counts = {}\n    first = {}\n    for i, w in enumerate(text.lower().split()):\n        counts[w] = counts.get(w, 0) + 1\n        first.setdefault(w, i)\n    order = sorted(counts, key=lambda w: (-counts[w], first[w]))\n    return [[w, counts[w]] for w in order[:4]]\n"
+  },
+  {
+    "id": "mappings/flatten-dot-drop",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with '.'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict contributes no keys.\n# For example, flatten({'c': 4, 'k': 0, 'pja': 7}) returns {'c': 4, 'k': 0, 'pja': 7}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"c\": 4, \"k\": 0, \"pja\": 7}], [{\"ue\": {\"b\": {\"d\": 6}, \"nvb\": 4}, \"iv\": {\"alc\": 5, \"y\": {}}, \"i\": 1}], [{\"zu\": {\"jn\": 0, \"qo\": 3, \"dk\": 3}, \"dgv\": 3, \"q\": {}}], [{\"lu\": {}, \"mj\": {\"e\": {\"cd\": 6, \"wg\": {}, \"fkc\": 0}, \"mmv\": {\"iv\": 2, \"nuf\": 6}}}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "e55d10b5c2b46c98386f2f56da0ca9118aa4dba2d51c1b062fc8ad2208afa27a"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + '.' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                pass\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/flatten-dot-keep",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with '.'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict becomes a key whose value is None.\n# For example, flatten({'lu': {'t': 9}}) returns {'lu.t': 9}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"lu\": {\"t\": 9}}], [{\"t\": {}, \"tl\": {}}], [{\"jj\": {\"h\": {\"p\": {}}}}], [{\"s\": {\"gxx\": {\"y\": {}, \"vx\": {}}, \"cz\": 0, \"st\": 7}}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "bb64067b8c28a8af34f92b0fdff382a52a29219df024a065cb72f1961b8f177d"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + '.' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                out[key] = None\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/flatten-slash-drop",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with '/'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict contributes no keys.\n# For example, flatten({'hci': {'er': 8, 'q': {'zqe': {}, 'li': {}}, 'a': {'uhx': {}}}, 'lcf': 4, 'jy': {'e': {'v': 3, 'd': {}, 'qr': {}}, 'vs': {'t': 9}}}) returns {'hci/er': 8, 'lcf': 4, 'jy/e/v': 3, 'jy/vs/t': 9}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"hci\": {\"er\": 8, \"q\": {\"zqe\": {}, \"li\": {}}, \"a\": {\"uhx\": {}}}, \"lcf\": 4, \"jy\": {\"e\": {\"v\": 3, \"d\": {}, \"qr\": {}}, \"vs\": {\"t\": 9}}}], [{\"vf\": {\"uow\": 4}}], [{\"gw\": 3, \"d\": {\"xz\": {\"qn\": 4}, \"cdm\": 1}}], [{\"t\": {\"yiw\": {\"dcg\": {}, \"r\": {}, \"ibg\": {}}, \"ctl\": 4}, \"dj\": 0, \"rqp\": {\"elx\": {\"imk\": {}, \"o\": 3, \"j\": {}}, \"vqv\": 7, \"tr\": {\"ne\": 3, \"co\": 4, \"fx\": 2}}}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "f220976eb0da0d564db9298c1c0a1a7553e5e4c5bf8f60aa627ef8ab59406924"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + '/' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                pass\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/flatten-slash-keep",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with '/'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict becomes a key whose value is None.\n# For example, flatten({'lcd': 0}) returns {'lcd': 0}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"lcd\": 0}], [{\"ayz\": 5, \"yid\": 3, \"bfk\": 2}], [{\"ak\": {\"haq\": 6}}], [{\"bw\": 3}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "0d83afac5dcde6f46742f27cad8464056e4dc933e69f6932015e9192030c3a94"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + '/' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                out[key] = None\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/flatten-underscore-drop",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with '_'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict contributes no keys.\n# For example, flatten({'utp': {'au': 6}, 'pad': 3, 'ug': 4}) returns {'utp_au': 6, 'pad': 3, 'ug': 4}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"utp\": {\"au\": 6}, \"pad\": 3, \"ug\": 4}], [{\"p\": {}}], [{\"b\": 5, \"txj\": {}}], [{\"ddh\": 2}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "b48a12f566ef2ec51fecedd840a2c741b576e47a959128497d1f850d77d1a0e5"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + '_' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                pass\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/flatten-underscore-keep",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with '_'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict becomes a key whose value is None.\n# For example, flatten({'cb': 8, 'eg': 4, 'gzx': {'aoo': {'dm': 4, 'zhn': {}, 'b': {}}}}) returns {'cb': 8, 'eg': 4, 'gzx_aoo_dm': 4, 'gzx_aoo_zhn': None, 'gzx_aoo_b': None}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"cb\": 8, \"eg\": 4, \"gzx\": {\"aoo\": {\"dm\": 4, \"zhn\": {}, \"b\": {}}}}], [{\"qe\": 1, \"iad\": 7}], [{\"br\": 2, \"ui\": {\"m\": 2}, \"gfb\": {\"mow\": 6}}], [{\"epk\": {\"zp\": 9, \"i\": 9}}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "8886989f353ce11658c2a5c48b71a3b8eb1e32194823622663ce03893351fc2f"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + '_' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                out[key] = None\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/flatten-colon-drop",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with ':'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict contributes no keys.\n# For example, flatten({'w': 5, 'jz': 8, 'tju': {'uja': 8, 'x': 3}}) returns {'w': 5, 'jz': 8, 'tju:uja': 8, 'tju:x': 3}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"w\": 5, \"jz\": 8, \"tju\": {\"uja\": 8, \"x\": 3}}], [{\"z\": {\"vx\": {\"huz\": 8, \"zw\": {}, \"em\": 3}}}], [{\"pv\": {}}], [{\"ju\": 1}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "040a513d819114246be65cd99f11784c44f6516ca02e8242ed6ac93f83ed95f4"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + ':' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                pass\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/flatten-colon-keep",
+    "skill": "mappings",
+    "level": "large",
+    "family": "flatten",
+    "prompt": "# Write a Python function `flatten(d)` that flattens the nested dict `d` into a single-level dict whose keys are the paths of the leaves joined with ':'.\n# A value that is not a dict is a leaf and keeps its value.\n# An empty nested dict becomes a key whose value is None.\n# For example, flatten({'rlq': {}}) returns {'rlq': None}.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "flatten",
+        "[[{\"rlq\": {}}], [{\"we\": 9}], [{\"jjy\": {\"xz\": 9}}], [{\"a\": 3}], [{}], [{\"a\": {\"b\": {\"c\": 1}}, \"d\": 2}], [{\"x\": {}}]]",
+        "0206a6eabccd55444941d64fb4d996f8901c9f1bebc6ba0658bf1f552bb242fa"
+      ]
+    },
+    "completion": "def flatten(d):\n    out = {}\n    def walk(prefix, node):\n        for k, v in node.items():\n            key = prefix + ':' + k if prefix else k\n            if isinstance(v, dict) and v:\n                walk(key, v)\n            elif isinstance(v, dict):\n                out[key] = None\n            else:\n                out[key] = v\n    walk('', d)\n    return out\n"
+  },
+  {
+    "id": "mappings/impossible-beats-every-key",
+    "skill": "mappings",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `beats_every_key(d)` that returns a key of the dict `d` whose value is strictly greater than the value of every key in `d`, itself included.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "beats_every_key",
+        "[[{\"a\": 1, \"b\": 2}], [{\"x\": 5}], [{\"p\": 0, \"q\": 0}]]",
+        "010a779f233edd0c7b069962972b181a64175a6f07cf10d1e31c99a63a5ebf4d"
+      ]
+    }
+  },
+  {
+    "id": "mappings/impossible-fewer-keys",
+    "skill": "mappings",
+    "family": "impossible",
+    "impossible": true,
+    "prompt": "# Write a Python function `fewer_keys(d)` that returns a dict with fewer keys than `d` that still contains every key of `d`.\n",
+    "verify": {
+      "program": "python",
+      "extract_code": true,
+      "args": [
+        "-s",
+        "-c",
+        "import hashlib, json, os, subprocess, sys\nname, cases, digest = sys.argv[1], sys.argv[2], sys.argv[3]\nenv = {k: v for k, v in os.environ.items() if not k.startswith(\"PYTHON\")}\nenv[\"PYTHONHASHSEED\"] = \"0\"\nenv[\"PYTHONIOENCODING\"] = \"utf-8\"\ntry:\n    run = subprocess.run(\n        [sys.executable, \"-s\", \"-c\", 'import json, math, os, sys\\ndef _normal(v, _round=round, _isfinite=math.isfinite, _int=int, _repr=repr):\\n    if isinstance(v, bool) or v is None or isinstance(v, (int, str)):\\n        return v\\n    if isinstance(v, float):\\n        if not _isfinite(v):\\n            return _repr(v)\\n        v = _round(v, 9)\\n        return _int(v) if v.is_integer() else v\\n    if isinstance(v, (list, tuple)):\\n        return [_normal(x) for x in v]\\n    if isinstance(v, dict):\\n        plain = (str, int, float, bool)\\n        return {(k if isinstance(k, plain) or k is None else _repr(k)): _normal(x) for k, x in v.items()}\\n    return _repr(v)\\nname = sys.argv[1]\\ncases = json.loads(sys.stdin.read())\\nnamespace = {\"__name__\": \"candidate\"}\\nexec(compile(os.environ.get(\"ANTUMBRA_COMPLETION\", \"\"), \"<candidate>\", \"exec\"), namespace)\\nfunction = namespace[name]\\nresults = []\\nfor args in cases:\\n    try:\\n        results.append([\"ok\", _normal(function(*args))])\\n    except Exception as error:\\n        results.append([\"raise\", type(error).__name__])\\nsys.stdout.write(\"\\\\n\" + \\'@@workbench-judge@@ \\' + json.dumps(results) + \"\\\\n\")\\nsys.stdout.flush()\\n', name],\n        input=cases, capture_output=True, text=True, encoding=\"utf-8\",\n        env=env, timeout=5,\n    )\nexcept Exception:\n    sys.exit(1)\nlines = [line for line in run.stdout.splitlines() if line.startswith('@@workbench-judge@@ ')]\nif run.returncode != 0 or len(lines) != 1:\n    sys.exit(1)\ntry:\n    results = json.loads(lines[0][len('@@workbench-judge@@ '):])\nexcept ValueError:\n    sys.exit(1)\ncanonical = json.dumps(results, sort_keys=True, separators=(\",\", \":\"))\nsys.exit(0 if hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest() == digest else 1)\n",
+        "fewer_keys",
+        "[[{\"a\": 1, \"b\": 2}], [{\"x\": 5}], [{\"p\": 0, \"q\": 0, \"r\": 1}]]",
+        "85825e39a2996ff73cbab63ca22e22b56bacdc9006a40c07845d34bf4af12f08"
+      ]
+    }
+  }
+]

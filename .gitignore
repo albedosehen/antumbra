@@ -53,3 +53,8 @@ corpora/_*.json
 
 # Docker build logs (artifacts)
 docker/*.log
+
+# Python tooling (corpora/workbench)
+__pycache__/
+.mypy_cache/
+.ruff_cache/
