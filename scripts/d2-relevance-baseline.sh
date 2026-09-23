@@ -85,6 +85,17 @@ jq -c '.[]' "$LABELS" | while read -r row; do
     printf '%s %s\n' "$s" "$lbl" >> "$work/all"
 done
 
+# The raw scores, for calibration rather than thresholding. A threshold asks
+# "which side", and a floor that means the same thing for every query needs
+# "how likely" -- which is a monotone map from this score, fitted against these
+# same verifier labels. ADR-0024's TypedDecider contract requires that fit to
+# minimise a strictly proper scoring rule, so the fitting lives in Rust beside
+# the Brier implementation rather than in awk here.
+if [ -n "${ANTUMBRA_D2_SCORES_OUT:-}" ]; then
+    cp "$work/all" "$ANTUMBRA_D2_SCORES_OUT"
+    echo "raw scores written to $ANTUMBRA_D2_SCORES_OUT ($(wc -l < "$work/all") rows of 'score label')"
+fi
+
 sort -g "$work/all" | awk -v P="$POS" -v N="$NEG" '
 BEGIN { tp=P; fp=N; best=0 }
 {

@@ -60,6 +60,31 @@ The cause is mean-pooling, not a bad row and not the import: re-storing the wors
 
 Two corrections followed and are in the tree: the dense leg is now re-ranked by a per-text calibration before fusion (`antumbra-core/src/calibrate.rs`), and a cross-encoder re-scores the fused pool where one is configured. Both produce a score that survives a comparison across lengths. The floor belongs on that score, after fusion and after any rerank, which is also the only place it can be compared against a threshold that means the same thing for a stub and for a thousand-word memory.
 
+**The floor now ships, and building it corrected the paragraph above.** The claim that the cross-encoder cannot carry a floor is true of a THRESHOLD and false of a CALIBRATION, which this record ruled out without trying. The ten-memory measurement that produced the ruling is real; it was just far smaller than what followed.
+
+Measured over 800 balanced pairs from 400 distinct queries, a logistic fitted on `log10(score)` — `antumbra-core/src/platt.rs`, fit on half, every number below reported on the other half:
+
+| | accuracy | precision | recall | F1 |
+|---|---|---|---|---|
+| calibrated probability at its own 0.5 | 0.803 | 0.820 | 0.775 | **0.797** |
+| best tuned threshold, chosen *in sample* | 0.802 | 0.862 | 0.720 | 0.785 |
+
+The calibrated probability wins while giving up the advantage the threshold had, which was picking its cut point on the rows it was then scored against. Expected calibration error is 0.033 over ten bins.
+
+**The default floor is 0.30, and the curve rather than the round number chose it.** F1 is flat from 0.30 to 0.60 (0.797, 0.803, 0.797, 0.796), so the choice buys nothing in overall quality and is entirely about which error to prefer:
+
+| floor | precision | recall | genuine answers dropped |
+|---|---|---|---|
+| 0.30 | 0.732 | 0.875 | 12.5% |
+| 0.50 | 0.820 | 0.775 | 22.5% |
+| 0.60 | 0.874 | 0.730 | 27.0% |
+
+For a memory the two errors are not symmetric. A relevant memory held back is invisible to the caller and cannot be asked for, because they do not know it exists; a weak one that surfaces is visible and discardable. So the default takes ten points of recall for no F1, and remains movable in both directions by the caller's `floor`.
+
+Two things are honestly weak here and are recorded rather than smoothed over. The worst-calibrated slice is 0.50–0.75, gap 0.083 on 42 samples — and mid-range is exactly where a floor is read, so that is the band a refit should target first. And the labels are constructed by a verifier, a proxy for relevance rather than relevance itself; a calibration fitted on a proxy is a hypothesis about real queries until it meets some.
+
+`antumbra-rerank/src/floor.rs` implements this as a `TypedDecider`, which the port's contract admits because the fit minimises log loss (strictly proper) over labels a deterministic verifier produced rather than over any model's own answers. It answers `Noul` and refuses the other question types instead of guessing. It needs no GPU and no `models` build, so the floor is available on every deployment that configures a reranker rather than only on the ones with a card.
+
 ### B-3 · The output shape is linted, and not only Antumbra's
 
 `antumbra claude mcp-lint` (ADR-0021) already reads a server's `tools/list` and reports which tools will break a session or vanish from it. It checks input schemas against the vendor's rules and says nothing about what a tool *returns*.
@@ -105,7 +130,9 @@ The hook's total becomes checkable. With a bound on each memory and a count of m
 2. [x] **The hook's worst case.** Validation 5, which is the reason the bound matters and is a test rather than a feature. Found already satisfied, on both platforms, and predating this record: each session-start hook caps its own output at 9,500 characters and lists what it left out, and `scripts/hooks/tests/session-start.{ps1,sh}` drive twelve 1,500-character memories (18,000 in all) through them asserting the context stays under 10,000, that the best memory survives, that the omitted count and the kept count sum to twelve, and that the brief precedes any memory. Both suites re-run green after B-1. The item stands as a record of where the guarantee lives, since it is enforced in the hook rather than in the crate and would otherwise be looked for in the wrong place.
 3. [x] **B-2, the floor.** The relevance floor and validation 4, both in `antumbra-mcp`: a `floor` the caller may lower, a `DEFAULT_RELEVANCE_FLOOR`, and `nothing_cleared_the_floor` on the result. Validation 4 is a test rather than a claim, and so is its converse — an empty store does NOT set the flag, because "there was nothing to reject" and "everything was rejected" are different answers and the field must not blur them.
 
-   **What is settled is the mechanism; what is not is the number.** The floor sits on the fused score after any rerank, which is where this section's correction says it belongs, and the flag makes emptiness branchable. But the threshold that floor compares against is a default rather than a calibrated one, because this system has two ranking signals and no calibrated one — which is precisely the finding this section records and precisely what ADR-0024's D-2 exists to fix. That record now holds the measured bar (0.782 F1) and the open work; it is not a gap in this one. B-2 asked for a definitive empty state and got one.
+   **Both the mechanism and the number are now settled, which was not true when this line was first written.** The floor sits on the fused score after any rerank, the flag makes emptiness branchable, and the probability it compares against is calibrated rather than assumed: `antumbra-rerank/src/floor.rs` maps the cross-encoder's score through a logistic fitted on verifier labels, reaching 0.803 accuracy and 0.797 F1 out of sample with an expected calibration error of 0.033. The default is 0.30, chosen off the precision/recall curve rather than from the round number.
+
+   The claim this item used to rest on — that the system has two ranking signals and no calibrated one — was answered by calibrating one of them rather than by waiting for a new model. ADR-0024's D-2 is still wanted, for the part a cross-encoder cannot do: it answers `Noul` and has no opinion about a `Choice` or a `Score`, which is what D-1's gate needs.
 4. [x] **B-3, the lint.** All three output-shape rules are in `mcp-lint`, and validation 6 is a fixture test. Last because it is the generalisation, and generalising before the specific case is settled would encode a guess.
 
    The first two generalise from B-1: an unbounded text field in a collection row, and a collection with no stated bound. **The third generalises from B-2** — a collection that can come back empty with nothing beside it to say why — and it could be written once B-2's mechanism landed, because what it checks for is the shape B-2 chose. A boolean, an enumerated status or a count beside the rows all satisfy it; so does a description that says what an empty one means, which is the same escape hatch the other two rules offer and the honest form for a tool whose empty state is unambiguous.

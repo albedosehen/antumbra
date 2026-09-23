@@ -111,11 +111,29 @@ const RERANK_POOL_MAX: usize = 100;
 /// (ADR-0023 B-2). A default the caller may move with `floor`, never the only
 /// option, because "the best of a bad lot" is occasionally what is wanted.
 ///
-/// Half is the honest starting point for a calibrated probability: it is the
-/// value at which a decider is saying "more likely than not". It is deliberately
-/// not tuned, because tuning it against the current signal would bake in the
-/// miscalibration this floor exists to stop reading.
-const DEFAULT_RELEVANCE_FLOOR: f32 = 0.5;
+/// Half was the honest starting point while no decider existed and the floor was
+/// inert: it is where a calibrated probability says "more likely than not".
+/// **Now that a calibrated decider ships, the measurement decides instead**, and
+/// it says half is the wrong side of a flat curve.
+///
+/// Measured on 400 held-out pairs through the shipped calibration
+/// (`antumbra_core::platt`, `calibrating_the_reranker`):
+///
+/// | floor | precision | recall | F1 | genuine answers dropped |
+/// |---|---|---|---|---|
+/// | 0.30 | 0.732 | 0.875 | 0.797 | 12.5% |
+/// | 0.40 | 0.782 | 0.825 | 0.803 | 17.5% |
+/// | 0.50 | 0.820 | 0.775 | 0.797 | 22.5% |
+/// | 0.60 | 0.874 | 0.730 | 0.796 | 27.0% |
+///
+/// F1 is FLAT across that range, so the choice buys nothing in overall quality
+/// and is purely about which error to prefer. For a memory this is not
+/// symmetric: a relevant memory held back is invisible to the caller and cannot
+/// be recovered, while a weak one that surfaces is visible and discardable. So
+/// the default errs toward recall, taking ten points of it for no F1.
+///
+/// It stays a default the caller may move with `floor`, in both directions.
+const DEFAULT_RELEVANCE_FLOOR: f32 = 0.30;
 
 /// Bounded cache of `(query, sorted candidate ids) -> reranked id order`. A plain
 /// insertion-ordered map capped at `CAP`; on overflow the oldest entry is

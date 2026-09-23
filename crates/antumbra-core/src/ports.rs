@@ -183,6 +183,29 @@ pub trait Reranker: Send + Sync {
     async fn rerank(&self, query: &str, candidates: &[(String, String)]) -> Result<Vec<String>>;
 }
 
+/// The same signal a [`Reranker`] orders by, as NUMBERS rather than an order.
+///
+/// Separate from `Reranker` on purpose. That port returns a permutation because
+/// ordering is all a precision stage needs, and ADR-0023 B-2 is emphatic that
+/// the score is trustworthy WITHIN a query and not across queries — so handing
+/// callers a raw magnitude invites exactly the mistake that record warns about.
+///
+/// A relevance floor needs the magnitude anyway, because "is this good enough"
+/// is an across-query comparison by construction. The resolution is not to
+/// expose the raw score to callers but to CALIBRATE it: fit
+/// [`Platt`](crate::platt::Platt) against verifier-produced labels and let the
+/// floor read a probability. This port is the input to that fit and to the
+/// decider built on it, which is why it is named for scoring rather than for
+/// ranking.
+#[async_trait]
+pub trait RelevanceScorer: Send + Sync {
+    /// Score each text against `query`, in the order given. The result has one
+    /// entry per input text, positionally aligned, so a caller can zip it with
+    /// its own rows. Higher means more relevant; the scale is the model's own
+    /// and means nothing across queries until calibrated.
+    async fn relevance(&self, query: &str, texts: &[String]) -> Result<Vec<f32>>;
+}
+
 /// A question with a known answer space, asked of a [`TypedDecider`] (ADR-0024).
 ///
 /// The point of naming the answer space is that the answer comes back as a

@@ -11,6 +11,7 @@
 
 pub mod boundary;
 pub mod calibrate;
+pub mod platt;
 pub mod compartment;
 pub mod device;
 pub mod document;
