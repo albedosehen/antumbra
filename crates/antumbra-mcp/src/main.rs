@@ -538,8 +538,8 @@ async fn run() -> Result<()> {
     let reranker: Option<Arc<dyn antumbra_core::ports::Reranker>> = http_reranker
         .clone()
         .map(|r| r as Arc<dyn antumbra_core::ports::Reranker>);
-    let scorer: Option<Arc<dyn antumbra_core::ports::RelevanceScorer>> = http_reranker
-        .map(|r| r as Arc<dyn antumbra_core::ports::RelevanceScorer>);
+    let scorer: Option<Arc<dyn antumbra_core::ports::RelevanceScorer>> =
+        http_reranker.map(|r| r as Arc<dyn antumbra_core::ports::RelevanceScorer>);
     // The relevance floor (ADR-0023 B-2). The same cross-encoder that orders the
     // pool also answers "does this answer the query" once its score is mapped
     // through the fitted calibration, so the floor costs no extra model and
