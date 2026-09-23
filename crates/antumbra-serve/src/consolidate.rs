@@ -85,6 +85,7 @@ pub async fn consolidate_compartment(
         &mut model,
         &verifier,
         &tasks,
+        &[],
         &RunId::new(name.clone()),
         cfg,
         &[],

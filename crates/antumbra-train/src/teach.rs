@@ -43,10 +43,16 @@ fn verify_request(
 /// pairs: when `cfg.replay_ratio > 0` it is interleaved into every SFT
 /// round so consolidating new memories does not clobber old skills. Plain
 /// capture passes an empty buffer (replay off).
+///
+/// `withheld` corrections are never internalized: they are measured after
+/// training, beside the learned ones, and reported per task without counting
+/// toward fitness (ADR-0022). Pass an empty slice to learn every correction,
+/// which is what an intake of a user's own corrections should do.
 pub async fn capture_corrections(
     model: &mut (dyn CausalLm + Send),
     verifier: &dyn Verifier,
     tasks: &[CorpusTask],
+    withheld: &[CorpusTask],
     run_id: &RunId,
     cfg: &RaftConfig,
     replay: &[SftExample],
@@ -117,6 +123,14 @@ pub async fn capture_corrections(
 
     // Fitness: does the expert now generate the correction on its own?
     let learned = eval_pass_rate(model, verifier, tasks, run_id, cfg.samples_per_task).await?;
+    // The withheld corrections, against the same adapter, measured and no more.
+    let measured = if withheld.is_empty() {
+        Vec::new()
+    } else {
+        eval_pass_rate(model, verifier, withheld, run_id, cfg.samples_per_task)
+            .await?
+            .per_task
+    };
 
     let safe = run_id.as_str().replace([':', '/', '\\'], "_");
     let adapter_uri = format!("{}/{safe}.safetensors", cfg.adapter_dir);
@@ -134,16 +148,19 @@ pub async fn capture_corrections(
         per_task: learned
             .per_task
             .iter()
+            .chain(measured.iter())
             .map(|r| TaskOutcome {
                 task_id: r.id.clone(),
                 passed: r.passed > 0,
                 size: tasks
                     .iter()
+                    .chain(withheld.iter())
                     .find(|t| t.id == r.id)
                     .map(|t| t.prompt.chars().count() as u32)
                     .unwrap_or(0),
             })
             .collect(),
+        holdout: None,
     })
 }
 
@@ -197,9 +214,17 @@ mod tests {
             samples_per_task: 4,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:g0"), &cfg, &[])
-            .await
-            .unwrap();
+        let out = capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("cap:g0"),
+            &cfg,
+            &[],
+        )
+        .await
+        .unwrap();
         // The correction verified, was internalized, and the expert now emits it.
         assert_eq!(out.final_fitness, 1.0);
         assert_eq!(out.capability_exemplars, vec!["add a dep"]);
@@ -220,11 +245,90 @@ mod tests {
             samples_per_task: 4,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:g1"), &cfg, &[])
-            .await
-            .unwrap();
+        let out = capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("cap:g1"),
+            &cfg,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(out.final_fitness, 0.0);
         assert!(out.capability_exemplars.is_empty());
+    }
+
+    /// Emits the correction for every prompt but one, and records what it was
+    /// trained on.
+    struct Stubborn {
+        stubborn: &'static str,
+        trained: Vec<String>,
+    }
+
+    #[async_trait]
+    impl CausalLm for Stubborn {
+        async fn generate(&mut self, prompt: &str, n: usize) -> Result<Vec<String>> {
+            let out = if prompt == self.stubborn {
+                "npm install"
+            } else {
+                "deno install"
+            };
+            Ok(vec![out.to_string(); n])
+        }
+        async fn sft_step(&mut self, batch: &[SftExample]) -> Result<f32> {
+            self.trained.extend(batch.iter().map(|e| e.prompt.clone()));
+            Ok(0.0)
+        }
+        fn save_adapter(&self, _path: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// ADR-0022: a withheld correction is measured after training and never
+    /// internalized, and its result is not fitness.
+    #[tokio::test]
+    async fn a_withheld_correction_is_measured_and_never_internalized() -> Result<()> {
+        let mut lm = Stubborn {
+            stubborn: "held out",
+            trained: Vec::new(),
+        };
+        let verifier = MarkerVerifier {
+            expect: "deno install".into(),
+        };
+        let tasks = vec![CorpusTask::new("seen", "learn me").with_completion("deno install")];
+        let withheld = vec![CorpusTask::new("held", "held out").with_completion("deno install")];
+        let cfg = RaftConfig {
+            rounds: 2,
+            samples_per_task: 2,
+            ..RaftConfig::default()
+        };
+        let out = capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &withheld,
+            &RunId::new("cap:held"),
+            &cfg,
+            &[],
+        )
+        .await?;
+        assert!(
+            lm.trained.iter().all(|p| p == "learn me"),
+            "a withheld correction was internalized: {:?}",
+            lm.trained
+        );
+        // Counting the withheld correction would halve this.
+        assert_eq!(out.final_fitness, 1.0);
+        assert_eq!(out.capability_exemplars, vec!["learn me"]);
+        let reported: Vec<(&str, bool)> = out
+            .per_task
+            .iter()
+            .map(|t| (t.task_id.as_str(), t.passed))
+            .collect();
+        assert_eq!(reported, [("seen", true), ("held", false)]);
+        Ok(())
     }
 
     #[tokio::test]
@@ -249,9 +353,17 @@ mod tests {
             samples_per_task: 2,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:b"), &cfg, &[])
-            .await
-            .unwrap();
+        let out = capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("cap:b"),
+            &cfg,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(out.boundary_findings.len(), 1);
         let f = &out.boundary_findings[0];
         assert_eq!(f.behavior, "add a dep");
@@ -281,9 +393,17 @@ mod tests {
             samples_per_task: 2,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:i"), &cfg, &[])
-            .await
-            .unwrap();
+        let out = capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("cap:i"),
+            &cfg,
+            &[],
+        )
+        .await
+        .unwrap();
         assert_eq!(out.boundary_findings.len(), 1);
         assert_eq!(out.boundary_findings[0].governing_feature, "runtime");
     }
@@ -309,9 +429,17 @@ mod tests {
             samples_per_task: 2,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:i2"), &cfg, &[])
-            .await
-            .unwrap();
+        let out = capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("cap:i2"),
+            &cfg,
+            &[],
+        )
+        .await
+        .unwrap();
         assert!(out.boundary_findings.is_empty());
     }
 
@@ -337,9 +465,17 @@ mod tests {
             samples_per_task: 2,
             ..RaftConfig::default()
         };
-        let out = capture_corrections(&mut lm, &verifier, &tasks, &RunId::new("cap:b2"), &cfg, &[])
-            .await
-            .unwrap();
+        let out = capture_corrections(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("cap:b2"),
+            &cfg,
+            &[],
+        )
+        .await
+        .unwrap();
         assert!(out.boundary_findings.is_empty());
     }
 
@@ -388,6 +524,7 @@ mod tests {
             &mut lm,
             &verifier,
             &tasks,
+            &[],
             &RunId::new("cons:g0"),
             &cfg,
             &replay,

@@ -11,7 +11,6 @@
 
 pub mod boundary;
 pub mod calibrate;
-pub mod platt;
 pub mod compartment;
 pub mod device;
 pub mod document;
@@ -26,11 +25,13 @@ pub mod keyed;
 pub mod memory;
 pub mod orchestration;
 pub mod penumbra;
+pub mod platt;
 pub mod ports;
 pub mod provenance;
 pub mod reward;
 pub mod router;
 pub mod shadow;
+pub mod slice;
 pub mod vector;
 
 #[cfg(any(test, feature = "testing"))]

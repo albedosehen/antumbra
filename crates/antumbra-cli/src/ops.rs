@@ -163,6 +163,7 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
                 &mut model,
                 &verifier,
                 &tasks,
+                &[],
                 &RunId::new(name.clone()),
                 &cfg,
                 &replay,

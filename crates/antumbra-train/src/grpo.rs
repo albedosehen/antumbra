@@ -121,10 +121,15 @@ pub trait GrpoModelLoader: Send + Sync {
 /// Run GRPO for `cfg.rounds` rounds (group size = `cfg.samples_per_task`) and
 /// return the trained adapter outcome. The per-round pass-rate is the reward
 /// curve, exactly as RAFT, so the loop swaps in behind the trainer.
+///
+/// `withheld` tasks are measured in the final round and never learned from,
+/// under the same contract as [`crate::raft::raft_train`]: no policy step, no
+/// fitness, only a per-task result.
 pub async fn grpo_train(
     model: &mut (dyn GrpoLm + Send),
     verifier: &dyn Verifier,
     tasks: &[CorpusTask],
+    withheld: &[CorpusTask],
     run_id: &RunId,
     cfg: &RaftConfig,
 ) -> Result<TrainOutcome> {
@@ -135,12 +140,15 @@ pub async fn grpo_train(
     // of it verified.
     let mut per_task: Vec<TaskOutcome> = Vec::new();
 
-    for _round in 0..cfg.rounds {
+    let last_round = cfg.rounds.saturating_sub(1);
+    for round in 0..cfg.rounds {
         let mut solved: Vec<String> = Vec::new();
         let (mut total, mut passed) = (0usize, 0usize);
         let mut round_tasks: Vec<TaskOutcome> = Vec::new();
 
-        for task in tasks {
+        let measured: &[CorpusTask] = if round == last_round { withheld } else { &[] };
+        let learned = tasks.iter().map(|t| (t, true));
+        for (task, learn) in learned.chain(measured.iter().map(|t| (t, false))) {
             let mut task_passed = false;
             let samples = model
                 .sample_group(&task.prompt, cfg.samples_per_task)
@@ -148,7 +156,6 @@ pub async fn grpo_train(
 
             let mut rewards = Vec::with_capacity(samples.len());
             for (i, sample) in samples.iter().enumerate() {
-                total += 1;
                 let req = VerifyRequest {
                     run_id: run_id.clone(),
                     step_idx: i as u32,
@@ -162,13 +169,30 @@ pub async fn grpo_train(
                 };
                 let won = verifier.verify(&req).await?.passed;
                 rewards.push(if won { 1.0 } else { 0.0 });
+                task_passed |= won;
+                if !learn {
+                    continue;
+                }
+                total += 1;
                 if won {
                     passed += 1;
-                    task_passed = true;
                     if !solved.contains(&task.prompt) {
                         solved.push(task.prompt.clone());
                     }
                 }
+            }
+            // Recorded before any early exit below. A group with no spread (every
+            // sample passed, or every one failed) takes no step, but it is still a
+            // measured task: leaving it out would drop exactly the tasks the
+            // adapter has mastered or cannot do from the per-task results.
+            round_tasks.push(TaskOutcome {
+                task_id: task.id.clone(),
+                passed: task_passed,
+                size: task.prompt.chars().count() as u32,
+            });
+            // A withheld task is measured and nothing more.
+            if !learn {
+                continue;
             }
 
             let advantages = group_advantages(&rewards);
@@ -191,11 +215,6 @@ pub async fn grpo_train(
                 });
             }
             model.grpo_step(&task.prompt, &group, cfg).await?;
-            round_tasks.push(TaskOutcome {
-                task_id: task.id.clone(),
-                passed: task_passed,
-                size: task.prompt.chars().count() as u32,
-            });
         }
 
         reward_curve.push(if total == 0 {
@@ -219,6 +238,7 @@ pub async fn grpo_train(
         capability_exemplars,
         per_task,
         boundary_findings: Vec::new(),
+        holdout: None,
     })
 }
 
@@ -321,11 +341,101 @@ mod tests {
             rounds: 3,
             ..RaftConfig::default()
         };
-        let out = grpo_train(&mut lm, &verifier, &tasks, &RunId::new("shadow:g0"), &cfg)
-            .await
-            .unwrap();
+        let out = grpo_train(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("shadow:g0"),
+            &cfg,
+        )
+        .await
+        .unwrap();
         assert_eq!(out.reward_curve.len(), 3);
         assert!(out.reward_curve.last().unwrap() > out.reward_curve.first().unwrap());
         assert_eq!(out.capability_exemplars, vec!["do the thing"]);
+    }
+
+    /// Answers every prompt the same way each time: all pass for a mastered
+    /// prompt, half pass for any other. Records which prompts took a step.
+    #[derive(Default)]
+    struct Recording {
+        mastered: Vec<String>,
+        stepped: Vec<String>,
+    }
+
+    #[async_trait]
+    impl GrpoLm for Recording {
+        async fn sample_group(&mut self, prompt: &str, group: usize) -> Result<Vec<GrpoSample>> {
+            let all = self.mastered.iter().any(|m| m == prompt);
+            Ok((0..group)
+                .map(|i| GrpoSample {
+                    completion: if all || i % 2 == 0 { "PASS" } else { "FAIL" }.into(),
+                    tokens: vec![1, 2],
+                    old_logprobs: vec![-0.1, -0.1],
+                })
+                .collect())
+        }
+        async fn reference_logprobs(&mut self, _prompt: &str, tokens: &[u32]) -> Result<Vec<f32>> {
+            Ok(vec![-0.2; tokens.len()])
+        }
+        async fn grpo_step(
+            &mut self,
+            prompt: &str,
+            _group: &[GrpoExperience],
+            _cfg: &RaftConfig,
+        ) -> Result<f32> {
+            self.stepped.push(prompt.to_string());
+            Ok(0.0)
+        }
+        fn save_adapter(&self, _path: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Two things the per-task results must not do: lose a task because its
+    /// group had no spread, and let a withheld task take a policy step.
+    #[tokio::test]
+    async fn every_measured_task_is_reported_and_no_withheld_one_is_learned() -> Result<()> {
+        let mut lm = Recording {
+            mastered: vec!["mastered".into()],
+            ..Recording::default()
+        };
+        let verifier = MarkerVerifier {
+            expect: "PASS".into(),
+        };
+        let tasks = vec![
+            CorpusTask::new("seen:mixed", "mixed"),
+            CorpusTask::new("seen:mastered", "mastered"),
+        ];
+        let withheld = vec![CorpusTask::new("held:mixed", "held, mixed")];
+        let cfg = RaftConfig {
+            samples_per_task: 4,
+            rounds: 2,
+            ..RaftConfig::default()
+        };
+        let out = grpo_train(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &withheld,
+            &RunId::new("shadow:held"),
+            &cfg,
+        )
+        .await?;
+
+        let reported: Vec<&str> = out.per_task.iter().map(|t| t.task_id.as_str()).collect();
+        // `seen:mastered` has no spread, so it takes no step; it was still
+        // measured, and a mastered task missing from the results would bias
+        // every rate computed over them downward.
+        assert_eq!(reported, ["seen:mixed", "seen:mastered", "held:mixed"]);
+        assert!(
+            lm.stepped.iter().all(|p| p == "mixed"),
+            "only the learned task with spread steps: {:?}",
+            lm.stepped
+        );
+        // Fitness over the learned tasks: 2 of 4 plus 4 of 4.
+        assert_eq!(out.final_fitness, 0.75);
+        Ok(())
     }
 }

@@ -32,6 +32,12 @@ cargo run -p antumbra-cli -- --url surrealkv://./data/antumbra.skv status
 cargo run -p antumbra-cli -- --url surrealkv://./data/antumbra.skv experts
 ```
 
+### Measuring a run: `--holdout`
+
+`train --holdout` withholds part of the corpus from training so each generation can be measured against tasks it never learned from ([ADR-0022](adr/0022-governed-self-improvement.md)'s standing instruments). The split is a pure function of each task id and a seed: about a fifth of the tasks are held out and a tenth audited, and the rest stay visible. Only visible tasks are trained on and counted in the fitness that decides graduation. Held-out tasks are measured in the final round, and audited tasks when their turn comes. Each generation then prints its widest visible-minus-held-out gap by task size, and the audit pass rate, and stores both beside its fitness.
+
+It is off by default because it changes what is learned, and because the demo corpora here are too small to split: both tasks in `corpora/arith.json` hash into the held-out slice, so `train --holdout` refuses that corpus rather than training on nothing. Use it on a corpus of real size. Without it, generations carry no instruments rather than a gap computed over tasks that were all trained on.
+
 ## Corpus format
 
 A JSON array of tasks. `verify.program`/`args` run after generation with the candidate completion in `$ANTUMBRA_COMPLETION`; `extract_code: true` pulls the code out of a markdown fence first.

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::boundary::BoundaryFinding;
 use crate::error::Result;
 use crate::ids::{ExpertId, RunId, ShadowId};
+use crate::slice::Holdout;
 
 // --- serving (hardware-adaptive) ------------------------------------------
 
@@ -71,6 +72,11 @@ pub struct TrainRequest {
     pub shadow: ShadowId,
     pub base_model: String,
     pub corpus_task_ids: Vec<String>,
+    /// What this run must withhold from learning (ADR-0022). `None` learns from
+    /// every task and measures nothing apart, which is the honest shape for a
+    /// run with nothing held out: its generation carries no instruments.
+    #[serde(default)]
+    pub holdout: Option<Holdout>,
 }
 
 /// One corpus task, as the final training round found it.
@@ -107,9 +113,17 @@ pub struct TrainOutcome {
     #[serde(default)]
     pub boundary_findings: Vec<BoundaryFinding>,
     /// Per-task results from the final round, in corpus order. The same round
-    /// `capability_exemplars` reflects, so the two describe one adapter.
+    /// `capability_exemplars` reflects, so the two describe one adapter. Under
+    /// a holdout this includes the tasks measured without being learned from.
     #[serde(default)]
     pub per_task: Vec<TaskOutcome>,
+    /// The holdout this run actually enforced, echoed back. The loop measures a
+    /// generation only when this matches what it asked for, so a trainer that
+    /// ignores the request (an older one, or one that cannot split its corpus)
+    /// produces an unmeasured generation rather than a gap over tasks it
+    /// learned from.
+    #[serde(default)]
+    pub holdout: Option<Holdout>,
 }
 
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;

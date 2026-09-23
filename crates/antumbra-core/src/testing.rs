@@ -122,6 +122,11 @@ pub struct ScriptedTrainer {
     /// looks like -- and the loop has to stay honest about that rather than
     /// inventing a report from one number.
     pub per_task: Vec<crate::ports::TaskOutcome>,
+    /// Behave like a trainer that predates the holdout: learn from everything,
+    /// report everything, and echo no holdout back. The loop must then decline
+    /// to measure the generation rather than trust per-task results whose
+    /// held-out half was learned from.
+    pub ignores_holdout: bool,
 }
 
 impl ScriptedTrainer {
@@ -133,6 +138,7 @@ impl ScriptedTrainer {
             capability_exemplars: Vec::new(),
             boundary_findings: Vec::new(),
             per_task: Vec::new(),
+            ignores_holdout: false,
         }
     }
 
@@ -144,6 +150,7 @@ impl ScriptedTrainer {
             capability_exemplars: Vec::new(),
             boundary_findings: Vec::new(),
             per_task: Vec::new(),
+            ignores_holdout: false,
         }
     }
 
@@ -169,13 +176,24 @@ impl ScriptedTrainer {
 #[async_trait]
 impl Trainer for ScriptedTrainer {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
+        // A scripted run learns nothing, so it withholds trivially; what it
+        // must still model is the reporting: under a holdout it reports only
+        // the tasks that run measures, as a real trainer does.
+        let holdout = req.holdout.filter(|_| !self.ignores_holdout);
+        let per_task = self
+            .per_task
+            .iter()
+            .filter(|t| holdout.is_none_or(|h| h.measures(&t.task_id)))
+            .cloned()
+            .collect();
         Ok(TrainOutcome {
             adapter_uri: format!("memory://adapter/{}", req.shadow),
             reward_curve: self.curve.clone(),
             final_fitness: self.final_fitness,
             capability_exemplars: self.capability_exemplars.clone(),
             boundary_findings: self.boundary_findings.clone(),
-            per_task: self.per_task.clone(),
+            per_task,
+            holdout,
         })
     }
 }

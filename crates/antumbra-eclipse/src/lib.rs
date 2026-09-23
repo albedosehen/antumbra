@@ -42,5 +42,5 @@ pub mod trend;
 
 pub use instrument::{GenerationReport, Outcome, Rate, SizeBand, SizeBands};
 pub use isomorphic::{Pair, Reverification};
-pub use slice::{Partition, Slice};
+pub use slice::{Holdout, Partition, Slice};
 pub use trend::{Point, Trend, Watch};

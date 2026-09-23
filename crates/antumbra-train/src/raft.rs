@@ -14,10 +14,17 @@ use crate::config::RaftConfig;
 use crate::model::{CausalLm, CorpusTask, SftExample};
 
 /// Run RAFT for `cfg.rounds` rounds and return the trained adapter outcome.
+///
+/// `tasks` are learned from and are the only tasks fitness is computed over.
+/// `withheld` are measured in the final round, against the same adapter the
+/// learned tasks' final results describe, and never learned from: no winner
+/// of theirs reaches an SFT step and no pass of theirs reaches the reward
+/// curve. Pass an empty slice when nothing is held out (ADR-0022).
 pub async fn raft_train(
     model: &mut (dyn CausalLm + Send),
     verifier: &dyn Verifier,
     tasks: &[CorpusTask],
+    withheld: &[CorpusTask],
     run_id: &RunId,
     cfg: &RaftConfig,
 ) -> Result<TrainOutcome> {
@@ -31,19 +38,23 @@ pub async fn raft_train(
     // exists. It was already being computed and discarded.
     let mut per_task: Vec<TaskOutcome> = Vec::new();
 
-    for _round in 0..cfg.rounds {
+    let last_round = cfg.rounds.saturating_sub(1);
+    for round in 0..cfg.rounds {
         let mut winners: Vec<SftExample> = Vec::new();
         let mut solved: Vec<String> = Vec::new();
         let (mut total, mut passed) = (0usize, 0usize);
         let mut round_tasks: Vec<TaskOutcome> = Vec::new();
 
-        for task in tasks {
+        // Only the final round's per-task results are kept, so only the final
+        // round spends samples on the withheld tasks.
+        let measured: &[CorpusTask] = if round == last_round { withheld } else { &[] };
+        let learned = tasks.iter().map(|t| (t, true));
+        for (task, learn) in learned.chain(measured.iter().map(|t| (t, false))) {
             let samples = model.generate(&task.prompt, cfg.samples_per_task).await?;
             // A task counts as passed when any sample of it verified, which is
             // the same reading `solved` takes: the adapter can do it.
             let mut task_passed = false;
             for (i, sample) in samples.iter().enumerate() {
-                total += 1;
                 let req = VerifyRequest {
                     run_id: run_id.clone(),
                     step_idx: i as u32,
@@ -55,9 +66,16 @@ pub async fn raft_train(
                         "verify": task.verify,
                     }),
                 };
-                if verifier.verify(&req).await?.passed {
+                let verified = verifier.verify(&req).await?.passed;
+                task_passed |= verified;
+                // A withheld task is measured and nothing more: its passes are
+                // not fitness and its winners are not training data.
+                if !learn {
+                    continue;
+                }
+                total += 1;
+                if verified {
                     passed += 1;
-                    task_passed = true;
                     if !solved.contains(&task.prompt) {
                         solved.push(task.prompt.clone());
                     }
@@ -108,6 +126,8 @@ pub async fn raft_train(
         // RAFT discovers skills, not scopes; boundaries come from the capture path.
         boundary_findings: Vec::new(),
         per_task,
+        // The trainer adapter, which chose the split, says what was enforced.
+        holdout: None,
     })
 }
 
@@ -159,9 +179,16 @@ mod tests {
             ..RaftConfig::default()
         };
 
-        let out = raft_train(&mut lm, &verifier, &tasks, &RunId::new("shadow:g0"), &cfg)
-            .await
-            .unwrap();
+        let out = raft_train(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("shadow:g0"),
+            &cfg,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(out.reward_curve.len(), 3);
         // pass-rate climbs as the adapter trains on verified winners
@@ -188,12 +215,109 @@ mod tests {
             rounds: 2,
             ..RaftConfig::default()
         };
-        let out = raft_train(&mut lm, &verifier, &tasks, &RunId::new("shadow:g1"), &cfg)
-            .await
-            .unwrap();
+        let out = raft_train(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("shadow:g1"),
+            &cfg,
+        )
+        .await
+        .unwrap();
         assert_eq!(out.final_fitness, 0.0);
         assert!(out.reward_curve.iter().all(|&r| r == 0.0));
         // nothing solved -> no capability exemplars
         assert!(out.capability_exemplars.is_empty());
+    }
+
+    /// Passes every prompt except the ones named, and records what it was
+    /// asked and what it was trained on.
+    #[derive(Default)]
+    struct Recording {
+        fails: Vec<String>,
+        asked: Vec<String>,
+        trained: Vec<String>,
+    }
+
+    #[async_trait]
+    impl CausalLm for Recording {
+        async fn generate(&mut self, prompt: &str, n_samples: usize) -> Result<Vec<String>> {
+            self.asked.push(prompt.to_string());
+            let answer = if self.fails.iter().any(|f| f == prompt) {
+                "FAIL"
+            } else {
+                "PASS"
+            };
+            Ok(vec![answer.to_string(); n_samples])
+        }
+
+        async fn sft_step(&mut self, batch: &[SftExample]) -> Result<f32> {
+            self.trained
+                .extend(batch.iter().map(|example| example.prompt.clone()));
+            Ok(0.1)
+        }
+
+        fn save_adapter(&self, _path: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// ADR-0022: a withheld task is measured and never learned from. Its
+    /// winners reach no SFT step, its passes reach no fitness, and it costs
+    /// samples only in the round whose results are kept.
+    #[tokio::test]
+    async fn a_withheld_task_is_measured_and_never_learned_from() -> Result<()> {
+        let mut lm = Recording {
+            fails: vec!["held, failing".into()],
+            ..Recording::default()
+        };
+        let verifier = MarkerVerifier {
+            expect: "PASS".into(),
+        };
+        let tasks = vec![CorpusTask::new("seen", "learn me")];
+        let withheld = vec![
+            CorpusTask::new("held:pass", "held, passing"),
+            CorpusTask::new("held:fail", "held, failing"),
+        ];
+        let cfg = RaftConfig {
+            samples_per_task: 4,
+            rounds: 3,
+            ..RaftConfig::default()
+        };
+        let out = raft_train(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &withheld,
+            &RunId::new("shadow:held"),
+            &cfg,
+        )
+        .await?;
+
+        assert!(
+            lm.trained.iter().all(|p| p == "learn me"),
+            "a withheld winner reached training: {:?}",
+            lm.trained
+        );
+        // Counting the withheld tasks would make this 8 of 12.
+        assert_eq!(
+            out.final_fitness, 1.0,
+            "fitness reads the learned tasks only"
+        );
+        assert_eq!(out.capability_exemplars, vec!["learn me"]);
+        let passed: Vec<(&str, bool)> = out
+            .per_task
+            .iter()
+            .map(|t| (t.task_id.as_str(), t.passed))
+            .collect();
+        assert_eq!(
+            passed,
+            [("seen", true), ("held:pass", true), ("held:fail", false)]
+        );
+        let asked = |prompt: &str| lm.asked.iter().filter(|p| *p == prompt).count();
+        assert_eq!(asked("learn me"), 3);
+        assert_eq!(asked("held, passing"), 1, "only the kept round measures it");
+        Ok(())
     }
 }

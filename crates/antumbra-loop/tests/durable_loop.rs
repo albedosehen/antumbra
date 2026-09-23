@@ -386,7 +386,7 @@ async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Re
     };
     let embedder = FixedEmbedder::new(8);
     let cfg = LoopConfig {
-        partition,
+        partition: Some(partition),
         ..LoopConfig::default()
     };
     let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg);
@@ -406,21 +406,120 @@ async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Re
     Ok(())
 }
 
+/// Three per-task results, one in each slice the default partition draws:
+/// the visible task passes, the held-out one fails, the audited one passes.
+fn one_task_per_slice() -> Vec<antumbra_core::ports::TaskOutcome> {
+    [("task:0", true), ("task:1", false), ("task:19", true)]
+        .into_iter()
+        .map(|(id, passed)| antumbra_core::ports::TaskOutcome {
+            task_id: id.into(),
+            passed,
+            size: 10,
+        })
+        .collect()
+}
+
+/// Run one generation of `trainer` under `partition` and return its report.
+async fn one_generation(
+    trainer: &ScriptedTrainer,
+    partition: Option<antumbra_eclipse::Partition>,
+    run: &str,
+) -> antumbra_core::Result<antumbra_loop::GenerationReport> {
+    let store = Store::connect_memory(8).await?;
+    let embedder = FixedEmbedder::new(8);
+    let cfg = LoopConfig {
+        partition,
+        ..LoopConfig::default()
+    };
+    let lp = GenerationLoop::new(&store, trainer, &embedder, cfg);
+    let mut head = lp.resume_or_init(&RunId::new(run)).await?;
+    lp.run_generation(&mut head).await
+}
+
 /// A trainer that reports only aggregate fitness leaves the generation
 /// unmeasured, and the loop says so rather than inventing a report from one
 /// number. That distinction is the whole reason the instruments exist.
 #[tokio::test]
 async fn a_generation_with_no_per_task_results_is_not_measured() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(8).await?;
-    let trainer = ScriptedTrainer::graduating();
-    let embedder = FixedEmbedder::new(8);
-    let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
-    let run = RunId::new("run:unmeasured");
-    let mut head = lp.resume_or_init(&run).await?;
-    let report = lp.run_generation(&mut head).await?;
+    let report = one_generation(
+        &ScriptedTrainer::graduating(),
+        Some(antumbra_eclipse::Partition::default()),
+        "run:unmeasured",
+    )
+    .await?;
     assert!(
         report.instruments.is_none(),
         "a report synthesised from aggregate fitness would look like a measurement"
+    );
+    Ok(())
+}
+
+/// With no partition nothing was held out, so per-task results are a list of
+/// learned tasks, and slicing it would invent a gap between them.
+#[tokio::test]
+async fn a_generation_with_nothing_held_out_is_not_measured() -> antumbra_core::Result<()> {
+    let trainer = ScriptedTrainer {
+        per_task: one_task_per_slice(),
+        ..ScriptedTrainer::graduating()
+    };
+    let report = one_generation(&trainer, None, "run:nothing-held").await?;
+    assert!(report.instruments.is_none());
+    Ok(())
+}
+
+/// The defect this guards against shipped once: the loop sliced per-task
+/// results by the partition while the trainer had learned from every task, so
+/// every persisted gap was a difference between two sets of trained tasks. A
+/// trainer that does not confirm the holdout it enforced gets no instruments.
+#[tokio::test]
+async fn a_trainer_that_ignores_the_holdout_is_not_measured() -> antumbra_core::Result<()> {
+    let trainer = ScriptedTrainer {
+        per_task: one_task_per_slice(),
+        ignores_holdout: true,
+        ..ScriptedTrainer::graduating()
+    };
+    let report = one_generation(
+        &trainer,
+        Some(antumbra_eclipse::Partition::default()),
+        "run:ignored",
+    )
+    .await?;
+    assert!(
+        report.instruments.is_none(),
+        "results from a run that learned from its held-out tasks are not a gap"
+    );
+    Ok(())
+}
+
+/// The instruments are persisted beside the fitness they qualify, with the
+/// seed they were read under.
+#[tokio::test]
+async fn the_measurement_is_stored_with_the_score_it_qualifies() -> antumbra_core::Result<()> {
+    let store = Store::connect_memory(8).await?;
+    let trainer = ScriptedTrainer {
+        per_task: one_task_per_slice(),
+        ..ScriptedTrainer::graduating()
+    };
+    let embedder = FixedEmbedder::new(8);
+    let partition = antumbra_eclipse::Partition::new(0.20, 0.10, 0)?;
+    let cfg = LoopConfig {
+        partition: Some(partition),
+        ..LoopConfig::default()
+    };
+    let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg);
+    let run = RunId::new("run:stored");
+    let mut head = lp.resume_or_init(&run).await?;
+    lp.run_generation(&mut head).await?;
+
+    let rows = evaluation::list_for_subject(&store, SubjectKind::Shadow, "run:stored:g0").await?;
+    let metrics = rows
+        .first()
+        .and_then(|r| r.metrics.clone())
+        .ok_or_else(|| antumbra_core::AntumbraError::other("no evaluation row"))?;
+    assert_eq!(metrics["partition_seed"], serde_json::json!(0));
+    assert_eq!(
+        metrics["instruments"]["audit"]["measured"],
+        serde_json::json!(1)
     );
     Ok(())
 }
