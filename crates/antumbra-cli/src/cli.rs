@@ -461,6 +461,11 @@ pub enum Command {
         /// Nucleus cutoff. Defaults to training's (1.0, off).
         #[arg(long)]
         top_p: Option<f64>,
+        /// Compute precision on the GPU: f32, bf16 or f16. Defaults to
+        /// training's (bf16). Comparing f32 with bf16 on the same draws is how
+        /// to tell a numerics problem from a model that cannot do the task.
+        #[arg(long)]
+        dtype: Option<String>,
     },
     /// Capture a supplied, verifier-checked correction into a frozen expert (the
     /// other intake path beside `train`, the capture intake into the umbra). The corpus carries a

@@ -484,6 +484,7 @@ async fn run() -> anyhow::Result<()> {
             report,
             temperature,
             top_p,
+            dtype,
         } => {
             #[cfg(feature = "models")]
             {
@@ -494,12 +495,17 @@ async fn run() -> anyhow::Result<()> {
                     max_new_tokens,
                     temperature: temperature.unwrap_or(defaults.temperature),
                     top_p: top_p.unwrap_or(defaults.top_p),
+                    dtype: match dtype.as_deref() {
+                        Some(name) => name.parse()?,
+                        None => defaults.dtype,
+                    },
                     ..defaults
                 };
                 let corpus_doc = JsonCorpus::from_file(&corpus)?;
                 let tasks = corpus_doc.tasks(&[]);
                 let base_model = base_model.unwrap_or_else(|| cfg.base_model.clone());
-                let (cfg_temperature, cfg_top_p) = (cfg.temperature, cfg.top_p);
+                let (cfg_temperature, cfg_top_p, cfg_dtype) =
+                    (cfg.temperature, cfg.top_p, cfg.dtype);
                 let loader = CandleModelLoader::new(cfg);
                 let mut model = ModelLoader::load(&loader, &base_model, adapter.as_deref()).await?;
                 let verifier = antumbra_critic::CommandVerifier;
@@ -529,6 +535,7 @@ async fn run() -> anyhow::Result<()> {
                     );
                     record["temperature"] = serde_json::json!(cfg_temperature);
                     record["top_p"] = serde_json::json!(cfg_top_p);
+                    record["dtype"] = serde_json::json!(format!("{cfg_dtype:?}"));
                     std::fs::write(path, serde_json::to_vec_pretty(&record)?)?;
                     println!("per-task results -> {path}");
                 }
@@ -544,6 +551,7 @@ async fn run() -> anyhow::Result<()> {
                     &report,
                     temperature,
                     top_p,
+                    &dtype,
                 );
                 anyhow::bail!("`eval` requires building with --features models (candle + a GPU)");
             }

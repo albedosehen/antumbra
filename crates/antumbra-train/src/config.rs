@@ -12,6 +12,21 @@ pub enum TrainDtype {
     F32,
 }
 
+impl std::str::FromStr for TrainDtype {
+    type Err = antumbra_core::AntumbraError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "f16" => Ok(TrainDtype::F16),
+            "bf16" => Ok(TrainDtype::Bf16),
+            "f32" => Ok(TrainDtype::F32),
+            other => Err(antumbra_core::AntumbraError::other(format!(
+                "unknown dtype `{other}` (use f32, bf16 or f16)"
+            ))),
+        }
+    }
+}
+
 impl TrainDtype {
     pub fn to_candle(self) -> DType {
         match self {
@@ -145,6 +160,14 @@ impl RaftConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn train_dtype_parses_by_name_and_refuses_the_unknown() {
+        assert_eq!("f32".parse::<TrainDtype>().ok(), Some(TrainDtype::F32));
+        assert_eq!(" BF16 ".parse::<TrainDtype>().ok(), Some(TrainDtype::Bf16));
+        assert_eq!("f16".parse::<TrainDtype>().ok(), Some(TrainDtype::F16));
+        assert!("fp8".parse::<TrainDtype>().is_err());
+    }
 
     #[test]
     fn train_dtype_maps_to_candle() {
