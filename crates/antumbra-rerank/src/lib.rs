@@ -58,12 +58,34 @@ const RERANK_TIMEOUT_SECS: u64 = 30;
 /// its own, so scores from different batches compare directly.
 const RERANK_MAX_BATCH: usize = 32;
 
+/// The most one scoring call may take across all of its batches, overridable
+/// with `ANTUMBRA_RERANK_BUDGET_MS`.
+///
+/// Recall waits on the cross-encoder before it answers, and the callers that
+/// recall most are hooks with a few seconds to spend: the session bootstrap gives
+/// up after five, the per-prompt hook after ten. On a CPU, `bge-reranker-base`
+/// scores a batch of 32 memories in 3.5 to 5 seconds, so the 100-candidate pool
+/// of a twelve-row recall took 13 seconds and every session started cold. Past
+/// the budget the call fails, and recall falls back to the fused order as it
+/// does for any reranker fault: a slow precision stage costs its budget, never
+/// the answer.
+const RERANK_BUDGET_MS: u64 = 2000;
+
 fn max_batch() -> usize {
     std::env::var("ANTUMBRA_RERANK_BATCH")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|&n| n > 0)
         .unwrap_or(RERANK_MAX_BATCH)
+}
+
+fn budget() -> std::time::Duration {
+    let ms = std::env::var("ANTUMBRA_RERANK_BUDGET_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(RERANK_BUDGET_MS);
+    std::time::Duration::from_millis(ms)
 }
 
 /// The production transport: a blocking `ureq` POST over an agent with a bounded
@@ -115,6 +137,8 @@ pub struct HttpReranker {
     transport: Arc<dyn RerankTransport>,
     /// Texts per request; see [`RERANK_MAX_BATCH`].
     max_batch: usize,
+    /// Time allowed per scoring call; see [`RERANK_BUDGET_MS`].
+    budget: std::time::Duration,
 }
 
 impl HttpReranker {
@@ -127,6 +151,7 @@ impl HttpReranker {
             api_key,
             transport: Arc::new(UreqTransport::new()),
             max_batch: max_batch(),
+            budget: budget(),
         }
     }
 
@@ -188,24 +213,37 @@ impl HttpReranker {
     /// One score per text, in the caller's order, however many texts there are:
     /// they go to the endpoint in batches of at most `max_batch` and each
     /// batch's indices are offset back into place. Any batch failing fails the
-    /// whole call, so a caller never ranks a pool that was only partly scored.
+    /// whole call, so a caller never ranks a pool that was only partly scored,
+    /// and so does running past the budget: the batches not yet sent are never
+    /// sent.
     async fn scores(&self, query: &str, texts: &[&str]) -> Result<Vec<f32>> {
-        let mut out = Vec::with_capacity(texts.len());
-        for batch in texts.chunks(self.max_batch.max(1)) {
-            let url = self.url.clone();
-            let api_key = self.api_key.clone();
-            let body = self.request_body(query, batch);
-            let transport = self.transport.clone();
-            // `ureq` is blocking; run it off the async runtime so it never
-            // stalls a worker (the same offload the embedder uses).
-            let resp = tokio::task::spawn_blocking(move || {
-                transport.post(&url, api_key.as_deref(), &body)
-            })
+        let scoring = async {
+            let mut out = Vec::with_capacity(texts.len());
+            for batch in texts.chunks(self.max_batch.max(1)) {
+                let url = self.url.clone();
+                let api_key = self.api_key.clone();
+                let body = self.request_body(query, batch);
+                let transport = self.transport.clone();
+                // `ureq` is blocking; run it off the async runtime so it never
+                // stalls a worker (the same offload the embedder uses).
+                let resp = tokio::task::spawn_blocking(move || {
+                    transport.post(&url, api_key.as_deref(), &body)
+                })
+                .await
+                .map_err(|e| AntumbraError::other(format!("rerank task panicked: {e}")))??;
+                out.extend(Self::parse_scores(&resp, batch.len())?);
+            }
+            Ok(out)
+        };
+        tokio::time::timeout(self.budget, scoring)
             .await
-            .map_err(|e| AntumbraError::other(format!("rerank task panicked: {e}")))??;
-            out.extend(Self::parse_scores(&resp, batch.len())?);
-        }
-        Ok(out)
+            .unwrap_or_else(|_| {
+                Err(AntumbraError::other(format!(
+                    "rerank of {} texts exceeded its {} ms budget",
+                    texts.len(),
+                    self.budget.as_millis()
+                )))
+            })
     }
 }
 
@@ -257,6 +295,7 @@ mod tests {
             api_key: None,
             transport: Arc::new(FakeTransport(resp)),
             max_batch: RERANK_MAX_BATCH,
+            budget: std::time::Duration::from_millis(RERANK_BUDGET_MS),
         }
     }
 
@@ -270,11 +309,13 @@ mod tests {
 
     /// Behaves like text-embeddings-inference: refuses a request carrying more
     /// than `limit` texts, and otherwise scores each text as the number it
-    /// spells (`"t42"` scores 0.42). Records every batch it was sent.
+    /// spells (`"t42"` scores 0.42). Records every batch it was sent, and takes
+    /// `delay` to answer each one, the way a cross-encoder on a CPU does.
     struct TeiLike {
         limit: usize,
         batches: std::sync::Mutex<Vec<usize>>,
         fail_call: Option<usize>,
+        delay: std::time::Duration,
     }
 
     impl TeiLike {
@@ -283,6 +324,7 @@ mod tests {
                 limit,
                 batches: std::sync::Mutex::new(Vec::new()),
                 fail_call: None,
+                delay: std::time::Duration::ZERO,
             }
         }
 
@@ -312,6 +354,7 @@ mod tests {
             if self.fail_call == Some(call) {
                 return Err(AntumbraError::other("connection reset"));
             }
+            std::thread::sleep(self.delay);
             let scored: Vec<Value> = texts
                 .iter()
                 .enumerate()
@@ -331,6 +374,7 @@ mod tests {
             api_key: None,
             transport,
             max_batch: RERANK_MAX_BATCH,
+            budget: std::time::Duration::from_millis(RERANK_BUDGET_MS),
         }
     }
 
@@ -379,6 +423,53 @@ mod tests {
             .map(|i| (format!("c{i}"), format!("t{i}")))
             .collect();
         assert!(batched(tei).rerank("q", &pool).await.is_err());
+    }
+
+    fn slow(per_batch_ms: u64) -> Arc<TeiLike> {
+        Arc::new(TeiLike {
+            delay: std::time::Duration::from_millis(per_batch_ms),
+            ..TeiLike::new(32)
+        })
+    }
+
+    fn within(tei: Arc<TeiLike>, budget_ms: u64) -> HttpReranker {
+        HttpReranker {
+            budget: std::time::Duration::from_millis(budget_ms),
+            ..batched(tei)
+        }
+    }
+
+    /// The budget covers the whole call, not each batch: four batches of 150 ms
+    /// overrun 400 ms although each fits, and the call fails rather than make
+    /// recall wait. Past the budget no further batch is sent, so a slow endpoint
+    /// is not handed work nobody will read.
+    #[tokio::test]
+    async fn a_ranking_that_overruns_its_budget_fails_and_stops_sending() {
+        let tei = slow(150);
+        let pool: Vec<(String, String)> = (0..100)
+            .map(|i| (format!("c{i}"), format!("t{i}")))
+            .collect();
+        let err = within(tei.clone(), 400).rerank("q", &pool).await;
+        assert!(
+            err.as_ref()
+                .is_err_and(|e| e.to_string().contains("exceeded its 400 ms budget")),
+            "{err:?}"
+        );
+        // Longer than a batch takes, so a batch sent late would have landed.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert!(tei.sizes().len() < 4, "sent {:?}", tei.sizes());
+    }
+
+    #[tokio::test]
+    async fn a_ranking_inside_its_budget_is_untouched() -> Result<()> {
+        let tei = slow(150);
+        let pool: Vec<(String, String)> = (0..10)
+            .map(|i| (format!("c{i}"), format!("t{i}")))
+            .collect();
+        let out = within(tei.clone(), 400).rerank("q", &pool).await?;
+        assert_eq!(out.first().map(String::as_str), Some("c9"));
+        assert_eq!(tei.sizes(), vec![10]);
+        Ok(())
     }
 
     #[tokio::test]
@@ -471,6 +562,7 @@ mod tests {
             api_key: None,
             transport: Arc::new(FakeTransport(Ok(Value::Null))),
             max_batch: RERANK_MAX_BATCH,
+            budget: std::time::Duration::from_millis(RERANK_BUDGET_MS),
         };
         let body = r.request_body("q", &["t"]);
         assert_eq!(body["model"], "rerank-v2");
