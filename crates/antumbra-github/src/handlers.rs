@@ -57,6 +57,15 @@ impl Merge {
         })
     }
 
+    /// Whether a memory with this evidence is one the merge moves: its current
+    /// anchor sits on the merged branch, in the merged repository.
+    pub fn moves(&self, evidence: &[String]) -> bool {
+        GitProvenance::from_evidence(evidence).is_some_and(|anchor| {
+            normalize_repo(&anchor.repo) == normalize_repo(&self.repo)
+                && anchor.branch.as_deref() == Some(self.head_branch.as_str())
+        })
+    }
+
     /// The anchor a memory moves to: the merge commit on the base branch,
     /// keeping the memory's own path.
     fn target(&self, from: &GitProvenance) -> GitProvenance {
@@ -76,9 +85,7 @@ pub fn reanchor_merged(memories: Vec<Memory>, merge: &Merge, now: DateTime<Utc>)
         .into_iter()
         .filter_map(|mut m| {
             let anchor = GitProvenance::from_evidence(&m.evidence)?;
-            let on_merged_branch = normalize_repo(&anchor.repo) == normalize_repo(&merge.repo)
-                && anchor.branch.as_deref() == Some(merge.head_branch.as_str());
-            if !on_merged_branch || !reanchor(&mut m.evidence, &merge.target(&anchor)) {
+            if !merge.moves(&m.evidence) || !reanchor(&mut m.evidence, &merge.target(&anchor)) {
                 return None;
             }
             m.updated_at = now;

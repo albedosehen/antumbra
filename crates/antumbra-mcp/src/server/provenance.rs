@@ -120,17 +120,30 @@ impl McpServer {
         Parameters(p): Parameters<RecordMergeParams>,
     ) -> Result<Json<MergeRecorded>, ErrorData> {
         let (merge, merged_at) = merge_of(&p)?;
-        let belongs = |m: &Memory| {
-            merged_at.is_none_or(|at| m.created_at <= at)
-                || GitProvenance::from_evidence(&m.evidence)
+        let belongs = |a: &memory::Anchored| {
+            merged_at.is_none_or(|at| a.created_at <= at)
+                || GitProvenance::from_evidence(&a.evidence)
                     .is_some_and(|anchor| carried(&p.commits, &anchor.commit))
         };
-        let candidates: Vec<Memory> = memory::list(&self.store, &self.tenant)
+        // Which memories move is decided from their anchors alone; only those
+        // are read in full. The full row is needed because the write replaces
+        // it, and a row written back without its embedding would lose it.
+        let moving: Vec<MemoryId> = memory::list_anchored(&self.store, &self.tenant)
             .await
             .map_err(err)?
             .into_iter()
-            .filter(belongs)
+            .filter(|a| merge.moves(&a.evidence) && belongs(a))
+            .map(|a| a.id)
             .collect();
+        let mut candidates = Vec::with_capacity(moving.len());
+        for id in &moving {
+            if let Some(m) = memory::get(&self.store, &self.tenant, id)
+                .await
+                .map_err(err)?
+            {
+                candidates.push(m);
+            }
+        }
         let changed = reanchor_merged(candidates, &merge, Utc::now());
         let (mut moved, mut not_writable) = (0, 0);
         for m in &changed {
@@ -259,6 +272,14 @@ mod tests {
         let recorded = s.record_merge(Parameters(merge(None))).await.unwrap().0;
         assert_eq!((recorded.moved, recorded.not_writable), (1, 0));
 
+        let kept = memory::get(&s.store, &s.tenant, &MemoryId::new(&on_branch))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            kept.embedding.is_some(),
+            "a moved memory keeps its embedding"
+        );
         let moved = anchor(&s, &on_branch).await.unwrap();
         assert_eq!(moved.branch.as_deref(), Some("main"));
         assert_eq!(moved.commit, "4e1318f");

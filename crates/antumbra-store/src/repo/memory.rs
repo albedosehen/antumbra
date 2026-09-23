@@ -12,6 +12,7 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -191,6 +192,48 @@ pub async fn count(store: &Store, tenant: &TenantId) -> Result<u32> {
     let rows: Vec<CountRow> = query_records(store.client(), &query).await.map_err(map)?;
     // `GROUP ALL` over an empty match set returns no row at all, not a zero.
     Ok(rows.first().map_or(0, |r| r.count as u32))
+}
+
+/// Where a memory is anchored, and nothing else of it: enough to decide which
+/// memories a provenance event touches (a merge, a deleted branch) without
+/// reading every embedding and every body to find the few it does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Anchored {
+    pub id: MemoryId,
+    pub evidence: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Deserialize)]
+struct AnchoredRow {
+    key: String,
+    #[serde(default)]
+    evidence: Vec<String>,
+    created_at: String,
+    #[serde(default)]
+    deleted_at: Option<String>,
+}
+
+/// A tenant's live memories as [`Anchored`]. A full row carries a 384-float
+/// embedding and the whole content, so a workspace of 5,672 memories is tens of
+/// megabytes to read; this projection is a few hundred bytes a row.
+pub async fn list_anchored(store: &Store, tenant: &TenantId) -> Result<Vec<Anchored>> {
+    let fields: Vec<String> = ["key", "evidence", "created_at", "deleted_at"]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    let filter = eq("tenant_id", tenant.as_str());
+    let rows: Vec<AnchoredRow> = store.read_paged(TABLE, Some(fields), Some(&filter)).await?;
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(|r| {
+            Ok(Anchored {
+                id: MemoryId::new(r.key),
+                evidence: r.evidence,
+                created_at: parse_dt(&r.created_at)?,
+            })
+        })
+        .collect()
 }
 
 /// Every memory across all tenants, with NO tenant filter. As an owner/root
