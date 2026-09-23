@@ -195,6 +195,8 @@ services:
     # The cpu-1.5 tag fails with "Could not download model artifacts / relative
     # URL without a base" and setting HF_ENDPOINT does not help. cpu-latest
     # resolves an ONNX build and works; it needs ~2 minutes to become ready.
+    # Too slow for a full recall pool on a CPU; docker-compose.gpu.yml moves it
+    # onto the GPU.
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     container_name: antumbra-rerank
     profiles: ["rerank"]

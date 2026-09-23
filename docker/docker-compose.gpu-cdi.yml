@@ -18,3 +18,7 @@ services:
     deploy: !reset null
     devices:
       - nvidia.com/gpu=all
+  rerank:
+    deploy: !reset null
+    devices:
+      - nvidia.com/gpu=all
