@@ -21,6 +21,7 @@ pub mod brief;
 pub mod conventions;
 pub mod mcp_lint;
 pub mod mcp_stdio;
+pub mod reanchor;
 pub mod run;
 pub mod skills;
 

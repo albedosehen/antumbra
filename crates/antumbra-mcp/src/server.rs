@@ -29,7 +29,8 @@ use antumbra_store::repo::{boundary, compartment, document, edge, expert, memory
 use antumbra_store::Store;
 
 /// One (tenant, user) MCP session over its Penumbra. `#[tool_handler]` resolves
-/// the tools via `Self::tool_router()`, so no router field is stored.
+/// the tools via `Self::tool_router()` (every router, joined in `engine.rs`),
+/// so no router field is stored.
 #[derive(Clone)]
 pub struct McpServer {
     store: Store,
@@ -309,9 +310,10 @@ fn default_capability() -> String {
 pub(crate) mod consolidation;
 mod engine;
 mod params;
+mod provenance;
 use self::params::*;
 
-#[tool_router]
+#[tool_router(router = memory_router)]
 impl McpServer {
     /// Store a memory in this tenant's Penumbra.
     #[tool(

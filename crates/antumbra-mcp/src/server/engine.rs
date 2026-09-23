@@ -6,8 +6,8 @@
 //! A child module of `server`, so these are the same inherent methods on the
 //! same `McpServer` and they see the helpers next door; they moved here only
 //! because `server.rs` had grown past the size rule. The `#[tool_router]`
-//! block stays there, because that macro builds the router from the block it
-//! is applied to.
+//! blocks stay in `server.rs` and `provenance.rs`, because that macro builds a
+//! router from the block it is applied to; `tool_router` here joins them.
 
 use super::*;
 
@@ -120,6 +120,12 @@ impl McpServer {
 
     /// Every tool this server has, by name, profile or not: what `--tools`
     /// is validated against.
+    /// Every tool: the memory tools in `server.rs` and the provenance tools in
+    /// `provenance.rs`, each block building its own router.
+    pub(super) fn tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Self> {
+        Self::memory_router() + Self::provenance_router()
+    }
+
     pub fn all_tool_names() -> Vec<String> {
         Self::tool_router()
             .list_all()
@@ -654,6 +660,7 @@ impl McpServer {
             "ingest_document" => dispatch!(IngestDocumentParams, ingest_document),
             "recall_documents" => dispatch!(RecallDocumentsParams, recall_documents),
             "reinforce_memory" => dispatch!(IdParams, reinforce_memory),
+            "penalize_memory" => dispatch!(IdParams, penalize_memory),
             "forget_memory" => dispatch!(IdParams, forget_memory),
             "list_memories" => dispatch!(ListParams, list_memories),
             "relate_memories" => dispatch!(RelateParams, relate_memories),
@@ -679,6 +686,7 @@ impl McpServer {
             }
             "share_compartment" => dispatch!(ShareParams, share_compartment),
             "revoke_compartment" => dispatch!(RevokeParams, revoke_compartment),
+            "record_merge" => dispatch!(super::provenance::RecordMergeParams, record_merge),
             other => Err(ErrorData::invalid_params(
                 format!("unknown tool: {other}"),
                 None,
