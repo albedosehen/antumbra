@@ -46,10 +46,21 @@ echo "pairs: $TOTAL  positives: $POS  hard negatives: $NEG"
 
 # --- the control that decides whether the rest is worth reading --------------
 # One jq expression, no model: is the query a substring of the memory?
-jq -r '[.[] | select((.memory | ascii_downcase) | contains(.query | ascii_downcase | ltrimstr(" ") | rtrimstr(" "))) as $hit | 1] | length' \
-  "$LABELS" > /dev/null 2>&1 || true
-GREP_TP=$(jq '[.[] | select(.relevant) | select((.memory) | contains(.query | sub("^ +";"") | sub(" +$";"")))] | length' "$LABELS")
-GREP_FP=$(jq '[.[] | select(.relevant|not) | select((.memory) | contains(.query | sub("^ +";"") | sub(" +$";"")))] | length' "$LABELS")
+#
+# The bindings are explicit because `contains()` evaluates its argument with `.`
+# rebound to the string on its left, so the obvious `.memory | contains(.query)`
+# indexes a string with "query" and dies. Naming the row first is the fix.
+hits() { # $1 = true to count positives, false to count negatives
+  jq --argjson want "$1" \
+    '[ .[]
+       | select(.relevant == $want)
+       | . as $r
+       | ($r.query | sub("^ +";"") | sub(" +$";"")) as $q
+       | select($q != "" and ($r.memory | contains($q)))
+     ] | length' "$LABELS"
+}
+GREP_TP=$(hits true)
+GREP_FP=$(hits false)
 awk -v tp="$GREP_TP" -v fp="$GREP_FP" -v p="$POS" -v n="$NEG" '
 BEGIN {
   prec = (tp + fp) > 0 ? tp / (tp + fp) : 0;
