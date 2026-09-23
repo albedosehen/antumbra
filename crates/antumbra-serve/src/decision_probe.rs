@@ -197,7 +197,14 @@ pub async fn train_and_score(
     epochs: usize,
     how: Pairing,
 ) -> Result<Scored> {
-    let dev = Device::Cpu;
+    // The head is small, but the ENCODER pass in front of it is not, and the
+    // chunked pairing multiplies it: MiniLM pads a batch to a fixed shape, so a
+    // 300-character chunk costs nearly what a 4000-character memory costs. An
+    // 800-pair three-way run did not finish in 161 minutes on CPU, which is why
+    // the recorded figures came from a 120-pair sample and had to be read as an
+    // ordering. `cuda_if_available` falls back to CPU on a host without a card
+    // and without the feature, so this is the same code either way.
+    let dev = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
     let dim = embedder.dim();
     let width = feature_dim(dim, how);
 
