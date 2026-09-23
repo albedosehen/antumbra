@@ -364,5 +364,59 @@ mod tests {
             );
         }
         println!("  CONTROL (cross-encoder threshold)                       F1=0.782");
+        let triv = verbatim_containment(&test);
+        println!(
+            "  NO MODEL: does the memory contain the query verbatim?  acc={:.3} prec={:.3} rec={:.3} F1={:.3}",
+            triv.accuracy, triv.precision, triv.recall, triv.f1
+        );
+        println!(
+            "  If that last line is near 1.000 the benchmark is DEGENERATE: the labels are\n  \
+             cut verbatim from the memory, so a short enough chunk IS the query and the task\n  \
+             collapses from judging relevance into detecting a substring. Read every score\n  \
+             above against this line, not against the control."
+        );
+    }
+
+    /// The control that decides whether any of the scores above mean anything:
+    /// one `contains` call, no model, no training, no GPU.
+    ///
+    /// `scripts/d2-labels.sh` builds a query by taking twelve words from ~60%
+    /// through a memory, so a positive pair's memory contains its query almost
+    /// verbatim -- modulo the whitespace the script normalises when it joins the
+    /// words. If this scores near 1.000, the labelled task is substring
+    /// provenance rather than relevance, and a method scores well on it exactly
+    /// insofar as it detects near-exact overlap. That is not a bug in the label
+    /// construction, which needed a deterministic verifier and got one; it is a
+    /// limit on what conclusions the resulting numbers support.
+    fn verbatim_containment(test: &[LabelledPair]) -> Scored {
+        fn flat(s: &str) -> String {
+            s.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+        let (mut tp, mut fp, mut fern, mut tn) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for p in test {
+            let hit = flat(&p.memory).contains(flat(&p.query).trim());
+            match (hit, p.relevant) {
+                (true, true) => tp += 1.0,
+                (true, false) => fp += 1.0,
+                (false, true) => fern += 1.0,
+                (false, false) => tn += 1.0,
+            }
+        }
+        let precision = if tp + fp > 0.0 { tp / (tp + fp) } else { 0.0 };
+        let recall = if tp + fern > 0.0 {
+            tp / (tp + fern)
+        } else {
+            0.0
+        };
+        Scored {
+            accuracy: (tp + tn) / test.len().max(1) as f32,
+            precision,
+            recall,
+            f1: if precision + recall > 0.0 {
+                2.0 * precision * recall / (precision + recall)
+            } else {
+                0.0
+            },
+        }
     }
 }
