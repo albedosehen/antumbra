@@ -20,9 +20,18 @@ cat >"$work/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 cat "$FAKE_RESPONSE"
 STUB
+# `claude reanchor` writes its arguments, and whether it was handed the token,
+# to ANTUMBRA_TEST_MARKER, then takes five seconds, so a hook that waited for it
+# would be caught.
 cat >"$work/bin/antumbra" <<'STUB'
 #!/usr/bin/env bash
 [ "$1 $2" = "claude brief" ] && printf '%s\n' '## Sovereign mode' '' '- a line the agent must see'
+if [ "$1 $2" = "claude reanchor" ]; then
+  echo "$*" >"$ANTUMBRA_TEST_MARKER"
+  [ -n "${ANTUMBRA_TOKEN:-}" ] && echo "token handed on" >>"$ANTUMBRA_TEST_MARKER"
+  sleep 5
+fi
+exit 0
 STUB
 chmod +x "$work/bin/curl" "$work/bin/antumbra"
 
@@ -30,9 +39,20 @@ chmod +x "$work/bin/curl" "$work/bin/antumbra"
 jq -nc '{memories: [range(1; 13) | {id: ("memory:" + tostring), content: ("M" + tostring + ":" + ("x" * 1500))}]}' >"$work/large.json"
 jq -nc '{memories: [{id: "memory:a", content: "first small"}, {id: "memory:b", content: "second small"}]}' >"$work/small.json"
 
+marker="$work/reanchored.txt"
+# A clone with a GitHub origin, for the cases that need a repository.
+mkdir -p "$work/clone"
+git -C "$work/clone" init -q
+git -C "$work/clone" remote add origin https://github.com/acme/orders.git
+
+run_in() { # directory, response file, then extra environment assignments
+  local dir="$1" response="$2"; shift 2
+  (cd "$dir" && env PATH="$work/bin:$PATH" FAKE_RESPONSE="$response" ANTUMBRA_TOKEN=test-token \
+    ANTUMBRA_TEST_MARKER="$marker" ANTUMBRA_REANCHOR_LOG="$work/reanchor.log" "$@" bash "$hook" </dev/null)
+}
 run() { # response file, then extra environment assignments
   local response="$1"; shift
-  (cd "$work" && env PATH="$work/bin:$PATH" FAKE_RESPONSE="$response" "$@" bash "$hook" </dev/null)
+  run_in "$work" "$response" "$@"
 }
 context() { jq -r '.hookSpecificOutput.additionalContext'; }
 
@@ -65,5 +85,24 @@ printf '{}' >"$work/empty.json"
 ctx=$(run "$work/empty.json" | context)
 check "starts cold and says so" grep -q 'starting cold' <<<"$ctx"
 check "still says what is different about the session" grep -q 'Sovereign mode' <<<"$ctx"
+
+echo "outside a repository"
+check "reports no merges" test ! -e "$marker"
+
+echo "in a clone"
+started=$(date +%s)
+ctx=$(run_in "$work/clone" "$work/small.json" | context)
+took=$(( $(date +%s) - started ))
+check "does not wait for the report (${took} s, the stub takes 5)" test "$took" -lt 4
+for _ in $(seq 1 30); do [ -e "$marker" ] && break; sleep 0.2; done
+check "reports the last three days of merges" grep -q 'claude reanchor --days 3' "$marker"
+check "hands the report the token" grep -q 'token handed on' "$marker"
+check "still answers" grep -q 'first small' <<<"$ctx"
+
+echo "in a clone, turned off"
+rm -f "$marker"
+ctx=$(run_in "$work/clone" "$work/small.json" ANTUMBRA_REANCHOR=0 | context)
+sleep 2
+check "reports no merges" test ! -e "$marker"
 
 [ "$failed" = 0 ] && echo "all passed" || { echo "FAILED"; exit 1; }

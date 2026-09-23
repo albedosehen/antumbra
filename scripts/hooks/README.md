@@ -21,7 +21,9 @@ ANTUMBRA_TOKEN=<bearer-jwt>            # Authorization: Bearer <token>
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
 ANTUMBRA_PENALIZE_ORPHANS=0            # 1: bootstrap also penalizes memories whose branch is gone
 ANTUMBRA_TOOLS=agent                   # on the SERVER: advertise only the eight tools a coding agent needs
-ANTUMBRA_BIN=antumbra                  # the CLI the bootstrap asks for the sovereign-mode block (optional)
+ANTUMBRA_BIN=antumbra                  # the CLI the bootstrap asks for the sovereign-mode block and runs to report merges (optional)
+ANTUMBRA_REANCHOR=1                    # 0: the bootstrap does not report recent merges
+ANTUMBRA_REANCHOR_LOG=~/.antumbra/reanchor.log  # where the last merge report's output goes
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
@@ -126,5 +128,7 @@ A memory about code is only as good as its anchor. The hooks keep that anchor as
   | `[orphaned]`    | its branch no longer exists locally or on `origin` (as far as this clone knows; fetch to be current), or the server recorded GitHub deleting it (the App's delete event; `orphaned_at` on the hit) |
 
   Set `ANTUMBRA_PENALIZE_ORPHANS=1` to have the bootstrap also call `penalize_memory` on orphaned hits, so a memory about a branch that is gone loses standing without anyone noticing it first.
+
+- **Merges** move a branch's memories onto the branch it merged into, so recall from there counts them in scope. The GitHub webhook does this when GitHub can reach the server. When it cannot, the bootstrap does it instead. Inside a repository, with `antumbra` on the path, it starts `antumbra claude reanchor --days 3` in the background. That command asks GitHub, through `gh`, which pull requests merged in the last three days and reports each one to the `record_merge` tool. The report runs detached, holding none of the hook's handles, so the session never waits for it. Reporting a merge again moves nothing, so running it every session is safe. The output of the last run is in `~/.antumbra/reanchor.log`. Set `ANTUMBRA_REANCHOR=0` to turn it off.
 
 Outside a repository, or without `git` on the path, both hooks run exactly as before: no anchor, no tags. Nothing here needs a parser, and nothing is garbage-collected; the anchor travels with the memory. For inventory questions ("what routes does this service expose?") the parser-free companion is `antumbra ingest --title routes -- <the framework's own lister>`, which stores what the command printed as a knowledge document stamped with the same anchor. Add `--copal-addr` and the original is archived to copal first, as the server does.

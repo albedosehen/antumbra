@@ -11,6 +11,7 @@
 //! so git cannot tell a squash-merged branch from an abandoned one. Safe to run
 //! again: a merge whose memories have already moved moves nothing.
 
+use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 
 use super::conventions::Call;
@@ -62,6 +63,16 @@ pub fn merges_in(listed: &str) -> anyhow::Result<Vec<Merged>> {
     // RFC 3339 in UTC, as gh writes it, sorts as text.
     merges.sort_by(|a, b| a.merged_at.cmp(&b.merged_at));
     Ok(merges)
+}
+
+/// The merges at or after `cutoff`. A merge whose time does not read as RFC
+/// 3339 is kept: reporting a merge again moves nothing, and dropping one would
+/// leave its memories where they are.
+pub fn merged_since(merges: Vec<Merged>, cutoff: DateTime<Utc>) -> Vec<Merged> {
+    merges
+        .into_iter()
+        .filter(|m| DateTime::parse_from_rfc3339(&m.merged_at).map_or(true, |at| at >= cutoff))
+        .collect()
 }
 
 /// Report each merge to the surface, in order, and say what moved. With
@@ -138,6 +149,25 @@ mod tests {
         assert_eq!(numbers, vec![50, 51]);
         assert_eq!(merges[1].commits, vec!["5df8993", "229e6c4"]);
         assert_eq!(merges[1].commit, "4e1318f");
+    }
+
+    #[test]
+    fn a_window_keeps_the_recent_merges_and_any_it_cannot_date() {
+        let mut merges = merges_in(LISTED).unwrap();
+        let cutoff = DateTime::parse_from_rfc3339("2026-09-23T17:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let recent: Vec<u64> = merged_since(merges.clone(), cutoff)
+            .iter()
+            .map(|m| m.number)
+            .collect();
+        assert_eq!(recent, vec![51]);
+        merges[0].merged_at = "yesterday".into();
+        let kept: Vec<u64> = merged_since(merges, cutoff)
+            .iter()
+            .map(|m| m.number)
+            .collect();
+        assert_eq!(kept, vec![50, 51]);
     }
 
     #[test]

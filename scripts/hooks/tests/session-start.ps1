@@ -12,15 +12,44 @@ function Check([string]$What, [bool]$Holds) {
     if ($Holds) { Write-Output "  ok    $What" } else { Write-Output "  FAIL  $What"; $script:failed = 1 }
 }
 
-# --- a stub `antumbra` that only knows `claude brief` ----------------------------
+# --- a stub `antumbra` that knows `claude brief` and `claude reanchor` -------------
+# `reanchor` writes its arguments, and whether it was handed the token, to
+# ANTUMBRA_TEST_MARKER, then takes five seconds, so a hook that waited for it
+# would be caught.
+$marker = Join-Path $work 'reanchored.txt'
 if ($IsWindows) {
     $stub = Join-Path $work 'antumbra.cmd'
-    Set-Content -Path $stub -Value "@echo off`r`nif `"%1 %2`"==`"claude brief`" (`r`necho ## Sovereign mode`r`necho.`r`necho - a line the agent must see`r`n)"
+    Set-Content -Path $stub -Value (@(
+        '@echo off'
+        'if "%1 %2"=="claude brief" ('
+        'echo ## Sovereign mode'
+        'echo.'
+        'echo - a line the agent must see'
+        ')'
+        'if "%1 %2"=="claude reanchor" ('
+        '>"%ANTUMBRA_TEST_MARKER%" echo %*'
+        'if defined ANTUMBRA_TOKEN >>"%ANTUMBRA_TEST_MARKER%" echo token handed on'
+        'ping -n 6 127.0.0.1 >nul'
+        ')'
+    ) -join "`r`n")
 } else {
     $stub = Join-Path $work 'antumbra'
-    Set-Content -Path $stub -Value "#!/usr/bin/env bash`n[ `"`$1 `$2`" = `"claude brief`" ] && printf '%s\n' '## Sovereign mode' '' '- a line the agent must see'`n"
+    Set-Content -Path $stub -Value (@(
+        '#!/usr/bin/env bash'
+        'if [ "$1 $2" = "claude brief" ]; then printf ''%s\n'' ''## Sovereign mode'' '''' ''- a line the agent must see''; fi'
+        'if [ "$1 $2" = "claude reanchor" ]; then echo "$*" > "$ANTUMBRA_TEST_MARKER"; [ -n "$ANTUMBRA_TOKEN" ] && echo "token handed on" >> "$ANTUMBRA_TEST_MARKER"; sleep 5; fi'
+    ) -join "`n")
     & chmod +x $stub
 }
+$env:ANTUMBRA_TEST_MARKER = $marker
+$env:ANTUMBRA_TOKEN = 'test-token'
+$env:ANTUMBRA_REANCHOR_LOG = Join-Path $work 'reanchor.log'
+
+# A clone with a GitHub origin, for the cases that need a repository.
+$clone = Join-Path $work 'clone'
+New-Item -ItemType Directory -Path $clone | Out-Null
+& git -C $clone init -q
+& git -C $clone remote add origin https://github.com/acme/orders.git
 
 # --- a surface that answers every call with the current response file ------------
 $response = Join-Path $work 'response.json'
@@ -51,11 +80,11 @@ foreach ($attempt in 1..50) {
 }
 if (-not $up) { Write-Output 'the test surface did not start'; exit 2 }
 
-function Get-Context([string]$ResponseJson, [string]$Bin) {
+function Get-Context([string]$ResponseJson, [string]$Bin, [string]$Dir = $work) {
     Set-Content -Path $response -Value $ResponseJson
     $env:ANTUMBRA_URL = $url
     $env:ANTUMBRA_BIN = $Bin
-    Push-Location $work
+    Push-Location $Dir
     try { $out = & pwsh -NoProfile -NonInteractive -File $hook | Out-String } finally { Pop-Location }
     $answer = $out | ConvertFrom-Json
     if ($answer.hookSpecificOutput.hookEventName -ne 'SessionStart') { throw "not a SessionStart answer: $out" }
@@ -92,6 +121,28 @@ Write-Output 'no memories at all'
 $ctx = Get-Context '{}' $stub
 Check 'starts cold and says so' $ctx.Contains('starting cold')
 Check 'still says what is different about the session' $ctx.Contains('Sovereign mode')
+
+Write-Output 'outside a repository'
+Check 'reports no merges' (-not (Test-Path $marker))
+
+Write-Output 'in a clone'
+$clock = [System.Diagnostics.Stopwatch]::StartNew()
+$ctx = Get-Context $small $stub $clone
+$took = $clock.Elapsed.TotalSeconds
+Check "does not wait for the report ($([math]::Round($took, 1)) s, the stub takes 5)" ($took -lt 4)
+foreach ($wait in 1..30) { if (Test-Path $marker) { break }; Start-Sleep -Milliseconds 200 }
+$said = if (Test-Path $marker) { Get-Content -Raw $marker } else { '' }
+Check 'reports the last three days of merges' $said.Contains('claude reanchor --days 3')
+Check 'hands the report the token' $said.Contains('token handed on')
+Check 'still answers' $ctx.Contains('first small')
+
+Write-Output 'in a clone, turned off'
+Remove-Item -Force $marker -ErrorAction SilentlyContinue
+$env:ANTUMBRA_REANCHOR = '0'
+$ctx = Get-Context $small $stub $clone
+Start-Sleep -Seconds 2
+Check 'reports no merges' (-not (Test-Path $marker))
+Remove-Item Env:ANTUMBRA_REANCHOR
 
 $listener.Stop()
 Get-Job | Remove-Job -Force

@@ -237,6 +237,10 @@ pub enum ClaudeAction {
         /// How many of the most recent merged pull requests to report.
         #[arg(long, default_value_t = 30)]
         limit: u32,
+        /// Only the merges of the last this many days. The session-start hook
+        /// passes a few, so each session reports only what is recent.
+        #[arg(long)]
+        days: Option<i64>,
         /// Say which merges would be reported and write nothing.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
