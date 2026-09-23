@@ -342,12 +342,13 @@ pub async fn memory_import(url: &str, args: MemoryImportArgs) -> anyhow::Result<
             };
             let corpus = JsonCorpus::from_tasks(captures.clone());
             let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+            let base_model = cfg.base_model.clone();
             let loader = CandleModelLoader::new(cfg.clone());
             let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
             let embedder = crate::make_embedder()?;
             let loop_cfg = LoopConfig {
                 graduate_threshold: 0.3,
-                base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                base_model,
                 ..LoopConfig::default()
             };
             let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);
@@ -819,11 +820,12 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
                 };
                 let corpus = JsonCorpus::from_tasks(tasks.clone());
                 let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+                let base_model = cfg.base_model.clone();
                 let loader = CandleModelLoader::new(cfg.clone());
                 let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
                 let loop_cfg = LoopConfig {
                     graduate_threshold: 0.3,
-                    base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+                    base_model,
                     ..LoopConfig::default()
                 };
                 let lp = GenerationLoop::new(store, &trainer, embedder, loop_cfg);

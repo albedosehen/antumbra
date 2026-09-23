@@ -110,6 +110,33 @@ USER 65532
 # One at a time: two encoder passes at once would contend for the card.
 ENTRYPOINT ["/usr/local/bin/antumbra-d2", "--ignored", "--nocapture", "--test-threads=1", "d2_head"]
 
+# --- calibrate stage: a corpus against the base model, on the card ----------
+# A corpus teaches nothing through tasks the base model always passes or never
+# passes, and only a GPU run says which those are. This stage is the `antumbra`
+# CLI with the model path compiled in, so `eval --report` can score the bare
+# base on each file and keep every task's result:
+#
+#   scripts/workbench-calibrate.sh <sha>   (on the GPU host; see the script)
+#
+# It shares the weights volume with `gpu-test`, and it carries python for the
+# verifier and the repository's corpora at /build/corpora.
+FROM builder AS calibrate
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -u 65532 -m -s /usr/sbin/nologin nonroot
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo build --release -p antumbra-cli --locked --features models,cuda \
+    && cp /build/target/release/antumbra /usr/local/bin/antumbra
+ENV HF_HOME=/weights
+WORKDIR /reports
+RUN mkdir -p /weights /reports && chown 65532:65532 /weights /reports
+USER 65532
+ENTRYPOINT ["/usr/local/bin/antumbra"]
+
 # --- runtime stage: CUDA runtime + python (the exec verifier) --------------
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 ENV DEBIAN_FRONTEND=noninteractive

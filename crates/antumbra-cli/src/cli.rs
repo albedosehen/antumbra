@@ -439,13 +439,21 @@ pub enum Command {
         /// the bare base: the prior floor.
         #[arg(long)]
         adapter: Option<String>,
-        #[arg(long, default_value = "Qwen/Qwen2.5-Coder-1.5B")]
-        base_model: String,
+        /// Base model to score. Defaults to the one training loads
+        /// (Qwen2.5-Coder-1.5B-Instruct), so an eval measures the model a run
+        /// would start from.
+        #[arg(long)]
+        base_model: Option<String>,
         /// Completions sampled per task (the pass-rate denominator is tasks x K).
         #[arg(long, default_value_t = 8)]
         samples: usize,
-        #[arg(long, default_value_t = 64)]
+        /// Tokens generated per completion. The training default, so a function
+        /// long enough to pass training is not cut short here.
+        #[arg(long, default_value_t = 256)]
         max_new_tokens: usize,
+        /// Write every task's result (passes out of samples) to this JSON file.
+        #[arg(long)]
+        report: Option<String>,
     },
     /// Capture a supplied, verifier-checked correction into a frozen expert (the
     /// other intake path beside `train`, the capture intake into the umbra). The corpus carries a

@@ -97,6 +97,37 @@ pub async fn eval_pass_rate(
     })
 }
 
+/// The record of one evaluation worth keeping: what was scored, under what
+/// budget, and how every task fared. The aggregate hides the thing a corpus
+/// is calibrated by -- which tasks the model always passes or never passes,
+/// since neither kind teaches it anything -- so the per-task counts are the
+/// point of it.
+pub fn report(
+    corpus: &str,
+    base_model: &str,
+    adapter: Option<&str>,
+    samples: usize,
+    max_new_tokens: usize,
+    out: &EvalOutcome,
+) -> serde_json::Value {
+    let tasks: Vec<serde_json::Value> = out
+        .per_task
+        .iter()
+        .map(|t| json!({ "id": t.id, "passed": t.passed, "total": t.total }))
+        .collect();
+    json!({
+        "corpus": corpus,
+        "base_model": base_model,
+        "adapter": adapter,
+        "samples": samples,
+        "max_new_tokens": max_new_tokens,
+        "pass_rate": out.pass_rate,
+        "passed": out.passed,
+        "total": out.total,
+        "tasks": tasks,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +169,30 @@ mod tests {
         // 3 of every 4 draws pass, across both tasks: 6 / 8.
         assert_eq!((out.passed, out.total), (6, 8));
         assert!((out.pass_rate - 0.75).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn the_report_keeps_every_task_and_what_was_scored() {
+        let mut lm = FixedLm { skill: 1 };
+        let verifier = MarkerVerifier {
+            expect: "PASS".into(),
+        };
+        let tasks = vec![CorpusTask::new("t1", "p1"), CorpusTask::new("t2", "p2")];
+        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 2)
+            .await
+            .unwrap();
+        let record = report("c.json", "base", None, 2, 256, &out);
+        assert_eq!(record["base_model"], "base");
+        assert_eq!(record["adapter"], serde_json::Value::Null);
+        assert_eq!(record["max_new_tokens"], 256);
+        let ids: Vec<&str> = record["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["t1", "t2"]);
+        assert_eq!(record["tasks"][0]["passed"], 1);
+        assert_eq!(record["tasks"][0]["total"], 2);
     }
 }

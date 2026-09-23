@@ -215,8 +215,7 @@ pub async fn scope(url: &str, args: ScopeArgs) -> anyhow::Result<()> {
             None => (
                 doc["base_model"]
                     .as_str()
-                    .unwrap_or("Qwen/Qwen2.5-Coder-1.5B")
-                    .to_string(),
+                    .map_or_else(|| RaftConfig::default().base_model, str::to_string),
                 None,
             ),
         };
@@ -350,6 +349,11 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         };
         let corpus = JsonCorpus::from_file(&corpus)?;
         let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+        // The loop hands this name to the trainer, which loads it, so it must be
+        // the configured base rather than a literal: a literal here once kept
+        // every `train` run on the raw completion model after the default moved
+        // to the Instruct one the recipe was validated on.
+        let base_model = cfg.base_model.clone();
         let loader = CandleModelLoader::new(cfg.clone());
         let trainer: Box<dyn Trainer> = match algo.as_str() {
             "grpo" => Box::new(GrpoTrainer::new(cfg, loader, corpus, verifier)),
@@ -360,7 +364,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         let embedder = make_embedder()?;
         let loop_cfg = LoopConfig {
             graduate_threshold: 0.3,
-            base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+            base_model,
             partition: holdout.then(antumbra_core::slice::Partition::default),
             ..LoopConfig::default()
         };
@@ -451,12 +455,13 @@ pub async fn teach(url: &str, args: TeachArgs) -> anyhow::Result<()> {
         };
         let corpus = JsonCorpus::from_file(&corpus)?;
         let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+        let base_model = cfg.base_model.clone();
         let loader = CandleModelLoader::new(cfg.clone());
         let trainer = CaptureTrainer::new(cfg, loader, corpus, verifier);
         let embedder = make_embedder()?;
         let loop_cfg = LoopConfig {
             graduate_threshold: 0.3,
-            base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+            base_model,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, &trainer, embedder.as_ref(), loop_cfg);

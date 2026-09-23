@@ -481,6 +481,7 @@ async fn run() -> anyhow::Result<()> {
             base_model,
             samples,
             max_new_tokens,
+            report,
         } => {
             #[cfg(feature = "models")]
             {
@@ -492,6 +493,7 @@ async fn run() -> anyhow::Result<()> {
                 };
                 let corpus_doc = JsonCorpus::from_file(&corpus)?;
                 let tasks = corpus_doc.tasks(&[]);
+                let base_model = base_model.unwrap_or_else(|| cfg.base_model.clone());
                 let loader = CandleModelLoader::new(cfg);
                 let mut model = ModelLoader::load(&loader, &base_model, adapter.as_deref()).await?;
                 let verifier = antumbra_critic::CommandVerifier;
@@ -510,10 +512,29 @@ async fn run() -> anyhow::Result<()> {
                 for (i, ex) in out.examples.iter().enumerate() {
                     println!("  sample[{i}]: {}", ex.replace('\n', " ").trim());
                 }
+                if let Some(path) = &report {
+                    let record = antumbra_train::eval::report(
+                        &corpus,
+                        &base_model,
+                        adapter.as_deref(),
+                        samples,
+                        max_new_tokens,
+                        &out,
+                    );
+                    std::fs::write(path, serde_json::to_vec_pretty(&record)?)?;
+                    println!("per-task results -> {path}");
+                }
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (&corpus, &adapter, &base_model, samples, max_new_tokens);
+                let _ = (
+                    &corpus,
+                    &adapter,
+                    &base_model,
+                    samples,
+                    max_new_tokens,
+                    &report,
+                );
                 anyhow::bail!("`eval` requires building with --features models (candle + a GPU)");
             }
         }
