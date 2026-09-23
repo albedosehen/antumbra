@@ -270,7 +270,14 @@ pub fn shape_problems(schema: &Value) -> Vec<Problem> {
     // prose that answers neither. A string field's escape hatch stays lenient,
     // because "cut to a prefix unless you asked for `full`" is the bound.
     fn describes_size(node: &Value) -> bool {
-        const SIZE: [&str; 6] = ["at most", "up to", "no more than", "limit", "top_k", "default"];
+        const SIZE: [&str; 6] = [
+            "at most",
+            "up to",
+            "no more than",
+            "limit",
+            "top_k",
+            "default",
+        ];
         node.get("description")
             .and_then(Value::as_str)
             .map(|d| d.to_ascii_lowercase())
@@ -357,7 +364,11 @@ pub fn shape_problems(schema: &Value) -> Vec<Problem> {
                 // one of them would bury the case that matters.
                 let is_result_collection = !in_row
                     && resolved.get("type").and_then(Value::as_str) == Some("array")
-                    && resolved.get("minItems").and_then(Value::as_u64).unwrap_or(0) == 0;
+                    && resolved
+                        .get("minItems")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                        == 0;
                 if is_result_collection && !explained_by_sibling && !describes_empty(resolved) {
                     out.push(Problem::IndistinguishableEmpty(child_path.clone()));
                 }

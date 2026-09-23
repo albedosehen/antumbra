@@ -180,13 +180,25 @@ mod tests {
     fn calibration_error_separates_honest_from_overconfident() {
         // Half the samples at p=1.0 and true, half at p=0.0 and false.
         let honest: Vec<(f32, bool)> = (0..100)
-            .map(|i| if i % 2 == 0 { (1.0, true) } else { (0.0, false) })
+            .map(|i| {
+                if i % 2 == 0 {
+                    (1.0, true)
+                } else {
+                    (0.0, false)
+                }
+            })
             .collect();
         assert!(expected_calibration_error(&honest, 10) < 0.01);
 
         // Confidently wrong about everything.
         let wrong: Vec<(f32, bool)> = (0..100)
-            .map(|i| if i % 2 == 0 { (1.0, false) } else { (0.0, true) })
+            .map(|i| {
+                if i % 2 == 0 {
+                    (1.0, false)
+                } else {
+                    (0.0, true)
+                }
+            })
             .collect();
         assert!(
             expected_calibration_error(&wrong, 10) > 0.9,
@@ -241,7 +253,10 @@ mod tests {
             platt.a,
             platt.b
         );
-        assert!(platt.a > 0.0, "a higher rerank score must read as MORE likely");
+        assert!(
+            platt.a > 0.0,
+            "a higher rerank score must read as MORE likely"
+        );
 
         let probs: Vec<(f32, bool)> = test
             .iter()
@@ -257,7 +272,11 @@ mod tests {
             }
         }
         let prec = if tp + fp > 0.0 { tp / (tp + fp) } else { 0.0 };
-        let rec = if tp + fern > 0.0 { tp / (tp + fern) } else { 0.0 };
+        let rec = if tp + fern > 0.0 {
+            tp / (tp + fern)
+        } else {
+            0.0
+        };
         let f1 = if prec + rec > 0.0 {
             2.0 * prec * rec / (prec + rec)
         } else {
@@ -293,7 +312,11 @@ mod tests {
                 }
             }
             let prec = if tp + fp > 0.0 { tp / (tp + fp) } else { 0.0 };
-            let rec = if tp + fern > 0.0 { tp / (tp + fern) } else { 0.0 };
+            let rec = if tp + fern > 0.0 {
+                tp / (tp + fern)
+            } else {
+                0.0
+            };
             let f1 = if prec + rec > 0.0 {
                 2.0 * prec * rec / (prec + rec)
             } else {
