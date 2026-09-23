@@ -77,6 +77,39 @@ USER 65532
 # trains at once would contend for the card and the weight download.
 ENTRYPOINT ["/usr/local/bin/antumbra-mcp-tests", "--include-ignored", "--test-threads=1"]
 
+# --- d2-probe stage: ADR-0024's D-2 measurement on the card -----------------
+# The head itself is small; the ENCODER passes in front of it are not, and the
+# chunked pairing multiplies them, because MiniLM pads a batch to a fixed shape
+# and a 300-character chunk costs nearly what a 4000-character memory costs. An
+# 800-pair three-way run did not finish in 161 minutes on CPU, so the recorded
+# figures came from a 120-pair sample and had to be read as an ordering rather
+# than compared to the 0.782 bar, which was measured on 800.
+#
+# This stage exists to remove that excuse. Build needs no GPU; running does, and
+# it needs the labels, which are built from the store by scripts/d2-labels.sh:
+#
+#   ssh <store-host> 'bash -s' < scripts/d2-labels.sh > d2-labels.json
+#   docker build -f docker/Dockerfile.cuda --target d2-probe -t antumbra-d2 .
+#   docker run --rm --device nvidia.com/gpu=all \
+#     -v antumbra-gpu-test-weights:/weights \
+#     -v "$PWD/d2-labels.json:/labels/d2-labels.json:ro" antumbra-d2
+#
+# Shares the weights volume with `gpu-test` so the encoder is downloaded once.
+FROM builder AS d2-probe
+RUN useradd -u 65532 -m -s /usr/sbin/nologin nonroot
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/build/target \
+    cargo test --release -p antumbra-serve --locked --features models,cuda --lib --no-run \
+    && cp "$(ls -t /build/target/release/deps/antumbra_serve-* | grep -v '\.d$' | head -1)" /usr/local/bin/antumbra-d2
+ENV HF_HOME=/weights
+ENV ANTUMBRA_D2_LABELS=/labels/d2-labels.json
+WORKDIR /d2
+RUN mkdir -p /weights /labels /d2 && chown 65532:65532 /weights /d2
+USER 65532
+# One at a time: two encoder passes at once would contend for the card.
+ENTRYPOINT ["/usr/local/bin/antumbra-d2", "--ignored", "--nocapture", "--test-threads=1", "d2_head"]
+
 # --- runtime stage: CUDA runtime + python (the exec verifier) --------------
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 ENV DEBIAN_FRONTEND=noninteractive

@@ -64,7 +64,14 @@ impl BertEmbedder {
     /// [`load`](Self::load) against an explicitly named hf-hub model, so two can be
     /// compared in one process.
     pub fn load_model(model: &str) -> Result<Self> {
-        let device = Device::Cpu;
+        // A `--features cuda` build pinned this to the CPU, so the one candle
+        // model on every recall path never touched the card the feature exists
+        // to use. `cuda_if_available` is the whole fix: it returns a CUDA device
+        // only in a build that has the backend AND on a host with a working
+        // card, and falls back otherwise, so a CPU host and a default build are
+        // unaffected. MiniLM is 22M parameters and costs about 100MB of VRAM,
+        // which matters on this deployment because the GPU has another tenant.
+        let device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
         // hf-hub 1.0's blocking client wraps an async runtime and `block_on`s it,
         // which panics if called from within an existing tokio runtime (the CLI and
         // MCP load the embedder from async). Run the downloads on a dedicated thread

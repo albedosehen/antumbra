@@ -15,10 +15,18 @@
 //! and it is the argument for the bigger encoder rather than an assumption of
 //! it.
 //!
-//! The bar is 0.782 F1, measured over this same construction by
-//! `scripts/d2-relevance-baseline.sh`. A bar measured on one set and beaten on
-//! another is not beaten, so the labels come from `scripts/d2-labels.sh`, which
-//! builds pairs identically.
+//! The bar is 0.785 F1 — accuracy 0.802, precision 0.862, recall 0.720 — a
+//! threshold over the deployed cross-encoder, measured by
+//! `scripts/d2-relevance-baseline.sh`, which reads the very label file this
+//! trains on. It reads rather than rebuilds for a reason: the two scripts used
+//! to construct pairs separately and identically, and were identically wrong.
+//!
+//! **A label set that `grep` can answer measures nothing.** The first version of
+//! these labels left the query verbatim inside its positive memory, so a
+//! `contains` check with no model scored F1 1.000 and a chunk sweep appeared to
+//! beat the control at 0.940. The span is now excised, `contains` scores 0.000,
+//! and the harness prints that line on every run so the degeneracy cannot come
+//! back quietly. Read every score against it, not against the control.
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
@@ -51,7 +59,7 @@ pub struct Scored {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pairing {
     /// One encoder pass over both texts joined, mean-pooled. Measured at 0.519
-    /// F1 against a 0.782 control — chance is 0.500.
+    /// F1 against a 0.785 control — chance is 0.500.
     Joined,
     /// Encode each side separately and hand the head `[u, v, |u-v|, u*v]`, the
     /// standard bi-encoder recipe for sentence-pair classification.
@@ -78,23 +86,40 @@ pub enum Pairing {
     /// model and no fine-tuning: the same frozen encoder, applied to shorter
     /// units.
     ///
-    /// The size matters and is not arbitrary. An earlier measurement of
-    /// chunk-and-max-pool found discrimination best in the MIDDLE — a
-    /// topical/nonsense gap of 0.149 at 300 characters against 0.083 unchunked
-    /// and 0.091 at 120 — because very small chunks raise every score, relevant
-    /// or not. 300 is that peak.
+    /// **Read the history here before trusting any chunking number, because the
+    /// first set of them was an artefact and nearly became a decision.**
     ///
-    /// **It is the first thing that moved the number.** On 120 pairs with sixty
-    /// held out: 0.650 accuracy and 0.588 F1, against 0.550/0.542 for `Separate`
-    /// and 0.467/0.385 for `Joined` on that same sample. The ordering is the
-    /// result and the values are not — this sample is small, and `Joined` scores
-    /// 0.519 on the 800-pair set against 0.385 here. What survives the noise is
-    /// the direction, and it is the direction the explanation above predicts.
+    /// Swept on the original label set, this appeared to beat the control
+    /// outright: 0.940 F1 at 150 characters, 0.862 at 200, 0.730 at 300, against
+    /// a 0.782 bar. The curve was MONOTONIC in smaller chunks, which was the
+    /// tell. `scripts/d2-labels.sh` cut a twelve-word query out of a memory and
+    /// left it there, so a short enough chunk simply WAS the query, and the task
+    /// was substring detection wearing relevance as a costume. A `contains`
+    /// check with no model scored 1.000 on that set.
     ///
-    /// Still short of the 0.782 control, so chunking is NECESSARY AND NOT
-    /// SUFFICIENT — the same conclusion an earlier measurement reached about
-    /// ranking, by a different route. It composes with a trained pair encoder
-    /// rather than replacing one.
+    /// With the span excised — same memories, same hard negatives, same split —
+    /// the shortcut dies (`contains` scores 0.000) and so does most of the gain:
+    ///
+    /// | chunk | F1 (honest) | F1 (degenerate) |
+    /// |---|---|---|
+    /// | 150 | 0.594 | 0.940 |
+    /// | 200 | **0.613** | 0.862 |
+    /// | 300 | 0.525 | 0.730 |
+    /// | 450 | 0.540 | 0.599 |
+    /// | 600 | 0.520 | 0.658 |
+    ///
+    /// Two things survive. Chunking still helps, 0.519 to 0.613, which is real
+    /// but modest. And the honest curve PEAKS IN THE MIDDLE rather than running
+    /// to the smallest chunk, which is what an independent measurement of
+    /// chunk-and-max-pool found for ranking (a topical/nonsense gap of 0.149 at
+    /// 300 characters against 0.083 unchunked and 0.091 at 120, because very
+    /// small chunks raise every score). Two unrelated measurements agreeing on
+    /// the shape is the reason to believe this one.
+    ///
+    /// So chunking is NECESSARY AND NOT SUFFICIENT against a 0.785 control. That
+    /// was the conclusion before the artefact was found and it is the conclusion
+    /// after, which is luck rather than vindication: for one run the evidence
+    /// said the opposite and said it loudly.
     BestChunk { chunk_chars: usize },
 }
 
@@ -197,7 +222,14 @@ pub async fn train_and_score(
     epochs: usize,
     how: Pairing,
 ) -> Result<Scored> {
-    let dev = Device::Cpu;
+    // The head is small, but the ENCODER pass in front of it is not, and the
+    // chunked pairing multiplies it: MiniLM pads a batch to a fixed shape, so a
+    // 300-character chunk costs nearly what a 4000-character memory costs. An
+    // 800-pair three-way run did not finish in 161 minutes on CPU, which is why
+    // the recorded figures came from a 120-pair sample and had to be read as an
+    // ordering. `cuda_if_available` falls back to CPU on a host without a card
+    // and without the feature, so this is the same code either way.
+    let dev = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
     let dim = embedder.dim();
     let width = feature_dim(dim, how);
 
@@ -264,10 +296,16 @@ mod tests {
     /// ADR-0024 Validation 2 for D-2: does a head trained on constructed labels
     /// beat the control?
     ///
-    /// The control is 0.782 F1, a threshold over the deployed cross-encoder,
-    /// measured on pairs built the same way (`scripts/d2-relevance-baseline.sh`).
-    /// This trains against `scripts/d2-labels.sh` output and prints both, so the
-    /// record's bar is compared rather than asserted.
+    /// The control is 0.785 F1, a threshold over the deployed cross-encoder,
+    /// measured by `scripts/d2-relevance-baseline.sh` over the same label file
+    /// this reads. It prints the head, the control and the no-model `contains`
+    /// check together, so the bar is compared rather than asserted and the
+    /// benchmark's own validity is visible in the same output.
+    ///
+    /// The cross-encoder scored 0.782 on the degenerate set and 0.785 on the
+    /// honest one, which is worth knowing: it never used the verbatim shortcut,
+    /// while the frozen-encoder head fell from 0.940 to 0.613 because that was
+    /// all it had been doing.
     ///
     /// Ignored: it needs the label file and downloads the encoder. Run with
     ///   ANTUMBRA_D2_LABELS=/path/to/d2-labels.json \
@@ -318,9 +356,30 @@ mod tests {
         for (label, how) in [
             ("joined, mean-pooled ", Pairing::Joined),
             ("separate [u,v,|u-v|,u*v]", Pairing::Separate),
+            // 300 was carried over from a DIFFERENT measurement -- chunk-and-max-
+            // pool for ranking -- so it is a borrowed constant rather than one
+            // tuned for this question. Sweeping it costs seconds on a GPU and
+            // settles whether the remaining gap to the control is a chunk-size
+            // choice or something the frozen encoder cannot do.
+            (
+                "best chunk, 150 chars   ",
+                Pairing::BestChunk { chunk_chars: 150 },
+            ),
+            (
+                "best chunk, 200 chars   ",
+                Pairing::BestChunk { chunk_chars: 200 },
+            ),
             (
                 "best chunk, 300 chars   ",
                 Pairing::BestChunk { chunk_chars: 300 },
+            ),
+            (
+                "best chunk, 450 chars   ",
+                Pairing::BestChunk { chunk_chars: 450 },
+            ),
+            (
+                "best chunk, 600 chars   ",
+                Pairing::BestChunk { chunk_chars: 600 },
             ),
         ] {
             let got = train_and_score(&e, &train, &test, 400, how)
@@ -332,9 +391,63 @@ mod tests {
                 got.precision,
                 got.recall,
                 got.f1,
-                if got.f1 > 0.782 { "BEATS 0.782" } else { "" }
+                if got.f1 > 0.785 { "BEATS 0.785" } else { "" }
             );
         }
-        println!("  CONTROL (cross-encoder threshold)                       F1=0.782");
+        println!("  CONTROL (cross-encoder threshold, span-excised set)      F1=0.785");
+        let triv = verbatim_containment(&test);
+        println!(
+            "  NO MODEL: does the memory contain the query verbatim?  acc={:.3} prec={:.3} rec={:.3} F1={:.3}",
+            triv.accuracy, triv.precision, triv.recall, triv.f1
+        );
+        println!(
+            "  If that last line is near 1.000 the benchmark is DEGENERATE: the labels are\n  \
+             cut verbatim from the memory, so a short enough chunk IS the query and the task\n  \
+             collapses from judging relevance into detecting a substring. Read every score\n  \
+             above against this line, not against the control."
+        );
+    }
+
+    /// The control that decides whether any of the scores above mean anything:
+    /// one `contains` call, no model, no training, no GPU.
+    ///
+    /// `scripts/d2-labels.sh` builds a query by taking twelve words from ~60%
+    /// through a memory, so a positive pair's memory contains its query almost
+    /// verbatim -- modulo the whitespace the script normalises when it joins the
+    /// words. If this scores near 1.000, the labelled task is substring
+    /// provenance rather than relevance, and a method scores well on it exactly
+    /// insofar as it detects near-exact overlap. That is not a bug in the label
+    /// construction, which needed a deterministic verifier and got one; it is a
+    /// limit on what conclusions the resulting numbers support.
+    fn verbatim_containment(test: &[LabelledPair]) -> Scored {
+        fn flat(s: &str) -> String {
+            s.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+        let (mut tp, mut fp, mut fern, mut tn) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for p in test {
+            let hit = flat(&p.memory).contains(flat(&p.query).trim());
+            match (hit, p.relevant) {
+                (true, true) => tp += 1.0,
+                (true, false) => fp += 1.0,
+                (false, true) => fern += 1.0,
+                (false, false) => tn += 1.0,
+            }
+        }
+        let precision = if tp + fp > 0.0 { tp / (tp + fp) } else { 0.0 };
+        let recall = if tp + fern > 0.0 {
+            tp / (tp + fern)
+        } else {
+            0.0
+        };
+        Scored {
+            accuracy: (tp + tn) / test.len().max(1) as f32,
+            precision,
+            recall,
+            f1: if precision + recall > 0.0 {
+                2.0 * precision * recall / (precision + recall)
+            } else {
+                0.0
+            },
+        }
     }
 }
