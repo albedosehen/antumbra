@@ -182,7 +182,20 @@ impl Store {
         fields: Option<Vec<String>>,
         filter: Option<&Operator>,
     ) -> Result<Vec<T>> {
-        const PAGE: i64 = 20_000;
+        self.read_in_pages_of(READ_PAGE_ROWS, table, fields, filter)
+            .await
+    }
+
+    /// [`read_paged`](Self::read_paged) with the page size named, so paging
+    /// itself can be tested with pages of a few rows.
+    async fn read_in_pages_of<T: DeserializeOwned>(
+        &self,
+        page_rows: i64,
+        table: &str,
+        fields: Option<Vec<String>>,
+        filter: Option<&Operator>,
+    ) -> Result<Vec<T>> {
+        let page_rows = page_rows.max(1);
         // SurrealDB v3 requires the `ORDER BY` idiom to appear in an explicit
         // projection: `SELECT a, b FROM t ORDER BY id` errors with "Missing
         // order idiom `id` in statement selection". We page by `id`, so ensure
@@ -207,17 +220,17 @@ impl Store {
             let query = builder
                 .order_by("id", "ASC")
                 .map_err(map)?
-                .limit(PAGE)
+                .limit(page_rows)
                 .map_err(map)?
                 .offset(offset)
                 .map_err(map)?;
             let page: Vec<T> = query_records(self.client(), &query).await.map_err(map)?;
             let n = page.len() as i64;
             out.extend(page);
-            if n < PAGE {
+            if n < page_rows {
                 break;
             }
-            offset += PAGE;
+            offset += page_rows;
         }
         Ok(out)
     }
@@ -225,9 +238,44 @@ impl Store {
 
 pub const DEFAULT_EMBED_DIM: usize = EMBED_DIM;
 
+/// Rows per page in [`Store::read_paged`].
+///
+/// A memory row carries its embedding, 384 floats that serialize to about 5 KB
+/// of JSON, plus its content, which runs to several KB. The first cut paged at
+/// 20,000 rows, so a workspace of 5,672 memories still came back as one
+/// response, and on kuskokwim that reset the connection: `list_memories`,
+/// `record_merge` and every other whole-workspace read failed with
+/// "Connection reset". At 500 rows a page is a few megabytes, well inside the
+/// WebSocket limits, and 6,000 memories take twelve round trips.
+const READ_PAGE_ROWS: i64 = 500;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pages of two over five rows return all five, each once: the loop stops
+    /// on the short page, and ordering by id keeps offsets from skipping or
+    /// repeating a row.
+    #[tokio::test]
+    async fn paging_returns_every_row_exactly_once() -> Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        store
+            .client()
+            .query(
+                "FOR $i IN [1, 2, 3, 4, 5] { CREATE type::record('paging_probe', $i) SET n = $i; };",
+            )
+            .await
+            .map_err(map)?;
+        for page_rows in [1, 2, 5, 6] {
+            let rows: Vec<serde_json::Value> = store
+                .read_in_pages_of(page_rows, "paging_probe", None, None)
+                .await?;
+            let mut seen: Vec<i64> = rows.iter().filter_map(|r| r["n"].as_i64()).collect();
+            seen.sort_unstable();
+            assert_eq!(seen, vec![1, 2, 3, 4, 5], "pages of {page_rows}");
+        }
+        Ok(())
+    }
 
     /// Every (table, column, index) the schema builds an HNSW index
     /// over.
