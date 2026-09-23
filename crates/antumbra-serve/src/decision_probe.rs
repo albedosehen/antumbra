@@ -325,9 +325,30 @@ mod tests {
         for (label, how) in [
             ("joined, mean-pooled ", Pairing::Joined),
             ("separate [u,v,|u-v|,u*v]", Pairing::Separate),
+            // 300 was carried over from a DIFFERENT measurement -- chunk-and-max-
+            // pool for ranking -- so it is a borrowed constant rather than one
+            // tuned for this question. Sweeping it costs seconds on a GPU and
+            // settles whether the remaining gap to the control is a chunk-size
+            // choice or something the frozen encoder cannot do.
+            (
+                "best chunk, 150 chars   ",
+                Pairing::BestChunk { chunk_chars: 150 },
+            ),
+            (
+                "best chunk, 200 chars   ",
+                Pairing::BestChunk { chunk_chars: 200 },
+            ),
             (
                 "best chunk, 300 chars   ",
                 Pairing::BestChunk { chunk_chars: 300 },
+            ),
+            (
+                "best chunk, 450 chars   ",
+                Pairing::BestChunk { chunk_chars: 450 },
+            ),
+            (
+                "best chunk, 600 chars   ",
+                Pairing::BestChunk { chunk_chars: 600 },
             ),
         ] {
             let got = train_and_score(&e, &train, &test, 400, how)
