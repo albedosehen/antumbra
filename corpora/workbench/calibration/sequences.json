@@ -1,0 +1,215 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/sequences.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.606249988079071,
+  "passed": 97,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "sequences/nth-term-8-minus3",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/nth-term-8-minus2",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/nth-term-6-2",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/nth-term-0-4",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "sequences/nth-term-0-5",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/nth-term-6-5",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/nth-term-5-minus3",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/nth-term-8-6",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-total",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-max",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-min",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-product",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-evens",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-abs-total",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-from-first",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "sequences/running-alternating",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-minus3-4",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-3-minus2",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-minus3-0",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-minus2-minus2",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-2-minus3",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-minus3-minus2",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-minus1-4",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/fib-like-minus2-2",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/look-and-say-count-first",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/look-and-say-digit-first",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "sequences/look-and-say-count-first-length",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "sequences/look-and-say-digit-first-length",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "sequences/classify-words",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "sequences/classify-letters",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "sequences/classify-ops",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "sequences/classify-symbols",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "sequences/classify-codes",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "sequences/collatz-steps",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "sequences/collatz-length",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/collatz-peak",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/collatz-odd",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "sequences/collatz-halvings",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "sequences/impossible-last-natural",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "sequences/impossible-descending-increasing",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 160
+}

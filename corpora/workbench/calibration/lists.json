@@ -1,0 +1,235 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/lists.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.5340909361839294,
+  "passed": 94,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "lists/rotate-right-3",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/rotate-left-1",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/rotate-right-6",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "lists/rotate-right-2",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/rotate-right-5",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/rotate-left-4",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/rotate-left-5",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/rotate-left-2",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/every-2-from-0",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/every-4-from-3",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/every-3-from-0",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/every-4-from-1",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/every-5-from-4",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/every-5-from-2",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/every-3-from-1",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/every-5-from-3",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-2-keep",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-2-drop",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-3-keep",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-3-drop",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-4-keep",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-4-drop",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-5-keep",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/chunks-5-drop",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/dedupe-first",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/dedupe-last",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/dedupe-first-abs",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/dedupe-once",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/run-inc-first",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "lists/run-inc-last",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/run-nondec-first",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/run-nondec-last",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/run-dec-first",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "lists/run-dec-last",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to--1",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to-4",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to-5",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to-8",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to-9",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to-7",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to-13",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "lists/pairs-to-12",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "lists/impossible-greater-than-all",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "lists/impossible-shorter-superset",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 176
+}

@@ -10,6 +10,8 @@ A corpus built for the loop to be measured on: 349 Python function-writing tasks
 | `judge.py`     | the judge, and the verify spec that runs it                                    |
 | `legacy.py`    | rebuilds the older corpora's verifiers on the same judge                       |
 | `families/`    | the task templates, one module per skill                                       |
+| `calibrate.py` | summarises base-model eval reports into where the corpus has headroom          |
+| `calibration/` | the reports behind the calibration below                                       |
 
 ## The judge
 
@@ -69,6 +71,30 @@ Before writing anything, the generator runs every reference through the judge ex
 
 Generation is deterministic: two runs under different hash seeds produce the same files. Lint and types come from `uvx ruff check`, `uvx ruff format --check` and `uvx mypy --strict`, all run from this directory.
 
-## Not yet measured
+## Calibration
 
-The base model's pass rate on each skill has not been measured. Measuring it needs a `models` build and a GPU, and the spec sizes were chosen to spread difficulty, not calibrated against that rate. Until it is measured, the corpus has no evidence that it leaves headroom above the base model's pass rate: tasks the base model already passes, or never passes, teach nothing.
+Measured on 2026-09-23 against the model `train` starts from, `Qwen2.5-Coder-1.5B-Instruct`, using training's own sampling settings: 4 draws per task, temperature 0.8, no nucleus sampling, bf16, 256 new tokens, on an RTX 3090 Ti. The reports are in `calibration/`, and `calibrate.py calibration` rebuilds the full table (skill by size) from them.
+
+| skill     | pass rate | never | sometimes | always |
+| --------- | --------: | ----: | --------: | -----: |
+| dates     |      0.32 |   36% |       61% |     3% |
+| grids     |      0.32 |   41% |       49% |    11% |
+| lists     |      0.56 |   17% |       57% |    26% |
+| mappings  |      0.57 |   11% |       63% |    26% |
+| numbers   |      0.26 |   42% |       54% |     4% |
+| parsing   |      0.27 |   48% |       46% |     6% |
+| sequences |      0.64 |   16% |       58% |    26% |
+| strings   |      0.35 |   30% |       61% |     9% |
+| _small_   |      0.56 |   13% |       63% |    23% |
+| _medium_  |      0.43 |   21% |       67% |    12% |
+| _large_   |      0.19 |   61% |       35% |     4% |
+| **all**   |  **0.40** |   31% |   **56%** |    14% |
+
+A task in the "sometimes" column is one RAFT can learn from: some draws pass and some fail, so there is a winner to prefer and a loser to prefer it over. 56% of the corpus sits there. The 31% that never pass are the frontier, and they are mostly large specs (61% of large tasks never pass; `grids` large never passes at all). The 14% that always pass teach nothing and measure regressions. No impossible task passed on any draw.
+
+Running this calibration found two defects that had shaped every earlier GPU result, and both are fixed:
+
+- **A chat answer was cut at its code fence.** The completion-model stops end at the first fence, so the Instruct model's code answers came back as the sentence introducing them, or empty. The first run scored `dates` at 0 of 144 draws.
+- **The rotary table was built in bf16.** Neighbouring positions past 256 collapsed together, and the angles lost their precision, so greedy draws carried duplicated tokens ("longer than than 11"). With that bug the same measurement read 0.30 overall and 0.10 on large specs. On the 103 large tasks, greedy bf16 went from 18 passes to 21, matching f32.
+
+To re-measure, run `scripts/workbench-calibrate.sh <sha>` on the GPU host.

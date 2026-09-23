@@ -1,0 +1,210 @@
+{
+  "adapter": null,
+  "base_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+  "corpus": "/build/corpora/workbench/grids.json",
+  "dtype": "Bf16",
+  "max_new_tokens": 256,
+  "pass_rate": 0.3076923191547394,
+  "passed": 48,
+  "samples": 4,
+  "tasks": [
+    {
+      "id": "grids/reshape-transpose",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/reshape-mirror",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "grids/reshape-flip",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "grids/reshape-anti-transpose",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/reshape-diagonal",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/reshape-anti-diagonal",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-row-sums",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-column-sums",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-row-max",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-column-min",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-row-spread",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-column-max",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-row-min",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "id": "grids/lines-column-spread",
+      "passed": 3,
+      "total": 4
+    },
+    {
+      "id": "grids/rotate-clockwise",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/rotate-counterclockwise",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/rotate-half-turn",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-4-sum",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-4-nonzero",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-4-max",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-4-min",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-8-sum",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-8-nonzero",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-8-max",
+      "passed": 1,
+      "total": 4
+    },
+    {
+      "id": "grids/neighbours-8-min",
+      "passed": 2,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-4-count-one",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-4-count-nonzero",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-4-largest-one",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-4-largest-nonzero",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-8-count-one",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-8-count-nonzero",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-8-largest-one",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/islands-8-largest-nonzero",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/spiral-clockwise-top-left",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/spiral-counterclockwise-top-left",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/spiral-counterclockwise-top-right",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/spiral-clockwise-bottom-right",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/impossible-above-the-total",
+      "passed": 0,
+      "total": 4
+    },
+    {
+      "id": "grids/impossible-fifth-corner",
+      "passed": 0,
+      "total": 4
+    }
+  ],
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "total": 156
+}
