@@ -454,6 +454,13 @@ pub enum Command {
         /// Write every task's result (passes out of samples) to this JSON file.
         #[arg(long)]
         report: Option<String>,
+        /// Sampling temperature. Defaults to training's, so the eval sees the
+        /// draws a run would; 0 is greedy.
+        #[arg(long)]
+        temperature: Option<f64>,
+        /// Nucleus cutoff. Defaults to training's (1.0, off).
+        #[arg(long)]
+        top_p: Option<f64>,
     },
     /// Capture a supplied, verifier-checked correction into a frozen expert (the
     /// other intake path beside `train`, the capture intake into the umbra). The corpus carries a
