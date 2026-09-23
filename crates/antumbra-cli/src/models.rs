@@ -362,6 +362,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             graduate_threshold: 0.3,
             base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
             partition: holdout.then(antumbra_core::slice::Partition::default),
+            ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
         let reports = lp.run_until(&RunId::new(run), generations).await?;
@@ -385,7 +386,8 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     .rate()
                     .map(|a| format!("{a:.2} over {}", m.audit.measured))
                     .unwrap_or_else(|| "not due".into());
-                println!("        widest held-out gap {gap}, audit {audit}");
+                let trend = r.trend.map_or("not read", |t| t.as_str());
+                println!("        widest held-out gap {gap}, audit {audit}, trend {trend}");
             }
         }
         println!("population: {} experts", expert::list(&store).await?.len());

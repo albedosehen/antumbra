@@ -5,7 +5,7 @@ use surql::query::builder::Query;
 use surql::query::crud::{create_record, first, query_records};
 use surql::types::operators::eq;
 
-use antumbra_core::{EvaluationRun, Result, SubjectKind};
+use antumbra_core::{EvaluationRun, Result, RunId, SubjectKind};
 
 use crate::error::map;
 use crate::store::Store;
@@ -33,6 +33,24 @@ pub async fn list_for_subject(
         .where_(eq("subject_kind", kind.as_str()))
         .where_(eq("subject_id", subject_id))
         .order_by("created_at", "DESC")
+        .map_err(map)?;
+    query_records(store.client(), &query).await.map_err(map)
+}
+
+/// Every row one run recorded for a kind of subject, oldest first: the history
+/// a trend across generations is read from.
+pub async fn list_for_run(
+    store: &Store,
+    run_id: &RunId,
+    kind: SubjectKind,
+) -> Result<Vec<EvaluationRun>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(eq("run_id", run_id.as_str()))
+        .where_(eq("subject_kind", kind.as_str()))
+        .order_by("created_at", "ASC")
         .map_err(map)?;
     query_records(store.client(), &query).await.map_err(map)
 }
@@ -80,7 +98,6 @@ mod tests {
     use super::*;
     use crate::schema::EMBED_DIM;
     use antumbra_core::evaluation::EvalStatus;
-    use antumbra_core::RunId;
     use chrono::Utc;
 
     fn make(id: &str, status: EvalStatus, at: chrono::DateTime<Utc>) -> EvaluationRun {
@@ -118,5 +135,27 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].run_id.as_str(), "run:new", "newest first");
         assert_eq!(runs[0].status, EvalStatus::Failure);
+    }
+
+    #[tokio::test]
+    async fn list_for_run_reads_one_run_oldest_first() -> Result<()> {
+        let s = Store::connect_memory(EMBED_DIM).await?;
+        let now = Utc::now();
+        let at = |secs: i64| now - chrono::Duration::seconds(secs);
+        let shadow = |id: &str, task: &str, when| EvaluationRun {
+            subject_kind: SubjectKind::Shadow,
+            corpus_task_id: task.into(),
+            ..make(id, EvalStatus::Success, when)
+        };
+        insert(&s, &shadow("run:a", "gen:1", at(10))).await?;
+        insert(&s, &shadow("run:a", "gen:0", at(20))).await?;
+        insert(&s, &shadow("run:b", "gen:0", at(30))).await?;
+        // Another kind of subject in the same run is not part of its history.
+        insert(&s, &make("run:a", EvalStatus::Success, at(5))).await?;
+
+        let runs = list_for_run(&s, &RunId::new("run:a"), SubjectKind::Shadow).await?;
+        let tasks: Vec<&str> = runs.iter().map(|r| r.corpus_task_id.as_str()).collect();
+        assert_eq!(tasks, ["gen:0", "gen:1"], "one run, one kind, oldest first");
+        Ok(())
     }
 }

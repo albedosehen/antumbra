@@ -40,6 +40,17 @@ pub enum Trend {
     Inconclusive,
 }
 
+impl Trend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Trend::Carrying => "carrying",
+            Trend::Overtuning => "overtuning",
+            Trend::Flat => "flat",
+            Trend::Inconclusive => "inconclusive",
+        }
+    }
+}
+
 /// How the window is read. The generation count is ADR-0022's ("ten
 /// generations"); `carry` is an operator's dial with a stated default rather
 /// than a measured constant, and it is named here so nobody mistakes it for one.

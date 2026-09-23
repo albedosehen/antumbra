@@ -523,3 +523,126 @@ async fn the_measurement_is_stored_with_the_score_it_qualifies() -> antumbra_cor
     );
     Ok(())
 }
+
+/// Run generations `from..to` of one run. Each is trained by a scripted trainer
+/// whose fitness climbs three points a generation, and whose audited task
+/// (`task:19` under the default partition) passes from `audit_passes_from` on.
+async fn climbing_run(
+    store: &Store,
+    run: &RunId,
+    partition: antumbra_eclipse::Partition,
+    generations: std::ops::Range<u32>,
+    audit_passes_from: Option<u32>,
+) -> antumbra_core::Result<Vec<antumbra_loop::GenerationReport>> {
+    let embedder = FixedEmbedder::new(8);
+    let mut reports = Vec::new();
+    for g in generations {
+        let audit_passes = audit_passes_from.is_some_and(|from| g >= from);
+        let trainer = ScriptedTrainer {
+            final_fitness: 0.40 + 0.03 * g as f32,
+            per_task: [
+                ("task:0", true),
+                ("task:1", true),
+                ("task:19", audit_passes),
+            ]
+            .into_iter()
+            .map(|(id, passed)| antumbra_core::ports::TaskOutcome {
+                task_id: id.into(),
+                passed,
+                size: 10,
+            })
+            .collect(),
+            ..ScriptedTrainer::graduating()
+        };
+        let cfg = LoopConfig {
+            partition: Some(partition),
+            ..LoopConfig::default()
+        };
+        let lp = GenerationLoop::new(store, &trainer, &embedder, cfg);
+        let mut head = lp.resume_or_init(run).await?;
+        reports.push(lp.run_generation(&mut head).await?);
+    }
+    Ok(reports)
+}
+
+fn audit_measured(report: &antumbra_loop::GenerationReport) -> Option<u32> {
+    report.instruments.as_ref().map(|m| m.audit.measured)
+}
+
+/// ADR-0022 reads the audit slice every k generations, not every one. Off
+/// schedule the audit task is not measured at all, which is different from
+/// measured and failed.
+#[tokio::test]
+async fn the_audit_slice_is_measured_on_its_schedule() -> antumbra_core::Result<()> {
+    let store = Store::connect_memory(8).await?;
+    let partition = antumbra_eclipse::Partition::default();
+    let reports = climbing_run(&store, &RunId::new("run:k"), partition, 0..3, Some(0)).await?;
+    // Default k is 2: generations 0 and 2 are audited, 1 is not.
+    let audited: Vec<Option<u32>> = reports.iter().map(audit_measured).collect();
+    assert_eq!(audited, [Some(1), Some(0), Some(1)]);
+    // The held-out slice is measured every generation regardless.
+    assert!(reports.iter().all(|r| r
+        .instruments
+        .as_ref()
+        .is_some_and(|m| m.gaps.iter().any(|g| g.held_out.measured > 0))));
+    Ok(())
+}
+
+/// S-1's kill criterion, read by the loop: ten generations of a search score
+/// climbing while the audit slice stays where it was.
+#[tokio::test]
+async fn a_climb_the_audit_slice_does_not_follow_reads_as_overtuning() -> antumbra_core::Result<()>
+{
+    use antumbra_eclipse::Trend;
+    let store = Store::connect_memory(8).await?;
+    let run = RunId::new("run:overtuned");
+    let partition = antumbra_eclipse::Partition::default();
+    let reports = climbing_run(&store, &run, partition, 0..10, None).await?;
+
+    let trends: Vec<Option<Trend>> = reports.iter().map(|r| r.trend).collect();
+    // Nine generations are not a window: an unasked question is not a clean
+    // bill, so they read as inconclusive rather than carrying.
+    assert!(trends[..9].iter().all(|t| *t == Some(Trend::Inconclusive)));
+    assert_eq!(trends[9], Some(Trend::Overtuning));
+
+    // And the reading is stored with the generation it was taken at.
+    let rows =
+        evaluation::list_for_subject(&store, SubjectKind::Shadow, "run:overtuned:g9").await?;
+    let trend = rows
+        .first()
+        .and_then(|r| r.metrics.as_ref())
+        .map(|m| m["trend"].clone());
+    assert_eq!(trend, Some(serde_json::json!("overtuning")));
+    Ok(())
+}
+
+/// The same climb, with the audit slice following it, is a real gain.
+#[tokio::test]
+async fn a_climb_the_audit_slice_follows_reads_as_carrying() -> antumbra_core::Result<()> {
+    let store = Store::connect_memory(8).await?;
+    let partition = antumbra_eclipse::Partition::default();
+    let reports =
+        climbing_run(&store, &RunId::new("run:honest"), partition, 0..10, Some(4)).await?;
+    assert_eq!(
+        reports.last().and_then(|r| r.trend),
+        Some(antumbra_eclipse::Trend::Carrying)
+    );
+    Ok(())
+}
+
+/// A reseed repartitions the corpus, so generations measured under the old
+/// seed read a different audit slice and do not count toward the new trend.
+#[tokio::test]
+async fn a_reseed_starts_the_trend_over() -> antumbra_core::Result<()> {
+    let store = Store::connect_memory(8).await?;
+    let run = RunId::new("run:reseeded");
+    let before = antumbra_eclipse::Partition::default();
+    climbing_run(&store, &run, before, 0..10, None).await?;
+    let after = antumbra_eclipse::Partition::new(before.held_out, before.audit, 7)?;
+    let reports = climbing_run(&store, &run, after, 10..11, None).await?;
+    assert_eq!(
+        reports.first().and_then(|r| r.trend),
+        Some(antumbra_eclipse::Trend::Inconclusive)
+    );
+    Ok(())
+}
