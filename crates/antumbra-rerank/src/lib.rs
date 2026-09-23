@@ -46,6 +46,26 @@ pub trait RerankTransport: Send + Sync {
 /// tenant.
 const RERANK_TIMEOUT_SECS: u64 = 30;
 
+/// The most texts sent in one request, overridable with `ANTUMBRA_RERANK_BATCH`.
+///
+/// text-embeddings-inference refuses a request carrying more than its
+/// `--max-client-batch-size` texts, 32 by default, with a 422. Recall sends a
+/// pool of up to 100 candidates -- ten per requested row, more when a repo scope
+/// widens it -- so an unbatched call failed whenever a caller asked for four or
+/// more rows, and recall fell back to the fused order without its precision
+/// stage. The per-prompt hook asks for more than that on every prompt. Batches
+/// are sent one after another; a cross-encoder scores each (query, text) pair on
+/// its own, so scores from different batches compare directly.
+const RERANK_MAX_BATCH: usize = 32;
+
+fn max_batch() -> usize {
+    std::env::var("ANTUMBRA_RERANK_BATCH")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(RERANK_MAX_BATCH)
+}
+
 /// The production transport: a blocking `ureq` POST over an agent with a bounded
 /// global timeout, so a dead endpoint fails fast instead of hanging the worker.
 struct UreqTransport {
@@ -93,6 +113,8 @@ pub struct HttpReranker {
     model: Option<String>,
     api_key: Option<String>,
     transport: Arc<dyn RerankTransport>,
+    /// Texts per request; see [`RERANK_MAX_BATCH`].
+    max_batch: usize,
 }
 
 impl HttpReranker {
@@ -104,6 +126,7 @@ impl HttpReranker {
             model,
             api_key,
             transport: Arc::new(UreqTransport::new()),
+            max_batch: max_batch(),
         }
     }
 
@@ -111,46 +134,26 @@ impl HttpReranker {
     /// `{query, texts, raw_scores}`; Cohere/Jina additionally want a `model` (and
     /// call the field `documents`, but accept `texts` via TEI-compatible servers).
     /// `raw_scores: false` keeps the endpoint's normalized relevance scores.
+    /// `truncate: true` has the endpoint cut a text to the model's input window
+    /// rather than refuse it: memories run to thousands of characters, past the
+    /// 512 tokens a BERT-sized cross-encoder reads, and the head of a memory is
+    /// what it would read anyway.
     fn request_body(&self, query: &str, texts: &[&str]) -> Value {
-        let mut body = json!({ "query": query, "texts": texts, "raw_scores": false });
+        let mut body = json!({
+            "query": query,
+            "texts": texts,
+            "raw_scores": false,
+            "truncate": true,
+        });
         if let Some(model) = &self.model {
             body["model"] = json!(model);
         }
         body
     }
 
-    /// Pull the scored-candidate order out of a rerank response, tolerant of the
-    /// two common shapes: a bare top-level array of `{index, score}` (TEI) or
-    /// `{ "results": [{index, relevance_score}] }` (Cohere/Jina). Returns the
-    /// candidate indices best-first. Out-of-range indices are dropped; the result
-    /// is re-sorted by score defensively rather than trusting the wire order.
-    fn parse(resp: &Value, n: usize) -> Result<Vec<usize>> {
-        let arr = resp
-            .as_array()
-            .or_else(|| resp.get("results").and_then(Value::as_array))
-            .ok_or_else(|| {
-                AntumbraError::other("rerank response was not a scored array".to_string())
-            })?;
-        let mut scored: Vec<(usize, f64)> = arr
-            .iter()
-            .filter_map(|o| {
-                let idx = o.get("index").and_then(Value::as_u64)? as usize;
-                let score = o
-                    .get("score")
-                    .or_else(|| o.get("relevance_score"))
-                    .and_then(Value::as_f64)?;
-                (idx < n).then_some((idx, score))
-            })
-            .collect();
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        Ok(scored.into_iter().map(|(i, _)| i).collect())
-    }
-
-    /// The same response, keeping the SCORES and restoring the caller's order.
-    ///
-    /// [`parse`](Self::parse) throws the scores away because ordering is all a
-    /// precision stage needs. A relevance floor needs the magnitudes, so this
-    /// returns one score per input position rather than a permutation. A
+    /// A rerank response as one score per input position, tolerant of the two
+    /// common shapes: a bare top-level array of `{index, score}` (TEI) or
+    /// `{ "results": [{index, relevance_score}] }` (Cohere/Jina). A
     /// candidate the endpoint omitted scores [`f32::NEG_INFINITY`], which reads
     /// as "not relevant" through any monotone calibration and cannot be mistaken
     /// for a real low score.
@@ -181,58 +184,52 @@ impl HttpReranker {
     }
 }
 
+impl HttpReranker {
+    /// One score per text, in the caller's order, however many texts there are:
+    /// they go to the endpoint in batches of at most `max_batch` and each
+    /// batch's indices are offset back into place. Any batch failing fails the
+    /// whole call, so a caller never ranks a pool that was only partly scored.
+    async fn scores(&self, query: &str, texts: &[&str]) -> Result<Vec<f32>> {
+        let mut out = Vec::with_capacity(texts.len());
+        for batch in texts.chunks(self.max_batch.max(1)) {
+            let url = self.url.clone();
+            let api_key = self.api_key.clone();
+            let body = self.request_body(query, batch);
+            let transport = self.transport.clone();
+            // `ureq` is blocking; run it off the async runtime so it never
+            // stalls a worker (the same offload the embedder uses).
+            let resp = tokio::task::spawn_blocking(move || {
+                transport.post(&url, api_key.as_deref(), &body)
+            })
+            .await
+            .map_err(|e| AntumbraError::other(format!("rerank task panicked: {e}")))??;
+            out.extend(Self::parse_scores(&resp, batch.len())?);
+        }
+        Ok(out)
+    }
+}
+
 #[async_trait]
 impl antumbra_core::ports::RelevanceScorer for HttpReranker {
     async fn relevance(&self, query: &str, texts: &[String]) -> Result<Vec<f32>> {
-        if texts.is_empty() {
-            return Ok(Vec::new());
-        }
-        let url = self.url.clone();
-        let api_key = self.api_key.clone();
         let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-        let body = self.request_body(query, &refs);
-        let transport = self.transport.clone();
-        let resp =
-            tokio::task::spawn_blocking(move || transport.post(&url, api_key.as_deref(), &body))
-                .await
-                .map_err(|e| AntumbraError::other(format!("rerank task panicked: {e}")))??;
-        Self::parse_scores(&resp, texts.len())
+        self.scores(query, &refs).await
     }
 }
 
 #[async_trait]
 impl Reranker for HttpReranker {
     async fn rerank(&self, query: &str, candidates: &[(String, String)]) -> Result<Vec<String>> {
-        if candidates.is_empty() {
-            return Ok(Vec::new());
-        }
-        // `ureq` is blocking; run it off the async runtime so it never stalls a
-        // worker (the same offload the embedder uses).
-        let url = self.url.clone();
-        let api_key = self.api_key.clone();
         let texts: Vec<&str> = candidates.iter().map(|(_, t)| t.as_str()).collect();
-        let body = self.request_body(query, &texts);
-        let transport = self.transport.clone();
-        let resp =
-            tokio::task::spawn_blocking(move || transport.post(&url, api_key.as_deref(), &body))
-                .await
-                .map_err(|e| AntumbraError::other(format!("rerank task panicked: {e}")))??;
-
-        let order = Self::parse(&resp, candidates.len())?;
-        // Map indices back to ids, then append any ids the endpoint dropped in
-        // their original order, so the return is always a full permutation (the
-        // caller's id->row reorder can never silently shrink below the requested
-        // k because of a misbehaving endpoint).
-        let mut ids: Vec<String> = order.iter().map(|&i| candidates[i].0.clone()).collect();
-        if ids.len() < candidates.len() {
-            let seen: std::collections::HashSet<String> = ids.iter().cloned().collect();
-            for (id, _) in candidates {
-                if !seen.contains(id) {
-                    ids.push(id.clone());
-                }
-            }
-        }
-        Ok(ids)
+        let scores = self.scores(query, &texts).await?;
+        // Best first. The sort is stable, and a candidate the endpoint omitted
+        // scores negative infinity, so it keeps its place at the end in the
+        // order it arrived: the return is always a full permutation, and the
+        // caller's id-to-row reorder can never shrink below the requested k
+        // because of a misbehaving endpoint.
+        let mut order: Vec<usize> = (0..candidates.len()).collect();
+        order.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
+        Ok(order.into_iter().map(|i| candidates[i].0.clone()).collect())
     }
 }
 
@@ -259,6 +256,7 @@ mod tests {
             model: None,
             api_key: None,
             transport: Arc::new(FakeTransport(resp)),
+            max_batch: RERANK_MAX_BATCH,
         }
     }
 
@@ -268,6 +266,119 @@ mod tests {
             ("b".into(), "bravo text".into()),
             ("c".into(), "charlie text".into()),
         ]
+    }
+
+    /// Behaves like text-embeddings-inference: refuses a request carrying more
+    /// than `limit` texts, and otherwise scores each text as the number it
+    /// spells (`"t42"` scores 0.42). Records every batch it was sent.
+    struct TeiLike {
+        limit: usize,
+        batches: std::sync::Mutex<Vec<usize>>,
+        fail_call: Option<usize>,
+    }
+
+    impl TeiLike {
+        fn new(limit: usize) -> Self {
+            Self {
+                limit,
+                batches: std::sync::Mutex::new(Vec::new()),
+                fail_call: None,
+            }
+        }
+
+        fn sizes(&self) -> Vec<usize> {
+            self.batches.lock().map(|b| b.clone()).unwrap_or_default()
+        }
+    }
+
+    impl RerankTransport for TeiLike {
+        fn post(&self, _url: &str, _api_key: Option<&str>, body: &Value) -> Result<Value> {
+            let texts = body["texts"].as_array().cloned().unwrap_or_default();
+            let call = {
+                let mut batches = self
+                    .batches
+                    .lock()
+                    .map_err(|_| AntumbraError::other("poisoned"))?;
+                batches.push(texts.len());
+                batches.len() - 1
+            };
+            if texts.len() > self.limit {
+                return Err(AntumbraError::other(format!(
+                    "http status: 422 (batch size {} > maximum allowed batch size {})",
+                    texts.len(),
+                    self.limit
+                )));
+            }
+            if self.fail_call == Some(call) {
+                return Err(AntumbraError::other("connection reset"));
+            }
+            let scored: Vec<Value> = texts
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let n: f64 = t.as_str().unwrap_or("t0")[1..].parse().unwrap_or(0.0);
+                    json!({ "index": i, "score": n / 100.0 })
+                })
+                .collect();
+            Ok(Value::Array(scored))
+        }
+    }
+
+    fn batched(transport: Arc<TeiLike>) -> HttpReranker {
+        HttpReranker {
+            url: "http://localhost/rerank".into(),
+            model: None,
+            api_key: None,
+            transport,
+            max_batch: RERANK_MAX_BATCH,
+        }
+    }
+
+    /// A pool of 100, as recall sends when a caller asks for ten rows, used to
+    /// fail outright against the endpoint's 32-text limit and leave recall in
+    /// its fused order. It is scored in batches, and the order is by score
+    /// across all of them rather than within each.
+    #[tokio::test]
+    async fn a_pool_past_the_endpoints_batch_limit_is_scored_in_batches() -> Result<()> {
+        let tei = Arc::new(TeiLike::new(32));
+        // Scores that interleave across batch boundaries: id i scores (i * 37) % 100.
+        let pool: Vec<(String, String)> = (0..100)
+            .map(|i| (format!("c{i}"), format!("t{}", (i * 37) % 100)))
+            .collect();
+        let out = batched(tei.clone()).rerank("q", &pool).await?;
+        assert_eq!(tei.sizes(), vec![32, 32, 32, 4]);
+        assert_eq!(out.len(), 100);
+        // The best score, 99, belongs to i = 27 (27 * 37 = 999); the worst, 0, to i = 0.
+        assert_eq!(out.first().map(String::as_str), Some("c27"));
+        assert_eq!(out.last().map(String::as_str), Some("c0"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn relevance_keeps_the_callers_order_across_batches() -> Result<()> {
+        let tei = Arc::new(TeiLike::new(32));
+        let texts: Vec<String> = (0..70).map(|i| format!("t{}", 70 - i)).collect();
+        let scores =
+            antumbra_core::ports::RelevanceScorer::relevance(&batched(tei.clone()), "q", &texts)
+                .await?;
+        assert_eq!(tei.sizes(), vec![32, 32, 6]);
+        let expected: Vec<f32> = (0..70).map(|i| (70 - i) as f32 / 100.0).collect();
+        assert_eq!(scores, expected);
+        Ok(())
+    }
+
+    /// A batch that fails fails the call: ranking a pool that was only partly
+    /// scored would put every unscored candidate last for no reason.
+    #[tokio::test]
+    async fn one_failed_batch_fails_the_whole_ranking() {
+        let tei = Arc::new(TeiLike {
+            fail_call: Some(1),
+            ..TeiLike::new(32)
+        });
+        let pool: Vec<(String, String)> = (0..50)
+            .map(|i| (format!("c{i}"), format!("t{i}")))
+            .collect();
+        assert!(batched(tei).rerank("q", &pool).await.is_err());
     }
 
     #[tokio::test]
@@ -348,6 +459,7 @@ mod tests {
         assert_eq!(body["query"], "the query");
         assert_eq!(body["texts"], json!(["t0", "t1"]));
         assert_eq!(body["raw_scores"], false);
+        assert_eq!(body["truncate"], true, "a long memory is cut, not refused");
         assert!(body.get("model").is_none(), "model omitted when None");
     }
 
@@ -358,6 +470,7 @@ mod tests {
             model: Some("rerank-v2".into()),
             api_key: None,
             transport: Arc::new(FakeTransport(Ok(Value::Null))),
+            max_batch: RERANK_MAX_BATCH,
         };
         let body = r.request_body("q", &["t"]);
         assert_eq!(body["model"], "rerank-v2");
