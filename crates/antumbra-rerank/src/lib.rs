@@ -22,6 +22,8 @@
 //! [`HttpReranker`] deliberately has no `Debug` impl, so the key cannot leak
 //! through `{:?}`.
 
+pub mod floor;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -142,6 +144,59 @@ impl HttpReranker {
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         Ok(scored.into_iter().map(|(i, _)| i).collect())
+    }
+
+    /// The same response, keeping the SCORES and restoring the caller's order.
+    ///
+    /// [`parse`](Self::parse) throws the scores away because ordering is all a
+    /// precision stage needs. A relevance floor needs the magnitudes, so this
+    /// returns one score per input position rather than a permutation. A
+    /// candidate the endpoint omitted scores [`f32::NEG_INFINITY`], which reads
+    /// as "not relevant" through any monotone calibration and cannot be mistaken
+    /// for a real low score.
+    fn parse_scores(resp: &Value, n: usize) -> Result<Vec<f32>> {
+        let arr = resp
+            .as_array()
+            .or_else(|| resp.get("results").and_then(Value::as_array))
+            .ok_or_else(|| {
+                AntumbraError::other("rerank response was not a scored array".to_string())
+            })?;
+        let mut out = vec![f32::NEG_INFINITY; n];
+        for o in arr {
+            let Some(idx) = o.get("index").and_then(Value::as_u64).map(|i| i as usize) else {
+                continue;
+            };
+            let Some(score) = o
+                .get("score")
+                .or_else(|| o.get("relevance_score"))
+                .and_then(Value::as_f64)
+            else {
+                continue;
+            };
+            if idx < n {
+                out[idx] = score as f32;
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[async_trait]
+impl antumbra_core::ports::RelevanceScorer for HttpReranker {
+    async fn relevance(&self, query: &str, texts: &[String]) -> Result<Vec<f32>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = self.url.clone();
+        let api_key = self.api_key.clone();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let body = self.request_body(query, &refs);
+        let transport = self.transport.clone();
+        let resp =
+            tokio::task::spawn_blocking(move || transport.post(&url, api_key.as_deref(), &body))
+                .await
+                .map_err(|e| AntumbraError::other(format!("rerank task panicked: {e}")))??;
+        Self::parse_scores(&resp, texts.len())
     }
 }
 

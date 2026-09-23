@@ -155,6 +155,8 @@ struct HttpState {
     /// per-identity server after hybrid recall. Server-level (one endpoint), not
     /// per-tenant.
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
+    /// The relevance floor applied to every per-identity server (ADR-0023 B-2).
+    decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
     /// The optional copal document-of-record archive, applied to every
     /// per-identity server's ingest. One server-level instance (one endpoint);
     /// its [`antumbra_copal::CopalTenancy`] decides which copal tenant each
@@ -193,6 +195,9 @@ pub async fn serve(
     auto_propose: Option<usize>,
     auto_consolidate: bool,
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
+    // The relevance floor (ADR-0023 B-2), built where the flags are so this
+    // module stays free of any calibration choice.
+    decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     github: Option<GithubConfig>,
@@ -226,6 +231,7 @@ pub async fn serve(
         auto_consolidate,
         serve,
         reranker,
+        decider,
         copal,
         profile,
         github: github.map(Arc::new),
@@ -417,6 +423,9 @@ impl HttpState {
         }
         if let Some(reranker) = self.reranker.clone() {
             mcp = mcp.with_reranker(reranker);
+        }
+        if let Some(decider) = self.decider.clone() {
+            mcp = mcp.with_decider(decider);
         }
         if let Some(archive) = self.copal.clone() {
             mcp = mcp.with_copal_archive(archive);

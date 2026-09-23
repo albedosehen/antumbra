@@ -20,6 +20,7 @@ async fn state() -> Arc<HttpState> {
         auto_consolidate: false,
         serve: None,
         reranker: None,
+        decider: None,
         copal: None,
         profile: None,
         github: None,

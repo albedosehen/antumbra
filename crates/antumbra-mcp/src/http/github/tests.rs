@@ -38,6 +38,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         auto_consolidate: false,
         serve: None,
         reranker: None,
+        decider: None,
         copal: None,
         profile: None,
         github: github.map(Arc::new),

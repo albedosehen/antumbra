@@ -525,12 +525,28 @@ async fn run() -> Result<()> {
 
     // Optional cross-encoder rerank stage (P-2). Operator-configured endpoint; the
     // precision stage runs after hybrid recall and degrades to RRF order on error.
-    let reranker: Option<Arc<dyn antumbra_core::ports::Reranker>> = cli.rerank_url.map(|url| {
+    // Built once as the concrete type and then viewed two ways. The same
+    // endpoint answers both questions, and calling it twice to get an order and
+    // then a magnitude would double the latency of every recall.
+    let http_reranker: Option<Arc<antumbra_rerank::HttpReranker>> = cli.rerank_url.map(|url| {
         Arc::new(antumbra_rerank::HttpReranker::new(
             url,
             cli.rerank_model,
             cli.rerank_key,
-        )) as Arc<dyn antumbra_core::ports::Reranker>
+        ))
+    });
+    let reranker: Option<Arc<dyn antumbra_core::ports::Reranker>> = http_reranker
+        .clone()
+        .map(|r| r as Arc<dyn antumbra_core::ports::Reranker>);
+    let scorer: Option<Arc<dyn antumbra_core::ports::RelevanceScorer>> = http_reranker
+        .map(|r| r as Arc<dyn antumbra_core::ports::RelevanceScorer>);
+    // The relevance floor (ADR-0023 B-2). The same cross-encoder that orders the
+    // pool also answers "does this answer the query" once its score is mapped
+    // through the fitted calibration, so the floor costs no extra model and
+    // appears exactly when a reranker is configured.
+    let decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>> = scorer.map(|s| {
+        Arc::new(antumbra_rerank::floor::CalibratedFloor::new(s))
+            as Arc<dyn antumbra_core::ports::TypedDecider>
     });
 
     // Optional copal document-of-record archive. Operator-configured; absent,
@@ -579,6 +595,7 @@ async fn run() -> Result<()> {
             cli.auto_propose,
             cli.auto_consolidate,
             reranker,
+            decider,
             copal,
             profile,
             github,
@@ -605,6 +622,9 @@ async fn run() -> Result<()> {
     }
     if let Some(r) = reranker {
         service = service.with_reranker(r);
+    }
+    if let Some(d) = decider {
+        service = service.with_decider(d);
     }
     if let Some(c) = copal {
         service = service.with_copal_archive(c);
