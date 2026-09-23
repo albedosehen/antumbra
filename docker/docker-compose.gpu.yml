@@ -43,6 +43,25 @@ services:
               count: all
               capabilities: [gpu]
 
+  # The cross-encoder on the same GPU, when the `rerank` profile runs. On a CPU,
+  # bge-reranker-base scores a batch of 32 memories in 3.5 to 5 seconds, so the
+  # 100-candidate pool of a twelve-row recall took 13 seconds and the hooks that
+  # recall on every session and every prompt ran out of time. The GPU sits idle
+  # between the model server's requests. TEI builds one image per compute
+  # capability: `86-` is Ampere consumer and workstation cards (RTX 30x0, A10,
+  # A40); set ANTUMBRA_RERANK_GPU_IMAGE in docker/.env for another (`89-` for
+  # Ada, the bare version for A100). The model, cache volume, port and health
+  # check come from the base service.
+  rerank:
+    image: ${ANTUMBRA_RERANK_GPU_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:86-1.9}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
 volumes:
   antumbra-weights:
   antumbra-adapters:
