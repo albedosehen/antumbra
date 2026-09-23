@@ -67,6 +67,37 @@ if ((Get-Command git -ErrorAction SilentlyContinue) -and (Invoke-Git @('rev-pars
     if (-not $branch) { $branch = '' }
 }
 
+# --- report this repository's recent merges (fail-open, detached) ------------
+# A server GitHub cannot reach never hears that a branch merged, so what was
+# learned on it reads other_branch from the base branch until someone says so.
+# `antumbra claude reanchor` asks GitHub (with `gh`) for the last few days'
+# merges and reports each one. It runs detached, so it never delays the session,
+# and reporting a merge again moves nothing, so every session can run it. Off
+# with ANTUMBRA_REANCHOR=0. The last run's output is in ~/.antumbra/reanchor.log,
+# or wherever ANTUMBRA_REANCHOR_LOG names.
+$bin = if ($env:ANTUMBRA_BIN) { $env:ANTUMBRA_BIN } else { 'antumbra' }
+if ($repo -and $env:ANTUMBRA_REANCHOR -ne '0' -and (Get-Command $bin -ErrorAction SilentlyContinue)) {
+    try {
+        $env:ANTUMBRA_URL = $url
+        if ($token) { $env:ANTUMBRA_TOKEN = $token }
+        $log = if ($env:ANTUMBRA_REANCHOR_LOG) { $env:ANTUMBRA_REANCHOR_LOG } else { Join-Path $HOME '.antumbra/reanchor.log' }
+        $logDir = Split-Path -Parent $log
+        if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+        # Started so that it holds none of this hook's handles. A process started
+        # with its output redirected inherits the hook's own output pipe as well,
+        # and the agent waits on that pipe, so the session would wait for the
+        # report after all. On Windows cmd does the redirecting and the shell
+        # starts cmd, which passes no handles; elsewhere sh backgrounds it with
+        # every stream pointed at the log and returns at once.
+        if ($env:OS -eq 'Windows_NT') {
+            Start-Process -FilePath 'cmd.exe' -WindowStyle Hidden `
+                -ArgumentList "/d /s /c `"`"$bin`" claude reanchor --days 3 >`"$log`" 2>&1`"" | Out-Null
+        } else {
+            & sh -c '"$0" claude reanchor --days 3 </dev/null >"$1" 2>&1 &' $bin $log
+        }
+    } catch { }
+}
+
 # --- recall, scoped to here when known --------------------------------------
 $mems = @()
 try {
@@ -121,7 +152,6 @@ if ($penalize -eq '1') {
 # features gated on them, and nothing tells it (ADR-0021). `antumbra claude brief`
 # prints a few lines when that is so and nothing when it is not. No antumbra on
 # the path, or any failure: no lines.
-$bin   = if ($env:ANTUMBRA_BIN) { $env:ANTUMBRA_BIN } else { 'antumbra' }
 $brief = ''
 if (Get-Command $bin -ErrorAction SilentlyContinue) {
     try {

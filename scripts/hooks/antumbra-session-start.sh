@@ -55,6 +55,21 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
   case "$repo" in *\\*|/*) repo="" ;; */*) ;; *) repo="" ;; esac
 fi
 
+# --- report this repository's recent merges (fail-open, detached) ------------
+# A server GitHub cannot reach never hears that a branch merged, so what was
+# learned on it reads other_branch from the base branch until someone says so.
+# `antumbra claude reanchor` asks GitHub (with `gh`) for the last few days'
+# merges and reports each one. It runs detached, so it never delays the session,
+# and reporting a merge again moves nothing, so every session can run it. Off
+# with ANTUMBRA_REANCHOR=0. The last run's output is in ~/.antumbra/reanchor.log,
+# or wherever ANTUMBRA_REANCHOR_LOG names.
+BIN="${ANTUMBRA_BIN:-antumbra}"
+if [ -n "$repo" ] && [ "${ANTUMBRA_REANCHOR:-1}" != "0" ] && command -v "$BIN" >/dev/null 2>&1; then
+  log="${ANTUMBRA_REANCHOR_LOG:-$HOME/.antumbra/reanchor.log}"
+  mkdir -p "$(dirname "$log")" 2>/dev/null || true
+  ( ANTUMBRA_URL="$URL" ANTUMBRA_TOKEN="$TOKEN" nohup "$BIN" claude reanchor --days 3       </dev/null >"$log" 2>&1 & ) 2>/dev/null || true
+fi
+
 # --- recall, scoped to here when known --------------------------------------
 args=$(jq -nc --arg repo "$repo" --arg branch "$branch" '
   {query: "standing conventions, project context, and active tasks for this agent", top_k: 12}
@@ -105,7 +120,6 @@ fi
 # features gated on them, and nothing tells it (ADR-0021). `antumbra claude brief`
 # prints a few lines when that is so and nothing when it is not. No antumbra on
 # the path, or any failure: no lines.
-BIN="${ANTUMBRA_BIN:-antumbra}"
 brief=""
 if command -v "$BIN" >/dev/null 2>&1; then
   brief=$("$BIN" claude brief 2>/dev/null || true)

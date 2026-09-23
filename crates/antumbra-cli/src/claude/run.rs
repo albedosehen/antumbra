@@ -326,6 +326,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::Reanchor {
             dir,
             limit,
+            days,
             dry_run,
             surface,
             token,
@@ -339,7 +340,11 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
                         project.display()
                     )
                 })?;
-            let merges = reanchor::merges_in(&merged_pull_requests(&repo, limit)?)?;
+            let mut merges = reanchor::merges_in(&merged_pull_requests(&repo, limit)?)?;
+            if let Some(days) = days {
+                let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
+                merges = reanchor::merged_since(merges, cutoff);
+            }
             let agent = surface_agent();
             let call = |tool: &str, arguments: Value| {
                 call_surface(&agent, &surface, token.as_deref(), tool, arguments)
