@@ -129,6 +129,7 @@ pub async fn raft_train(
         per_task,
         // The trainer adapter, which chose the split, says what was enforced.
         holdout: None,
+        recipe: None,
     })
 }
 

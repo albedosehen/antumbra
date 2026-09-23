@@ -160,6 +160,7 @@ pub async fn capture_corrections(
             })
             .collect(),
         holdout: None,
+        recipe: None,
     })
 }
 

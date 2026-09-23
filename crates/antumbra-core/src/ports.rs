@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::boundary::BoundaryFinding;
 use crate::error::Result;
 use crate::ids::{ExpertId, RunId, ShadowId};
+use crate::recipe::TrainingRecipe;
 use crate::slice::Holdout;
 
 // --- serving (hardware-adaptive) ------------------------------------------
@@ -77,6 +78,11 @@ pub struct TrainRequest {
     /// run with nothing held out: its generation carries no instruments.
     #[serde(default)]
     pub holdout: Option<Holdout>,
+    /// The recipe to train under (ADR-0022 S-1). `None` trains under the
+    /// trainer's own configuration, which is what every run did before the
+    /// recipe was searched.
+    #[serde(default)]
+    pub recipe: Option<TrainingRecipe>,
 }
 
 /// One corpus task, as the final training round found it.
@@ -129,6 +135,11 @@ pub struct TrainOutcome {
     /// learned from.
     #[serde(default)]
     pub holdout: Option<Holdout>,
+    /// The recipe this run actually trained under, echoed back whether or not
+    /// one was asked for. The loop records a recipe row only from this echo,
+    /// so a row never names settings a run did not use.
+    #[serde(default)]
+    pub recipe: Option<TrainingRecipe>,
 }
 
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;

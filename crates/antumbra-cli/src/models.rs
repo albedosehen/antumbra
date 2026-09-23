@@ -393,6 +393,12 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                 let trend = r.trend.map_or("not read", |t| t.as_str());
                 println!("        widest held-out gap {gap}, audit {audit}, trend {trend}");
             }
+            if let Some(recipe) = &r.recipe {
+                println!(
+                    "        recipe lr {:.1e}, batch {}, kl {}",
+                    recipe.learning_rate, recipe.batch_size, recipe.kl_beta
+                );
+            }
         }
         println!("population: {} experts", expert::list(&store).await?.len());
         // Self-maintaining gate: keep the learned router current with the

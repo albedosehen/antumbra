@@ -127,7 +127,21 @@ pub struct ScriptedTrainer {
     /// to measure the generation rather than trust per-task results whose
     /// held-out half was learned from.
     pub ignores_holdout: bool,
+    /// The recipe this trainer is configured with, echoed back when a request
+    /// names none, as a real trainer reports the settings it actually used.
+    pub own_recipe: Option<crate::TrainingRecipe>,
+    /// Behave like a trainer that predates the recipe: train under its own
+    /// settings whatever is asked and echo no recipe back. The loop must then
+    /// write no recipe row rather than one naming settings nobody ran.
+    pub ignores_recipe: bool,
 }
+
+/// The recipe a scripted trainer is configured with.
+pub const SCRIPTED_RECIPE: crate::TrainingRecipe = crate::TrainingRecipe {
+    learning_rate: 1e-4,
+    batch_size: 1,
+    kl_beta: 0.04,
+};
 
 impl ScriptedTrainer {
     /// A trainer whose shadow graduates.
@@ -139,6 +153,8 @@ impl ScriptedTrainer {
             boundary_findings: Vec::new(),
             per_task: Vec::new(),
             ignores_holdout: false,
+            own_recipe: Some(SCRIPTED_RECIPE),
+            ignores_recipe: false,
         }
     }
 
@@ -151,6 +167,8 @@ impl ScriptedTrainer {
             boundary_findings: Vec::new(),
             per_task: Vec::new(),
             ignores_holdout: false,
+            own_recipe: Some(SCRIPTED_RECIPE),
+            ignores_recipe: false,
         }
     }
 
@@ -194,6 +212,11 @@ impl Trainer for ScriptedTrainer {
             boundary_findings: self.boundary_findings.clone(),
             per_task,
             holdout,
+            recipe: if self.ignores_recipe {
+                None
+            } else {
+                req.recipe.or(self.own_recipe)
+            },
         })
     }
 }

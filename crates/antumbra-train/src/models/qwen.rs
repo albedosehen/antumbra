@@ -195,10 +195,9 @@ pub struct QwenCausalLm {
     /// template (so the model is prompted the way it was tuned) and generation
     /// stops at `<|im_end|>` instead of `<|endoftext|>`.
     chat: bool,
-    /// Accumulate the batch gradient and take one optimizer step per `sft_step`
-    /// (mean gradient) rather than one step per example. See
-    /// [`RaftConfig::grad_accumulation`].
-    grad_accumulation: bool,
+    /// Verified winners per optimizer step: 1 steps on each in turn, more steps
+    /// on the mean loss of that many at a time. See [`RaftConfig::batch_size`].
+    batch_size: usize,
 }
 
 /// Process-global generation nonce, so every `generate` call (even repeated
@@ -303,7 +302,7 @@ impl QwenCausalLm {
             repetition_penalty: cfg.repetition_penalty,
             no_repeat_ngram_size: cfg.no_repeat_ngram_size,
             chat,
-            grad_accumulation: cfg.grad_accumulation,
+            batch_size: cfg.batch_size.max(1),
         })
     }
 
@@ -485,7 +484,7 @@ impl QwenCausalLm {
     /// Forward + masked LM loss for one example, with autograd tracked. Returns
     /// the loss tensor (graph attached) or `None` if the example is too short to
     /// supervise. The caller drives backward/step -- per example (`train_one`) or
-    /// accumulated over a batch (`sft_step` with `grad_accumulation`).
+    /// accumulated over a batch (`sft_step` with a `batch_size` above one).
     fn forward_loss(&mut self, example: &SftExample) -> Result<Option<Tensor>> {
         self.model.clear_cache();
         self.model.set_grad(true); // training forward must be tracked
@@ -538,7 +537,7 @@ impl QwenCausalLm {
         }
     }
 
-    /// Shuffled mini-batch SGD: step on the **mean loss of a small micro-batch**
+    /// Shuffled mini-batch SGD: step on the **mean loss of `per_step` examples**
     /// rather than one example at a time. By linearity of backprop the gradient of
     /// the mean loss is the mean of the per-example gradients, so each step is a
     /// genuine mini-batch update -- far less noisy than batch-of-1, stable at a
@@ -554,11 +553,7 @@ impl QwenCausalLm {
     /// identity and a hand-rebuilt store silently matched none -- a no-op.) The
     /// batch is shuffled first so groups are random across rounds. Returns the
     /// mean supervised loss over the steps taken.
-    fn train_batch(&mut self, batch: &[SftExample]) -> Result<f32> {
-        // Retained forward graphs per step; small enough to fit alongside the
-        // frozen base, large enough to denoise the gradient over batch-of-1.
-        const MICRO_BATCH: usize = 4;
-
+    fn train_batch(&mut self, batch: &[SftExample], per_step: usize) -> Result<f32> {
         let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut order: Vec<usize> = (0..batch.len()).collect();
         let mut rng = StdRng::seed_from_u64(0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)));
@@ -566,7 +561,7 @@ impl QwenCausalLm {
 
         let mut total = 0.0f32;
         let mut steps = 0usize;
-        for group in order.chunks(MICRO_BATCH) {
+        for group in order.chunks(per_step.max(1)) {
             let mut losses: Vec<Tensor> = Vec::with_capacity(group.len());
             for &i in group {
                 if let Some(loss) = self.forward_loss(&batch[i])? {
@@ -640,8 +635,8 @@ impl CausalLm for QwenCausalLm {
         // True mini-batch descent: accumulate the batch gradient, one step. Order
         // is irrelevant (summation commutes), and no example dominates by being
         // trained last, so no shuffle is needed.
-        if self.grad_accumulation {
-            return self.train_batch(batch);
+        if self.batch_size > 1 {
+            return self.train_batch(batch, self.batch_size);
         }
         // Each example is one SGD step (batch-of-1). Shuffle the order every call
         // so no single example is consistently trained *last* and dominates the

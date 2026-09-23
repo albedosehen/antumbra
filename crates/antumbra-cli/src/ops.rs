@@ -67,7 +67,7 @@ pub struct ConsolidateArgs {
     pub samples: usize,
     pub max_new_tokens: usize,
     pub lr: f64,
-    pub grad_accumulation: bool,
+    pub batch_size: usize,
 }
 
 /// Score a memory export against the consolidation gate, graduate the survivors
@@ -140,7 +140,7 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
             max_new_tokens: a.max_new_tokens,
             learning_rate: a.lr,
             replay_ratio: a.replay_ratio,
-            grad_accumulation: a.grad_accumulation,
+            batch_size: a.batch_size,
             ..RaftConfig::default()
         };
         let loader = CandleModelLoader::new(cfg.clone());
