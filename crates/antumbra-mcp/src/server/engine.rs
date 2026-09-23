@@ -686,7 +686,7 @@ impl McpServer {
             }
             "share_compartment" => dispatch!(ShareParams, share_compartment),
             "revoke_compartment" => dispatch!(RevokeParams, revoke_compartment),
-            "record_merge" => dispatch!(super::provenance::RecordMergeParams, record_merge),
+            "record_merges" => dispatch!(super::provenance::RecordMergesParams, record_merges),
             other => Err(ErrorData::invalid_params(
                 format!("unknown tool: {other}"),
                 None,

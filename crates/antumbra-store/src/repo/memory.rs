@@ -214,6 +214,12 @@ struct AnchoredRow {
     deleted_at: Option<String>,
 }
 
+/// Rows per page in [`list_anchored`]. An anchored row is a few hundred bytes,
+/// so a page this size stays within a few megabytes while holding a whole
+/// workspace: on kuskokwim, 5,672 memories read in pages of 500 took twelve
+/// queries and 3.7 seconds, nearly as long as reading them in full.
+const ANCHORED_PAGE_ROWS: i64 = 10_000;
+
 /// A tenant's live memories as [`Anchored`]. A full row carries a 384-float
 /// embedding and the whole content, so a workspace of 5,672 memories is tens of
 /// megabytes to read; this projection is a few hundred bytes a row.
@@ -223,7 +229,9 @@ pub async fn list_anchored(store: &Store, tenant: &TenantId) -> Result<Vec<Ancho
         .map(|s| (*s).to_string())
         .collect();
     let filter = eq("tenant_id", tenant.as_str());
-    let rows: Vec<AnchoredRow> = store.read_paged(TABLE, Some(fields), Some(&filter)).await?;
+    let rows: Vec<AnchoredRow> = store
+        .read_in_pages_of(ANCHORED_PAGE_ROWS, TABLE, Some(fields), Some(&filter))
+        .await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none())
         .map(|r| {
