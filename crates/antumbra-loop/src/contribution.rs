@@ -23,12 +23,13 @@ use sha2::{Digest, Sha256};
 use antumbra_core::ports::{EvaluateRequest, TaskPrompt, TaskScores};
 use antumbra_core::slice::Holdout;
 use antumbra_core::{
-    this_host, ContributionRecord, Expert, ExpertId, FailureBoundary, Generation, LearnedRouter,
-    Result, RunId,
+    this_host, BaselineRecord, ContributionRecord, Expert, ExpertId, FailureBoundary, Generation,
+    LearnedRouter, Result, RunId,
 };
 use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_store::repo::{boundary, contribution, lifecycle};
 
+use crate::baseline::compare;
 use crate::GenerationLoop;
 
 /// Inhibition above which a boundary escalates a task the learned router
@@ -45,6 +46,10 @@ pub struct ContributionPolicy {
     /// At most this many live tasks, chosen by a stable hash of their ids, so
     /// successive generations measure the same tasks.
     pub max_tasks: usize,
+    /// Also compare the routed population against its best single expert
+    /// (ADR-0022 S-5). It scores every expert on every live task, one more
+    /// evaluation of them per expert.
+    pub baseline: bool,
 }
 
 impl Default for ContributionPolicy {
@@ -53,6 +58,7 @@ impl Default for ContributionPolicy {
             every: 2,
             seeds: 2,
             max_tasks: 32,
+            baseline: true,
         }
     }
 }
@@ -121,6 +127,13 @@ fn rank(id: &str) -> [u8; 32] {
     Sha256::digest(id.as_bytes()).into()
 }
 
+/// What a contribution measurement recorded.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Measured {
+    pub contribution: Vec<ContributionRecord>,
+    pub baseline: Option<BaselineRecord>,
+}
+
 /// Where each task routes with the whole population, and, for a task routed
 /// to an expert, where it routes with that expert masked.
 struct Routes {
@@ -152,12 +165,12 @@ impl GenerationLoop<'_> {
         run_id: &RunId,
         generation: Generation,
         holdout: Option<Holdout>,
-    ) -> Result<Vec<ContributionRecord>> {
+    ) -> Result<Measured> {
         let Some(policy) = self.cfg.contribution else {
-            return Ok(Vec::new());
+            return Ok(Measured::default());
         };
         if !generation.0.is_multiple_of(policy.every.max(1)) {
-            return Ok(Vec::new());
+            return Ok(Measured::default());
         }
         let host = this_host();
         let experts: Vec<Expert> = lifecycle::routable(self.store)
@@ -166,13 +179,20 @@ impl GenerationLoop<'_> {
             .filter(|e| e.owner.is_none() && e.is_placed_on(&host))
             .collect();
         if experts.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Measured::default());
         }
         let tasks = self.live_sample(holdout, policy.max_tasks).await?;
         let routes = self.route_live(&tasks, &experts).await?;
         let draws = seeds("contribution", run_id, generation, policy.seeds);
         let scores = self
-            .score_routes(run_id, generation, &routes, &experts, &draws)
+            .score_routes(
+                run_id,
+                generation,
+                &routes,
+                &experts,
+                &draws,
+                policy.baseline,
+            )
             .await?;
         let score = |who: &Option<ExpertId>, task: &str| -> Option<f32> {
             scores.get(who).and_then(|s| s.scores.get(task)).copied()
@@ -214,7 +234,28 @@ impl GenerationLoop<'_> {
             contribution::upsert(self.store, &record).await?;
             recorded.push(record);
         }
-        Ok(recorded)
+        let ids: Vec<ExpertId> = experts.iter().map(|e| e.id.clone()).collect();
+        let baseline = match compare(&routes.full, &ids, score).filter(|_| policy.baseline) {
+            Some(c) => {
+                let record = BaselineRecord {
+                    run_id: run_id.clone(),
+                    generation,
+                    tasks: c.tasks,
+                    population: c.population,
+                    best_alone: c.best.as_ref().map(|b| b.1),
+                    best: c.best.map(|b| b.0),
+                    seeds: policy.seeds,
+                    at: Utc::now(),
+                };
+                contribution::upsert_baseline(self.store, &record).await?;
+                Some(record)
+            }
+            None => None,
+        };
+        Ok(Measured {
+            contribution: recorded,
+            baseline,
+        })
     }
 
     async fn route_live(&self, tasks: &[TaskPrompt], experts: &[Expert]) -> Result<Routes> {
@@ -241,7 +282,9 @@ impl GenerationLoop<'_> {
     }
 
     /// Evaluate every adapter the comparison needs once, over the union of
-    /// the tasks it is needed for. `None` is the base model alone.
+    /// the tasks it is needed for. `None` is the base model alone. With
+    /// `baseline`, every expert is also scored on every live task, and the
+    /// base on the tasks the population escalates.
     async fn score_routes(
         &self,
         run_id: &RunId,
@@ -249,8 +292,20 @@ impl GenerationLoop<'_> {
         routes: &Routes,
         experts: &[Expert],
         draws: &[u64],
+        baseline: bool,
     ) -> Result<HashMap<Option<ExpertId>, TaskScores>> {
         let mut needed: HashMap<Option<ExpertId>, BTreeSet<String>> = HashMap::new();
+        if baseline {
+            for (task, to) in &routes.full {
+                needed.entry(to.clone()).or_default().insert(task.clone());
+                for e in experts {
+                    needed
+                        .entry(Some(e.id.clone()))
+                        .or_default()
+                        .insert(task.clone());
+                }
+            }
+        }
         for (task, to) in &routes.full {
             let Some(expert) = to else { continue };
             needed

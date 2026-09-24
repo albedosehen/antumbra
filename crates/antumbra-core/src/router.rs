@@ -100,6 +100,17 @@ impl LearnedRouter {
         out
     }
 
+    /// Whether this router was trained over exactly these experts: the test
+    /// for whether the population it routes over has changed since (ADR-0022
+    /// S-5, the gate re-frozen while the population holds still).
+    pub fn trained_over<'a>(&self, experts: impl IntoIterator<Item = &'a ExpertId>) -> bool {
+        let mine: std::collections::BTreeSet<&str> =
+            self.experts.iter().map(|e| e.id.as_str()).collect();
+        let theirs: std::collections::BTreeSet<&str> =
+            experts.into_iter().map(ExpertId::as_str).collect();
+        mine == theirs
+    }
+
     /// The router with every expert `keep` refuses masked out of the gate:
     /// its centroid is gone, so it is neither routed to nor counted toward
     /// coverage. The learned metric is shared and stays, so the experts kept
@@ -158,6 +169,26 @@ mod tests {
         // The metric zeroes dim 0, so a task only on dim 0 projects to ~nothing
         // -> top similarity below the floor -> not covered (out of distribution).
         assert!(!router.covers(&[1.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn a_router_knows_the_population_it_was_trained_over() {
+        let router = LearnedRouter {
+            weights: vec![1.0],
+            experts: ["a", "b"]
+                .iter()
+                .map(|id| RouterExpert {
+                    id: ExpertId::new(*id),
+                    centroid: vec![1.0],
+                })
+                .collect(),
+            temperature: 0.1,
+            floor: 0.5,
+        };
+        let ids = |xs: &[&str]| xs.iter().map(|x| ExpertId::new(*x)).collect::<Vec<_>>();
+        assert!(router.trained_over(&ids(&["b", "a"])));
+        assert!(!router.trained_over(&ids(&["a"])));
+        assert!(!router.trained_over(&ids(&["a", "b", "c"])));
     }
 
     /// A masked expert is neither routed to nor what makes a task covered, and

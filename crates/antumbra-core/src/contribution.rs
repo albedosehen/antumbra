@@ -57,6 +57,37 @@ impl ContributionRecord {
     }
 }
 
+/// The whole population against its single best expert, on the same live
+/// tasks under the same seeds (ADR-0022 S-5): the population's score with
+/// every task routed as the gate routes it, against the best any one of its
+/// experts scores with every task sent to it alone. Kept whether or not it
+/// flatters the architecture. If the gap collapses, the honest answer is
+/// fewer and broader experts, not a better retirement policy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BaselineRecord {
+    pub run_id: RunId,
+    pub generation: Generation,
+    /// Live tasks both sides were scored on.
+    pub tasks: u32,
+    /// The routed population's mean score, the base model standing in for a
+    /// task the gate escalates.
+    pub population: f32,
+    /// The expert that scored best alone, and its mean score.
+    #[serde(default)]
+    pub best: Option<ExpertId>,
+    #[serde(default)]
+    pub best_alone: Option<f32>,
+    pub seeds: u32,
+    pub at: DateTime<Utc>,
+}
+
+impl BaselineRecord {
+    /// What routing across the population adds over its best single expert.
+    pub fn delta(&self) -> Option<f32> {
+        Some(self.population - self.best_alone?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

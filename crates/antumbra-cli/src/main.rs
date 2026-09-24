@@ -110,15 +110,68 @@ fn builtin_embedder() -> anyhow::Result<Box<dyn Embedder>> {
     )
 }
 
-/// Train (or retrain) the learned router over the exemplars of the experts the
-/// gate may route to (the active ones, ADR-0022 S-5) and persist it (the
-/// learned gate). Returns the router, or `None` when too few are routable to
-/// need one (<2 experts/exemplars), in which case any router left from before
-/// is cleared, so routing falls back to the heuristic gate over the population
-/// as it now is. This is the self-maintaining gate: `train`/`teach` call it so
-/// routing stays current without a manual `gate-train`.
+/// An expert's capability exemplars: the texts the learned router trains on.
+#[cfg(feature = "models")]
+fn exemplars_of(e: &antumbra_core::Expert) -> Vec<String> {
+    e.capability_card
+        .get("exemplars")
+        .and_then(|v| v.as_array())
+        .map(|xs| {
+            xs.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What a refresh did to the learned router.
+#[cfg(feature = "models")]
+pub(crate) enum RouterRefresh {
+    /// Retrained, because the population it routes over changed.
+    Trained(antumbra_core::LearnedRouter),
+    /// Left frozen: the experts it routes over are the ones it was trained
+    /// over.
+    Unchanged,
+    /// Cleared: too few routable experts to need one.
+    Cleared,
+}
+
+/// Keep the learned gate current without letting it drift (ADR-0022 S-5: the
+/// gate re-opens for training when the population changes, then closes).
+/// Retrains only when the experts the gate may route to, those with
+/// exemplars, are not the ones the stored router was trained over. This is the
+/// self-maintaining gate: `train`/`teach` call it so routing stays current
+/// without a manual `gate-train`, which always retrains.
 #[cfg(feature = "models")]
 async fn refresh_router(
+    store: &Store,
+    embedder: &dyn Embedder,
+    epochs: usize,
+) -> anyhow::Result<RouterRefresh> {
+    let routable = lifecycle::routable(store).await?;
+    let covered = routable
+        .iter()
+        .filter(|e| !exemplars_of(e).is_empty())
+        .map(|e| &e.id);
+    if let Some(current) = antumbra_store::repo::router::load(store).await? {
+        if current.trained_over(covered) {
+            return Ok(RouterRefresh::Unchanged);
+        }
+    }
+    Ok(match train_router(store, embedder, epochs).await? {
+        Some(router) => RouterRefresh::Trained(router),
+        None => RouterRefresh::Cleared,
+    })
+}
+
+/// Train the learned router over the exemplars of the experts the gate may
+/// route to (the active ones, ADR-0022 S-5) and persist it (the learned gate).
+/// Returns the router, or `None` when too few are routable to need one (<2
+/// experts/exemplars), in which case any router left from before is cleared,
+/// so routing falls back to the heuristic gate over the population as it now
+/// is.
+#[cfg(feature = "models")]
+async fn train_router(
     store: &Store,
     embedder: &dyn Embedder,
     epochs: usize,
@@ -130,16 +183,8 @@ async fn refresh_router(
     }
     let mut exemplars: Vec<(ExpertId, Vec<f32>)> = Vec::new();
     for e in &experts {
-        let cards = e
-            .capability_card
-            .get("exemplars")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        for ex in cards {
-            if let Some(s) = ex.as_str() {
-                exemplars.push((e.id.clone(), embedder.embed(s).await?));
-            }
+        for text in exemplars_of(e) {
+            exemplars.push((e.id.clone(), embedder.embed(&text).await?));
         }
     }
     if exemplars.len() < 2 {
@@ -610,7 +655,7 @@ async fn run() -> anyhow::Result<()> {
             {
                 let store = connect(&cli.url).await?;
                 let embedder = make_embedder()?;
-                match refresh_router(&store, embedder.as_ref(), epochs).await? {
+                match train_router(&store, embedder.as_ref(), epochs).await? {
                     Some(r) => println!(
                         "trained learned router: {} experts, {} epochs, OOD floor={:.3}",
                         r.experts.len(),

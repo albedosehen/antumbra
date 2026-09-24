@@ -330,6 +330,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("contribution_expert_idx", ["expert", "generation"])]),
+        // The population against its single best expert, per measured
+        // generation of a run (ADR-0022 S-5): the rolling comparison that is
+        // reported whether or not it flatters the architecture.
+        table_schema("population_baseline")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(SHARED_POPULATION_PERMS)
+            .with_indexes([index("baseline_run_idx", ["run_id", "generation"])]),
         // Validation harness.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)

@@ -28,7 +28,7 @@ use antumbra_train::{
 use chrono::Utc;
 
 #[cfg(feature = "models")]
-use crate::{connect, make_embedder, refresh_router};
+use crate::{connect, make_embedder, refresh_router, RouterRefresh};
 
 /// What `antumbra ask` was given.
 pub struct AskArgs {
@@ -528,6 +528,18 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     moved.expert, moved.cause
                 );
             }
+            if let Some(b) = &r.baseline {
+                let best = match (&b.best, b.best_alone, b.delta()) {
+                    (Some(id), Some(alone), Some(d)) => {
+                        format!("its best single expert {id} {alone:.2} (routing adds {d:+.2})")
+                    }
+                    _ => "no single expert to compare".to_string(),
+                };
+                println!(
+                    "        population {:.2} over {} live task(s) against {best}",
+                    b.population, b.tasks
+                );
+            }
             for c in &r.contribution {
                 let delta = match (c.with, c.without, c.delta()) {
                     (Some(with), Some(without), Some(d)) => {
@@ -544,7 +556,8 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         println!("population: {} experts", expert::list(&store).await?.len());
         // Self-maintaining gate: keep the learned router current with the
         // population so routing never needs a manual `gate-train`.
-        if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+        if let Ok(RouterRefresh::Trained(r)) = refresh_router(&store, embedder.as_ref(), 400).await
+        {
             println!("router refreshed over {} experts", r.experts.len());
         }
         Ok(())
@@ -642,7 +655,8 @@ pub async fn teach(url: &str, args: TeachArgs) -> anyhow::Result<()> {
             }
         }
         println!("population: {} experts", experts.len());
-        if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+        if let Ok(RouterRefresh::Trained(r)) = refresh_router(&store, embedder.as_ref(), 400).await
+        {
             println!("router refreshed over {} experts", r.experts.len());
         }
         Ok(())
