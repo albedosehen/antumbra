@@ -43,6 +43,7 @@ It is off by default because it changes what is learned, and because the demo co
 `train --contribution-every N` measures every shared expert's leave-one-out contribution in every N-th generation (ADR-0022 S-5). Each expert is masked in turn, and the tasks it served are routed again, to the next expert or to the base model. Both sides are then scored under the same seeds.
 - **Output:** each generation prints, per expert, how many live tasks were routed to it, its score with and without, and the difference. An expert nothing was routed to prints as unused.
 - **The record:** rows go to the `contribution` table, the history retirement reads.
+- **Retirement:** with contribution measured, `--retire-after N` (3 by default, 0 for off) demotes an expert to dormant once its contribution was at or below nothing in N consecutive measurements, each on at least two tasks. The generation prints the demotion with its evidence. Advisory warnings print too: a falling routing share, an expert that went unused, drift in what it is asked. They change nothing. `antumbra revive` undoes a demotion, and the count starts afresh.
 - **Cost:** about two evaluations of the live tasks (the visible slice, at most 32 tasks) each time it runs. On the 3090 Ti, one expert against the base model over 30 tasks, two seeds of four samples, took 13 minutes, about as long as the generation's training. It is off by default.
 
 ### Admission: `--duplicate-above`

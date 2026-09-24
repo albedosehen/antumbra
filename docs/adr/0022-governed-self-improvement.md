@@ -325,8 +325,14 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The population:** it stayed one expert. Generation 1's contribution measurement found that expert taking all 30 live tasks, at 0.77 against the base model's 0.57.
    - **The cost:** the head-to-head took about as long as a contribution measurement: two evaluations of the live tasks, paid only when a twin turns up.
 
+   **The loop now retires, through two detectors in series.** With `LoopConfig::retirement` set, both run after each contribution measurement. `train` sets it by default, at `--retire-after 3`, and it acts only when contribution is measured.
+   - **The early warning** is label-free and advisory only. It reads the contribution stream: an expert's routing share fell to under half its earlier mean, it went unused after tasks had been routed to it, or the inputs routed to it drifted more than 0.1 of cosine further from its capability vector. That last is the `affinity` each measurement now keeps. It is reported and changes nothing.
+   - **Confirmation** is the only thing permitted to change state. An expert is demoted to dormant, never further, when its contribution was at or below the floor (0) in each of its last three measurements, each resting on at least two routed tasks. The move is recorded as `Stale`, with those generations and contributions as its evidence.
+   - **The validation rule holds by construction:** no expert whose latest measurement shows it contributing is demoted.
+   - **Unused is never evidence.** An unused expert is not demoted, and a window with an unused measurement confirms nothing. The GPU showed why: an unused expert can be a twin, and admission is the cure.
+   - **A revive starts afresh:** only measurements taken since the expert last became active count, so a person's revive restarts the count.
+
    Still to come for this step:
-   - the two detectors in series, which let the loop make the moves a person makes now;
    - conservative merging;
    - the gate's re-freeze schedule;
    - the population's comparison against its single best expert.

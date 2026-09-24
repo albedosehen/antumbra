@@ -76,6 +76,7 @@ mod tests {
             with: Some(with),
             without: Some(0.2),
             seeds: 2,
+            affinity: Some(0.9),
             at: Utc::now(),
         }
     }

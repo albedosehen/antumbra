@@ -496,6 +496,13 @@ pub enum Command {
         /// is not admitted. Above 1 admits every graduate.
         #[arg(long, default_value_t = 0.95)]
         duplicate_above: f32,
+        /// Retirement as the loop's job (ADR-0022 S-5): demote an expert to
+        /// dormant once its contribution on the tasks routed to it has been
+        /// at or below nothing in this many consecutive measurements, each on
+        /// at least two tasks. It reads the contribution stream, so it acts
+        /// only with --contribution-every. 0 leaves every move to a person.
+        #[arg(long, default_value_t = 3)]
+        retire_after: u32,
         /// Judge graduation on this many re-measurements of the carried-forward
         /// shadow, each under a fresh seed, on the held-out slice under
         /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off

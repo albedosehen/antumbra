@@ -32,6 +32,11 @@ pub struct ContributionRecord {
     /// Evaluations per task on each side, under the same seeds, so the two
     /// means are a paired comparison.
     pub seeds: u32,
+    /// How close the inputs routed to it sit to its capability vector: their
+    /// mean cosine similarity. A label-free reading of drift in what it is
+    /// asked to do. `None` when none were routed to it.
+    #[serde(default)]
+    pub affinity: Option<f32>,
     pub at: DateTime<Utc>,
 }
 
@@ -66,6 +71,7 @@ mod tests {
             with,
             without,
             seeds: 2,
+            affinity: None,
             at: Utc::now(),
         }
     }
