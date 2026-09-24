@@ -3,10 +3,12 @@
 //! Architecture vendored from candle-transformers' `qwen2` (GQA attention,
 //! RoPE, RMSNorm, KV cache) with the seven projection linears per layer swapped
 //! for [`LoraLinear`]: the base weights load **frozen** from the HF safetensors;
-//! only the LoRA `A`/`B` factors are trainable `Var`s. Generation uses the KV
-//! cache; `sft_step` runs a full-sequence forward, the completion-masked
-//! cross-entropy ([`crate::objective::causal_lm_loss`]), and `backward_step`
-//! over the LoRA `VarMap`. Validated on the 3090 Ti (needs weights).
+//! only the LoRA `A`/`B` factors are trainable `Var`s, and every product
+//! against a base weight goes through [`frozen_matmul_t`], which computes no
+//! gradient for the weight. Generation uses the KV cache; `sft_step` runs a
+//! full-sequence forward, the completion-masked cross-entropy
+//! ([`crate::objective::causal_lm_loss`]), and a backward over the LoRA
+//! `VarMap`. Validated on the 3090 Ti (needs weights).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,7 +28,9 @@ use async_trait::async_trait;
 
 use antumbra_core::{AntumbraError, Result};
 
+use crate::accumulate::GradSum;
 use crate::config::RaftConfig;
+use crate::frozen::frozen_matmul_t;
 use crate::grpo::{token_logprobs, GrpoExperience, GrpoLm, GrpoSample};
 use crate::model::{CausalLm, SftExample};
 use crate::objective::causal_lm_loss;
@@ -196,7 +200,7 @@ pub struct QwenCausalLm {
     /// stops at `<|im_end|>` instead of `<|endoftext|>`.
     chat: bool,
     /// Verified winners per optimizer step: 1 steps on each in turn, more steps
-    /// on the mean loss of that many at a time. See [`RaftConfig::batch_size`].
+    /// on the mean gradient of that many at a time. See [`RaftConfig::batch_size`].
     batch_size: usize,
     /// When set by [`CausalLm::seed_draws`], the seed later draws come from and
     /// how many have been taken from it; otherwise draws come from the
@@ -399,7 +403,7 @@ impl QwenCausalLm {
                 .map_err(ce)?;
             let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
             let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
-            let logits = matmul_t(&last, &self.model.lm_head_w)
+            let logits = frozen_matmul_t(&last, &self.model.lm_head_w)
                 .map_err(ce)?
                 .squeeze(0)
                 .map_err(ce)?
@@ -438,7 +442,7 @@ impl QwenCausalLm {
             .map_err(ce)?;
         let logits = (|| {
             let hidden = self.model.hidden(&input, 0, false)?;
-            matmul_t(&hidden, &self.model.lm_head_w)?.to_dtype(DType::F32)
+            frozen_matmul_t(&hidden, &self.model.lm_head_w)?.to_dtype(DType::F32)
         })();
         self.model.set_lora(true);
         logits.map_err(ce)
@@ -465,7 +469,7 @@ impl QwenCausalLm {
                 .map_err(ce)?;
             let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
             let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
-            let logits = matmul_t(&last, &self.model.lm_head_w)
+            let logits = frozen_matmul_t(&last, &self.model.lm_head_w)
                 .map_err(ce)?
                 .squeeze(0)
                 .map_err(ce)?
@@ -546,7 +550,7 @@ impl QwenCausalLm {
         let mask = Tensor::from_vec(mask, (1, full_ids.len()), &self.model.device).map_err(ce)?;
 
         let hidden = self.model.hidden(&input, 0, false).map_err(ce)?;
-        let logits = matmul_t(&hidden, &self.model.lm_head_w)
+        let logits = frozen_matmul_t(&hidden, &self.model.lm_head_w)
             .map_err(ce)?
             .to_dtype(DType::F32)
             .map_err(ce)?;
@@ -565,49 +569,44 @@ impl QwenCausalLm {
         }
     }
 
-    /// Shuffled mini-batch SGD: step on the **mean loss of `per_step` examples**
-    /// rather than one example at a time. By linearity of backprop the gradient of
-    /// the mean loss is the mean of the per-example gradients, so each step is a
-    /// genuine mini-batch update -- far less noisy than batch-of-1, stable at a
-    /// higher learning rate ("Beware of the Batch Size") and free of last-example
-    /// dominance within the group.
+    /// Shuffled mini-batch SGD: one step on the **mean gradient of `per_step`
+    /// examples** rather than one example at a time. It is a genuine mini-batch
+    /// update -- far less noisy than batch-of-1, stable at a higher learning rate
+    /// ("Beware of the Batch Size") and free of last-example dominance within
+    /// the group.
     ///
-    /// Why mini-batches and not one step over the whole batch: accumulating the
-    /// loss retains every example's forward graph until its backward, so peak
-    /// memory scales with the group -- the full (replay-inflated) batch OOMs a
-    /// 24 GB card. A small group caps retained graphs while still capturing most
-    /// of the variance reduction. (Manually merging per-example `GradStore`s would
-    /// be O(1) memory, but candle's `step` matches grads to vars by tensor
-    /// identity and a hand-rebuilt store silently matched none -- a no-op.) The
-    /// batch is shuffled first so groups are random across rounds. Returns the
-    /// mean supervised loss over the steps taken.
+    /// Each example is backpropagated as soon as its loss is computed and its
+    /// adapter gradients summed ([`GradSum`]), so only one forward graph is
+    /// alive at a time and a group of any size costs one example's memory.
+    /// Stepping on the mean loss instead held every example's graph until the
+    /// one backward, and two examples of workbench code ran the 24 GB card out.
+    /// Groups rather than the whole batch still, because a group is the batch
+    /// size the recipe asks for. The batch is shuffled first so groups are
+    /// random across rounds. Returns the mean supervised loss over the steps
+    /// taken.
     fn train_batch(&mut self, batch: &[SftExample], per_step: usize) -> Result<f32> {
         let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut order: Vec<usize> = (0..batch.len()).collect();
         let mut rng = StdRng::seed_from_u64(0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)));
         order.shuffle(&mut rng);
 
+        let vars = self.model.varmap.all_vars();
         let mut total = 0.0f32;
         let mut steps = 0usize;
         for group in order.chunks(per_step.max(1)) {
-            let mut losses: Vec<Tensor> = Vec::with_capacity(group.len());
+            let mut sum = GradSum::new();
+            let mut group_loss = 0.0f32;
             for &i in group {
                 if let Some(loss) = self.forward_loss(&batch[i])? {
-                    losses.push(loss);
+                    group_loss += loss.to_scalar::<f32>().map_err(ce)?;
+                    sum.add(&loss, &vars).map_err(ce)?;
                 }
             }
-            if losses.is_empty() {
-                continue;
+            let n = sum.len();
+            if sum.step(&mut self.opt, &vars).map_err(ce)? {
+                total += group_loss / n as f32;
+                steps += 1;
             }
-            let n = losses.len();
-            let mut sum = losses[0].clone();
-            for loss in &losses[1..] {
-                sum = (sum + loss).map_err(ce)?;
-            }
-            let mean = (sum / n as f64).map_err(ce)?;
-            total += mean.to_scalar::<f32>().map_err(ce)?;
-            self.opt.backward_step(&mean).map_err(ce)?;
-            steps += 1;
         }
         if steps == 0 {
             return Ok(0.0);

@@ -14,8 +14,8 @@
 #   ssh <host> 'nohup bash /tmp/search-validate.sh <sha> >/dev/null 2>&1 &'
 #
 # Each run gets a directory of its own under ~/antumbra-search-runs, with its
-# own file store, and a trace of the card's memory every five seconds in
-# gpu-mem.log beside it. A fresh directory rather than a cleaned one: the
+# own file store, and a trace of the card's memory every second in gpu-mem.log
+# beside it. A fresh directory rather than a cleaned one: the
 # container writes as its own user, the host cannot delete what it wrote, and a
 # cleanup that silently failed once left a stale store behind for the next run
 # to resume. Nothing here touches the deploy checkout, the production database
@@ -45,11 +45,10 @@ echo "== build antumbra-calibrate:$SHA"
 docker build -f docker/Dockerfile.cuda --target calibrate -t "antumbra-calibrate:$SHA" . 2>&1 | tail -20
 chmod 777 "$RUN"
 
-# The card's memory while the run trains, sampled until it ends.
-(while true; do
-    echo "$(date -u +%T) $(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)"
-    sleep 5
-done) >"$RUN/gpu-mem.log" 2>&1 &
+# The card's memory while the run trains, sampled until it ends. One sampler
+# process looping on its own, so the exit trap stops all of it.
+nvidia-smi --query-gpu=timestamp,memory.used --format=csv,noheader,nounits -lms 1000 \
+    >"$RUN/gpu-mem.log" 2>&1 &
 SAMPLER=$!
 trap 'kill "$SAMPLER" 2>/dev/null || true' EXIT
 
@@ -63,5 +62,5 @@ docker run --rm --device nvidia.com/gpu=all \
     --generations "$GENERATIONS" --samples "$SAMPLES" --rounds "$ROUNDS" \
     --holdout --search --cohort "$COHORT"
 
-echo "== peak card memory $(awk '{print $2}' "$RUN/gpu-mem.log" | sort -n | tail -1) MiB"
+echo "== peak card memory $(awk -F', ' '{print $2}' "$RUN/gpu-mem.log" | sort -n | tail -1) MiB"
 echo "== search $SHA end $(date -u +%FT%TZ) OK"
