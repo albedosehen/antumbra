@@ -336,6 +336,8 @@ pub struct TrainArgs {
     pub anneal: Option<u32>,
     /// Measure contribution in every N-th generation; 0 leaves it off.
     pub contribution_every: u32,
+    /// Capability similarity at which a graduate is a twin; above 1 admits all.
+    pub duplicate_above: f32,
     /// Re-measurements graduation is judged on; `None` takes the default.
     pub remeasure: Option<u32>,
 }
@@ -374,6 +376,10 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         every: args.contribution_every,
         ..Default::default()
     });
+    let admission = (args.duplicate_above <= 1.0).then(|| antumbra_loop::AdmissionPolicy {
+        duplicate_above: args.duplicate_above,
+        ..Default::default()
+    });
     #[cfg(feature = "models")]
     {
         let store = connect(url).await?;
@@ -410,6 +416,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             search,
             remeasure,
             contribution,
+            admission,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -476,6 +483,35 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     r.graduation_score
                 );
             }
+            match &r.admission {
+                Some(antumbra_loop::Admission::Superseded {
+                    archived,
+                    similarity,
+                    candidate,
+                    incumbent,
+                }) => println!(
+                    "        admitted in place of {archived} (similarity {similarity:.3}): \
+                     {candidate:.2} against its {incumbent:.2}; {archived} archived"
+                ),
+                Some(antumbra_loop::Admission::Rejected {
+                    duplicate_of,
+                    similarity,
+                    candidate,
+                    incumbent,
+                }) => {
+                    let head_to_head = match (candidate, incumbent) {
+                        (Some(c), Some(i)) => format!("{c:.2} against its {i:.2}"),
+                        _ => "not measurable here".to_string(),
+                    };
+                    println!(
+                        "        not admitted: duplicates {duplicate_of} (similarity {similarity:.3}), {head_to_head}"
+                    );
+                }
+                Some(antumbra_loop::Admission::Admitted {
+                    nearest: Some((id, s)),
+                }) => println!("        admitted: nearest expert {id} at similarity {s:.3}"),
+                _ => {}
+            }
             for c in &r.contribution {
                 let delta = match (c.with, c.without, c.delta()) {
                     (Some(with), Some(without), Some(d)) => {
@@ -514,6 +550,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &search,
             &remeasure,
             &contribution,
+            &admission,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

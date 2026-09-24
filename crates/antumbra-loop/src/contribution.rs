@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
 
-use antumbra_core::ports::{EvaluateRequest, TaskScores};
+use antumbra_core::ports::{EvaluateRequest, TaskPrompt, TaskScores};
 use antumbra_core::slice::Holdout;
 use antumbra_core::{
     this_host, ContributionRecord, Expert, ExpertId, FailureBoundary, Generation, LearnedRouter,
@@ -90,12 +90,13 @@ fn route_top1(
     }
 }
 
-/// The seeds a generation's contribution draws from: from the run and the
-/// generation, never from training's stream.
-fn seeds(run_id: &RunId, generation: Generation, n: u32) -> Vec<u64> {
+/// The seeds a measurement named `purpose` draws from in a generation: from
+/// the run and the generation, never from training's stream, and different
+/// for each purpose.
+pub(crate) fn seeds(purpose: &str, run_id: &RunId, generation: Generation, n: u32) -> Vec<u64> {
     (0..n)
         .map(|k| {
-            let digest = Sha256::digest(format!("contribution:{run_id}:{}:{k}", generation.0));
+            let digest = Sha256::digest(format!("{purpose}:{run_id}:{}:{k}", generation.0));
             let mut bytes = [0u8; 8];
             bytes.copy_from_slice(&digest[..8]);
             u64::from_le_bytes(bytes)
@@ -116,6 +117,19 @@ struct Routes {
 }
 
 impl GenerationLoop<'_> {
+    /// At most `max` live tasks, the same ones every generation: chosen by a
+    /// stable hash of their ids.
+    pub(crate) async fn live_sample(
+        &self,
+        holdout: Option<Holdout>,
+        max: usize,
+    ) -> Result<Vec<TaskPrompt>> {
+        let mut tasks = self.trainer.live_tasks(holdout).await?;
+        tasks.sort_by_key(|t| rank(&t.id));
+        tasks.truncate(max);
+        Ok(tasks)
+    }
+
     /// Measure and record the contribution of every shared expert this node
     /// serves, when the policy says this generation is due. Returns what it
     /// recorded, nothing when it was not due or there is nothing to measure.
@@ -140,11 +154,9 @@ impl GenerationLoop<'_> {
         if experts.is_empty() {
             return Ok(Vec::new());
         }
-        let mut tasks = self.trainer.live_tasks(holdout).await?;
-        tasks.sort_by_key(|t| rank(&t.id));
-        tasks.truncate(policy.max_tasks);
+        let tasks = self.live_sample(holdout, policy.max_tasks).await?;
         let routes = self.route_live(&tasks, &experts).await?;
-        let draws = seeds(run_id, generation, policy.seeds);
+        let draws = seeds("contribution", run_id, generation, policy.seeds);
         let scores = self
             .score_routes(run_id, generation, &routes, &experts, &draws)
             .await?;
@@ -190,11 +202,7 @@ impl GenerationLoop<'_> {
         Ok(recorded)
     }
 
-    async fn route_live(
-        &self,
-        tasks: &[antumbra_core::ports::TaskPrompt],
-        experts: &[Expert],
-    ) -> Result<Routes> {
+    async fn route_live(&self, tasks: &[TaskPrompt], experts: &[Expert]) -> Result<Routes> {
         let router = lifecycle::load_router(self.store).await?;
         let boundaries = boundary::list(self.store).await?;
         let mut full = Vec::with_capacity(tasks.len());
@@ -341,8 +349,10 @@ mod tests {
     #[test]
     fn seeds_are_the_runs_and_differ_by_generation() {
         let run = RunId::new("run");
-        assert_eq!(seeds(&run, Generation(1), 2), seeds(&run, Generation(1), 2));
-        assert_ne!(seeds(&run, Generation(1), 2), seeds(&run, Generation(2), 2));
-        assert_eq!(seeds(&run, Generation(1), 3).len(), 3);
+        let at = |g| seeds("contribution", &run, Generation(g), 2);
+        assert_eq!(at(1), at(1));
+        assert_ne!(at(1), at(2));
+        assert_ne!(at(1), seeds("admission", &run, Generation(1), 2));
+        assert_eq!(seeds("contribution", &run, Generation(1), 3).len(), 3);
     }
 }

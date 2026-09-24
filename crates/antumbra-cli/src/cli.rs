@@ -489,6 +489,13 @@ pub enum Command {
         /// default) leaves it unmeasured.
         #[arg(long, default_value_t = 0)]
         contribution_every: u32,
+        /// Gate admission (ADR-0022 S-5): a graduate whose capability vector
+        /// is at least this similar (cosine) to an active shared expert's is a
+        /// twin. It joins only if it beats that expert head to head on the
+        /// live tasks, and then replaces it, which is archived; otherwise it
+        /// is not admitted. Above 1 admits every graduate.
+        #[arg(long, default_value_t = 0.95)]
+        duplicate_above: f32,
         /// Judge graduation on this many re-measurements of the carried-forward
         /// shadow, each under a fresh seed, on the held-out slice under
         /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off

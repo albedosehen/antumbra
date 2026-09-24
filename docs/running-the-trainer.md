@@ -45,6 +45,14 @@ It is off by default because it changes what is learned, and because the demo co
 - **The record:** rows go to the `contribution` table, the history retirement reads.
 - **Cost:** about two evaluations of the live tasks (the visible slice, at most 32 tasks) each time it runs. On the 3090 Ti, one expert against the base model over 30 tasks, two seeds of four samples, took 13 minutes, about as long as the generation's training. It is off by default.
 
+### Admission: `--duplicate-above`
+
+A graduate whose capability vector is at least `--duplicate-above` (0.95 by default) similar to an active shared expert's is a twin (ADR-0022 S-5). It joins only if it beats that expert head to head on the live tasks, under the same seeds, and it then takes that expert's place. The other is archived, not deleted, and `antumbra revive` brings it back.
+- **A twin that loses** is not admitted, and its shadow is pruned.
+- **Output:** each generation prints the decision, with the similarity and both scores.
+- **Why:** two experts from one corpus have near-identical capability vectors. The heuristic gate routes on the margin between its top two, so with both present it escalated every task and served neither.
+- **Turning it off:** a value above 1 admits every graduate.
+
 ### Searching the recipe: `--search`
 
 `train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes (ADR-0022 S-1).
