@@ -574,7 +574,8 @@ impl McpServer {
 
     /// Rank the experts covering an embedded task: shared experts via the learned
     /// router, plus the user's own private experts by centroid. Top-`k`, best
-    /// first. The expert ACL already scopes `expert::list` to shared + own-private.
+    /// first. The expert ACL already scopes `expert::list` to shared + own-private,
+    /// and only experts the gate may route to (the active ones) are candidates.
     ///
     /// Boundary inhibition at the counterfactual boundary of competence: if this task falls inside a known failure
     /// scope, escalate (return no routes) rather than route confidently; the
@@ -595,7 +596,7 @@ impl McpServer {
             return Ok(Vec::new());
         }
         let mut routes: Vec<RouteHit> = Vec::new();
-        if let Some(router) = router::load(&self.store).await? {
+        if let Some(router) = lifecycle::load_router(&self.store).await? {
             if router.covers(v) {
                 for (id, probability) in router.route(v) {
                     routes.push(RouteHit {
@@ -606,7 +607,7 @@ impl McpServer {
                 }
             }
         }
-        for e in expert::list(&self.store).await? {
+        for e in lifecycle::routable(&self.store).await? {
             if e.owner.as_ref() == Some(&self.user) {
                 if let Some(sim) = e.capability_similarity(v) {
                     if sim >= PRIVATE_ROUTE_FLOOR {

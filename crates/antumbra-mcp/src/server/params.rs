@@ -331,6 +331,9 @@ pub(super) struct ExpertView {
     pub(super) fitness: f32,
     /// True if this is the caller's own private expert (else a shared one).
     pub(super) private: bool,
+    /// Where it stands (ADR-0022 S-5): `active` (routed to), `dormant` (served
+    /// only when named), `archived` (kept, not served) or `deleted`.
+    pub(super) status: String,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]

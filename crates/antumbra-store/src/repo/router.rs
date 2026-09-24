@@ -2,7 +2,7 @@
 //! trained metric + centroids, retrained whenever the population changes. No
 //! raw SurrealQL; surql-rs `crud` helpers only.
 
-use surql::query::crud::{get_record, upsert_record};
+use surql::query::crud::{delete_record, get_record, upsert_record};
 use surql::types::RecordID;
 
 use antumbra_core::{LearnedRouter, Result};
@@ -25,6 +25,19 @@ pub async fn save(store: &Store, router: &LearnedRouter) -> Result<()> {
         .await
         .map_err(map)?;
     Ok(())
+}
+
+/// Remove the active learned router, so routing falls back to the heuristic
+/// gate over the population as it now is. For a population too small to
+/// train one over: a router left behind would keep routing among experts
+/// that have since left. A no-op when there is none.
+pub async fn clear(store: &Store) -> Result<()> {
+    let id = record_id()?;
+    match delete_record(store.client(), &id).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.to_string().contains("does not exist") => Ok(()),
+        Err(e) => Err(map(e)),
+    }
 }
 
 /// Load the active learned router, if one has been trained. Returns `None`

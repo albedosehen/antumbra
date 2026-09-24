@@ -402,7 +402,9 @@ pub(crate) async fn build_serve(
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     use antumbra_serve::{MultiAdapterServe, RaftConfig};
 
-    let experts = antumbra_store::repo::expert::list(store).await?;
+    // Dormant experts stay registered, since they are served when named;
+    // archived ones are not (ADR-0022 S-5).
+    let experts = antumbra_store::repo::lifecycle::servable(store).await?;
     // With no expert to name a base, use the one consolidation trains on, so the
     // first minted adapter fits the resident model.
     let base = serving_base(

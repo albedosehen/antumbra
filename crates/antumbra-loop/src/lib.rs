@@ -27,7 +27,7 @@ use antumbra_core::{
 use antumbra_eclipse::instrument::GenerationReport as InstrumentReport;
 use antumbra_eclipse::{Trend, Watch};
 use antumbra_store::repo::{
-    boundary, evaluation, expert, generation, loop_control, reward, shadow,
+    boundary, evaluation, expert, generation, lifecycle, loop_control, reward, shadow,
 };
 use antumbra_store::Store;
 
@@ -517,7 +517,12 @@ impl<'a> GenerationLoop<'a> {
     /// demand, not only as part of a generation.
     pub async fn check_no_forgetting(&self, run_id: &RunId) -> Result<Vec<ExpertId>> {
         let mut regressions = Vec::new();
-        for frozen in expert::list(self.store).await? {
+        // Demoted and archived experts keep their weights, and those weights
+        // are still held to their freeze; only a deleted one has none left.
+        for (frozen, status) in lifecycle::population(self.store).await? {
+            if !status.keeps_weights() {
+                continue;
+            }
             let id = frozen.id.to_string();
             let Some(baseline) =
                 evaluation::latest_for_subject(self.store, SubjectKind::Expert, &id).await?

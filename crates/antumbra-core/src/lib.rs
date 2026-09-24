@@ -22,6 +22,7 @@ pub mod genesis;
 pub mod hive;
 pub mod ids;
 pub mod keyed;
+pub mod lifecycle;
 pub mod memory;
 pub mod orchestration;
 pub mod penumbra;
@@ -57,6 +58,7 @@ pub use ids::{
     BoundaryId, CompartmentId, DocumentChunkId, ExpertId, Generation, MemoryId, RunId, ShadowId,
     TenantId, UserId,
 };
+pub use lifecycle::{current_status, ExpertStatus, ExpertTransition, TransitionCause};
 pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork, MemoryStatus};
 pub use orchestration::{ComposeStrategy, OrchestrationRun, OrchestrationStatus};
 pub use penumbra::{propose_compartments, ClusterConfig, ProposedCompartment};

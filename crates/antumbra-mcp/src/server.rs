@@ -25,7 +25,7 @@ use antumbra_core::{
     Capability, ClusterConfig, Compartment, CompartmentId, DocumentChunk, EdgeType, ExpertId,
     Grant, Memory, MemoryEdge, MemoryId, MemoryNetwork, Origin, TenantId, UserId,
 };
-use antumbra_store::repo::{boundary, compartment, document, edge, expert, memory, router};
+use antumbra_store::repo::{boundary, compartment, document, edge, expert, lifecycle, memory};
 use antumbra_store::Store;
 
 /// One (tenant, user) MCP session over its Penumbra. `#[tool_handler]` resolves
@@ -708,19 +708,20 @@ impl McpServer {
     /// a dashboard / status view, P-2). The expert ACL already scopes the list to
     /// shared experts plus this user's own private ones.
     #[tool(
-        description = "List the expert population visible to you (shared experts plus your own private ones), each with its generation and fitness."
+        description = "List the expert population visible to you (shared experts plus your own private ones), each with its generation, fitness, and status (active experts are routed to; dormant ones are served only when named; archived ones are kept but not served)."
     )]
     async fn population(&self) -> Result<Json<PopulationOut>, ErrorData> {
-        let experts = expert::list(&self.store).await.map_err(err)?;
+        let experts = lifecycle::population(&self.store).await.map_err(err)?;
         Ok(Json(PopulationOut {
             experts: experts
                 .iter()
-                .map(|e| ExpertView {
+                .map(|(e, status)| ExpertView {
                     id: e.id.as_str().to_string(),
                     name: e.name.clone(),
                     generation: e.generation.0,
                     fitness: e.fitness,
                     private: e.owner.as_ref() == Some(&self.user),
+                    status: status.as_str().to_string(),
                 })
                 .collect(),
         }))

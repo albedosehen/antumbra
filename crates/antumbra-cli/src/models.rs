@@ -19,7 +19,7 @@ use antumbra_loop::{GenerationLoop, LoopConfig};
 #[cfg(feature = "models")]
 use antumbra_serve::{CandleServe, GenerateVerifyProbe};
 #[cfg(feature = "models")]
-use antumbra_store::repo::{boundary, expert};
+use antumbra_store::repo::{boundary, expert, lifecycle};
 #[cfg(feature = "models")]
 use antumbra_train::{
     CandleModelLoader, CaptureTrainer, GrpoTrainer, JsonCorpus, RaftConfig, RaftTrainer,
@@ -54,11 +54,14 @@ pub async fn ask(url: &str, args: AskArgs) -> anyhow::Result<()> {
         let store = connect(url).await?;
         let embedder = make_embedder()?;
         let task_vec = embedder.embed(&task).await?;
-        let experts = expert::list(&store).await?;
+        // Routing sees the experts the gate may route to; a standing expert
+        // named with --with is served whether or not it is routed to.
+        let experts = lifecycle::routable(&store).await?;
+        let named = lifecycle::servable(&store).await?;
         // Pick the expert via the learned router when trained, else the
         // heuristic boundary-conditioned gate.
         let chosen_id: Option<ExpertId> =
-            if let Some(router) = antumbra_store::repo::router::load(&store).await? {
+            if let Some(router) = lifecycle::load_router(&store).await? {
                 let ranked = router.route(&task_vec);
                 let sim = router.top_similarity(&task_vec);
                 // Escalate when out of distribution, or when a boundary
@@ -104,7 +107,7 @@ pub async fn ask(url: &str, args: AskArgs) -> anyhow::Result<()> {
                     let (name, w) = part
                         .split_once(':')
                         .ok_or_else(|| anyhow::anyhow!("bad --with `{part}` (want name:weight)"))?;
-                    let s = experts
+                    let s = named
                         .iter()
                         .find(|e| e.name == name.trim())
                         .ok_or_else(|| {
@@ -201,7 +204,7 @@ pub async fn scope(url: &str, args: ScopeArgs) -> anyhow::Result<()> {
         // the bare base. The expert acts the behavior; the verifier judges.
         let (base_model, adapter) = match &expert {
             Some(name) => {
-                let experts = expert::list(&store).await?;
+                let experts = lifecycle::servable(&store).await?;
                 let e = experts
                     .iter()
                     .find(|e| &e.name == name)
@@ -551,7 +554,8 @@ pub async fn teach(url: &str, args: TeachArgs) -> anyhow::Result<()> {
         // expert whose competence lands in a failure region supersedes
         // the boundary that flagged it (the boundary lifecycle). The gate
         // then routes the region to the fix instead of escalating.
-        let experts = expert::list(&store).await?;
+        // Only an expert the gate routes to covers a region.
+        let experts = lifecycle::routable(&store).await?;
         for b in boundary::list(&store).await? {
             let covered = experts.iter().any(|e| {
                 e.capability_vec

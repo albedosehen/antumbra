@@ -281,6 +281,29 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    The repeated runs are the first real measure of the noise the search works against. The same recipe, trained again from the base, moved by 0.05 between generations: as much as the recipes differed from one another. That noise is what pooled ranking is for, and it is why two generations could not tell the recipes apart.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
+
+   **The lifecycle is in, and a person still makes every move.** `antumbra_core::lifecycle` holds the four states and the one rule.
+   - **Moves:** active goes to dormant or archived; dormant and archived both revive; deletion is reachable only from dormant or archived, never from active.
+   - **The one rule:** `ExpertStatus::transition` refuses a deletion for any cause but `Redundant { of }`. The store refuses it too unless the covering expert exists, is not the expert itself, and is active: an expert cannot be covered by one the gate no longer routes to.
+   - **The record:** a move is a row of its own in `expert_transition`, appended and numbered per expert, carrying its cause and the generation that decided it. The expert's record is never touched by its own retirement, which keeps ADR-0001's freeze literal.
+   - **Races:** a unique index on the expert and the number turns two writers racing to move one expert into one success and one refusal.
+   - **Visibility:** each row carries the expert's owner under the expert table's own permissions. A tenant session sees the moves of exactly the experts it can see; one that could read an expert but not its moves would take a demoted expert for an active one.
+
+   **What each state means where it matters:**
+   - **Routing:** every route, whether the learned router, the heuristic gate or a private expert's centroid, sees only the active experts.
+   - **The learned router:** it is masked on load. A demoted expert's centroid is dropped before routing and before the out-of-distribution floor is read, so a router trained while the expert was active cannot route to it. Retraining happens over the active experts only. When fewer than two are left, the stored router is cleared rather than left routing among experts that have gone.
+   - **Serving:** a dormant expert is still registered and served when named (`ask --with`, `compose`). An archived one is not.
+   - **The tripwire:** the byte-identity tripwire still checks every dormant and archived expert, since their weights are kept and still held to their freeze. Only a deleted expert leaves it.
+
+   **`antumbra retire` demotes.** It used to delete the expert's row outright, the command the record warns an automated version would industrialize. It now moves the expert to dormant, or to archived with `--archive`, and records the operator's note. `antumbra revive` brings either back. The `population` MCP tool reports each expert's status.
+
+   Still to come for this step:
+   - the leave-one-out contribution history;
+   - the two detectors in series, which let the loop make the moves a person makes now;
+   - admission gating at graduation;
+   - conservative merging;
+   - the gate's re-freeze schedule;
+   - the population's comparison against its single best expert.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
