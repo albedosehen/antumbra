@@ -294,6 +294,28 @@ pub enum Command {
         #[command(subcommand)]
         action: crate::verifier_args::VerifierAction,
     },
+    /// The margin gate's risk-coverage curve over a store's population
+    /// (ADR-0024 D-1): every held-out task routed with the threshold out of
+    /// the way, its expert and the base both scored, and the threshold swept
+    /// offline. The best point is the bar a typed gate must clear. Needs
+    /// --features models and a GPU.
+    GateSweep {
+        #[arg(long)]
+        corpus: String,
+        /// Every satisfiable task, not only the ones the default partition
+        /// withholds.
+        #[arg(long)]
+        all_tasks: bool,
+        /// Seeds each side is scored under.
+        #[arg(long, default_value_t = 2)]
+        seeds: u64,
+        /// Completions per task per seed.
+        #[arg(long, default_value_t = 4)]
+        samples: usize,
+        /// Write every task's outcome here.
+        #[arg(long)]
+        out: Option<String>,
+    },
     /// A critic trained on the verifier's verdicts (ADR-0022 S-2): train one
     /// and read it against them, per skill.
     Critic {

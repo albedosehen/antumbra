@@ -21,6 +21,7 @@ mod claude;
 mod cli;
 mod commands;
 mod critic_cmd;
+mod gate_sweep;
 mod gitctx;
 mod gitfacts;
 #[cfg(feature = "models")]
@@ -175,6 +176,22 @@ async fn run() -> anyhow::Result<()> {
         }
         Command::Verifier { action } => verifiers::run(&cli.url, action).await?,
         Command::Critic { action } => critic_cmd::run(action).await?,
+        Command::GateSweep {
+            corpus,
+            all_tasks,
+            seeds,
+            samples,
+            out,
+        } => {
+            let args = gate_sweep::SweepArgs {
+                corpus,
+                all_tasks,
+                seeds,
+                samples,
+                out,
+            };
+            gate_sweep::run(&cli.url, args).await?;
+        }
         Command::Migrate => {
             connect(&cli.url).await?;
             println!("schema applied at {}", cli.url);
