@@ -44,6 +44,27 @@ fn recipe_for(req: &TrainRequest, config: &RaftConfig) -> Result<TrainingRecipe>
 /// trained under a holdout that holds any out, and otherwise the tasks it
 /// trained on. Never the audit slice, which no decision may read, and never an
 /// impossible task, which is its own alarm. The flag says which it was.
+/// What a run learns from, narrowed to the grow step's focus when it named
+/// one (ADR-0022 S-3). Withheld tasks are not touched, so a focused run is
+/// measured as a full one is. A focus that names none of the tasks the run may
+/// learn from is refused: it would train on nothing.
+fn focused(learn: Vec<CorpusTask>, focus: &[String]) -> Result<Vec<CorpusTask>> {
+    if focus.is_empty() {
+        return Ok(learn);
+    }
+    let wanted: std::collections::HashSet<&str> = focus.iter().map(String::as_str).collect();
+    let narrowed: Vec<CorpusTask> = learn
+        .into_iter()
+        .filter(|t| wanted.contains(t.id.as_str()))
+        .collect();
+    if narrowed.is_empty() {
+        return Err(antumbra_core::AntumbraError::other(
+            "the focus names none of the tasks this run may learn from",
+        ));
+    }
+    Ok(narrowed)
+}
+
 fn remeasure_slice(
     tasks: Vec<CorpusTask>,
     holdout: Option<&Holdout>,
@@ -125,6 +146,7 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
             self.corpus.tasks(&req.corpus_task_ids),
             req.holdout.as_ref(),
         )?;
+        let learn = focused(learn, &req.focus)?;
         let config = self.config.with_recipe(&recipe);
         let mut model = self
             .loader
@@ -210,6 +232,7 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
             self.corpus.tasks(&req.corpus_task_ids),
             req.holdout.as_ref(),
         )?;
+        let learn = focused(learn, &req.focus)?;
         let config = self.config.with_recipe(&recipe);
         let mut model = self
             .loader
@@ -296,6 +319,7 @@ impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
             self.corpus.tasks(&req.corpus_task_ids),
             req.holdout.as_ref(),
         )?;
+        let learn = focused(learn, &req.focus)?;
         let config = self.config.with_recipe(&recipe);
         let mut model = self
             .loader
@@ -407,6 +431,25 @@ mod tests {
         }
     }
 
+    /// The grow step narrows what a run learns from, never what it measures,
+    /// and a focus that names nothing it may learn from is refused.
+    #[test]
+    fn a_focus_narrows_what_is_learned() -> Result<()> {
+        let learn = vec![CorpusTask::new("a", "a"), CorpusTask::new("b", "b")];
+        assert_eq!(
+            focused(learn.clone(), &[])?.len(),
+            2,
+            "no focus, everything"
+        );
+        let narrowed = focused(learn.clone(), &["b".to_string(), "held".to_string()])?;
+        assert_eq!(
+            narrowed.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["b"]
+        );
+        assert!(focused(learn, &["held".to_string()]).is_err());
+        Ok(())
+    }
+
     #[tokio::test]
     async fn train_shadow_runs_raft_end_to_end() {
         let trainer = RaftTrainer::new(
@@ -427,6 +470,7 @@ mod tests {
             corpus_task_ids: vec![],
             holdout: None,
             recipe: None,
+            focus: Vec::new(),
         };
         let out = trainer.train_shadow(req).await.unwrap();
         assert!(out.final_fitness > 0.0);
@@ -489,6 +533,7 @@ mod tests {
             corpus_task_ids: vec![],
             holdout: Some(holdout),
             recipe: None,
+            focus: Vec::new(),
         }
     }
 
@@ -680,6 +725,7 @@ mod tests {
             corpus_task_ids: vec![],
             holdout: None,
             recipe,
+            focus: Vec::new(),
         }
     }
 

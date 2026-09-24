@@ -515,6 +515,18 @@ pub enum Command {
         /// must keep for them to count as siblings.
         #[arg(long, default_value_t = 0.9)]
         merge_retained: f32,
+        /// The grow step (ADR-0022 S-3): each generation learns from the
+        /// region (skill) the latest census makes most learnable, plus a
+        /// quarter sampled from the whole visible slice. It reads the census
+        /// the contribution measurement takes, which it turns on every
+        /// generation over 64 live tasks unless --contribution-every is set.
+        #[arg(long)]
+        grow: bool,
+        /// With --grow, choose among the regions that pass the gate
+        /// uniformly at random instead: the baseline the grow step is
+        /// measured against.
+        #[arg(long)]
+        grow_uniform: bool,
         /// Judge graduation on this many re-measurements of the carried-forward
         /// shadow, each under a fresh seed, on the held-out slice under
         /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off

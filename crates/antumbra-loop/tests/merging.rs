@@ -49,6 +49,7 @@ impl Trainer for Merger {
             .map(|i| TaskPrompt {
                 id: format!("t{i}"),
                 prompt: format!("task {i}"),
+                region: "tasks".into(),
             })
             .collect())
     }

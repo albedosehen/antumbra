@@ -343,6 +343,9 @@ pub struct TrainArgs {
     /// Merge sibling experts, and the overlap that makes them siblings.
     pub merge: bool,
     pub merge_retained: f32,
+    /// Choose each generation's region by the grow step, or uniformly.
+    pub grow: bool,
+    pub grow_uniform: bool,
     /// Re-measurements graduation is judged on; `None` takes the default.
     pub remeasure: Option<u32>,
 }
@@ -377,8 +380,27 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         0 => None,
         repeats => Some(antumbra_loop::Remeasure { repeats }),
     };
-    let contribution = (args.contribution_every > 0).then(|| antumbra_loop::ContributionPolicy {
-        every: args.contribution_every,
+    // The grow step reads the census the contribution measurement takes, so
+    // it needs one every generation, and over enough tasks to cover every
+    // region.
+    let contribution = match (args.contribution_every, args.grow) {
+        (0, false) => None,
+        (0, true) => Some(antumbra_loop::ContributionPolicy {
+            every: 1,
+            max_tasks: 64,
+            ..Default::default()
+        }),
+        (every, _) => Some(antumbra_loop::ContributionPolicy {
+            every,
+            ..Default::default()
+        }),
+    };
+    let grow = args.grow.then(|| antumbra_loop::GrowPolicy {
+        choosing: if args.grow_uniform {
+            antumbra_loop::Choosing::Uniform
+        } else {
+            antumbra_loop::Choosing::Learnability
+        },
         ..Default::default()
     });
     let admission = (args.duplicate_above <= 1.0).then(|| antumbra_loop::AdmissionPolicy {
@@ -432,6 +454,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             admission,
             retirement,
             merge,
+            grow,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -536,6 +559,29 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     moved.expert, moved.cause
                 );
             }
+            if let Some(g) = &r.growth {
+                match &g.record.chosen {
+                    Some(region) => {
+                        let learnability = g
+                            .record
+                            .candidates
+                            .iter()
+                            .find(|c| &c.region == region)
+                            .map_or(0.0, |c| c.learnability);
+                        let credit = g
+                            .record
+                            .credit
+                            .map_or("none yet".to_string(), |c| format!("{c:+.2}"));
+                        println!(
+                            "        grow: learned from {region} (learnability {learnability:.3}; {} task(s), {} unfiltered); last choice's credit {credit}; entropy {:.2}, coverage {:.2}, revived {}",
+                            g.record.focus, g.record.unfiltered, g.diversity.entropy, g.diversity.coverage, g.diversity.revived
+                        );
+                    }
+                    None => println!(
+                        "        grow: no region chosen (no census yet, or none passed the gate); learned from every visible task"
+                    ),
+                }
+            }
             match &r.merge {
                 Some(antumbra_loop::Merge::Merged {
                     into,
@@ -622,6 +668,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &admission,
             &retirement,
             &merge,
+            &grow,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

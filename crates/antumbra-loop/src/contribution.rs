@@ -30,6 +30,7 @@ use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_store::repo::{boundary, contribution, lifecycle};
 
 use crate::baseline::compare;
+use crate::grow;
 use crate::GenerationLoop;
 
 /// Inhibition above which a boundary escalates a task the learned router
@@ -132,6 +133,8 @@ fn rank(id: &str) -> [u8; 32] {
 pub(crate) struct Measured {
     pub contribution: Vec<ContributionRecord>,
     pub baseline: Option<BaselineRecord>,
+    /// The region census, taken with the baseline for the grow step.
+    pub census: Vec<antumbra_core::RegionCensus>,
 }
 
 /// Where each task routes with the whole population, and, for a task routed
@@ -178,7 +181,9 @@ impl GenerationLoop<'_> {
             .into_iter()
             .filter(|e| e.owner.is_none() && e.is_placed_on(&host))
             .collect();
-        if experts.is_empty() {
+        // With no expert there is nothing to credit, but the grow step still
+        // needs the census: the base model alone, on every live task.
+        if experts.is_empty() && self.cfg.grow.is_none() {
             return Ok(Measured::default());
         }
         let tasks = self.live_sample(holdout, policy.max_tasks).await?;
@@ -252,9 +257,16 @@ impl GenerationLoop<'_> {
             }
             None => None,
         };
+        let census = if policy.baseline {
+            let readings = grow::census(&tasks, &routes.full, &routes.vectors, score);
+            self.record_census(run_id, generation, readings).await?
+        } else {
+            Vec::new()
+        };
         Ok(Measured {
             contribution: recorded,
             baseline,
+            census,
         })
     }
 
@@ -270,8 +282,8 @@ impl GenerationLoop<'_> {
             if let Some(expert) = &to {
                 let without = route_top1(&v, router.as_ref(), experts, &boundaries, Some(expert));
                 fallback.insert(t.id.clone(), without);
-                vectors.insert(t.id.clone(), v);
             }
+            vectors.insert(t.id.clone(), v);
             full.push((t.id.clone(), to));
         }
         Ok(Routes {

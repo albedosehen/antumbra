@@ -162,11 +162,14 @@ impl GenerationLoop<'_> {
             return Ok(None);
         };
         let host = this_host();
-        let experts: Vec<Expert> = lifecycle::routable(self.store)
+        let mut experts: Vec<Expert> = lifecycle::routable(self.store)
             .await?
             .into_iter()
             .filter(|e| e.owner.is_none() && e.is_placed_on(&host))
             .collect();
+        // In id order, so the pair and its merged file do not depend on the
+        // order the store returns rows in.
+        experts.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
         let mut best: Option<(usize, usize, f32)> = None;
         for i in 0..experts.len() {
             for j in i + 1..experts.len() {

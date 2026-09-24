@@ -64,6 +64,7 @@ impl Trainer for Graduating {
             .map(|i| TaskPrompt {
                 id: format!("t{i}"),
                 prompt: format!("{} {i}", self.skill),
+                region: self.skill.to_string(),
             })
             .collect())
     }

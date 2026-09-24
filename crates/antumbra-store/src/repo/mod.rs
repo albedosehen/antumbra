@@ -15,6 +15,7 @@ pub mod evaluation;
 pub mod expert;
 pub mod generation;
 pub mod genesis;
+pub mod grow;
 pub mod hive;
 pub mod invite;
 pub mod lifecycle;

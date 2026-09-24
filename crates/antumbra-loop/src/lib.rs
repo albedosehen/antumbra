@@ -35,6 +35,7 @@ mod admission;
 mod baseline;
 mod cohort;
 mod contribution;
+mod grow;
 mod measure;
 mod merging;
 mod recipe;
@@ -43,6 +44,7 @@ pub mod search;
 pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
 pub use contribution::ContributionPolicy;
+pub use grow::{choose, diversity, Choosing, Diversity, GrowPolicy, Growth};
 use measure::Measurement;
 pub use merging::{Merge, MergePolicy};
 pub use retirement::{confirms, warnings, Detection, RetirementPolicy, Warning};
@@ -138,6 +140,12 @@ pub struct LoopConfig {
     /// merge scores at least as well as the better of them; both are then
     /// archived. `None` (the default) never merges.
     pub merge: Option<MergePolicy>,
+    /// The grow step (ADR-0022 S-3): each generation learns from the region
+    /// the policy chooses from the latest census, plus an unfiltered share of
+    /// the whole visible slice. The census comes from the contribution
+    /// measurement, so it chooses only once one has been taken. `None` (the
+    /// default) learns from every visible task, as always.
+    pub grow: Option<GrowPolicy>,
 }
 
 impl Default for LoopConfig {
@@ -155,6 +163,7 @@ impl Default for LoopConfig {
             admission: None,
             retirement: None,
             merge: None,
+            grow: None,
         }
     }
 }
@@ -212,6 +221,11 @@ pub struct GenerationReport {
     /// What merging considered and did, when a policy is set and a pair was
     /// similar enough to consider.
     pub merge: Option<Merge>,
+    /// What the grow step decided this generation learned from, when a policy
+    /// is set.
+    pub growth: Option<Growth>,
+    /// The region census this generation's contribution measurement took.
+    pub census: Vec<antumbra_core::RegionCensus>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -278,7 +292,9 @@ impl<'a> GenerationLoop<'a> {
         // train them on verified outcomes, withholding what the partition keeps
         // from selection. One, or a cohort when the recipe is searched.
         let holdout = self.holdout_for(generation);
-        let members = self.train_cohort(head, holdout).await?;
+        let growth = self.plan_growth(&run_id, generation, holdout).await?;
+        let focus = growth.as_ref().map(|g| g.focus.clone()).unwrap_or_default();
+        let members = self.train_cohort(head, holdout, &focus).await?;
         let (winner, cohort) = self.select(members).await?;
         let cohort::Member {
             shadow: mut sh,
@@ -366,6 +382,7 @@ impl<'a> GenerationLoop<'a> {
         let contribution::Measured {
             contribution,
             baseline,
+            census,
         } = self
             .measure_contribution(&run_id, generation, holdout)
             .await?;
@@ -394,6 +411,8 @@ impl<'a> GenerationLoop<'a> {
             detection,
             baseline,
             merge,
+            growth,
+            census,
         })
     }
 
