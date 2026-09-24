@@ -137,6 +137,8 @@ pub struct ScriptedTrainer {
     /// What a re-measurement reports, cycled across the seeds asked for.
     /// `None` refuses re-measurement, as a trainer without it does.
     pub remeasured: Option<Vec<f32>>,
+    /// The named verifiers a run reports it trained under.
+    pub granted_by: Vec<crate::VerifierGrant>,
 }
 
 /// The recipe a scripted trainer is configured with.
@@ -159,6 +161,7 @@ impl ScriptedTrainer {
             own_recipe: Some(SCRIPTED_RECIPE),
             ignores_recipe: false,
             remeasured: None,
+            granted_by: Vec::new(),
         }
     }
 
@@ -174,6 +177,7 @@ impl ScriptedTrainer {
             own_recipe: Some(SCRIPTED_RECIPE),
             ignores_recipe: false,
             remeasured: None,
+            granted_by: Vec::new(),
         }
     }
 
@@ -222,6 +226,7 @@ impl Trainer for ScriptedTrainer {
             } else {
                 req.recipe.or(self.own_recipe)
             },
+            granted_by: self.granted_by.clone(),
         })
     }
 

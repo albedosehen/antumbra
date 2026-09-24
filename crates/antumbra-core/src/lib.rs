@@ -83,6 +83,6 @@ pub use trust::{
 };
 pub use vector::truncate_renormalize;
 pub use verifier::{
-    canonical_json, current_trust, verifier_address, TrustCause, TrustState, VerifierOrigin,
-    VerifierRecord, VerifierTier, VerifierTransition,
+    canonical_json, count_grant, current_trust, named_verifier, verifier_address, TrustCause,
+    TrustState, VerifierGrant, VerifierOrigin, VerifierRecord, VerifierTier, VerifierTransition,
 };

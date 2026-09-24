@@ -23,12 +23,13 @@ use surql::types::operators::eq;
 
 use antumbra_core::ports::TrustedVerifiers;
 use antumbra_core::{
-    after_measurement, canonical_json, current_trust, grants_reward, AntumbraError, Result,
-    TrustCause, TrustMeasurement, TrustState, VerifierId, VerifierOrigin, VerifierRecord,
+    after_measurement, canonical_json, current_trust, grants_reward, AntumbraError, ExpertId,
+    Result, TrustCause, TrustMeasurement, TrustState, VerifierId, VerifierOrigin, VerifierRecord,
     VerifierTier, VerifierTransition,
 };
 
 use crate::error::map;
+use crate::repo::lifecycle;
 use crate::store::Store;
 
 const TABLE: &str = "verifier";
@@ -83,6 +84,14 @@ impl VerifierRow {
         }
         Ok(record)
     }
+}
+
+/// A verifier's move, and the experts it archived: taking a verifier out of
+/// use archives every expert that trained under it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VerifierMove {
+    pub transition: VerifierTransition,
+    pub archived: Vec<ExpertId>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -182,7 +191,7 @@ pub async fn record_measurement(
     store: &Store,
     record: &VerifierRecord,
     measurement: &TrustMeasurement,
-) -> Result<Option<VerifierTransition>> {
+) -> Result<Option<VerifierMove>> {
     if measurement.verifier != record.id {
         return Err(AntumbraError::rejected(format!(
             "a measurement of {} cannot be recorded against {}",
@@ -218,7 +227,7 @@ pub async fn transition(
     id: &VerifierId,
     to: TrustState,
     note: Option<String>,
-) -> Result<VerifierTransition> {
+) -> Result<VerifierMove> {
     let Some(record) = get(store, id).await? else {
         return Err(AntumbraError::rejected(format!("no verifier {id}")));
     };
@@ -234,7 +243,7 @@ async fn append(
     from: TrustState,
     to: TrustState,
     cause: TrustCause,
-) -> Result<VerifierTransition> {
+) -> Result<VerifierMove> {
     from.transition(to, &cause)?;
     let transition = VerifierTransition {
         verifier: id.clone(),
@@ -250,7 +259,17 @@ async fn append(
     create_record(store.client(), TRANSITIONS, serde_json::to_value(row)?)
         .await
         .map_err(map)?;
-    Ok(transition)
+    // What it taught goes out of use with it, here rather than in any caller,
+    // so no path that moves a verifier can forget.
+    let archived = if matches!(to, TrustState::Quarantined | TrustState::Revoked) {
+        lifecycle::archive_trained_under(store, id).await?
+    } else {
+        Vec::new()
+    };
+    Ok(VerifierMove {
+        transition,
+        archived,
+    })
 }
 
 /// Whether verifier `record` may grant reward at `now`.

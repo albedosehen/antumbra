@@ -7,7 +7,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ids::RunId;
+use crate::ids::{RunId, VerifierId};
+use crate::verifier::VerifierGrant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -26,6 +27,9 @@ pub struct RewardSignal {
     pub dimension: String,
     pub value: f32,
     pub source: RewardSource,
+    /// The named verifier that granted it, when one did (ADR-0022 S-4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier: Option<VerifierId>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -78,7 +82,19 @@ impl RewardSignal {
             dimension: dimension.into(),
             value,
             source,
+            verifier: None,
             created_at: now,
+        }
+    }
+
+    /// What a named verifier granted a run: its trained-on passes, counted, in
+    /// dimension `granted`. A count, not a step reward, so it takes a step
+    /// index of its own (`after`, past the run's last step) and never folds
+    /// with a step's readings.
+    pub fn granted(run_id: RunId, after: u32, grant: &VerifierGrant, now: DateTime<Utc>) -> Self {
+        RewardSignal {
+            verifier: Some(grant.verifier.clone()),
+            ..Self::verifier(run_id, after, "granted", grant.passes as f32, now)
         }
     }
 

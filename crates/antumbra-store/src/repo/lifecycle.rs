@@ -20,7 +20,7 @@ use surql::types::operators::eq;
 
 use antumbra_core::{
     current_status, AntumbraError, Expert, ExpertId, ExpertStatus, ExpertTransition, Generation,
-    LearnedRouter, Result, TransitionCause,
+    LearnedRouter, Result, TransitionCause, VerifierId,
 };
 
 use crate::error::map;
@@ -166,6 +166,32 @@ pub async fn load_router(store: &Store) -> Result<Option<LearnedRouter>> {
             .unwrap_or(ExpertStatus::Active)
             .is_routable()
     })))
+}
+
+/// Whether `expert` trained under `verifier`: its card lists it.
+pub fn trained_under(expert: &Expert, verifier: &VerifierId) -> bool {
+    expert.capability_card["verifiers"]
+        .as_array()
+        .is_some_and(|ids| ids.iter().any(|v| v.as_str() == Some(verifier.as_str())))
+}
+
+/// Archive every expert that trained under `verifier` and is still active or
+/// dormant (ADR-0022 S-4), and return them. Archived keeps the weights and
+/// the tripwire, and a person can revive one; nothing here deletes.
+pub async fn archive_trained_under(store: &Store, verifier: &VerifierId) -> Result<Vec<ExpertId>> {
+    let mut archived = Vec::new();
+    for (expert, status) in population(store).await? {
+        let movable = matches!(status, ExpertStatus::Active | ExpertStatus::Dormant);
+        if !movable || !trained_under(&expert, verifier) {
+            continue;
+        }
+        let cause = TransitionCause::Quarantined {
+            verifier: verifier.clone(),
+        };
+        transition(store, &expert.id, ExpertStatus::Archived, cause, None).await?;
+        archived.push(expert.id);
+    }
+    Ok(archived)
 }
 
 async fn in_states(store: &Store, keep: fn(ExpertStatus) -> bool) -> Result<Vec<Expert>> {

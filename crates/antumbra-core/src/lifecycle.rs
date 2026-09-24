@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AntumbraError, Result};
-use crate::ids::{ExpertId, Generation};
+use crate::ids::{ExpertId, Generation, VerifierId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -111,6 +111,10 @@ pub enum TransitionCause {
         generations: Vec<Generation>,
         contributions: Vec<f32>,
     },
+    /// A verifier it trained under was quarantined or revoked (ADR-0022 S-4):
+    /// what that verifier taught is kept out of routing, serving and any
+    /// training downstream, not merely scored low.
+    Quarantined { verifier: VerifierId },
 }
 
 /// One change of an expert's status, as recorded.

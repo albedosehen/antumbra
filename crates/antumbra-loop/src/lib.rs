@@ -471,15 +471,24 @@ impl<'a> GenerationLoop<'a> {
         }
     }
 
-    /// Persist the training reward curve as source-tagged signals for the critic.
+    /// Persist the training reward curve as source-tagged signals for the
+    /// critic, and what each named verifier granted the run (ADR-0022 S-4),
+    /// so every unit of reward it trained on has a named source.
     async fn record_rewards(&self, run_id: &RunId, outcome: &TrainOutcome) -> Result<()> {
         let now = Utc::now();
-        let signals: Vec<RewardSignal> = outcome
+        let mut signals: Vec<RewardSignal> = outcome
             .reward_curve
             .iter()
             .enumerate()
             .map(|(i, &v)| RewardSignal::verifier(run_id.clone(), i as u32, "fitness", v, now))
             .collect();
+        let after = u32::try_from(outcome.reward_curve.len()).unwrap_or(u32::MAX);
+        signals.extend(
+            outcome
+                .granted_by
+                .iter()
+                .map(|g| RewardSignal::granted(run_id.clone(), after, g, now)),
+        );
         reward::insert_many(self.store, &signals).await
     }
 
@@ -551,6 +560,13 @@ impl<'a> GenerationLoop<'a> {
             capability_card: serde_json::json!({
                 "generation": generation.0,
                 "exemplars": outcome.capability_exemplars,
+                // The named verifiers it trained under: quarantining one
+                // archives it (ADR-0022 S-4).
+                "verifiers": outcome
+                    .granted_by
+                    .iter()
+                    .map(|g| g.verifier.as_str())
+                    .collect::<Vec<_>>(),
             }),
             capability_vec: Some(capability_vec),
             fitness,

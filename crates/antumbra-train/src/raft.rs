@@ -8,7 +8,7 @@
 use serde_json::json;
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{Result, RunId};
+use antumbra_core::{count_grant, Result, RunId, VerifierGrant};
 
 use crate::config::RaftConfig;
 use crate::model::{CausalLm, CorpusTask, SftExample};
@@ -37,6 +37,8 @@ pub async fn raft_train(
     // audit from one aggregate number, and this is where the per-task answer
     // exists. It was already being computed and discarded.
     let mut per_task: Vec<TaskOutcome> = Vec::new();
+    // Every winner a named verifier passed is reward it granted (ADR-0022 S-4).
+    let mut granted_by: Vec<VerifierGrant> = Vec::new();
 
     let last_round = cfg.rounds.saturating_sub(1);
     for round in 0..cfg.rounds {
@@ -83,6 +85,7 @@ pub async fn raft_train(
                         prompt: task.prompt.clone(),
                         completion: sample.clone(),
                     });
+                    count_grant(&mut granted_by, &task.verify);
                 }
             }
             round_tasks.push(TaskOutcome {
@@ -130,6 +133,7 @@ pub async fn raft_train(
         // The trainer adapter, which chose the split, says what was enforced.
         holdout: None,
         recipe: None,
+        granted_by,
     })
 }
 
@@ -199,6 +203,46 @@ mod tests {
         assert!(out.adapter_uri.ends_with("shadow_g0.safetensors"));
         // capability is learned from the task it provably solved
         assert_eq!(out.capability_exemplars, vec!["complete the function"]);
+    }
+
+    #[tokio::test]
+    async fn every_trained_on_pass_of_a_named_verifier_is_counted_as_its_grant() {
+        let mut lm = FakeLm {
+            skill: AtomicUsize::new(1),
+        };
+        let verifier = MarkerVerifier {
+            expect: "PASS".into(),
+        };
+        let named = serde_json::json!({ "verifier": "verifier:a" });
+        let tasks = vec![
+            CorpusTask::new("t1", "p1").with_verify(named.clone()),
+            CorpusTask::new("t2", "p2").with_verify(serde_json::json!({ "program": "x" })),
+        ];
+        let withheld = vec![CorpusTask::new("t3", "p3").with_verify(named)];
+        let cfg = RaftConfig {
+            samples_per_task: 2,
+            rounds: 2,
+            ..RaftConfig::default()
+        };
+        let out = raft_train(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &withheld,
+            &RunId::new("r"),
+            &cfg,
+        )
+        .await
+        .unwrap();
+        // One winner in the first round and two in the second, for t1 only:
+        // t2's spec is its own, and t3 is measured, never trained on.
+        assert_eq!(
+            out.granted_by,
+            vec![antumbra_core::VerifierGrant {
+                verifier: antumbra_core::VerifierId::new("verifier:a"),
+                passes: 3
+            }]
+        );
     }
 
     #[tokio::test]

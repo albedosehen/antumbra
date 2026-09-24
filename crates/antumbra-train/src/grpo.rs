@@ -13,7 +13,7 @@ use candle_nn::ops::log_softmax;
 use serde_json::json;
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{AntumbraError, Result, RunId, TrainingRecipe};
+use antumbra_core::{count_grant, AntumbraError, Result, RunId, TrainingRecipe, VerifierGrant};
 
 use crate::config::RaftConfig;
 use crate::model::CorpusTask;
@@ -162,6 +162,8 @@ pub async fn grpo_train(
     // (ADR-0022). The same reading RAFT takes: a task passed when any sample
     // of it verified.
     let mut per_task: Vec<TaskOutcome> = Vec::new();
+    // Every pass in a group that steps is reward granted (ADR-0022 S-4).
+    let mut granted_by: Vec<VerifierGrant> = Vec::new();
 
     let last_round = cfg.rounds.saturating_sub(1);
     for round in 0..cfg.rounds {
@@ -225,6 +227,10 @@ pub async fn grpo_train(
             if advantages.iter().all(|a| a.abs() < 1e-6) {
                 continue;
             }
+            // The group steps, so every pass in it is reward granted.
+            for _ in rewards.iter().filter(|&&r| r > 0.0) {
+                count_grant(&mut granted_by, &task.verify);
+            }
 
             let mut group = Vec::with_capacity(samples.len());
             for (sample, advantage) in samples.iter().zip(advantages) {
@@ -264,6 +270,7 @@ pub async fn grpo_train(
         boundary_findings: Vec::new(),
         holdout: None,
         recipe: None,
+        granted_by,
     })
 }
 

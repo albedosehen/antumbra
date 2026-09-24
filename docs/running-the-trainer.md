@@ -115,6 +115,7 @@ Synthesized checks start with `antumbra verifier synthesize`, where the model pr
 - **Trust:** the 95% upper bound on its false-positive rate must be at or under 0.10 (`--confidence`, `--max-false-positive`), which takes at least 29 known-bad cases with none passed. It must also accept half the known-good ones (`--min-accepted`).
 - **Time to live:** trust lasts seven days (`--ttl-days`), then lapses unless a new measurement renews it.
 - **Quarantine:** a trusted verifier re-measured as unsound, or caught by `challenge`, stops granting at once. `quarantine` and `revoke` are the manual moves. No command promotes one.
+- **What it taught:** `train` records the passes each named verifier granted, on the reward rows and on the card of the expert that graduates. Quarantining or revoking a verifier archives every expert that trained under it. `revive` brings one back.
 
 ## Corpus format
 

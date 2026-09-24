@@ -8,7 +8,9 @@
 //! gated on ground truth, neither trusts unverified teacher text.
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{governing_feature_from_pair, BoundaryFinding, Result, RunId};
+use antumbra_core::{
+    count_grant, governing_feature_from_pair, BoundaryFinding, Result, RunId, VerifierGrant,
+};
 use serde_json::json;
 
 use crate::config::RaftConfig;
@@ -64,6 +66,7 @@ pub async fn capture_corrections(
     // boundary -- but only once verified, so an unchecked "rule" never gates
     // routing (the same ground-truth gate the population itself sits behind).
     let mut findings: Vec<BoundaryFinding> = Vec::new();
+    let mut granted_by: Vec<VerifierGrant> = Vec::new();
     for (i, task) in tasks.iter().enumerate() {
         let Some(correction) = task.completion.as_deref() else {
             continue;
@@ -74,6 +77,7 @@ pub async fn capture_corrections(
                 prompt: task.prompt.clone(),
                 completion: correction.to_string(),
             });
+            count_grant(&mut granted_by, &task.verify);
             if !solved.contains(&task.prompt) {
                 solved.push(task.prompt.clone());
             }
@@ -161,6 +165,7 @@ pub async fn capture_corrections(
             .collect(),
         holdout: None,
         recipe: None,
+        granted_by,
     })
 }
 

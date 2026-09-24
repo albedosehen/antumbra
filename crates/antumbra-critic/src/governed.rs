@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use antumbra_core::ports::{TrustedVerifiers, Verifier, VerifierVerdict, VerifyRequest};
-use antumbra_core::{Result, VerifierId};
+use antumbra_core::{named_verifier, Result};
 
 pub struct Governed<V> {
     inner: V,
@@ -28,11 +28,7 @@ impl<V> Governed<V> {
 #[async_trait]
 impl<V: Verifier> Verifier for Governed<V> {
     async fn verify(&self, req: &VerifyRequest) -> Result<VerifierVerdict> {
-        let named = req
-            .artifact
-            .get("verify")
-            .and_then(|v| v.get("verifier"))
-            .and_then(|v| v.as_str());
+        let named = req.artifact.get("verify").and_then(named_verifier);
         let Some(named) = named else {
             return self.inner.verify(req).await;
         };
@@ -41,11 +37,7 @@ impl<V: Verifier> Verifier for Governed<V> {
             .get("task")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        match self
-            .registry
-            .trusted_spec(&VerifierId::new(named), task)
-            .await?
-        {
+        match self.registry.trusted_spec(&named, task).await? {
             Some(spec) => {
                 let mut resolved = req.clone();
                 resolved.artifact["verify"] = spec;
@@ -64,7 +56,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use antumbra_core::RunId;
+    use antumbra_core::{RunId, VerifierId};
 
     use super::*;
     use crate::CommandVerifier;

@@ -7,9 +7,11 @@ use chrono::{TimeDelta, Utc};
 
 use antumbra_core::ports::TrustedVerifiers;
 use antumbra_core::{
-    Tally, TrustPolicy, TrustState, TrustVerdict, VerifierOrigin, VerifierRecord, VerifierTier,
+    Expert, ExpertId, ExpertStatus, Generation, Tally, TransitionCause, TrustPolicy, TrustState,
+    TrustVerdict, VerifierId, VerifierOrigin, VerifierRecord, VerifierTier,
 };
 use antumbra_store::repo::verifier::{self, Registry};
+use antumbra_store::repo::{expert, lifecycle};
 use antumbra_store::Store;
 
 fn synthesized(task: Option<&str>) -> VerifierRecord {
@@ -87,7 +89,7 @@ async fn only_a_sound_measurement_lets_a_synthesized_verifier_grant_reward() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        (moved.from, moved.to),
+        (moved.transition.from, moved.transition.to),
         (TrustState::Proposed, TrustState::Trusted)
     );
     assert_eq!(
@@ -116,7 +118,7 @@ async fn only_a_sound_measurement_lets_a_synthesized_verifier_grant_reward() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(moved.to, TrustState::Quarantined);
+    assert_eq!(moved.transition.to, TrustState::Quarantined);
     assert!(registry
         .trusted_spec(&record.id, "strings/swap")
         .await
@@ -161,7 +163,7 @@ async fn a_flaky_proposal_is_revoked_outright() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(moved.to, TrustState::Revoked);
+    assert_eq!(moved.transition.to, TrustState::Revoked);
 }
 
 #[tokio::test]
@@ -207,4 +209,83 @@ async fn an_authored_verifier_grants_by_authorship_until_a_person_moves_it() {
         .await
         .unwrap()
         .is_none());
+}
+
+fn expert_under(id: &str, verifiers: &[&VerifierId]) -> Expert {
+    Expert {
+        id: ExpertId::new(id),
+        name: id.to_string(),
+        base_model: "base".into(),
+        artifact_uri: format!("adapters/{id}.safetensors"),
+        capability_card: serde_json::json!({
+            "verifiers": verifiers.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
+        }),
+        capability_vec: None,
+        fitness: 0.9,
+        frozen_at: Some(Utc::now()),
+        generation: Generation::ZERO,
+        owner: None,
+        compartment: None,
+        placed_on: None,
+        created_at: Utc::now(),
+    }
+}
+
+#[tokio::test]
+async fn quarantining_a_verifier_archives_what_it_taught_and_nothing_else() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let record = verifier::propose(&store, &synthesized(None)).await.unwrap();
+    let other = VerifierId::new("verifier:other");
+    for e in [
+        expert_under("expert:taught", &[&record.id]),
+        expert_under("expert:both", &[&other, &record.id]),
+        expert_under("expert:dormant", &[&record.id]),
+        expert_under("expert:elsewhere", &[&other]),
+        expert_under("expert:none", &[]),
+    ] {
+        expert::insert(&store, &e).await.unwrap();
+    }
+    let dormant = ExpertId::new("expert:dormant");
+    let operator = TransitionCause::Operator { note: None };
+    lifecycle::transition(&store, &dormant, ExpertStatus::Dormant, operator, None)
+        .await
+        .unwrap();
+
+    let sound = sound_tally().judge(&record.id, Utc::now(), &TrustPolicy::default());
+    let trusted = verifier::record_measurement(&store, &record, &sound)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(trusted.archived.is_empty(), "trust archives nothing");
+
+    let moved = verifier::transition(&store, &record.id, TrustState::Quarantined, None)
+        .await
+        .unwrap();
+    let mut archived: Vec<&str> = moved.archived.iter().map(|e| e.as_str()).collect();
+    archived.sort();
+    assert_eq!(archived, ["expert:both", "expert:dormant", "expert:taught"]);
+    let statuses = lifecycle::statuses(&store).await.unwrap();
+    assert_eq!(
+        statuses.get(&ExpertId::new("expert:taught")),
+        Some(&ExpertStatus::Archived)
+    );
+    assert_eq!(
+        statuses.get(&ExpertId::new("expert:elsewhere")),
+        None,
+        "still active"
+    );
+    let history = lifecycle::history(&store, &ExpertId::new("expert:taught"))
+        .await
+        .unwrap();
+    assert_eq!(
+        history.last().unwrap().cause,
+        TransitionCause::Quarantined {
+            verifier: record.id.clone()
+        }
+    );
+    // Revoking it afterwards finds nothing left to archive.
+    let revoked = verifier::transition(&store, &record.id, TrustState::Revoked, None)
+        .await
+        .unwrap();
+    assert!(revoked.archived.is_empty());
 }

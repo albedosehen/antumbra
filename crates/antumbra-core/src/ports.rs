@@ -147,6 +147,11 @@ pub struct TrainOutcome {
     /// so a row never names settings a run did not use.
     #[serde(default)]
     pub recipe: Option<TrainingRecipe>,
+    /// The named verifiers whose passes this run trained on, with how many
+    /// (ADR-0022 S-4). A verifier later quarantined can then be traced to
+    /// what it taught.
+    #[serde(default)]
+    pub granted_by: Vec<crate::verifier::VerifierGrant>,
 }
 
 /// Measure a trained shadow again for graduation (ADR-0022 S-1): the
