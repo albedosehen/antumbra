@@ -490,9 +490,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    `scripts/critic-validate.sh` trains one on a skill and reads it on a second, independently seeded set of answers.
 
+   **Recalibration and the twin are in.**
+   - **Recalibration:** the record asks for quantile regression rather than temperature scaling. For a verdict that is 0 or 1, every conditional quantile is 0 or 1, so the map is fitted by isotonic regression instead (`Isotonic`, pool-adjacent-violators). That keeps what the record wanted: no parametric form, so a critic overconfident in one range is corrected there and not scaled everywhere.
+   - **Where it runs:** `critic train` fits the map on half the held-out tasks and reads the other half through it, raw and recalibrated side by side. That is the per-generation step, run once.
+   - **The twin:** `critic measure --twin` reads a second critic, trained on another seed, on the same completions, and reports their rank agreement.
+   - **The harness:** `critic-validate.sh` trains both and reads them on a third set neither has seen.
+
    Still to come for this step:
    - **The GPU reading,** and then the record's own test: fewer samples to graduation with the critic than with verifier-only reward.
-   - **Per-generation recalibration,** and critic-derived labels held to the floor, once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
+   - **Recalibration and the twin inside the loop,** each generation, and critic-derived labels held to the floor once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
    - **The twin.** A second critic on another seed and slice, kept as an instrument, whose agreement with the first is watched for decline.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
 8. Never: S-6.
