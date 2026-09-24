@@ -20,6 +20,7 @@ pub mod evaluation;
 pub mod expert;
 pub mod generational;
 pub mod genesis;
+pub mod grow;
 pub mod hive;
 pub mod ids;
 pub mod keyed;
@@ -55,6 +56,7 @@ pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};
 pub use expert::{cosine_similarity, Expert};
 pub use generational::{GenerationHead, LoopCommand, LoopControl, LoopState};
 pub use genesis::{GenesisRequest, GenesisStatus};
+pub use grow::{GrowRecord, RegionCandidate, RegionCensus};
 pub use hive::{is_open, Hive, HiveMembership, HiveOffer, OfferStatus, OfferedKind};
 pub use ids::{
     BoundaryId, CompartmentId, DocumentChunkId, ExpertId, Generation, MemoryId, RunId, ShadowId,

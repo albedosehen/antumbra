@@ -83,6 +83,13 @@ pub struct TrainRequest {
     /// recipe was searched.
     #[serde(default)]
     pub recipe: Option<TrainingRecipe>,
+    /// The grow step's choice of what to learn (ADR-0022 S-3). When not empty,
+    /// the shadow learns only from these tasks, among those its holdout lets
+    /// it learn from. Withheld tasks are measured as always, so a focused run
+    /// carries the same instruments as a full one. Empty learns from every
+    /// visible task, as every run did before.
+    #[serde(default)]
+    pub focus: Vec<String>,
 }
 
 /// One corpus task, as the final training round found it.
@@ -188,6 +195,10 @@ impl Remeasurement {
 pub struct TaskPrompt {
     pub id: String,
     pub prompt: String,
+    /// The region the task belongs to: its skill, the unit the grow step
+    /// chooses among (ADR-0022 S-3).
+    #[serde(default)]
+    pub region: String,
 }
 
 /// Score the base model under one adapter, or alone, on named tasks: the

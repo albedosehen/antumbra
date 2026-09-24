@@ -53,6 +53,7 @@ impl Trainer for Scorer {
             .map(|p| TaskPrompt {
                 id: p.replace(' ', "-"),
                 prompt: p.to_string(),
+                region: p.split(' ').next().unwrap_or_default().to_string(),
             })
             .collect())
     }

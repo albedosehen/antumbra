@@ -23,6 +23,7 @@ pub(crate) fn live_tasks(
     Ok(learn
         .into_iter()
         .map(|t| TaskPrompt {
+            region: t.skill().to_string(),
             id: t.id,
             prompt: t.prompt,
         })

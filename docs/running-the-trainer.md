@@ -55,6 +55,17 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 - **Why:** two experts from one corpus have near-identical capability vectors. The heuristic gate routes on the margin between its top two, so with both present it escalated every task and served neither.
 - **Turning it off:** a value above 1 admits every graduate.
 
+### Choosing what to learn: `--grow`
+
+`train --grow` lets each generation learn from one region (a skill) instead of every visible task (ADR-0022 S-3). It picks the region where the population, measured on the latest census, succeeds about half the time: learnability `p(1-p)`.
+- **The gate:** regions where it never succeeds are gated out.
+- **Redundancy:** a region like the ones chosen recently is discounted.
+- **The unfiltered share:** a quarter of what is learned is drawn from the whole visible slice.
+- **The census:** it comes from the contribution measurement, which `--grow` turns on every generation over 64 live tasks.
+- **The first generation:** it has no census yet, so it learns from everything.
+- **Output:** each generation prints the chosen region, its learnability, the last choice's realized credit, and the diversity instruments.
+- **The baseline:** `--grow-uniform` chooses among the regions that pass the gate uniformly at random instead. It is the baseline the grow step is measured against.
+
 ### Merging siblings: `--merge`
 
 `train --merge` considers the most similar pair of active shared experts at each generation boundary (ADR-0022 S-5).

@@ -359,6 +359,31 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - the byte-identity tripwire checks every expert whose weights are kept through every demotion, archive and merge;
    - the population is compared with its single best expert whether or not the comparison flatters it.
 5. [ ] S-3, the learned grow step.
+
+   **The grow step chooses, as gate, then score, then regularize.** A region is a skill.
+   - **The census:** with `LoopConfig::grow` set (`train --grow`), each contribution measurement leaves a census. It holds the routed population's acceptability on each region's live tasks, judged by the authored verifiers, with the base model standing in where the gate escalates and, before the first expert, alone.
+   - **The gate:** from the latest census, a region is admitted only where the population is above 0.05, so impossible and unreachable regions stay out.
+   - **The score:** each admitted region is scored by learnability, `p(1-p)`.
+   - **Regularizing:** the score is discounted by up to half for the region's likeness, as the cosine of task centroids, to the regions chosen in the last four generations.
+   - **What is learned:** the chosen region's visible tasks, plus a quarter drawn unfiltered from the whole visible slice.
+   - **`TrainRequest::focus`:** it narrows what the shadow learns from after the holdout split, so a focused generation is measured, held-out and audit slices included, exactly as a full one is.
+   - **The record:** each decision is a `grow` row with every candidate weighed and the credit its predecessor realized: the chosen region's acceptability at the next census, less what it was when chosen.
+   - **The instruments** are reported each generation: the entropy of the regions chosen, the share of regions ever chosen, and the regions once gated out that now pass.
+
+   **On the GPU, the grow step worked, and its credit said what learnability could not.** The run was three generations over the full workbench corpus: eight skills, 236 visible tasks. It is not yet the comparison the step is judged on.
+   - **Generation 0** had no census and learned from every visible task, in 77 minutes. Its expert contributed +0.30 over the base model on the 64 live tasks, all 64 routed to it.
+   - **Generation 1** learned from `grids`, the most learnable region at 0.246: its 30 visible tasks and 10 unfiltered, in 20 minutes. Its graduate took 4 of the 64 live tasks and contributed nothing there.
+   - **Generation 2** was steered off `grids` by the redundancy discount and learned from `mappings` (0.239). Its graduate took 8 tasks and did 0.16 worse on them than the expert it displaced.
+   - **The credit** recorded for the `grids` choice was -0.09: the region's acceptability fell after it was chosen.
+   - **The baseline** fell as the specialists drew tasks from the generalist: routing added 0.00, then -0.02, then -0.05 against the best single expert.
+
+   A specialist trained from the base on one region's forty tasks did worse on its own region than the generalist trained on all of them. Learnability chose sensibly, and the realized credit, which is what the record makes the objective, came out negative. Admission let both specialists in, since neither was a twin (similarity 0.82 and 0.77), and only contribution and retirement would catch them later. Two things follow for the next slice:
+   - credit, not learnability, has to decide;
+   - admission should measure a candidate against the expert currently serving its region, not only against its twins.
+
+   Still to come for this step:
+   - **Credit as the objective:** the policy learning from its recorded credit, with learnability as the prior.
+   - **The comparison:** a run against the empty status quo and against uniform sampling, on graduations per unit of compute. Until it beats both, the step stays unchecked. The uniform baseline is in (`Choosing::Uniform`, `train --grow --grow-uniform`). It has the same gate, focus and unfiltered share, and differs only in how a region is chosen.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 8. Never: S-6.

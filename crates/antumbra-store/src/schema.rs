@@ -337,6 +337,14 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("baseline_run_idx", ["run_id", "generation"])]),
+        // The grow step (ADR-0022 S-3): the region census each contribution
+        // measurement takes, and the decision each generation made from it.
+        table_schema("region_census")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("census_run_idx", ["run_id", "generation"])]),
+        table_schema("grow")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("grow_run_idx", ["run_id", "generation"])]),
         // Validation harness.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)

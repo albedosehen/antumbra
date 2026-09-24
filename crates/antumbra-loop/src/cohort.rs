@@ -167,6 +167,7 @@ impl GenerationLoop<'_> {
         &self,
         head: &mut GenerationHead,
         holdout: Option<Holdout>,
+        focus: &[String],
     ) -> Result<Vec<Member>> {
         let run_id = head.run_id.clone();
         let generation = head.generation;
@@ -196,6 +197,7 @@ impl GenerationLoop<'_> {
                     corpus_task_ids: Vec::new(),
                     holdout,
                     recipe: asked,
+                    focus: focus.to_vec(),
                 })
                 .await?;
             let recipe = self
