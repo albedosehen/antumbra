@@ -466,6 +466,7 @@ async fn run() -> anyhow::Result<()> {
             slow,
             slow_interval,
             anneal,
+            contribution_every,
             remeasure,
         } => {
             models::train(
@@ -486,6 +487,7 @@ async fn run() -> anyhow::Result<()> {
                     slow,
                     slow_interval,
                     anneal,
+                    contribution_every,
                     remeasure,
                 },
             )

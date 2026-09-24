@@ -9,6 +9,8 @@ description = "The durable generational loop: a resumable state-machine-in-DB (g
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 antumbra-eclipse = { path = "../antumbra-eclipse" }
+# The heuristic gate, so contribution routes the live tasks as serving does.
+antumbra-gate = { path = "../antumbra-gate" }
 antumbra-store = { path = "../antumbra-store" }
 # Promotes a verified correction's BoundaryFinding into a persistable, embedded
 # actionable counterfactual boundary.

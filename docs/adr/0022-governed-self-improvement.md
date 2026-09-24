@@ -297,8 +297,21 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    **`antumbra retire` demotes.** It used to delete the expert's row outright, the command the record warns an automated version would industrialize. It now moves the expert to dormant, or to archived with `--archive`, and records the operator's note. `antumbra revive` brings either back. The `population` MCP tool reports each expert's status.
 
+   **Each shared expert's leave-one-out contribution is measured and kept.** With `LoopConfig::contribution` set (`train --contribution-every N`), the loop measures it inside the Consolidate step on its schedule. It works on the live tasks, which are the visible slice. The held-out and audit slices are never read, because demotion is a selection.
+   - **Routing:** each task is routed as `ask` routes it: the learned router masked to the active experts when one is trained, the heuristic gate otherwise.
+   - **With and without:** for every task routed to an expert, the gate routes it again with that expert masked. It goes to the next expert, or to the base model when nothing else covers it.
+   - **Scoring:** both sides are scored under the same seeds, so each task is a paired comparison.
+   - **Cost:** masking one expert moves only its own tasks, and every adapter is evaluated once, over the union of tasks either side needs. A measurement costs about two evaluations of the live tasks, not two per expert.
+   - **The record:** a `contribution` row per expert per measured generation, kept apart from `evaluation_run`. That table's latest row per expert is the tripwire's freeze baseline, and a contribution row there would read as drift. Each row holds the routing share, the mean with and without the expert, and the seeds. An expert nothing routes to is recorded as unused, which is not the same as useless: only the useless are candidates for anything.
+   - **Scope:** measured are the shared experts this node serves. A private expert routes only for its owner, and an adapter on another node cannot be scored here.
+
+   **On the GPU it measured a contribution, and then showed why admission has to be gated.** The run was two generations over the workbench `sequences` corpus, held out, with no learned router yet.
+   - **Generation 0:** its graduate took all 30 live tasks and scored 0.77 on them, against 0.60 for the base model: a contribution of +0.17. The measurement took 13 minutes, about as long as the generation's training.
+   - **Generation 1:** it graduated a second expert from the same corpus, and both came out unused, 0 of 30 routed. Their capability vectors nearly coincide. The heuristic gate routes on the margin between its top two experts, so it escalated every task, where either expert alone would have taken all 30.
+
+   That is the dilution the record describes, and it arrived at the second expert. It is also why unused is kept apart from useless: neither expert was useless, and demoting either on routing share would have been wrong. The cure is admission gating, not retirement.
+
    Still to come for this step:
-   - the leave-one-out contribution history;
    - the two detectors in series, which let the loop make the moves a person makes now;
    - admission gating at graduation;
    - conservative merging;

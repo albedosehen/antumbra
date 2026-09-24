@@ -32,10 +32,12 @@ use antumbra_store::repo::{
 use antumbra_store::Store;
 
 mod cohort;
+mod contribution;
 mod measure;
 mod recipe;
 pub mod search;
 pub use cohort::{CohortMember, Remeasure};
+pub use contribution::ContributionPolicy;
 use measure::Measurement;
 
 /// The shadow a generation of a run trains. It also names that generation's
@@ -107,6 +109,11 @@ pub struct LoopConfig {
     /// many audited generations it needs, and the share of a search gain the
     /// audit slice must show for the gain to count as carried.
     pub watch: Watch,
+    /// Measure every shared expert's leave-one-out contribution on the live
+    /// tasks (ADR-0022 S-5), at the generation boundary, on this schedule.
+    /// `None` (the default) leaves it unmeasured: it costs about two
+    /// evaluations of the live tasks each time it runs.
+    pub contribution: Option<ContributionPolicy>,
 }
 
 impl Default for LoopConfig {
@@ -120,6 +127,7 @@ impl Default for LoopConfig {
             recipe: None,
             search: None,
             remeasure: None,
+            contribution: None,
         }
     }
 }
@@ -162,6 +170,9 @@ pub struct GenerationReport {
     pub graduation_score: f32,
     /// The re-measurement graduation was judged on, when the loop took one.
     pub remeasured: Option<antumbra_core::ports::Remeasurement>,
+    /// Each shared expert's leave-one-out contribution, when this generation
+    /// measured it (ADR-0022 S-5). Empty when it was not due.
+    pub contribution: Vec<antumbra_core::ContributionRecord>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -286,7 +297,14 @@ impl<'a> GenerationLoop<'a> {
         .await?;
 
         // decide -> consolidate -> grow (the last step bumps the generation).
+        // Contribution is measured at the boundary, over the population as
+        // this generation left it. A process that dies partway through it
+        // resumes past it, since what the generation decided is already
+        // written: one measurement is lost, never a generation repeated.
         self.advance(head, LoopState::Consolidate).await?;
+        let contribution = self
+            .measure_contribution(&run_id, generation, holdout)
+            .await?;
         self.advance(head, LoopState::Grow).await?;
 
         // The population just changed; verify every frozen expert is still
@@ -306,6 +324,7 @@ impl<'a> GenerationLoop<'a> {
             cohort,
             graduation_score,
             remeasured,
+            contribution,
         })
     }
 
