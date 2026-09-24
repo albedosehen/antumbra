@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 
-use antumbra_core::{Result, TrainingRecipe};
+use antumbra_core::{AntumbraError, Result, TrainingRecipe};
 
 /// A verifiable task drawn from the corpus (your repo): a prompt to complete,
 /// plus the per-task `verify` spec passed through to the verifier. For
@@ -132,6 +132,16 @@ pub trait CausalLm {
     async fn sft_step(&mut self, batch: &[SftExample]) -> Result<f32>;
     /// Persist the trained LoRA adapter (safetensors).
     fn save_adapter(&self, path: &str) -> Result<()>;
+
+    /// Draw every later sample from `seed`, so a measurement can be repeated
+    /// exactly or taken again under a seed its draws have never used. The
+    /// default refuses: a model that cannot seed its draws must say so, or a
+    /// "new seed" re-measurement would quietly reuse whatever stream the model
+    /// was already on.
+    fn seed_draws(&mut self, seed: u64) -> Result<()> {
+        let _ = seed;
+        Err(AntumbraError::Unimplemented("seeded draws"))
+    }
 }
 
 /// Builds a fresh [`CausalLm`] for a shadow: the shared base plus a new LoRA

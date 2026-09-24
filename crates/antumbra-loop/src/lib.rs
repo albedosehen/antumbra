@@ -35,7 +35,7 @@ mod cohort;
 mod measure;
 mod recipe;
 pub mod search;
-pub use cohort::CohortMember;
+pub use cohort::{CohortMember, Remeasure};
 use measure::Measurement;
 
 /// The shadow a generation of a run trains. It also names that generation's
@@ -97,6 +97,12 @@ pub struct LoopConfig {
     /// recipes the search proposes, every member from the base, and carries the
     /// best forward. `None` (the default) trains one shadow under `recipe`.
     pub search: Option<search::SearchPolicy>,
+    /// Judge graduation on a re-measurement (ADR-0022 S-1's fourth
+    /// constraint): the carried-forward shadow is evaluated again, on the
+    /// held-out slice when there is one, once per fresh seed, and the threshold
+    /// applies to the mean. `None` (the default) judges on training fitness, or
+    /// on its shrunk form under a search.
+    pub remeasure: Option<Remeasure>,
     /// How the audit-slice trend is read across generations: the window, how
     /// many audited generations it needs, and the share of a search gain the
     /// audit slice must show for the gain to count as carried.
@@ -113,6 +119,7 @@ impl Default for LoopConfig {
             watch: Watch::default(),
             recipe: None,
             search: None,
+            remeasure: None,
         }
     }
 }
@@ -151,8 +158,10 @@ pub struct GenerationReport {
     pub cohort: Vec<CohortMember>,
     /// The number the graduation threshold was applied to: the carried-forward
     /// shadow's fitness, shrunk toward the cohort's mean when it was chosen
-    /// from a cohort.
+    /// from a cohort, or the mean of its re-measurement when the loop took one.
     pub graduation_score: f32,
+    /// The re-measurement graduation was judged on, when the loop took one.
+    pub remeasured: Option<antumbra_core::ports::Remeasurement>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -227,7 +236,7 @@ impl<'a> GenerationLoop<'a> {
             recipe,
         } = winner;
         let shadow_id = sh.id.clone();
-        let measured = self
+        let mut measured = self
             .measure(&run_id, generation, holdout.as_ref(), &outcome)
             .await?;
 
@@ -254,8 +263,12 @@ impl<'a> GenerationLoop<'a> {
                 generation.0, report.impossible_passed
             );
         }
-        let graduation_score = self.graduation_score(fitness, &cohort);
-        let graduated = graduation_score >= self.cfg.graduate_threshold && shortcut.is_none();
+        let shortcut = shortcut.is_some();
+        let (graduation_score, remeasured) = self
+            .judge(&run_id, generation, &shadow_id, &outcome, &cohort, shortcut)
+            .await?;
+        measured.remeasured = remeasured.clone();
+        let graduated = graduation_score >= self.cfg.graduate_threshold && !shortcut;
         if graduated {
             sh.advance_to(ShadowStatus::Graduated)?;
             shadow::upsert(self.store, &sh).await?;
@@ -291,6 +304,7 @@ impl<'a> GenerationLoop<'a> {
             recipe,
             cohort,
             graduation_score,
+            remeasured,
         })
     }
 
@@ -363,6 +377,7 @@ impl<'a> GenerationLoop<'a> {
                 "partition_seed": self.cfg.partition.map(|p| p.seed),
                 "instruments": measured.instruments,
                 "trend": measured.trend,
+                "remeasured": measured.remeasured,
             })),
             regression_fingerprint: Some(outcome.adapter_uri.clone()),
             created_at: Utc::now(),

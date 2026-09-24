@@ -246,7 +246,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    `antumbra train --search` turns it on, with `--cohort` members, and adds the KL weight to the search under GRPO.
 
-   Still to come for this step: graduation on a fresh slice with a new seed and at least three repeats. That needs seeded sampling, which the Qwen sampler does not have. Also still to come: the fast and slow cohorts that blunt greed.
+   **Graduation re-measures.** Sampling can now be seeded: `CausalLm::seed_draws` points later draws at a seed instead of the process-wide nonce, and it refuses by default, so a model that cannot seed says so rather than repeating one stream. `Trainer::remeasure` loads the carried-forward shadow's adapter and runs one full evaluation per seed.
+   - **The slice** is the held-out one when the shadow trained under a holdout its trainer confirmed. It is frozen from training and search, and the partition reserves it for gating graduation. Otherwise the trained tasks are re-drawn. The audit slice and impossible tasks are never used.
+   - **The seeds** come from the run, generation and repeat, so a resumed run re-measures exactly what a continuous one would, and never on training's stream.
+   - **The judgement:** with `LoopConfig::remeasure`, the graduation threshold applies to the mean. The pass rates are stored on the generation's evaluation row with the fitness they qualify. A generation failed by an impossible-task pass is not re-measured.
+   - **Coverage:** RAFT and correction capture implement it. The GRPO trainer's model does not yet satisfy the `CausalLm` interface the evaluation runs on, so under GRPO the shrunk cohort score remains the rule, and `train` says so.
+
+   `train --search` re-measures three times by default, and `--remeasure N` sets the count for any run.
+
+   Still to come for this step: the fast and slow cohorts that blunt greed, and a GPU run of the whole search. Until that run, the step stays unchecked.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.

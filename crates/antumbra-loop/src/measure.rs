@@ -8,7 +8,7 @@
 //! choosing it: a generation that passed an impossible task fails whole, so it
 //! does not graduate. No number measured here reaches training or reward.
 
-use antumbra_core::ports::{TaskOutcome, TrainOutcome};
+use antumbra_core::ports::{Remeasurement, TaskOutcome, TrainOutcome};
 use antumbra_core::slice::{Holdout, Slice};
 use antumbra_core::{EvaluationRun, Generation, Result, RunId, SubjectKind};
 use antumbra_eclipse::instrument::GenerationReport as InstrumentReport;
@@ -22,6 +22,8 @@ use crate::GenerationLoop;
 pub(crate) struct Measurement {
     pub(crate) instruments: Option<InstrumentReport>,
     pub(crate) trend: Option<Trend>,
+    /// What graduation was judged on, when the loop re-measured the shadow.
+    pub(crate) remeasured: Option<Remeasurement>,
 }
 
 impl GenerationLoop<'_> {
@@ -100,6 +102,7 @@ impl GenerationLoop<'_> {
             return Ok(Measurement {
                 instruments,
                 trend: None,
+                remeasured: None,
             });
         };
         let current = Point {
@@ -121,6 +124,7 @@ impl GenerationLoop<'_> {
         Ok(Measurement {
             instruments,
             trend: Some(trend),
+            remeasured: None,
         })
     }
 

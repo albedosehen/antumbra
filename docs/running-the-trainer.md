@@ -43,8 +43,12 @@ It is off by default because it changes what is learned, and because the demo co
 `train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes (ADR-0022 S-1).
 - **What is searched:** learning rate and batch size, plus the KL weight under `--algo grpo`.
 - **Every member trains from the base.** Only the best member's recipe is carried forward, and it leads the next generation's cohort. No member starts from another's weights, so each graduate is a skill of its own.
-- **Graduation:** until graduation re-measures on a fresh slice, the best member's fitness is shrunk halfway toward the cohort's mean before the threshold applies. Picking the best of a noisy few overstates it.
-- **Output:** each generation prints every member's recipe and fitness, and the score graduation was judged on. Every member's recipe is stored as a `recipe` row, and those rows are the history later generations are proposed from.
+- **Graduation:** the best member is judged on a re-measurement, not on the training fitness it was picked for. Picking the best of a noisy few overstates it.
+  - Its adapter is evaluated again under three fresh seeds (`--remeasure N` to change the count, 0 for off).
+  - With `--holdout`, the tasks are the held-out slice, which it never trained on. Without it, the tasks are the ones it trained on, re-drawn.
+  - The threshold applies to the mean.
+  - Re-measurement is not yet available under GRPO. There, the best member's fitness is shrunk halfway toward the cohort's mean instead.
+- **Output:** each generation prints every member's recipe and fitness, and the score graduation was judged on, including the re-measured pass rates. Every member's recipe is stored as a `recipe` row, and those rows are the history later generations are proposed from.
 - **Cost:** a generation takes the cohort size times as long. Combine it with `--holdout` on a corpus of real size, so the audit trend can tell a search that improves from one that overtunes.
 
 ## Corpus format

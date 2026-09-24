@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::boundary::BoundaryFinding;
-use crate::error::Result;
+use crate::error::{AntumbraError, Result};
 use crate::ids::{ExpertId, RunId, ShadowId};
 use crate::recipe::TrainingRecipe;
 use crate::slice::Holdout;
@@ -142,11 +142,59 @@ pub struct TrainOutcome {
     pub recipe: Option<TrainingRecipe>,
 }
 
+/// Measure a trained shadow again for graduation (ADR-0022 S-1): the
+/// fitness a search ranked by is a noisy estimate chosen for being high, and
+/// the record's fourth constraint puts the graduation threshold on a fresh
+/// measurement instead: a fresh slice, a new seed, at least three repeats.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RemeasureRequest {
+    pub shadow: ShadowId,
+    pub base_model: String,
+    pub adapter_uri: String,
+    /// The holdout the shadow's trainer confirmed it enforced. Its held-out
+    /// slice is the fresh one: frozen away from training and search, and
+    /// reserved for gating graduation. `None` re-draws the tasks the shadow
+    /// trained on, which answers the noise but not generalization.
+    #[serde(default)]
+    pub holdout: Option<Holdout>,
+    /// One full evaluation per seed, each drawing from its own.
+    pub seeds: Vec<u64>,
+}
+
+/// What a re-measurement found.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Remeasurement {
+    /// Pass rate per seed, in seed order.
+    pub pass_rates: Vec<f32>,
+    /// Whether the tasks were the held-out slice, never trained on, rather
+    /// than the tasks the shadow trained on.
+    pub held_out: bool,
+    /// How many tasks each evaluation covered.
+    pub tasks: usize,
+}
+
+impl Remeasurement {
+    /// The mean pass rate over the seeds, which the graduation threshold is
+    /// applied to. `None` with no evaluations.
+    pub fn mean(&self) -> Option<f32> {
+        (!self.pass_rates.is_empty())
+            .then(|| self.pass_rates.iter().sum::<f32>() / self.pass_rates.len() as f32)
+    }
+}
+
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;
 /// in v0 this is a DIY candle QLoRA path, stubbed behind this trait until built.
 #[async_trait]
 pub trait Trainer: Send + Sync {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome>;
+
+    /// Re-measure a trained shadow's adapter: the number graduation is judged
+    /// on when the loop asks for it. The default refuses, so a trainer that
+    /// cannot re-measure is never taken to have done it.
+    async fn remeasure(&self, req: RemeasureRequest) -> Result<Remeasurement> {
+        let _ = req;
+        Err(AntumbraError::Unimplemented("re-measurement"))
+    }
 }
 
 // --- reward ----------------------------------------------------------------

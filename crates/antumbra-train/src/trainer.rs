@@ -16,13 +16,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use antumbra_core::ports::{TrainOutcome, TrainRequest, Trainer, Verifier};
+use antumbra_core::ports::{
+    RemeasureRequest, Remeasurement, TrainOutcome, TrainRequest, Trainer, Verifier,
+};
+use antumbra_core::slice::{Holdout, Slice};
 use antumbra_core::{Result, RunId, TrainingRecipe};
 
 use crate::config::RaftConfig;
 use crate::grpo::{grpo_train, GrpoModelLoader};
 use crate::holdout::{split, Split};
-use crate::model::{Corpus, ModelLoader};
+use crate::model::{Corpus, CorpusTask, ModelLoader};
 use crate::raft::raft_train;
 use crate::teach::capture_corrections;
 
@@ -32,6 +35,55 @@ fn recipe_for(req: &TrainRequest, config: &RaftConfig) -> Result<TrainingRecipe>
     let recipe = req.recipe.unwrap_or_else(|| config.recipe());
     recipe.validate()?;
     Ok(recipe)
+}
+
+/// The tasks graduation is re-measured on: the held-out slice when the shadow
+/// trained under a holdout that holds any out, and otherwise the tasks it
+/// trained on. Never the audit slice, which no decision may read, and never an
+/// impossible task, which is its own alarm. The flag says which it was.
+fn remeasure_slice(
+    tasks: Vec<CorpusTask>,
+    holdout: Option<&Holdout>,
+) -> Result<(Vec<CorpusTask>, bool)> {
+    if let Some(h) = holdout {
+        let held: Vec<CorpusTask> = tasks
+            .iter()
+            .filter(|t| !t.impossible && h.partition.of(&t.id) == Slice::HeldOut)
+            .cloned()
+            .collect();
+        if !held.is_empty() {
+            return Ok((held, true));
+        }
+    }
+    let Split { learn, .. } = split(tasks, holdout)?;
+    Ok((learn, false))
+}
+
+/// Re-measure a trained adapter on its slice, once per seed, for any trainer
+/// whose loader builds a [`crate::model::CausalLm`].
+async fn remeasure_with<L: ModelLoader>(
+    loader: &L,
+    tasks: Vec<CorpusTask>,
+    verifier: &dyn Verifier,
+    samples: usize,
+    req: RemeasureRequest,
+) -> Result<Remeasurement> {
+    let (slice, held_out) = remeasure_slice(tasks, req.holdout.as_ref())?;
+    let mut model = loader.load(&req.base_model, Some(&req.adapter_uri)).await?;
+    let pass_rates = crate::eval::remeasure(
+        &mut model,
+        verifier,
+        &slice,
+        &RunId::new(req.shadow.as_str()),
+        samples,
+        &req.seeds,
+    )
+    .await?;
+    Ok(Remeasurement {
+        pass_rates,
+        held_out,
+        tasks: slice.len(),
+    })
 }
 
 pub struct RaftTrainer<L: ModelLoader, C: Corpus> {
@@ -84,6 +136,17 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
             recipe: Some(recipe),
             ..outcome
         })
+    }
+
+    async fn remeasure(&self, req: RemeasureRequest) -> Result<Remeasurement> {
+        remeasure_with(
+            &self.loader,
+            self.corpus.tasks(&[]),
+            self.verifier.as_ref(),
+            self.config.samples_per_task,
+            req,
+        )
+        .await
     }
 }
 
@@ -196,6 +259,17 @@ impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
             recipe: Some(recipe),
             ..outcome
         })
+    }
+
+    async fn remeasure(&self, req: RemeasureRequest) -> Result<Remeasurement> {
+        remeasure_with(
+            &self.loader,
+            self.corpus.tasks(&[]),
+            self.verifier.as_ref(),
+            self.config.samples_per_task,
+            req,
+        )
+        .await
     }
 }
 
@@ -392,6 +466,125 @@ mod tests {
             .await
             .is_err());
         assert_eq!(loads.load(Ordering::SeqCst), 0, "no base model for nothing");
+    }
+
+    /// Passes every draw whose seed is even; keeps the seeds it was given.
+    struct SeededLm {
+        seeds: Arc<std::sync::Mutex<Vec<u64>>>,
+        next: Option<u64>,
+    }
+
+    #[async_trait]
+    impl CausalLm for SeededLm {
+        async fn generate(&mut self, _prompt: &str, n: usize) -> Result<Vec<String>> {
+            Ok((0..n)
+                .map(|_| {
+                    let draw = self.next.map_or(1, |s| {
+                        self.next = Some(s + 1);
+                        s
+                    });
+                    if draw.is_multiple_of(2) { "PASS" } else { "FAIL" }.to_string()
+                })
+                .collect())
+        }
+        async fn sft_step(&mut self, _batch: &[SftExample]) -> Result<f32> {
+            Ok(0.0)
+        }
+        fn save_adapter(&self, _path: &str) -> Result<()> {
+            Ok(())
+        }
+        fn seed_draws(&mut self, seed: u64) -> Result<()> {
+            if let Ok(mut seeds) = self.seeds.lock() {
+                seeds.push(seed);
+            }
+            self.next = Some(seed);
+            Ok(())
+        }
+    }
+
+    struct SeededLoader(Arc<std::sync::Mutex<Vec<u64>>>);
+    #[async_trait]
+    impl ModelLoader for SeededLoader {
+        type Model = SeededLm;
+        async fn load_trained(
+            &self,
+            _base: &str,
+            parent: Option<&str>,
+            _recipe: Option<&TrainingRecipe>,
+        ) -> Result<SeededLm> {
+            assert_eq!(
+                parent,
+                Some("adapters/winner.safetensors"),
+                "re-measures the adapter"
+            );
+            Ok(SeededLm {
+                seeds: self.0.clone(),
+                next: None,
+            })
+        }
+    }
+
+    fn remeasure_request(holdout: Option<Holdout>) -> RemeasureRequest {
+        RemeasureRequest {
+            shadow: ShadowId::new("shadow:winner"),
+            base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
+            adapter_uri: "adapters/winner.safetensors".into(),
+            holdout,
+            seeds: vec![10, 11, 12],
+        }
+    }
+
+    /// Under a holdout, graduation is measured on the held-out slice only:
+    /// not the visible task it trained on, and not the audit task no decision
+    /// may read. Each seed is one evaluation, in order.
+    #[tokio::test]
+    async fn remeasurement_uses_the_held_out_slice_under_each_seed() -> Result<()> {
+        let seeds = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let trainer = RaftTrainer::new(
+            raft(),
+            SeededLoader(seeds.clone()),
+            IdCorpus(&["task:0", "task:1", "task:19"]),
+            passing(),
+        );
+        let holdout = Holdout {
+            partition: Partition::default(),
+            audit: true,
+        };
+        let m = trainer.remeasure(remeasure_request(Some(holdout))).await?;
+        assert!(m.held_out);
+        assert_eq!(m.tasks, 1, "task:1 is the one held-out task");
+        assert_eq!(*seeds.lock().unwrap(), vec![10, 11, 12]);
+        // Four draws per evaluation (`raft()`), from each seed in turn: seed 10
+        // draws 10..14 (two even), seed 11 draws 11..15 (two even), and so on.
+        assert_eq!(m.pass_rates, vec![0.5, 0.5, 0.5]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn without_a_holdout_the_trained_tasks_are_redrawn() -> Result<()> {
+        let seeds = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let trainer = RaftTrainer::new(
+            raft(),
+            SeededLoader(seeds),
+            IdCorpus(&["task:0", "task:1", "task:19"]),
+            passing(),
+        );
+        let m = trainer.remeasure(remeasure_request(None)).await?;
+        assert!(!m.held_out);
+        assert_eq!((m.tasks, m.pass_rates.len()), (3, 3));
+        Ok(())
+    }
+
+    /// A model that cannot seed its draws is refused rather than measured
+    /// three times on one stream.
+    #[tokio::test]
+    async fn a_model_that_cannot_seed_is_not_remeasured() {
+        let trainer = RaftTrainer::new(raft(), FakeLoader, OneTaskCorpus, passing());
+        let req = RemeasureRequest {
+            adapter_uri: "x".into(),
+            ..remeasure_request(None)
+        };
+        assert!(trainer.remeasure(req).await.is_err());
     }
 
     fn recipe_request(recipe: Option<TrainingRecipe>) -> TrainRequest {

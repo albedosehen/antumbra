@@ -326,6 +326,8 @@ pub struct TrainArgs {
     /// Search the recipe with a cohort of this many shadows a generation.
     pub search: bool,
     pub cohort: usize,
+    /// Re-measurements graduation is judged on; `None` takes the default.
+    pub remeasure: Option<u32>,
 }
 
 pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
@@ -350,6 +352,23 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         }
         policy
     });
+    // Re-measurement loads the adapter as a `CausalLm`, which the GRPO trainer
+    // does not build yet, so under GRPO only an explicit request is an error;
+    // the search's default falls back to the shrunk cohort score.
+    let remeasure = match args.remeasure.unwrap_or(if args.search { 3 } else { 0 }) {
+        0 => None,
+        _ if algo == "grpo" && args.remeasure.is_some() => {
+            anyhow::bail!("--remeasure is not yet available under --algo grpo")
+        }
+        _ if algo == "grpo" => {
+            println!(
+                "note: re-measurement is not yet available under grpo; graduation uses the \
+                 cohort's shrunk score"
+            );
+            None
+        }
+        repeats => Some(antumbra_loop::Remeasure { repeats }),
+    };
     #[cfg(feature = "models")]
     {
         let store = connect(url).await?;
@@ -384,6 +403,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             // A searched run starts from the recipe the trainer is configured with.
             recipe: search.is_some().then_some(start),
             search,
+            remeasure,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -430,8 +450,21 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                         m.shadow, m.fitness
                     );
                 }
+                if r.remeasured.is_none() {
+                    println!(
+                        "        graduation score {:.2} (the best, shrunk toward the cohort's mean)",
+                        r.graduation_score
+                    );
+                }
+            }
+            if let Some(m) = &r.remeasured {
+                let rates: Vec<String> = m.pass_rates.iter().map(|p| format!("{p:.2}")).collect();
                 println!(
-                    "        graduation score {:.2} (the best, shrunk toward the cohort's mean)",
+                    "        re-measured on {} {} task(s) under {} seed(s): [{}], graduation score {:.2}",
+                    m.tasks,
+                    if m.held_out { "held-out" } else { "trained" },
+                    m.pass_rates.len(),
+                    rates.join(", "),
                     r.graduation_score
                 );
             }
@@ -459,6 +492,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &parent,
             holdout,
             &search,
+            &remeasure,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

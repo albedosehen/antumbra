@@ -468,6 +468,12 @@ pub enum Command {
         /// Shadows per searched generation.
         #[arg(long, default_value_t = 4)]
         cohort: usize,
+        /// Judge graduation on this many re-measurements of the carried-forward
+        /// shadow, each under a fresh seed, on the held-out slice under
+        /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off
+        /// otherwise; 0 turns it off. Not yet available under `--algo grpo`.
+        #[arg(long)]
+        remeasure: Option<u32>,
     },
     /// Score a saved adapter's pass-rate on a corpus, with no training.
     /// Needs --features models + a GPU + python.
