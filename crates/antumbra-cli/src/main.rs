@@ -458,6 +458,9 @@ async fn run() -> anyhow::Result<()> {
             holdout,
             search,
             cohort,
+            slow,
+            slow_interval,
+            anneal,
             remeasure,
         } => {
             models::train(
@@ -475,6 +478,9 @@ async fn run() -> anyhow::Result<()> {
                     holdout,
                     search,
                     cohort,
+                    slow,
+                    slow_interval,
+                    anneal,
                     remeasure,
                 },
             )

@@ -326,6 +326,11 @@ pub struct TrainArgs {
     /// Search the recipe with a cohort of this many shadows a generation.
     pub search: bool,
     pub cohort: usize,
+    /// Slow members; `None` takes a third of the cohort.
+    pub slow: Option<usize>,
+    pub slow_interval: u32,
+    /// Generations the fast interval anneals over; `None` takes the run's.
+    pub anneal: Option<u32>,
     /// Re-measurements graduation is judged on; `None` takes the default.
     pub remeasure: Option<u32>,
 }
@@ -342,8 +347,12 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     let parent = args.parent;
     let holdout = args.holdout;
     let search = args.search.then(|| {
+        let cohort = args.cohort.max(1);
         let mut policy = antumbra_loop::search::SearchPolicy {
-            cohort: args.cohort.max(1),
+            cohort,
+            slow: args.slow.unwrap_or(cohort / 3),
+            slow_interval: args.slow_interval.max(1),
+            anneal: args.anneal.unwrap_or(generations),
             ..Default::default()
         };
         // GRPO weighs its KL penalty; RAFT has none to weigh.
@@ -433,8 +442,10 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                         )
                     });
                     println!(
-                        "        member {} {recipe} fitness {:.2}",
-                        m.shadow, m.fitness
+                        "        member {} {recipe} fitness {:.2}{}",
+                        m.shadow,
+                        m.fitness,
+                        if m.slow { " (slow)" } else { "" }
                     );
                 }
                 if r.remeasured.is_none() {

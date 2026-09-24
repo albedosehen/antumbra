@@ -12,7 +12,8 @@ use antumbra_core::generational::{GenerationHead, LoopState};
 use antumbra_core::ports::{RemeasureRequest, Remeasurement, TrainOutcome, TrainRequest};
 use antumbra_core::slice::Holdout;
 use antumbra_core::{
-    AntumbraError, Generation, Result, RunId, Shadow, ShadowId, ShadowStatus, TrainingRecipe,
+    AntumbraError, Generation, RecipeRecord, Result, RunId, Shadow, ShadowId, ShadowStatus,
+    TrainingRecipe,
 };
 use antumbra_store::repo::{recipe, shadow};
 
@@ -25,6 +26,7 @@ pub(crate) struct Member {
     pub outcome: TrainOutcome,
     /// The recipe it trained under, as its trainer reported it.
     pub recipe: Option<TrainingRecipe>,
+    pub slow: bool,
 }
 
 /// A cohort member as the generation report shows it.
@@ -34,6 +36,16 @@ pub struct CohortMember {
     /// The recipe it trained under, as its trainer reported it.
     pub recipe: Option<TrainingRecipe>,
     pub fitness: f32,
+    /// Whether it is in the slow cohort, whose recipes are held for longer.
+    pub slow: bool,
+}
+
+/// One member a generation will train: who, under what, descending from what.
+struct Planned {
+    id: ShadowId,
+    recipe: Option<TrainingRecipe>,
+    parent: Option<ShadowId>,
+    slow: bool,
 }
 
 /// How graduation is re-measured.
@@ -70,13 +82,34 @@ fn member_id(run_id: &RunId, generation: Generation, index: usize) -> ShadowId {
     ShadowId::new(format!("{}:s{index}", shadow_id(run_id, generation)))
 }
 
+/// What the member at `index` ran before `generation`, read from its rows in
+/// `history`: the recipe of its previous run, and how many consecutive
+/// generations it had run it. Rows are the record, so a resumed run sees the
+/// same slots a continuous one would.
+fn slot_before(
+    history: &[RecipeRecord],
+    run_id: &RunId,
+    generation: Generation,
+    index: usize,
+) -> Option<search::Slot> {
+    let ran = |g: u32| {
+        let id = member_id(run_id, Generation(g), index);
+        history.iter().find(|r| r.shadow == id).map(|r| r.recipe)
+    };
+    let recipe = ran(generation.0.checked_sub(1)?)?;
+    let mut held = 1;
+    while let Some(g) = generation.0.checked_sub(held + 1) {
+        if ran(g) != Some(recipe) {
+            break;
+        }
+        held += 1;
+    }
+    Some(search::Slot { recipe, held })
+}
+
 impl GenerationLoop<'_> {
     /// Who trains this generation, under what, and what each descends from.
-    async fn plan(
-        &self,
-        run_id: &RunId,
-        generation: Generation,
-    ) -> Result<Vec<(ShadowId, Option<TrainingRecipe>, Option<ShadowId>)>> {
+    async fn plan(&self, run_id: &RunId, generation: Generation) -> Result<Vec<Planned>> {
         let Some(policy) = &self.cfg.search else {
             let parent = match generation.0.checked_sub(1) {
                 Some(previous) => recipe::get(self.store, &shadow_id(run_id, Generation(previous)))
@@ -84,11 +117,12 @@ impl GenerationLoop<'_> {
                     .map(|row| row.shadow),
                 None => None,
             };
-            return Ok(vec![(
-                shadow_id(run_id, generation),
-                self.cfg.recipe,
+            return Ok(vec![Planned {
+                id: shadow_id(run_id, generation),
+                recipe: self.cfg.recipe,
                 parent,
-            )]);
+                slow: false,
+            }]);
         };
         let anchor = self.cfg.recipe.ok_or_else(|| {
             AntumbraError::other(
@@ -107,16 +141,28 @@ impl GenerationLoop<'_> {
             .filter(|row| row.generation < generation && row.partition_seed == seed)
             .collect();
         let parent = search::incumbent(&history, policy.prior_weight).map(|row| row.shadow.clone());
-        Ok(search::propose(policy, &history, generation.0, anchor)
-            .into_iter()
-            .enumerate()
-            .map(|(i, r)| (member_id(run_id, generation, i), Some(r), parent.clone()))
-            .collect())
+        let slots: Vec<_> = (0..policy.cohort)
+            .map(|i| slot_before(&history, run_id, generation, i))
+            .collect();
+        Ok(
+            search::propose(policy, &history, generation.0, anchor, &slots)
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, r)| {
+                    Some(Planned {
+                        id: member_id(run_id, generation, i),
+                        recipe: Some(r?),
+                        parent: parent.clone(),
+                        slow: policy.is_slow(i),
+                    })
+                })
+                .collect(),
+        )
     }
 
     /// Spawn and train every member of this generation, recording each one's
     /// recipe, and move the loop to `Explore` on the way. Members come back in
-    /// cohort order, the incumbent's recipe first.
+    /// cohort order.
     pub(crate) async fn train_cohort(
         &self,
         head: &mut GenerationHead,
@@ -126,14 +172,20 @@ impl GenerationLoop<'_> {
         let generation = head.generation;
         let plan = self.plan(&run_id, generation).await?;
         let mut shadows = Vec::with_capacity(plan.len());
-        for (id, _, _) in &plan {
-            let sh = Shadow::spawn(id.clone(), generation, None, Utc::now());
+        for planned in &plan {
+            let sh = Shadow::spawn(planned.id.clone(), generation, None, Utc::now());
             shadow::upsert(self.store, &sh).await?;
             shadows.push(sh);
         }
         self.advance(head, LoopState::Explore).await?;
         let mut members = Vec::with_capacity(plan.len());
-        for ((id, asked, parent), mut sh) in plan.into_iter().zip(shadows) {
+        for (planned, mut sh) in plan.into_iter().zip(shadows) {
+            let Planned {
+                id,
+                recipe: asked,
+                parent,
+                slow,
+            } = planned;
             sh.advance_to(ShadowStatus::Exploring)?;
             shadow::upsert(self.store, &sh).await?;
             let outcome = self
@@ -163,14 +215,16 @@ impl GenerationLoop<'_> {
                 shadow: sh,
                 outcome,
                 recipe,
+                slow,
             });
         }
         Ok(members)
     }
 
     /// Take the best member out of the cohort and settle the rest: they were
-    /// scored and lost, so they are pruned. Ties go to the earlier member,
-    /// which is the incumbent's recipe when it is among them.
+    /// scored and lost, so they are pruned. Ties go to the earlier member: the
+    /// first runs the incumbent's recipe, unless a member holding its recipe
+    /// already does.
     pub(crate) async fn select(
         &self,
         mut members: Vec<Member>,
@@ -181,6 +235,7 @@ impl GenerationLoop<'_> {
                 shadow: m.shadow.id.clone(),
                 recipe: m.recipe,
                 fitness: m.outcome.final_fitness,
+                slow: m.slow,
             })
             .collect();
         let best = members

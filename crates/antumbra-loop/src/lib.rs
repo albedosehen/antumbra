@@ -234,6 +234,7 @@ impl<'a> GenerationLoop<'a> {
             shadow: mut sh,
             outcome,
             recipe,
+            ..
         } = winner;
         let shadow_id = sh.id.clone();
         let mut measured = self

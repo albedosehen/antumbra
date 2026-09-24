@@ -222,7 +222,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    **Impossible tasks are in, and they close the item.** The partition never assigns that slice, because an unsatisfiable task has to be authored rather than drawn, so the corpus marks it (`"impossible": true`) and the mark travels on `TaskOutcome` to the instruments. Such a task is never learned from, with or without a holdout: it can only be passed by a shortcut, so a winner of one is a shortcut, and training on it would teach the shortcut. Under a holdout it is measured on every run rather than on the audit schedule, because one pass fails the generation and the alarm cannot wait k generations. The loop enforces that literally: a generation that passed one does not graduate, however well it scored, and says which task it passed. That is the one place an instrument reaches a decision, and it is the record's rule rather than the loop's choice.
 
    Impossible tasks only work if the verifier cannot be passed by accident, and the shipped verifiers could be. Every Python verifier in `corpora/` ran the candidate inside the judging process, so `raise SystemExit` exited 0 and passed every task without defining anything. Under RAFT such a sample is a verified winner and is trained on. `corpora/workbench` judges in a separate process against hashed answers, and the older corpora now use the same judge.
-3. [ ] S-1, the searched `TrainingRecipe` and the `recipe` rows behind it.
+3. [x] S-1, the searched `TrainingRecipe` and the `recipe` rows behind it.
 
    **The recipe is data, and every generation leaves a row. The search is not in yet.** `TrainingRecipe` in `antumbra_core::recipe` holds the three searched axes the record names. Learning rate is itself. The anti-collapse weight is GRPO's KL-to-reference penalty, `kl_beta`: it is the only such term the trainer has, and RAFT has none to weigh, because it avoids collapse by training on verified winners alone. Batch size is verified winners per optimizer step. That generalizes what was an on/off `grad_accumulation`, which already meant steps of four and never the whole batch, as its name suggested. The trainer backpropagates a batch one example at a time and sums the gradients, so the batch size costs steps, not memory, and `consolidate --grad-accumulation` became `--batch-size`. Rank and alpha stay fixed, as the record requires.
 
@@ -254,7 +254,32 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    `train --search` re-measures three times by default, and `--remeasure N` sets the count for any run.
 
-   Still to come for this step: the fast and slow cohorts that blunt greed, and a GPU run of the whole search. Until that run, the step stays unchecked.
+   **The whole search has run on the GPU.** It ran two generations of three over the workbench `sequences` corpus, held out, on the 3090 Ti beside the production services. The first attempt ran the card out of memory on a batch-2 member. That found two things the CPU tests could not:
+   - candle builds a gradient for every frozen base weight on every step;
+   - a batch held every example's forward graph until one backward.
+
+   With both fixed (the frozen product and gradient accumulation; see the trainer guide), one example's step peaks at 11.1 GB of the card instead of 19.2. The batch-4 member trained within the run's peak of 14.6 GB. The attempt also found that a run killed mid-generation could not be resumed, and it now can. The run took 53 minutes:
+   - **Generation 0** carried forward the starting recipe (learning rate 1e-4, batch 1) at fitness 0.73, against 0.68 and 0.62. It graduated on a re-measured mean of 0.67 over 5 held-out tasks and 3 seeds.
+   - **Generation 1** carried forward learning rate 1.4e-5, batch 4, at 0.70 against 0.68 and 0.68. It graduated on 0.72.
+
+   That shows the search runs. It does not yet show that it finds better recipes than the starting one: the members' differences are within the noise of four samples a task.
+
+   **Two frequencies blunt greed, read for recipe-only propagation.** In PBT, a member's ready interval is how long it trains before it may be truncated, which means its weights and hyperparameters are replaced by a better member's. Here no weights move, so a cohort member is a slot that keeps its recipe until its ready interval has passed. Holding a recipe means training it again from the base: another measurement of the same recipe.
+   - **The slow cohort** is the last `slow` slots. Each keeps its recipe for `slow_interval` generations, whatever the fast members score. That is the "cannot truncate".
+   - **The fast cohort** is the rest. Its interval starts at one generation and lengthens over `anneal` generations toward the slow interval, stopping one short so the two frequencies stay two.
+   - **The first slot** always carries the incumbent, unless a held slot already runs it, so the winning recipe still propagates.
+   - **What each slot held** is read from the recipe rows by member name, so a resumed run holds what a continuous one would.
+
+   **Ranking pools a recipe's runs.** The incumbent was the best single row. A slow member measured three times would have counted as three separate one-run recipes, each shrunk halfway to its generation's mean, and any newcomer's lucky run could displace it. A recipe is now ranked on all its runs: their mean, shrunk toward the means of the generations they ran in, by the prior's weight against their total count. That is constraint 4 as written: shrunk in proportion to the evaluation count, so a lucky single evaluation cannot win.
+
+   **Measured, the frequencies neither help nor hurt on the synthetic landscape.** Over 300 seeds of twelve generations of four, one slow member with or without annealing stayed level with the fast cohort alone. Every gap was within about 0.002, about one standard error, at noise 0.1, 0.3 and 0.5 wide. Smaller seed sets had suggested either direction. The landscape does not move between generations, and a moving objective is where the record expects greed to cost. So the defaults (`train --search` gives a third of the cohort to the slow cohort, holds for three generations and anneals over the run) follow the record's reasoning, not a measured gain. Whether they earn their keep is for real runs over a changing corpus to show. The search with them still beats random search on the same budget, which a test holds it to.
+
+   **The slow cohort has run on the GPU.** Four generations of three ran on the same corpus and card with the CLI's defaults: one slow member held for three generations, and the fast interval annealed over four. The run took 1 hour 44 minutes and peaked at 15.1 GB. Every slot moved as the tests say it should:
+   - **The slow member** held learning rate 1e-5, batch 1 through generations 0 to 2, scoring 0.62, 0.67 and 0.67. It was proposed afresh in generation 3.
+   - **The fast member** was proposed afresh in generations 0 and 1. It kept its recipe in generation 2, once its interval had grown to two, and was proposed afresh in generation 3.
+   - **The incumbent** stayed the starting recipe on four pooled runs (0.73, 0.68, 0.68, 0.68).
+
+   The repeated runs are the first real measure of the noise the search works against. The same recipe, trained again from the base, moved by 0.05 between generations: as much as the recipes differed from one another. That noise is what pooled ranking is for, and it is why two generations could not tell the recipes apart.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.

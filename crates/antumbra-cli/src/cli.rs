@@ -468,6 +468,20 @@ pub enum Command {
         /// Shadows per searched generation.
         #[arg(long, default_value_t = 4)]
         cohort: usize,
+        /// Members of the cohort in the slow cohort, whose recipes are held
+        /// for `--slow-interval` generations and cannot be displaced by what
+        /// the fast members score (ADR-0022 S-1). Defaults to a third of the
+        /// cohort, rounded down; 0 runs the fast cohort alone.
+        #[arg(long)]
+        slow: Option<usize>,
+        /// Generations a slow member keeps its recipe.
+        #[arg(long, default_value_t = 3)]
+        slow_interval: u32,
+        /// Generations over which the fast members' ready interval lengthens
+        /// from one toward the slow interval. Defaults to the run's
+        /// `--generations`; 0 keeps it at one.
+        #[arg(long)]
+        anneal: Option<u32>,
         /// Judge graduation on this many re-measurements of the carried-forward
         /// shadow, each under a fresh seed, on the held-out slice under
         /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off
