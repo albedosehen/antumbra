@@ -41,6 +41,7 @@ mod merging;
 mod recipe;
 mod retirement;
 pub mod search;
+mod serving;
 pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
 pub use contribution::ContributionPolicy;
@@ -342,7 +343,7 @@ impl<'a> GenerationLoop<'a> {
                 .mint(&run_id, generation, &outcome.adapter_uri, fitness, &outcome)
                 .await?;
             admission = self
-                .admission(&run_id, generation, &candidate, holdout)
+                .admission(&run_id, generation, &candidate, holdout, &focus)
                 .await?;
             let admitted = admission.as_ref().is_none_or(Admission::admits);
             if admitted {

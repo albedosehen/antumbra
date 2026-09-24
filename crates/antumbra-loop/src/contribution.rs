@@ -66,7 +66,7 @@ impl Default for ContributionPolicy {
 
 /// The expert a task goes to, or `None` when it escalates, with `masked` taken
 /// out of the population.
-fn route_top1(
+pub(crate) fn route_top1(
     task: &[f32],
     router: Option<&LearnedRouter>,
     experts: &[Expert],
@@ -124,7 +124,7 @@ pub(crate) fn seeds(purpose: &str, run_id: &RunId, generation: Generation, n: u3
 }
 
 /// A stable order for choosing which live tasks to measure.
-fn rank(id: &str) -> [u8; 32] {
+pub(crate) fn rank(id: &str) -> [u8; 32] {
     Sha256::digest(id.as_bytes()).into()
 }
 

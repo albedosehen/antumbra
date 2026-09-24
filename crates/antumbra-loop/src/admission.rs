@@ -36,8 +36,12 @@ pub struct AdmissionPolicy {
     pub seeds: u32,
     /// At most this many live tasks in the head-to-head.
     pub max_tasks: usize,
-    /// How much better than the duplicate a candidate must score to replace it.
+    /// How much better than the duplicate a candidate must score to replace it,
+    /// and than what serves its tasks to join beside it.
     pub margin: f32,
+    /// Also require a candidate that duplicates nothing to beat what the
+    /// population routes the tasks it was trained for to (see `serving`).
+    pub against_serving: bool,
 }
 
 impl Default for AdmissionPolicy {
@@ -47,6 +51,7 @@ impl Default for AdmissionPolicy {
             seeds: 2,
             max_tasks: 32,
             margin: 0.0,
+            against_serving: true,
         }
     }
 }
@@ -65,6 +70,13 @@ pub enum Admission {
         candidate: f32,
         incumbent: f32,
     },
+    /// It duplicated nothing, but did no better than what the population
+    /// routes the tasks it was trained for to, so it was not admitted.
+    Outserved {
+        tasks: u32,
+        candidate: f32,
+        serving: f32,
+    },
     /// It duplicated `duplicate_of` and did not score better, or could not be
     /// measured against it, so it was not admitted.
     Rejected {
@@ -77,7 +89,10 @@ pub enum Admission {
 
 impl Admission {
     pub fn admits(&self) -> bool {
-        !matches!(self, Admission::Rejected { .. })
+        !matches!(
+            self,
+            Admission::Rejected { .. } | Admission::Outserved { .. }
+        )
     }
 }
 
@@ -110,6 +125,7 @@ impl GenerationLoop<'_> {
         generation: Generation,
         candidate: &Expert,
         holdout: Option<Holdout>,
+        focus: &[String],
     ) -> Result<Option<Admission>> {
         let Some(policy) = self.cfg.admission else {
             return Ok(None);
@@ -129,9 +145,17 @@ impl GenerationLoop<'_> {
         let (twin, similarity) = match nearest {
             Some((e, s)) if s >= policy.duplicate_above => (e, s),
             other => {
+                if policy.against_serving {
+                    if let Some(outserved) = self
+                        .outserved(run_id, generation, candidate, holdout, focus, &policy)
+                        .await?
+                    {
+                        return Ok(Some(outserved));
+                    }
+                }
                 return Ok(Some(Admission::Admitted {
                     nearest: other.map(|(e, s)| (e.id, s)),
-                }))
+                }));
             }
         };
         let rejected = |candidate, incumbent| Admission::Rejected {
@@ -204,6 +228,12 @@ mod tests {
             similarity: 0.99,
             candidate: 0.8,
             incumbent: 0.7,
+        }
+        .admits());
+        assert!(!Admission::Outserved {
+            tasks: 4,
+            candidate: 0.4,
+            serving: 0.9,
         }
         .admits());
         assert!(!Admission::Rejected {
