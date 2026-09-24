@@ -315,11 +315,7 @@ impl<'a> GenerationLoop<'a> {
         target_generation: u32,
     ) -> Result<Vec<GenerationReport>> {
         let mut head = self.resume_or_init(run_id).await?;
-        // Resume out of a prior cooperative halt (Paused) into the next Grow,
-        // without crossing a generation boundary.
-        if head.state == LoopState::Paused {
-            self.advance(&mut head, LoopState::Grow).await?;
-        }
+        self.recover(&mut head).await?;
         let mut reports = Vec::new();
         while head.generation.0 < target_generation {
             // Cooperative stop: an operator can halt the run between
@@ -332,6 +328,38 @@ impl<'a> GenerationLoop<'a> {
             reports.push(self.run_generation(&mut head).await?);
         }
         Ok(reports)
+    }
+
+    /// Bring a head the process left anywhere but a generation boundary back to
+    /// one, so the run can go on.
+    ///
+    /// The loop checkpoints where it is, not the work in flight: a shadow
+    /// half-trained when the process died has nothing to resume from. So a
+    /// generation interrupted before its decision was written (in `Explore`,
+    /// `Score` or `Decide`) is run again from its start, through the same
+    /// `Paused -> Grow` edge an operator's halt takes, and does not cross the
+    /// generation boundary. What it wrote on the way is keyed so the second
+    /// run replaces the first: shadows and recipe rows by shadow, the
+    /// graduated expert by generation, and the audit trend keeps a
+    /// generation's latest evaluation. One interrupted in `Consolidate` had
+    /// written everything, so it is finished rather than repeated. Before this,
+    /// a run killed mid-training (an out-of-memory on the GPU, a reboot) could
+    /// never be resumed: every generation opens by moving to `Explore`, which
+    /// a head already there refuses.
+    async fn recover(&self, head: &mut GenerationHead) -> Result<()> {
+        match head.state {
+            LoopState::Grow => Ok(()),
+            LoopState::Paused => self.advance(head, LoopState::Grow).await,
+            LoopState::Consolidate => self.advance(head, LoopState::Grow).await,
+            LoopState::Explore | LoopState::Score | LoopState::Decide => {
+                eprintln!(
+                    "loop: generation {} was interrupted in {:?}; running it again from its start",
+                    head.generation.0, head.state
+                );
+                self.advance(head, LoopState::Paused).await?;
+                self.advance(head, LoopState::Grow).await
+            }
+        }
     }
 
     /// Persist the training reward curve as source-tagged signals for the critic.
@@ -425,6 +453,13 @@ impl<'a> GenerationLoop<'a> {
             placed_on: Some(antumbra_core::this_host()),
             created_at: now,
         };
+        // A generation run again after an interruption may already have
+        // graduated once. Its expert is keyed by generation, so the second
+        // decision replaces the first rather than adding a twin to the
+        // population.
+        if expert::get(self.store, &expert.id).await?.is_some() {
+            expert::delete(self.store, &expert.id).await?;
+        }
         expert::insert(self.store, &expert).await?;
         // Snapshot the freeze baseline for the no-forgetting tripwire (the frozen
         // population versus the plastic shadow): this fingerprint must never
