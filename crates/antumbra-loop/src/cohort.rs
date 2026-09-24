@@ -9,7 +9,7 @@
 use chrono::Utc;
 
 use antumbra_core::generational::{GenerationHead, LoopState};
-use antumbra_core::ports::{TrainOutcome, TrainRequest};
+use antumbra_core::ports::{RemeasureRequest, Remeasurement, TrainOutcome, TrainRequest};
 use antumbra_core::slice::Holdout;
 use antumbra_core::{
     AntumbraError, Generation, Result, RunId, Shadow, ShadowId, ShadowStatus, TrainingRecipe,
@@ -34,6 +34,35 @@ pub struct CohortMember {
     /// The recipe it trained under, as its trainer reported it.
     pub recipe: Option<TrainingRecipe>,
     pub fitness: f32,
+}
+
+/// How graduation is re-measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Remeasure {
+    /// Evaluations, each under its own fresh seed. The record asks for at
+    /// least three.
+    pub repeats: u32,
+}
+
+impl Default for Remeasure {
+    fn default() -> Self {
+        Self { repeats: 3 }
+    }
+}
+
+/// The seeds a generation's re-measurement draws from: derived from the run,
+/// the generation and the repeat, so a resumed run re-measures exactly what a
+/// continuous one would, and never the stream training drew from.
+pub(crate) fn remeasure_seeds(run_id: &RunId, generation: Generation, repeats: u32) -> Vec<u64> {
+    use sha2::{Digest, Sha256};
+    (0..repeats)
+        .map(|k| {
+            let digest = Sha256::digest(format!("remeasure:{run_id}:{}:{k}", generation.0));
+            let mut bytes = [0u8; 8];
+            bytes.copy_from_slice(&digest[..8]);
+            u64::from_le_bytes(bytes)
+        })
+        .collect()
 }
 
 /// A member of a searched generation's cohort: `{run}:g{n}:s{i}`.
@@ -174,11 +203,44 @@ impl GenerationLoop<'_> {
         Ok((winner, cohort))
     }
 
-    /// The number the graduation threshold is applied to. Alone, a shadow's
-    /// fitness. The best of a cohort was chosen for scoring well on noisy
-    /// fitness, which the optimizer's curse says overstates it, so until
-    /// graduation re-measures on a fresh slice (the record's fourth
-    /// constraint) the winner's fitness is shrunk toward the cohort's mean.
+    /// What graduation is judged on, and the re-measurement behind it when
+    /// there is one. With `LoopConfig::remeasure`, the carried-forward shadow
+    /// is evaluated again under fresh seeds, on the held-out slice its trainer
+    /// confirmed withholding, and the score is the mean. A generation that
+    /// already failed on a shortcut is not re-measured, since nothing it scores
+    /// can graduate it.
+    pub(crate) async fn judge(
+        &self,
+        run_id: &RunId,
+        generation: Generation,
+        shadow: &ShadowId,
+        outcome: &TrainOutcome,
+        cohort: &[CohortMember],
+        shortcut: bool,
+    ) -> Result<(f32, Option<Remeasurement>)> {
+        let Some(plan) = self.cfg.remeasure.filter(|_| !shortcut) else {
+            return Ok((self.graduation_score(outcome.final_fitness, cohort), None));
+        };
+        let remeasured = self
+            .trainer
+            .remeasure(RemeasureRequest {
+                shadow: shadow.clone(),
+                base_model: self.cfg.base_model.clone(),
+                adapter_uri: outcome.adapter_uri.clone(),
+                // What the trainer confirmed it withheld: a holdout it ignored
+                // left the held-out tasks learned from, so they are not fresh.
+                holdout: outcome.holdout,
+                seeds: remeasure_seeds(run_id, generation, plan.repeats),
+            })
+            .await?;
+        let score = remeasured.mean().unwrap_or(0.0);
+        Ok((score, Some(remeasured)))
+    }
+
+    /// The number the graduation threshold is applied to without a
+    /// re-measurement. Alone, a shadow's fitness. The best of a cohort was
+    /// chosen for scoring well on noisy fitness, which the optimizer's curse
+    /// says overstates it, so its fitness is shrunk toward the cohort's mean.
     /// That can only make graduation harder than the raw score would.
     pub(crate) fn graduation_score(&self, winner: f32, cohort: &[CohortMember]) -> f32 {
         match &self.cfg.search {

@@ -458,6 +458,7 @@ async fn run() -> anyhow::Result<()> {
             holdout,
             search,
             cohort,
+            remeasure,
         } => {
             models::train(
                 &cli.url,
@@ -474,6 +475,7 @@ async fn run() -> anyhow::Result<()> {
                     holdout,
                     search,
                     cohort,
+                    remeasure,
                 },
             )
             .await?;

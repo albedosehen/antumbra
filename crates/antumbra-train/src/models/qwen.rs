@@ -198,6 +198,10 @@ pub struct QwenCausalLm {
     /// Verified winners per optimizer step: 1 steps on each in turn, more steps
     /// on the mean loss of that many at a time. See [`RaftConfig::batch_size`].
     batch_size: usize,
+    /// When set by [`CausalLm::seed_draws`], the seed later draws come from and
+    /// how many have been taken from it; otherwise draws come from the
+    /// process-wide nonce.
+    draws: Option<(u64, u64)>,
 }
 
 /// Process-global generation nonce, so every `generate` call (even repeated
@@ -303,6 +307,7 @@ impl QwenCausalLm {
             no_repeat_ngram_size: cfg.no_repeat_ngram_size,
             chat,
             batch_size: cfg.batch_size.max(1),
+            draws: None,
         })
     }
 
@@ -617,12 +622,25 @@ impl CausalLm for QwenCausalLm {
     async fn generate(&mut self, prompt: &str, n_samples: usize) -> Result<Vec<String>> {
         let mut out = Vec::with_capacity(n_samples);
         for i in 0..n_samples {
-            // Fresh nonce per draw so repeated calls (best-of-K over reloaded
-            // models) diverge instead of all seeding identically.
-            let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let seed = 0xA17_u64
-                .wrapping_mul(nonce.wrapping_add(1))
-                .wrapping_add(i as u64);
+            let seed = match &mut self.draws {
+                // Seeded: the n-th draw since `seed_draws` takes the n-th seed of
+                // the stream, so the same seed repeats the same draws.
+                Some((base, taken)) => {
+                    let seed = base
+                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        .wrapping_add(*taken);
+                    *taken += 1;
+                    seed
+                }
+                // Fresh nonce per draw so repeated calls (best-of-K over
+                // reloaded models) diverge instead of all seeding identically.
+                None => {
+                    let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    0xA17_u64
+                        .wrapping_mul(nonce.wrapping_add(1))
+                        .wrapping_add(i as u64)
+                }
+            };
             out.push(self.sample_one(prompt, seed)?);
         }
         Ok(out)
@@ -656,6 +674,11 @@ impl CausalLm for QwenCausalLm {
 
     fn save_adapter(&self, path: &str) -> Result<()> {
         self.write_adapter(path)
+    }
+
+    fn seed_draws(&mut self, seed: u64) -> Result<()> {
+        self.draws = Some((seed, 0));
+        Ok(())
     }
 }
 

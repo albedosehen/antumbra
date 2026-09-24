@@ -134,6 +134,9 @@ pub struct ScriptedTrainer {
     /// settings whatever is asked and echo no recipe back. The loop must then
     /// write no recipe row rather than one naming settings nobody ran.
     pub ignores_recipe: bool,
+    /// What a re-measurement reports, cycled across the seeds asked for.
+    /// `None` refuses re-measurement, as a trainer without it does.
+    pub remeasured: Option<Vec<f32>>,
 }
 
 /// The recipe a scripted trainer is configured with.
@@ -155,6 +158,7 @@ impl ScriptedTrainer {
             ignores_holdout: false,
             own_recipe: Some(SCRIPTED_RECIPE),
             ignores_recipe: false,
+            remeasured: None,
         }
     }
 
@@ -169,6 +173,7 @@ impl ScriptedTrainer {
             ignores_holdout: false,
             own_recipe: Some(SCRIPTED_RECIPE),
             ignores_recipe: false,
+            remeasured: None,
         }
     }
 
@@ -217,6 +222,22 @@ impl Trainer for ScriptedTrainer {
             } else {
                 req.recipe.or(self.own_recipe)
             },
+        })
+    }
+
+    async fn remeasure(
+        &self,
+        req: crate::ports::RemeasureRequest,
+    ) -> Result<crate::ports::Remeasurement> {
+        let Some(rates) = &self.remeasured else {
+            return Err(crate::AntumbraError::Unimplemented("re-measurement"));
+        };
+        Ok(crate::ports::Remeasurement {
+            pass_rates: (0..req.seeds.len())
+                .filter_map(|i| rates.get(i % rates.len().max(1)).copied())
+                .collect(),
+            held_out: req.holdout.is_some(),
+            tasks: self.per_task.len(),
         })
     }
 }

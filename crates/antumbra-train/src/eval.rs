@@ -97,6 +97,31 @@ pub async fn eval_pass_rate(
     })
 }
 
+/// Re-measure a trained adapter (ADR-0022 S-1's fourth constraint): one full
+/// evaluation per seed, each drawing from its own, so graduation is judged on
+/// independent measurements rather than the one noisy number a search ranked
+/// by. Returns the pass rate per seed, in seed order. Fails if the model cannot
+/// seed its draws, rather than returning repeats of one stream.
+pub async fn remeasure(
+    model: &mut (dyn CausalLm + Send),
+    verifier: &dyn Verifier,
+    tasks: &[CorpusTask],
+    run_id: &RunId,
+    samples: usize,
+    seeds: &[u64],
+) -> Result<Vec<f32>> {
+    let mut rates = Vec::with_capacity(seeds.len());
+    for &seed in seeds {
+        model.seed_draws(seed)?;
+        rates.push(
+            eval_pass_rate(model, verifier, tasks, run_id, samples)
+                .await?
+                .pass_rate,
+        );
+    }
+    Ok(rates)
+}
+
 /// The record of one evaluation worth keeping: what was scored, under what
 /// budget, and how every task fared. The aggregate hides the thing a corpus
 /// is calibrated by -- which tasks the model always passes or never passes,
