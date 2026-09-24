@@ -694,15 +694,34 @@ pub enum Command {
         #[arg(long, default_value_t = 1)]
         batch_size: usize,
     },
-    /// Retire an expert by name and refresh the router: population-level
-    /// forgetting. Wire a store's contradiction report against a consolidated
-    /// memory to this to undo a graduation (a frozen LoRA cannot be edited
-    /// per-fact; retiring the whole expert is how you forget). Needs --features
-    /// models (the real embedder for the router refresh).
+    /// Retire an expert: population-level forgetting that demotes rather than
+    /// deletes (ADR-0022 S-5). The expert goes dormant, masked from the gate
+    /// but kept, and still served when named; `--archive` takes it out of
+    /// serving too. Its adapter stays on disk and `revive` brings it back.
+    /// Wire a store's contradiction report against a consolidated memory to
+    /// this to undo a graduation (a frozen LoRA cannot be edited per-fact).
+    /// The router masks it at once; with --features models it is retrained
+    /// over the experts that remain.
     Retire {
-        /// The expert name to supersede.
+        /// The expert, by name or id.
         #[arg(long)]
         expert: String,
+        /// Archive it: out of serving as well as routing.
+        #[arg(long)]
+        archive: bool,
+        /// Why, recorded with the move.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Bring a dormant or archived expert back into the population the gate
+    /// routes over. A deleted expert cannot be revived.
+    Revive {
+        /// The expert, by name or id.
+        #[arg(long)]
+        expert: String,
+        /// Why, recorded with the move.
+        #[arg(long)]
+        note: Option<String>,
     },
     /// Seed a memory into a user's compartment from the CLI (the owner/admin
     /// path; agents write via the MCP `store_memory` tool). No embedding is

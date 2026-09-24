@@ -169,3 +169,51 @@ fn git_facts_dry_run_reads_this_repository() {
     ]);
     assert!(out.contains("dry run"), "{out}");
 }
+
+/// Retiring demotes and reviving restores (ADR-0022 S-5), through a store that
+/// outlives each command. Nothing is deleted along the way.
+#[test]
+fn retire_demotes_and_revive_restores() {
+    let dir = std::env::temp_dir().join(format!("antumbra-retire-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a temp dir");
+    let url = format!("surrealkv://{}", dir.join("store.skv").display());
+    let url = url.as_str();
+    ok(&["--url", url, "migrate"]);
+    ok(&["--url", url, "--fake-embedder", "seed"]);
+    let status_of = |name: &str| -> String {
+        ok(&["--url", url, "experts"])
+            .lines()
+            .find(|l| l.starts_with(name))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert_eq!(status_of("arith-specialist"), "active");
+
+    let said = ok(&["--url", url, "retire", "--expert", "arith-specialist"]);
+    assert!(said.contains("active -> dormant"), "{said}");
+    assert_eq!(status_of("arith-specialist"), "dormant");
+    assert_eq!(status_of("string-specialist"), "active");
+
+    ok(&[
+        "--url",
+        url,
+        "retire",
+        "--expert",
+        "arith-specialist",
+        "--archive",
+    ]);
+    assert_eq!(status_of("arith-specialist"), "archived");
+    let said = ok(&["--url", url, "revive", "--expert", "arith-specialist"]);
+    assert!(said.contains("archived -> active"), "{said}");
+    assert_eq!(status_of("arith-specialist"), "active");
+
+    // Reviving an active expert is not a move, and says so.
+    let refused = cli(&["--url", url, "revive", "--expert", "arith-specialist"]);
+    assert!(!refused.status.success());
+    assert!(!cli(&["--url", url, "retire", "--expert", "nobody"])
+        .status
+        .success());
+    let _ = std::fs::remove_dir_all(&dir);
+}

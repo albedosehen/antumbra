@@ -29,7 +29,7 @@ use crate::refresh_router;
 use antumbra_copal::CopalArchive;
 use antumbra_core::{CompartmentId, GitProvenance, TenantId, UserId};
 pub use antumbra_ingest::Ingested;
-use antumbra_store::repo::principal;
+use antumbra_store::repo::{lifecycle, principal};
 
 /// Serialize capture tasks back to the `{id, prompt, verify, completion, skill}`
 /// corpus shape (captures carry a completion; seeds do not).
@@ -422,34 +422,64 @@ pub async fn propose_compartments(url: &str, a: ProposeCompartmentsArgs) -> anyh
     Ok(())
 }
 
-/// Supersede an expert by name and refresh the router: population-level
-/// forgetting. Wire a store's `report_contradiction` against a *consolidated*
-/// memory to this: a contradiction retires the expert that memory produced, so
-/// the gate stops routing to it (retire-on-correction at the
-/// population scale, since a frozen LoRA cannot be edited per-fact).
-#[cfg(feature = "models")]
-pub async fn retire(url: &str, expert_name: &str) -> anyhow::Result<()> {
+/// Move an expert, named by name or id, to `to` as an operator's decision
+/// (ADR-0022 S-5): `retire` demotes it (dormant, or archived) and `revive`
+/// brings it back. Population-level forgetting: wire a store's
+/// `report_contradiction` against a *consolidated* memory to this, and the
+/// expert that memory produced leaves the gate (retire-on-correction at the
+/// population scale, since a frozen LoRA cannot be edited per-fact). Nothing
+/// is deleted: the adapter stays on disk and the move is undone by another.
+///
+/// The router masks a demoted expert on load, so routing is right at once.
+/// With the models build the router is also retrained over the experts the
+/// gate may route to, which a revived expert needs before the learned router
+/// can pick it.
+pub async fn move_expert(
+    url: &str,
+    name_or_id: &str,
+    to: antumbra_core::ExpertStatus,
+    note: Option<String>,
+) -> anyhow::Result<()> {
     let store = crate::connect(url).await?;
-    let target = expert::list(&store)
+    let (target, from) = lifecycle::population(&store)
         .await?
         .into_iter()
-        .find(|e| e.name == expert_name)
-        .ok_or_else(|| anyhow::anyhow!("expert '{expert_name}' not found"))?;
-    expert::delete(&store, &target.id).await?;
-    println!("retired expert {} ({})", target.name, target.id);
+        .find(|(e, _)| e.name == name_or_id || e.id.as_str() == name_or_id)
+        .ok_or_else(|| anyhow::anyhow!("expert '{name_or_id}' not found"))?;
+    lifecycle::transition(
+        &store,
+        &target.id,
+        to,
+        antumbra_core::TransitionCause::Operator { note },
+        None,
+    )
+    .await?;
+    println!(
+        "{} ({}): {} -> {}",
+        target.name,
+        target.id,
+        from.as_str(),
+        to.as_str()
+    );
+    refresh_after_move(&store).await
+}
+
+#[cfg(feature = "models")]
+async fn refresh_after_move(store: &antumbra_store::Store) -> anyhow::Result<()> {
     let embedder = crate::make_embedder()?;
-    match refresh_router(&store, embedder.as_ref(), 400).await? {
+    match refresh_router(store, embedder.as_ref(), 400).await? {
         Some(r) => println!("router refreshed over {} experts", r.experts.len()),
-        None => println!("router cleared (fewer than 2 experts remain)"),
+        None => println!("router cleared (fewer than 2 active experts remain)"),
     }
     Ok(())
 }
 
 #[cfg(not(feature = "models"))]
-pub async fn retire(_url: &str, _expert_name: &str) -> anyhow::Result<()> {
-    anyhow::bail!(
-        "`retire` requires building with --features models (real embedder for the router)"
-    )
+async fn refresh_after_move(_store: &antumbra_store::Store) -> anyhow::Result<()> {
+    println!(
+        "the router masks demoted experts on load; retrain it with `gate-train` from a          --features models build to route to a revived one"
+    );
+    Ok(())
 }
 
 /// Arguments for [`remember`].

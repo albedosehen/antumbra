@@ -99,6 +99,16 @@ impl LearnedRouter {
         out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         out
     }
+
+    /// The router with every expert `keep` refuses masked out of the gate:
+    /// its centroid is gone, so it is neither routed to nor counted toward
+    /// coverage. The learned metric is shared and stays, so the experts kept
+    /// are scored exactly as before (ADR-0022 S-5, a dormant expert's gate
+    /// masked).
+    pub fn masked(mut self, keep: impl Fn(&ExpertId) -> bool) -> Self {
+        self.experts.retain(|e| keep(&e.id));
+        self
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +158,38 @@ mod tests {
         // The metric zeroes dim 0, so a task only on dim 0 projects to ~nothing
         // -> top similarity below the floor -> not covered (out of distribution).
         assert!(!router.covers(&[1.0, 0.0, 0.0]));
+    }
+
+    /// A masked expert is neither routed to nor what makes a task covered, and
+    /// the experts kept keep their scores relative to each other.
+    #[test]
+    fn a_masked_expert_is_out_of_routing_and_coverage() {
+        let router = LearnedRouter {
+            weights: vec![1.0, 1.0, 1.0],
+            experts: vec![
+                RouterExpert {
+                    id: ExpertId::new("dormant"),
+                    centroid: vec![1.0, 0.0, 0.0],
+                },
+                RouterExpert {
+                    id: ExpertId::new("a"),
+                    centroid: vec![0.0, 1.0, 0.0],
+                },
+                RouterExpert {
+                    id: ExpertId::new("b"),
+                    centroid: vec![0.0, 0.0, 1.0],
+                },
+            ],
+            temperature: 0.1,
+            floor: 0.9,
+        };
+        let task = [1.0, 0.1, 0.05];
+        assert!(router.covers(&task), "covered only by the dormant expert");
+        let masked = router.masked(|id| id.as_str() != "dormant");
+        assert!(!masked.covers(&task), "masked, it covers nothing");
+        let ranked = masked.route(&task);
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].0, ExpertId::new("a"));
     }
 
     // A task embedded at the wrong width must abstain (escalate), not route on a

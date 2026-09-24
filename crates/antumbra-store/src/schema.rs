@@ -316,6 +316,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // rows self-expire out at the next sweep. Owner-only, like the rest of
         // the control-plane tables.
         table_schema("magic_link_use").with_mode(TableMode::Schemaless),
+        // Expert lifecycle (ADR-0022 S-5): every status change, appended and
+        // numbered per expert. Readable where its expert is, through the same
+        // owner rule, so no session sees an expert without its moves.
+        table_schema("expert_transition")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(EXPERT_PERMS)
+            .with_indexes([unique_index("xtrans_seq_uq", ["expert", "seq"])]),
         // Validation harness.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)

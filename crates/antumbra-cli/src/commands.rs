@@ -14,7 +14,7 @@ use antumbra_gate::{route as gate_route, GateConfig};
 #[cfg(feature = "models")]
 use antumbra_loop::{GenerationLoop, LoopConfig};
 #[cfg(feature = "models")]
-use antumbra_store::repo::{boundary, expert};
+use antumbra_store::repo::{boundary, expert, lifecycle};
 #[cfg(feature = "models")]
 use antumbra_store::EMBED_DIM;
 #[cfg(feature = "models")]
@@ -68,9 +68,9 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
 
         // One extra round to confirm coverage after the last grow.
         for round in 0..(max_experts + 1) {
-            let experts = expert::list(&store).await?;
+            let experts = lifecycle::routable(&store).await?;
             let boundaries = boundary::list(&store).await?;
-            let router = antumbra_store::repo::router::load(&store).await?;
+            let router = lifecycle::load_router(&store).await?;
 
             // Route each task to an expert (or none, if the gate
             // escalates). Coverage is *serving* coverage: an expert only
@@ -565,21 +565,21 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
 
         let store = crate::connect(url).await?;
         let embedder = crate::make_embedder()?;
-        let experts = expert::list(&store).await?;
+        let experts = lifecycle::routable(&store).await?;
         if experts.is_empty() {
             anyhow::bail!(
-                "no experts in the population; grow some with `populate` / `evolve` first"
+                "no active experts in the population; grow some with `populate` / `evolve` first"
             );
         }
         let boundaries = boundary::list(&store).await?;
-        let router = antumbra_store::repo::router::load(&store).await?;
+        let router = lifecycle::load_router(&store).await?;
 
-        // The resident engine: one shared base, every expert's adapter registered
-        // so a route hot-swaps to it without reloading the base.
+        // The resident engine: one shared base, every servable expert's adapter
+        // registered so a route hot-swaps to it without reloading the base.
         let base_model = experts[0].base_model.clone();
         let cfg = RaftConfig::for_serving(max_new_tokens, temperature);
         let mut engine = MultiAdapterServe::new(base_model, cfg);
-        for e in &experts {
+        for e in &lifecycle::servable(&store).await? {
             engine.register(e.id.clone(), e.artifact_uri.clone());
         }
         eprintln!(

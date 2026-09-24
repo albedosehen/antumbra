@@ -12,7 +12,7 @@ use antumbra_core::{Expert, ExpertId, Generation, RunId, ShadowStatus};
 use antumbra_embed::HttpEmbedder;
 use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_loop::{GenerationLoop, LoopConfig};
-use antumbra_store::repo::{boundary, expert, shadow};
+use antumbra_store::repo::{boundary, expert, lifecycle, shadow};
 use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::Parser;
@@ -110,19 +110,22 @@ fn builtin_embedder() -> anyhow::Result<Box<dyn Embedder>> {
     )
 }
 
-/// Train (or retrain) the learned router over the whole population's exemplars
-/// and persist it (the learned gate). Returns the expert count it covers, or `None` when
-/// the population is too small to need a router (<2 experts/exemplars). This is
-/// the self-maintaining gate: `train`/`teach` call it so routing stays current
-/// without a manual `gate-train`.
+/// Train (or retrain) the learned router over the exemplars of the experts the
+/// gate may route to (the active ones, ADR-0022 S-5) and persist it (the
+/// learned gate). Returns the router, or `None` when too few are routable to
+/// need one (<2 experts/exemplars), in which case any router left from before
+/// is cleared, so routing falls back to the heuristic gate over the population
+/// as it now is. This is the self-maintaining gate: `train`/`teach` call it so
+/// routing stays current without a manual `gate-train`.
 #[cfg(feature = "models")]
 async fn refresh_router(
     store: &Store,
     embedder: &dyn Embedder,
     epochs: usize,
 ) -> anyhow::Result<Option<antumbra_core::LearnedRouter>> {
-    let experts = expert::list(store).await?;
+    let experts = lifecycle::routable(store).await?;
     if experts.len() < 2 {
+        antumbra_store::repo::router::clear(store).await?;
         return Ok(None);
     }
     let mut exemplars: Vec<(ExpertId, Vec<f32>)> = Vec::new();
@@ -140,6 +143,7 @@ async fn refresh_router(
         }
     }
     if exemplars.len() < 2 {
+        antumbra_store::repo::router::clear(store).await?;
         return Ok(None);
     }
     let router = antumbra_train::train_learned_router(&exemplars, epochs)?;
@@ -244,14 +248,15 @@ async fn run() -> anyhow::Result<()> {
         }
         Command::Experts => {
             let store = connect(&cli.url).await?;
-            let experts = expert::list(&store).await?;
+            let experts = lifecycle::population(&store).await?;
             if experts.is_empty() {
                 println!("(no experts yet)");
             }
-            for e in experts {
+            for (e, status) in experts {
                 println!(
-                    "{:<20} fitness={:.2}  base={}  frozen={}",
+                    "{:<20} {:<8} fitness={:.2}  base={}  frozen={}",
                     e.name,
+                    status.as_str(),
                     e.fitness,
                     e.base_model,
                     e.is_frozen()
@@ -337,7 +342,7 @@ async fn run() -> anyhow::Result<()> {
             let task_vec = embedder.embed(&task).await?;
             // Prefer the learned router (the learned gate) once trained; it separates
             // specialists from generalists where raw-cosine coverage cannot.
-            if let Some(router) = antumbra_store::repo::router::load(&store).await? {
+            if let Some(router) = lifecycle::load_router(&store).await? {
                 let ranked = router.route(&task_vec);
                 let sim = router.top_similarity(&task_vec);
                 // The learned router routes; boundaries still inhibit (a known
@@ -371,7 +376,7 @@ async fn run() -> anyhow::Result<()> {
                     println!("  {:<22} p={pr:.3}", id.to_string());
                 }
             } else {
-                let experts = expert::list(&store).await?;
+                let experts = lifecycle::routable(&store).await?;
                 let boundaries = boundary::list(&store).await?;
                 let cfg = GateConfig {
                     coverage_threshold: threshold,
@@ -625,7 +630,9 @@ async fn run() -> anyhow::Result<()> {
             #[cfg(feature = "models")]
             {
                 let store = connect(&cli.url).await?;
-                let population = expert::list(&store).await?;
+                // Named experts are served whether or not the gate routes to
+                // them: a dormant one still composes, an archived one does not.
+                let population = lifecycle::servable(&store).await?;
                 // Resolve "name:weight,..." to adapter paths + weights.
                 let mut specs: Vec<(String, f32)> = Vec::new();
                 let mut base_model = String::new();
@@ -827,8 +834,20 @@ async fn run() -> anyhow::Result<()> {
             )
             .await?;
         }
-        Command::Retire { expert } => {
-            ops::retire(&cli.url, &expert).await?;
+        Command::Retire {
+            expert,
+            archive,
+            note,
+        } => {
+            let to = if archive {
+                antumbra_core::ExpertStatus::Archived
+            } else {
+                antumbra_core::ExpertStatus::Dormant
+            };
+            ops::move_expert(&cli.url, &expert, to, note).await?;
+        }
+        Command::Revive { expert, note } => {
+            ops::move_expert(&cli.url, &expert, antumbra_core::ExpertStatus::Active, note).await?;
         }
         Command::Remember {
             tenant,

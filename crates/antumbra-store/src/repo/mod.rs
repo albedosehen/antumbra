@@ -16,6 +16,7 @@ pub mod generation;
 pub mod genesis;
 pub mod hive;
 pub mod invite;
+pub mod lifecycle;
 pub mod loop_control;
 pub mod magic_use;
 pub mod memory;

@@ -682,6 +682,7 @@ async fn call_tool_dispatches_a_named_tool() {
         .is_err());
 }
 
+mod lifecycle;
 mod workspace;
 
 /// A server pinned to a named host, for the fabric tests: which machine a run
