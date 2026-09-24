@@ -48,7 +48,7 @@ It is off by default because it changes what is learned, and because the demo co
   - With `--holdout`, the tasks are the held-out slice, which it never trained on. Without it, the tasks are the ones it trained on, re-drawn.
   - The threshold applies to the mean.
 - **Output:** each generation prints every member's recipe and fitness, and the score graduation was judged on, including the re-measured pass rates. Every member's recipe is stored as a `recipe` row, and those rows are the history later generations are proposed from.
-- **Cost:** a generation takes the cohort size times as long. Combine it with `--holdout` on a corpus of real size, so the audit trend can tell a search that improves from one that overtunes.
+- **Cost:** a generation takes the cohort size times as long, plus the re-measurement. On the 3090 Ti, two generations of three over the workbench `sequences` corpus (`--samples 4 --rounds 2 --holdout`) took 53 minutes and peaked at 14.6 GB of the card, whatever the batch size (`scripts/search-validate.sh` runs exactly that). Combine it with `--holdout` on a corpus of real size, so the audit trend can tell a search that improves from one that overtunes.
 
 ## Corpus format
 
