@@ -254,7 +254,17 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    `train --search` re-measures three times by default, and `--remeasure N` sets the count for any run.
 
-   Still to come for this step: the fast and slow cohorts that blunt greed, and a GPU run of the whole search. Until that run, the step stays unchecked.
+   **The whole search has run on the GPU.** It ran two generations of three over the workbench `sequences` corpus, held out, on the 3090 Ti beside the production services. The first attempt ran the card out of memory on a batch-2 member. That found two things the CPU tests could not:
+   - candle builds a gradient for every frozen base weight on every step;
+   - a batch held every example's forward graph until one backward.
+
+   With both fixed (the frozen product and gradient accumulation; see the trainer guide), one example's step peaks at 11.1 GB of the card instead of 19.2. The batch-4 member trained within the run's peak of 14.6 GB. The attempt also found that a run killed mid-generation could not be resumed, and it now can. The run took 53 minutes:
+   - **Generation 0** carried forward the starting recipe (learning rate 1e-4, batch 1) at fitness 0.73, against 0.68 and 0.62. It graduated on a re-measured mean of 0.67 over 5 held-out tasks and 3 seeds.
+   - **Generation 1** carried forward learning rate 1.4e-5, batch 4, at 0.70 against 0.68 and 0.68. It graduated on 0.72.
+
+   That shows the search runs. It does not yet show that it finds better recipes than the starting one: the members' differences are within the noise of four samples a task.
+
+   Still to come for this step: the fast and slow cohorts that blunt greed. Until they are in, the step stays unchecked.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.
