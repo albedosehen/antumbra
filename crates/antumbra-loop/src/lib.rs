@@ -31,11 +31,13 @@ use antumbra_store::repo::{
 };
 use antumbra_store::Store;
 
+mod admission;
 mod cohort;
 mod contribution;
 mod measure;
 mod recipe;
 pub mod search;
+pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
 pub use contribution::ContributionPolicy;
 use measure::Measurement;
@@ -114,6 +116,11 @@ pub struct LoopConfig {
     /// `None` (the default) leaves it unmeasured: it costs about two
     /// evaluations of the live tasks each time it runs.
     pub contribution: Option<ContributionPolicy>,
+    /// Gate admission (ADR-0022 S-5): a graduate whose capability vector
+    /// duplicates an active shared expert's joins only if it beats that
+    /// expert head to head, and then replaces it. `None` (the default) admits
+    /// every graduate, as the loop always has.
+    pub admission: Option<AdmissionPolicy>,
 }
 
 impl Default for LoopConfig {
@@ -128,6 +135,7 @@ impl Default for LoopConfig {
             search: None,
             remeasure: None,
             contribution: None,
+            admission: None,
         }
     }
 }
@@ -173,6 +181,9 @@ pub struct GenerationReport {
     /// Each shared expert's leave-one-out contribution, when this generation
     /// measured it (ADR-0022 S-5). Empty when it was not due.
     pub contribution: Vec<antumbra_core::ContributionRecord>,
+    /// What admission decided for a shadow that cleared graduation, when a
+    /// policy is set. A rejected one did not graduate.
+    pub admission: Option<Admission>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -280,17 +291,38 @@ impl<'a> GenerationLoop<'a> {
             .judge(&run_id, generation, &shadow_id, &outcome, &cohort, shortcut)
             .await?;
         measured.remeasured = remeasured.clone();
-        let graduated = graduation_score >= self.cfg.graduate_threshold && !shortcut;
-        if graduated {
-            sh.advance_to(ShadowStatus::Graduated)?;
-            shadow::upsert(self.store, &sh).await?;
-            self.graduate(&run_id, generation, &outcome.adapter_uri, fitness, &outcome)
+        let cleared = graduation_score >= self.cfg.graduate_threshold && !shortcut;
+        let mut admission = None;
+        let graduated = if cleared {
+            let candidate = self
+                .mint(&run_id, generation, &outcome.adapter_uri, fitness, &outcome)
                 .await?;
+            admission = self
+                .admission(&run_id, generation, &candidate, holdout)
+                .await?;
+            let admitted = admission.as_ref().is_none_or(Admission::admits);
+            if admitted {
+                sh.advance_to(ShadowStatus::Graduated)?;
+                shadow::upsert(self.store, &sh).await?;
+                self.admit(&run_id, generation, &candidate, fitness, admission.as_ref())
+                    .await?;
+            } else {
+                // A twin of an expert it could not beat. Not a failure of
+                // competence, so no boundary is logged: the skill is covered.
+                eprintln!(
+                    "admission: generation {} duplicates the population and is not admitted: {admission:?}",
+                    generation.0
+                );
+                sh.advance_to(ShadowStatus::Pruned)?;
+                shadow::upsert(self.store, &sh).await?;
+            }
+            admitted
         } else {
             sh.advance_to(ShadowStatus::Pruned)?;
             shadow::upsert(self.store, &sh).await?;
             self.log_open_boundary(generation, &shadow_id).await?;
-        }
+            false
+        };
         self.record_evaluation(
             &run_id, &shadow_id, generation, graduated, &outcome, &measured,
         )
@@ -325,6 +357,7 @@ impl<'a> GenerationLoop<'a> {
             graduation_score,
             remeasured,
             contribution,
+            admission,
         })
     }
 
@@ -440,14 +473,16 @@ impl<'a> GenerationLoop<'a> {
     /// routes against, so routing reflects what the expert demonstrably does,
     /// not a hand-written label. Falls back to a generic descriptor only when
     /// the trainer reported no exemplars.
-    async fn graduate(
+    /// The frozen expert a graduating shadow would become, not yet in the
+    /// population.
+    async fn mint(
         &self,
         run_id: &RunId,
         generation: Generation,
         adapter_uri: &str,
         fitness: f32,
         outcome: &TrainOutcome,
-    ) -> Result<()> {
+    ) -> Result<Expert> {
         let capability_vec = self
             .capability_vector(&outcome.capability_exemplars, generation)
             .await?;
@@ -473,6 +508,20 @@ impl<'a> GenerationLoop<'a> {
             placed_on: Some(antumbra_core::this_host()),
             created_at: now,
         };
+        Ok(expert)
+    }
+
+    /// Put an admitted expert into the population, freeze its baseline, and
+    /// archive the twin it superseded, if it superseded one.
+    async fn admit(
+        &self,
+        run_id: &RunId,
+        generation: Generation,
+        expert: &Expert,
+        fitness: f32,
+        admission: Option<&Admission>,
+    ) -> Result<()> {
+        let now = expert.created_at;
         // A generation run again after an interruption may already have
         // graduated once. Its expert is keyed by generation, so the second
         // decision replaces the first rather than adding a twin to the
@@ -480,7 +529,21 @@ impl<'a> GenerationLoop<'a> {
         if expert::get(self.store, &expert.id).await?.is_some() {
             expert::delete(self.store, &expert.id).await?;
         }
-        expert::insert(self.store, &expert).await?;
+        expert::insert(self.store, expert).await?;
+        if let Some(Admission::Superseded { archived, .. }) = admission {
+            // Archived, not deleted: out of routing and serving, its weights
+            // kept and revivable, and still under the tripwire.
+            lifecycle::transition(
+                self.store,
+                archived,
+                antumbra_core::ExpertStatus::Archived,
+                antumbra_core::TransitionCause::Redundant {
+                    of: expert.id.clone(),
+                },
+                Some(generation),
+            )
+            .await?;
+        }
         // Snapshot the freeze baseline for the no-forgetting tripwire (the frozen
         // population versus the plastic shadow): this fingerprint must never
         // change while the expert is frozen in the population. Stored once, at
@@ -493,14 +556,14 @@ impl<'a> GenerationLoop<'a> {
             corpus_task_id: format!("freeze:g{}", generation.0),
             status: EvalStatus::Success,
             metrics: Some(serde_json::json!({ "fitness": fitness, "event": "freeze" })),
-            regression_fingerprint: Some(fingerprint(adapter_uri)),
+            regression_fingerprint: Some(fingerprint(&expert.artifact_uri)),
             created_at: now,
         };
         evaluation::insert(self.store, &baseline).await?;
         // A new expert may resolve the failure region of an open scope: retire
         // every actionable counterfactual boundary its capability now covers. The
         // gap the boundary marked is filled, so it should stop gating routing.
-        self.retire_covered_boundaries(&expert).await?;
+        self.retire_covered_boundaries(expert).await?;
         Ok(())
     }
 

@@ -311,9 +311,22 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    That is the dilution the record describes, and it arrived at the second expert. It is also why unused is kept apart from useless: neither expert was useless, and demoting either on routing share would have been wrong. The cure is admission gating, not retirement.
 
+   **Admission is gated.** With `LoopConfig::admission` set, a shadow that clears graduation is checked against the population before it joins. `train` sets it by default, at `--duplicate-above 0.95`.
+   - **The duplicate test:** the candidate is a twin if its capability vector is at least that similar (cosine) to an active shared expert's. The vector is what the gate routes on and what collapsed on the GPU.
+   - **Head to head:** a twin is scored against the expert it duplicates on the same live tasks under the same seeds.
+   - **Winning:** if it beats that expert, it is admitted in its place, and the other is archived as `Redundant` with it: out of routing and serving, weights kept and still under the tripwire, revivable, never deleted.
+   - **Losing:** otherwise the shadow is pruned without a boundary, since the skill is covered, and the population does not grow.
+   - **A twin on another node** cannot be measured here, so the candidate cannot show it is better and is not admitted.
+   - **A generation run again** does not take its own first graduate for a twin.
+   - **Why not merge:** the record names merging as the other answer. Replacement is the one that needs no merge, and it keeps growth sublinear without deleting anything.
+
+   On the GPU, the same two generations that left both experts unused ran again with the gate:
+   - **The twin:** generation 1's graduate had a similarity of 0.9988 to generation 0's expert. It scored 0.73 against that expert's 0.77 head to head, and was not admitted.
+   - **The population:** it stayed one expert. Generation 1's contribution measurement found that expert taking all 30 live tasks, at 0.77 against the base model's 0.57.
+   - **The cost:** the head-to-head took about as long as a contribution measurement: two evaluations of the live tasks, paid only when a twin turns up.
+
    Still to come for this step:
    - the two detectors in series, which let the loop make the moves a person makes now;
-   - admission gating at graduation;
    - conservative merging;
    - the gate's re-freeze schedule;
    - the population's comparison against its single best expert.
