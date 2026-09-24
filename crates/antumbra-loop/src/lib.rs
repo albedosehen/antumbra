@@ -44,7 +44,7 @@ pub mod search;
 pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
 pub use contribution::ContributionPolicy;
-pub use grow::{choose, diversity, Choosing, Diversity, GrowPolicy, Growth};
+pub use grow::{by_credit, choose, diversity, Choosing, Diversity, GrowPolicy, Growth};
 use measure::Measurement;
 pub use merging::{Merge, MergePolicy};
 pub use retirement::{confirms, warnings, Detection, RetirementPolicy, Warning};

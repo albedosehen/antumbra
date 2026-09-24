@@ -381,9 +381,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - credit, not learnability, has to decide;
    - admission should measure a candidate against the expert currently serving its region, not only against its twins.
 
+   **Credit is now the objective.** `Choosing::Credit`, the default, is a small bandit over regions:
+   - **The prior:** a region's expected credit starts from its learnability, scaled so a perfectly learnable region is expected to realize +0.10.
+   - **The evidence:** the prior is pulled toward the mean credit that region's past choices realized, weighing one realized credit's worth against them.
+   - **Redundancy** is discounted in the same units.
+
+   On the credit the GPU run recorded, `grids` would fall from 0.098 to 0.004 after its -0.09, and the next choice would move on for that reason rather than for redundancy alone. `learnability` stays available (`--grow-by learnability`) for the comparison.
+
    Still to come for this step:
-   - **Credit as the objective:** the policy learning from its recorded credit, with learnability as the prior.
-   - **The comparison:** a run against the empty status quo and against uniform sampling, on graduations per unit of compute. Until it beats both, the step stays unchecked. The uniform baseline is in (`Choosing::Uniform`, `train --grow --grow-uniform`). It has the same gate, focus and unfiltered share, and differs only in how a region is chosen.
+   - **The comparison:** a run against the empty status quo and against uniform sampling, on graduations per unit of compute. Until it beats both, the step stays unchecked. The uniform baseline is in (`Choosing::Uniform`, `train --grow --grow-by uniform`). It has the same gate, focus and unfiltered share, and differs only in how a region is chosen.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 8. Never: S-6.

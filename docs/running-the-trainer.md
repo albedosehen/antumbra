@@ -64,7 +64,10 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 - **The census:** it comes from the contribution measurement, which `--grow` turns on every generation over 64 live tasks.
 - **The first generation:** it has no census yet, so it learns from everything.
 - **Output:** each generation prints the chosen region, its learnability, the last choice's realized credit, and the diversity instruments.
-- **The baseline:** `--grow-uniform` chooses among the regions that pass the gate uniformly at random instead. It is the baseline the grow step is measured against.
+- **`--grow-by`:** how the region is chosen.
+  - `credit` (the default, the record's objective) chooses the highest expected realized improvement. Learnability is the prior, and the credit that region's past choices realized updates it.
+  - `learnability` ignores credit.
+  - `uniform` picks at random among the regions that pass the gate. It is the baseline the grow step is measured against.
 
 ### Merging siblings: `--merge`
 
