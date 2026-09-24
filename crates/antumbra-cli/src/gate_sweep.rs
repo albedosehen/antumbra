@@ -94,12 +94,23 @@ pub fn best(points: &[Point]) -> Option<Point> {
     })
 }
 
-/// What `gate-sweep` was given.
+/// What `gate-sweep` is given.
+#[derive(clap::Args, Debug)]
 pub struct SweepArgs {
+    #[arg(long)]
     pub corpus: String,
+    /// Every satisfiable task, not only the ones the default partition
+    /// withholds.
+    #[arg(long)]
     pub all_tasks: bool,
+    /// Seeds each side is scored under.
+    #[arg(long, default_value_t = 2)]
     pub seeds: u64,
+    /// Completions per task per seed.
+    #[arg(long, default_value_t = 4)]
     pub samples: usize,
+    /// Write every task's outcome here.
+    #[arg(long)]
     pub out: Option<String>,
 }
 

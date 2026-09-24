@@ -30,20 +30,7 @@ use chrono::Utc;
 #[cfg(feature = "models")]
 use crate::{connect, make_embedder, refresh_router, RouterRefresh};
 
-/// What `antumbra eval` was given.
-pub struct EvalArgs {
-    pub corpus: String,
-    pub adapter: Option<String>,
-    pub base_model: Option<String>,
-    pub samples: usize,
-    pub max_new_tokens: usize,
-    pub report: Option<String>,
-    pub completions: Option<String>,
-    pub seed: Option<u64>,
-    pub temperature: Option<f64>,
-    pub top_p: Option<f64>,
-    pub dtype: Option<String>,
-}
+pub use crate::eval_args::EvalArgs;
 
 /// `antumbra eval`: an adapter's pass rate on a corpus, with no training.
 pub async fn eval(args: EvalArgs) -> anyhow::Result<()> {

@@ -299,23 +299,7 @@ pub enum Command {
     /// the way, its expert and the base both scored, and the threshold swept
     /// offline. The best point is the bar a typed gate must clear. Needs
     /// --features models and a GPU.
-    GateSweep {
-        #[arg(long)]
-        corpus: String,
-        /// Every satisfiable task, not only the ones the default partition
-        /// withholds.
-        #[arg(long)]
-        all_tasks: bool,
-        /// Seeds each side is scored under.
-        #[arg(long, default_value_t = 2)]
-        seeds: u64,
-        /// Completions per task per seed.
-        #[arg(long, default_value_t = 4)]
-        samples: usize,
-        /// Write every task's outcome here.
-        #[arg(long)]
-        out: Option<String>,
-    },
+    GateSweep(crate::gate_sweep::SweepArgs),
     /// A critic trained on the verifier's verdicts (ADR-0022 S-2): train one
     /// and read it against them, per skill.
     Critic {
@@ -462,51 +446,7 @@ pub enum Command {
     Train(crate::train_args::TrainArgs),
     /// Score a saved adapter's pass-rate on a corpus, with no training.
     /// Needs --features models + a GPU + python.
-    Eval {
-        /// Path to the JSON corpus of verifiable tasks ({id,prompt,verify}).
-        #[arg(long)]
-        corpus: String,
-        /// Saved adapter to load over the base before scoring. Omit to score
-        /// the bare base: the prior floor.
-        #[arg(long)]
-        adapter: Option<String>,
-        /// Base model to score. Defaults to the one training loads
-        /// (Qwen2.5-Coder-1.5B-Instruct), so an eval measures the model a run
-        /// would start from.
-        #[arg(long)]
-        base_model: Option<String>,
-        /// Completions sampled per task (the pass-rate denominator is tasks x K).
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        /// Tokens generated per completion. The training default, so a function
-        /// long enough to pass training is not cut short here.
-        #[arg(long, default_value_t = 256)]
-        max_new_tokens: usize,
-        /// Write every task's result (passes out of samples) to this JSON file.
-        #[arg(long)]
-        report: Option<String>,
-        /// Write every sampled completion, as `{task, completion, passed}`, to
-        /// this JSON file: the policy's own answers, for labeling as cases a
-        /// verifier is measured on (`antumbra verifier cases`).
-        #[arg(long)]
-        completions: Option<String>,
-        /// Seed the draws. Unseeded, every eval of the same model draws the same
-        /// completions, so a second, independent sample needs a seed.
-        #[arg(long)]
-        seed: Option<u64>,
-        /// Sampling temperature. Defaults to training's, so the eval sees the
-        /// draws a run would; 0 is greedy.
-        #[arg(long)]
-        temperature: Option<f64>,
-        /// Nucleus cutoff. Defaults to training's (1.0, off).
-        #[arg(long)]
-        top_p: Option<f64>,
-        /// Compute precision on the GPU: f32, bf16 or f16. Defaults to
-        /// training's (bf16). Comparing f32 with bf16 on the same draws is how
-        /// to tell a numerics problem from a model that cannot do the task.
-        #[arg(long)]
-        dtype: Option<String>,
-    },
+    Eval(crate::eval_args::EvalArgs),
     /// Capture a supplied, verifier-checked correction into a frozen expert (the
     /// other intake path beside `train`, the capture intake into the umbra). The corpus carries a
     /// `completion` per task. Needs --features models + a GPU + python.
