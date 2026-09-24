@@ -236,7 +236,17 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    A cohort's first member is the incumbent, so the recipe behind the best shadow propagates. Proposals are a pure function of the history and a seed, so a resumed run proposes what a continuous one would. On a synthetic landscape with one good region, six generations of four, noisy, carried forward a recipe whose true fitness averaged 0.898 over twelve seeds, against 0.882 for random search on the same budget. The worst seeds were 0.891 and 0.840, and the optimum is 0.900. The test holds the search to beating random search on both the mean and the worst seed.
 
-   Still to come for this step: training a cohort per generation, and graduation on a fresh slice with a new seed and at least three repeats. Also open is whether cohort members start from fresh adapters, carrying only the recipe forward, or from the winner's weights as PBT's exploitation does. That choice decides whether the frozen population is independent skills or successive refinements of one adapter, so it is settled before the wiring.
+   **The cohort is wired, and only the recipe propagates.** Each member trains from fresh factors, never from the winner's weights. The other reading, PBT's exploitation, would have made each graduate a refinement of the last, which changes what the frozen population is. So the ADR's "exploitation copies weights" does not apply here, and neither does the risk behind constraint 3, since no weights are copied at all.
+
+   With `LoopConfig::search` set, a generation runs like this:
+   - `propose` gives one recipe per member. The first is the incumbent, or the run's starting recipe in generation 0. The history is earlier generations' rows under the same partition, so a generation that crashed partway does not count its own half-trained members as evidence.
+   - Every member trains and leaves a recipe row, descending from the incumbent's.
+   - The best by fitness is carried forward, with ties going to the incumbent. The others are pruned, and the generation's scoring, instruments and decision run on the winner as they always did for the one shadow.
+   - Until re-measurement exists, the graduation threshold applies to the winner's fitness shrunk toward the cohort's mean. Picking the best of a noisy few overstates it, and shrinking can only make graduation harder.
+
+   `antumbra train --search` turns it on, with `--cohort` members, and adds the KL weight to the search under GRPO.
+
+   Still to come for this step: graduation on a fresh slice with a new seed and at least three repeats. That needs seeded sampling, which the Qwen sampler does not have. Also still to come: the fast and slow cohorts that blunt greed.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.

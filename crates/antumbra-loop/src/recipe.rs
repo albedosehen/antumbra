@@ -1,5 +1,5 @@
-//! What the loop records of the recipe each generation trained under
-//! (ADR-0022 S-1): the ledger the recipe search reads, one row per shadow.
+//! What the loop records of the recipe each shadow trained under (ADR-0022
+//! S-1): the ledger the recipe search reads, one row per shadow.
 //!
 //! Only the trainer's echo is recorded. A row naming the recipe the loop asked
 //! for, when the trainer used another or would not say, would describe a run
@@ -10,65 +10,66 @@ use chrono::Utc;
 
 use antumbra_core::ports::TrainOutcome;
 use antumbra_core::slice::Holdout;
-use antumbra_core::{Generation, RecipeRecord, Result, RunId, TrainingRecipe};
+use antumbra_core::{Generation, RecipeRecord, Result, RunId, ShadowId, TrainingRecipe};
 use antumbra_store::repo::recipe;
 
-use crate::{shadow_id, GenerationLoop};
+use crate::GenerationLoop;
+
+/// One shadow's run, as its recipe row needs it.
+pub(crate) struct Trained<'a> {
+    pub run_id: &'a RunId,
+    pub generation: Generation,
+    pub shadow: &'a ShadowId,
+    /// The recipe the shadow was asked to train under, `None` for the
+    /// trainer's own.
+    pub asked: Option<TrainingRecipe>,
+    /// The row this one descends from.
+    pub parent: Option<ShadowId>,
+    pub holdout: Option<&'a Holdout>,
+    pub outcome: &'a TrainOutcome,
+}
 
 impl GenerationLoop<'_> {
-    /// Record the recipe this generation trained under, as its trainer
-    /// reported it, and return it.
+    /// Record the recipe a shadow trained under, as its trainer reported it,
+    /// and return it.
     ///
     /// A trainer that reports none leaves no row. One that trained under
     /// something other than what was asked is recorded as what it did, and the
-    /// difference is said. The row descends from the previous generation's, so
-    /// the lineage of a recipe can be walked back through the run. The
-    /// partition seed is kept only when the trainer confirmed the holdout: then
-    /// the fitness is over that split's visible tasks alone, and a ranking must
-    /// never set it against fitness read under another split, or under none.
-    pub(crate) async fn record_recipe(
-        &self,
-        run_id: &RunId,
-        generation: Generation,
-        holdout: Option<&Holdout>,
-        outcome: &TrainOutcome,
-    ) -> Result<Option<TrainingRecipe>> {
-        let Some(ran) = outcome.recipe else {
-            if self.cfg.recipe.is_some() {
+    /// difference is said. The partition seed is kept only when the trainer
+    /// confirmed the holdout: then the fitness is over that split's visible
+    /// tasks alone, and a ranking must never set it against fitness read under
+    /// another split, or under none.
+    pub(crate) async fn record_recipe(&self, run: Trained<'_>) -> Result<Option<TrainingRecipe>> {
+        let Some(ran) = run.outcome.recipe else {
+            if run.asked.is_some() {
                 eprintln!(
-                    "recipe: the trainer did not say which recipe generation {} trained under, so \
-                     it leaves no recipe row",
-                    generation.0
+                    "recipe: the trainer did not say which recipe {} trained under, so it leaves \
+                     no recipe row",
+                    run.shadow
                 );
             }
             return Ok(None);
         };
-        if let Some(asked) = self.cfg.recipe.filter(|asked| *asked != ran) {
+        if let Some(asked) = run.asked.filter(|asked| *asked != ran) {
             eprintln!(
-                "recipe: generation {} asked for {asked:?} but trained under {ran:?}; recorded as \
-                 trained",
-                generation.0
+                "recipe: {} asked for {asked:?} but trained under {ran:?}; recorded as trained",
+                run.shadow
             );
         }
-        let parent = match generation.0.checked_sub(1) {
-            Some(previous) => recipe::get(self.store, &shadow_id(run_id, Generation(previous)))
-                .await?
-                .map(|row| row.shadow),
-            None => None,
-        };
-        let partition_seed = holdout
-            .filter(|asked| outcome.holdout.as_ref() == Some(*asked))
+        let partition_seed = run
+            .holdout
+            .filter(|asked| run.outcome.holdout.as_ref() == Some(*asked))
             .map(|asked| asked.partition.seed);
         recipe::upsert(
             self.store,
             &RecipeRecord {
-                shadow: shadow_id(run_id, generation),
-                run_id: run_id.clone(),
-                generation,
+                shadow: run.shadow.clone(),
+                run_id: run.run_id.clone(),
+                generation: run.generation,
                 recipe: ran,
-                parent,
+                parent: run.parent,
                 partition_seed,
-                fitness_mean: outcome.final_fitness,
+                fitness_mean: run.outcome.final_fitness,
                 fitness_variance: None,
                 evaluations: 1,
                 created_at: Utc::now(),

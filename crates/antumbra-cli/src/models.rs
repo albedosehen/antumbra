@@ -323,6 +323,9 @@ pub struct TrainArgs {
     pub parent: Option<String>,
     /// Hold the default partition out of training and measure against it.
     pub holdout: bool,
+    /// Search the recipe with a cohort of this many shadows a generation.
+    pub search: bool,
+    pub cohort: usize,
 }
 
 pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
@@ -336,6 +339,17 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     let quantize_base = args.quantize_base;
     let parent = args.parent;
     let holdout = args.holdout;
+    let search = args.search.then(|| {
+        let mut policy = antumbra_loop::search::SearchPolicy {
+            cohort: args.cohort.max(1),
+            ..Default::default()
+        };
+        // GRPO weighs its KL penalty; RAFT has none to weigh.
+        if algo == "grpo" {
+            policy.space.kl_beta = (0.0, 0.2);
+        }
+        policy
+    });
     #[cfg(feature = "models")]
     {
         let store = connect(url).await?;
@@ -354,6 +368,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         // every `train` run on the raw completion model after the default moved
         // to the Instruct one the recipe was validated on.
         let base_model = cfg.base_model.clone();
+        let start = cfg.recipe();
         let loader = CandleModelLoader::new(cfg.clone());
         let trainer: Box<dyn Trainer> = match algo.as_str() {
             "grpo" => Box::new(GrpoTrainer::new(cfg, loader, corpus, verifier)),
@@ -366,6 +381,9 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             graduate_threshold: 0.3,
             base_model,
             partition: holdout.then(antumbra_core::slice::Partition::default),
+            // A searched run starts from the recipe the trainer is configured with.
+            recipe: search.is_some().then_some(start),
+            search,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -399,6 +417,24 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     recipe.learning_rate, recipe.batch_size, recipe.kl_beta
                 );
             }
+            if r.cohort.len() > 1 {
+                for m in &r.cohort {
+                    let recipe = m.recipe.map_or("unreported".to_string(), |x| {
+                        format!(
+                            "lr {:.1e} batch {} kl {}",
+                            x.learning_rate, x.batch_size, x.kl_beta
+                        )
+                    });
+                    println!(
+                        "        member {} {recipe} fitness {:.2}",
+                        m.shadow, m.fitness
+                    );
+                }
+                println!(
+                    "        graduation score {:.2} (the best, shrunk toward the cohort's mean)",
+                    r.graduation_score
+                );
+            }
         }
         println!("population: {} experts", expert::list(&store).await?.len());
         // Self-maintaining gate: keep the learned router current with the
@@ -422,6 +458,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             quantize_base,
             &parent,
             holdout,
+            &search,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

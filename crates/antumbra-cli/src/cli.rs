@@ -458,6 +458,16 @@ pub enum Command {
         /// any task visible, as several shipped demo corpora are.
         #[arg(long)]
         holdout: bool,
+        /// Search the training recipe (ADR-0022 S-1): each generation trains
+        /// `--cohort` shadows under recipes the search proposes, each from the
+        /// base, and carries the best forward. Learning rate and batch size
+        /// are searched, and the KL weight too under `--algo grpo`. Multiplies
+        /// each generation's training time by the cohort size.
+        #[arg(long)]
+        search: bool,
+        /// Shadows per searched generation.
+        #[arg(long, default_value_t = 4)]
+        cohort: usize,
     },
     /// Score a saved adapter's pass-rate on a corpus, with no training.
     /// Needs --features models + a GPU + python.
