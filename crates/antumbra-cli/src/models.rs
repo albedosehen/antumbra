@@ -348,15 +348,21 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     // The grow step reads the census the contribution measurement takes, so
     // it needs one every generation, and over enough tasks to cover every
     // region.
+    let max_tasks = args.contribution_tasks.unwrap_or(if args.grow {
+        64
+    } else {
+        antumbra_loop::ContributionPolicy::default().max_tasks
+    });
     let contribution = match (args.contribution_every, args.grow) {
         (0, false) => None,
         (0, true) => Some(antumbra_loop::ContributionPolicy {
             every: 1,
-            max_tasks: 64,
+            max_tasks,
             ..Default::default()
         }),
         (every, _) => Some(antumbra_loop::ContributionPolicy {
             every,
+            max_tasks,
             ..Default::default()
         }),
     };

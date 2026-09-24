@@ -69,6 +69,11 @@ pub struct TrainArgs {
     /// default) leaves it unmeasured.
     #[arg(long, default_value_t = 0)]
     pub contribution_every: u32,
+    /// Live tasks a contribution measurement samples: 32, or 64 with --grow,
+    /// whose census needs enough of every region. Set it to compare runs on
+    /// the same sample.
+    #[arg(long)]
+    pub contribution_tasks: Option<usize>,
     /// Gate admission (ADR-0022 S-5): a graduate whose capability vector
     /// is at least this similar (cosine) to an active shared expert's is a
     /// twin. It joins only if it beats that expert head to head on the

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run the recipe search (ADR-0022 S-1) end to end on the GPU host: a searched,
 # held-out training run over a workbench corpus, cohort per generation,
-# graduation on fresh-seed re-measurement. Detached; logs to
-# /tmp/search-validate.log.
+# graduation on fresh-seed re-measurement. Detached; logs to $LOG
+# (/tmp/search-validate.log by default).
 #
 # The search is tested on CPU against fakes; this is where the real trainer
 # takes the recipes (learning rate, batch size), where seeded sampling draws the
@@ -21,8 +21,8 @@
 # to resume. Nothing here touches the deploy checkout, the production database
 # or the running services. Knobs: CORPUS (a workbench skill, default sequences),
 # GENERATIONS (2), COHORT (3), SAMPLES (4), ROUNDS (2), SEARCH (1; 0 trains one
-# shadow a generation without the recipe search), and ARGS (more train flags,
-# for example "--contribution-every 1").
+# shadow a generation without the recipe search), ARGS (more train flags,
+# for example "--contribution-every 1"), and LOG (where the run logs).
 
 export PATH=$PATH:/run/current-system/sw/bin:/run/wrappers/bin
 SHA="$1"
@@ -33,9 +33,10 @@ SAMPLES="${SAMPLES:-4}"
 ROUNDS="${ROUNDS:-2}"
 SEARCH="${SEARCH:-1}"
 ARGS="${ARGS:-}"
+LOG="${LOG:-/tmp/search-validate.log}"
 SRC="$HOME/antumbra-search-src/$SHA"
 RUN="$HOME/antumbra-search-runs/$(date -u +%Y%m%dT%H%M%SZ)-$SHA"
-exec >/tmp/search-validate.log 2>&1
+exec >"$LOG" 2>&1
 set -euo pipefail
 echo "== search $SHA start $(date -u +%FT%TZ): $CORPUS, $GENERATIONS generation(s) of $COHORT, $SAMPLES samples, $ROUNDS rounds, search=$SEARCH, args: $ARGS"
 echo "== run directory $RUN"
