@@ -313,42 +313,7 @@ pub async fn scope(url: &str, args: ScopeArgs) -> anyhow::Result<()> {
     }
 }
 
-/// What `antumbra train` was given.
-pub struct TrainArgs {
-    pub corpus: String,
-    pub generations: u32,
-    pub run: String,
-    pub samples: usize,
-    pub rounds: usize,
-    pub max_new_tokens: usize,
-    pub algo: String,
-    pub quantize_base: bool,
-    pub parent: Option<String>,
-    /// Hold the default partition out of training and measure against it.
-    pub holdout: bool,
-    /// Search the recipe with a cohort of this many shadows a generation.
-    pub search: bool,
-    pub cohort: usize,
-    /// Slow members; `None` takes a third of the cohort.
-    pub slow: Option<usize>,
-    pub slow_interval: u32,
-    /// Generations the fast interval anneals over; `None` takes the run's.
-    pub anneal: Option<u32>,
-    /// Measure contribution in every N-th generation; 0 leaves it off.
-    pub contribution_every: u32,
-    /// Capability similarity at which a graduate is a twin; above 1 admits all.
-    pub duplicate_above: f32,
-    /// Consecutive measurements at nothing that demote an expert; 0 is off.
-    pub retire_after: u32,
-    /// Merge sibling experts, and the overlap that makes them siblings.
-    pub merge: bool,
-    pub merge_retained: f32,
-    /// Choose each generation's region by the grow step, and how.
-    pub grow: bool,
-    pub grow_by: String,
-    /// Re-measurements graduation is judged on; `None` takes the default.
-    pub remeasure: Option<u32>,
-}
+pub use crate::train_args::TrainArgs;
 
 pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     let corpus = args.corpus;
