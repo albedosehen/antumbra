@@ -13,6 +13,7 @@ pub mod boundary;
 pub mod calibrate;
 pub mod compartment;
 pub mod contribution;
+pub mod critic;
 pub mod device;
 pub mod document;
 pub mod error;

@@ -25,7 +25,7 @@ use antumbra_core::{Result, RunId, TrainingRecipe};
 
 use crate::config::RaftConfig;
 use crate::contribution;
-use crate::grpo::{grpo_train, GrpoModelLoader};
+use crate::grpo::{grpo_train, CriticShaping, GrpoModelLoader};
 use crate::grpo_eval::EvalLoader;
 use crate::holdout::{split, Split};
 use crate::model::{Corpus, CorpusTask, ModelLoader};
@@ -211,6 +211,7 @@ pub struct GrpoTrainer<L: GrpoModelLoader, C: Corpus> {
     loader: L,
     corpus: C,
     verifier: Arc<dyn Verifier>,
+    shaping: Option<CriticShaping>,
 }
 
 impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
@@ -220,7 +221,19 @@ impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
             loader,
             corpus,
             verifier,
+            shaping: None,
         }
+    }
+
+    /// Let `critic` shape advantage inside the verifier's parts, at `weight`
+    /// (ADR-0022 S-2). Without it, reward is the verifier's alone.
+    pub fn with_critic(
+        mut self,
+        critic: Arc<dyn antumbra_core::ports::Critic>,
+        weight: f32,
+    ) -> Self {
+        self.shaping = Some(CriticShaping { critic, weight });
+        self
     }
 }
 
@@ -250,6 +263,7 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
             &withheld,
             &run_id,
             &config,
+            self.shaping.as_ref(),
         )
         .await?;
         Ok(TrainOutcome {

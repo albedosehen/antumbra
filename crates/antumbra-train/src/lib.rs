@@ -49,7 +49,7 @@ pub use consolidate::{
 };
 pub use corpus::JsonCorpus;
 pub use eval::{eval_pass_rate, Draw, EvalOutcome, TaskResult};
-pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
+pub use grpo::{grpo_train, CriticShaping, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use harness::{
     metabolize, normalize_traces, parse_traces as parse_harness_traces, HarnessStep, HarnessTrace,
     MetabolizePolicy,
