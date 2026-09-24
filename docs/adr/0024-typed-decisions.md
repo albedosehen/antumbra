@@ -183,6 +183,14 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
    It took two passes to get there, and the second is the one worth remembering. The first label set left the query verbatim inside its positive memory, so `grep` scored F1 1.000 on it and a chunk sweep appeared to beat the control; the span is now excised and the harness prints the no-model check on every run. **A constructed benchmark gets a no-model baseline before any model is compared against it** — that rule is the durable output of this item, more than either number.
 
    **D-1's half is blocked, on data rather than on effort**: sweeping `coverage_threshold` needs routing outcomes, and this deployment holds zero evaluation runs, shadows, boundaries and reward signals because the generational loop has never run on it. That half waits for a loop run, and no amount of care with the gate's code substitutes for it.
+
+   **The loop now leaves populations behind, and the sweep is built.** ADR-0022's GPU runs train populations on the workbench corpus, and each run keeps its store and adapters.
+   - **Routing:** `antumbra gate-sweep` routes every task the default partition withholds over such a population, with the threshold out of the way, keeping each task's expert and margin.
+   - **Scoring:** that expert and the base model answer each task under the same seeds.
+   - **The sweep:** the threshold is then swept offline, with escalations answered by the base model, the stand-in for the agent above.
+   - **The report:** the curve's best point is the control, and the shipped threshold is printed beside it.
+
+   `scripts/gate-sweep.sh` runs it over a run directory. What remains is the run itself, which waits for a GPU.
 2. [~] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated.
 
    **A floor now ships, and it is not the head this record specifies.** `antumbra-rerank/src/floor.rs` answers `Noul` by mapping the deployed cross-encoder's score through a logistic fitted on the same verifier labels, reaching 0.803 accuracy and 0.797 F1 on a held-out half against the 0.785 the best in-sample threshold manages, with an expected calibration error of 0.033. It satisfies the `TypedDecider` contract on the contract's own terms: log loss is strictly proper, and the labels come from a deterministic verifier rather than from any model's answers.
