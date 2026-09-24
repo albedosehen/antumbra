@@ -463,6 +463,12 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    A dry run on two workbench tasks, with hand-written inputs instead of the model's, found the binding constraint before the GPU did. A per-task verifier is measured only on its own task's cases, and a one-line reference yields few mutants. The forgeries and mutants of `strings/swap-in` came to 11 known-bad cases. That is too few to bound the rate under 0.10 however well the check does, and the verifier stayed unmeasured. The weak check, three inputs without the letters it swaps, passed 3 of its 11 and stayed proposed. So what makes a per-task verifier trustable is mostly the model's own wrong completions, and a skill the model is already good at has few of them.
 
+   **Attribution and downstream quarantine are in.** A trainer counts every pass of a named verifier that became training data: a RAFT winner, a pass in a GRPO group that stepped, or a verified correction. It reports these on `TrainOutcome::granted_by`. The loop then records them in two places:
+   - **the reward rows:** one `granted` row per verifier, with the count and the verifier's address. `RewardSignal` gained `verifier` for it. The row takes a step index past the run's last, so it never folds with a step's readings;
+   - **the graduate's card:** the expert's capability card lists the verifiers it trained under.
+
+   Moving a verifier to quarantined or revoked archives every active or dormant expert that trained under it, with its own cause (`TransitionCause::Quarantined`). This happens inside the store's move, not in any caller, so no path that moves a verifier can skip it. Archived rather than scored low, as the record asks: out of routing, serving and anything trained downstream. The weights and the tripwire stay, a person can revive the expert, and every reward row the verifier produced stays on record.
+
    Still to come for this step:
    - **The GPU measurement:** `verifier-validate.sh` on a workbench skill, reporting how many synthesized checks were trusted, whether they held their bound on the second set, and what the challenge caught. It waits for the S-3 comparison to free the card.
    - **Attribution:** `reward_signal` naming the verifier that granted it, and the shadows trained under a quarantined verifier quarantined from downstream training.

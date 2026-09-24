@@ -292,6 +292,38 @@ pub struct VerifierTransition {
     pub at: DateTime<Utc>,
 }
 
+/// The verifier a task's `verify` names, when it names one from the
+/// namespace (`{"verifier": "verifier:..."}`) rather than carrying a spec.
+pub fn named_verifier(spec: &serde_json::Value) -> Option<VerifierId> {
+    spec.get("verifier")
+        .and_then(|v| v.as_str())
+        .map(VerifierId::new)
+}
+
+/// The reward a named verifier granted that a run trained on: every pass of
+/// its that became training data. So when it is quarantined, what it taught
+/// can be found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerifierGrant {
+    pub verifier: VerifierId,
+    pub passes: u32,
+}
+
+/// Count one trained-on pass toward the verifier `spec` names, if it names
+/// one. A spec written into the task is authored and counts toward nothing.
+pub fn count_grant(grants: &mut Vec<VerifierGrant>, spec: &serde_json::Value) {
+    let Some(id) = named_verifier(spec) else {
+        return;
+    };
+    match grants.iter_mut().find(|g| g.verifier == id) {
+        Some(g) => g.passes += 1,
+        None => grants.push(VerifierGrant {
+            verifier: id,
+            passes: 1,
+        }),
+    }
+}
+
 /// The state a history leaves a verifier in: the last move's, or where its
 /// origin starts it when it has none.
 pub fn current_trust(origin: VerifierOrigin, history: &[VerifierTransition]) -> TrustState {
@@ -411,6 +443,31 @@ mod tests {
         for to in [Proposed, Trusted, Quarantined, Revoked] {
             assert!(Revoked.transition(to, &sound()).is_err(), "{to:?}");
         }
+    }
+
+    #[test]
+    fn grants_count_only_toward_a_named_verifier() {
+        let named = serde_json::json!({ "verifier": "verifier:a" });
+        let other = serde_json::json!({ "verifier": "verifier:b" });
+        let inline = serde_json::json!({ "program": "python" });
+        let mut grants = Vec::new();
+        for spec in [&named, &inline, &named, &other, &serde_json::Value::Null] {
+            count_grant(&mut grants, spec);
+        }
+        assert_eq!(
+            grants,
+            vec![
+                VerifierGrant {
+                    verifier: VerifierId::new("verifier:a"),
+                    passes: 2
+                },
+                VerifierGrant {
+                    verifier: VerifierId::new("verifier:b"),
+                    passes: 1
+                },
+            ]
+        );
+        assert_eq!(named_verifier(&inline), None);
     }
 
     #[test]

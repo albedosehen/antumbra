@@ -287,9 +287,24 @@ async fn moved(
     note: Option<String>,
 ) -> anyhow::Result<()> {
     let record = resolve(store, named).await?;
-    let t = verifier::transition(store, &record.id, to, note).await?;
-    println!("{}: {} -> {}", record.id, t.from.as_str(), t.to.as_str());
+    let moved = verifier::transition(store, &record.id, to, note).await?;
+    println!("{}: {}", record.id, describe(&moved));
     Ok(())
+}
+
+/// A move, and the experts it archived.
+fn describe(moved: &verifier::VerifierMove) -> String {
+    let t = &moved.transition;
+    let mut line = format!("{} -> {}", t.from.as_str(), t.to.as_str());
+    if !moved.archived.is_empty() {
+        let ids: Vec<&str> = moved.archived.iter().map(|e| e.as_str()).collect();
+        line.push_str(&format!(
+            "; archived {} expert(s) trained under it: {}",
+            ids.len(),
+            ids.join(", ")
+        ));
+    }
+    line
 }
 
 /// A verifier by its address or a unique prefix of it.
@@ -346,8 +361,8 @@ async fn report(
 ) -> anyhow::Result<()> {
     let moved = verifier::record_measurement(store, record, m).await?;
     println!("{}: {}", record.id, summary(m));
-    if let Some(t) = moved {
-        println!("  {} -> {}", t.from.as_str(), t.to.as_str());
+    if let Some(moved) = moved {
+        println!("  {}", describe(&moved));
     }
     Ok(())
 }
