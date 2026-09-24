@@ -129,6 +129,7 @@ fn every(n: u32) -> LoopConfig {
             every: n,
             seeds: 2,
             max_tasks: 16,
+            baseline: false,
         }),
         ..LoopConfig::default()
     }
@@ -184,6 +185,43 @@ async fn each_expert_is_measured_against_the_population_without_it() -> Result<(
 
     let stored = contribution::history(&store, &ExpertId::new("expert:alpha")).await?;
     assert_eq!(stored, vec![alpha]);
+    Ok(())
+}
+
+/// The routed population against its best single expert, on the same tasks:
+/// here routing adds nothing over sending everything to the alpha expert,
+/// and the record says so.
+#[tokio::test]
+async fn the_population_is_compared_with_its_best_single_expert() -> Result<()> {
+    let store = population().await?;
+    let trainer = Scorer::default();
+    let cfg = LoopConfig {
+        contribution: Some(ContributionPolicy {
+            every: 1,
+            seeds: 2,
+            max_tasks: 16,
+            baseline: true,
+        }),
+        ..LoopConfig::default()
+    };
+    let reports = GenerationLoop::new(&store, &trainer, &Axes, cfg)
+        .run_until(&RunId::new("run:base"), 1)
+        .await?;
+    let b = reports[0].baseline.clone().expect("compared");
+    assert_eq!(b.tasks, 4);
+    assert_eq!(b.population, 0.75, "alpha 1, 1; beta 0.5; the base 0.5");
+    assert_eq!(b.best, Some(ExpertId::new("expert:alpha")));
+    assert_eq!(b.best_alone, Some(0.75));
+    assert_eq!(b.delta(), Some(0.0));
+    let kept = contribution::baselines_for_run(&store, &RunId::new("run:base")).await?;
+    assert_eq!(kept, vec![b]);
+    // Each adapter was still scored once, over everything it was needed for.
+    let asked = trainer.asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 4, "alpha, beta, unused and the base");
+    assert!(asked
+        .iter()
+        .filter(|r| r.adapter_uri.is_some())
+        .all(|r| r.task_ids.len() == 4));
     Ok(())
 }
 

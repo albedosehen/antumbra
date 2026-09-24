@@ -24,7 +24,7 @@ use antumbra_train::{
 };
 
 #[cfg(feature = "models")]
-use crate::refresh_router;
+use crate::{refresh_router, RouterRefresh};
 
 use antumbra_copal::CopalArchive;
 use antumbra_core::{CompartmentId, GitProvenance, TenantId, UserId};
@@ -206,7 +206,8 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
             // Rehearse this freshly-consolidated skill while training the rest.
             replay.extend(replay_from_tasks(&tasks));
         }
-        if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+        if let Ok(RouterRefresh::Trained(r)) = refresh_router(&store, embedder.as_ref(), 400).await
+        {
             println!("router refreshed over {} experts", r.experts.len());
         }
     } else if !a.train {
@@ -468,8 +469,11 @@ pub async fn move_expert(
 async fn refresh_after_move(store: &antumbra_store::Store) -> anyhow::Result<()> {
     let embedder = crate::make_embedder()?;
     match refresh_router(store, embedder.as_ref(), 400).await? {
-        Some(r) => println!("router refreshed over {} experts", r.experts.len()),
-        None => println!("router cleared (fewer than 2 active experts remain)"),
+        RouterRefresh::Trained(r) => println!("router refreshed over {} experts", r.experts.len()),
+        RouterRefresh::Unchanged => {
+            println!("router unchanged: the experts it routes over are the same")
+        }
+        RouterRefresh::Cleared => println!("router cleared (fewer than 2 active experts remain)"),
     }
     Ok(())
 }

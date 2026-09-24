@@ -95,6 +95,7 @@ fn retiring() -> LoopConfig {
             every: 1,
             seeds: 1,
             max_tasks: 8,
+            baseline: false,
         }),
         retirement: Some(RetirementPolicy::default()),
         ..LoopConfig::default()

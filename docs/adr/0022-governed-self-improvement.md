@@ -332,10 +332,14 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **Unused is never evidence.** An unused expert is not demoted, and a window with an unused measurement confirms nothing. The GPU showed why: an unused expert can be a twin, and admission is the cure.
    - **A revive starts afresh:** only measurements taken since the expert last became active count, so a person's revive restarts the count.
 
-   Still to come for this step:
-   - conservative merging;
-   - the gate's re-freeze schedule;
-   - the population's comparison against its single best expert.
+   **The population is compared with its single best expert, whether or not it flatters the architecture.** A contribution measurement also scores every expert alone on every live task, and the base model on the tasks the population escalates. Only tasks every side scored count, so every mean is over the same tasks.
+   - **The record:** a `population_baseline` row per measured generation, holding the routed population's mean, the best single expert, and that expert's mean alone. The difference is what routing adds.
+   - **Cost:** it costs one more evaluation of the live tasks per expert, and it is on whenever contribution is measured.
+   - **What it said first:** in the test that pins it down, routing added nothing over sending every task to the one good expert. The record reports that as 0.00 rather than leaving it out. When the rolling difference collapses, the honest answer is fewer and broader experts, as the record says.
+
+   **The gate is re-frozen while the population holds still.** Every `train`, `teach` and `evolve` used to retrain the learned router after it ran, whether or not anything had changed. Now an automatic refresh retrains only when the experts the gate may route to, those with exemplars, are not the ones the stored router was trained over: an expert admitted, demoted, archived or revived. Otherwise the router stays as it was. The gate re-opens when the population changes, then closes. `gate-train` still always retrains.
+
+   Still to come for this step: conservative merging. The record merges only siblings with high subspace overlap and low cumulative training, archives both pre-merge adapters, and measures the cost by leave-one-out before and after. Admission already keeps the population free of twins by replacement, so merging is the refinement that would keep both twins' competence in one adapter.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.

@@ -21,7 +21,7 @@ use antumbra_store::EMBED_DIM;
 use antumbra_train::{CandleModelLoader, CaptureTrainer, JsonCorpus, RaftConfig};
 
 #[cfg(feature = "models")]
-use crate::refresh_router;
+use crate::{refresh_router, RouterRefresh};
 
 /// Parameters for [`populate`]; mirrors the clap variant so `main.rs`'s arm
 /// stays a one-line dispatch.
@@ -214,7 +214,9 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
                     out.final_fitness
                 );
             }
-            if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+            if let Ok(RouterRefresh::Trained(r)) =
+                refresh_router(&store, embedder.as_ref(), 400).await
+            {
                 println!("  router refreshed over {} experts", r.experts.len());
             }
             let _ = round;
@@ -361,7 +363,9 @@ pub async fn memory_import(url: &str, args: MemoryImportArgs) -> anyhow::Result<
             }
             let experts = expert::list(&store).await?;
             println!("population: {} experts", experts.len());
-            if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+            if let Ok(RouterRefresh::Trained(r)) =
+                refresh_router(&store, embedder.as_ref(), 400).await
+            {
                 println!("router refreshed over {} experts", r.experts.len());
             }
         }
@@ -515,7 +519,9 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
             expert::delete(&store, &expert.id).await?; // supersede on re-run
             expert::insert(&store, &expert).await?;
             println!("persisted expert {run} into the population (fitness {final_rate:.2})");
-            if let Ok(Some(r)) = refresh_router(&store, embedder.as_ref(), 400).await {
+            if let Ok(RouterRefresh::Trained(r)) =
+                refresh_router(&store, embedder.as_ref(), 400).await
+            {
                 println!("router refreshed over {} experts", r.experts.len());
             }
         }
@@ -836,7 +842,7 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
                         r.generation.0, r.shadow, r.fitness, r.graduated
                     );
                 }
-                if let Ok(Some(r)) = refresh_router(store, embedder, 400).await {
+                if let Ok(RouterRefresh::Trained(r)) = refresh_router(store, embedder, 400).await {
                     println!("router refreshed over {} experts", r.experts.len());
                 }
             }

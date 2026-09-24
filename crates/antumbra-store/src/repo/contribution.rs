@@ -11,12 +11,13 @@ use surql::query::crud::{query_records, upsert_record};
 use surql::types::operators::eq;
 use surql::types::RecordID;
 
-use antumbra_core::{ContributionRecord, ExpertId, Result, RunId};
+use antumbra_core::{BaselineRecord, ContributionRecord, ExpertId, Result, RunId};
 
 use crate::error::map;
 use crate::store::Store;
 
 const TABLE: &str = "contribution";
+const BASELINE: &str = "population_baseline";
 
 fn key(record: &ContributionRecord) -> String {
     format!(
@@ -59,6 +60,30 @@ pub async fn list_for_run(store: &Store, run_id: &RunId) -> Result<Vec<Contribut
     query_records(store.client(), &query).await.map_err(map)
 }
 
+/// Record a generation's population-against-best-expert comparison,
+/// replacing what the same generation recorded before.
+pub async fn upsert_baseline(store: &Store, record: &BaselineRecord) -> Result<()> {
+    let key = format!("{}@g{}", record.run_id, record.generation.0);
+    let id = RecordID::<()>::new(BASELINE, key.as_str()).map_err(map)?;
+    upsert_record(store.client(), &id, serde_json::to_value(record)?)
+        .await
+        .map_err(map)?;
+    Ok(())
+}
+
+/// Every comparison one run recorded, oldest generation first: the rolling
+/// comparison the record asks to be reported.
+pub async fn baselines_for_run(store: &Store, run_id: &RunId) -> Result<Vec<BaselineRecord>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(BASELINE)
+        .map_err(map)?
+        .where_(eq("run_id", run_id.as_str()))
+        .order_by("generation", "ASC")
+        .map_err(map)?;
+    query_records(store.client(), &query).await.map_err(map)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +117,30 @@ mod tests {
         let seen: Vec<(u32, Option<f32>)> = a.iter().map(|r| (r.generation.0, r.with)).collect();
         assert_eq!(seen, [(0, Some(0.5)), (1, Some(0.7))]);
         assert_eq!(list_for_run(&s, &RunId::new("run:c")).await?.len(), 3);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_baseline_is_kept_per_generation_and_replaced_when_measured_again() -> Result<()> {
+        let s = Store::connect_memory(EMBED_DIM).await?;
+        let at = |generation: u32, population: f32| BaselineRecord {
+            run_id: RunId::new("run:b"),
+            generation: Generation(generation),
+            tasks: 8,
+            population,
+            best: Some(ExpertId::new("expert:a")),
+            best_alone: Some(0.6),
+            seeds: 2,
+            at: Utc::now(),
+        };
+        upsert_baseline(&s, &at(0, 0.7)).await?;
+        upsert_baseline(&s, &at(1, 0.5)).await?;
+        upsert_baseline(&s, &at(1, 0.65)).await?;
+        let rolling = baselines_for_run(&s, &RunId::new("run:b")).await?;
+        let deltas: Vec<Option<f32>> = rolling.iter().map(BaselineRecord::delta).collect();
+        assert_eq!(rolling.len(), 2);
+        assert!((deltas[0].unwrap_or(0.0) - 0.1).abs() < 1e-6);
+        assert!((deltas[1].unwrap_or(0.0) - 0.05).abs() < 1e-6);
         Ok(())
     }
 }

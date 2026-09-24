@@ -32,6 +32,7 @@ use antumbra_store::repo::{
 use antumbra_store::Store;
 
 mod admission;
+mod baseline;
 mod cohort;
 mod contribution;
 mod measure;
@@ -196,6 +197,9 @@ pub struct GenerationReport {
     /// What retirement's detectors found over this generation's contribution:
     /// advisory warnings, and the demotions confirmation made.
     pub detection: Detection,
+    /// The routed population against its single best expert on the same live
+    /// tasks, when this generation measured contribution with the baseline.
+    pub baseline: Option<antumbra_core::BaselineRecord>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -346,7 +350,10 @@ impl<'a> GenerationLoop<'a> {
         // resumes past it, since what the generation decided is already
         // written: one measurement is lost, never a generation repeated.
         self.advance(head, LoopState::Consolidate).await?;
-        let contribution = self
+        let contribution::Measured {
+            contribution,
+            baseline,
+        } = self
             .measure_contribution(&run_id, generation, holdout)
             .await?;
         let detection = self.detect(generation, &contribution).await?;
@@ -372,6 +379,7 @@ impl<'a> GenerationLoop<'a> {
             contribution,
             admission,
             detection,
+            baseline,
         })
     }
 
