@@ -12,6 +12,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+# Content addresses of verifiers (ADR-0022 S-4).
+sha2 = "0.11"
 
 [features]
 # Exposes in-memory fakes of the ports so downstream crates can drive the

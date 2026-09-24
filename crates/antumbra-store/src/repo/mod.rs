@@ -28,3 +28,4 @@ pub mod reward;
 pub mod router;
 pub mod shadow;
 pub mod sync;
+pub mod verifier;

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::boundary::BoundaryFinding;
 use crate::error::{AntumbraError, Result};
-use crate::ids::{ExpertId, RunId, ShadowId};
+use crate::ids::{ExpertId, RunId, ShadowId, VerifierId};
 use crate::recipe::TrainingRecipe;
 use crate::slice::Holdout;
 
@@ -303,6 +303,17 @@ pub struct VerifierVerdict {
 #[async_trait]
 pub trait Verifier: Send + Sync {
     async fn verify(&self, req: &VerifyRequest) -> Result<VerifierVerdict>;
+}
+
+/// The verifier namespace as the reward path sees it (ADR-0022 S-4): which
+/// named verifiers may grant reward now. Read-only, so nothing that trains
+/// can write a verifier or change one's trust through it.
+#[async_trait]
+pub trait TrustedVerifiers: Send + Sync {
+    /// The spec verifier `id` checks `task` with, if it may grant reward for
+    /// it now: it applies to the task, it is trusted and intact, and, when
+    /// synthesized, it is inside its time to live.
+    async fn trusted_spec(&self, id: &VerifierId, task: &str) -> Result<Option<serde_json::Value>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

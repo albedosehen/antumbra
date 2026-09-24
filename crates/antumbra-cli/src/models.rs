@@ -400,7 +400,12 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             ..RaftConfig::default()
         };
         let corpus = JsonCorpus::from_file(&corpus)?;
-        let verifier = std::sync::Arc::new(antumbra_critic::CommandVerifier);
+        // A task may name a verifier in the namespace instead of carrying its
+        // spec; the gate runs it only while it may grant reward (ADR-0022 S-4).
+        let verifier = std::sync::Arc::new(antumbra_critic::Governed::new(
+            antumbra_critic::CommandVerifier,
+            std::sync::Arc::new(antumbra_store::repo::verifier::Registry::new(store.clone())),
+        ));
         // The loop hands this name to the trainer, which loads it, so it must be
         // the configured base rather than a literal: a literal here once kept
         // every `train` run on the raw completion model after the default moved

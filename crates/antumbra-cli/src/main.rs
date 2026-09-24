@@ -27,6 +27,8 @@ mod learned_gate;
 mod models;
 mod ops;
 mod train_args;
+mod verifier_args;
+mod verifiers;
 
 use cli::{Cli, Command};
 #[cfg(feature = "models")]
@@ -169,6 +171,7 @@ async fn run() -> anyhow::Result<()> {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.
             tokio::task::spawn_blocking(move || claude::run::run(action)).await??;
         }
+        Command::Verifier { action } => verifiers::run(&cli.url, action).await?,
         Command::Migrate => {
             connect(&cli.url).await?;
             println!("schema applied at {}", cli.url);

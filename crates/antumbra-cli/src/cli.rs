@@ -287,6 +287,13 @@ pub enum Command {
         #[command(subcommand)]
         action: ClaudeAction,
     },
+    /// The verifier namespace (ADR-0022 S-4): propose a check, measure it
+    /// against ground truth the loop did not produce, and move it. Only a
+    /// sound measurement lets a synthesized verifier grant reward.
+    Verifier {
+        #[command(subcommand)]
+        action: crate::verifier_args::VerifierAction,
+    },
     /// Apply the schema (idempotent).
     Migrate,
     /// Print the generated schema DDL (surql-rs builder output).

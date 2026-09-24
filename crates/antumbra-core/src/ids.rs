@@ -81,6 +81,10 @@ string_id!(
     /// organization, sharing, deletion, and reference-scope within a tenant.
     CompartmentId
 );
+string_id!(
+    /// A verifier, addressed by the hash of what it checks with (ADR-0022 S-4).
+    VerifierId
+);
 
 /// Monotonic generation counter for the durable loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]

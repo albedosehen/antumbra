@@ -33,7 +33,9 @@ antumbra-loop = { path = "../antumbra-loop" }
 antumbra-gate = { path = "../antumbra-gate" }
 antumbra-boundary = { path = "../antumbra-boundary" }
 antumbra-train = { path = "../antumbra-train", optional = true }
-antumbra-critic = { path = "../antumbra-critic", optional = true }
+# The verifier namespace and its trust protocol (`antumbra verifier`), and the
+# reward gate `train` checks through.
+antumbra-critic = { path = "../antumbra-critic" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
 clap = { workspace = true, features = ["env"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
@@ -56,7 +58,6 @@ default = []
 models = [
     "dep:antumbra-train",
     "antumbra-train/models",
-    "dep:antumbra-critic",
     "dep:antumbra-serve",
     "antumbra-serve/models",
 ]
