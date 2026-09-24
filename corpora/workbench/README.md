@@ -2,16 +2,17 @@
 
 A corpus built for the loop to be measured on: 349 Python function-writing tasks across eight skills and three spec sizes, each checked by a judge that cannot be passed without computing the right answers. The corpora beside it are one to three tasks each, which is enough to see training happen and too few to hold anything out ([ADR-0022](../../docs/adr/0022-governed-self-improvement.md)).
 
-| file           | what it is                                                                     |
-| -------------- | ------------------------------------------------------------------------------ |
-| `all.json`     | every task; the corpus for an instrumented run                                 |
-| `<skill>.json` | one skill's tasks, including its two impossible ones; for growing a specialist |
-| `generate.py`  | writes the files above, and refuses to unless every task holds up              |
-| `judge.py`     | the judge, and the verify spec that runs it                                    |
-| `legacy.py`    | rebuilds the older corpora's verifiers on the same judge                       |
-| `families/`    | the task templates, one module per skill                                       |
-| `calibrate.py` | summarises base-model eval reports into where the corpus has headroom          |
-| `calibration/` | the reports behind the calibration below                                       |
+| file            | what it is                                                                      |
+| --------------- | ------------------------------------------------------------------------------- |
+| `all.json`      | every task; the corpus for an instrumented run                                  |
+| `<skill>.json`  | one skill's tasks, including its two impossible ones; for growing a specialist  |
+| `generate.py`   | writes the files above, and refuses to unless every task holds up               |
+| `judge.py`      | the judge, and the verify spec that runs it                                     |
+| `legacy.py`     | rebuilds the older corpora's verifiers on the same judge                        |
+| `families/`     | the task templates, one module per skill                                        |
+| `calibrate.py`  | summarises base-model eval reports into where the corpus has headroom           |
+| `calibration/`  | the reports behind the calibration below                                        |
+| `synthesize.py` | turns a model's proposed inputs into verifiers, and writes mutants to test them |
 
 ## The judge
 
@@ -54,6 +55,16 @@ antumbra train --corpus corpora/workbench/all.json --holdout --generations 10
 # one specialist for one skill
 antumbra train --corpus corpora/workbench/dates.json --run dates
 ```
+
+```bash
+# synthesized verifiers (ADR-0022 S-4): the model picks inputs, the reference
+# supplies outputs, and the trust protocol measures the result
+antumbra verifier synthesize --corpus corpora/workbench/strings.json --out proposals.json
+python corpora/workbench/synthesize.py --corpus corpora/workbench/strings.json \
+  --proposals proposals.json --specs specs.json --artifacts artifacts.json
+```
+
+`scripts/verifier-validate.sh` runs the rest on the GPU host. It proposes the specs, labels the model's completions and the artifacts with each task's authored judge, and measures.
 
 The verifier runs `python`. The GPU image ships one. On Windows set `ANTUMBRA_PYTHON`, because the `python` on `PATH` is usually the Store stub.
 

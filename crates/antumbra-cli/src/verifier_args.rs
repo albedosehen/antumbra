@@ -11,11 +11,11 @@ pub enum VerifierAction {
     /// already there.
     Propose {
         /// The spec `CommandVerifier` runs: JSON, or @path to a JSON file.
-        #[arg(long)]
-        spec: String,
+        #[arg(long, required_unless_present = "batch")]
+        spec: Option<String>,
         /// The region of tasks it is measured in and may grant reward in.
-        #[arg(long)]
-        domain: String,
+        #[arg(long, required_unless_present = "batch")]
+        domain: Option<String>,
         /// The one task it checks; every task in its domain when omitted.
         #[arg(long)]
         task: Option<String>,
@@ -29,6 +29,38 @@ pub enum VerifierAction {
         /// Who or what proposed it, for the audit trail.
         #[arg(long)]
         by: Option<String>,
+        /// Propose every verifier in this JSON array of `{domain, task, tier,
+        /// spec, by}`, as `corpora/workbench/synthesize.py` writes them.
+        #[arg(long, conflicts_with_all = ["spec", "domain", "task", "authored"])]
+        batch: Option<String>,
+    },
+    /// Have the model propose the inputs of a differential check for each task
+    /// of a corpus (the reducible tier), written as proposals for
+    /// `corpora/workbench/synthesize.py` to turn into specs. Needs
+    /// --features models and a GPU.
+    Synthesize {
+        #[arg(long)]
+        corpus: String,
+        /// Only tasks of this skill.
+        #[arg(long)]
+        skill: Option<String>,
+        /// Only this task.
+        #[arg(long)]
+        task: Option<String>,
+        /// Inputs asked for per answer.
+        #[arg(long, default_value_t = 12)]
+        inputs: usize,
+        /// Answers drawn per task; their distinct inputs are merged.
+        #[arg(long, default_value_t = 2)]
+        draws: usize,
+        #[arg(long, default_value_t = 384)]
+        max_new_tokens: usize,
+        /// Defaults to the base training loads.
+        #[arg(long)]
+        base_model: Option<String>,
+        /// Where to write the proposals.
+        #[arg(long)]
+        out: String,
     },
     /// Build the cases a verifier is measured on from a corpus. Each task's
     /// reference solution is known-good. Each completion given for it is
@@ -46,9 +78,10 @@ pub enum VerifierAction {
         /// Only tasks of this skill.
         #[arg(long)]
         skill: Option<String>,
-        /// A JSON array of `{task, completion}` to label.
+        /// A JSON array of `{task, completion}` to label. May be given more
+        /// than once.
         #[arg(long)]
-        completions: Option<String>,
+        completions: Vec<String>,
         /// Where to write the cases; standard output when omitted.
         #[arg(long)]
         out: Option<String>,
@@ -58,7 +91,12 @@ pub enum VerifierAction {
     /// shortcut is revoked; a trusted one found unsound is quarantined.
     Measure {
         /// The verifier: its address, or a unique prefix of it.
-        verifier: String,
+        #[arg(required_unless_present = "domain")]
+        verifier: Option<String>,
+        /// Measure every synthesized verifier in this domain that is
+        /// proposed or trusted, instead of one.
+        #[arg(long, conflicts_with = "verifier")]
+        domain: Option<String>,
         /// A JSON array of cases, as `cases` writes them.
         #[arg(long)]
         cases: String,

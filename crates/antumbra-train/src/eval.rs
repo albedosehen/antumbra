@@ -29,6 +29,14 @@ impl TaskResult {
     }
 }
 
+/// One sampled completion and its verdict.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Draw {
+    pub task: String,
+    pub completion: String,
+    pub passed: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct EvalOutcome {
     pub pass_rate: f32,
@@ -38,6 +46,8 @@ pub struct EvalOutcome {
     pub per_task: Vec<TaskResult>,
     /// A few raw completions, for eyeballing what the model actually emits.
     pub examples: Vec<String>,
+    /// Every completion drawn, with its verdict, in task order.
+    pub draws: Vec<Draw>,
 }
 
 /// Sample `samples` completions per task, verify each, and return the pass-rate
@@ -53,6 +63,7 @@ pub async fn eval_pass_rate(
     let (mut total, mut passed) = (0usize, 0usize);
     let mut examples: Vec<String> = Vec::new();
     let mut per_task: Vec<TaskResult> = Vec::new();
+    let mut all: Vec<Draw> = Vec::new();
     for task in tasks {
         let draws = model.generate(&task.prompt, samples).await?;
         let mut task_passed = 0usize;
@@ -72,10 +83,16 @@ pub async fn eval_pass_rate(
                     "verify": task.verify,
                 }),
             };
-            if verifier.verify(&req).await?.passed {
+            let verified = verifier.verify(&req).await?.passed;
+            if verified {
                 passed += 1;
                 task_passed += 1;
             }
+            all.push(Draw {
+                task: task.id.clone(),
+                completion: sample.clone(),
+                passed: verified,
+            });
         }
         per_task.push(TaskResult {
             id: task.id.clone(),
@@ -94,6 +111,7 @@ pub async fn eval_pass_rate(
         total,
         per_task,
         examples,
+        draws: all,
     })
 }
 
@@ -194,6 +212,32 @@ mod tests {
         // 3 of every 4 draws pass, across both tasks: 6 / 8.
         assert_eq!((out.passed, out.total), (6, 8));
         assert!((out.pass_rate - 0.75).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn every_draw_is_kept_with_its_task_and_verdict() {
+        let mut lm = FixedLm { skill: 1 };
+        let verifier = MarkerVerifier {
+            expect: "PASS".into(),
+        };
+        let tasks = vec![CorpusTask::new("t1", "p1"), CorpusTask::new("t2", "p2")];
+        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 2)
+            .await
+            .unwrap();
+        let kept: Vec<(&str, &str, bool)> = out
+            .draws
+            .iter()
+            .map(|d| (d.task.as_str(), d.completion.as_str(), d.passed))
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                ("t1", "PASS", true),
+                ("t1", "FAIL", false),
+                ("t2", "PASS", true),
+                ("t2", "FAIL", false)
+            ]
+        );
     }
 
     #[tokio::test]

@@ -109,6 +109,8 @@ antumbra verifier challenge --domain strings --cases wrong.json
 antumbra verifier list --domain strings
 ```
 
+Synthesized checks start with `antumbra verifier synthesize`, where the model proposes the inputs of a differential check for each task. `corpora/workbench/synthesize.py` turns those inputs into specs from each task's reference, and `propose --batch` adds them. `measure --domain` then measures every proposed or trusted check in a domain. `eval --completions --seed` writes the model's own answers for labeling, and `scripts/verifier-validate.sh` runs all of it on the GPU host.
+
 - **Measurement:** every case runs three times (`--repeats`). A verifier that disagrees with itself, or passes anything on an impossible task, is revoked.
 - **Trust:** the 95% upper bound on its false-positive rate must be at or under 0.10 (`--confidence`, `--max-false-positive`), which takes at least 29 known-bad cases with none passed. It must also accept half the known-good ones (`--min-accepted`).
 - **Time to live:** trust lasts seven days (`--ttl-days`), then lapses unless a new measurement renews it.
