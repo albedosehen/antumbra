@@ -12,7 +12,12 @@ use candle_core::Tensor;
 use candle_nn::ops::log_softmax;
 use serde_json::json;
 
-use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
+use std::sync::Arc;
+
+use antumbra_core::critic::{shaped_advantages, weakest_step};
+use antumbra_core::ports::{
+    ActOutput, Critic, StepOutput, TaskOutcome, TrainOutcome, Verifier, VerifyRequest,
+};
 use antumbra_core::{count_grant, AntumbraError, Result, RunId, TrainingRecipe, VerifierGrant};
 
 use crate::config::RaftConfig;
@@ -141,6 +146,38 @@ pub trait GrpoModelLoader: Send + Sync {
     }
 }
 
+/// A critic and how far it may shape advantage (ADR-0022 S-2). It reorders
+/// samples only inside the parts the verifier made, scaled by how well it
+/// tracks the verifier; see [`shaped_advantages`]. Fitness, and so
+/// graduation, still reads verifier bits alone.
+#[derive(Clone)]
+pub struct CriticShaping {
+    pub critic: Arc<dyn Critic>,
+    pub weight: f32,
+}
+
+impl CriticShaping {
+    /// Each completion's score, its weakest step; `None` when any went
+    /// unscored, and then the group is not shaped at all.
+    async fn scores(&self, samples: &[GrpoSample]) -> Result<Option<Vec<f32>>> {
+        let mut out = Vec::with_capacity(samples.len());
+        for sample in samples {
+            let trace = ActOutput {
+                steps: vec![StepOutput {
+                    step_idx: 0,
+                    content: sample.completion.clone(),
+                }],
+                final_output: sample.completion.clone(),
+            };
+            match weakest_step(&self.critic.densify(&trace).await?) {
+                Some(score) => out.push(score),
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(out))
+    }
+}
+
 /// Run GRPO for `cfg.rounds` rounds (group size = `cfg.samples_per_task`) and
 /// return the trained adapter outcome. The per-round pass-rate is the reward
 /// curve, exactly as RAFT, so the loop swaps in behind the trainer.
@@ -155,6 +192,7 @@ pub async fn grpo_train(
     withheld: &[CorpusTask],
     run_id: &RunId,
     cfg: &RaftConfig,
+    critic: Option<&CriticShaping>,
 ) -> Result<TrainOutcome> {
     let mut reward_curve = Vec::with_capacity(cfg.rounds);
     let mut capability_exemplars: Vec<String> = Vec::new();
@@ -221,11 +259,18 @@ pub async fn grpo_train(
                 continue;
             }
 
-            let advantages = group_advantages(&rewards);
+            let mut advantages = group_advantages(&rewards);
             // No spread -> no learning signal; skip the step (never reinforce
-            // nothing, mirroring RAFT's empty-winner guard).
+            // nothing, mirroring RAFT's empty-winner guard). The critic cannot
+            // make a signal the verifier did not.
             if advantages.iter().all(|a| a.abs() < 1e-6) {
                 continue;
+            }
+            if let Some(shaping) = critic {
+                if let Some(scores) = shaping.scores(&samples).await? {
+                    let bits: Vec<bool> = rewards.iter().map(|&r| r > 0.0).collect();
+                    advantages = shaped_advantages(&bits, &scores, shaping.weight);
+                }
             }
             // The group steps, so every pass in it is reward granted.
             for _ in rewards.iter().filter(|&&r| r > 0.0) {
@@ -359,6 +404,151 @@ mod tests {
         }
     }
 
+    /// Samples four fixed completions and records the advantages each step
+    /// was given, and never improves.
+    struct RecordingLm {
+        stepped: Vec<Vec<f32>>,
+    }
+
+    #[async_trait]
+    impl GrpoLm for RecordingLm {
+        async fn sample_group(&mut self, _prompt: &str, _group: usize) -> Result<Vec<GrpoSample>> {
+            Ok(["PASS 3", "PASS 9", "FAIL 1", "FAIL 7"]
+                .iter()
+                .map(|c| GrpoSample {
+                    completion: c.to_string(),
+                    tokens: vec![1],
+                    old_logprobs: vec![-0.1],
+                })
+                .collect())
+        }
+        async fn reference_logprobs(&mut self, _prompt: &str, tokens: &[u32]) -> Result<Vec<f32>> {
+            Ok(vec![-0.2; tokens.len()])
+        }
+        async fn grpo_step(
+            &mut self,
+            _prompt: &str,
+            group: &[GrpoExperience],
+            _cfg: &RaftConfig,
+        ) -> Result<f32> {
+            self.stepped
+                .push(group.iter().map(|e| e.advantage).collect());
+            Ok(0.0)
+        }
+        fn save_adapter(&self, _path: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Passes a completion that starts with PASS.
+    struct Prefix;
+
+    #[async_trait]
+    impl Verifier for Prefix {
+        async fn verify(
+            &self,
+            req: &VerifyRequest,
+        ) -> Result<antumbra_core::ports::VerifierVerdict> {
+            let passed = req.artifact["completion"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("PASS"));
+            Ok(antumbra_core::ports::VerifierVerdict {
+                passed,
+                value: if passed { 1.0 } else { 0.0 },
+            })
+        }
+    }
+
+    /// Scores a completion by its last digit, read upside down when `invert`.
+    struct Digit {
+        invert: bool,
+    }
+
+    #[async_trait]
+    impl Critic for Digit {
+        async fn densify(
+            &self,
+            output: &ActOutput,
+        ) -> Result<Vec<antumbra_core::ports::CriticScore>> {
+            let d = output
+                .final_output
+                .chars()
+                .last()
+                .and_then(|c| c.to_digit(10))
+                .unwrap_or(0) as f32;
+            let pass = output.final_output.starts_with("PASS");
+            // Tracks the verifier across the group (every PASS above every FAIL),
+            // or the opposite, and orders each part by its digit either way.
+            let score = match (self.invert, pass) {
+                (false, true) | (true, false) => 10.0 + d,
+                _ => d,
+            };
+            Ok(vec![antumbra_core::ports::CriticScore {
+                step_idx: 0,
+                dimension: "critic".into(),
+                value: score,
+            }])
+        }
+    }
+
+    async fn stepped_with(critic: Option<CriticShaping>) -> (Vec<f32>, TrainOutcome) {
+        let mut lm = RecordingLm {
+            stepped: Vec::new(),
+        };
+        let cfg = RaftConfig {
+            samples_per_task: 4,
+            rounds: 1,
+            ..RaftConfig::default()
+        };
+        let tasks = vec![CorpusTask::new("t1", "p1")];
+        let out = grpo_train(
+            &mut lm,
+            &Prefix,
+            &tasks,
+            &[],
+            &RunId::new("r"),
+            &cfg,
+            critic.as_ref(),
+        )
+        .await
+        .unwrap();
+        (lm.stepped.remove(0), out)
+    }
+
+    #[tokio::test]
+    async fn a_critic_reorders_only_inside_the_verifiers_parts_and_fitness_ignores_it() {
+        let (plain, plain_out) = stepped_with(None).await;
+        assert_eq!(plain[0], plain[1]);
+        let tracking = CriticShaping {
+            critic: Arc::new(Digit { invert: false }),
+            weight: 1.0,
+        };
+        let (shaped, out) = stepped_with(Some(tracking)).await;
+        // "PASS 9" over "PASS 3" and "FAIL 7" over "FAIL 1", and every pass
+        // still over every fail.
+        assert!(shaped[1] > shaped[0] && shaped[3] > shaped[2], "{shaped:?}");
+        assert!(
+            shaped[0].min(shaped[1]) > shaped[2].max(shaped[3]),
+            "{shaped:?}"
+        );
+        // Graduation reads verifier bits only.
+        assert_eq!(out.reward_curve, plain_out.reward_curve);
+
+        let inverted = CriticShaping {
+            critic: Arc::new(Digit { invert: true }),
+            weight: 1.0,
+        };
+        let (flipped, _) = stepped_with(Some(inverted)).await;
+        assert!(
+            flipped[1] < flipped[0] && flipped[3] < flipped[2],
+            "{flipped:?}"
+        );
+        assert!(
+            flipped[0].min(flipped[1]) > flipped[2].max(flipped[3]),
+            "{flipped:?}"
+        );
+    }
+
     #[tokio::test]
     async fn grpo_lifts_pass_rate_over_rounds() {
         let mut lm = FakeGrpoLm {
@@ -380,6 +570,7 @@ mod tests {
             &[],
             &RunId::new("shadow:g0"),
             &cfg,
+            None,
         )
         .await
         .unwrap();
@@ -453,6 +644,7 @@ mod tests {
             &withheld,
             &RunId::new("shadow:held"),
             &cfg,
+            None,
         )
         .await?;
 

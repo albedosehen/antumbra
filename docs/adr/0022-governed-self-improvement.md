@@ -474,6 +474,18 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **Attribution:** `reward_signal` naming the verifier that granted it, and the shadows trained under a quarantined verifier quarantined from downstream training.
    - **Loop-driven quarantine:** re-measurement on the loop's own schedule, and quarantine when the gap between a verifier's visible and held-out pass rates crosses a threshold.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
+
+   **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.
+   - **Precedence is arithmetic.** `antumbra_core::critic::shaped_advantages` takes a group's verifier verdicts and critic scores. It normalizes the critic's scores separately inside the passed part and the failed part, and scales them by the Spearman correlation between the critic and the verifier over the whole group. So a critic that tracks the verifier reorders each part, one with no correlation adds nothing, and an inverted one flips. Its term is clamped to a quarter of the gap between the parts, so no score, however extreme, lifts a failed sample over a passed one. A test holds that for adversarial scores at a weight of 100.
+   - **A group the verifier did not split stays flat.** With every sample passed, or every one failed, there is nothing to correlate with, and GRPO takes no step, exactly as without a critic. The critic cannot create a signal the verifier did not.
+   - **It reaches training through GRPO.** `GrpoTrainer::with_critic` scores each completion by its weakest step (`weakest_step`) and shapes the advantages of every group that steps. Fitness, and so graduation, still reads verifier bits alone, and a test holds that the reward curve is identical with and without a critic.
+   - **The sum is gone.** A critique now totals to its weakest step instead of the mean of its steps, so verbose vacuous steps earn nothing.
+   - **Two instruments.** `calibration_by_slice` reports expected calibration error and agreement per slice, so a broken slice shows as itself. `derived_allowed` computes the exogenous floor: how many critic-derived labels a training set may hold for its count of fresh verifier labels.
+
+   Still to come for this step:
+   - **A critic.** A shadow scoring steps, trained with the floor applied, recalibrated each generation, and measured sliced. It is the first thing here that needs the GPU, and the record's honest limit applies to it in full: every check above sees only where a verifier can.
+   - **The twin.** A second critic on another seed and slice, kept as an instrument, whose agreement with the first is watched for decline.
+   - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
 8. Never: S-6.
 
 ## Notes on the evidence

@@ -27,7 +27,7 @@ pub struct StepReward {
 }
 
 /// The outcome of assessing a trace: every source-tagged signal, the per-step
-/// folded rewards, and a single scalar (mean of steps) for fitness.
+/// folded rewards, and a single scalar for fitness: the weakest step.
 #[derive(Debug, Clone)]
 pub struct Critique {
     pub signals: Vec<RewardSignal>,
@@ -94,11 +94,13 @@ pub fn aggregate(signals: &[RewardSignal], critic_weight: f32) -> Critique {
             folded: fold_step(sigs, critic_weight),
         })
         .collect();
-    let total = if steps.is_empty() {
-        0.0
-    } else {
-        steps.iter().map(|s| s.folded).sum::<f32>() / steps.len() as f32
-    };
+    // The weakest step, not the mean or the sum: a sum pays for verbose
+    // vacuous steps (ADR-0022 S-2).
+    let total = steps
+        .iter()
+        .map(|s| s.folded)
+        .reduce(f32::min)
+        .unwrap_or(0.0);
     Critique {
         signals: signals.to_vec(),
         steps,
@@ -225,5 +227,18 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(critique.total, 0.0);
+    }
+
+    #[test]
+    fn a_trace_totals_to_its_weakest_step_not_its_mean() {
+        let run = RunId::new("run:1");
+        let now = Utc::now();
+        let signals = vec![
+            RewardSignal::verifier(run.clone(), 0, "tests", 1.0, now),
+            RewardSignal::verifier(run.clone(), 1, "tests", 0.2, now),
+            RewardSignal::verifier(run, 2, "tests", 0.9, now),
+        ];
+        assert_eq!(aggregate(&signals, 0.5).total, 0.2);
+        assert_eq!(aggregate(&[], 0.5).total, 0.0);
     }
 }
