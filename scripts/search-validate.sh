@@ -20,7 +20,9 @@
 # cleanup that silently failed once left a stale store behind for the next run
 # to resume. Nothing here touches the deploy checkout, the production database
 # or the running services. Knobs: CORPUS (a workbench skill, default sequences),
-# GENERATIONS (2), COHORT (3), SAMPLES (4), ROUNDS (2).
+# GENERATIONS (2), COHORT (3), SAMPLES (4), ROUNDS (2), SEARCH (1; 0 trains one
+# shadow a generation without the recipe search), and ARGS (more train flags,
+# for example "--contribution-every 1").
 
 export PATH=$PATH:/run/current-system/sw/bin:/run/wrappers/bin
 SHA="$1"
@@ -29,11 +31,13 @@ GENERATIONS="${GENERATIONS:-2}"
 COHORT="${COHORT:-3}"
 SAMPLES="${SAMPLES:-4}"
 ROUNDS="${ROUNDS:-2}"
+SEARCH="${SEARCH:-1}"
+ARGS="${ARGS:-}"
 SRC="$HOME/antumbra-search-src/$SHA"
 RUN="$HOME/antumbra-search-runs/$(date -u +%Y%m%dT%H%M%SZ)-$SHA"
 exec >/tmp/search-validate.log 2>&1
 set -euo pipefail
-echo "== search $SHA start $(date -u +%FT%TZ): $CORPUS, $GENERATIONS generation(s) of $COHORT, $SAMPLES samples, $ROUNDS rounds"
+echo "== search $SHA start $(date -u +%FT%TZ): $CORPUS, $GENERATIONS generation(s) of $COHORT, $SAMPLES samples, $ROUNDS rounds, search=$SEARCH, args: $ARGS"
 echo "== run directory $RUN"
 
 rm -rf "$SRC"
@@ -52,6 +56,10 @@ nvidia-smi --query-gpu=timestamp,memory.used --format=csv,noheader,nounits -lms 
 SAMPLER=$!
 trap 'kill "$SAMPLER" 2>/dev/null || true' EXIT
 
+SEARCH_FLAGS=""
+if [ "$SEARCH" = "1" ]; then
+    SEARCH_FLAGS="--search --cohort $COHORT"
+fi
 echo "== train $(date -u +%FT%TZ)"
 docker run --rm --device nvidia.com/gpu=all \
     -v antumbra-gpu-test-weights:/weights \
@@ -60,7 +68,7 @@ docker run --rm --device nvidia.com/gpu=all \
     --url surrealkv:///reports/store.skv \
     train --corpus "/build/corpora/workbench/$CORPUS.json" --run "search:$SHA" \
     --generations "$GENERATIONS" --samples "$SAMPLES" --rounds "$ROUNDS" \
-    --holdout --search --cohort "$COHORT"
+    --holdout $SEARCH_FLAGS $ARGS
 
 echo "== peak card memory $(awk -F', ' '{print $2}' "$RUN/gpu-mem.log" | sort -n | tail -1) MiB"
 echo "== search $SHA end $(date -u +%FT%TZ) OK"

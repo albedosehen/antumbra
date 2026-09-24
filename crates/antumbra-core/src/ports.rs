@@ -182,6 +182,38 @@ impl Remeasurement {
     }
 }
 
+/// A task the population is judged on, as routing needs it: an id and the
+/// prompt a router embeds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskPrompt {
+    pub id: String,
+    pub prompt: String,
+}
+
+/// Score the base model under one adapter, or alone, on named tasks: the
+/// measurement a leave-one-out contribution is made of (ADR-0022 S-5).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EvaluateRequest {
+    /// Names the evaluation, for the verifier's scratch space and the logs.
+    pub label: String,
+    pub base_model: String,
+    /// The adapter to evaluate under. `None` scores the base model alone,
+    /// which is what a task no expert covers falls back to.
+    #[serde(default)]
+    pub adapter_uri: Option<String>,
+    pub task_ids: Vec<String>,
+    /// One evaluation per seed. The same seeds on both sides of a comparison
+    /// make it a paired one.
+    pub seeds: Vec<u64>,
+}
+
+/// Each task's pass rate, averaged over the seeds, by task id. A task the
+/// trainer does not know is absent rather than scored zero.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaskScores {
+    pub scores: std::collections::BTreeMap<String, f32>,
+}
+
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;
 /// in v0 this is a DIY candle QLoRA path, stubbed behind this trait until built.
 #[async_trait]
@@ -194,6 +226,22 @@ pub trait Trainer: Send + Sync {
     async fn remeasure(&self, req: RemeasureRequest) -> Result<Remeasurement> {
         let _ = req;
         Err(AntumbraError::Unimplemented("re-measurement"))
+    }
+
+    /// The tasks a population's contribution is measured on: the visible
+    /// slice under `holdout`, impossible tasks left out. Never the held-out or
+    /// audit slice, which no selection may touch, and demotion is one. The
+    /// default refuses.
+    async fn live_tasks(&self, holdout: Option<Holdout>) -> Result<Vec<TaskPrompt>> {
+        let _ = holdout;
+        Err(AntumbraError::Unimplemented("live tasks"))
+    }
+
+    /// Score an adapter, or the base model alone, on named tasks. The default
+    /// refuses, so a trainer that cannot evaluate is never taken to have.
+    async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
+        let _ = req;
+        Err(AntumbraError::Unimplemented("task evaluation"))
     }
 }
 

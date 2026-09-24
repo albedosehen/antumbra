@@ -323,6 +323,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions(EXPERT_PERMS)
             .with_indexes([unique_index("xtrans_seq_uq", ["expert", "seq"])]),
+        // Each shared expert's leave-one-out contribution per measured
+        // generation (ADR-0022 S-5), the history retirement reads. Readable
+        // like the shared population it measures.
+        table_schema("contribution")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(SHARED_POPULATION_PERMS)
+            .with_indexes([index("contribution_expert_idx", ["expert", "generation"])]),
         // Validation harness.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)

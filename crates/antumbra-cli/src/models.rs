@@ -334,6 +334,8 @@ pub struct TrainArgs {
     pub slow_interval: u32,
     /// Generations the fast interval anneals over; `None` takes the run's.
     pub anneal: Option<u32>,
+    /// Measure contribution in every N-th generation; 0 leaves it off.
+    pub contribution_every: u32,
     /// Re-measurements graduation is judged on; `None` takes the default.
     pub remeasure: Option<u32>,
 }
@@ -368,6 +370,10 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         0 => None,
         repeats => Some(antumbra_loop::Remeasure { repeats }),
     };
+    let contribution = (args.contribution_every > 0).then(|| antumbra_loop::ContributionPolicy {
+        every: args.contribution_every,
+        ..Default::default()
+    });
     #[cfg(feature = "models")]
     {
         let store = connect(url).await?;
@@ -403,6 +409,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             recipe: search.is_some().then_some(start),
             search,
             remeasure,
+            contribution,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -469,6 +476,18 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     r.graduation_score
                 );
             }
+            for c in &r.contribution {
+                let delta = match (c.with, c.without, c.delta()) {
+                    (Some(with), Some(without), Some(d)) => {
+                        format!("with {with:.2} without {without:.2} contribution {d:+.2}")
+                    }
+                    _ => "unused".to_string(),
+                };
+                println!(
+                    "        expert {} routed {}/{} {delta}",
+                    c.expert, c.routed, c.tasks
+                );
+            }
         }
         println!("population: {} experts", expert::list(&store).await?.len());
         // Self-maintaining gate: keep the learned router current with the
@@ -494,6 +513,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             holdout,
             &search,
             &remeasure,
+            &contribution,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

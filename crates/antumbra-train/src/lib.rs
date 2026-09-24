@@ -18,6 +18,7 @@ pub mod accumulate;
 pub mod compose;
 pub mod config;
 pub mod consolidate;
+mod contribution;
 pub mod corpus;
 pub mod decision;
 pub mod decode;

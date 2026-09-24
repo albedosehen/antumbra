@@ -38,6 +38,13 @@ cargo run -p antumbra-cli -- --url surrealkv://./data/antumbra.skv experts
 
 It is off by default because it changes what is learned, and because the demo corpora here are too small to split: both tasks in `corpora/arith.json` hash into the held-out slice, so `train --holdout` refuses that corpus rather than training on nothing. Use it on a corpus of real size, such as [`corpora/workbench/all.json`](../corpora/workbench/README.md): 349 tasks across eight skills and three spec sizes, including the impossible tasks the instruments need. Without it, generations carry no instruments rather than a gap computed over tasks that were all trained on.
 
+### Measuring what each expert adds: `--contribution-every`
+
+`train --contribution-every N` measures every shared expert's leave-one-out contribution in every N-th generation (ADR-0022 S-5). Each expert is masked in turn, and the tasks it served are routed again, to the next expert or to the base model. Both sides are then scored under the same seeds.
+- **Output:** each generation prints, per expert, how many live tasks were routed to it, its score with and without, and the difference. An expert nothing was routed to prints as unused.
+- **The record:** rows go to the `contribution` table, the history retirement reads.
+- **Cost:** about two evaluations of the live tasks (the visible slice, at most 32 tasks) each time it runs. On the 3090 Ti, one expert against the base model over 30 tasks, two seeds of four samples, took 13 minutes, about as long as the generation's training. It is off by default.
+
 ### Searching the recipe: `--search`
 
 `train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes (ADR-0022 S-1).

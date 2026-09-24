@@ -17,12 +17,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use antumbra_core::ports::{
-    RemeasureRequest, Remeasurement, TrainOutcome, TrainRequest, Trainer, Verifier,
+    EvaluateRequest, RemeasureRequest, Remeasurement, TaskPrompt, TaskScores, TrainOutcome,
+    TrainRequest, Trainer, Verifier,
 };
 use antumbra_core::slice::{Holdout, Slice};
 use antumbra_core::{Result, RunId, TrainingRecipe};
 
 use crate::config::RaftConfig;
+use crate::contribution;
 use crate::grpo::{grpo_train, GrpoModelLoader};
 use crate::grpo_eval::EvalLoader;
 use crate::holdout::{split, Split};
@@ -149,6 +151,21 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
         )
         .await
     }
+
+    async fn live_tasks(&self, holdout: Option<Holdout>) -> Result<Vec<TaskPrompt>> {
+        contribution::live_tasks(self.corpus.tasks(&[]), holdout.as_ref())
+    }
+
+    async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
+        contribution::evaluate_with(
+            &self.loader,
+            self.corpus.tasks(&[]),
+            self.verifier.as_ref(),
+            self.config.samples_per_task,
+            req,
+        )
+        .await
+    }
 }
 
 /// The [`Trainer`] port realized as the GRPO loop (v1 efficiency); same shape as
@@ -207,6 +224,21 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
 
     async fn remeasure(&self, req: RemeasureRequest) -> Result<Remeasurement> {
         remeasure_with(
+            &EvalLoader(&self.loader),
+            self.corpus.tasks(&[]),
+            self.verifier.as_ref(),
+            self.config.samples_per_task,
+            req,
+        )
+        .await
+    }
+
+    async fn live_tasks(&self, holdout: Option<Holdout>) -> Result<Vec<TaskPrompt>> {
+        contribution::live_tasks(self.corpus.tasks(&[]), holdout.as_ref())
+    }
+
+    async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
+        contribution::evaluate_with(
             &EvalLoader(&self.loader),
             self.corpus.tasks(&[]),
             self.verifier.as_ref(),
@@ -275,6 +307,21 @@ impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
 
     async fn remeasure(&self, req: RemeasureRequest) -> Result<Remeasurement> {
         remeasure_with(
+            &self.loader,
+            self.corpus.tasks(&[]),
+            self.verifier.as_ref(),
+            self.config.samples_per_task,
+            req,
+        )
+        .await
+    }
+
+    async fn live_tasks(&self, holdout: Option<Holdout>) -> Result<Vec<TaskPrompt>> {
+        contribution::live_tasks(self.corpus.tasks(&[]), holdout.as_ref())
+    }
+
+    async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
+        contribution::evaluate_with(
             &self.loader,
             self.corpus.tasks(&[]),
             self.verifier.as_ref(),

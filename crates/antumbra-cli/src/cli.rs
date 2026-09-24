@@ -482,6 +482,13 @@ pub enum Command {
         /// `--generations`; 0 keeps it at one.
         #[arg(long)]
         anneal: Option<u32>,
+        /// Measure every shared expert's leave-one-out contribution
+        /// (ADR-0022 S-5) in every N-th generation: each is masked, the live
+        /// tasks are routed again, and both ways are scored under the same
+        /// seeds. About two evaluations of the live tasks each time. 0 (the
+        /// default) leaves it unmeasured.
+        #[arg(long, default_value_t = 0)]
+        contribution_every: u32,
         /// Judge graduation on this many re-measurements of the carried-forward
         /// shadow, each under a fresh seed, on the held-out slice under
         /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off
