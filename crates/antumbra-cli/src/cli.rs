@@ -522,11 +522,12 @@ pub enum Command {
         /// generation over 64 live tasks unless --contribution-every is set.
         #[arg(long)]
         grow: bool,
-        /// With --grow, choose among the regions that pass the gate
-        /// uniformly at random instead: the baseline the grow step is
-        /// measured against.
-        #[arg(long)]
-        grow_uniform: bool,
+        /// With --grow, how a region is chosen among those that pass the gate:
+        /// credit (the record's objective: expected realized improvement,
+        /// learnability its prior), learnability (the most learnable,
+        /// regardless of credit) or uniform (at random, the baseline).
+        #[arg(long, default_value = "credit")]
+        grow_by: String,
         /// Judge graduation on this many re-measurements of the carried-forward
         /// shadow, each under a fresh seed, on the held-out slice under
         /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off

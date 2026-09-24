@@ -159,6 +159,56 @@ fn the_uniform_baseline_draws_among_the_admitted() {
     assert!(uniformly(&candidates[..1], &run, Generation(0)).is_none());
 }
 
+/// The credit a region's choices realized overrides its learnability: the
+/// most learnable region, whose choice lost ground, gives way to one with no
+/// bad evidence; and a region whose choice gained is preferred even when it
+/// is less learnable.
+#[test]
+fn realized_credit_decides_and_learnability_only_shapes() {
+    let census = [
+        region("grids", 0.44, vec![1.0, 0.0, 0.0]),
+        region("mappings", 0.4, vec![0.0, 1.0, 0.0]),
+        region("dates", 0.2, vec![0.0, 0.0, 1.0]),
+    ];
+    let policy = GrowPolicy::default();
+    let (candidates, learnable) = choose(&census, &[], &policy);
+    assert_eq!(learnable.as_deref(), Some("grids"));
+    let none = BTreeMap::new();
+    assert_eq!(
+        by_credit(&candidates, &none, &policy)
+            .map(|c| c.0)
+            .as_deref(),
+        Some("grids")
+    );
+
+    let lost: BTreeMap<String, Vec<f32>> =
+        [("grids".to_string(), vec![-0.09])].into_iter().collect();
+    let (chosen, expected) = by_credit(&candidates, &lost, &policy).expect("a choice");
+    assert_eq!(chosen, "mappings");
+    assert!((expected - 0.096).abs() < 1e-4, "{expected}");
+
+    let gained: BTreeMap<String, Vec<f32>> = [("dates".to_string(), vec![0.3, 0.2])]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        by_credit(&candidates, &gained, &policy)
+            .map(|c| c.0)
+            .as_deref(),
+        Some("dates")
+    );
+}
+
+#[test]
+fn a_decisions_credit_belongs_to_the_choice_before_it() {
+    let mut first = decided(0, Some("a"), &[], &["a"]);
+    first.credit = None;
+    let mut second = decided(1, Some("b"), &[], &["b"]);
+    second.credit = Some(-0.1);
+    let by = realized(&[&first, &second], Some(0.2));
+    assert_eq!(by.get("a"), Some(&vec![-0.1]));
+    assert_eq!(by.get("b"), Some(&vec![0.2]));
+}
+
 #[test]
 fn diversity_reads_entropy_coverage_and_revived_regions() {
     let even = [

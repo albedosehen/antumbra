@@ -517,7 +517,7 @@ async fn run() -> anyhow::Result<()> {
             merge,
             merge_retained,
             grow,
-            grow_uniform,
+            grow_by,
             remeasure,
         } => {
             models::train(
@@ -544,7 +544,7 @@ async fn run() -> anyhow::Result<()> {
                     merge,
                     merge_retained,
                     grow,
-                    grow_uniform,
+                    grow_by,
                     remeasure,
                 },
             )

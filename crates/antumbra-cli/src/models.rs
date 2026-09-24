@@ -343,9 +343,9 @@ pub struct TrainArgs {
     /// Merge sibling experts, and the overlap that makes them siblings.
     pub merge: bool,
     pub merge_retained: f32,
-    /// Choose each generation's region by the grow step, or uniformly.
+    /// Choose each generation's region by the grow step, and how.
     pub grow: bool,
-    pub grow_uniform: bool,
+    pub grow_by: String,
     /// Re-measurements graduation is judged on; `None` takes the default.
     pub remeasure: Option<u32>,
 }
@@ -395,12 +395,14 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             ..Default::default()
         }),
     };
+    let choosing = match args.grow_by.as_str() {
+        "credit" => antumbra_loop::Choosing::Credit,
+        "learnability" => antumbra_loop::Choosing::Learnability,
+        "uniform" => antumbra_loop::Choosing::Uniform,
+        other => anyhow::bail!("--grow-by {other}: use credit, learnability or uniform"),
+    };
     let grow = args.grow.then(|| antumbra_loop::GrowPolicy {
-        choosing: if args.grow_uniform {
-            antumbra_loop::Choosing::Uniform
-        } else {
-            antumbra_loop::Choosing::Learnability
-        },
+        choosing,
         ..Default::default()
     });
     let admission = (args.duplicate_above <= 1.0).then(|| antumbra_loop::AdmissionPolicy {

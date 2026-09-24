@@ -39,7 +39,12 @@ use crate::GenerationLoop;
 /// How the grow step chooses among the regions that pass the gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Choosing {
-    /// The most learnable, discounted for redundancy: the grow step proper.
+    /// The highest expected credit: the record's objective. Learnability is
+    /// the prior, and the credit a region's past choices realized updates it
+    /// (see [`by_credit`]).
+    Credit,
+    /// The most learnable, discounted for redundancy, with no regard to
+    /// credit.
     Learnability,
     /// One at random, seeded by the run and generation: the uniform-sampling
     /// baseline the record measures the grow step against. Same gate, same
@@ -63,17 +68,25 @@ pub struct GrowPolicy {
     pub redundancy: f32,
     /// Recent choices the redundancy is measured against.
     pub window: usize,
+    /// The credit a perfectly learnable region is expected to realize before
+    /// any evidence: the prior's scale.
+    pub credit_scale: f32,
+    /// How many realized credits' worth of weight the learnability prior
+    /// carries.
+    pub credit_prior: f32,
 }
 
 impl Default for GrowPolicy {
     fn default() -> Self {
         Self {
-            choosing: Choosing::Learnability,
+            choosing: Choosing::Credit,
             gate: 0.05,
             min_tasks: 2,
             unfiltered: 0.25,
             redundancy: 0.5,
             window: 4,
+            credit_scale: 0.1,
+            credit_prior: 1.0,
         }
     }
 }
@@ -230,6 +243,51 @@ pub struct Growth {
     pub diversity: Diversity,
 }
 
+/// Credit as the objective (ADR-0022 S-3): the admitted region with the
+/// highest expected credit, and that expectation.
+///
+/// A region's expected credit starts from its learnability, scaled so a
+/// perfectly learnable one is expected to realize `credit_scale`, and is
+/// pulled toward the mean credit its past choices realized, the prior
+/// weighing `credit_prior` realized credits' worth. Redundancy is discounted
+/// in the same units. Learnability shapes where the policy looks first; what
+/// the population actually gained decides.
+pub fn by_credit(
+    candidates: &[RegionCandidate],
+    realized: &BTreeMap<String, Vec<f32>>,
+    policy: &GrowPolicy,
+) -> Option<(String, f32)> {
+    candidates
+        .iter()
+        .filter(|c| c.admitted)
+        .map(|c| {
+            let prior = policy.credit_scale * c.learnability / 0.25;
+            let seen = realized.get(&c.region).map_or(&[][..], Vec::as_slice);
+            let k = policy.credit_prior.max(0.0);
+            let expected =
+                (seen.iter().sum::<f32>() + k * prior) / (seen.len() as f32 + k).max(f32::EPSILON);
+            (c.region.clone(), expected - policy.credit_scale * c.penalty)
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+}
+
+/// The credit each region's past choices realized, from a run's decisions in
+/// order: the credit a decision records belongs to the choice before it.
+fn realized(decisions: &[&GrowRecord], latest: Option<f32>) -> BTreeMap<String, Vec<f32>> {
+    let mut by_region: BTreeMap<String, Vec<f32>> = BTreeMap::new();
+    let credits = decisions
+        .iter()
+        .skip(1)
+        .map(|r| r.credit)
+        .chain(std::iter::once(latest));
+    for (choice, credit) in decisions.iter().zip(credits) {
+        if let (Some(region), Some(c)) = (&choice.chosen, credit) {
+            by_region.entry(region.clone()).or_default().push(c);
+        }
+    }
+    by_region
+}
+
 /// Among the admitted candidates, the one a uniform draw seeded by the run
 /// and generation picks.
 fn uniformly(
@@ -281,10 +339,6 @@ impl GenerationLoop<'_> {
             .map(|c| c.centroid.clone())
             .collect();
         let (candidates, best) = choose(&census, &recent, &policy);
-        let chosen = match policy.choosing {
-            Choosing::Learnability => best,
-            Choosing::Uniform => uniformly(&candidates, run_id, generation),
-        };
         // What the last choice realized, now that there is a census after it.
         let credit = earlier.last().and_then(|last| {
             let region = last.chosen.as_deref()?;
@@ -296,6 +350,13 @@ impl GenerationLoop<'_> {
             let now = census.iter().find(|c| c.region == region)?.acceptability;
             (census.first()?.generation.0 >= last.generation.0).then_some(now - then)
         });
+        let chosen = match policy.choosing {
+            Choosing::Credit => {
+                by_credit(&candidates, &realized(&earlier, credit), &policy).map(|(r, _)| r)
+            }
+            Choosing::Learnability => best,
+            Choosing::Uniform => uniformly(&candidates, run_id, generation),
+        };
         let mut focus = Vec::new();
         let mut unfiltered = 0u32;
         if let Some(region) = &chosen {
