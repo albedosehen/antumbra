@@ -17,8 +17,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use antumbra_core::ports::{
-    EvaluateRequest, RemeasureRequest, Remeasurement, TaskPrompt, TaskScores, TrainOutcome,
-    TrainRequest, Trainer, Verifier,
+    EvaluateRequest, MergeOutcome, MergeRequest, RemeasureRequest, Remeasurement, TaskPrompt,
+    TaskScores, TrainOutcome, TrainRequest, Trainer, Verifier,
 };
 use antumbra_core::slice::{Holdout, Slice};
 use antumbra_core::{Result, RunId, TrainingRecipe};
@@ -60,6 +60,16 @@ fn remeasure_slice(
     }
     let Split { learn, .. } = split(tasks, holdout)?;
     Ok((learn, false))
+}
+
+/// Merge two adapters at their rank, for any trainer: the merge is arithmetic
+/// on the adapter files and needs no model.
+fn merge_with(req: MergeRequest) -> Result<MergeOutcome> {
+    let report = crate::merge::merge_adapters(&req.left, &req.right, req.out.as_deref())?;
+    Ok(MergeOutcome {
+        rank: report.rank,
+        retained: report.retained,
+    })
 }
 
 /// Re-measure a trained adapter on its slice, once per seed, for any trainer
@@ -156,6 +166,10 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
         contribution::live_tasks(self.corpus.tasks(&[]), holdout.as_ref())
     }
 
+    async fn merge(&self, req: MergeRequest) -> Result<MergeOutcome> {
+        merge_with(req)
+    }
+
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
         contribution::evaluate_with(
             &self.loader,
@@ -235,6 +249,10 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
 
     async fn live_tasks(&self, holdout: Option<Holdout>) -> Result<Vec<TaskPrompt>> {
         contribution::live_tasks(self.corpus.tasks(&[]), holdout.as_ref())
+    }
+
+    async fn merge(&self, req: MergeRequest) -> Result<MergeOutcome> {
+        merge_with(req)
     }
 
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
@@ -318,6 +336,10 @@ impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
 
     async fn live_tasks(&self, holdout: Option<Holdout>) -> Result<Vec<TaskPrompt>> {
         contribution::live_tasks(self.corpus.tasks(&[]), holdout.as_ref())
+    }
+
+    async fn merge(&self, req: MergeRequest) -> Result<MergeOutcome> {
+        merge_with(req)
     }
 
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {

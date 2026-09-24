@@ -55,6 +55,13 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 - **Why:** two experts from one corpus have near-identical capability vectors. The heuristic gate routes on the margin between its top two, so with both present it escalated every task and served neither.
 - **Turning it off:** a value above 1 admits every graduate.
 
+### Merging siblings: `--merge`
+
+`train --merge` considers the most similar pair of active shared experts at each generation boundary (ADR-0022 S-5).
+- **The test:** the pair is merged at the population's rank when their adapters share enough of their subspace (`--merge-retained`, 0.9 of the averaged delta's energy), and when the merged adapter scores on the live tasks at least as well as the better of the two.
+- **On a merge:** both originals are archived, not deleted, and `antumbra revive` undoes it.
+- **Output:** each generation prints the decision with the overlap and the scores. The merge's scoring costs three evaluations of the live tasks.
+
 ### Searching the recipe: `--search`
 
 `train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes (ADR-0022 S-1).

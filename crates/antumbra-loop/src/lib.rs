@@ -36,6 +36,7 @@ mod baseline;
 mod cohort;
 mod contribution;
 mod measure;
+mod merging;
 mod recipe;
 mod retirement;
 pub mod search;
@@ -43,6 +44,7 @@ pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
 pub use contribution::ContributionPolicy;
 use measure::Measurement;
+pub use merging::{Merge, MergePolicy};
 pub use retirement::{confirms, warnings, Detection, RetirementPolicy, Warning};
 
 /// The shadow a generation of a run trains. It also names that generation's
@@ -130,6 +132,12 @@ pub struct LoopConfig {
     /// contribution stream, so it acts only when `contribution` is measured.
     /// `None` (the default) leaves every move to a person.
     pub retirement: Option<RetirementPolicy>,
+    /// Merge sibling experts (ADR-0022 S-5): at the generation boundary, the
+    /// most similar pair of active shared experts is merged at the
+    /// population's rank when their adapters share their subspace and the
+    /// merge scores at least as well as the better of them; both are then
+    /// archived. `None` (the default) never merges.
+    pub merge: Option<MergePolicy>,
 }
 
 impl Default for LoopConfig {
@@ -146,6 +154,7 @@ impl Default for LoopConfig {
             contribution: None,
             admission: None,
             retirement: None,
+            merge: None,
         }
     }
 }
@@ -200,6 +209,9 @@ pub struct GenerationReport {
     /// The routed population against its single best expert on the same live
     /// tasks, when this generation measured contribution with the baseline.
     pub baseline: Option<antumbra_core::BaselineRecord>,
+    /// What merging considered and did, when a policy is set and a pair was
+    /// similar enough to consider.
+    pub merge: Option<Merge>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -350,6 +362,7 @@ impl<'a> GenerationLoop<'a> {
         // resumes past it, since what the generation decided is already
         // written: one measurement is lost, never a generation repeated.
         self.advance(head, LoopState::Consolidate).await?;
+        let merge = self.consider_merge(&run_id, generation, holdout).await?;
         let contribution::Measured {
             contribution,
             baseline,
@@ -380,6 +393,7 @@ impl<'a> GenerationLoop<'a> {
             admission,
             detection,
             baseline,
+            merge,
         })
     }
 
@@ -543,6 +557,43 @@ impl<'a> GenerationLoop<'a> {
         fitness: f32,
         admission: Option<&Admission>,
     ) -> Result<()> {
+        self.enter(run_id, generation, expert, fitness).await?;
+        if let Some(Admission::Superseded { archived, .. }) = admission {
+            self.archive_as_redundant(archived, &expert.id, generation)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Archive `archived` as redundant with `of`: out of routing and serving,
+    /// its weights kept and revivable, and still under the tripwire. Never
+    /// deleted.
+    pub(crate) async fn archive_as_redundant(
+        &self,
+        archived: &ExpertId,
+        of: &ExpertId,
+        generation: Generation,
+    ) -> Result<()> {
+        lifecycle::transition(
+            self.store,
+            archived,
+            antumbra_core::ExpertStatus::Archived,
+            antumbra_core::TransitionCause::Redundant { of: of.clone() },
+            Some(generation),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Put a frozen expert into the population: insert it, freeze its
+    /// baseline for the tripwire, and retire the boundaries it now covers.
+    pub(crate) async fn enter(
+        &self,
+        run_id: &RunId,
+        generation: Generation,
+        expert: &Expert,
+        fitness: f32,
+    ) -> Result<()> {
         let now = expert.created_at;
         // A generation run again after an interruption may already have
         // graduated once. Its expert is keyed by generation, so the second
@@ -552,20 +603,6 @@ impl<'a> GenerationLoop<'a> {
             expert::delete(self.store, &expert.id).await?;
         }
         expert::insert(self.store, expert).await?;
-        if let Some(Admission::Superseded { archived, .. }) = admission {
-            // Archived, not deleted: out of routing and serving, its weights
-            // kept and revivable, and still under the tripwire.
-            lifecycle::transition(
-                self.store,
-                archived,
-                antumbra_core::ExpertStatus::Archived,
-                antumbra_core::TransitionCause::Redundant {
-                    of: expert.id.clone(),
-                },
-                Some(generation),
-            )
-            .await?;
-        }
         // Snapshot the freeze baseline for the no-forgetting tripwire (the frozen
         // population versus the plastic shadow): this fingerprint must never
         // change while the expert is frozen in the population. Stored once, at

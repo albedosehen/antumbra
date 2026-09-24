@@ -514,6 +514,8 @@ async fn run() -> anyhow::Result<()> {
             contribution_every,
             duplicate_above,
             retire_after,
+            merge,
+            merge_retained,
             remeasure,
         } => {
             models::train(
@@ -537,6 +539,8 @@ async fn run() -> anyhow::Result<()> {
                     contribution_every,
                     duplicate_above,
                     retire_after,
+                    merge,
+                    merge_retained,
                     remeasure,
                 },
             )

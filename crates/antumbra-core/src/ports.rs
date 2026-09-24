@@ -214,6 +214,26 @@ pub struct TaskScores {
     pub scores: std::collections::BTreeMap<String, f32>,
 }
 
+/// Merge two adapters into one of the same rank (ADR-0022 S-5). With `out` of
+/// `None` nothing is written, and the outcome alone is the test of whether the
+/// two are siblings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergeRequest {
+    pub left: String,
+    pub right: String,
+    #[serde(default)]
+    pub out: Option<String>,
+}
+
+/// What a merge kept: the share of the averaged delta's energy that fits in
+/// the population's rank, which is how far the two adapters' subspaces
+/// overlap.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MergeOutcome {
+    pub rank: usize,
+    pub retained: f32,
+}
+
 /// Trains a shadow adapter on verified outcomes. The heaviest real component;
 /// in v0 this is a DIY candle QLoRA path, stubbed behind this trait until built.
 #[async_trait]
@@ -242,6 +262,12 @@ pub trait Trainer: Send + Sync {
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
         let _ = req;
         Err(AntumbraError::Unimplemented("task evaluation"))
+    }
+
+    /// Merge two adapters at the population's rank. The default refuses.
+    async fn merge(&self, req: MergeRequest) -> Result<MergeOutcome> {
+        let _ = req;
+        Err(AntumbraError::Unimplemented("adapter merging"))
     }
 }
 

@@ -280,7 +280,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The incumbent** stayed the starting recipe on four pooled runs (0.73, 0.68, 0.68, 0.68).
 
    The repeated runs are the first real measure of the noise the search works against. The same recipe, trained again from the base, moved by 0.05 between generations: as much as the recipes differed from one another. That noise is what pooled ranking is for, and it is why two generations could not tell the recipes apart.
-4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
+4. [x] S-5, retirement as the loop's job, demoting rather than deleting.
 
    **The lifecycle is in, and a person still makes every move.** `antumbra_core::lifecycle` holds the four states and the one rule.
    - **Moves:** active goes to dormant or archived; dormant and archived both revive; deletion is reachable only from dormant or archived, never from active.
@@ -339,7 +339,25 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    **The gate is re-frozen while the population holds still.** Every `train`, `teach` and `evolve` used to retrain the learned router after it ran, whether or not anything had changed. Now an automatic refresh retrains only when the experts the gate may route to, those with exemplars, are not the ones the stored router was trained over: an expert admitted, demoted, archived or revived. Otherwise the router stays as it was. The gate re-opens when the population changes, then closes. `gate-train` still always retrains.
 
-   Still to come for this step: conservative merging. The record merges only siblings with high subspace overlap and low cumulative training, archives both pre-merge adapters, and measures the cost by leave-one-out before and after. Admission already keeps the population free of twins by replacement, so merging is the refinement that would keep both twins' competence in one adapter.
+   **Merging is conservative and reversible.** With `LoopConfig::merge` set (`train --merge`), the most similar pair of active shared experts is considered at each generation boundary. At most one pair is merged a generation.
+   - **The rank:** the merge keeps the population's rank. Rank concatenation would double the rank, and every loader and server builds its model at the one rank. So the two deltas are averaged in factored form and truncated back to that rank: a QR of each side's stacked factors, then an SVD of the small core.
+   - **Siblings:** the share of the averaged delta's energy the rank keeps is the subspace overlap the record asks for. Siblings whose subspaces coincide keep nearly all of it; orthogonal ones keep half. A pair must reach `--merge-retained` (0.9) to be siblings at all.
+   - **Before and after:** the merged adapter is scored on the live tasks under the same seeds as both originals. It must score at least as well as the better of them, so the cost is measured, not assumed.
+   - **On a merge:** the merged expert enters the population with both cards' exemplars and its parents recorded. Both originals are archived as redundant with it: weights kept and still under the tripwire. Reviving them undoes the merge.
+   - **Otherwise:** nothing changes, and the merged file is removed.
+   - **Cumulative training:** the record also asks for low cumulative training, because the most-trained experts merge worst. Under recipe-only propagation every expert trains from the base on the same budget, so that condition holds for every pair, and the measurement guards the rest.
+
+   **On the GPU, merging and the baseline ran against the twins admission exists to stop.** The run was two generations of one corpus, with admission turned off so the twins coexisted, and the overlap bar at zero so the whole path ran.
+   - **The overlap:** the twins' adapters share 0.999 of their subspace. They are siblings in the record's sense, and in the weights, not just the capability vectors.
+   - **The merge:** the merged adapter loaded at the population's rank and scored 0.76, against the better twin's 0.77. That is within the noise of the seeds, but below, so under the zero margin it was not merged, and its file was removed.
+   - **The baseline:** it measured what the twins cost. With both in the population the heuristic gate escalated every task, and the population scored 0.60 against its best single expert's 0.77: routing subtracted 0.17. The early warning flagged the first expert as gone unused.
+
+   Admission, on by default, is what keeps that from happening.
+
+   Every part of the step is in: the lifecycle, contribution, the two detectors in series, admission, merging, the re-frozen gate and the baseline. The validation holds as the record states it:
+   - no expert whose latest measurement shows it contributing is demoted;
+   - the byte-identity tripwire checks every expert whose weights are kept through every demotion, archive and merge;
+   - the population is compared with its single best expert whether or not the comparison flatters it.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
