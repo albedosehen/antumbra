@@ -512,6 +512,13 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                         "        not admitted: duplicates {duplicate_of} (similarity {similarity:.3}), {head_to_head}"
                     );
                 }
+                Some(antumbra_loop::Admission::Outserved {
+                    tasks,
+                    candidate,
+                    serving,
+                }) => println!(
+                    "        not admitted: {candidate:.2} on the {tasks} task(s) it trained for, against {serving:.2} from what already serves them"
+                ),
                 Some(antumbra_loop::Admission::Admitted {
                     nearest: Some((id, s)),
                 }) => println!("        admitted: nearest expert {id} at similarity {s:.3}"),

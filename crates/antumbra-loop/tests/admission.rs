@@ -40,8 +40,8 @@ impl Embedder for Axes {
 }
 
 /// Graduates a shadow whose exemplars are all `skill` tasks, and scores the
-/// adapters it is asked about: the old expert at `old`, anything else (the
-/// candidate) at `new`.
+/// adapters it is asked about: the old expert at `old`, the base model at
+/// nothing, and anything else (the candidate) at `new`.
 struct Graduating {
     skill: &'static str,
     old: f32,
@@ -70,10 +70,10 @@ impl Trainer for Graduating {
     }
 
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
-        let s = if req.adapter_uri.as_deref() == Some("adapters/expert:old") {
-            self.old
-        } else {
-            self.new
+        let s = match req.adapter_uri.as_deref() {
+            Some("adapters/expert:old") => self.old,
+            None => 0.0,
+            Some(_) => self.new,
         };
         Ok(TaskScores {
             scores: req.task_ids.iter().map(|t| (t.clone(), s)).collect(),
@@ -82,9 +82,14 @@ impl Trainer for Graduating {
 }
 
 async fn with_an_alpha_expert() -> Result<Store> {
-    let store = Store::connect_memory(DIM).await?;
     let mut v = vec![0.0f32; DIM];
     v[0] = 1.0;
+    with_an_old_expert(v).await
+}
+
+/// An old expert whose capability is `v`.
+async fn with_an_old_expert(v: Vec<f32>) -> Result<Store> {
+    let store = Store::connect_memory(DIM).await?;
     expert::insert(
         &store,
         &Expert {
@@ -214,6 +219,42 @@ async fn a_twin_that_scores_no_better_is_not_admitted() -> Result<()> {
         lifecycle::status_of(&store, &ExpertId::new("expert:old")).await?,
         ExpertStatus::Active
     );
+    Ok(())
+}
+
+/// A candidate that duplicates nothing, but does worse on the tasks it trained
+/// for than the generalist the gate routes them to, is not admitted; one that
+/// does better is.
+#[tokio::test]
+async fn a_candidate_must_beat_what_already_serves_its_tasks() -> Result<()> {
+    let generalist = vec![0.7, 0.7, 0.0, 0.0];
+    let store = with_an_old_expert(generalist.clone()).await?;
+    let worse = Graduating {
+        skill: "beta",
+        old: 0.9,
+        new: 0.4,
+    };
+    let report = run(&store, &worse).await?;
+    assert!(!report.graduated);
+    assert_eq!(
+        report.admission,
+        Some(Admission::Outserved {
+            tasks: 4,
+            candidate: 0.4,
+            serving: 0.9,
+        })
+    );
+    assert!(expert::get(&store, &candidate()).await?.is_none());
+
+    let store = with_an_old_expert(generalist).await?;
+    let better = Graduating {
+        skill: "beta",
+        old: 0.9,
+        new: 0.95,
+    };
+    let report = run(&store, &better).await?;
+    assert!(report.graduated);
+    assert!(matches!(report.admission, Some(Admission::Admitted { .. })));
     Ok(())
 }
 

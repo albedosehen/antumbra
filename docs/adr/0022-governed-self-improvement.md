@@ -388,6 +388,19 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    On the credit the GPU run recorded, `grids` would fall from 0.098 to 0.004 after its -0.09, and the next choice would move on for that reason rather than for redundancy alone. `learnability` stays available (`--grow-by learnability`) for the comparison.
 
+   **Admission now measures a candidate against what already serves it.** A graduate that duplicates no expert must still beat the population on the tasks it was trained for: the generation's focus, or the live sample when there was none.
+   - **Routing:** each task is routed as the population would route it today.
+   - **Scoring:** the candidate and whatever serves each task, expert or base model, are scored under the same seeds.
+   - **The rule:** a candidate that does no better is not admitted (`Admission::Outserved`). The twin check still runs first.
+
+   This closes the gap the specialists walked through. `AdmissionPolicy::against_serving` is on by default wherever admission is.
+
+   On the GPU it closed half of that gap. The run was the same three generations over the full corpus.
+   - **Generation 1's** specialist, for `numbers`, scored 0.57 on the 32 tasks it trained for, against 0.60 from the generalist that serves them. It was not admitted, and the population held at its best expert's 0.73.
+   - **Generation 2's** specialist, for `grids`, beat the generalist on its own tasks and was admitted. The population then fell to 0.68 against the best expert's 0.72: with two experts 0.82 alike, the heuristic gate's top-two margin shrank, and 12 of the 64 live tasks escalated to the base model instead of the generalist.
+   - **The lesson:** the harm lands on other tasks, which a check on the candidate's own tasks never sees. The test that sees it is leave-one-in: the population on the live tasks with the candidate routed in, against the population as it is.
+   - **The credit** for `numbers` also read -0.05 although nothing had changed. The census draws fresh seeds each generation, so the same population measures differently; credit needs a census paired across generations.
+
    Still to come for this step:
    - **The comparison:** a run against the empty status quo and against uniform sampling, on graduations per unit of compute. Until it beats both, the step stays unchecked. The uniform baseline is in (`Choosing::Uniform`, `train --grow --grow-by uniform`). It has the same gate, focus and unfiltered share, and differs only in how a region is chosen.
 6. [ ] S-4, proposed verifiers and the trust protocol.
