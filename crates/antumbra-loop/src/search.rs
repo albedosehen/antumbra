@@ -162,12 +162,23 @@ impl Default for SearchPolicy {
     }
 }
 
+/// A mean over `evaluations` shrunk toward `generation_mean` by
+/// `prior_weight` evaluations' worth.
+pub fn shrink(mean: f32, evaluations: u32, generation_mean: f32, prior_weight: f64) -> f64 {
+    let n = f64::from(evaluations);
+    (n * f64::from(mean) + prior_weight * f64::from(generation_mean))
+        / (n + prior_weight).max(f64::EPSILON)
+}
+
 /// The fitness a recipe is ranked by: its mean shrunk toward its generation's
 /// mean, by `prior_weight` evaluations' worth.
 pub fn shrunk_fitness(record: &RecipeRecord, generation_mean: f32, prior_weight: f64) -> f64 {
-    let n = f64::from(record.evaluations);
-    (n * f64::from(record.fitness_mean) + prior_weight * f64::from(generation_mean))
-        / (n + prior_weight).max(f64::EPSILON)
+    shrink(
+        record.fitness_mean,
+        record.evaluations,
+        generation_mean,
+        prior_weight,
+    )
 }
 
 /// The best recipe in `history` by shrunk fitness, each measured against the

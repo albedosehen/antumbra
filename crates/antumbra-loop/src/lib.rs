@@ -18,11 +18,11 @@ use sha2::{Digest, Sha256};
 
 use antumbra_boundary::finding_to_boundary;
 use antumbra_core::generational::{GenerationHead, LoopCommand, LoopState};
-use antumbra_core::ports::{Embedder, TrainOutcome, TrainRequest, Trainer};
+use antumbra_core::ports::{Embedder, TrainOutcome, Trainer};
 use antumbra_core::slice::Partition;
 use antumbra_core::{
     BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Grain,
-    Result, RewardSignal, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind, TrainingRecipe,
+    Result, RewardSignal, RunId, ShadowId, ShadowStatus, SubjectKind, TrainingRecipe,
 };
 use antumbra_eclipse::instrument::GenerationReport as InstrumentReport;
 use antumbra_eclipse::{Trend, Watch};
@@ -31,9 +31,11 @@ use antumbra_store::repo::{
 };
 use antumbra_store::Store;
 
+mod cohort;
 mod measure;
 mod recipe;
 pub mod search;
+pub use cohort::CohortMember;
 use measure::Measurement;
 
 /// The shadow a generation of a run trains. It also names that generation's
@@ -89,7 +91,12 @@ pub struct LoopConfig {
     /// `None` (the default) trains under the trainer's own settings, as every
     /// run did before the recipe was searched. Either way the trainer reports
     /// the recipe it used, and that is what the generation's recipe row holds.
+    /// A searched run starts from it.
     pub recipe: Option<TrainingRecipe>,
+    /// Search the recipe (ADR-0022 S-1): each generation trains a cohort under
+    /// recipes the search proposes, every member from the base, and carries the
+    /// best forward. `None` (the default) trains one shadow under `recipe`.
+    pub search: Option<search::SearchPolicy>,
     /// How the audit-slice trend is read across generations: the window, how
     /// many audited generations it needs, and the share of a search gain the
     /// audit slice must show for the gain to count as carried.
@@ -105,6 +112,7 @@ impl Default for LoopConfig {
             audit_every: 2,
             watch: Watch::default(),
             recipe: None,
+            search: None,
         }
     }
 }
@@ -138,6 +146,13 @@ pub struct GenerationReport {
     /// The recipe the shadow trained under, as its trainer reported it. `None`
     /// when the trainer did not say, in which case no recipe row was written.
     pub recipe: Option<TrainingRecipe>,
+    /// Every shadow the generation trained, the carried-forward one included:
+    /// one without a search, the cohort with one.
+    pub cohort: Vec<CohortMember>,
+    /// The number the graduation threshold was applied to: the carried-forward
+    /// shadow's fitness, shrunk toward the cohort's mean when it was chosen
+    /// from a cohort.
+    pub graduation_score: f32,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -199,36 +214,22 @@ impl<'a> GenerationLoop<'a> {
     pub async fn run_generation(&self, head: &mut GenerationHead) -> Result<GenerationReport> {
         let run_id = head.run_id.clone();
         let generation = head.generation;
-        let shadow_id = shadow_id(&run_id, generation);
 
-        // grow -> explore: spawn the shadow that holds the plasticity.
-        let mut sh = Shadow::spawn(shadow_id.clone(), generation, None, Utc::now());
-        shadow::upsert(self.store, &sh).await?;
-        self.advance(head, LoopState::Explore).await?;
-        sh.advance_to(ShadowStatus::Exploring)?;
-        shadow::upsert(self.store, &sh).await?;
-
-        // train on verified outcomes, withholding what the partition keeps
-        // from selection.
+        // grow -> explore: spawn the shadows that hold the plasticity and
+        // train them on verified outcomes, withholding what the partition keeps
+        // from selection. One, or a cohort when the recipe is searched.
         let holdout = self.holdout_for(generation);
-        let outcome = self
-            .trainer
-            .train_shadow(TrainRequest {
-                shadow: shadow_id.clone(),
-                base_model: self.cfg.base_model.clone(),
-                corpus_task_ids: Vec::new(),
-                holdout,
-                recipe: self.cfg.recipe,
-            })
-            .await?;
+        let members = self.train_cohort(head, holdout).await?;
+        let (winner, cohort) = self.select(members).await?;
+        let cohort::Member {
+            shadow: mut sh,
+            outcome,
+            recipe,
+        } = winner;
+        let shadow_id = sh.id.clone();
         let measured = self
             .measure(&run_id, generation, holdout.as_ref(), &outcome)
             .await?;
-        let recipe = self
-            .record_recipe(&run_id, generation, holdout.as_ref(), &outcome)
-            .await?;
-        sh.adapter_uri = Some(outcome.adapter_uri.clone());
-        sh.reward_curve = outcome.reward_curve.clone();
 
         // explore -> score: record the per-step reward from the critic.
         self.advance(head, LoopState::Score).await?;
@@ -253,7 +254,8 @@ impl<'a> GenerationLoop<'a> {
                 generation.0, report.impossible_passed
             );
         }
-        let graduated = fitness >= self.cfg.graduate_threshold && shortcut.is_none();
+        let graduation_score = self.graduation_score(fitness, &cohort);
+        let graduated = graduation_score >= self.cfg.graduate_threshold && shortcut.is_none();
         if graduated {
             sh.advance_to(ShadowStatus::Graduated)?;
             shadow::upsert(self.store, &sh).await?;
@@ -287,6 +289,8 @@ impl<'a> GenerationLoop<'a> {
             instruments: measured.instruments,
             trend: measured.trend,
             recipe,
+            cohort,
+            graduation_score,
         })
     }
 

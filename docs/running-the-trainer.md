@@ -38,6 +38,15 @@ cargo run -p antumbra-cli -- --url surrealkv://./data/antumbra.skv experts
 
 It is off by default because it changes what is learned, and because the demo corpora here are too small to split: both tasks in `corpora/arith.json` hash into the held-out slice, so `train --holdout` refuses that corpus rather than training on nothing. Use it on a corpus of real size, such as [`corpora/workbench/all.json`](../corpora/workbench/README.md): 349 tasks across eight skills and three spec sizes, including the impossible tasks the instruments need. Without it, generations carry no instruments rather than a gap computed over tasks that were all trained on.
 
+### Searching the recipe: `--search`
+
+`train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes (ADR-0022 S-1).
+- **What is searched:** learning rate and batch size, plus the KL weight under `--algo grpo`.
+- **Every member trains from the base.** Only the best member's recipe is carried forward, and it leads the next generation's cohort. No member starts from another's weights, so each graduate is a skill of its own.
+- **Graduation:** until graduation re-measures on a fresh slice, the best member's fitness is shrunk halfway toward the cohort's mean before the threshold applies. Picking the best of a noisy few overstates it.
+- **Output:** each generation prints every member's recipe and fitness, and the score graduation was judged on. Every member's recipe is stored as a `recipe` row, and those rows are the history later generations are proposed from.
+- **Cost:** a generation takes the cohort size times as long. Combine it with `--holdout` on a corpus of real size, so the audit trend can tell a search that improves from one that overtunes.
+
 ## Corpus format
 
 A JSON array of tasks. `verify.program`/`args` run after generation with the candidate completion in `$ANTUMBRA_COMPLETION`; `extract_code: true` pulls the code out of a markdown fence first.
