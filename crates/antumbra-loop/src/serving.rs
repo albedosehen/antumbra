@@ -1,45 +1,78 @@
-//! Admission against what already serves (ADR-0022 S-5, found on the GPU in
-//! S-3): a graduate joins only if it does better than what the population
-//! routes the tasks it was trained for to.
+//! Leave-one-in admission (ADR-0022 S-5, found on the GPU in S-3): a graduate
+//! joins only if the population does better on the live tasks with it than
+//! without it.
 //!
-//! The twin check catches a candidate that duplicates an expert. It does not
-//! catch one that is merely worse than what serves its region. The grow step's
-//! first run on the GPU grew two such specialists, each trained from the base
-//! on one region's forty tasks. Both did worse there than the generalist
-//! trained on everything; both were admitted, since neither was a twin; and
-//! the population fell below its best single expert as they drew tasks away.
+//! The twin check catches a candidate that duplicates an expert. Two GPU runs
+//! of the grow step found what it misses:
+//! - a region specialist trained from the base on forty tasks can do worse on
+//!   its own region than the generalist trained on all of them;
+//! - one that does better there can still cost the population: with two
+//!   experts 0.82 alike, the heuristic gate's top-two margin shrank, and a
+//!   fifth of the live tasks escalated to the base model instead of the
+//!   generalist.
 //!
-//! So each of those tasks (the generation's focus, or the live sample when it
-//! had none) is routed as the population would route it today. The candidate
-//! and whatever serves each task, expert or base model, are scored under the
-//! same seeds, and the candidate must do better than the population by more
-//! than the margin.
+//! A check on the candidate's own tasks sees the first and not the second. So
+//! every live task is routed twice, as the population routes it now and as it
+//! would with the candidate in it. Under the heuristic gate the candidate
+//! joins the pool; under a learned router it gets a centroid, projected into
+//! the router's metric as a retrained router would place it. Only the tasks
+//! whose routing the candidate changes can differ, and each of those is scored
+//! both ways under the same seeds: whatever serves it now, expert or base
+//! model, and whatever would with the candidate in. The candidate joins only
+//! if the population does better on them by more than the margin; one the gate
+//! would route nothing to adds nothing, and is not admitted either.
 
 use std::collections::{BTreeSet, HashMap};
 
-use antumbra_core::ports::{EvaluateRequest, TaskPrompt, TaskScores};
+use antumbra_core::ports::{EvaluateRequest, TaskScores};
 use antumbra_core::slice::Holdout;
-use antumbra_core::{this_host, Expert, ExpertId, Generation, Result, RunId};
+use antumbra_core::{
+    this_host, Expert, ExpertId, FailureBoundary, Generation, LearnedRouter, Result, RouterExpert,
+    RunId,
+};
 use antumbra_store::repo::{boundary, lifecycle};
 
 use crate::admission::{Admission, AdmissionPolicy};
-use crate::contribution::{rank, route_top1, seeds};
+use crate::contribution::{route_top1, seeds};
 use crate::GenerationLoop;
 
-/// The candidate's mean and the serving population's over the tasks both
-/// were scored on, and how many there were.
-fn against(
-    candidate: &TaskScores,
-    serving: &[(String, Option<ExpertId>)],
+/// Where a task goes with `candidate` in the population: the candidate joins
+/// the heuristic gate's pool, or the learned router gains its centroid.
+fn route_with(
+    task: &[f32],
+    router: Option<&LearnedRouter>,
+    experts: &[Expert],
+    boundaries: &[FailureBoundary],
+    candidate: &Expert,
+) -> Option<ExpertId> {
+    let mut pool = experts.to_vec();
+    pool.push(candidate.clone());
+    let extended = router.map(|learned| {
+        let mut learned = learned.clone();
+        if let Some(cap) = candidate.capability_vec.as_deref() {
+            let centroid = learned.project(cap);
+            if !centroid.is_empty() {
+                learned.experts.push(RouterExpert {
+                    id: candidate.id.clone(),
+                    centroid,
+                });
+            }
+        }
+        learned
+    });
+    route_top1(task, extended.as_ref(), &pool, boundaries, None)
+}
+
+/// The population's mean with the candidate and without it, over the tasks
+/// whose routing it changes and that were scored both ways.
+fn with_and_without(
+    changed: &[(String, Option<ExpertId>, Option<ExpertId>)],
     scores: &HashMap<Option<ExpertId>, TaskScores>,
 ) -> Option<(u32, f32, f32)> {
-    let pairs: Vec<(f32, f32)> = serving
+    let score = |who: &Option<ExpertId>, task: &str| scores.get(who)?.scores.get(task).copied();
+    let pairs: Vec<(f32, f32)> = changed
         .iter()
-        .filter_map(|(task, who)| {
-            let mine = candidate.scores.get(task)?;
-            let theirs = scores.get(who)?.scores.get(task)?;
-            Some((*mine, *theirs))
-        })
+        .filter_map(|(task, with, without)| Some((score(with, task)?, score(without, task)?)))
         .collect();
     let n = pairs.len() as f32;
     (!pairs.is_empty()).then(|| {
@@ -52,16 +85,14 @@ fn against(
 }
 
 impl GenerationLoop<'_> {
-    /// Whether `candidate` is outserved on the tasks it was trained for.
-    /// `None` when it does better than what serves them, or when there is
-    /// nothing to judge it on; the rejection otherwise.
+    /// Whether the population does no better with `candidate` in it. `None`
+    /// when it does better; the rejection otherwise.
     pub(crate) async fn outserved(
         &self,
         run_id: &RunId,
         generation: Generation,
         candidate: &Expert,
         holdout: Option<Holdout>,
-        focus: &[String],
         policy: &AdmissionPolicy,
     ) -> Result<Option<Admission>> {
         let host = this_host();
@@ -71,50 +102,37 @@ impl GenerationLoop<'_> {
             .filter(|e| e.owner.is_none() && e.is_placed_on(&host) && e.id != candidate.id)
             .collect();
         experts.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
-        let mut tasks: Vec<TaskPrompt> = self
-            .trainer
-            .live_tasks(holdout)
-            .await?
-            .into_iter()
-            .filter(|t| focus.is_empty() || focus.contains(&t.id))
-            .collect();
-        tasks.sort_by_key(|t| rank(&t.id));
-        tasks.truncate(policy.max_tasks);
-        if tasks.is_empty() {
-            return Ok(None);
-        }
+        let tasks = self.live_sample(holdout, policy.max_tasks).await?;
         let router = lifecycle::load_router(self.store).await?;
         let boundaries = boundary::list(self.store).await?;
-        let mut serving = Vec::with_capacity(tasks.len());
+        let mut changed = Vec::new();
         for t in &tasks {
             let v = self.embedder.embed(&t.prompt).await?;
-            serving.push((
-                t.id.clone(),
-                route_top1(&v, router.as_ref(), &experts, &boundaries, None),
-            ));
+            let without = route_top1(&v, router.as_ref(), &experts, &boundaries, None);
+            let with = route_with(&v, router.as_ref(), &experts, &boundaries, candidate);
+            if with != without {
+                changed.push((t.id.clone(), with, without));
+            }
+        }
+        if changed.is_empty() {
+            // The gate would route nothing to it: it adds nothing.
+            return Ok(Some(Admission::Outserved {
+                tasks: 0,
+                candidate: 0.0,
+                serving: 0.0,
+            }));
+        }
+        let mut needed: HashMap<Option<ExpertId>, BTreeSet<String>> = HashMap::new();
+        for (task, with, without) in &changed {
+            for who in [with, without] {
+                needed.entry(who.clone()).or_default().insert(task.clone());
+            }
         }
         let draws = seeds("serving", run_id, generation, policy.seeds);
-        let request = |adapter_uri: Option<String>, task_ids: Vec<String>| EvaluateRequest {
-            label: format!("serving:{run_id}:g{}", generation.0),
-            base_model: self.cfg.base_model.clone(),
-            adapter_uri,
-            task_ids,
-            seeds: draws.clone(),
-        };
-        let mine = self
-            .trainer
-            .evaluate(request(
-                Some(candidate.artifact_uri.clone()),
-                tasks.iter().map(|t| t.id.clone()).collect(),
-            ))
-            .await?;
-        let mut needed: HashMap<Option<ExpertId>, BTreeSet<String>> = HashMap::new();
-        for (task, who) in &serving {
-            needed.entry(who.clone()).or_default().insert(task.clone());
-        }
         let mut scores = HashMap::new();
         for (who, task_ids) in needed {
             let adapter_uri = match &who {
+                Some(id) if id == &candidate.id => Some(candidate.artifact_uri.clone()),
                 Some(id) => match experts.iter().find(|e| &e.id == id) {
                     Some(e) => Some(e.artifact_uri.clone()),
                     None => continue,
@@ -123,18 +141,22 @@ impl GenerationLoop<'_> {
             };
             let scored = self
                 .trainer
-                .evaluate(request(adapter_uri, task_ids.into_iter().collect()))
+                .evaluate(EvaluateRequest {
+                    label: format!("serving:{run_id}:g{}", generation.0),
+                    base_model: self.cfg.base_model.clone(),
+                    adapter_uri,
+                    task_ids: task_ids.into_iter().collect(),
+                    seeds: draws.clone(),
+                })
                 .await?;
             scores.insert(who, scored);
         }
-        Ok(match against(&mine, &serving, &scores) {
-            Some((n, candidate_mean, serving_mean))
-                if candidate_mean <= serving_mean + policy.margin =>
-            {
+        Ok(match with_and_without(&changed, &scores) {
+            Some((n, with, without)) if with <= without + policy.margin => {
                 Some(Admission::Outserved {
                     tasks: n,
-                    candidate: candidate_mean,
-                    serving: serving_mean,
+                    candidate: with,
+                    serving: without,
                 })
             }
             _ => None,
@@ -152,24 +174,24 @@ mod tests {
         }
     }
 
-    /// Each task is compared with whatever serves it, the base model where
-    /// the population escalates, over the tasks both sides scored.
+    /// Each task the candidate reroutes is scored both ways, the base model
+    /// wherever the gate would escalate, over the tasks scored both ways.
     #[test]
-    fn the_candidate_is_compared_task_by_task_with_what_serves_it() {
-        let g = ExpertId::new("g");
-        let serving = vec![
-            ("a".to_string(), Some(g.clone())),
-            ("b".to_string(), None),
-            ("c".to_string(), Some(g.clone())),
+    fn the_population_is_compared_with_and_without_the_candidate() {
+        let (c, g) = (ExpertId::new("c"), ExpertId::new("g"));
+        let changed = vec![
+            ("mine".to_string(), Some(c.clone()), Some(g.clone())),
+            ("escalated".to_string(), None, Some(g.clone())),
+            ("unscored".to_string(), Some(c.clone()), None),
         ];
         let by: HashMap<Option<ExpertId>, TaskScores> = [
-            (Some(g), scores(&[("a", 1.0), ("c", 0.5)])),
-            (None, scores(&[("b", 0.0)])),
+            (Some(c), scores(&[("mine", 1.0)])),
+            (Some(g), scores(&[("mine", 0.5), ("escalated", 0.75)])),
+            (None, scores(&[("escalated", 0.25)])),
         ]
         .into_iter()
         .collect();
-        let mine = scores(&[("a", 0.5), ("b", 1.0)]);
-        assert_eq!(against(&mine, &serving, &by), Some((2, 0.75, 0.5)));
-        assert_eq!(against(&scores(&[]), &serving, &by), None);
+        assert_eq!(with_and_without(&changed, &by), Some((2, 0.625, 0.625)));
+        assert_eq!(with_and_without(&[], &by), None);
     }
 }

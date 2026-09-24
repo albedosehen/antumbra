@@ -188,7 +188,9 @@ impl GenerationLoop<'_> {
         }
         let tasks = self.live_sample(holdout, policy.max_tasks).await?;
         let routes = self.route_live(&tasks, &experts).await?;
-        let draws = seeds("contribution", run_id, generation, policy.seeds);
+        // The same seeds every generation, so an unchanged population measures
+        // the same and the grow step's credit reads change, not seed noise.
+        let draws = seeds("contribution", run_id, Generation::ZERO, policy.seeds);
         let scores = self
             .score_routes(
                 run_id,

@@ -401,6 +401,13 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The lesson:** the harm lands on other tasks, which a check on the candidate's own tasks never sees. The test that sees it is leave-one-in: the population on the live tasks with the candidate routed in, against the population as it is.
    - **The credit** for `numbers` also read -0.05 although nothing had changed. The census draws fresh seeds each generation, so the same population measures differently; credit needs a census paired across generations.
 
+   **Admission is now leave-one-in, and the census is paired.** Every live task in the sample (64) is routed twice: as the population routes it now, and with the candidate in it.
+   - **Adding the candidate:** under the heuristic gate it joins the pool. Under a learned router it gets a centroid projected into the router's metric, as a retrained router would place it.
+   - **Scoring:** the tasks whose routing it changes are scored both ways under the same seeds. That includes tasks it makes the gate escalate.
+   - **The rule:** the candidate joins only if the population does better on them with it. One the gate would route nothing to adds nothing, and is not admitted either.
+   - **The pinning test:** a specialist that scores 1.0 on its own tasks against the generalist's 0.8 is turned away, because joining it makes four other tasks escalate to the base model. The population would score 0.33 on the six it reroutes, against 0.80 without it.
+   - **The paired census:** the contribution measurement, and so the census, now draws the same seeds every generation. An unchanged population measures the same, and the credit a choice realizes is change, not noise.
+
    Still to come for this step:
    - **The comparison:** a run against the empty status quo and against uniform sampling, on graduations per unit of compute. Until it beats both, the step stays unchecked. The uniform baseline is in (`Choosing::Uniform`, `train --grow --grow-by uniform`). It has the same gate, focus and unfiltered share, and differs only in how a region is chosen.
 6. [ ] S-4, proposed verifiers and the trust protocol.

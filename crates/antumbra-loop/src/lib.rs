@@ -343,7 +343,7 @@ impl<'a> GenerationLoop<'a> {
                 .mint(&run_id, generation, &outcome.adapter_uri, fitness, &outcome)
                 .await?;
             admission = self
-                .admission(&run_id, generation, &candidate, holdout, &focus)
+                .admission(&run_id, generation, &candidate, holdout)
                 .await?;
             let admitted = admission.as_ref().is_none_or(Admission::admits);
             if admitted {

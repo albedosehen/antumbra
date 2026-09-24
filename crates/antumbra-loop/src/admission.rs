@@ -39,8 +39,8 @@ pub struct AdmissionPolicy {
     /// How much better than the duplicate a candidate must score to replace it,
     /// and than what serves its tasks to join beside it.
     pub margin: f32,
-    /// Also require a candidate that duplicates nothing to beat what the
-    /// population routes the tasks it was trained for to (see `serving`).
+    /// Also require that the population does better on the live tasks with a
+    /// candidate that duplicates nothing than without it (see `serving`).
     pub against_serving: bool,
 }
 
@@ -49,7 +49,7 @@ impl Default for AdmissionPolicy {
         Self {
             duplicate_above: 0.95,
             seeds: 2,
-            max_tasks: 32,
+            max_tasks: 64,
             margin: 0.0,
             against_serving: true,
         }
@@ -70,8 +70,10 @@ pub enum Admission {
         candidate: f32,
         incumbent: f32,
     },
-    /// It duplicated nothing, but did no better than what the population
-    /// routes the tasks it was trained for to, so it was not admitted.
+    /// It duplicated nothing, but the population did no better on the live
+    /// tasks it would reroute (`tasks` of them; none when the gate would route
+    /// nothing to it) with it (`candidate`) than without it (`serving`), so
+    /// it was not admitted.
     Outserved {
         tasks: u32,
         candidate: f32,
@@ -125,7 +127,6 @@ impl GenerationLoop<'_> {
         generation: Generation,
         candidate: &Expert,
         holdout: Option<Holdout>,
-        focus: &[String],
     ) -> Result<Option<Admission>> {
         let Some(policy) = self.cfg.admission else {
             return Ok(None);
@@ -147,7 +148,7 @@ impl GenerationLoop<'_> {
             other => {
                 if policy.against_serving {
                     if let Some(outserved) = self
-                        .outserved(run_id, generation, candidate, holdout, focus, &policy)
+                        .outserved(run_id, generation, candidate, holdout, &policy)
                         .await?
                     {
                         return Ok(Some(outserved));
