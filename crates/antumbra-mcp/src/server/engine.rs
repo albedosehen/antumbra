@@ -123,7 +123,7 @@ impl McpServer {
     /// Every tool: the memory tools in `server.rs` and the provenance tools in
     /// `provenance.rs`, each block building its own router.
     pub(super) fn tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Self> {
-        Self::memory_router() + Self::provenance_router()
+        Self::memory_router() + Self::provenance_router() + Self::compartment_router()
     }
 
     pub fn all_tool_names() -> Vec<String> {
