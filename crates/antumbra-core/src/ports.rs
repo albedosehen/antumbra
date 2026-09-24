@@ -333,6 +333,21 @@ pub struct CriticScore {
 #[async_trait]
 pub trait Critic: Send + Sync {
     async fn densify(&self, output: &ActOutput) -> Result<Vec<CriticScore>>;
+
+    /// One completion of `prompt`, scored: by default its steps densified,
+    /// read by the weakest. A critic that reads the task itself overrides it.
+    /// `None` when nothing was scored.
+    async fn score(&self, prompt: &str, completion: &str) -> Result<Option<f32>> {
+        let _ = prompt;
+        let trace = ActOutput {
+            steps: vec![StepOutput {
+                step_idx: 0,
+                content: completion.to_string(),
+            }],
+            final_output: completion.to_string(),
+        };
+        Ok(crate::critic::weakest_step(&self.densify(&trace).await?))
+    }
 }
 
 // --- embedding + boundary probe -------------------------------------------

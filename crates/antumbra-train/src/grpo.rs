@@ -14,10 +14,8 @@ use serde_json::json;
 
 use std::sync::Arc;
 
-use antumbra_core::critic::{shaped_advantages, weakest_step};
-use antumbra_core::ports::{
-    ActOutput, Critic, StepOutput, TaskOutcome, TrainOutcome, Verifier, VerifyRequest,
-};
+use antumbra_core::critic::shaped_advantages;
+use antumbra_core::ports::{Critic, TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{count_grant, AntumbraError, Result, RunId, TrainingRecipe, VerifierGrant};
 
 use crate::config::RaftConfig;
@@ -157,19 +155,12 @@ pub struct CriticShaping {
 }
 
 impl CriticShaping {
-    /// Each completion's score, its weakest step; `None` when any went
-    /// unscored, and then the group is not shaped at all.
-    async fn scores(&self, samples: &[GrpoSample]) -> Result<Option<Vec<f32>>> {
+    /// Each completion's score; `None` when any went unscored, and then the
+    /// group is not shaped at all.
+    async fn scores(&self, prompt: &str, samples: &[GrpoSample]) -> Result<Option<Vec<f32>>> {
         let mut out = Vec::with_capacity(samples.len());
         for sample in samples {
-            let trace = ActOutput {
-                steps: vec![StepOutput {
-                    step_idx: 0,
-                    content: sample.completion.clone(),
-                }],
-                final_output: sample.completion.clone(),
-            };
-            match weakest_step(&self.critic.densify(&trace).await?) {
+            match self.critic.score(prompt, &sample.completion).await? {
                 Some(score) => out.push(score),
                 None => return Ok(None),
             }
@@ -267,7 +258,7 @@ pub async fn grpo_train(
                 continue;
             }
             if let Some(shaping) = critic {
-                if let Some(scores) = shaping.scores(&samples).await? {
+                if let Some(scores) = shaping.scores(&task.prompt, &samples).await? {
                     let bits: Vec<bool> = rewards.iter().map(|&r| r > 0.0).collect();
                     advantages = shaped_advantages(&bits, &scores, shaping.weight);
                 }
@@ -468,7 +459,7 @@ mod tests {
     impl Critic for Digit {
         async fn densify(
             &self,
-            output: &ActOutput,
+            output: &antumbra_core::ports::ActOutput,
         ) -> Result<Vec<antumbra_core::ports::CriticScore>> {
             let d = output
                 .final_output

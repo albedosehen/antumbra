@@ -24,6 +24,15 @@ pub struct TrainArgs {
     /// Algorithm: `raft` (reward-ranked SFT) or `grpo`.
     #[arg(long, default_value = "raft")]
     pub algo: String,
+    /// A critic adapter (`antumbra critic train`) to shape GRPO's advantages
+    /// inside the verifier's parts (ADR-0022 S-2). GRPO only; fitness still
+    /// reads the verifier alone.
+    #[arg(long)]
+    pub critic: Option<String>,
+    /// How far the critic may shape, before the clamp that keeps every pass
+    /// above every fail.
+    #[arg(long, default_value_t = 0.5)]
+    pub critic_weight: f32,
     /// Quantize the frozen base to 4-bit Q4_K (QLoRA).
     #[arg(long)]
     pub quantize_base: bool,
