@@ -503,6 +503,18 @@ pub enum Command {
         /// only with --contribution-every. 0 leaves every move to a person.
         #[arg(long, default_value_t = 3)]
         retire_after: u32,
+        /// Merge sibling experts (ADR-0022 S-5): at each generation boundary,
+        /// the most similar pair of active shared experts is merged at the
+        /// population's rank when their adapters share enough of their
+        /// subspace (--merge-retained) and the merge scores on the live tasks
+        /// at least as well as the better of them. Both are then archived,
+        /// so reviving them undoes it.
+        #[arg(long)]
+        merge: bool,
+        /// Share of the two adapters' averaged delta the population's rank
+        /// must keep for them to count as siblings.
+        #[arg(long, default_value_t = 0.9)]
+        merge_retained: f32,
         /// Judge graduation on this many re-measurements of the carried-forward
         /// shadow, each under a fresh seed, on the held-out slice under
         /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off

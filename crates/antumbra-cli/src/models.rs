@@ -340,6 +340,9 @@ pub struct TrainArgs {
     pub duplicate_above: f32,
     /// Consecutive measurements at nothing that demote an expert; 0 is off.
     pub retire_after: u32,
+    /// Merge sibling experts, and the overlap that makes them siblings.
+    pub merge: bool,
+    pub merge_retained: f32,
     /// Re-measurements graduation is judged on; `None` takes the default.
     pub remeasure: Option<u32>,
 }
@@ -386,6 +389,10 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         persist: args.retire_after,
         ..Default::default()
     });
+    let merge = args.merge.then(|| antumbra_loop::MergePolicy {
+        retained_above: args.merge_retained,
+        ..Default::default()
+    });
     #[cfg(feature = "models")]
     {
         let store = connect(url).await?;
@@ -424,6 +431,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             contribution,
             admission,
             retirement,
+            merge,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -528,6 +536,38 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     moved.expert, moved.cause
                 );
             }
+            match &r.merge {
+                Some(antumbra_loop::Merge::Merged {
+                    into,
+                    pair,
+                    similarity,
+                    retained,
+                    merged,
+                    better,
+                }) => println!(
+                    "        merged {} and {} into {into} (similarity {similarity:.3}, overlap {retained:.3}): {merged:.2} against the better's {better:.2}; both archived",
+                    pair.0, pair.1
+                ),
+                Some(antumbra_loop::Merge::NotSiblings {
+                    pair,
+                    similarity,
+                    retained,
+                }) => println!(
+                    "        not merged: {} and {} (similarity {similarity:.3}) share {retained:.3} of their subspace",
+                    pair.0, pair.1
+                ),
+                Some(antumbra_loop::Merge::Costly {
+                    pair,
+                    retained,
+                    merged,
+                    better,
+                    ..
+                }) => println!(
+                    "        not merged: {} and {} (overlap {retained:.3}) merge to {merged:.2} against the better's {better:.2}",
+                    pair.0, pair.1
+                ),
+                None => {}
+            }
             if let Some(b) = &r.baseline {
                 let best = match (&b.best, b.best_alone, b.delta()) {
                     (Some(id), Some(alone), Some(d)) => {
@@ -581,6 +621,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &contribution,
             &admission,
             &retirement,
+            &merge,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

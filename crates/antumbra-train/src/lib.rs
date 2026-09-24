@@ -31,6 +31,7 @@ pub mod harness;
 pub mod holdout;
 pub mod lora;
 pub mod memory;
+pub mod merge;
 pub mod model;
 pub mod objective;
 pub mod raft;
