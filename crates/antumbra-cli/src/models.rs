@@ -516,8 +516,15 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     tasks,
                     candidate,
                     serving,
+                }) if *tasks == 0 => println!(
+                    "        not admitted: the gate would route none of the live tasks to it"
+                ),
+                Some(antumbra_loop::Admission::Outserved {
+                    tasks,
+                    candidate,
+                    serving,
                 }) => println!(
-                    "        not admitted: {candidate:.2} on the {tasks} task(s) it trained for, against {serving:.2} from what already serves them"
+                    "        not admitted: the population scores {candidate:.2} with it on the {tasks} live task(s) it would reroute, against {serving:.2} without it"
                 ),
                 Some(antumbra_loop::Admission::Admitted {
                     nearest: Some((id, s)),

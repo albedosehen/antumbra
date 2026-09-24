@@ -248,3 +248,19 @@ async fn contribution_is_measured_on_its_schedule_and_off_by_default() -> Result
     assert!(trainer.asked.lock().unwrap().is_empty());
     Ok(())
 }
+
+/// Every generation's measurement draws the same seeds, so an unchanged
+/// population measures the same and what the grow step credits is change,
+/// not seed noise.
+#[tokio::test]
+async fn every_generation_is_measured_under_the_same_seeds() -> Result<()> {
+    let store = population().await?;
+    let trainer = Scorer::default();
+    GenerationLoop::new(&store, &trainer, &Axes, every(1))
+        .run_until(&RunId::new("run:paired"), 2)
+        .await?;
+    let asked = trainer.asked.lock().unwrap().clone();
+    assert!(asked.len() >= 6, "two generations measured: {asked:?}");
+    assert!(asked.iter().all(|r| r.seeds == asked[0].seeds));
+    Ok(())
+}

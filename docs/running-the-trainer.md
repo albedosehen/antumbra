@@ -51,7 +51,7 @@ It is off by default because it changes what is learned, and because the demo co
 
 A graduate whose capability vector is at least `--duplicate-above` (0.95 by default) similar to an active shared expert's is a twin (ADR-0022 S-5). It joins only if it beats that expert head to head on the live tasks, under the same seeds, and it then takes that expert's place. The other is archived, not deleted, and `antumbra revive` brings it back.
 - **A twin that loses** is not admitted, and its shadow is pruned.
-- **Any graduate** must also beat what the population already routes the tasks it trained for to, expert or base model, on the same seeds. One that does not is not admitted.
+- **Any graduate** must also leave the population better off. Every live task in a 64-task sample is routed with and without it, and the tasks it reroutes are scored both ways under the same seeds. That includes tasks it would make the gate escalate. One that does not improve them is not admitted.
 - **Output:** each generation prints the decision, with the similarity and both scores.
 - **Why:** two experts from one corpus have near-identical capability vectors. The heuristic gate routes on the margin between its top two, so with both present it escalated every task and served neither.
 - **Turning it off:** a value above 1 admits every graduate.
