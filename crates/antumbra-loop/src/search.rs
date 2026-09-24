@@ -32,8 +32,9 @@ pub struct RecipeSpace {
     /// Learning-rate bounds, searched on a log scale: the record's
     /// "log-uniform learning rate".
     pub learning_rate: (f64, f64),
-    /// The batch sizes to choose among, smallest first. The largest should be
-    /// one the card can hold: 4 beside the 1.5B base on 24 GB.
+    /// The batch sizes to choose among, smallest first. The trainer
+    /// accumulates a batch's gradients one example at a time, so the size
+    /// costs steps, not memory.
     pub batch_sizes: Vec<u32>,
     /// KL-weight bounds. RAFT has no use for the weight, so the default fixes
     /// it at the trainer's value rather than spending a dimension on it.

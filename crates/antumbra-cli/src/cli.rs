@@ -673,10 +673,10 @@ pub enum Command {
         #[arg(long, default_value_t = 3e-4)]
         lr: f64,
         /// Verified winners per optimizer step. 1 steps on each example in
-        /// turn; more steps on the mean loss of that many at a time (true
+        /// turn; more steps on the mean gradient of that many at a time (true
         /// mini-batch descent), which is less noisy, so a higher `--lr` stays
-        /// stable and no example dominates by being trained last. Memory grows
-        /// with it: 4 fits beside the 1.5B base on a 24 GB card.
+        /// stable and no example dominates by being trained last. Examples are
+        /// backpropagated one at a time, so memory does not grow with it.
         #[arg(long, default_value_t = 1)]
         batch_size: usize,
     },

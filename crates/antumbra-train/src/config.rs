@@ -90,12 +90,12 @@ pub struct RaftConfig {
     /// catastrophic interference (the complementary-learning-systems fix).
     pub replay_ratio: f64,
     /// Verified winners per optimizer step. `1` (the default, the validated
-    /// recipe) steps on each example in turn. `n > 1` steps on the mean loss of
-    /// `n` at a time: true mini-batch descent, far less noisy, so a higher
-    /// learning rate is stable and the adapter no longer over-updates toward
-    /// whatever example it saw last ("Beware of the Batch Size"). Each example
-    /// in a step keeps its forward graph until the backward, so memory grows
-    /// with `n`; 4 fits beside the frozen 1.5B base on a 24 GB card.
+    /// recipe) steps on each example in turn. `n > 1` steps on the mean
+    /// gradient of `n` at a time: true mini-batch descent, far less noisy, so a
+    /// higher learning rate is stable and the adapter no longer over-updates
+    /// toward whatever example it saw last ("Beware of the Batch Size"). Each
+    /// example is backpropagated before the next is run, so memory does not
+    /// grow with `n`.
     pub batch_size: usize,
 }
 

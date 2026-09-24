@@ -100,7 +100,10 @@ impl LoraLinear {
             BaseWeight::Dense(w) => w.clone(),
             BaseWeight::Quantized(q) => q.dequantize(x.device())?.to_dtype(x.dtype())?,
         };
-        let mut out = matmul_t(x, &base_w)?;
+        // The base is frozen, so its product computes no gradient for the
+        // weight: candle's plain matmul would build one for every base
+        // weight on every training step and never use it.
+        let mut out = frozen_matmul_t(x, &base_w)?;
         if self.enabled {
             // Detaching the factors when grad is off keeps generation off the
             // autograd graph: same values, no retained activations or dequant.
