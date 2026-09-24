@@ -294,6 +294,12 @@ pub enum Command {
         #[command(subcommand)]
         action: crate::verifier_args::VerifierAction,
     },
+    /// A critic trained on the verifier's verdicts (ADR-0022 S-2): train one
+    /// and read it against them, per skill.
+    Critic {
+        #[command(subcommand)]
+        action: crate::critic_cmd::CriticAction,
+    },
     /// Apply the schema (idempotent).
     Migrate,
     /// Print the generated schema DDL (surql-rs builder output).

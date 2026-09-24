@@ -448,6 +448,29 @@ impl QwenCausalLm {
         logits.map_err(ce)
     }
 
+    /// The next-token logits after `prompt`, under the adapter, with no
+    /// gradient: a reading, not a training pass.
+    fn next_logits(&mut self, prompt: &str) -> Result<Vec<f32>> {
+        self.model.clear_cache();
+        self.model.set_lora(true);
+        self.model.set_grad(false);
+        let ids = self.encode(&self.wrap_prompt(prompt))?;
+        let input = Tensor::new(ids.as_slice(), &self.model.device)
+            .map_err(ce)?
+            .unsqueeze(0)
+            .map_err(ce)?;
+        let hidden = self.model.hidden(&input, 0, false).map_err(ce)?;
+        let last = hidden.narrow(1, ids.len() - 1, 1).map_err(ce)?;
+        frozen_matmul_t(&last, &self.model.lm_head_w)
+            .map_err(ce)?
+            .flatten_all()
+            .map_err(ce)?
+            .to_dtype(DType::F32)
+            .map_err(ce)?
+            .to_vec1()
+            .map_err(ce)
+    }
+
     /// Sample one completion, capturing each generated token's `π_old` log-prob
     /// (under the model's softmax, temperature aside) for the GRPO ratio.
     fn sample_one_with_logprobs(&mut self, prompt: &str, seed: u64) -> Result<GrpoSample> {
@@ -683,6 +706,21 @@ impl CausalLm for QwenCausalLm {
     fn seed_draws(&mut self, seed: u64) -> Result<()> {
         self.draws = Some((seed, 0));
         Ok(())
+    }
+
+    async fn choose(&mut self, prompt: &str, choices: &[&str]) -> Result<Vec<f32>> {
+        let logits = self.next_logits(prompt)?;
+        let mut picked = Vec::with_capacity(choices.len());
+        for choice in choices {
+            let first = self.encode(choice)?.first().copied().ok_or_else(|| {
+                AntumbraError::other(format!("choice `{choice}` encodes to nothing"))
+            })?;
+            let logit = logits.get(first as usize).copied().ok_or_else(|| {
+                AntumbraError::other(format!("choice `{choice}` is out of vocabulary"))
+            })?;
+            picked.push(logit);
+        }
+        Ok(crate::critic::softmax(&picked))
     }
 }
 

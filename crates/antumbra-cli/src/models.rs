@@ -453,6 +453,12 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     let rounds = args.rounds;
     let max_new_tokens = args.max_new_tokens;
     let algo = args.algo;
+    let critic = args.critic;
+    #[cfg(feature = "models")]
+    let critic_weight = args.critic_weight;
+    if critic.is_some() && algo != "grpo" {
+        anyhow::bail!("--critic shapes GRPO's advantages; use it with --algo grpo");
+    }
     let quantize_base = args.quantize_base;
     let parent = args.parent;
     let holdout = args.holdout;
@@ -544,7 +550,21 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         let start = cfg.recipe();
         let loader = CandleModelLoader::new(cfg.clone());
         let trainer: Box<dyn Trainer> = match algo.as_str() {
-            "grpo" => Box::new(GrpoTrainer::new(cfg, loader, corpus, verifier)),
+            "grpo" => {
+                let grpo = GrpoTrainer::new(cfg.clone(), loader, corpus, verifier);
+                match &critic {
+                    Some(adapter) => {
+                        use antumbra_train::ModelLoader;
+                        let judge = CandleModelLoader::new(cfg.clone());
+                        let model =
+                            ModelLoader::load(&judge, &cfg.base_model, Some(adapter)).await?;
+                        println!("critic: {adapter} at weight {critic_weight}");
+                        let critic = antumbra_train::critic::ModelCritic::new(Box::new(model));
+                        Box::new(grpo.with_critic(std::sync::Arc::new(critic), critic_weight))
+                    }
+                    None => Box::new(grpo),
+                }
+            }
             "raft" => Box::new(RaftTrainer::new(cfg, loader, corpus, verifier)),
             other => anyhow::bail!("unknown --algo `{other}` (use raft or grpo)"),
         };

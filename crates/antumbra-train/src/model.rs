@@ -142,6 +142,14 @@ pub trait CausalLm {
         let _ = seed;
         Err(AntumbraError::Unimplemented("seeded draws"))
     }
+
+    /// How likely, under the adapter, `prompt` is answered by each of
+    /// `choices`, each read by its first token and normalized over the
+    /// choices: how a critic reads its own verdict. The default refuses.
+    async fn choose(&mut self, prompt: &str, choices: &[&str]) -> Result<Vec<f32>> {
+        let _ = (prompt, choices);
+        Err(AntumbraError::Unimplemented("scoring choices"))
+    }
 }
 
 /// Builds a fresh [`CausalLm`] for a shadow: the shared base plus a new LoRA

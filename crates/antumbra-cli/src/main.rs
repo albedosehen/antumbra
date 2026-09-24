@@ -20,6 +20,7 @@ use clap::Parser;
 mod claude;
 mod cli;
 mod commands;
+mod critic_cmd;
 mod gitctx;
 mod gitfacts;
 #[cfg(feature = "models")]
@@ -173,6 +174,7 @@ async fn run() -> anyhow::Result<()> {
             tokio::task::spawn_blocking(move || claude::run::run(action)).await??;
         }
         Command::Verifier { action } => verifiers::run(&cli.url, action).await?,
+        Command::Critic { action } => critic_cmd::run(action).await?,
         Command::Migrate => {
             connect(&cli.url).await?;
             println!("schema applied at {}", cli.url);

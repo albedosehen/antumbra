@@ -20,6 +20,7 @@ pub mod config;
 pub mod consolidate;
 mod contribution;
 pub mod corpus;
+pub mod critic;
 pub mod decision;
 pub mod decode;
 pub mod device;

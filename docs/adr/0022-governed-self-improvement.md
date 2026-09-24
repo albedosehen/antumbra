@@ -482,8 +482,17 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The sum is gone.** A critique now totals to its weakest step instead of the mean of its steps, so verbose vacuous steps earn nothing.
    - **Two instruments.** `calibration_by_slice` reports expected calibration error and agreement per slice, so a broken slice shows as itself. `derived_allowed` computes the exogenous floor: how many critic-derived labels a training set may hold for its count of fresh verifier labels.
 
+   **A critic is in, and not yet trained on the GPU.** It is a shadow: the base with an adapter of its own, asked whether a completion does exactly what its task asks, and read by the probability of its first answer token over `yes` and `no` (`CausalLm::choose`).
+   - **What it learns from:** it learns only fresh verifier verdicts, so the exogenous floor holds with room to spare. The verdicts are the model's own answers from `eval --completions`, labeled by each task's authored judge.
+   - **Balance:** the smaller class is repeated until it matches the larger, so a critic trained where most answers fail does not learn to say no.
+   - **The split:** `antumbra critic train` holds out the default partition's withheld tasks and reads the critic on them. It reports calibration error and agreement per skill, and its rank correlation with the verifier.
+   - **In training:** `train --algo grpo --critic <adapter>` loads it behind the `Critic` port (`ModelCritic`), where it scores through `Critic::score`, which sees the task. The arithmetic above bounds it.
+
+   `scripts/critic-validate.sh` trains one on a skill and reads it on a second, independently seeded set of answers.
+
    Still to come for this step:
-   - **A critic.** A shadow scoring steps, trained with the floor applied, recalibrated each generation, and measured sliced. It is the first thing here that needs the GPU, and the record's honest limit applies to it in full: every check above sees only where a verifier can.
+   - **The GPU reading,** and then the record's own test: fewer samples to graduation with the critic than with verifier-only reward.
+   - **Per-generation recalibration,** and critic-derived labels held to the floor, once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
    - **The twin.** A second critic on another seed and slice, kept as an instrument, whose agreement with the first is watched for decline.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
 8. Never: S-6.
