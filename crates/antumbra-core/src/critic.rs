@@ -199,6 +199,68 @@ pub fn calibration_by_slice(scored: &[Scored], bins: usize) -> Vec<SliceCalibrat
         .collect()
 }
 
+/// A monotone map from a critic's score to the pass rate it stands for,
+/// refitted each generation on fresh verdicts (ADR-0022 S-2).
+///
+/// The record asks for quantile regression rather than temperature scaling.
+/// For a verdict that is 0 or 1 every conditional quantile is 0 or 1, so the
+/// map is fitted by isotonic regression instead, which keeps what the record
+/// wanted from quantile regression: no parametric form, so a critic
+/// overconfident in one range and not another is corrected where it is wrong,
+/// not scaled uniformly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Isotonic {
+    /// Block boundaries: the highest score in each block, ascending.
+    upper: Vec<f32>,
+    /// Each block's pass rate, non-decreasing.
+    rate: Vec<f32>,
+}
+
+impl Isotonic {
+    /// Fit by pool-adjacent-violators. `None` with nothing to fit.
+    pub fn fit(scores: &[f32], passed: &[bool]) -> Option<Self> {
+        if scores.is_empty() || scores.len() != passed.len() {
+            return None;
+        }
+        let mut order: Vec<usize> = (0..scores.len()).collect();
+        order.sort_by(|&a, &b| scores[a].total_cmp(&scores[b]));
+        // (sum of outcomes, count, highest score) per block.
+        let mut blocks: Vec<(f32, f32, f32)> = Vec::new();
+        for i in order {
+            blocks.push((if passed[i] { 1.0 } else { 0.0 }, 1.0, scores[i]));
+            while blocks.len() > 1 {
+                let (s2, n2, u2) = blocks[blocks.len() - 1];
+                let (s1, n1, _) = blocks[blocks.len() - 2];
+                if s1 / n1 <= s2 / n2 {
+                    break;
+                }
+                blocks.pop();
+                let last = blocks.len() - 1;
+                blocks[last] = (s1 + s2, n1 + n2, u2);
+            }
+        }
+        Some(Isotonic {
+            upper: blocks.iter().map(|b| b.2).collect(),
+            rate: blocks.iter().map(|b| b.0 / b.1).collect(),
+        })
+    }
+
+    /// The pass rate a score stands for: its block's, the last block's past
+    /// the highest score seen.
+    pub fn apply(&self, score: f32) -> f32 {
+        let i = self.upper.partition_point(|&u| u < score);
+        self.rate[i.min(self.rate.len() - 1)]
+    }
+}
+
+/// How far two critics agree: the rank correlation of their scores on the
+/// same completions. The record keeps a twin, trained on another seed and
+/// slice, purely as this instrument, because agreement falls under
+/// optimization pressure before headline fitness turns over.
+pub fn agreement(a: &[f32], b: &[f32]) -> Option<f32> {
+    spearman(a, b)
+}
+
 /// The exogenous floor: how many labels derived from the critic (critic-scored
 /// or critic-selected) a training set with `fresh` fresh verifier labels may
 /// hold, so that the fresh share is at least `floor`. A floor of 1 admits none;
@@ -321,6 +383,30 @@ mod tests {
         // The broken slice is visible as itself.
         assert!((report[1].ece - 0.85).abs() < 1e-6);
         assert_eq!(report[1].agreement, 0.0);
+    }
+
+    #[test]
+    fn isotonic_recalibration_is_monotone_and_corrects_overconfidence() {
+        // Scores high across the board, but only the top ones pass.
+        let scores = [0.9, 0.91, 0.92, 0.95, 0.97, 0.99];
+        let passed = [false, false, true, false, true, true];
+        let map = Isotonic::fit(&scores, &passed).unwrap();
+        let fitted: Vec<f32> = scores.iter().map(|&s| map.apply(s)).collect();
+        assert!(fitted.windows(2).all(|w| w[0] <= w[1]), "{fitted:?}");
+        assert_eq!(map.apply(0.9), 0.0);
+        assert_eq!(map.apply(0.99), 1.0);
+        // The pooled middle takes its pool's rate.
+        assert!((map.apply(0.93) - 0.5).abs() < 1e-6, "{fitted:?}");
+        // Beyond what was seen, the ends hold.
+        assert_eq!(map.apply(0.1), 0.0);
+        assert_eq!(map.apply(2.0), 1.0);
+        assert!(Isotonic::fit(&[], &[]).is_none());
+    }
+
+    #[test]
+    fn twins_agree_by_rank() {
+        assert_eq!(agreement(&[0.1, 0.5, 0.9], &[0.2, 0.3, 0.8]), Some(1.0));
+        assert_eq!(agreement(&[0.1, 0.5, 0.9], &[0.8, 0.3, 0.2]), Some(-1.0));
     }
 
     #[test]

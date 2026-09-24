@@ -12,7 +12,7 @@
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
-use antumbra_core::critic::{calibration_by_slice, spearman, Scored, SliceCalibration};
+use antumbra_core::critic::{calibration_by_slice, spearman, Isotonic, Scored, SliceCalibration};
 use antumbra_core::ports::{ActOutput, Critic, CriticScore};
 use antumbra_core::Result;
 
@@ -110,6 +110,50 @@ pub struct CriticReading {
     /// Spearman's correlation between its scores and the verifier's verdicts.
     /// The influence `CriticShaping` gives it scales by this, inside a group.
     pub correlation: Option<f32>,
+    /// Every completion's score, in the order given, for recalibration.
+    pub scored: Vec<Scored>,
+}
+
+/// A reading of already-scored completions.
+pub fn read(scored: Vec<Scored>) -> CriticReading {
+    let all: Vec<Scored> = scored
+        .iter()
+        .map(|s| Scored {
+            slice: "all".into(),
+            ..s.clone()
+        })
+        .collect();
+    let predicted: Vec<f32> = scored.iter().map(|s| s.predicted).collect();
+    let verdicts: Vec<f32> = scored
+        .iter()
+        .map(|s| if s.passed { 1.0 } else { 0.0 })
+        .collect();
+    CriticReading {
+        n: scored.len(),
+        slices: calibration_by_slice(&scored, 10),
+        overall: calibration_by_slice(&all, 10).into_iter().next(),
+        correlation: spearman(&predicted, &verdicts),
+        scored,
+    }
+}
+
+/// Fit a recalibration on one reading and apply it to another: the critic's
+/// scores on `evaluate` mapped through what `fit` showed they stand for.
+/// `None` when `fit` is empty.
+pub fn recalibrate(fit: &CriticReading, evaluate: &CriticReading) -> Option<CriticReading> {
+    let scores: Vec<f32> = fit.scored.iter().map(|s| s.predicted).collect();
+    let passed: Vec<bool> = fit.scored.iter().map(|s| s.passed).collect();
+    let map = Isotonic::fit(&scores, &passed)?;
+    Some(read(
+        evaluate
+            .scored
+            .iter()
+            .map(|s| Scored {
+                predicted: map.apply(s.predicted),
+                ..s.clone()
+            })
+            .collect(),
+    ))
 }
 
 /// Measure `model` as a critic on labeled completions it did not learn from.
@@ -125,24 +169,7 @@ pub async fn measure_critic(
             passed: l.passed,
         });
     }
-    let all: Vec<Scored> = scored
-        .iter()
-        .map(|s| Scored {
-            slice: "all".into(),
-            ..s.clone()
-        })
-        .collect();
-    let predicted: Vec<f32> = scored.iter().map(|s| s.predicted).collect();
-    let verdicts: Vec<f32> = scored
-        .iter()
-        .map(|s| if s.passed { 1.0 } else { 0.0 })
-        .collect();
-    Ok(CriticReading {
-        n: scored.len(),
-        slices: calibration_by_slice(&scored, 10),
-        overall: calibration_by_slice(&all, 10).into_iter().next(),
-        correlation: spearman(&predicted, &verdicts),
-    })
+    Ok(read(scored))
 }
 
 /// A trained critic behind the [`Critic`] port. It reads the task, so it
@@ -260,6 +287,28 @@ mod tests {
         assert_eq!(dates.agreement, 0.5);
         assert_eq!(strings.agreement, 1.0);
         assert!(reading.correlation.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn a_recalibration_fitted_on_one_reading_corrects_another() {
+        let s = |predicted: f32, passed: bool| Scored {
+            slice: "s".into(),
+            predicted,
+            passed,
+        };
+        // Confident about everything, right about half.
+        let overconfident = |n: usize| {
+            read(
+                (0..n)
+                    .map(|i| s(0.9 + (i % 5) as f32 * 0.01, i % 2 == 0))
+                    .collect(),
+            )
+        };
+        let (fit, evaluate) = (overconfident(40), overconfident(40));
+        let raw = evaluate.overall.clone().unwrap().ece;
+        let fixed = recalibrate(&fit, &evaluate).unwrap().overall.unwrap().ece;
+        assert!(fixed < raw, "{fixed} !< {raw}");
+        assert!(recalibrate(&read(Vec::new()), &evaluate).is_none());
     }
 
     #[tokio::test]

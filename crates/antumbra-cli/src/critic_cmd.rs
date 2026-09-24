@@ -31,6 +31,10 @@ pub enum CriticAction {
         corpus: String,
         #[arg(long)]
         completions: Vec<String>,
+        /// A twin critic, trained on another seed or slice: report how far
+        /// the two agree, by rank, on the same completions.
+        #[arg(long)]
+        twin: Option<String>,
     },
 }
 
@@ -77,6 +81,15 @@ pub fn labeled(corpus: &[serde_json::Value], draws: &[serde_json::Value]) -> Vec
     out
 }
 
+/// Which half of the held-out tasks fits the recalibration; the other half
+/// is read through it. A second partition, so the halves are stable.
+#[cfg(feature = "models")]
+fn fits_calibration(task: &str) -> bool {
+    antumbra_core::slice::Partition::new(0.5, 0.0, 1)
+        .map(|p| p.of(task).selection_may_read())
+        .unwrap_or(true)
+}
+
 #[cfg(any(feature = "models", test))]
 /// Whether a task is held out from the critic's training: the default
 /// partition's withheld slices, so the split is the one every run uses.
@@ -101,7 +114,7 @@ fn read_all(paths: &[String]) -> anyhow::Result<Vec<serde_json::Value>> {
 pub async fn run(action: CriticAction) -> anyhow::Result<()> {
     #[cfg(feature = "models")]
     {
-        use antumbra_train::critic::{measure_critic, train_critic, Labeled};
+        use antumbra_train::critic::{judge, measure_critic, recalibrate, train_critic, Labeled};
         use antumbra_train::{CandleModelLoader, CausalLm, ModelLoader, RaftConfig};
 
         let to_labeled = |rows: Vec<Row>| {
@@ -135,9 +148,9 @@ pub async fn run(action: CriticAction) -> anyhow::Result<()> {
             } => {
                 let tasks = read_all(std::slice::from_ref(&corpus))?;
                 let rows = labeled(&tasks, &read_all(&completions)?);
-                let (held, learn): (Vec<_>, Vec<_>) =
+                let (held_rows, learn): (Vec<_>, Vec<_>) =
                     rows.into_iter().partition(|r| held_out(&r.task));
-                let (held, learn) = (to_labeled(held), to_labeled(learn));
+                let (held, learn) = (to_labeled(held_rows.clone()), to_labeled(learn));
                 println!(
                     "critic: learning from {} completion(s), holding out {}",
                     learn.len(),
@@ -150,19 +163,48 @@ pub async fn run(action: CriticAction) -> anyhow::Result<()> {
                 println!("losses: {losses:?}");
                 model.save_adapter(&out)?;
                 println!("critic adapter -> {out}");
+                println!("held out, raw:");
                 report(&measure_critic(&mut model, &held).await?);
+                // Recalibrate on half the held-out tasks, read the other half
+                // through it: the per-generation step, once.
+                let (fit, read): (Vec<_>, Vec<_>) = held_rows
+                    .into_iter()
+                    .partition(|r| fits_calibration(&r.task));
+                let fitted = measure_critic(&mut model, &to_labeled(fit)).await?;
+                let evaluated = measure_critic(&mut model, &to_labeled(read)).await?;
+                println!("the evaluation half, raw:");
+                report(&evaluated);
+                if let Some(fixed) = recalibrate(&fitted, &evaluated) {
+                    println!("the evaluation half, recalibrated on the other:");
+                    report(&fixed);
+                }
             }
             CriticAction::Measure {
                 adapter,
                 corpus,
                 completions,
+                twin,
             } => {
                 let tasks = read_all(std::slice::from_ref(&corpus))?;
                 let rows = to_labeled(labeled(&tasks, &read_all(&completions)?));
                 let cfg = RaftConfig::default();
                 let loader = CandleModelLoader::new(cfg.clone());
                 let mut model = ModelLoader::load(&loader, &cfg.base_model, Some(&adapter)).await?;
-                report(&measure_critic(&mut model, &rows).await?);
+                let reading = measure_critic(&mut model, &rows).await?;
+                report(&reading);
+                if let Some(twin) = twin {
+                    drop(model);
+                    let mut other =
+                        ModelLoader::load(&loader, &cfg.base_model, Some(&twin)).await?;
+                    let mut theirs = Vec::with_capacity(rows.len());
+                    for r in &rows {
+                        theirs.push(judge(&mut other, &r.prompt, &r.completion).await?);
+                    }
+                    let ours: Vec<f32> = reading.scored.iter().map(|s| s.predicted).collect();
+                    let agree = antumbra_core::critic::agreement(&ours, &theirs)
+                        .map_or("none".to_string(), |a| format!("{a:.3}"));
+                    println!("agreement with the twin {twin}: {agree}");
+                }
             }
         }
         Ok(())
