@@ -273,3 +273,54 @@ async fn a_half_finished_generation_is_not_its_own_history() -> Result<()> {
     assert_eq!(proposed(&rerun[0]), proposed(&straight[1]));
     Ok(())
 }
+
+fn with_slow(interval: u32) -> LoopConfig {
+    LoopConfig {
+        recipe: Some(START),
+        search: Some(SearchPolicy {
+            cohort: 3,
+            slow: 1,
+            slow_interval: interval,
+            ..SearchPolicy::default()
+        }),
+        ..LoopConfig::default()
+    }
+}
+
+/// The slow member keeps its recipe for its interval, read back from the
+/// loop's own rows, and is proposed afresh after it. The report says which
+/// member is slow.
+#[tokio::test]
+async fn a_slow_member_holds_its_recipe_for_its_interval() -> Result<()> {
+    let store = Store::connect_memory(8).await?;
+    let reports = run(&store, &RecipeSensitive::default(), with_slow(2), 3).await?;
+    let slow: Vec<Option<TrainingRecipe>> = reports
+        .iter()
+        .map(|r| {
+            let slow: Vec<_> = r.cohort.iter().filter(|m| m.slow).collect();
+            assert_eq!(slow.len(), 1, "one slow member");
+            assert!(slow[0].shadow.as_str().ends_with(":s2"), "the last");
+            slow[0].recipe
+        })
+        .collect();
+    assert_eq!(slow[0], slow[1], "held for its interval of two");
+    assert_ne!(slow[1], slow[2], "then proposed afresh");
+    Ok(())
+}
+
+/// A run resumed partway holds and proposes what a continuous one would,
+/// because what each member held is read from the stored rows.
+#[tokio::test]
+async fn a_resumed_run_holds_what_a_continuous_one_would() -> Result<()> {
+    let recipes = |r: &GenerationReport| -> Vec<Option<TrainingRecipe>> {
+        r.cohort.iter().map(|m| m.recipe).collect()
+    };
+    let continuous = Store::connect_memory(8).await?;
+    let straight = run(&continuous, &RecipeSensitive::default(), with_slow(3), 3).await?;
+    let resumed = Store::connect_memory(8).await?;
+    run(&resumed, &RecipeSensitive::default(), with_slow(3), 2).await?;
+    let after = run(&resumed, &RecipeSensitive::default(), with_slow(3), 3).await?;
+    assert_eq!(after.len(), 1);
+    assert_eq!(recipes(&after[0]), recipes(&straight[2]));
+    Ok(())
+}
