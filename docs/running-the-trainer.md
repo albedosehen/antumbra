@@ -47,7 +47,6 @@ It is off by default because it changes what is learned, and because the demo co
   - Its adapter is evaluated again under three fresh seeds (`--remeasure N` to change the count, 0 for off).
   - With `--holdout`, the tasks are the held-out slice, which it never trained on. Without it, the tasks are the ones it trained on, re-drawn.
   - The threshold applies to the mean.
-  - Re-measurement is not yet available under GRPO. There, the best member's fitness is shrunk halfway toward the cohort's mean instead.
 - **Output:** each generation prints every member's recipe and fitness, and the score graduation was judged on, including the re-measured pass rates. Every member's recipe is stored as a `recipe` row, and those rows are the history later generations are proposed from.
 - **Cost:** a generation takes the cohort size times as long. Combine it with `--holdout` on a corpus of real size, so the audit trend can tell a search that improves from one that overtunes.
 

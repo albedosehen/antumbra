@@ -13,7 +13,7 @@ use candle_nn::ops::log_softmax;
 use serde_json::json;
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{Result, RunId, TrainingRecipe};
+use antumbra_core::{AntumbraError, Result, RunId, TrainingRecipe};
 
 use crate::config::RaftConfig;
 use crate::model::CorpusTask;
@@ -109,6 +109,13 @@ pub trait GrpoLm {
         cfg: &RaftConfig,
     ) -> Result<f32>;
     fn save_adapter(&self, path: &str) -> Result<()>;
+
+    /// Draw every later sample from `seed` (cf. [`crate::model::CausalLm::seed_draws`]).
+    /// The default refuses, so a model that cannot seed says so.
+    fn seed_draws(&mut self, seed: u64) -> Result<()> {
+        let _ = seed;
+        Err(AntumbraError::Unimplemented("seeded draws"))
+    }
 }
 
 /// Builds a fresh [`GrpoLm`] for a shadow (cf. [`crate::model::ModelLoader`]).

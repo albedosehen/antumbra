@@ -210,6 +210,29 @@ pub struct QwenCausalLm {
 static GEN_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 impl QwenCausalLm {
+    /// The seed the `i`-th draw of a call samples from. Seeded (`seed_draws`),
+    /// the n-th draw since takes the n-th seed of that stream, so the same seed
+    /// repeats the same draws. Otherwise a fresh process-wide nonce per draw,
+    /// so repeated calls (best-of-K over reloaded models) diverge instead of
+    /// all seeding identically.
+    fn next_draw_seed(&mut self, i: usize) -> u64 {
+        match &mut self.draws {
+            Some((base, taken)) => {
+                let seed = base
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(*taken);
+                *taken += 1;
+                seed
+            }
+            None => {
+                let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                0xA17_u64
+                    .wrapping_mul(nonce.wrapping_add(1))
+                    .wrapping_add(i as u64)
+            }
+        }
+    }
+
     /// Load Qwen2.5-Coder + a fresh LoRA adapter from the Hugging Face hub.
     pub fn load(device: Device, cfg: RaftConfig) -> Result<Self> {
         // hf-hub 1.0's blocking client `block_on`s an async runtime, which panics
@@ -622,25 +645,7 @@ impl CausalLm for QwenCausalLm {
     async fn generate(&mut self, prompt: &str, n_samples: usize) -> Result<Vec<String>> {
         let mut out = Vec::with_capacity(n_samples);
         for i in 0..n_samples {
-            let seed = match &mut self.draws {
-                // Seeded: the n-th draw since `seed_draws` takes the n-th seed of
-                // the stream, so the same seed repeats the same draws.
-                Some((base, taken)) => {
-                    let seed = base
-                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                        .wrapping_add(*taken);
-                    *taken += 1;
-                    seed
-                }
-                // Fresh nonce per draw so repeated calls (best-of-K over
-                // reloaded models) diverge instead of all seeding identically.
-                None => {
-                    let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    0xA17_u64
-                        .wrapping_mul(nonce.wrapping_add(1))
-                        .wrapping_add(i as u64)
-                }
-            };
+            let seed = self.next_draw_seed(i);
             out.push(self.sample_one(prompt, seed)?);
         }
         Ok(out)
@@ -687,13 +692,15 @@ impl GrpoLm for QwenCausalLm {
     async fn sample_group(&mut self, prompt: &str, group: usize) -> Result<Vec<GrpoSample>> {
         let mut out = Vec::with_capacity(group);
         for i in 0..group {
-            let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let seed = 0xA17_u64
-                .wrapping_mul(nonce.wrapping_add(1))
-                .wrapping_add(i as u64);
+            let seed = self.next_draw_seed(i);
             out.push(self.sample_one_with_logprobs(prompt, seed)?);
         }
         Ok(out)
+    }
+
+    fn seed_draws(&mut self, seed: u64) -> Result<()> {
+        self.draws = Some((seed, 0));
+        Ok(())
     }
 
     async fn reference_logprobs(&mut self, prompt: &str, tokens: &[u32]) -> Result<Vec<f32>> {

@@ -352,21 +352,8 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         }
         policy
     });
-    // Re-measurement loads the adapter as a `CausalLm`, which the GRPO trainer
-    // does not build yet, so under GRPO only an explicit request is an error;
-    // the search's default falls back to the shrunk cohort score.
     let remeasure = match args.remeasure.unwrap_or(if args.search { 3 } else { 0 }) {
         0 => None,
-        _ if algo == "grpo" && args.remeasure.is_some() => {
-            anyhow::bail!("--remeasure is not yet available under --algo grpo")
-        }
-        _ if algo == "grpo" => {
-            println!(
-                "note: re-measurement is not yet available under grpo; graduation uses the \
-                 cohort's shrunk score"
-            );
-            None
-        }
         repeats => Some(antumbra_loop::Remeasure { repeats }),
     };
     #[cfg(feature = "models")]
