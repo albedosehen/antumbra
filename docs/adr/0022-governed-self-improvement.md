@@ -411,6 +411,48 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    Still to come for this step:
    - **The comparison:** a run against the empty status quo and against uniform sampling, on graduations per unit of compute. Until it beats both, the step stays unchecked. The uniform baseline is in (`Choosing::Uniform`, `train --grow --grow-by uniform`). It has the same gate, focus and unfiltered share, and differs only in how a region is chosen.
 6. [ ] S-4, proposed verifiers and the trust protocol.
+
+   **The namespace and the trust protocol are in. Synthesis is not.**
+
+   **A verifier is data with an address.** A `VerifierRecord` holds the spec `CommandVerifier` runs, a domain (a region of tasks), optionally the one task it checks, a tier, and an origin (authored or synthesized). Its id is the SHA-256 of its domain, task, tier and spec in canonical JSON, so the check that was measured is exactly the check that grants reward. The store keeps the spec as canonical text, so the database cannot reorder or retype it, and every read checks the address against the content and refuses a verifier whose check changed. Proposing the same content twice returns the verifier already there.
+
+   There is no tier for oracles derived from the implementation, and `--tier derived` is refused by name.
+
+   **The four states, and one way into trusted.**
+   - **An authored verifier** starts trusted, by authorship. **A synthesized one** starts proposed and grants nothing.
+   - **Measurement is the only way into trusted.** The state machine refuses a person trust, and the store's operator move cannot pass a measurement as its cause. The only path is `record_measurement` with a sound one. A person may quarantine or revoke.
+   - **Quarantine is not undone.** The same content is the same check, so a repaired check is a new verifier that starts again with no power.
+   - **Trust lapses.** A synthesized verifier grants reward only while its last sound measurement is younger than its time to live (seven days by default). A trusted one that is not re-measured stops granting without anyone moving it.
+
+   **The protocol.** A verifier is measured on cases: artifacts whose outcome something outside the loop decided. Each case is anchored by one of three things:
+   - an authored verifier's verdict, named by its address;
+   - an authored reference solution;
+   - construction: every artifact of a task no artifact can satisfy.
+
+   There is no anchor for a synthesized verifier, trusted or not. A cases file that names one is refused, as is one that names the verifier being measured. Every case runs three times. The verdict comes from the first gate that fails:
+   1. **Determinism:** a case whose verdict changed between runs.
+   2. **The adversarial holdout:** one pass on an impossible task.
+   3. **Enough evidence:** known-good and known-bad cases both.
+   4. **The paired holdout:** the one-sided Clopper-Pearson upper bound on the false-positive rate must be at or under 0.10 at 95% confidence. The bound, not the observed rate, so it takes at least 29 known-bad cases, none passed, before a verifier can be trusted at all.
+   5. **Usefulness:** at least half the known-good cases accepted. A false negative only wastes compute, so this is a floor and not a bound.
+
+   The two outright rejections come first and revoke a proposal. A proposal whose bound is merely too wide stays proposed, since more cases may yet bound it. A trusted verifier found flaky, taking a shortcut, or over the bound is quarantined at once.
+
+   **The decisive test is `antumbra verifier challenge`.** Every trusted synthesized verifier in a domain runs on the known-bad and impossible cases it checks, and one pass on a deliberately wrong artifact that anchored truth failed is a shortcut, so it is quarantined. The bound that promotion reads tolerates a rare false positive; the challenge tolerates none, because its artifacts are chosen to be wrong.
+
+   **The reward gate.** A task's `verify` may name a verifier (`{"verifier": "verifier:..."}`) instead of carrying a spec. `train` checks through `Governed`, which resolves the name on every check and runs it only while the verifier may grant reward for that task. So a quarantine stops reward from the next check on, mid-run included. Anywhere without the gate, a named verifier grants nothing, because `CommandVerifier` cannot run a spec that is only a name.
+
+   Nothing that trains can write to the namespace. The tables carry no permissions clause, so no tenant session can reach them, and the reward path holds only the read-only `TrustedVerifiers` port.
+
+   **How one reading was settled.** The record says a trusted verifier "may grant reward in domains with no authored verifier". Promotion must still be decided against anchored truth, so a verifier can be trusted only where anchored cases exist for what it checks. Those cases need not come from an authored verifier: an authored reference solution is one, and construction is another. In practice, then, a task needs one authored seed, a reference, and synthesis supplies the check. `antumbra verifier cases` builds the cases from a corpus:
+   - each reference is known-good;
+   - each completion given for a task is labeled by that task's own authored verifier, run three times. The verifier is registered as authored and named as the anchor, and a completion it disagrees with itself on is refused rather than labeled;
+   - every completion for an impossible task is labeled impossible without being run.
+
+   Still to come for this step:
+   - **Synthesis:** the model proposing checks. The first target is differential checks against a reference, the reducible tier, measured on the workbench with the policy's own wrong samples as the known-bad cases.
+   - **Attribution:** `reward_signal` naming the verifier that granted it, and the shadows trained under a quarantined verifier quarantined from downstream training.
+   - **Loop-driven quarantine:** re-measurement on the loop's own schedule, and quarantine when the gap between a verifier's visible and held-out pass rates crosses a threshold.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 8. Never: S-6.
 

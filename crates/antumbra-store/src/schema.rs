@@ -345,6 +345,19 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("grow")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("grow_run_idx", ["run_id", "generation"])]),
+        // The verifier namespace (ADR-0022 S-4): verifiers keyed by content
+        // address, and the append-only measurements and state changes that
+        // decide whether each may grant reward. No permissions clause: owner
+        // only, so no tenant session and nothing that trains can write one.
+        table_schema("verifier")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([unique_index("verifier_key_uq", ["key"])]),
+        table_schema("verifier_transition")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([unique_index("vtrans_seq_uq", ["verifier", "seq"])]),
+        table_schema("verifier_measurement")
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([unique_index("vmeasure_seq_uq", ["verifier", "seq"])]),
         // Validation harness.
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)

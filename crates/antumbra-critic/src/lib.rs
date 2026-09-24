@@ -6,7 +6,10 @@
 //! [`Critic`] ports, tags every signal with its source, and folds them with
 //! the core [`fold_step`] discipline.
 
+pub mod governed;
+pub mod trust;
 pub mod verifiers;
+pub use governed::Governed;
 pub use verifiers::CommandVerifier;
 
 use std::collections::BTreeMap;

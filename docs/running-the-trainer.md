@@ -93,9 +93,32 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 - **Output:** each generation prints every member's recipe and fitness, and the score graduation was judged on, including the re-measured pass rates. Every member's recipe is stored as a `recipe` row, and those rows are the history later generations are proposed from.
 - **Cost:** a generation takes the cohort size times as long, plus the re-measurement. On the 3090 Ti, two generations of three over the workbench `sequences` corpus (`--samples 4 --rounds 2 --holdout`) took 53 minutes and peaked at 14.6 GB of the card, whatever the batch size (`scripts/search-validate.sh` runs exactly that). Combine it with `--holdout` on a corpus of real size, so the audit trend can tell a search that improves from one that overtunes.
 
+### Verifiers the loop did not write: `antumbra verifier`
+
+A proposed check grants reward only after a measurement against ground truth the loop did not produce ([ADR-0022](adr/0022-governed-self-improvement.md) S-4).
+
+```bash
+# label completions for a skill's tasks with each task's own authored verifier
+antumbra verifier cases --corpus corpora/workbench/all.json --skill strings \
+  --completions samples.json --out strings-cases.json
+# propose a check, then measure it: sound means trusted
+antumbra verifier propose --domain strings --task strings/swap-in --spec @check.json
+antumbra verifier measure <address or prefix> --cases strings-cases.json
+# every trusted synthesized verifier in a domain against deliberately wrong artifacts
+antumbra verifier challenge --domain strings --cases wrong.json
+antumbra verifier list --domain strings
+```
+
+- **Measurement:** every case runs three times (`--repeats`). A verifier that disagrees with itself, or passes anything on an impossible task, is revoked.
+- **Trust:** the 95% upper bound on its false-positive rate must be at or under 0.10 (`--confidence`, `--max-false-positive`), which takes at least 29 known-bad cases with none passed. It must also accept half the known-good ones (`--min-accepted`).
+- **Time to live:** trust lasts seven days (`--ttl-days`), then lapses unless a new measurement renews it.
+- **Quarantine:** a trusted verifier re-measured as unsound, or caught by `challenge`, stops granting at once. `quarantine` and `revoke` are the manual moves. No command promotes one.
+
 ## Corpus format
 
 A JSON array of tasks. `verify.program`/`args` run after generation with the candidate completion in `$ANTUMBRA_COMPLETION`; `extract_code: true` pulls the code out of a markdown fence first.
+
+Instead of a spec, `verify` may name a verifier in the namespace: `{"verifier": "verifier:..."}`. `train` runs it only while that verifier may grant reward for the task (see `antumbra verifier` above). Otherwise the task earns nothing, as a task with no spec earns nothing.
 
 ```json
 [

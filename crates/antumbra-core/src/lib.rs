@@ -36,7 +36,9 @@ pub mod reward;
 pub mod router;
 pub mod shadow;
 pub mod slice;
+pub mod trust;
 pub mod vector;
+pub mod verifier;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
@@ -60,7 +62,7 @@ pub use grow::{GrowRecord, RegionCandidate, RegionCensus};
 pub use hive::{is_open, Hive, HiveMembership, HiveOffer, OfferStatus, OfferedKind};
 pub use ids::{
     BoundaryId, CompartmentId, DocumentChunkId, ExpertId, Generation, MemoryId, RunId, ShadowId,
-    TenantId, UserId,
+    TenantId, UserId, VerifierId,
 };
 pub use lifecycle::{current_status, ExpertStatus, ExpertTransition, TransitionCause};
 pub use memory::{EdgeType, Memory, MemoryEdge, MemoryNetwork, MemoryStatus};
@@ -75,4 +77,12 @@ pub use recipe::{RecipeRecord, TrainingRecipe};
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};
 pub use shadow::{Shadow, ShadowStatus};
+pub use trust::{
+    after_measurement, grants_reward, upper_bound, Anchor, Case, Label, Tally, TrustMeasurement,
+    TrustPolicy, TrustVerdict,
+};
 pub use vector::truncate_renormalize;
+pub use verifier::{
+    canonical_json, current_trust, verifier_address, TrustCause, TrustState, VerifierOrigin,
+    VerifierRecord, VerifierTier, VerifierTransition,
+};
