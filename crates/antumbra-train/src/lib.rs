@@ -48,7 +48,7 @@ pub use consolidate::{
     interleave_replay, replay_from_tasks, score_memory, ConsolidationPolicy, Verdict,
 };
 pub use corpus::JsonCorpus;
-pub use eval::{eval_pass_rate, EvalOutcome, TaskResult};
+pub use eval::{eval_pass_rate, Draw, EvalOutcome, TaskResult};
 pub use grpo::{grpo_train, GrpoExperience, GrpoLm, GrpoModelLoader, GrpoSample};
 pub use harness::{
     metabolize, normalize_traces, parse_traces as parse_harness_traces, HarnessStep, HarnessTrace,

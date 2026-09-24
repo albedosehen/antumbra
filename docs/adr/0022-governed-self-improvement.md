@@ -433,10 +433,10 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    1. **Determinism:** a case whose verdict changed between runs.
    2. **The adversarial holdout:** one pass on an impossible task.
    3. **Enough evidence:** known-good and known-bad cases both.
-   4. **The paired holdout:** the one-sided Clopper-Pearson upper bound on the false-positive rate must be at or under 0.10 at 95% confidence. The bound, not the observed rate, so it takes at least 29 known-bad cases, none passed, before a verifier can be trusted at all.
+   4. **The paired holdout:** the one-sided Clopper-Pearson upper bound on the false-positive rate must be at or under 0.10 at 95% confidence. The bound, not the observed rate, so it takes at least 29 known-bad cases, none passed, before a verifier can be trusted at all. Fewer than that with none passed is missing evidence, not evidence against the verifier, and reads as unmeasured.
    5. **Usefulness:** at least half the known-good cases accepted. A false negative only wastes compute, so this is a floor and not a bound.
 
-   The two outright rejections come first and revoke a proposal. A proposal whose bound is merely too wide stays proposed, since more cases may yet bound it. A trusted verifier found flaky, taking a shortcut, or over the bound is quarantined at once.
+   The two outright rejections come first and revoke a proposal. A proposal that passed known-bad cases and is over the bound stays proposed, since more cases may yet bound it. A trusted verifier found flaky, taking a shortcut, or passing known-bad cases past the bound is quarantined at once. One re-measured on too few cases is neither quarantined nor renewed, so its trust lapses unless better evidence comes.
 
    **The decisive test is `antumbra verifier challenge`.** Every trusted synthesized verifier in a domain runs on the known-bad and impossible cases it checks, and one pass on a deliberately wrong artifact that anchored truth failed is a shortcut, so it is quarantined. The bound that promotion reads tolerates a rare false positive; the challenge tolerates none, because its artifacts are chosen to be wrong.
 
@@ -449,8 +449,22 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - each completion given for a task is labeled by that task's own authored verifier, run three times. The verifier is registered as authored and named as the anchor, and a completion it disagrees with itself on is refused rather than labeled;
    - every completion for an impossible task is labeled impossible without being run.
 
+   **Synthesis of the reducible tier is in, and not yet measured on the GPU.** The first thing the model proposes is the least it can: the inputs of a differential check.
+   - **The proposal:** `antumbra verifier synthesize` asks the model, for each task, for inputs that would tell a correct function from a wrong one, and nothing else.
+   - **The decider:** `corpora/workbench/synthesize.py` runs the task's authored reference on those inputs, through the same child the judge runs a candidate in, and the judge's equality decides. An input is kept when the reference returns a value on it, or raises an exception the prompt names. A spec needs three inputs and two distinct outputs, so no constant passes it.
+   - **What is measured:** the check is decided by something frozen, and the model only chose where to look. So the trust protocol measures exactly one thing: whether the model's inputs tell a wrong function from the right one as well as the authored inputs do.
+
+   The known-bad cases come from three places, each labeled by the task's own authored judge:
+   - the model's own completions, from `eval --completions` under a seed;
+   - the generator's forgeries;
+   - single-point mutants of the reference: a flipped comparison, a swapped operator or method, a number off by one, a string cut short or reversed. A mutant the authored judge passes is equivalent and is labeled good.
+
+   `scripts/verifier-validate.sh` runs the whole of it on one skill. It measures, then re-measures on a second, independently seeded set of completions, then challenges.
+
+   A dry run on two workbench tasks, with hand-written inputs instead of the model's, found the binding constraint before the GPU did. A per-task verifier is measured only on its own task's cases, and a one-line reference yields few mutants. The forgeries and mutants of `strings/swap-in` came to 11 known-bad cases. That is too few to bound the rate under 0.10 however well the check does, and the verifier stayed unmeasured. The weak check, three inputs without the letters it swaps, passed 3 of its 11 and stayed proposed. So what makes a per-task verifier trustable is mostly the model's own wrong completions, and a skill the model is already good at has few of them.
+
    Still to come for this step:
-   - **Synthesis:** the model proposing checks. The first target is differential checks against a reference, the reducible tier, measured on the workbench with the policy's own wrong samples as the known-bad cases.
+   - **The GPU measurement:** `verifier-validate.sh` on a workbench skill, reporting how many synthesized checks were trusted, whether they held their bound on the second set, and what the challenge caught. It waits for the S-3 comparison to free the card.
    - **Attribution:** `reward_signal` naming the verifier that granted it, and the shadows trained under a quarantined verifier quarantined from downstream training.
    - **Loop-driven quarantine:** re-measurement on the loop's own schedule, and quarantine when the gap between a verifier's visible and held-out pass rates crosses a threshold.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.

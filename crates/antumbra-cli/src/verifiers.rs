@@ -1,7 +1,7 @@
 //! `antumbra verifier` (ADR-0022 S-4): proposing verifiers, building the
 //! cases they are measured on, measuring them, and moving them.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{anyhow, bail, Context};
 use chrono::{TimeDelta, Utc};
@@ -28,19 +28,57 @@ pub async fn run(url: &str, action: VerifierAction) -> anyhow::Result<()> {
             tier,
             authored,
             by,
+            batch,
         } => {
-            let spec = read_json(&spec)?;
-            let tier: VerifierTier = tier.parse()?;
-            let origin = if authored {
-                VerifierOrigin::Authored
-            } else {
-                VerifierOrigin::Synthesized
+            let records = match batch {
+                Some(path) => batch_records(&read_json(&format!("@{path}"))?)?,
+                None => {
+                    let spec = read_json(spec.as_deref().unwrap_or_default())?;
+                    let origin = if authored {
+                        VerifierOrigin::Authored
+                    } else {
+                        VerifierOrigin::Synthesized
+                    };
+                    let domain = domain.unwrap_or_default();
+                    let mut record =
+                        VerifierRecord::new(domain, task, tier.parse()?, origin, spec, Utc::now());
+                    record.proposed_by = by;
+                    vec![record]
+                }
             };
-            let mut record = VerifierRecord::new(domain, task, tier, origin, spec, Utc::now());
-            record.proposed_by = by;
-            let kept = verifier::propose(&store, &record).await?;
-            let state = verifier::state_of(&store, &kept).await?;
-            println!("{} ({}, {})", kept.id, kept.origin.as_str(), state.as_str());
+            for record in records {
+                let kept = verifier::propose(&store, &record).await?;
+                let state = verifier::state_of(&store, &kept).await?;
+                println!(
+                    "{} ({}, {}) {}",
+                    kept.id,
+                    kept.origin.as_str(),
+                    state.as_str(),
+                    kept.task.as_deref().unwrap_or(&kept.domain)
+                );
+            }
+        }
+        VerifierAction::Synthesize {
+            corpus,
+            skill,
+            task,
+            inputs,
+            draws,
+            max_new_tokens,
+            base_model,
+            out,
+        } => {
+            crate::verifier_synth::synthesize(crate::verifier_synth::SynthesizeArgs {
+                corpus,
+                skill,
+                task,
+                inputs,
+                draws,
+                max_new_tokens,
+                base_model,
+                out,
+            })
+            .await?;
         }
         VerifierAction::Cases {
             corpus,
@@ -51,10 +89,12 @@ pub async fn run(url: &str, action: VerifierAction) -> anyhow::Result<()> {
         } => {
             let tasks: Vec<serde_json::Value> =
                 serde_json::from_value(read_json(&format!("@{corpus}"))?)?;
-            let given: Vec<serde_json::Value> = match completions {
-                Some(path) => serde_json::from_value(read_json(&format!("@{path}"))?)?,
-                None => Vec::new(),
-            };
+            let mut given: Vec<serde_json::Value> = Vec::new();
+            for path in &completions {
+                let more: Vec<serde_json::Value> =
+                    serde_json::from_value(read_json(&format!("@{path}"))?)?;
+                given.extend(more);
+            }
             let stem = std::path::Path::new(&corpus)
                 .file_stem()
                 .and_then(|s| s.to_str())
@@ -76,6 +116,7 @@ pub async fn run(url: &str, action: VerifierAction) -> anyhow::Result<()> {
         }
         VerifierAction::Measure {
             verifier: named,
+            domain,
             cases,
             repeats,
             confidence,
@@ -83,9 +124,12 @@ pub async fn run(url: &str, action: VerifierAction) -> anyhow::Result<()> {
             min_accepted,
             ttl_days,
         } => {
-            let record = resolve(&store, &named).await?;
+            let records = match (named, domain) {
+                (Some(named), _) => vec![resolve(&store, &named).await?],
+                (None, Some(domain)) => measurable(&store, &domain).await?,
+                (None, None) => bail!("name a verifier or a --domain"),
+            };
             let cases = read_cases(&cases)?;
-            check_anchors(&store, &record, &cases).await?;
             let policy = TrustPolicy {
                 repeats,
                 confidence,
@@ -93,8 +137,22 @@ pub async fn run(url: &str, action: VerifierAction) -> anyhow::Result<()> {
                 min_accepted,
                 ttl: TimeDelta::days(ttl_days),
             };
-            let m = measure(&CommandVerifier, &record, &cases, &policy, Utc::now()).await?;
-            report(&store, &record, &m).await?;
+            let mut verdicts: BTreeMap<&'static str, u32> = BTreeMap::new();
+            for record in &records {
+                check_anchors(&store, record, &cases).await?;
+                let m = measure(&CommandVerifier, record, &cases, &policy, Utc::now()).await?;
+                *verdicts.entry(verdict_kind(&m.verdict)).or_default() += 1;
+                report(&store, record, &m).await?;
+            }
+            if records.len() > 1 {
+                let counts: Vec<String> =
+                    verdicts.iter().map(|(k, n)| format!("{n} {k}")).collect();
+                println!(
+                    "{} verifier(s) measured: {}",
+                    records.len(),
+                    counts.join(", ")
+                );
+            }
         }
         VerifierAction::Challenge { domain, cases } => {
             let cases = read_cases(&cases)?;
@@ -163,6 +221,63 @@ pub async fn run(url: &str, action: VerifierAction) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The synthesized verifiers of `domain` a measurement can still move:
+/// the proposed and the trusted.
+async fn measurable(store: &Store, domain: &str) -> anyhow::Result<Vec<VerifierRecord>> {
+    let mut out = Vec::new();
+    for record in verifier::list(store).await? {
+        if record.domain != domain || record.origin != VerifierOrigin::Synthesized {
+            continue;
+        }
+        let state = verifier::state_of(store, &record).await?;
+        if matches!(state, TrustState::Proposed | TrustState::Trusted) {
+            out.push(record);
+        }
+    }
+    Ok(out)
+}
+
+/// A batch of proposals: `{domain, task, tier, spec, by}` each, synthesized.
+fn batch_records(batch: &serde_json::Value) -> anyhow::Result<Vec<VerifierRecord>> {
+    let items = batch
+        .as_array()
+        .ok_or_else(|| anyhow!("a batch is a JSON array of proposals"))?;
+    let now = Utc::now();
+    items
+        .iter()
+        .map(|item| {
+            let domain = item["domain"]
+                .as_str()
+                .ok_or_else(|| anyhow!("a proposal has no domain"))?;
+            let tier: VerifierTier = item["tier"].as_str().unwrap_or("reducible").parse()?;
+            if item["spec"].is_null() {
+                bail!("a proposal for {domain} has no spec");
+            }
+            let mut record = VerifierRecord::new(
+                domain,
+                item["task"].as_str().map(str::to_string),
+                tier,
+                VerifierOrigin::Synthesized,
+                item["spec"].clone(),
+                now,
+            );
+            record.proposed_by = item["by"].as_str().map(str::to_string);
+            Ok(record)
+        })
+        .collect()
+}
+
+fn verdict_kind(v: &TrustVerdict) -> &'static str {
+    match v {
+        TrustVerdict::Sound => "sound",
+        TrustVerdict::Flaky { .. } => "flaky",
+        TrustVerdict::Shortcut { .. } => "shortcut",
+        TrustVerdict::Unmeasured { .. } => "unmeasured",
+        TrustVerdict::FalsePositives { .. } => "over the bound",
+        TrustVerdict::TooStrict { .. } => "too strict",
+    }
 }
 
 async fn moved(
@@ -430,6 +545,61 @@ mod tests {
             { "task": "n/add", "completion": "a - b" }
         ]))
         .unwrap()
+    }
+
+    #[test]
+    fn a_batch_is_proposed_as_synthesized_whatever_it_claims() {
+        let batch = serde_json::json!([
+            { "domain": "strings", "task": "s/rev", "spec": { "contains_all": ["x"] }, "by": "m" },
+            { "domain": "strings", "tier": "partial", "spec": { "contains_all": ["y"] }, "origin": "authored" }
+        ]);
+        let records = batch_records(&batch).unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records
+            .iter()
+            .all(|r| r.origin == VerifierOrigin::Synthesized));
+        assert_eq!(records[0].task.as_deref(), Some("s/rev"));
+        assert_eq!(records[0].proposed_by.as_deref(), Some("m"));
+        assert_eq!(records[1].tier, VerifierTier::Partial);
+        assert!(batch_records(&serde_json::json!([{ "domain": "d" }])).is_err());
+        assert!(batch_records(
+            &serde_json::json!([{ "domain": "d", "tier": "derived", "spec": {} }])
+        )
+        .is_err());
+        assert!(batch_records(&serde_json::json!({})).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_domain_measurement_takes_the_proposed_and_trusted_synthesized_ones() {
+        let store = Store::connect_memory(4).await.unwrap();
+        let batch = serde_json::json!([
+            { "domain": "strings", "spec": { "contains_all": ["a"] } },
+            { "domain": "strings", "spec": { "contains_all": ["b"] } },
+            { "domain": "lists", "spec": { "contains_all": ["c"] } }
+        ]);
+        let mut ids = Vec::new();
+        for record in batch_records(&batch).unwrap() {
+            ids.push(verifier::propose(&store, &record).await.unwrap().id);
+        }
+        let authored = VerifierRecord::new(
+            "strings",
+            None,
+            VerifierTier::Reducible,
+            VerifierOrigin::Authored,
+            serde_json::json!({ "contains_all": ["z"] }),
+            Utc::now(),
+        );
+        verifier::propose(&store, &authored).await.unwrap();
+        verifier::transition(&store, &ids[1], TrustState::Revoked, None)
+            .await
+            .unwrap();
+        let picked: Vec<VerifierId> = measurable(&store, "strings")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(picked, vec![ids[0].clone()]);
     }
 
     #[tokio::test]

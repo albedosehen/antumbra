@@ -105,9 +105,11 @@ pub enum TrustVerdict {
     Flaky { cases: Vec<String> },
     /// It passed these cases of tasks no artifact can satisfy.
     Shortcut { cases: Vec<String> },
-    /// Too few anchored cases to bound anything.
+    /// Too few anchored cases to bound anything: no known-good or known-bad
+    /// cases, or too few known-bad ones, none passed, to bound the rate.
     Unmeasured { reason: String },
-    /// Its false-positive rate may be as high as `upper`, over `max`.
+    /// It passed known-bad cases, and its false-positive rate may be as high
+    /// as `upper`, over `max`.
     FalsePositives { upper: f64, max: f64 },
     /// It accepted `accepted` of the known-good cases, under `min`.
     TooStrict { accepted: f64, min: f64 },
@@ -200,6 +202,15 @@ impl Tally {
                 reason: format!(
                     "{} known-good and {} known-bad case(s): a bound needs both",
                     self.good, self.bad
+                ),
+            }
+        } else if upper > policy.max_false_positive && self.bad_passed == 0 {
+            // Nothing wrong was passed, but too little was tried to bound
+            // the rate: missing evidence, not evidence against it.
+            TrustVerdict::Unmeasured {
+                reason: format!(
+                    "none of {} known-bad case(s) passed, too few to bound the rate under {}",
+                    self.bad, policy.max_false_positive
                 ),
             }
         } else if upper > policy.max_false_positive {
@@ -415,12 +426,11 @@ mod tests {
 
     #[test]
     fn the_gates_read_the_bound_not_the_observed_rate() {
-        // No false positive seen, but too few failures to bound the rate.
+        // No false positive seen, but too few failures to bound the rate:
+        // not enough evidence either way.
         let few = judge(&tally((5, 5), (10, 0)));
-        assert!(
-            matches!(few, TrustVerdict::FalsePositives { upper, .. } if upper > 0.25),
-            "{few:?}"
-        );
+        assert!(matches!(few, TrustVerdict::Unmeasured { .. }), "{few:?}");
+        assert!(!few.is_unsound());
         // Enough to bound it under 10%.
         assert!(judge(&tally((5, 5), (29, 0))).is_sound());
         // One false positive in 29 is not.
@@ -428,6 +438,8 @@ mod tests {
             judge(&tally((5, 5), (29, 1))),
             TrustVerdict::FalsePositives { .. }
         ));
+        // One in 60 is: the bound tolerates a rare one, the observed rate aside.
+        assert!(judge(&tally((5, 5), (60, 1))).is_sound());
     }
 
     #[test]

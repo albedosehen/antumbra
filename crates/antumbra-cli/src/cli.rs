@@ -457,6 +457,15 @@ pub enum Command {
         /// Write every task's result (passes out of samples) to this JSON file.
         #[arg(long)]
         report: Option<String>,
+        /// Write every sampled completion, as `{task, completion, passed}`, to
+        /// this JSON file: the policy's own answers, for labeling as cases a
+        /// verifier is measured on (`antumbra verifier cases`).
+        #[arg(long)]
+        completions: Option<String>,
+        /// Seed the draws. Unseeded, every eval of the same model draws the same
+        /// completions, so a second, independent sample needs a seed.
+        #[arg(long)]
+        seed: Option<u64>,
         /// Sampling temperature. Defaults to training's, so the eval sees the
         /// draws a run would; 0 is greedy.
         #[arg(long)]

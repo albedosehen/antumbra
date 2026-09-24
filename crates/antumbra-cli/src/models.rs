@@ -30,6 +30,136 @@ use chrono::Utc;
 #[cfg(feature = "models")]
 use crate::{connect, make_embedder, refresh_router, RouterRefresh};
 
+/// What `antumbra eval` was given.
+pub struct EvalArgs {
+    pub corpus: String,
+    pub adapter: Option<String>,
+    pub base_model: Option<String>,
+    pub samples: usize,
+    pub max_new_tokens: usize,
+    pub report: Option<String>,
+    pub completions: Option<String>,
+    pub seed: Option<u64>,
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub dtype: Option<String>,
+}
+
+/// `antumbra eval`: an adapter's pass rate on a corpus, with no training.
+pub async fn eval(args: EvalArgs) -> anyhow::Result<()> {
+    #[cfg(feature = "models")]
+    {
+        use antumbra_train::{eval_pass_rate, CausalLm, Corpus, ModelLoader};
+        let EvalArgs {
+            corpus,
+            adapter,
+            base_model,
+            samples,
+            max_new_tokens,
+            report,
+            completions,
+            seed,
+            temperature,
+            top_p,
+            dtype,
+        } = args;
+        let defaults = RaftConfig::default();
+        let cfg = RaftConfig {
+            samples_per_task: samples,
+            max_new_tokens,
+            temperature: temperature.unwrap_or(defaults.temperature),
+            top_p: top_p.unwrap_or(defaults.top_p),
+            dtype: match dtype.as_deref() {
+                Some(name) => name.parse()?,
+                None => defaults.dtype,
+            },
+            ..defaults
+        };
+        let corpus_doc = JsonCorpus::from_file(&corpus)?;
+        let tasks = corpus_doc.tasks(&[]);
+        let base_model = base_model.unwrap_or_else(|| cfg.base_model.clone());
+        let (cfg_temperature, cfg_top_p, cfg_dtype) = (cfg.temperature, cfg.top_p, cfg.dtype);
+        let loader = CandleModelLoader::new(cfg);
+        let mut model = ModelLoader::load(&loader, &base_model, adapter.as_deref()).await?;
+        if let Some(seed) = seed {
+            model.seed_draws(seed)?;
+        }
+        let verifier = antumbra_critic::CommandVerifier;
+        let out =
+            eval_pass_rate(&mut model, &verifier, &tasks, &RunId::new("eval"), samples).await?;
+        println!(
+            "pass-rate {:.2} ({}/{}): {} on {} ({} tasks)",
+            out.pass_rate,
+            out.passed,
+            out.total,
+            adapter.as_deref().unwrap_or("(base only)"),
+            corpus,
+            tasks.len()
+        );
+        for (i, ex) in out.examples.iter().enumerate() {
+            println!("  sample[{i}]: {}", ex.replace('\n', " ").trim());
+        }
+        if let Some(path) = &report {
+            let mut record = antumbra_train::eval::report(
+                &corpus,
+                &base_model,
+                adapter.as_deref(),
+                samples,
+                max_new_tokens,
+                &out,
+            );
+            record["temperature"] = serde_json::json!(cfg_temperature);
+            record["top_p"] = serde_json::json!(cfg_top_p);
+            record["dtype"] = serde_json::json!(format!("{cfg_dtype:?}"));
+            record["seed"] = serde_json::json!(seed);
+            std::fs::write(path, serde_json::to_vec_pretty(&record)?)?;
+            println!("per-task results -> {path}");
+        }
+        if let Some(path) = &completions {
+            let draws: Vec<serde_json::Value> = out
+                .draws
+                .iter()
+                .map(|d| {
+                    serde_json::json!({ "task": d.task, "completion": d.completion, "passed": d.passed })
+                })
+                .collect();
+            std::fs::write(path, serde_json::to_vec_pretty(&draws)?)?;
+            println!("{} completion(s) -> {path}", draws.len());
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "models"))]
+    {
+        let EvalArgs {
+            corpus,
+            adapter,
+            base_model,
+            samples,
+            max_new_tokens,
+            report,
+            completions,
+            seed,
+            temperature,
+            top_p,
+            dtype,
+        } = args;
+        let _ = (
+            corpus,
+            adapter,
+            base_model,
+            samples,
+            max_new_tokens,
+            report,
+            completions,
+            seed,
+            temperature,
+            top_p,
+            dtype,
+        );
+        anyhow::bail!("`eval` requires building with --features models (candle + a GPU)")
+    }
+}
+
 /// What `antumbra ask` was given.
 pub struct AskArgs {
     pub task: String,
