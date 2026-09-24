@@ -250,7 +250,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The slice** is the held-out one when the shadow trained under a holdout its trainer confirmed. It is frozen from training and search, and the partition reserves it for gating graduation. Otherwise the trained tasks are re-drawn. The audit slice and impossible tasks are never used.
    - **The seeds** come from the run, generation and repeat, so a resumed run re-measures exactly what a continuous one would, and never on training's stream.
    - **The judgement:** with `LoopConfig::remeasure`, the graduation threshold applies to the mean. The pass rates are stored on the generation's evaluation row with the fitness they qualify. A generation failed by an impossible-task pass is not re-measured.
-   - **Coverage:** RAFT and correction capture implement it. The GRPO trainer's model does not yet satisfy the `CausalLm` interface the evaluation runs on, so under GRPO the shrunk cohort score remains the rule, and `train` says so.
+   - **Coverage:** RAFT, GRPO and correction capture all implement it. GRPO's model is evaluated through a view that presents its group sampler as a `CausalLm`, so its adapters are re-measured by the same code as RAFT's.
 
    `train --search` re-measures three times by default, and `--remeasure N` sets the count for any run.
 

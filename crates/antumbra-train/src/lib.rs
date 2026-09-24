@@ -23,6 +23,7 @@ pub mod decode;
 pub mod device;
 pub mod eval;
 pub mod grpo;
+mod grpo_eval;
 pub mod harness;
 pub mod holdout;
 pub mod lora;

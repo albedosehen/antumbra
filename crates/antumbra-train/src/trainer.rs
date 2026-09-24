@@ -24,6 +24,7 @@ use antumbra_core::{Result, RunId, TrainingRecipe};
 
 use crate::config::RaftConfig;
 use crate::grpo::{grpo_train, GrpoModelLoader};
+use crate::grpo_eval::EvalLoader;
 use crate::holdout::{split, Split};
 use crate::model::{Corpus, CorpusTask, ModelLoader};
 use crate::raft::raft_train;
@@ -202,6 +203,17 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
             recipe: Some(recipe),
             ..outcome
         })
+    }
+
+    async fn remeasure(&self, req: RemeasureRequest) -> Result<Remeasurement> {
+        remeasure_with(
+            &EvalLoader(&self.loader),
+            self.corpus.tasks(&[]),
+            self.verifier.as_ref(),
+            self.config.samples_per_task,
+            req,
+        )
+        .await
     }
 }
 
@@ -483,7 +495,12 @@ mod tests {
                         self.next = Some(s + 1);
                         s
                     });
-                    if draw.is_multiple_of(2) { "PASS" } else { "FAIL" }.to_string()
+                    if draw.is_multiple_of(2) {
+                        "PASS"
+                    } else {
+                        "FAIL"
+                    }
+                    .to_string()
                 })
                 .collect())
         }
