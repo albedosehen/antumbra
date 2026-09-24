@@ -264,7 +264,17 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    That shows the search runs. It does not yet show that it finds better recipes than the starting one: the members' differences are within the noise of four samples a task.
 
-   Still to come for this step: the fast and slow cohorts that blunt greed. Until they are in, the step stays unchecked.
+   **Two frequencies blunt greed, read for recipe-only propagation.** In PBT, a member's ready interval is how long it trains before it may be truncated, which means its weights and hyperparameters are replaced by a better member's. Here no weights move, so a cohort member is a slot that keeps its recipe until its ready interval has passed. Holding a recipe means training it again from the base: another measurement of the same recipe.
+   - **The slow cohort** is the last `slow` slots. Each keeps its recipe for `slow_interval` generations, whatever the fast members score. That is the "cannot truncate".
+   - **The fast cohort** is the rest. Its interval starts at one generation and lengthens over `anneal` generations toward the slow interval, stopping one short so the two frequencies stay two.
+   - **The first slot** always carries the incumbent, unless a held slot already runs it, so the winning recipe still propagates.
+   - **What each slot held** is read from the recipe rows by member name, so a resumed run holds what a continuous one would.
+
+   **Ranking pools a recipe's runs.** The incumbent was the best single row. A slow member measured three times would have counted as three separate one-run recipes, each shrunk halfway to its generation's mean, and any newcomer's lucky run could displace it. A recipe is now ranked on all its runs: their mean, shrunk toward the means of the generations they ran in, by the prior's weight against their total count. That is constraint 4 as written: shrunk in proportion to the evaluation count, so a lucky single evaluation cannot win.
+
+   **Measured, the frequencies neither help nor hurt on the synthetic landscape.** Over 300 seeds of twelve generations of four, one slow member with or without annealing stayed level with the fast cohort alone. Every gap was within about 0.002, about one standard error, at noise 0.1, 0.3 and 0.5 wide. Smaller seed sets had suggested either direction. The landscape does not move between generations, and a moving objective is where the record expects greed to cost. So the defaults (`train --search` gives a third of the cohort to the slow cohort, holds for three generations and anneals over the run) follow the record's reasoning, not a measured gain. Whether they earn their keep is for real runs over a changing corpus to show. The search with them still beats random search on the same budget, which a test holds it to.
+
+   Every part of the step is in. It is checked when a GPU run of the slow cohort holds its recipe as the tests say it does.
 4. [ ] S-5, retirement as the loop's job, demoting rather than deleting.
 5. [ ] S-3, the learned grow step.
 6. [ ] S-4, proposed verifiers and the trust protocol.

@@ -43,6 +43,10 @@ It is off by default because it changes what is learned, and because the demo co
 `train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes (ADR-0022 S-1).
 - **What is searched:** learning rate and batch size, plus the KL weight under `--algo grpo`.
 - **Every member trains from the base.** Only the best member's recipe is carried forward, and it leads the next generation's cohort. No member starts from another's weights, so each graduate is a skill of its own.
+- **Two frequencies:**
+  - **Slow members:** the last `--slow` members of the cohort (a third of it by default) keep their recipe for `--slow-interval` generations (3). Nothing the fast members score can replace a slow member's recipe sooner.
+  - **Fast members:** they are proposed a new recipe every generation at first. Their interval lengthens over `--anneal` generations (the run's length by default) and stops one short of the slow interval.
+  - **Ranking:** a held recipe is measured again each generation, and a recipe run several times is ranked on all its runs together. A well-measured recipe is not displaced by a newcomer's one lucky run.
 - **Graduation:** the best member is judged on a re-measurement, not on the training fitness it was picked for. Picking the best of a noisy few overstates it.
   - Its adapter is evaluated again under three fresh seeds (`--remeasure N` to change the count, 0 for off).
   - With `--holdout`, the tasks are the held-out slice, which it never trained on. Without it, the tasks are the ones it trained on, re-drawn.
