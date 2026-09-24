@@ -104,6 +104,13 @@ pub enum TransitionCause {
     },
     /// Another expert covers this one: the only cause that may delete.
     Redundant { of: ExpertId },
+    /// The loop confirmed staleness: in each of these consecutive measured
+    /// generations, the expert's leave-one-out contribution on the tasks
+    /// routed to it was at or below the floor. The evidence it was demoted on.
+    Stale {
+        generations: Vec<Generation>,
+        contributions: Vec<f32>,
+    },
 }
 
 /// One change of an expert's status, as recorded.
@@ -151,11 +158,20 @@ mod tests {
 
     #[test]
     fn only_redundancy_deletes() {
+        let stale = TransitionCause::Stale {
+            generations: vec![Generation(2), Generation(4), Generation(6)],
+            contributions: vec![0.0, -0.1, 0.0],
+        };
         for from in [Dormant, Archived] {
             let refused = from.transition(Deleted, &operator()).unwrap_err();
             assert!(refused.is_rejection(), "{refused}");
+            assert!(
+                from.transition(Deleted, &stale).is_err(),
+                "staleness demotes"
+            );
             assert_eq!(from.transition(Deleted, &redundant()).unwrap(), Deleted);
         }
+        assert_eq!(Active.transition(Dormant, &stale).unwrap(), Dormant);
     }
 
     #[test]

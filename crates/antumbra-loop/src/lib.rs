@@ -36,11 +36,13 @@ mod cohort;
 mod contribution;
 mod measure;
 mod recipe;
+mod retirement;
 pub mod search;
 pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
 pub use contribution::ContributionPolicy;
 use measure::Measurement;
+pub use retirement::{confirms, warnings, Detection, RetirementPolicy, Warning};
 
 /// The shadow a generation of a run trains. It also names that generation's
 /// recipe row, so the two are found from each other.
@@ -121,6 +123,12 @@ pub struct LoopConfig {
     /// expert head to head, and then replaces it. `None` (the default) admits
     /// every graduate, as the loop always has.
     pub admission: Option<AdmissionPolicy>,
+    /// Retirement as the loop's job (ADR-0022 S-5): after each contribution
+    /// measurement, the early warnings are reported and confirmation demotes
+    /// an expert whose contribution stayed at or below the floor. It reads the
+    /// contribution stream, so it acts only when `contribution` is measured.
+    /// `None` (the default) leaves every move to a person.
+    pub retirement: Option<RetirementPolicy>,
 }
 
 impl Default for LoopConfig {
@@ -136,6 +144,7 @@ impl Default for LoopConfig {
             remeasure: None,
             contribution: None,
             admission: None,
+            retirement: None,
         }
     }
 }
@@ -184,6 +193,9 @@ pub struct GenerationReport {
     /// What admission decided for a shadow that cleared graduation, when a
     /// policy is set. A rejected one did not graduate.
     pub admission: Option<Admission>,
+    /// What retirement's detectors found over this generation's contribution:
+    /// advisory warnings, and the demotions confirmation made.
+    pub detection: Detection,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -337,6 +349,7 @@ impl<'a> GenerationLoop<'a> {
         let contribution = self
             .measure_contribution(&run_id, generation, holdout)
             .await?;
+        let detection = self.detect(generation, &contribution).await?;
         self.advance(head, LoopState::Grow).await?;
 
         // The population just changed; verify every frozen expert is still
@@ -358,6 +371,7 @@ impl<'a> GenerationLoop<'a> {
             remeasured,
             contribution,
             admission,
+            detection,
         })
     }
 

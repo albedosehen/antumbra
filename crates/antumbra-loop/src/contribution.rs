@@ -90,6 +90,18 @@ fn route_top1(
     }
 }
 
+/// The mean cosine similarity of the tasks routed to `expert` to its
+/// capability vector: how close what it is asked to do sits to what it was
+/// minted for. `None` when nothing was routed to it or it has no vector.
+fn affinity(expert: &Expert, routed: &[&str], vectors: &BTreeMap<String, Vec<f32>>) -> Option<f32> {
+    let sims: Vec<f32> = routed
+        .iter()
+        .filter_map(|t| expert.capability_similarity(vectors.get(*t)?))
+        .filter(|s| s.is_finite())
+        .collect();
+    (!sims.is_empty()).then(|| sims.iter().sum::<f32>() / sims.len() as f32)
+}
+
 /// The seeds a measurement named `purpose` draws from in a generation: from
 /// the run and the generation, never from training's stream, and different
 /// for each purpose.
@@ -114,6 +126,8 @@ fn rank(id: &str) -> [u8; 32] {
 struct Routes {
     full: Vec<(String, Option<ExpertId>)>,
     fallback: BTreeMap<String, Option<ExpertId>>,
+    /// Each routed task's embedding, for how close it sits to its expert.
+    vectors: BTreeMap<String, Vec<f32>>,
 }
 
 impl GenerationLoop<'_> {
@@ -194,6 +208,7 @@ impl GenerationLoop<'_> {
                 with: mean(|p| p.0),
                 without: mean(|p| p.1),
                 seeds: policy.seeds,
+                affinity: affinity(e, &mine, &routes.vectors),
                 at: Utc::now(),
             };
             contribution::upsert(self.store, &record).await?;
@@ -207,16 +222,22 @@ impl GenerationLoop<'_> {
         let boundaries = boundary::list(self.store).await?;
         let mut full = Vec::with_capacity(tasks.len());
         let mut fallback = BTreeMap::new();
+        let mut vectors = BTreeMap::new();
         for t in tasks {
             let v = self.embedder.embed(&t.prompt).await?;
             let to = route_top1(&v, router.as_ref(), experts, &boundaries, None);
             if let Some(expert) = &to {
                 let without = route_top1(&v, router.as_ref(), experts, &boundaries, Some(expert));
                 fallback.insert(t.id.clone(), without);
+                vectors.insert(t.id.clone(), v);
             }
             full.push((t.id.clone(), to));
         }
-        Ok(Routes { full, fallback })
+        Ok(Routes {
+            full,
+            fallback,
+            vectors,
+        })
     }
 
     /// Evaluate every adapter the comparison needs once, over the union of

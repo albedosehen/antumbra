@@ -468,6 +468,7 @@ async fn run() -> anyhow::Result<()> {
             anneal,
             contribution_every,
             duplicate_above,
+            retire_after,
             remeasure,
         } => {
             models::train(
@@ -490,6 +491,7 @@ async fn run() -> anyhow::Result<()> {
                     anneal,
                     contribution_every,
                     duplicate_above,
+                    retire_after,
                     remeasure,
                 },
             )

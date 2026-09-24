@@ -338,6 +338,8 @@ pub struct TrainArgs {
     pub contribution_every: u32,
     /// Capability similarity at which a graduate is a twin; above 1 admits all.
     pub duplicate_above: f32,
+    /// Consecutive measurements at nothing that demote an expert; 0 is off.
+    pub retire_after: u32,
     /// Re-measurements graduation is judged on; `None` takes the default.
     pub remeasure: Option<u32>,
 }
@@ -380,6 +382,10 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         duplicate_above: args.duplicate_above,
         ..Default::default()
     });
+    let retirement = (args.retire_after > 0).then(|| antumbra_loop::RetirementPolicy {
+        persist: args.retire_after,
+        ..Default::default()
+    });
     #[cfg(feature = "models")]
     {
         let store = connect(url).await?;
@@ -417,6 +423,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             remeasure,
             contribution,
             admission,
+            retirement,
             ..LoopConfig::default()
         };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
@@ -512,6 +519,15 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                 }) => println!("        admitted: nearest expert {id} at similarity {s:.3}"),
                 _ => {}
             }
+            for (expert, warning) in &r.detection.warnings {
+                println!("        warning (advisory) {expert}: {warning:?}");
+            }
+            for moved in &r.detection.demoted {
+                println!(
+                    "        demoted {} to dormant on {:?}",
+                    moved.expert, moved.cause
+                );
+            }
             for c in &r.contribution {
                 let delta = match (c.with, c.without, c.delta()) {
                     (Some(with), Some(without), Some(d)) => {
@@ -551,6 +567,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &remeasure,
             &contribution,
             &admission,
+            &retirement,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }
