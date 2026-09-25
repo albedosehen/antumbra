@@ -25,6 +25,11 @@ echo "== calibrate $SHA start $(date -u +%FT%TZ)"
 
 rm -rf "$DIR" && mkdir -p "$DIR/reports"
 tar -xzf "/tmp/antumbra-$SHA.tar.gz" -C "$DIR"
+# git archive stamps every file with its commit's time, and the image build's
+# target cache is shared across commits, so a commit older than the last build
+# would be compiled against that build's artifacts. Stamp the sources now, so
+# cargo rebuilds what differs.
+find "$DIR" -type f -exec touch {} +
 cd "$DIR"
 
 echo "== build antumbra-calibrate:$SHA"

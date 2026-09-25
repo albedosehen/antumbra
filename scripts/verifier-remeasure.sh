@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Measure a finished verifier run's synthesized checks again, under this
 # commit's trust protocol, without the GPU (ADR-0022 S-4). Detached; logs to
-# $LOG (/tmp/verifier-remeasure.log by default).
+# $LOG (/tmp/verifier-remeasure.log by default). It trains and samples nothing,
+# so it can run beside a GPU job.
 #
 # $2 is a run directory verifier-validate.sh left behind. Its proposals and
 # the model's two sets of answers are reused as they are; everything the
@@ -37,13 +38,20 @@ chmod -R 777 "$RUN"
 rm -rf "$SRC"
 mkdir -p "$SRC"
 tar -xzf "/tmp/antumbra-$SHA.tar.gz" -C "$SRC"
+# git archive stamps every file with its commit's time, and the image build's
+# target cache is shared across commits, so a commit older than the last build
+# would be compiled against that build's artifacts. Stamp the sources now, so
+# cargo rebuilds what differs.
+find "$SRC" -type f -exec touch {} +
 cd "$SRC"
 echo "== build antumbra-calibrate:$SHA"
 docker build -f docker/Dockerfile.cuda --target calibrate -t "antumbra-calibrate:$SHA" . 2>&1 | tail -5
 
 CORPUS="/build/corpora/workbench/$SKILL.json"
+# The binary links the CUDA driver, so the device goes in even though
+# nothing here uses the card.
 antumbra() {
-    docker run --rm -v "$RUN:/reports" "antumbra-calibrate:$SHA" \
+    docker run --rm --device nvidia.com/gpu=all -v "$RUN:/reports" "antumbra-calibrate:$SHA" \
         --url surrealkv:///reports/store.skv "$@"
 }
 workbench() {
