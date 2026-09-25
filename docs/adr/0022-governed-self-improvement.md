@@ -549,8 +549,21 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    Under that rule the `caesar-15` check would have been revoked at promotion instead of trusted and later quarantined.
 
+   **The same evidence under the adversarial rule.** `verifier-remeasure.sh` rebuilt the 25 specs and the artifacts from the run's proposals, relabeled the same two sets of answers, and measured again on a fresh store (00a55a9). A deliberately wrong artifact the authored judge fails is adversarial and still counts as known-bad evidence. The first version of the rule took it out of the known-bad pool; that left 13 of 25 checks unmeasured on too few known-bad cases, and was corrected before this run.
+
+   | step | trusted | stayed proposed | revoked | quarantined |
+   | --- | ---: | ---: | ---: | ---: |
+   | measured on set 1 | 14 | 5 | 6 | 0 |
+   | re-measured on set 2 | 16 | 2 | 6 | 1 |
+   | challenged on set 2 | 16 | 2 | 6 | 1 |
+
+   - **Set 1:** six checks passed at least one deliberately wrong artifact and were revoked outright. Five are in the `title-*` family. The sixth is the `caesar-15` check the challenge caught before, now stopped at promotion. The other 14 were trusted, as before.
+   - **Set 2:** one trusted check failed to hold its bound: one wrong answer in 31, a sample of the policy's own this time, not an artifact. It was quarantined. Three proposed checks gathered enough clean evidence to be trusted.
+   - **The challenge** found nothing to quarantine among the 16.
+
+   So the rule moved the failure the challenge had caught to promotion, where it costs nothing. What remains is the bound doing what a bound does: 13 of 14 checks trusted on one set of answers held on the next, and the one that did not was quarantined.
+
    Still to come for this step:
-   - **The same measurement under the adversarial rule**, which reuses this run's proposals and answers and needs no GPU.
    - **Loop-driven quarantine:** re-measurement on the loop's own schedule, and quarantine when the gap between a verifier's visible and held-out pass rates crosses a threshold. Until then, trust lapses after its time to live.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
