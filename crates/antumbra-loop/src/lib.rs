@@ -352,10 +352,11 @@ impl<'a> GenerationLoop<'a> {
                 self.admit(&run_id, generation, &candidate, fitness, admission.as_ref())
                     .await?;
             } else {
-                // A twin of an expert it could not beat. Not a failure of
-                // competence, so no boundary is logged: the skill is covered.
+                // Turned away by admission: a twin of an expert it could not
+                // beat, or a candidate the population does no better with.
+                // Not a failure of competence, so no boundary is logged.
                 eprintln!(
-                    "admission: generation {} duplicates the population and is not admitted: {admission:?}",
+                    "admission: generation {} is not admitted: {admission:?}",
                     generation.0
                 );
                 sh.advance_to(ShadowStatus::Pruned)?;
