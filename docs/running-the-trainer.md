@@ -69,6 +69,10 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
   - `credit` (the default, the record's objective) chooses the highest expected realized improvement. Learnability is the prior, and the credit that region's past choices realized updates it.
   - `learnability` ignores credit.
   - `uniform` picks at random among the regions that pass the gate. It is the baseline the grow step is measured against.
+- **`--grow-from`:** where the region's shadow starts.
+  - `incumbent` (the default) starts it from the adapter of the expert the population routes most of the region's tasks to, so it refines what serves the region rather than relearning it from the base. With no expert serving the region, it starts fresh.
+  - `base` always starts from fresh factors.
+  - Output names the expert a shadow started from.
 
 ### Merging siblings: `--merge`
 

@@ -294,8 +294,7 @@ impl<'a> GenerationLoop<'a> {
         // from selection. One, or a cohort when the recipe is searched.
         let holdout = self.holdout_for(generation);
         let growth = self.plan_growth(&run_id, generation, holdout).await?;
-        let focus = growth.as_ref().map(|g| g.focus.clone()).unwrap_or_default();
-        let members = self.train_cohort(head, holdout, &focus).await?;
+        let members = self.train_cohort(head, holdout, growth.as_ref()).await?;
         let (winner, cohort) = self.select(members).await?;
         let cohort::Member {
             shadow: mut sh,

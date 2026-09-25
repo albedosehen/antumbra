@@ -445,6 +445,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
      - a specialist with more of the region's evidence.
 
      The first changes what the frozen population is made of: every specialist would be a refinement of the expert it sits beside. That is the property S-1 deliberately gave up for the cohort, so it is a decision to make, not a default.
+
+   **Decided: the warm start, and it is in.** The region's shadow starts from the adapter of the expert that serves the region now. That is the expert the population routes most of the region's live tasks to, as a contribution measurement would route them, ties going to the lowest id.
+   - **Where it applies:** where the gate escalates most of a region, or no expert is routable, the shadow starts fresh as before.
+   - **The record:** the grow record keeps the expert a shadow started from (`warm_from`), and `TrainRequest::parent_adapter` carries it to the trainer.
+   - **The switch:** `train --grow-from base` keeps the old behaviour.
+   - **Why S-1's reasoning does not apply here:** S-1 kept its cohort on fresh factors because copying the winner's weights would have made each graduate a refinement of the last. Here the refinement is the point: a region specialist that begins where the incumbent is has only to improve on it where it is weak.
+   - **What guards it:** admission. A refined specialist too like its parent is a twin, and one that gains its region by losing elsewhere fails leave-one-in.
+
+   The comparison runs again with the warm start: uniform and credit, against the status quo already measured, which the warm start does not touch.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 
    **The namespace and the trust protocol are in. Synthesis is not.**

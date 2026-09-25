@@ -134,6 +134,7 @@ mod tests {
                     focus: 0,
                     unfiltered: 0,
                     credit: None,
+                    warm_from: None,
                     at: Utc::now(),
                 },
             )

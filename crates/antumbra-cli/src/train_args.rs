@@ -122,6 +122,12 @@ pub struct TrainArgs {
     /// regardless of credit) or uniform (at random, the baseline).
     #[arg(long, default_value = "credit")]
     pub grow_by: String,
+    /// With --grow, where the region's shadow starts: incumbent (the adapter
+    /// of the expert that serves the region now, so it refines what is there)
+    /// or base (fresh factors, as every shadow did before). Incumbent falls
+    /// back to fresh factors when no expert serves the region.
+    #[arg(long, default_value = "incumbent")]
+    pub grow_from: String,
     /// Judge graduation on this many re-measurements of the carried-forward
     /// shadow, each under a fresh seed, on the held-out slice under
     /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off

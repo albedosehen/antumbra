@@ -167,8 +167,10 @@ impl GenerationLoop<'_> {
         &self,
         head: &mut GenerationHead,
         holdout: Option<Holdout>,
-        focus: &[String],
+        growth: Option<&crate::grow::Growth>,
     ) -> Result<Vec<Member>> {
+        let focus = growth.map(|g| g.focus.clone()).unwrap_or_default();
+        let parent_adapter = growth.and_then(|g| g.parent_adapter.clone());
         let run_id = head.run_id.clone();
         let generation = head.generation;
         let plan = self.plan(&run_id, generation).await?;
@@ -197,7 +199,8 @@ impl GenerationLoop<'_> {
                     corpus_task_ids: Vec::new(),
                     holdout,
                     recipe: asked,
-                    focus: focus.to_vec(),
+                    focus: focus.clone(),
+                    parent_adapter: parent_adapter.clone(),
                 })
                 .await?;
             let recipe = self

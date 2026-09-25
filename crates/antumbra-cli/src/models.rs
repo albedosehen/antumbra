@@ -495,8 +495,14 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         "uniform" => antumbra_loop::Choosing::Uniform,
         other => anyhow::bail!("--grow-by {other}: use credit, learnability or uniform"),
     };
+    let warm_start = match args.grow_from.as_str() {
+        "incumbent" => true,
+        "base" => false,
+        other => anyhow::bail!("--grow-from {other}: use incumbent or base"),
+    };
     let grow = args.grow.then(|| antumbra_loop::GrowPolicy {
         choosing,
+        warm_start,
         ..Default::default()
     });
     let admission = (args.duplicate_above <= 1.0).then(|| antumbra_loop::AdmissionPolicy {
@@ -701,8 +707,13 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                             .record
                             .credit
                             .map_or("none yet".to_string(), |c| format!("{c:+.2}"));
+                        let from = g
+                            .record
+                            .warm_from
+                            .as_ref()
+                            .map_or("fresh factors".to_string(), |e| format!("warm from {e}"));
                         println!(
-                            "        grow: learned from {region} (learnability {learnability:.3}; {} task(s), {} unfiltered); last choice's credit {credit}; entropy {:.2}, coverage {:.2}, revived {}",
+                            "        grow: learned from {region} (learnability {learnability:.3}; {} task(s), {} unfiltered; {from}); last choice's credit {credit}; entropy {:.2}, coverage {:.2}, revived {}",
                             g.record.focus, g.record.unfiltered, g.diversity.entropy, g.diversity.coverage, g.diversity.revived
                         );
                     }

@@ -29,11 +29,12 @@ use sha2::{Digest, Sha256};
 use antumbra_core::ports::TaskPrompt;
 use antumbra_core::slice::Holdout;
 use antumbra_core::{
-    cosine_similarity, ExpertId, Generation, GrowRecord, RegionCandidate, RegionCensus, Result,
-    RunId,
+    cosine_similarity, this_host, Expert, ExpertId, Generation, GrowRecord, RegionCandidate,
+    RegionCensus, Result, RunId,
 };
-use antumbra_store::repo::grow;
+use antumbra_store::repo::{boundary, grow, lifecycle};
 
+use crate::contribution::route_top1;
 use crate::GenerationLoop;
 
 /// How the grow step chooses among the regions that pass the gate.
@@ -56,6 +57,10 @@ pub enum Choosing {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GrowPolicy {
     pub choosing: Choosing,
+    /// Start the region's shadow from the expert that serves the region now,
+    /// so it refines what is there rather than relearning it from the base.
+    /// Off, every shadow starts from fresh factors.
+    pub warm_start: bool,
     /// Acceptability a region must exceed to pass the gate.
     pub gate: f32,
     /// Tasks a region's census must rest on to be weighed.
@@ -80,6 +85,7 @@ impl Default for GrowPolicy {
     fn default() -> Self {
         Self {
             choosing: Choosing::Credit,
+            warm_start: true,
             gate: 0.05,
             min_tasks: 2,
             unfiltered: 0.25,
@@ -241,6 +247,19 @@ pub struct Growth {
     pub record: GrowRecord,
     pub focus: Vec<String>,
     pub diversity: Diversity,
+    /// The adapter the shadow starts from, when it is warm-started.
+    pub parent_adapter: Option<String>,
+}
+
+/// The expert most of a region's tasks are routed to, when one is: `counts`
+/// holds how many went to each expert, `None` for those the gate escalates.
+/// Escalation can win too, and then no expert serves the region. Ties go to
+/// the lowest id, so the answer is the same on every run.
+pub fn plurality(counts: &BTreeMap<Option<String>, u32>) -> Option<String> {
+    counts
+        .iter()
+        .max_by(|a, b| a.1.cmp(b.1).then_with(|| b.0.cmp(a.0)))
+        .and_then(|(who, _)| who.clone())
 }
 
 /// Credit as the objective (ADR-0022 S-3): the admitted region with the
@@ -359,10 +378,14 @@ impl GenerationLoop<'_> {
         };
         let mut focus = Vec::new();
         let mut unfiltered = 0u32;
+        let mut warm = None;
         if let Some(region) = &chosen {
             let live = self.trainer.live_tasks(holdout).await?;
             let (mine, rest): (Vec<&TaskPrompt>, Vec<&TaskPrompt>) =
                 live.iter().partition(|t| &t.region == region);
+            if policy.warm_start {
+                warm = self.serving(&mine).await?;
+            }
             let share = policy.unfiltered.clamp(0.0, 0.9);
             let extra = ((mine.len() as f32) * share / (1.0 - share)).ceil() as usize;
             let mut others: Vec<&TaskPrompt> = rest;
@@ -382,6 +405,7 @@ impl GenerationLoop<'_> {
             focus: u32::try_from(focus.len()).unwrap_or(u32::MAX),
             unfiltered,
             credit,
+            warm_from: warm.as_ref().map(|e| e.id.clone()),
             at: Utc::now(),
         };
         grow::upsert(self.store, &record).await?;
@@ -392,7 +416,34 @@ impl GenerationLoop<'_> {
             record,
             focus,
             diversity,
+            parent_adapter: warm.map(|e| e.artifact_uri),
         }))
+    }
+
+    /// The expert that serves these tasks now: the one the population routes
+    /// most of them to, as a contribution measurement would route them.
+    async fn serving(&self, tasks: &[&TaskPrompt]) -> Result<Option<Expert>> {
+        let host = this_host();
+        let mut experts: Vec<Expert> = lifecycle::routable(self.store)
+            .await?
+            .into_iter()
+            .filter(|e| e.owner.is_none() && e.is_placed_on(&host))
+            .collect();
+        if experts.is_empty() || tasks.is_empty() {
+            return Ok(None);
+        }
+        experts.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+        let router = lifecycle::load_router(self.store).await?;
+        let boundaries = boundary::list(self.store).await?;
+        let mut counts: BTreeMap<Option<String>, u32> = BTreeMap::new();
+        for task in tasks {
+            let v = self.embedder.embed(&task.prompt).await?;
+            let routed = route_top1(&v, router.as_ref(), &experts, &boundaries, None);
+            *counts
+                .entry(routed.map(|id| id.as_str().to_string()))
+                .or_default() += 1;
+        }
+        Ok(plurality(&counts).and_then(|id| experts.into_iter().find(|e| e.id.as_str() == id)))
     }
 
     /// Record the census a contribution measurement took.

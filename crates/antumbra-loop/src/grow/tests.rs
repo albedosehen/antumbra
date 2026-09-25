@@ -131,6 +131,7 @@ fn decided(
         focus: 0,
         unfiltered: 0,
         credit: None,
+        warm_from: None,
         at: Utc::now(),
     }
 }
@@ -228,4 +229,33 @@ fn diversity_reads_entropy_coverage_and_revived_regions() {
     assert!(d.entropy.is_sign_positive(), "not a negative zero");
     assert_eq!(d.revived, 1, "c was gated out and now passes");
     assert_eq!(diversity(&[], 3).coverage, 0.0);
+}
+
+/// The expert most of a region's tasks go to serves it; escalation can win,
+/// and a tie goes to the lowest id.
+#[test]
+fn the_serving_expert_is_the_plurality_of_the_regions_routes() {
+    let counts = |pairs: &[(Option<&str>, u32)]| -> BTreeMap<Option<String>, u32> {
+        pairs
+            .iter()
+            .map(|(who, n)| (who.map(str::to_string), *n))
+            .collect()
+    };
+    assert_eq!(
+        plurality(&counts(&[
+            (Some("expert:b"), 3),
+            (Some("expert:a"), 1),
+            (None, 2)
+        ])),
+        Some("expert:b".into())
+    );
+    assert_eq!(
+        plurality(&counts(&[(Some("expert:b"), 1), (None, 3)])),
+        None
+    );
+    assert_eq!(
+        plurality(&counts(&[(Some("expert:b"), 2), (Some("expert:a"), 2)])),
+        Some("expert:a".into())
+    );
+    assert_eq!(plurality(&BTreeMap::new()), None);
 }
