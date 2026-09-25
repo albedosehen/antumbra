@@ -190,7 +190,12 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
    - **The sweep:** the threshold is then swept offline, with escalations answered by the base model, the stand-in for the agent above.
    - **The report:** the curve's best point is the control, and the shipped threshold is printed beside it.
 
-   `scripts/gate-sweep.sh` runs it over a run directory. What remains is the run itself, which waits for a GPU.
+   `scripts/gate-sweep.sh` runs it over a run directory.
+
+   **The first sweep ran, and it measured nothing about the gate.** It ran on 2026-09-25 over the S-3 comparison's credit arm. That population holds one expert, because admission turned every specialist away.
+   - **The data:** 97 withheld tasks, the expert scoring 0.573 and the base model 0.366.
+   - **Why it is degenerate:** with one expert the gate's relative coverage falls back to absolute similarity, which cleared the threshold on every task. So the best threshold and the shipped one both route everything.
+   - **What the control needs:** a population where the margin separates experts, which the grow step's warm start is being run to produce. The sweep runs again over that.
 2. [~] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated.
 
    **A floor now ships, and it is not the head this record specifies.** `antumbra-rerank/src/floor.rs` answers `Noul` by mapping the deployed cross-encoder's score through a logistic fitted on the same verifier labels, reaching 0.803 accuracy and 0.797 F1 on a held-out half against the 0.785 the best in-sample threshold manages, with an expected calibration error of 0.033. It satisfies the `TypedDecider` contract on the contract's own terms: log loss is strictly proper, and the labels come from a deterministic verifier rather than from any model's answers.
