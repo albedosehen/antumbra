@@ -588,8 +588,22 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The twin:** `critic measure --twin` reads a second critic, trained on another seed, on the same completions, and reports their rank agreement.
    - **The harness:** `critic-validate.sh` trains both and reads them on a third set neither has seen.
 
+   **The GPU reading.** `critic-validate.sh 9487fda` ran on the `strings` skill on 2026-09-25. The base answered each of the skill's 48 tasks 16 times under each of three seeds, and the authored judge labeled every answer. The pass rates were 0.38, 0.35 and 0.33.
+   - **Training:** the critic learned set 1's verdicts on the partition's visible tasks, 544 answers balanced, over two passes (loss 0.33, then 0.22). The twin did the same on set 2.
+   - **Read on its withheld tasks** (224 answers): rank correlation with the verifier 0.52, calibration error 0.15, agreement 0.72. The twin read 0.65, 0.21 and 0.78 on its own.
+   - **Read on set 3,** 768 answers neither had seen: correlation 0.67, calibration error 0.11, agreement 0.79.
+   - **Agreement between critic and twin:** 0.93.
+
+   So the critic tracks the verifier, and does so well enough that shaping would use a positive, not negligible, correlation.
+
+   Recalibration is not settled. Fitted on half the withheld tasks and read on the other half, 112 answers each:
+   - it cut the twin's calibration error from 0.25 to 0.10;
+   - it raised the critic's slightly, from 0.20 to 0.21.
+
+   At that size a half-split is noise as much as signal, so one reading proves nothing either way. Every slice here is one skill; the per-slice report earns its keep only across several.
+
    Still to come for this step:
-   - **The GPU reading,** and then the record's own test: fewer samples to graduation with the critic than with verifier-only reward.
+   - **The record's own test:** fewer samples to graduation with the critic than with verifier-only reward. `critic-compare.sh` runs it with this critic, queued behind the warm-start grow comparison.
    - **Recalibration and the twin inside the loop,** each generation, and critic-derived labels held to the floor once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
    - **The twin.** A second critic on another seed and slice, kept as an instrument, whose agreement with the first is watched for decline.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
