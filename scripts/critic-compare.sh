@@ -39,6 +39,11 @@ test -f "$CRITIC" || { echo "no critic adapter at $CRITIC"; exit 1; }
 rm -rf "$SRC"
 mkdir -p "$SRC"
 tar -xzf "/tmp/antumbra-$SHA.tar.gz" -C "$SRC"
+# git archive stamps every file with its commit's time, and the image build's
+# target cache is shared across commits, so a commit older than the last build
+# would be compiled against that build's artifacts. Stamp the sources now, so
+# cargo rebuilds what differs.
+find "$SRC" -type f -exec touch {} +
 cd "$SRC"
 echo "== build antumbra-calibrate:$SHA"
 docker build -f docker/Dockerfile.cuda --target calibrate -t "antumbra-calibrate:$SHA" . 2>&1 | tail -5

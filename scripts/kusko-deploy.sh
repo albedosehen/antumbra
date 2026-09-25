@@ -24,6 +24,11 @@ docker inspect antumbra-mcp --format 'before: {{.Config.Image}} created {{.Creat
 
 rm -rf "$HOME/antumbra-loop.new" && mkdir -p "$HOME/antumbra-loop.new"
 tar -xzf "/tmp/antumbra-$SHA.tar.gz" -C "$HOME/antumbra-loop.new"
+# git archive stamps every file with its commit's time, and the image build's
+# target cache is shared across commits, so a commit older than the last build
+# would be compiled against that build's artifacts. Stamp the sources now, so
+# cargo rebuilds what differs.
+find "$HOME/antumbra-loop.new" -type f -exec touch {} +
 cp "$HOME/antumbra-loop/docker/.env" "$HOME/antumbra-loop.new/docker/.env"
 rm -rf "$HOME/antumbra-loop.prev"
 mv "$HOME/antumbra-loop" "$HOME/antumbra-loop.prev"
