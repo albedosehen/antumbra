@@ -118,6 +118,7 @@ impl GenerationLoop<'_> {
             // The gate would route nothing to it: it adds nothing.
             return Ok(Some(Admission::Outserved {
                 tasks: 0,
+                escalated: 0,
                 candidate: 0.0,
                 serving: 0.0,
             }));
@@ -151,10 +152,12 @@ impl GenerationLoop<'_> {
                 .await?;
             scores.insert(who, scored);
         }
+        let escalated = changed.iter().filter(|(_, with, _)| with.is_none()).count();
         Ok(match with_and_without(&changed, &scores) {
             Some((n, with, without)) if with <= without + policy.margin => {
                 Some(Admission::Outserved {
                     tasks: n,
+                    escalated: u32::try_from(escalated).unwrap_or(u32::MAX),
                     candidate: with,
                     serving: without,
                 })

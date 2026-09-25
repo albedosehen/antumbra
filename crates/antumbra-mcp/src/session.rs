@@ -59,19 +59,27 @@ impl SessionKeeper {
     /// whether a refresh happened. Held under the keeper's lock so concurrent
     /// calls refresh once.
     pub async fn refresh_if_stale(&self) -> antumbra_core::Result<bool> {
+        self.refresh_if_stale_at(Instant::now()).await
+    }
+
+    /// `refresh_if_stale` as if it were `now`. Time is only ever moved
+    /// forward from a real instant, never back: an `Instant` less than the
+    /// host's uptime before now cannot be made, so a test that backdated a
+    /// session by an hour panicked on a machine that had booted an hour ago.
+    async fn refresh_if_stale_at(&self, now: Instant) -> antumbra_core::Result<bool> {
         let mut signed_in_at = self.signed_in_at.lock().await;
-        if !Self::is_stale(*signed_in_at, Instant::now()) {
+        if !Self::is_stale(*signed_in_at, now) {
             return Ok(false);
         }
         self.store.signin(&self.tenant, &self.user).await?;
-        *signed_in_at = Instant::now();
+        *signed_in_at = now;
         Ok(true)
     }
 
-    /// Pretend the session was signed in `age` ago.
+    /// `mark_signed_in` as if it were `now`.
     #[cfg(test)]
-    pub async fn backdate(&self, age: Duration) {
-        *self.signed_in_at.lock().await = Instant::now() - age;
+    async fn mark_signed_in_at(&self, now: Instant) {
+        *self.signed_in_at.lock().await = now;
     }
 }
 
@@ -85,14 +93,16 @@ mod tests {
     fn staleness_is_a_third_of_the_session() {
         assert_eq!(REFRESH_AFTER, Duration::from_secs(20 * 60));
         assert!(REFRESH_AFTER < TENANT_SESSION);
-        let now = Instant::now();
-        assert!(!SessionKeeper::is_stale(now, now));
+        // Forward from a real instant only: one less than the host's uptime
+        // before now cannot be made.
+        let then = Instant::now();
+        assert!(!SessionKeeper::is_stale(then, then));
         assert!(!SessionKeeper::is_stale(
-            now - (REFRESH_AFTER - Duration::from_secs(1)),
-            now
+            then,
+            then + (REFRESH_AFTER - Duration::from_secs(1))
         ));
-        assert!(SessionKeeper::is_stale(now - REFRESH_AFTER, now));
-        assert!(SessionKeeper::is_stale(now - TENANT_SESSION, now));
+        assert!(SessionKeeper::is_stale(then, then + REFRESH_AFTER));
+        assert!(SessionKeeper::is_stale(then, then + TENANT_SESSION));
     }
 
     #[tokio::test]
@@ -104,18 +114,20 @@ mod tests {
         store.signin(&tenant, &user).await.unwrap();
         let keeper = SessionKeeper::new(store, tenant, user);
         assert!(!keeper.refresh_if_stale().await.unwrap(), "just signed in");
-        keeper
-            .backdate(REFRESH_AFTER + Duration::from_secs(1))
-            .await;
+        let later = Instant::now() + REFRESH_AFTER + Duration::from_secs(1);
         assert!(
-            keeper.refresh_if_stale().await.unwrap(),
+            keeper.refresh_if_stale_at(later).await.unwrap(),
             "stale: re-signed in"
         );
-        assert!(!keeper.refresh_if_stale().await.unwrap(), "fresh again");
-        keeper.backdate(TENANT_SESSION).await;
-        keeper.mark_signed_in().await;
         assert!(
-            !keeper.refresh_if_stale().await.unwrap(),
+            !keeper.refresh_if_stale_at(later).await.unwrap(),
+            "fresh again"
+        );
+        // Stale by the old clock, fresh once an initialize restarts it.
+        let much_later = later + TENANT_SESSION;
+        keeper.mark_signed_in_at(much_later).await;
+        assert!(
+            !keeper.refresh_if_stale_at(much_later).await.unwrap(),
             "an initialize restarted the clock"
         );
     }

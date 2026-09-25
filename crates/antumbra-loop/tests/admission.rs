@@ -240,6 +240,7 @@ async fn a_candidate_must_beat_what_already_serves_its_tasks() -> Result<()> {
         report.admission,
         Some(Admission::Outserved {
             tasks: 4,
+            escalated: 0,
             candidate: 0.4,
             serving: 0.9,
         })

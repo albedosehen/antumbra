@@ -121,6 +121,7 @@ async fn a_candidate_that_makes_the_gate_escalate_others_is_turned_away() -> Res
         reports[0].admission,
         Some(Admission::Outserved {
             tasks: 6,
+            escalated: 4,
             candidate: 2.0 / 6.0,
             serving: 0.8,
         })

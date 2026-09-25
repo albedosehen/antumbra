@@ -73,9 +73,12 @@ pub enum Admission {
     /// It duplicated nothing, but the population did no better on the live
     /// tasks it would reroute (`tasks` of them; none when the gate would route
     /// nothing to it) with it (`candidate`) than without it (`serving`), so
-    /// it was not admitted.
+    /// it was not admitted. `escalated` of those tasks the gate would send to
+    /// the base model with it in: the harm it does by crowding another
+    /// expert's margin rather than by answering badly.
     Outserved {
         tasks: u32,
+        escalated: u32,
         candidate: f32,
         serving: f32,
     },
@@ -233,6 +236,7 @@ mod tests {
         .admits());
         assert!(!Admission::Outserved {
             tasks: 4,
+            escalated: 0,
             candidate: 0.4,
             serving: 0.9,
         }
