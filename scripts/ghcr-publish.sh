@@ -84,9 +84,20 @@ if [ "$DRY_RUN" = "1" ]; then
     exit 0
 fi
 
+# The registry sometimes answers a push with "unknown blob" and takes the
+# same push a minute later, so each gets three tries.
+push() {
+    local tag="$1" try
+    for try in 1 2 3; do
+        docker --config "$CONFIG" push "$IMAGE:$tag" && return 0
+        echo "== push of $tag failed (try $try)"
+        sleep 30
+    done
+    return 1
+}
 echo "== push"
-docker --config "$CONFIG" push "$IMAGE:$SHA"
-docker --config "$CONFIG" push "$IMAGE:latest"
+push "$SHA"
+push latest
 docker --config "$CONFIG" manifest inspect "$IMAGE:$SHA" >/dev/null && echo "== $IMAGE:$SHA is in the registry"
 docker --config "$CONFIG" logout ghcr.io
 echo "== publish $SHA end $(date -u +%FT%TZ) OK"
