@@ -90,6 +90,11 @@ pub struct TrainRequest {
     /// visible task, as every run did before.
     #[serde(default)]
     pub focus: Vec<String>,
+    /// The adapter the shadow starts from instead of fresh factors: the grow
+    /// step's warm start (ADR-0022 S-3), the expert that serves the region it
+    /// chose. `None` starts from the trainer's own configuration.
+    #[serde(default)]
+    pub parent_adapter: Option<String>,
 }
 
 /// One corpus task, as the final training round found it.

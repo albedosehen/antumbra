@@ -10,7 +10,9 @@
 # Every arm measures contribution each generation over the same 64 live tasks:
 # the grow arms need its census, and the status quo takes it too, so the
 # population is read the same way in all three. Admission is on in all three,
-# as it is by default. Knobs: CORPUS (all), GENERATIONS (4).
+# as it is by default. Knobs: CORPUS (all), GENERATIONS (4), ARMS (the arms to
+# run, default "status-quo uniform credit") and GROW_FROM (where a grow arm's
+# region shadow starts: incumbent, the default, or base).
 #
 #   git archive --format=tar.gz -o /tmp/antumbra-<sha>.tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/search-validate.sh scripts/grow-compare.sh <host>:/tmp/
@@ -19,15 +21,18 @@
 SHA="$1"
 CORPUS="${CORPUS:-all}"
 GENERATIONS="${GENERATIONS:-4}"
+ARMS="${ARMS:-status-quo uniform credit}"
+GROW_FROM="${GROW_FROM:-incumbent}"
 exec >/tmp/grow-compare.log 2>&1
 set -uo pipefail
-echo "== grow comparison $SHA start $(date -u +%FT%TZ): $CORPUS, $GENERATIONS generation(s) an arm"
+echo "== grow comparison $SHA start $(date -u +%FT%TZ): $CORPUS, $GENERATIONS generation(s) an arm, arms: $ARMS, grow from $GROW_FROM"
 
-for arm in status-quo uniform credit; do
+for arm in $ARMS; do
     case "$arm" in
         status-quo) args="--contribution-every 1 --contribution-tasks 64" ;;
-        uniform) args="--grow --grow-by uniform --contribution-tasks 64" ;;
-        credit) args="--grow --grow-by credit --contribution-tasks 64" ;;
+        uniform) args="--grow --grow-by uniform --grow-from $GROW_FROM --contribution-tasks 64" ;;
+        credit) args="--grow --grow-by credit --grow-from $GROW_FROM --contribution-tasks 64" ;;
+        *) echo "== unknown arm $arm"; continue ;;
     esac
     log="/tmp/grow-compare-$arm.log"
     start=$(date -u +%s)

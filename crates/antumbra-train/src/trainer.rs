@@ -152,7 +152,9 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
             .loader
             .load_trained(
                 &req.base_model,
-                config.parent_adapter.as_deref(),
+                req.parent_adapter
+                    .as_deref()
+                    .or(config.parent_adapter.as_deref()),
                 Some(&recipe),
             )
             .await?;
@@ -251,7 +253,9 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
             .loader
             .load_trained(
                 &req.base_model,
-                config.parent_adapter.as_deref(),
+                req.parent_adapter
+                    .as_deref()
+                    .or(config.parent_adapter.as_deref()),
                 Some(&recipe),
             )
             .await?;
@@ -339,7 +343,9 @@ impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
             .loader
             .load_trained(
                 &req.base_model,
-                config.parent_adapter.as_deref(),
+                req.parent_adapter
+                    .as_deref()
+                    .or(config.parent_adapter.as_deref()),
                 Some(&recipe),
             )
             .await?;
@@ -485,6 +491,7 @@ mod tests {
             holdout: None,
             recipe: None,
             focus: Vec::new(),
+            parent_adapter: None,
         };
         let out = trainer.train_shadow(req).await.unwrap();
         assert!(out.final_fitness > 0.0);
@@ -548,6 +555,7 @@ mod tests {
             holdout: Some(holdout),
             recipe: None,
             focus: Vec::new(),
+            parent_adapter: None,
         }
     }
 
@@ -740,6 +748,7 @@ mod tests {
             holdout: None,
             recipe,
             focus: Vec::new(),
+            parent_adapter: None,
         }
     }
 

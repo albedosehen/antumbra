@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{Generation, RunId};
+use crate::ids::{ExpertId, Generation, RunId};
 
 /// How the population fares on one region, in one measured generation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,5 +68,9 @@ pub struct GrowRecord {
     /// less what it was when chosen. The credit the policy learns from.
     #[serde(default)]
     pub credit: Option<f32>,
+    /// The expert the shadow started from: the one serving the chosen region.
+    /// `None` when it started fresh.
+    #[serde(default)]
+    pub warm_from: Option<ExpertId>,
     pub at: DateTime<Utc>,
 }

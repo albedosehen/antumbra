@@ -12,9 +12,9 @@ use antumbra_core::ports::{
 };
 use antumbra_core::slice::Holdout;
 use antumbra_core::testing::ScriptedTrainer;
-use antumbra_core::{Generation, Result, RunId};
+use antumbra_core::{Expert, ExpertId, Generation, Result, RunId};
 use antumbra_loop::{ContributionPolicy, GenerationLoop, GrowPolicy, LoopConfig};
-use antumbra_store::repo::grow;
+use antumbra_store::repo::{expert, grow};
 use antumbra_store::Store;
 
 const DIM: usize = 4;
@@ -38,10 +38,12 @@ impl Embedder for Axes {
 }
 
 /// Four tasks a region; the base model passes each at its region's rate.
-/// Graduates nothing, and keeps the focus of every run it was asked for.
+/// Graduates nothing, and keeps the focus and parent of every run it was
+/// asked for.
 #[derive(Default)]
 struct Regions {
     focus: Mutex<Vec<Vec<String>>>,
+    parents: Mutex<Vec<Option<String>>>,
 }
 
 #[async_trait]
@@ -49,6 +51,9 @@ impl Trainer for Regions {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
         if let Ok(mut seen) = self.focus.lock() {
             seen.push(req.focus.clone());
+        }
+        if let Ok(mut seen) = self.parents.lock() {
+            seen.push(req.parent_adapter.clone());
         }
         ScriptedTrainer::collapsing().train_shadow(req).await
     }
@@ -165,5 +170,72 @@ async fn without_a_policy_every_run_learns_from_everything() -> Result<()> {
         .await?;
     assert!(reports.iter().all(|r| r.growth.is_none()));
     assert!(trainer.focus.lock().unwrap().iter().all(Vec::is_empty));
+    Ok(())
+}
+
+/// An expert on the "half" axis, which the gate routes that region to.
+fn half_expert() -> Expert {
+    Expert {
+        id: ExpertId::new("expert:half"),
+        name: "half".into(),
+        base_model: "code-base".into(),
+        artifact_uri: "adapters/half".into(),
+        capability_card: serde_json::json!({}),
+        capability_vec: Some(vec![1.0, 0.0, 0.0, 0.0]),
+        fitness: 0.9,
+        frozen_at: Some(chrono::Utc::now()),
+        generation: Generation::ZERO,
+        owner: None,
+        compartment: None,
+        placed_on: None,
+        created_at: chrono::Utc::now(),
+    }
+}
+
+#[tokio::test]
+async fn a_region_shadow_starts_from_the_expert_that_serves_the_region() -> Result<()> {
+    let store = Store::connect_memory(DIM).await?;
+    expert::insert(&store, &half_expert()).await?;
+    let trainer = Regions::default();
+    let run = RunId::new("run:warm");
+    let reports = GenerationLoop::new(&store, &trainer, &Axes, growing())
+        .run_until(&run, 2)
+        .await?;
+    let second = reports[1].growth.as_ref().expect("decided");
+    assert_eq!(second.record.chosen.as_deref(), Some("half"));
+    assert_eq!(second.record.warm_from, Some(ExpertId::new("expert:half")));
+    let parents = trainer.parents.lock().unwrap().clone();
+    // Generation 0 chose no region and started fresh; generation 1 started
+    // from the serving expert's adapter.
+    assert_eq!(parents, vec![None, Some("adapters/half".to_string())]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn off_or_with_no_expert_serving_the_region_a_shadow_starts_fresh() -> Result<()> {
+    // Off: the serving expert is there, and ignored.
+    let store = Store::connect_memory(DIM).await?;
+    expert::insert(&store, &half_expert()).await?;
+    let trainer = Regions::default();
+    let cold = LoopConfig {
+        grow: Some(GrowPolicy {
+            warm_start: false,
+            ..GrowPolicy::default()
+        }),
+        ..growing()
+    };
+    let reports = GenerationLoop::new(&store, &trainer, &Axes, cold)
+        .run_until(&RunId::new("run:cold"), 2)
+        .await?;
+    assert_eq!(reports[1].growth.as_ref().unwrap().record.warm_from, None);
+    assert!(trainer.parents.lock().unwrap().iter().all(Option::is_none));
+
+    // On, but no expert: nothing to start from.
+    let store = Store::connect_memory(DIM).await?;
+    let trainer = Regions::default();
+    GenerationLoop::new(&store, &trainer, &Axes, growing())
+        .run_until(&RunId::new("run:none"), 2)
+        .await?;
+    assert!(trainer.parents.lock().unwrap().iter().all(Option::is_none));
     Ok(())
 }
