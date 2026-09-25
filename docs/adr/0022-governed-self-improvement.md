@@ -513,10 +513,45 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    Moving a verifier to quarantined or revoked archives every active or dormant expert that trained under it, with its own cause (`TransitionCause::Quarantined`). This happens inside the store's move, not in any caller, so no path that moves a verifier can skip it. Archived rather than scored low, as the record asks: out of routing, serving and anything trained downstream. The weights and the tripwire stay, a person can revive the expert, and every reward row the verifier produced stays on record.
 
+   **The GPU measurement ran.** `verifier-validate.sh 96a9644` ran on the `strings` skill on the RTX 3090 Ti on 2026-09-25.
+
+   **Synthesis.** The model was asked for 12 inputs per answer, two answers per task, for the 46 satisfiable tasks.
+   - 9 answers held no parsable JSON inputs.
+   - The reference turned the rest into 25 specs. The others fell short of three kept inputs or two distinct outputs.
+
+   **The cases.** For each set, 32 of the model's own answers per task, labeled by each task's authored judge. Beside them, 953 deliberately wrong artifacts: forgeries and mutants of the reference, 26 of the mutants equivalent. About 2,535 cases in all, half the known-bad ones from the artifacts.
+
+   **What happened to the 25 checks:**
+
+   | step | trusted | stayed proposed | quarantined |
+   | --- | ---: | ---: | ---: |
+   | measured on set 1 | 15 | 10 | 0 |
+   | re-measured on set 2 | 17 | 7 | 1 |
+   | challenged on set 2 | 16 | 7 | 2 |
+
+   - **Set 1.** 15 checks were sound, trusted on false-positive bounds between 0.049 and 0.095 at 95% confidence, each on 30 to 60 known-bad cases. The 10 over the bound are mostly the `title-*` family, where the model's inputs missed the words the task singles out. One of those checks passed 18 of 56 wrong answers on set 2.
+   - **Set 2.**
+     - Of the 15 trusted checks, 14 held their bound on a fresh, independently seeded set of answers.
+     - One passed a single wrong answer in 31 (bound 0.144) and was quarantined at once.
+     - Three proposed checks gathered enough clean evidence to be trusted.
+     - One fell under the usefulness floor (it accepted 5 of 11 right answers).
+   - **The challenge** quarantined one more. A check trusted with one false positive in 54, within the bound, passed a mutant of the `caesar-15` reference that flips `'A' <= c` to `'A' < c`. Its inputs never contained an uppercase `A`, so it could not tell the two apart. The same mutant was among set 1's cases, which makes it almost certainly the false positive the bound forgave at promotion.
+
+   Against the record's validation:
+   - **"A synthesized verifier reaching trusted must hold its false-positive bound on re-measurement":** 14 of 15 did.
+   - **The decisive test, deliberately wrong artifacts failed by every trusted verifier:** 16 of 17 did.
+   - **The kill criterion was not reached.** Both failures were quarantined the moment they were found, before any of these checks granted reward to anything.
+
+   **What that asks of promotion.** The check the challenge caught had passed the same wrong artifact at promotion, and the bound forgave it as a rare miss. But a deliberately wrong artifact is not a sample of the check's error rate; it was built to be wrong. So deliberately wrong artifacts are now adversarial at promotion as well as in the challenge:
+   - `synthesize.py` marks its artifacts `deliberate`;
+   - `antumbra verifier cases` labels one the authored verifier fails `Label::Adversarial`;
+   - a single pass of an adversarial case is a shortcut, which revokes a proposal outright. The bound goes on forgiving a rare miss only among the policy's own answers.
+
+   Under that rule the `caesar-15` check would have been revoked at promotion instead of trusted and later quarantined.
+
    Still to come for this step:
-   - **The GPU measurement:** `verifier-validate.sh` on a workbench skill, reporting how many synthesized checks were trusted, whether they held their bound on the second set, and what the challenge caught. It waits for the S-3 comparison to free the card.
-   - **Attribution:** `reward_signal` naming the verifier that granted it, and the shadows trained under a quarantined verifier quarantined from downstream training.
-   - **Loop-driven quarantine:** re-measurement on the loop's own schedule, and quarantine when the gap between a verifier's visible and held-out pass rates crosses a threshold.
+   - **The same measurement under the adversarial rule**, which reuses this run's proposals and answers and needs no GPU.
+   - **Loop-driven quarantine:** re-measurement on the loop's own schedule, and quarantine when the gap between a verifier's visible and held-out pass rates crosses a threshold. Until then, trust lapses after its time to live.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.

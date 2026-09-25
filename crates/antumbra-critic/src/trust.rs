@@ -62,7 +62,11 @@ pub async fn challenge(
         .iter()
         .filter(|c| c.label != Label::Good)
         .map(|c| Case {
-            label: Label::Impossible,
+            label: if c.label == Label::Impossible {
+                Label::Impossible
+            } else {
+                Label::Adversarial
+            },
             ..c.clone()
         })
         .collect();
@@ -219,7 +223,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!clean.verdict.is_unsound(), "{clean:?}");
-        assert_eq!(clean.impossible, 30);
+        assert_eq!((clean.impossible, clean.adversarial), (1, 29));
         // One wrong artifact it passes is enough.
         let mut wrong = cases();
         wrong.push(case(
