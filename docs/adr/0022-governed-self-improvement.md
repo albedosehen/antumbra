@@ -408,8 +408,43 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The pinning test:** a specialist that scores 1.0 on its own tasks against the generalist's 0.8 is turned away, because joining it makes four other tasks escalate to the base model. The population would score 0.33 on the six it reroutes, against 0.80 without it.
    - **The paired census:** the contribution measurement, and so the census, now draws the same seeds every generation. An unchanged population measures the same, and the credit a choice realizes is change, not noise.
 
+   **The comparison ran, and the grow step did not beat its baselines.** `scripts/grow-compare.sh` ran three arms back to back on the RTX 3090 Ti (7326a17, 2026-09-24/25). Each arm ran the full workbench corpus for four generations, measuring contribution every generation over the same 64 live tasks, with admission on.
+
+   | arm | wall clock | graduations admitted | population at the end |
+   | --- | ---: | ---: | --- |
+   | status quo (every visible task) | 491 min | 1 | 0.72, one expert |
+   | uniform (`--grow-by uniform`) | 317 min | 1 | 0.72, one expert |
+   | credit (`--grow-by credit`) | 312 min | 1 | 0.72, one expert |
+
+   The one graduation is the same in all three. Generation 0 has no census yet, so every arm learns from every visible task, and the three runs are identical to the round: pass rates 0.38 then 0.54. The result is a generalist that scores 0.72 on the live tasks against the base model's 0.46.
+   - **The status quo** then trained three near-copies of it (similarity 0.999). None scored better, so the twin check turned each away.
+   - **Uniform** chose dates, sequences and mappings.
+   - **Credit** chose grids (learnability 0.250), numbers (0.247) and mappings (0.178).
+
+   Leave-one-in admission turned away all six region specialists, because the population would have done worse on the tasks each rerouted:
+
+   | arm | region | tasks rerouted | population with it | without it |
+   | --- | --- | ---: | ---: | ---: |
+   | uniform | dates | 9 | 0.69 | 0.85 |
+   | uniform | sequences | 48 | 0.47 | 0.73 |
+   | uniform | mappings | 23 | 0.33 | 0.51 |
+   | credit | grids | 19 | 0.26 | 0.41 |
+   | credit | numbers | 46 | 0.58 | 0.79 |
+   | credit | mappings | 19 | 0.43 | 0.53 |
+
+   So on graduations the grow arms tie the status quo and each other. Per unit of compute they come out ahead only because a focused generation is cheaper: 60 to 75 minutes against two hours. That is not the credit objective at work, and by the record's own test the step stays unchecked.
+
+   Three readings of the run:
+   - **The guards held.** Admission, twin and leave-one-in together, admitted nothing that would have made the population worse. The paired census read 0.72 every generation in every arm, so every credit was an honest +0.00.
+   - **That same +0.00 leaves the bandit nothing to learn from.** Credit only moves when a choice changes the population. A policy whose every choice is turned away cannot tell a good region from a bad one, and its choices here were learnability ordered.
+   - **The binding constraint is not where to probe but what a probe can produce.** This is the third run to show it. A specialist trained from the base on one region's 32 to 40 tasks does not match a generalist trained on 236, on that region or near it. Diversity rose as designed (entropy 0.53 and coverage 0.38 by generation 3, nothing revived), but a diverse set of weaker candidates is still a set of weaker candidates.
+
    Still to come for this step:
-   - **The comparison:** a run against the empty status quo and against uniform sampling, on graduations per unit of compute. Until it beats both, the step stays unchecked. The uniform baseline is in (`Choosing::Uniform`, `train --grow --grow-by uniform`). It has the same gate, focus and unfiltered share, and differs only in how a region is chosen.
+   - **A probe that can beat the incumbent.** Two candidates:
+     - a region specialist warm-started from the expert that serves its region, so it refines what is already there rather than relearning it;
+     - a specialist with more of the region's evidence.
+
+     The first changes what the frozen population is made of: every specialist would be a refinement of the expert it sits beside. That is the property S-1 deliberately gave up for the cohort, so it is a decision to make, not a default.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 
    **The namespace and the trust protocol are in. Synthesis is not.**
