@@ -41,8 +41,9 @@ pub enum Label {
     /// Of a task no artifact can satisfy: a pass is a shortcut.
     Impossible,
     /// Built to be wrong (a mutant of the reference, a forgery) and failed by
-    /// anchored truth. A pass is a shortcut here too: the artifact was chosen
-    /// to be wrong, so passing it is not a rare miss the bound may forgive.
+    /// anchored truth. It counts as known-bad evidence for the bound, and a
+    /// pass is a shortcut: the artifact was chosen to be wrong, so passing it
+    /// is not a rare miss the bound may forgive.
     Adversarial,
 }
 
@@ -172,12 +173,18 @@ impl Tally {
                 self.bad += 1;
                 self.bad_passed += u32::from(first);
             }
-            Label::Impossible | Label::Adversarial => {
-                if case.label == Label::Impossible {
-                    self.impossible += 1;
-                } else {
-                    self.adversarial += 1;
+            Label::Impossible => {
+                self.impossible += 1;
+                if first {
+                    self.shortcuts.push(case.id.clone());
                 }
+            }
+            // Known-bad like any other, so it is evidence for the bound when
+            // failed; but chosen to be wrong, so one pass is a shortcut.
+            Label::Adversarial => {
+                self.adversarial += 1;
+                self.bad += 1;
+                self.bad_passed += u32::from(first);
                 if first {
                     self.shortcuts.push(case.id.clone());
                 }
@@ -440,10 +447,11 @@ mod tests {
     #[test]
     fn one_pass_on_a_deliberately_wrong_artifact_is_a_shortcut_the_bound_does_not_forgive() {
         // Sixty wrong answers, none passed: sound on its own.
-        let mut t = tally((10, 10), (60, 0));
+        // Failed, it is evidence for the bound like any known-bad case.
+        let mut t = tally((10, 10), (28, 0));
         t.add(&case("mutant", Label::Adversarial), &[false; 3]);
-        assert!(judge(&t).is_sound());
-        assert_eq!(t.adversarial, 1);
+        assert!(judge(&t).is_sound(), "29 known-bad, none passed");
+        assert_eq!((t.adversarial, t.bad), (1, 29));
         // The same verifier passing one mutant is rejected outright.
         t.add(&case("boundary-mutant", Label::Adversarial), &[true; 3]);
         assert_eq!(
