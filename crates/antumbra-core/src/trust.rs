@@ -40,6 +40,10 @@ pub enum Label {
     Bad,
     /// Of a task no artifact can satisfy: a pass is a shortcut.
     Impossible,
+    /// Built to be wrong (a mutant of the reference, a forgery) and failed by
+    /// anchored truth. A pass is a shortcut here too: the artifact was chosen
+    /// to be wrong, so passing it is not a rare miss the bound may forgive.
+    Adversarial,
 }
 
 /// Where a case's label comes from. Nothing the loop synthesized can be one.
@@ -144,6 +148,7 @@ pub struct Tally {
     pub bad: u32,
     pub bad_passed: u32,
     pub impossible: u32,
+    pub adversarial: u32,
     pub shortcuts: Vec<String>,
 }
 
@@ -167,8 +172,12 @@ impl Tally {
                 self.bad += 1;
                 self.bad_passed += u32::from(first);
             }
-            Label::Impossible => {
-                self.impossible += 1;
+            Label::Impossible | Label::Adversarial => {
+                if case.label == Label::Impossible {
+                    self.impossible += 1;
+                } else {
+                    self.adversarial += 1;
+                }
                 if first {
                     self.shortcuts.push(case.id.clone());
                 }
@@ -236,6 +245,7 @@ impl Tally {
             bad: self.bad,
             bad_passed: self.bad_passed,
             impossible: self.impossible,
+            adversarial: self.adversarial,
             false_positive_upper: upper,
             confidence: policy.confidence,
             verdict,
@@ -256,6 +266,9 @@ pub struct TrustMeasurement {
     pub bad: u32,
     pub bad_passed: u32,
     pub impossible: u32,
+    /// Deliberately wrong artifacts it was run on, none of which it may pass.
+    #[serde(default)]
+    pub adversarial: u32,
     /// The one-sided upper bound on the false-positive rate.
     pub false_positive_upper: f64,
     pub confidence: f64,
@@ -420,6 +433,23 @@ mod tests {
             judge(&t),
             TrustVerdict::Shortcut {
                 cases: vec!["gamed".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn one_pass_on_a_deliberately_wrong_artifact_is_a_shortcut_the_bound_does_not_forgive() {
+        // Sixty wrong answers, none passed: sound on its own.
+        let mut t = tally((10, 10), (60, 0));
+        t.add(&case("mutant", Label::Adversarial), &[false; 3]);
+        assert!(judge(&t).is_sound());
+        assert_eq!(t.adversarial, 1);
+        // The same verifier passing one mutant is rejected outright.
+        t.add(&case("boundary-mutant", Label::Adversarial), &[true; 3]);
+        assert_eq!(
+            judge(&t),
+            TrustVerdict::Shortcut {
+                cases: vec!["boundary-mutant".into()]
             }
         );
     }

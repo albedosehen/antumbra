@@ -381,7 +381,7 @@ fn summary(m: &TrustMeasurement) -> String {
         }
     };
     format!(
-        "{verdict} (good {}/{}, bad passed {}/{}, bound {:.3} at {:.0}%, {} impossible, {} run(s) each)",
+        "{verdict} (good {}/{}, bad passed {}/{}, bound {:.3} at {:.0}%, {} impossible, {} adversarial, {} run(s) each)",
         m.good_passed,
         m.good,
         m.bad_passed,
@@ -389,6 +389,7 @@ fn summary(m: &TrustMeasurement) -> String {
         m.false_positive_upper,
         m.confidence * 100.0,
         m.impossible,
+        m.adversarial,
         m.repeats
     )
 }
@@ -436,13 +437,18 @@ async fn build_cases(
             continue;
         }
         let impossible = task["impossible"].as_bool().unwrap_or(false);
-        let for_task: Vec<&str> = given
+        // A completion marked deliberate was built to be wrong (a mutant, a
+        // forgery), so one the authored verifier fails is adversarial.
+        let for_task: Vec<(&str, bool)> = given
             .iter()
             .filter(|c| c["task"].as_str() == Some(id))
-            .filter_map(|c| c["completion"].as_str())
+            .filter_map(|c| {
+                let deliberate = c["deliberate"].as_bool().unwrap_or(false);
+                c["completion"].as_str().map(|s| (s, deliberate))
+            })
             .collect();
         if impossible {
-            for (i, completion) in for_task.iter().enumerate() {
+            for (i, (completion, _)) in for_task.iter().enumerate() {
                 cases.push(Case {
                     id: format!("{id}#{i}"),
                     task: id.to_string(),
@@ -470,7 +476,7 @@ async fn build_cases(
             bail!("{id} has no verify spec to label its completions with");
         }
         let anchor = authored(store, skill, id, spec.clone()).await?;
-        for (i, completion) in for_task.iter().enumerate() {
+        for (i, (completion, deliberate)) in for_task.iter().enumerate() {
             let passed = label_with(&spec, id, completion).await?;
             let Some(passed) = passed else {
                 bail!("{id}'s authored verifier disagreed with itself on completion {i}");
@@ -479,7 +485,11 @@ async fn build_cases(
                 id: format!("{id}#{i}"),
                 task: id.to_string(),
                 completion: completion.to_string(),
-                label: if passed { Label::Good } else { Label::Bad },
+                label: match (passed, *deliberate) {
+                    (true, _) => Label::Good,
+                    (false, true) => Label::Adversarial,
+                    (false, false) => Label::Bad,
+                },
                 anchor: Anchor::Verifier { id: anchor.clone() },
             });
         }
@@ -649,6 +659,30 @@ mod tests {
         let anchor = verifier::get(&store, id).await.unwrap().unwrap();
         assert_eq!(anchor.origin, VerifierOrigin::Authored);
         assert_eq!(anchor.task.as_deref(), Some("s/rev"));
+    }
+
+    #[tokio::test]
+    async fn a_deliberate_artifact_the_authored_verifier_fails_is_adversarial() {
+        let store = Store::connect_memory(4).await.unwrap();
+        let given: Vec<serde_json::Value> = serde_json::from_value(serde_json::json!([
+            { "task": "s/rev", "completion": "def rev(s): return s", "deliberate": true },
+            { "task": "s/rev", "completion": "def rev(s): return s[::-1]", "deliberate": true },
+            { "task": "s/rev", "completion": "def rev(s): return None" }
+        ]))
+        .unwrap();
+        let only = Only {
+            task: Some("s/rev"),
+            ..Only::default()
+        };
+        let cases = build_cases(&store, &corpus(), "c", only, &given)
+            .await
+            .unwrap();
+        let labels: Vec<Label> = cases.iter().map(|c| c.label).collect();
+        // The reference, a failed mutant, an equivalent one, a plain failure.
+        assert_eq!(
+            labels,
+            vec![Label::Good, Label::Adversarial, Label::Good, Label::Bad]
+        );
     }
 
     #[tokio::test]

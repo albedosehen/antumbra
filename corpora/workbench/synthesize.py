@@ -16,8 +16,10 @@ exception the prompt names. An input the reference rejects any other way says
 nothing the prompt specified. A proposal becomes a spec only with at least
 three inputs and two distinct outputs, so no constant passes it.
 
-The artifacts are unlabeled completions for `antumbra verifier cases`, which
-labels each with the task's own authored verifier:
+The artifacts are completions for `antumbra verifier cases`, marked deliberate
+because they are built to be wrong. It labels each with the task's own authored
+verifier, and one the verifier fails is adversarial: a check that passes it is
+rejected outright, not forgiven by the false-positive bound. The artifacts are:
 - the forgeries the generator checks every task against;
 - single-point mutants of the reference: a flipped comparison, a swapped
   operator or method, a number off by one, a string cut short or reversed. Most are near misses the authored judge
@@ -230,7 +232,7 @@ def main() -> None:
     tasks = {t["id"]: t for t in json.loads(args.corpus.read_text(encoding="utf-8"))}
     proposals = json.loads(args.proposals.read_text(encoding="utf-8"))
     specs: list[dict[str, Any]] = []
-    artifacts: list[dict[str, str]] = []
+    artifacts: list[dict[str, Any]] = []
     for proposal in proposals:
         task = tasks.get(proposal["task"])
         if task is None or task.get("impossible") or "completion" not in task:
@@ -252,7 +254,7 @@ def main() -> None:
         forged = generate.forgeries(fn, None).values()
         made = mutants(task["completion"], args.mutants, SEED)
         distinct = dict.fromkeys([*forged, *made])
-        artifacts.extend({"task": task["id"], "completion": c} for c in distinct)
+        artifacts.extend({"task": task["id"], "completion": c, "deliberate": True} for c in distinct)
     args.specs.write_text(json.dumps(specs, indent=2) + "\n", encoding="utf-8", newline="\n")
     args.artifacts.write_text(json.dumps(artifacts, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"{len(specs)} spec(s) from {len(proposals)} proposal(s); {len(artifacts)} artifact(s) to label")
