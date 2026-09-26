@@ -483,6 +483,30 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    | 3 | mappings | 0.67, 0.74 | 20 | 0.51 | 0.52 |
 
    Both arms ended where they began: the generalist alone, 0.71 on the live tasks. The warm comparison runs again on this change: uniform and credit.
+
+   **Under the retrained router, the population grew for the first time.** The warm comparison ran again on 0331bb2 on 2026-09-26, uniform and then credit.
+
+   | arm | wall clock | admitted | experts at the end | population on the live tasks |
+   | --- | ---: | ---: | ---: | --- |
+   | uniform | 261 min | 4 of 4 | 4 | 0.72, 0.73, 0.75, 0.76 |
+   | credit | 273 min | 1 of 4 | 1 | 0.72 every generation |
+
+   - **Uniform** admitted every specialist it trained: lists, numbers and parsing, each 0.93 to 0.94 like the generalist it started from. The credit the grow step realized was +0.05 for lists and +0.17 for numbers. At the end, contribution per expert:
+     - numbers: 9 of the 64 live tasks, 1.00 with it against 0.79 without (+0.21);
+     - lists: +0.06;
+     - parsing: +0.00;
+     - the generalist: nothing any more, its share falling from all 64 tasks to 33.
+   - **Credit** chose numbers, grids and mappings, and leave-one-in turned each away under the same router:
+     - numbers: 0.56 with it against 0.62 on 11 rerouted tasks, 5 of them escalated;
+     - grids: 0.22 against 0.29 on 9;
+     - mappings: 0.54 against 0.65 on 9, 3 escalated.
+
+     The router's out-of-distribution floor still escalates some tasks, so a specialist that pulls them off the generalist can lose them to the base model.
+
+   Three readings:
+   - **The gate was the obstacle.** Under the heuristic margin, none of the twelve region specialists the earlier arms trained, cold or warm, was admitted. Under the router that serves them, one arm admitted all three of its own.
+   - **Growth is not yet specialization.** The uniform population ended at 0.76, and so did its best single expert, the numbers specialist. It scores 0.76 across all 64 tasks, above the generalist's 0.72. Much of the gain may be the warm start's continued training rather than routing among specialists. The routing headroom now kept on the baseline separates the two: the same experts routed as well as they could be, against the population.
+   - **One run an arm.** The two arms' first specialists came out differently: numbers was admitted in uniform (generation 2) and turned away in credit (generation 1). So the arms' difference here is as much the draw as the policy. By the record's test, credit against uniform, the step stays unchecked.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 
    **The namespace and the trust protocol are in. Synthesis is not.**
