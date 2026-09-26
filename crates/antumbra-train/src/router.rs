@@ -10,6 +10,9 @@ use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use antumbra_core::{AntumbraError, ExpertId, LearnedRouter, Result, RouterExpert};
 
 const PROJ_TEMP: f32 = 0.07;
+/// Passes over the exemplars when the loop retrains the gate, as the CLI's
+/// refresh does.
+pub const ROUTER_EPOCHS: usize = 400;
 /// Minimum gap below the in-distribution mean for the OOD floor, so a
 /// low-variance population (few exemplars per expert) still gets a usable band.
 const FLOOR_MARGIN: f32 = 0.15;

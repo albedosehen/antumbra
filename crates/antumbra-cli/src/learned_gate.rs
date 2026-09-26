@@ -3,22 +3,9 @@
 //! hold still (ADR-0022 S-5).
 
 use antumbra_core::ports::Embedder;
-use antumbra_core::ExpertId;
+use antumbra_loop::gate_exemplars;
 use antumbra_store::repo::lifecycle;
 use antumbra_store::Store;
-
-/// An expert's capability exemplars: the texts the learned router trains on.
-fn exemplars_of(e: &antumbra_core::Expert) -> Vec<String> {
-    e.capability_card
-        .get("exemplars")
-        .and_then(|v| v.as_array())
-        .map(|xs| {
-            xs.iter()
-                .filter_map(|x| x.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default()
-}
 
 /// What a refresh did to the learned router.
 pub(crate) enum RouterRefresh {
@@ -45,7 +32,7 @@ pub(crate) async fn refresh_router(
     let routable = lifecycle::routable(store).await?;
     let covered = routable
         .iter()
-        .filter(|e| !exemplars_of(e).is_empty())
+        .filter(|e| !e.exemplars().is_empty())
         .map(|e| &e.id);
     if let Some(current) = antumbra_store::repo::router::load(store).await? {
         if current.trained_over(covered) {
@@ -70,20 +57,10 @@ pub(crate) async fn train_router(
     epochs: usize,
 ) -> anyhow::Result<Option<antumbra_core::LearnedRouter>> {
     let experts = lifecycle::routable(store).await?;
-    if experts.len() < 2 {
+    let Some(exemplars) = gate_exemplars(&experts, embedder).await? else {
         antumbra_store::repo::router::clear(store).await?;
         return Ok(None);
-    }
-    let mut exemplars: Vec<(ExpertId, Vec<f32>)> = Vec::new();
-    for e in &experts {
-        for text in exemplars_of(e) {
-            exemplars.push((e.id.clone(), embedder.embed(&text).await?));
-        }
-    }
-    if exemplars.len() < 2 {
-        antumbra_store::repo::router::clear(store).await?;
-        return Ok(None);
-    }
+    };
     let router = antumbra_train::train_learned_router(&exemplars, epochs)?;
     antumbra_store::repo::router::save(store, &router).await?;
     Ok(Some(router))

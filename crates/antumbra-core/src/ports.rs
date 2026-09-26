@@ -13,6 +13,7 @@ use crate::boundary::BoundaryFinding;
 use crate::error::{AntumbraError, Result};
 use crate::ids::{ExpertId, RunId, ShadowId, VerifierId};
 use crate::recipe::TrainingRecipe;
+use crate::router::LearnedRouter;
 use crate::slice::Holdout;
 
 // --- serving (hardware-adaptive) ------------------------------------------
@@ -289,6 +290,14 @@ pub trait Trainer: Send + Sync {
     async fn merge(&self, req: MergeRequest) -> Result<MergeOutcome> {
         let _ = req;
         Err(AntumbraError::Unimplemented("adapter merging"))
+    }
+
+    /// Train the learned router over embedded capability exemplars, each
+    /// labeled with the expert it describes. The default refuses, so a
+    /// trainer that cannot train one leaves the gate as it is.
+    async fn train_router(&self, exemplars: &[(ExpertId, Vec<f32>)]) -> Result<LearnedRouter> {
+        let _ = exemplars;
+        Err(AntumbraError::Unimplemented("router training"))
     }
 }
 

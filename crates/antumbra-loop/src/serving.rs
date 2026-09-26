@@ -13,14 +13,17 @@
 //!
 //! A check on the candidate's own tasks sees the first and not the second. So
 //! every live task is routed twice, as the population routes it now and as it
-//! would with the candidate in it. Under the heuristic gate the candidate
-//! joins the pool; under a learned router it gets a centroid, projected into
-//! the router's metric as a retrained router would place it. Only the tasks
-//! whose routing the candidate changes can differ, and each of those is scored
-//! both ways under the same seeds: whatever serves it now, expert or base
-//! model, and whatever would with the candidate in. The candidate joins only
-//! if the population does better on them by more than the margin; one the gate
-//! would route nothing to adds nothing, and is not admitted either.
+//! would with the candidate in it. With the candidate in, the gate is the one
+//! that would serve it: a learned router retrained over the population and
+//! the candidate, as the loop retrains it once the candidate is admitted. A
+//! trainer that cannot train one falls back to the gate as it is: the
+//! candidate joins the heuristic gate's pool, or gets a centroid projected
+//! into the stored router's metric. Only the tasks whose routing the
+//! candidate changes can differ, and each of those is scored both ways under
+//! the same seeds: whatever serves it now, expert or base model, and whatever
+//! would with the candidate in. The candidate joins only if the population
+//! does better on them by more than the margin; one the gate would route
+//! nothing to adds nothing, and is not admitted either.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -36,8 +39,9 @@ use crate::admission::{Admission, AdmissionPolicy};
 use crate::contribution::{route_top1, seeds};
 use crate::GenerationLoop;
 
-/// Where a task goes with `candidate` in the population: the candidate joins
-/// the heuristic gate's pool, or the learned router gains its centroid.
+/// Where a task goes with `candidate` in the population when no router can be
+/// retrained over it: the candidate joins the heuristic gate's pool, or the
+/// learned router gains its centroid.
 fn route_with(
     task: &[f32],
     router: Option<&LearnedRouter>,
@@ -96,20 +100,32 @@ impl GenerationLoop<'_> {
         policy: &AdmissionPolicy,
     ) -> Result<Option<Admission>> {
         let host = this_host();
-        let mut experts: Vec<Expert> = lifecycle::routable(self.store)
+        let mut routable: Vec<Expert> = lifecycle::routable(self.store)
             .await?
             .into_iter()
-            .filter(|e| e.owner.is_none() && e.is_placed_on(&host) && e.id != candidate.id)
+            .filter(|e| e.id != candidate.id)
             .collect();
-        experts.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+        routable.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+        let experts: Vec<Expert> = routable
+            .iter()
+            .filter(|e| e.owner.is_none() && e.is_placed_on(&host))
+            .cloned()
+            .collect();
         let tasks = self.live_sample(holdout, policy.max_tasks).await?;
         let router = lifecycle::load_router(self.store).await?;
         let boundaries = boundary::list(self.store).await?;
+        routable.push(candidate.clone());
+        let retrained = self.retrained_gate(&routable).await?;
+        let mut pool = experts.clone();
+        pool.push(candidate.clone());
         let mut changed = Vec::new();
         for t in &tasks {
             let v = self.embedder.embed(&t.prompt).await?;
             let without = route_top1(&v, router.as_ref(), &experts, &boundaries, None);
-            let with = route_with(&v, router.as_ref(), &experts, &boundaries, candidate);
+            let with = match &retrained {
+                Some(learned) => route_top1(&v, Some(learned), &pool, &boundaries, None),
+                None => route_with(&v, router.as_ref(), &experts, &boundaries, candidate),
+            };
             if with != without {
                 changed.push((t.id.clone(), with, without));
             }

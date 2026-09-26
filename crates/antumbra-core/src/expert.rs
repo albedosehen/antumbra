@@ -95,6 +95,20 @@ impl Expert {
             .as_deref()
             .map(|cap| cosine_similarity(cap, query))
     }
+
+    /// The texts on its capability card the learned router trains on. None
+    /// for a card that lists no exemplars.
+    pub fn exemplars(&self) -> Vec<String> {
+        self.capability_card
+            .get("exemplars")
+            .and_then(|v| v.as_array())
+            .map(|xs| {
+                xs.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// Cosine similarity, defined to `0.0` for a zero-norm or length-mismatched
@@ -173,6 +187,14 @@ mod tests {
 
     /// The host name is compared whole. A node is not "the same machine" as one
     /// whose name it happens to start with.
+    #[test]
+    fn exemplars_are_read_from_the_card() {
+        let mut e = placement_expert(None);
+        assert!(e.exemplars().is_empty());
+        e.capability_card = serde_json::json!({"exemplars": ["a", 1, "b"]});
+        assert_eq!(e.exemplars(), vec!["a".to_string(), "b".to_string()]);
+    }
+
     #[test]
     fn placement_is_not_a_prefix_match() {
         let node = placement_expert(Some("rig"));

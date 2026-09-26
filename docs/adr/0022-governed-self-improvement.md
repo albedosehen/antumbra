@@ -402,7 +402,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The credit** for `numbers` also read -0.05 although nothing had changed. The census draws fresh seeds each generation, so the same population measures differently; credit needs a census paired across generations.
 
    **Admission is now leave-one-in, and the census is paired.** Every live task in the sample (64) is routed twice: as the population routes it now, and with the candidate in it.
-   - **Adding the candidate:** under the heuristic gate it joins the pool. Under a learned router it gets a centroid projected into the router's metric, as a retrained router would place it.
+   - **Adding the candidate:** under the heuristic gate it joins the pool. Under a learned router it gets a centroid projected into the router's metric, as a retrained router would place it. (A later change retrains the router over it instead; see the warm start below.)
    - **Scoring:** the tasks whose routing it changes are scored both ways under the same seeds. That includes tasks it makes the gate escalate.
    - **The rule:** the candidate joins only if the population does better on them with it. One the gate would route nothing to adds nothing, and is not admitted either.
    - **The pinning test:** a specialist that scores 1.0 on its own tasks against the generalist's 0.8 is turned away, because joining it makes four other tasks escalate to the base model. The population would score 0.33 on the six it reroutes, against 0.80 without it.
@@ -454,6 +454,25 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **What guards it:** admission. A refined specialist too like its parent is a twin, and one that gains its region by losing elsewhere fails leave-one-in.
 
    The comparison runs again with the warm start: uniform and credit, against the status quo already measured, which the warm start does not touch.
+
+   **The warm start trains better specialists, and the gate still turns them away.** The uniform arm ran again with it (9487fda, 2026-09-25, 302 minutes). Generation 0 graduated the same generalist as before. Each region's shadow then started from it, and each trained past it on its own region:
+
+   | generation | region | pass rate by round | tasks rerouted | population with it | without it |
+   | ---: | --- | --- | ---: | ---: | ---: |
+   | 1 | sequences | 0.71, 0.76 | 50 | 0.48 | 0.73 |
+   | 2 | mappings | 0.73, 0.77 | 22 | 0.49 | 0.57 |
+   | 3 | grids | 0.53, 0.62 | 19 | 0.28 | 0.41 |
+
+   None was admitted. The reason is in the rerouted counts. One region is a small share of the 64 live tasks, yet the sequences specialist rerouted 50 of them. With one expert, the heuristic gate falls back to absolute similarity and routes everything. With the generalist and a refinement of it side by side, their capability vectors are nearly the same, so the top-two margin falls under its threshold almost everywhere, and most tasks escalate to the base model. The population with the specialist scored close to the base model's 0.46, as escalation would. So the specialists were not judged; the heuristic gate's margin was.
+
+   **Decided: a graduate is judged under the gate that would serve it.** The learned router is already the gate for any population of two or more, because the refresh at the end of a run trains one. Only admission of the first specialist still ran under the heuristic margin. So:
+   - **A trainer retrains the router.** `Trainer::train_router` trains the learned router over embedded capability exemplars. The candle trainers run the same training the CLI's refresh runs; the default refuses.
+   - **Admission routes with a retrained router.** Leave-one-in routes each live task with the candidate in under a router retrained over the routable experts and the candidate. Without the candidate, it routes under the gate as it is.
+   - **The fallback:** when too few experts have exemplars, or the trainer cannot train a router, the candidate joins the heuristic pool or is projected into the stored router, as before.
+   - **Serving uses the router admission judged with.** Admitting an expert, or merging two, now retrains and stores the gate at once, rather than at the end of the run. The rest of the run, and serving, route under it.
+   - **The pinning test:** the specialist the heuristic gate turns away, which would escalate four tasks and score 0.33 on the six it reroutes, is admitted under a retrained router. That router sends all six to it, at 1.0 against the generalist's 0.8. The router it was judged with is the one stored.
+
+   The warm comparison runs again on this: uniform and credit.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 
    **The namespace and the trust protocol are in. Synthesis is not.**

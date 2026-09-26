@@ -271,6 +271,7 @@ impl GenerationLoop<'_> {
             .await?;
         self.archive_as_redundant(&b.id, &into.id, generation)
             .await?;
+        self.refresh_gate().await?;
         Ok(Some(Merge::Merged {
             into: into.id,
             pair,
