@@ -196,6 +196,20 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
    - **The data:** 97 withheld tasks, the expert scoring 0.573 and the base model 0.366.
    - **Why it is degenerate:** with one expert the gate's relative coverage falls back to absolute similarity, which cleared the threshold on every task. So the best threshold and the shipped one both route everything.
    - **What the control needs:** a population where the margin separates experts, which the grow step's warm start is being run to produce. The sweep runs again over that.
+
+   **The second sweep ran over four experts, and it sets the control at routing everything.** It ran on 2026-09-26 over the uniform arm of ADR-0022's grow comparison under learned-router admission (0331bb2). That population is a generalist and three specialists warm-started from it, each 0.93 to 0.94 like it. The data: 97 withheld tasks, two seeds of four samples.
+
+   | threshold | share routed | accuracy | risk on what is routed |
+   | --- | ---: | ---: | ---: |
+   | none routed (the base model alone) | 0.00 | 0.366 | - |
+   | shipped, 0.08 | 0.15 | 0.412 | 0.367 |
+   | best, 0.0003 | 1.00 | 0.616 | 0.384 |
+   | all routed | 1.00 | 0.616 | 0.384 |
+
+   - **The shipped margin escalates what it should route.** With experts this alike, the top-two margin is under 0.08 on 85% of the tasks. So the shipped threshold sends them to the base model, and accuracy falls from 0.616 to 0.412.
+   - **The margin carries no abstention signal here.** Every expert beats the base model on nearly every task, so the best point on the curve is to route everything. Nothing the margin separates is worth escalating.
+   - **What this does and does not measure:** it is the heuristic gate's threshold. A population of two or more is served by the learned router, whose out-of-distribution floor is a different signal, and the sweep does not read it.
+   - **The bar it sets for D-1's head:** 0.616 at full coverage and 0.366 at none, on these tasks. A typed gate earns its place only by abstaining where the population would be wrong, and on this population there is little such room.
 2. [~] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated.
 
    **A floor now ships, and it is not the head this record specifies.** `antumbra-rerank/src/floor.rs` answers `Noul` by mapping the deployed cross-encoder's score through a logistic fitted on the same verifier labels, reaching 0.803 accuracy and 0.797 F1 on a held-out half against the 0.785 the best in-sample threshold manages, with an expected calibration error of 0.033. It satisfies the `TypedDecider` contract on the contract's own terms: log loss is strictly proper, and the labels come from a deterministic verifier rather than from any model's answers.
