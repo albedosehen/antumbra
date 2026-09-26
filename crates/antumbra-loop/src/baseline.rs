@@ -3,6 +3,14 @@
 //! architecture. Routing across many experts has to beat sending everything to
 //! the best one; if it stops doing so, the honest answer is fewer and broader
 //! experts.
+//!
+//! When it does not, the reason is one of two, and the scores already taken
+//! tell them apart. Every expert is scored on every live task, so each task's
+//! best is known: the gate's own choice or any expert alone. Their mean is
+//! what these experts would score routed as well as they could be. Well above
+//! the population, the gate is choosing badly. Close to it, the experts are
+//! too alike for any routing to help. It is an upper bound and biased up,
+//! since it takes the highest of noisy scores.
 
 use antumbra_core::ExpertId;
 
@@ -16,6 +24,9 @@ pub(crate) struct Comparison {
     pub population: f32,
     /// The best single expert and its mean alone.
     pub best: Option<(ExpertId, f32)>,
+    /// The mean of each task's best score: the gate's own choice or any
+    /// expert alone.
+    pub oracle: f32,
 }
 
 /// Compare the routed population with each expert alone, over the tasks every
@@ -43,6 +54,11 @@ pub(crate) fn compare(
     }
     let n = rows.len() as f32;
     let population = rows.iter().map(|r| r.0).sum::<f32>() / n;
+    let oracle = rows
+        .iter()
+        .map(|r| r.1.iter().copied().fold(r.0, f32::max))
+        .sum::<f32>()
+        / n;
     let best = experts
         .iter()
         .enumerate()
@@ -52,6 +68,7 @@ pub(crate) fn compare(
         tasks: u32::try_from(rows.len()).unwrap_or(u32::MAX),
         population,
         best,
+        oracle,
     })
 }
 
@@ -91,6 +108,28 @@ mod tests {
         let c = compare(&routed, &[a.clone(), b], score).expect("scored");
         assert_eq!((c.tasks, c.population), (4, 1.0));
         assert_eq!(c.best, Some((a, 0.625)));
+        // Routed perfectly already: nothing left for better routing.
+        assert_eq!(c.oracle, 1.0);
+    }
+
+    /// A gate that sends each task to the wrong one of two specialists
+    /// leaves the population below either alone, and the oracle shows what
+    /// routing them well would reach.
+    #[test]
+    fn the_oracle_takes_each_tasks_best() {
+        let (a, b) = (id("a"), id("b"));
+        let routed = vec![
+            ("a1".to_string(), Some(b.clone())),
+            ("b1".to_string(), Some(a.clone())),
+        ];
+        let score = |who: &Option<ExpertId>, task: &str| match (who.as_ref(), task) {
+            (Some(e), "a1") if e.as_str() == "a" => Some(1.0),
+            (Some(e), "b1") if e.as_str() == "b" => Some(0.5),
+            _ => Some(0.0),
+        };
+        let c = compare(&routed, &[a, b], score).expect("scored");
+        assert_eq!(c.population, 0.0);
+        assert_eq!(c.oracle, 0.75);
     }
 
     /// An escalated task is scored on the base model, and a task some side
@@ -113,6 +152,8 @@ mod tests {
         assert_eq!(c.tasks, 2, "t3 was not scored");
         assert_eq!(c.population, 0.625);
         assert_eq!(c.best, Some((a, 0.875)));
+        // t2 goes to the expert rather than the base it escalated to.
+        assert_eq!(c.oracle, 0.875);
         assert!(compare(&[], &[id("a")], |_, _| Some(1.0)).is_none());
     }
 }

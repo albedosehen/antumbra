@@ -251,6 +251,7 @@ impl GenerationLoop<'_> {
                     population: c.population,
                     best_alone: c.best.as_ref().map(|b| b.1),
                     best: c.best.map(|b| b.0),
+                    oracle: Some(c.oracle),
                     seeds: policy.seeds,
                     at: Utc::now(),
                 };

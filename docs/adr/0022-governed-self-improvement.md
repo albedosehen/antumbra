@@ -334,6 +334,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    **The population is compared with its single best expert, whether or not it flatters the architecture.** A contribution measurement also scores every expert alone on every live task, and the base model on the tasks the population escalates. Only tasks every side scored count, so every mean is over the same tasks.
    - **The record:** a `population_baseline` row per measured generation, holding the routed population's mean, the best single expert, and that expert's mean alone. The difference is what routing adds.
+   - **The headroom:** the row also keeps the oracle, the mean of each task's best score among the gate's choice and every expert alone. The warm-start grow run with learned-router admission ended with routing adding nothing over its best single expert. The oracle separates a gate that chooses badly (well above the population) from experts too alike for any routing to help (close to it).
    - **Cost:** it costs one more evaluation of the live tasks per expert, and it is on whenever contribution is measured.
    - **What it said first:** in the test that pins it down, routing added nothing over sending every task to the one good expert. The record reports that as 0.00 rather than leaving it out. When the rolling difference collapses, the honest answer is fewer and broader experts, as the record says.
 
