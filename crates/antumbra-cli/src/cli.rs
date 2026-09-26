@@ -78,7 +78,9 @@ pub enum ClaudeAction {
     /// Say whether this Claude Code session is in sovereign mode (its telemetry
     /// is off, which also turns off its feature flags), list what that costs,
     /// and check the settings that bring some of it back. Exits non-zero when a
-    /// required setting is missing. Reads settings; never writes them.
+    /// required setting is missing. Also says whether each Antumbra hook the
+    /// settings run is the one this build ships. Reads settings; never writes
+    /// them.
     Doctor {
         /// The project to judge (its settings files, and whether its AGENTS.md
         /// is being read). Defaults to the current directory.
