@@ -54,7 +54,15 @@ tar -xzf "/tmp/antumbra-$SHA.tar.gz" -C "$SRC"
 find "$SRC" -type f -exec touch {} +
 cd "$SRC"
 echo "== build antumbra-calibrate:$SHA"
-docker build -f docker/Dockerfile.cuda --target calibrate -t "antumbra-calibrate:$SHA" . 2>&1 | tail -5
+# The whole build goes to a log beside the others, so a failure shows its
+# compiler errors here rather than the last lines of a stack of layers.
+BUILD_LOG="/tmp/antumbra-build-$SHA.log"
+if ! docker build -f docker/Dockerfile.cuda --target calibrate -t "antumbra-calibrate:$SHA" . >"$BUILD_LOG" 2>&1; then
+    echo "== build failed; its errors follow, and the whole log is $BUILD_LOG"
+    grep -E "error(\[E[0-9]+\])?:" -A8 "$BUILD_LOG" | head -80
+    exit 1
+fi
+tail -5 "$BUILD_LOG"
 
 antumbra() {
     docker run --rm --device nvidia.com/gpu=all \
