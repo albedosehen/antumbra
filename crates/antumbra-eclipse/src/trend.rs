@@ -63,7 +63,7 @@ pub struct Watch {
     /// verdict is `Inconclusive` rather than a guess from two points.
     pub min_audited: usize,
     /// The share of the search gain the audit slice must show for the gain to
-    /// count as carried. A dial: lower it and more runs read as honest, raise
+    /// count as carried. A dial: lower it and more runs read as carried, raise
     /// it and the instrument becomes strict enough to fire on noise.
     pub carry: f32,
     /// A search gain at or below this is no climb, so there is nothing for the
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn only_the_most_recent_window_is_read() {
-        // Twenty generations: overtuned for the first ten, honest for the last
+        // Twenty generations: overtuned for the first ten, carried for the last
         // ten. The verdict is about where the loop is now.
         let mut points: Vec<Point> = run(0.20, 0.0, 2);
         points.extend(run(0.20, 0.18, 2).into_iter().map(|mut p| {

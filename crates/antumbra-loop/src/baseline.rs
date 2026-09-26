@@ -1,7 +1,7 @@
 //! The population against its single best expert (ADR-0022 S-5): the rolling
 //! comparison the record asks to be reported whether or not it flatters the
 //! architecture. Routing across many experts has to beat sending everything to
-//! the best one; if it stops doing so, the honest answer is fewer and broader
+//! the best one; if it stops doing so, the right answer is fewer and broader
 //! experts.
 //!
 //! When it does not, the reason is one of two, and the scores already taken

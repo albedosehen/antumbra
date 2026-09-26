@@ -61,7 +61,7 @@ impl ContributionRecord {
 /// tasks under the same seeds (ADR-0022 S-5): the population's score with
 /// every task routed as the gate routes it, against the best any one of its
 /// experts scores with every task sent to it alone. Kept whether or not it
-/// flatters the architecture. If the gap collapses, the honest answer is
+/// flatters the architecture. If the gap collapses, the right answer is
 /// fewer and broader experts, not a better retirement policy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BaselineRecord {

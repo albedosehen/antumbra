@@ -4,7 +4,7 @@
 
 ## Context
 
-ADR-0018 anchors memories to commits and judges them at recall. The events that make an anchor stale, a merge, a branch deletion, a pull request closing, all originate in the hosting platform, and today Antumbra learns of them only when a session-start hook happens to run inside a checkout. Two consequences follow. First, the squash-merge re-anchor is an unbuilt step that has to live somewhere, and the merge event is the natural place. Second, an organization evaluating Antumbra against a static code-context service asks what remains that only static extraction can provide, and the honest answer is the cross-service dependency graph, because every other capability is reachable from platform events plus the existing ingest.
+ADR-0018 anchors memories to commits and judges them at recall. The events that make an anchor stale, a merge, a branch deletion, a pull request closing, all originate in the hosting platform, and today Antumbra learns of them only when a session-start hook happens to run inside a checkout. Two consequences follow. First, the squash-merge re-anchor is an unbuilt step that has to live somewhere, and the merge event is the natural place. Second, an organization evaluating Antumbra against a static code-context service asks what remains that only static extraction can provide, and the answer is the cross-service dependency graph, because every other capability is reachable from platform events plus the existing ingest.
 
 The obvious way to close that last gap is to adopt tree-sitter extraction. Antumbra has deliberately refused to own parsers (0018): every extractor is a per-language, per-framework heuristic maintained forever, and its output is a snapshot that goes stale silently. A graph built that way would import into Antumbra the very failure mode the rest of the system is designed to avoid.
 
@@ -33,7 +33,7 @@ The graph is built from four evidence sources, each an ordinary memory with prov
 | Learned | Cross-repository co-change, deploy ordering, incidents naming two services, from the GitHub integration and `git-facts` | Medium; grows with recurrence |
 | Claimed and verified | A model reads a service once and claims its dependencies; a claim is stored above a low floor only when a declared or observed source corroborates it | Low until corroborated; the verifier decides |
 
-Blast radius is a weighted traversal over the union that returns each edge's evidence with the answer. An edge reinforced by a fresh observation or declaration gains standing; an edge nobody has seen for a window fades and is eventually tombstoned. The graph stays honest without a cron job that re-extracts it.
+Blast radius is a weighted traversal over the union that returns each edge's evidence with the answer. An edge reinforced by a fresh observation or declaration gains standing; an edge nobody has seen for a window fades and is eventually tombstoned. The graph stays current without a cron job that re-extracts it.
 
 ### 3. What Antumbra does not do
 

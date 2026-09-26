@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "The native GitHub integration: webhook signature verification, the event shapes Antumbra acts on, the pure handlers that re-anchor, orphan, and remember, and the App client that reads repository contents, so the platform's own events keep every memory's git anchor honest."
+description = "The native GitHub integration: webhook signature verification, the event shapes Antumbra acts on, the pure handlers that re-anchor, orphan, and remember, and the App client that reads repository contents, so the platform's own events keep every memory's git anchor accurate."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }

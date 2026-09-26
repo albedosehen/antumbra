@@ -40,7 +40,7 @@ pub struct TrainingRecipe {
 }
 
 impl TrainingRecipe {
-    /// Refuse a recipe no run could honestly train under.
+    /// Refuse a recipe no run could actually train under.
     pub fn validate(&self) -> Result<()> {
         if !(self.learning_rate.is_finite() && self.learning_rate > 0.0) {
             return Err(AntumbraError::other(format!(

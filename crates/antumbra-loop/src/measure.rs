@@ -40,7 +40,7 @@ impl GenerationLoop<'_> {
 
     /// Read this generation through the standing instruments (ADR-0022).
     ///
-    /// `None` unless three things hold, and each `None` is the honest answer
+    /// `None` unless three things hold, and each `None` is the true answer
     /// rather than a degraded one. Something was held out: with no partition
     /// every task was learned from, and a gap between two sets of learned tasks
     /// measures nothing. The trainer confirmed it withheld exactly that: one

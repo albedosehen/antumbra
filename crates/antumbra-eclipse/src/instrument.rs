@@ -57,7 +57,7 @@ impl SizeBand {
 }
 
 /// The two cut points that put a task in a band, taken as terciles of the sizes
-/// actually present. A corpus of one size has one band, which is the honest
+/// actually present. A corpus of one size has one band, which is the true
 /// answer rather than three bands two of which are empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SizeBands {

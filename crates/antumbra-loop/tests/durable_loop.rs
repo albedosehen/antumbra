@@ -626,8 +626,7 @@ async fn a_climb_the_audit_slice_does_not_follow_reads_as_overtuning() -> antumb
 async fn a_climb_the_audit_slice_follows_reads_as_carrying() -> antumbra_core::Result<()> {
     let store = Store::connect_memory(8).await?;
     let partition = antumbra_eclipse::Partition::default();
-    let reports =
-        climbing_run(&store, &RunId::new("run:honest"), partition, 0..10, Some(4)).await?;
+    let reports = climbing_run(&store, &RunId::new("run:carry"), partition, 0..10, Some(4)).await?;
     assert_eq!(
         reports.last().and_then(|r| r.trend),
         Some(antumbra_eclipse::Trend::Carrying)
@@ -715,7 +714,7 @@ async fn failing_an_impossible_task_is_what_should_happen() -> antumbra_core::Re
     let trainer = with_impossible(false);
     let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg);
     let mut head = lp
-        .resume_or_init(&RunId::new("run:honest-impossible"))
+        .resume_or_init(&RunId::new("run:impossible-failed"))
         .await?;
     let report = lp.run_generation(&mut head).await?;
     assert!(report.graduated);

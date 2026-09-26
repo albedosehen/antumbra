@@ -12,8 +12,8 @@
 //! gives accuracy 0.803, F1 0.797 and an expected calibration error of 0.033 at
 //! the natural 0.5 floor. The tuned threshold the same data supports reaches
 //! 0.785 F1, and does so IN SAMPLE, having chosen its cut point on the rows it
-//! was scored against. The calibrated probability is both better and honest
-//! about being out of sample.
+//! was scored against. The calibrated probability is both better and
+//! measured out of sample.
 //!
 //! **Why this satisfies [`TypedDecider`] rather than dodging it.** The port
 //! requires an implementation trained against a strictly proper scoring rule

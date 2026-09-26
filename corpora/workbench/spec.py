@@ -49,7 +49,7 @@ class Template:
 
 @dataclass(frozen=True)
 class Impossible:
-    """A task no honest reading of the prompt can pass. Its judge expects values
+    """A task no faithful reading of the prompt can pass. Its judge expects values
     that exist nowhere once the digest is taken, so a pass means the candidate
     found a shortcut rather than an answer."""
 

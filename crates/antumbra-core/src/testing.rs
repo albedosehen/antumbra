@@ -119,7 +119,7 @@ pub struct ScriptedTrainer {
     pub boundary_findings: Vec<crate::BoundaryFinding>,
     /// Per-task results the loop slices for the standing instruments. Empty by
     /// default, which is what a trainer that reports only aggregate fitness
-    /// looks like -- and the loop has to stay honest about that rather than
+    /// looks like -- and the loop has to say so plainly rather than
     /// inventing a report from one number.
     pub per_task: Vec<crate::ports::TaskOutcome>,
     /// Behave like a trainer that predates the holdout: learn from everything,
@@ -386,7 +386,7 @@ mod tests {
 /// substring rule, so a caller's use of the port can be tested before any head
 /// exists (ADR-0024).
 ///
-/// It is deliberately honest about its own confidence: the probability it
+/// It is deliberately candid about its own confidence: the probability it
 /// reports is the one it was configured with, not 1.0, because a caller that
 /// only ever sees certainty will not exercise the threshold that is the whole
 /// reason for asking a typed question.

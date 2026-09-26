@@ -127,7 +127,7 @@ def audit(python: str, built: Built) -> list[str]:
     if built.reference is not None and not judge.judge(python, spec, built.reference):
         problems.append("the reference fails")
     if built.attempt is not None and judge.judge(python, spec, built.attempt):
-        problems.append("an honest attempt passes an impossible task")
+        problems.append("a faithful attempt passes an impossible task")
     problems.extend(f"'{label}' passes" for label, code in built.forgeries.items() if judge.judge(python, spec, code))
     return problems
 

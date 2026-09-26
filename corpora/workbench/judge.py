@@ -17,7 +17,7 @@ command line reveals the inputs and a hash, not the answers.
 
 What it does not defend against: a candidate that finds a reference solution on
 disk. The impossible tasks exist to catch shortcuts of that kind, because no
-honest reading of their prompt can produce the value they expect.
+faithful reading of their prompt can produce the value they expect.
 """
 
 from __future__ import annotations
