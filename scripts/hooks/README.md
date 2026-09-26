@@ -5,6 +5,7 @@ These are template lifecycle hooks that turn Antumbra into your agent's persiste
 | Script                   | Hook event            | What it does                                                                                                                                                |
 | ------------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `antumbra-session-start` | `SessionStart`        | **Bootstrap**: pull the agent's standing conventions + relevant memory from Antumbra and inject them as opening context.                                    |
+| `antumbra-prompt-recall` | `UserPromptSubmit`    | **Recall**: on every message, recall the three memories most relevant to it, scoped to the repository and branch, and inject them.                            |
 | `antumbra-capture`       | `Stop`, `PreCompact`  | **Capture**: nudge the agent to write non-obvious observations back via `store_memory` before the turn ends or context is compacted (sentinel = fire once). |
 | `strip-attribution`      | `PreToolUse` (git/gh) | **Override**: deny commits/PRs that embed model-vendor attribution, so work is attributed to you.                                                           |
 
@@ -24,6 +25,7 @@ ANTUMBRA_TOOLS=agent                   # on the SERVER: advertise only the eight
 ANTUMBRA_BIN=antumbra                  # the CLI the bootstrap asks for the sovereign-mode block and runs to report merges (optional)
 ANTUMBRA_REANCHOR=1                    # 0: the bootstrap does not report recent merges
 ANTUMBRA_REANCHOR_LOG=~/.antumbra/reanchor.log  # where the last merge report's output goes
+ANTUMBRA_RECALL_BUDGET_SEC=10          # the per-prompt recall's whole wall-clock budget; keep it under the hook's timeout
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
@@ -66,6 +68,8 @@ Pick the block for your OS. Both wire the same three touchpoints; they differ on
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command",
       "command": "bash ./scripts/hooks/antumbra-session-start.sh", "timeout": 10 }]}],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command",
+      "command": "bash ./scripts/hooks/antumbra-prompt-recall.sh", "timeout": 20 }]}],
     "Stop": [{ "hooks": [{ "type": "command",
       "command": "bash ./scripts/hooks/antumbra-capture.sh", "timeout": 5 }]}],
     "PreCompact": [{ "hooks": [{ "type": "command",
@@ -89,6 +93,8 @@ The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machi
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command",
       "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-session-start.ps1", "timeout": 10 }]}],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command",
+      "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-prompt-recall.ps1", "timeout": 20 }]}],
     "Stop": [{ "hooks": [{ "type": "command",
       "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
     "PreCompact": [{ "hooks": [{ "type": "command",
