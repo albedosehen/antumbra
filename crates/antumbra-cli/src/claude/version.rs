@@ -2,7 +2,7 @@
 //! end in a later release, and one loss depends on which switch turned the
 //! flags off, so the doctor compares versions and reads the triggers.
 
-use super::{detect, Inputs, VERIFIED_AGAINST};
+use super::{detect, rules, Inputs, Rule, VERIFIED_AGAINST};
 
 /// Whether `version` is `min` or later, comparing dotted numbers. A part that
 /// does not parse counts as 0.
@@ -23,6 +23,15 @@ pub fn at_least(version: &str, min: &str) -> bool {
         }
     }
     true
+}
+
+/// The rules whose loss lasts in `version`: a loss that ended in it or before
+/// is left out.
+pub fn rules_for(version: &str) -> Vec<Rule> {
+    rules()
+        .into_iter()
+        .filter(|rule| rule.until.is_none_or(|ended| !at_least(version, ended)))
+        .collect()
 }
 
 /// The release the rules are judged for: the installed one when it is known,
@@ -111,6 +120,8 @@ mod tests {
             assert!(standing(&older, id).is_some(), "{id} on 2.1.278");
         }
         assert_eq!(examine(&older).findings.len(), rules().len());
+        assert_eq!(rules_for("2.1.278").len(), rules().len());
+        assert_eq!(rules_for(VERIFIED_AGAINST).len(), rules().len() - 3);
     }
 
     #[test]

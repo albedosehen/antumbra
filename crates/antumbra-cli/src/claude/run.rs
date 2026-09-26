@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use super::{
     apply, auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, reanchor, render,
-    repository_root, rules, skills, Inputs, Standing,
+    repository_root, skills, Inputs, Standing,
 };
 use crate::cli::ClaudeAction;
 
@@ -217,7 +217,10 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             if dry_run {
                 println!("dry run: nothing written");
             }
-            for line in conventions::remember(&call, &rules(), dry_run)? {
+            // The memories say what was checked against the verified release,
+            // so a loss that ended by then is retired from them.
+            let lasting = super::version::rules_for(super::VERIFIED_AGAINST);
+            for line in conventions::remember(&call, &lasting, dry_run)? {
                 println!("{line}");
             }
         }
