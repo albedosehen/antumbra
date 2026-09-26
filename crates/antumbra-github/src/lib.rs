@@ -22,6 +22,7 @@ mod app;
 mod docs;
 mod event;
 mod handlers;
+mod knowledge;
 mod repos;
 mod signature;
 #[cfg(any(test, feature = "testing"))]
@@ -40,6 +41,7 @@ pub use event::{
 pub use handlers::{
     orphan_branch, pull_request_memory, reanchor_merged, Merge, SYSTEM_HOST, SYSTEM_USER,
 };
+pub use knowledge::{AtPath, CheckOutput, KnowledgeDiff, Named};
 pub use repos::{RepoMap, RepoMapError};
 pub use signature::{
     sign, verify, SignatureError, DELIVERY_HEADER, EVENT_HEADER, SIGNATURE_HEADER,

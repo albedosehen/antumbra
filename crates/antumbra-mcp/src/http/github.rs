@@ -21,6 +21,7 @@
 //! each one did.
 
 mod ingest;
+mod knowledge;
 #[cfg(test)]
 mod tests;
 
@@ -61,6 +62,8 @@ pub struct GithubConfig {
     /// Installation tokens, minted on demand and reused until they are about
     /// to expire.
     tokens: Mutex<HashMap<u64, InstallationToken>>,
+    /// Post the knowledge diff on pull requests (off by default).
+    knowledge_diff: bool,
 }
 
 // Hand-written so the secret never reaches a log or a panic message.
@@ -85,7 +88,16 @@ impl GithubConfig {
             app: None,
             api: GithubApi::new(DEFAULT_API_URL),
             tokens: Mutex::new(HashMap::new()),
+            knowledge_diff: false,
         }
+    }
+
+    /// Post the knowledge diff as a check run on every pull request opened or
+    /// pushed to in a mapped repository. Needs the App, with the Checks
+    /// permission (write).
+    pub fn with_knowledge_diff(mut self, on: bool) -> Self {
+        self.knowledge_diff = on;
+        self
     }
 
     /// Let the receiver read repository contents as the App.
@@ -206,6 +218,10 @@ pub struct Outcome {
     /// Documents queued for ingest after this response (the log reports each).
     #[serde(default)]
     pub ingest_queued: usize,
+    /// Whether the knowledge diff was queued, to post as a check run after
+    /// this response.
+    #[serde(default)]
+    pub knowledge_diff_queued: bool,
     /// Why nothing (or not everything) was done.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignored: Option<String>,
@@ -299,6 +315,9 @@ async fn apply_pull_request(state: &Arc<HttpState>, event: &PullRequestEvent) ->
     const KIND: &str = "pull_request";
     let cfg = config(state);
     let repo = event.repository.slug();
+    if knowledge::answers(event) {
+        return Ok(knowledge::queue(state, event));
+    }
     if !event.is_merge() {
         return Ok(Outcome::ignored(
             KIND,
