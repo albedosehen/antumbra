@@ -270,6 +270,8 @@ pub struct App {
     /// The store url this console is bound to, surfaced in the connect panel so
     /// the generated MCP-server command matches what the operator is viewing.
     pub store_url: String,
+    /// Where the console was started, for each memory's scope.
+    pub git: antumbra_core::GitContext,
     pub should_quit: bool,
 }
 
@@ -384,6 +386,7 @@ impl App {
             render_tier: crate::render::RenderTier::default(),
             demo: false,
             store_url: String::new(),
+            git: crate::here::context(&std::env::current_dir().unwrap_or_default()),
             should_quit: false,
         };
         app.reload(store).await?;

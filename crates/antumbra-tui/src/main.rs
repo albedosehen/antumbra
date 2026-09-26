@@ -7,6 +7,7 @@
 mod app;
 mod command;
 mod events;
+mod here;
 mod live;
 mod overlay;
 mod pacing;
