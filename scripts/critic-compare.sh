@@ -21,7 +21,8 @@
 # the running services. Knobs: SKILL (strings), GENERATIONS (3), SAMPLES (4),
 # ROUNDS (2), WEIGHT (the critic's weight, 0.5), RUN (the run name, critic:compare),
 # TWIN (a second critic adapter the critic arm reads its critic against every
-# generation, shaping nothing; none by default) and LOG.
+# generation, shaping nothing; none by default), SEED (the generation seed both
+# arms train under, 0 by default; another seed is another trajectory) and LOG.
 #
 # Both arms train under the same run name, each in its own store. The loop's
 # measurements draw their seeds from the run, so the head-to-head scores
@@ -38,6 +39,7 @@ SAMPLES="${SAMPLES:-4}"
 ROUNDS="${ROUNDS:-2}"
 WEIGHT="${WEIGHT:-0.5}"
 RUN="${RUN:-critic:compare}"
+SEED="${SEED:-0}"
 TWIN="${TWIN:-}"
 LOG="${LOG:-/tmp/critic-compare.log}"
 SRC="$HOME/antumbra-search-src/$SHA"
@@ -86,7 +88,7 @@ for arm in verifier-only critic; do
         --url surrealkv:///reports/store.skv \
         train --algo grpo --corpus "/build/corpora/workbench/$SKILL.json" \
         --run "$RUN" --generations "$GENERATIONS" --samples "$SAMPLES" \
-        --rounds "$ROUNDS" --holdout $extra >"/tmp/critic-compare-$arm.log" 2>&1
+        --rounds "$ROUNDS" --seed "$SEED" --holdout $extra >"/tmp/critic-compare-$arm.log" 2>&1
     status=$?
     cp "/tmp/critic-compare-$arm.log" "$run/train.log"
     minutes=$(( ($(date -u +%s) - start) / 60 ))

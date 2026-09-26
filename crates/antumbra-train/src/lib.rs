@@ -37,6 +37,7 @@ pub mod model;
 pub mod objective;
 pub mod raft;
 pub mod router;
+pub mod seed;
 pub mod teach;
 pub mod trainer;
 

@@ -687,10 +687,38 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The audit slice agrees:** no decision can reach it, and it read higher in the critic arm at both points it was due. The authored judge scores it, so the gain shows on tasks nothing selected on, under the verifier rather than the critic.
    - **How far that goes:**
      - It is one run an arm, on one skill, with one critic.
-     - Training samples are not seeded. The first round's pass rate, drawn before any step, already differed between the arms by 0.06.
+     - The first round's pass rate, drawn before any step, differed between the arms by 0.06. The paired repeat below shows why, and that it is not noise.
      - The live-task scores come from each arm's own admission measurement, which drew its seeds from the arm's run name, so the arms were not scored under the same draws.
 
    So the reading is a strong lead, not the test passed. `critic-compare.sh` now runs both arms under one run name, so the loop's measurements pair across arms. A repeat under another name is what would confirm it.
+
+   **The paired repeat ran, and by the restated test the critic wins.** `critic-compare.sh 13ffe82` ran both arms again on 2026-09-26 under one run name, `critic:compare`, with the twin read every generation.
+
+   **Training is reproducible, not unseeded.** Each arm drew exactly the pass rates it drew before, round for round:
+   - verifier-only: 0.50 and 0.64, 0.61 and 0.67, 0.47 and 0.61;
+   - critic: 0.56 and 0.79, 0.65 and 0.76, 0.55 and 0.70.
+
+   So the first run's caveat about unseeded samples was wrong. The critic arm's first round differs from the verifier-only arm's before any step, and does so the same way both times. That is consistent with the critic's scoring drawing from the sampler's random stream, so the two arms' draws part from the first scored group on.
+
+   **Paired scores on the live tasks.** Admission scored each arm's experts under the same seeds and tasks in both arms, since the seeds come from the shared run name:
+
+   | expert | verifier-only | critic |
+   | --- | ---: | ---: |
+   | generation 0 | 0.52 | 0.89 |
+   | generation 1 | 0.67, then 0.69 | 0.89, then 0.89 |
+   | generation 2 | 0.70 | 0.71, not admitted against its predecessor's 0.89 |
+
+   - **The restated test:** samples to reach the verifier-only arm's final live-task score. The verifier-only arm ended at 0.70 after three generations. The critic arm scored 0.89 after its first, on a third of the samples, under the same measurement.
+   - **The critic under training pressure:**
+
+     | generation | answers scored | correlation | calibration error | recalibrated | twin agreement |
+     | ---: | ---: | ---: | ---: | ---: | ---: |
+     | 0 | 156 | 0.36 | 0.19 | 0.08 | 0.94 |
+     | 1 | 128 | 0.25 | 0.22 | 0.18 | 0.94 |
+     | 2 | 140 | 0.38 | 0.10 | 0.06 | 0.91 |
+
+     The correlation is lower than the offline reading's 0.52 to 0.67. It is read only on the groups the critic shapes, those with both passes and failures, which are the hard ones. The twin's agreement held at 0.94 for two generations and fell to 0.91 in the third, the generation whose graduate was not admitted.
+   - **How far it goes:** one training trajectory an arm. Training is reproducible, so the repeat measured the same experts again under new seeds, and could not show variance between trajectories. That takes a training seed that varies between runs.
 
    **The critic is now read every generation it shapes.** GRPO keeps every answer the critic scored to shape advantage, with the verifier's verdict on it, and reports a `CriticWatch` on the outcome. The loop puts it on the generation's report, and `train` prints it.
    - **Correlation:** the critic's rank correlation with the verifier on those answers, the same number that scales its influence inside a group.
@@ -698,7 +726,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The twin:** `train --critic-twin <adapter>` loads a second critic that scores the same answers and shapes nothing. Its rank agreement with the critic is reported each generation, the signal the record says falls before fitness turns over. `critic-compare.sh` takes it as `TWIN`.
 
    Still to come for this step:
-   - **The record's own test, restated so it can fail:** samples to reach the verifier-only arm's final live-task score, paired across arms, over a repeat.
+   - **A second trajectory an arm:** the restated test passed on one. `train --seed` now shifts every unseeded draw and training shuffle (0 draws as before, so earlier runs reproduce), and `critic-compare.sh` takes it as `SEED`, so a second trajectory is one run away.
    - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's stated limit applies in full: every check here sees only where a verifier can.
    - **Reading the twin's decline:** the watch above reports the twin's agreement every generation, but nothing yet reads a decline across generations or acts on one.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
