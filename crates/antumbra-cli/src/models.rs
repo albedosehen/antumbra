@@ -447,6 +447,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         anyhow::bail!("--critic shapes GRPO's advantages; use it with --algo grpo");
     }
     let critic_twin = args.critic_twin;
+    let seed = args.seed;
     if critic_twin.is_some() && critic.is_none() {
         anyhow::bail!("--critic-twin is read against a critic; give --critic too");
     }
@@ -546,6 +547,10 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         let base_model = cfg.base_model.clone();
         let start = cfg.recipe();
         let loader = CandleModelLoader::new(cfg.clone());
+        antumbra_train::seed::seed_generation(seed);
+        if seed != 0 {
+            println!("generation seed: {seed}");
+        }
         let trainer: Box<dyn Trainer> = match algo.as_str() {
             "grpo" => {
                 let grpo = GrpoTrainer::new(cfg.clone(), loader, corpus, verifier);
@@ -859,6 +864,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             rounds,
             max_new_tokens,
             &algo,
+            seed,
             quantize_base,
             &parent,
             holdout,

@@ -38,6 +38,11 @@ pub struct TrainArgs {
     /// how far the two agree (ADR-0022 S-2). Needs --critic.
     #[arg(long)]
     pub critic_twin: Option<String>,
+    /// The generation seed: shifts every unseeded draw and training shuffle,
+    /// so a run can be repeated as another trajectory rather than the same
+    /// one. 0, the default, draws as every earlier run did.
+    #[arg(long, default_value_t = 0)]
+    pub seed: u64,
     /// Quantize the frozen base to 4-bit Q4_K (QLoRA).
     #[arg(long)]
     pub quantize_base: bool,

@@ -230,9 +230,12 @@ impl QwenCausalLm {
             }
             None => {
                 let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                0xA17_u64
-                    .wrapping_mul(nonce.wrapping_add(1))
-                    .wrapping_add(i as u64)
+                crate::seed::shifted(
+                    0xA17_u64
+                        .wrapping_mul(nonce.wrapping_add(1))
+                        .wrapping_add(i as u64),
+                    crate::seed::generation_seed(),
+                )
             }
         }
     }
@@ -610,7 +613,10 @@ impl QwenCausalLm {
     fn train_batch(&mut self, batch: &[SftExample], per_step: usize) -> Result<f32> {
         let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut order: Vec<usize> = (0..batch.len()).collect();
-        let mut rng = StdRng::seed_from_u64(0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)));
+        let mut rng = StdRng::seed_from_u64(crate::seed::shifted(
+            0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)),
+            crate::seed::generation_seed(),
+        ));
         order.shuffle(&mut rng);
 
         let vars = self.model.varmap.all_vars();
@@ -690,7 +696,10 @@ impl CausalLm for QwenCausalLm {
         // per round.
         let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut order: Vec<usize> = (0..batch.len()).collect();
-        let mut rng = StdRng::seed_from_u64(0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)));
+        let mut rng = StdRng::seed_from_u64(crate::seed::shifted(
+            0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)),
+            crate::seed::generation_seed(),
+        ));
         order.shuffle(&mut rng);
         let mut total = 0.0f32;
         for &i in &order {
