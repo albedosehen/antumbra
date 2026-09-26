@@ -32,8 +32,8 @@ pub(super) fn resource() -> Resource {
         ],
         pinned: vec![],
         pinned_either: vec![],
-        // eval_subject_idx is (subject_kind, subject_id): both are honest
-        // filters, and subject_kind -- the leading column -- the one honest
+        // eval_subject_idx is (subject_kind, subject_id): both are indexed
+        // filters, and subject_kind -- the leading column -- the one indexed
         // sort. created_at is claimed by no index, so the repo's
         // newest-first reads stay its own business rather than a sort this
         // contract promises.

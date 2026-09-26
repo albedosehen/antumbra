@@ -217,7 +217,7 @@ impl DeviceProfile {
 /// `ANTUMBRA_HOST` first, because inside a container the hostname is the
 /// container id: ephemeral, and a node's identity is keyed on its host, so
 /// taking that would make every recreate a new machine. Then the OS name, and
-/// finally `local`, which is honest about knowing nothing rather than
+/// finally `local`, which admits to knowing nothing rather than
 /// inventing something that looks like a hostname.
 pub fn this_host() -> String {
     std::env::var("ANTUMBRA_HOST")

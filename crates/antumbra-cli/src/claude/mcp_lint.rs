@@ -248,7 +248,7 @@ pub struct Finding {
 /// A field counts as bounded by a `maxLength`, or by a description that says
 /// what bounds it. The second is not a loophole: ADR-0023's rule is that a bound
 /// may be lifted by one documented call, and a schema cannot express "900 unless
-/// you asked for `full`". Saying so in the description is the honest form, so
+/// you asked for `full`". Saying so in the description is the accurate form, so
 /// the lint accepts it and the operator reads it.
 pub fn shape_problems(schema: &Value) -> Vec<Problem> {
     fn described(node: &Value) -> bool {

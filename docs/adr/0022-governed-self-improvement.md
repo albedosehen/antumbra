@@ -57,7 +57,7 @@ ADR-0003 already permits the critic to be a shadow that graduates. This record a
 
 **Step aggregation takes the minimum, not the sum**, since summing step rewards pays for verbose vacuous steps. Drift from the frozen base is budgeted by the square root of the divergence with early stopping at the observed turnover, rather than by tuning a penalty coefficient, which mostly slides along the same curve.
 
-**The honest limit, stated here rather than discovered later.** Every check above measures the critic where a verifier can see. The critic exists to densify steps where no verifier can. A critic that correlates beautifully on verifiable slices and is arbitrary on unverifiable ones passes all of it. That is the open crux of this seam, it is unsolved in the literature, and it is why ADR-0003's standing fallback of verifier-only reward remains live rather than vestigial.
+**The limit, stated here rather than discovered later.** Every check above measures the critic where a verifier can see. The critic exists to densify steps where no verifier can. A critic that correlates beautifully on verifiable slices and is arbitrary on unverifiable ones passes all of it. That is the open crux of this seam, it is unsolved in the literature, and it is why ADR-0003's standing fallback of verifier-only reward remains live rather than vestigial.
 
 ### S-3 · The grow step learns where to probe
 
@@ -116,7 +116,7 @@ The asymmetry is not caution for its own sake. Parameter isolation is forgetting
 
 **The gate is re-frozen on a schedule.** Continual mixture-of-experts theory gives a stability result requiring gating updates to stop; indefinite soft retirement by gradient pressure destabilizes load balance as the pool grows. The gate re-opens for training when new experts are admitted, then closes.
 
-**And the population has to earn its keep.** A rolling comparison of full-population routing against a single-best-expert baseline is logged. If that delta collapses, the honest answer is fewer and broader experts, not a better retirement policy, and the record should say so rather than defend the architecture.
+**And the population has to earn its keep.** A rolling comparison of full-population routing against a single-best-expert baseline is logged. If that delta collapses, the right answer is fewer and broader experts, not a better retirement policy, and the record should say so rather than defend the architecture.
 
 ### S-6 · The system does not modify its own source. Refused.
 
@@ -158,8 +158,8 @@ Every one of these is per-tenant and switchable. A tenant that wants none of it 
 
 ## Consequences
 
-- **Positive:** the improvement rate stops being capped by one person's throughput on the trainer; a new domain costs one authored seed instead of a full suite; every capability change keeps a named cause, a frozen artifact, and now an attributable reward source, so the audit story that makes this sellable gets stronger rather than weaker; the boundary engine becomes load-bearing instead of observational; and the instruments added here are worth having even if every seam stayed shut, because the visible-minus-held-out gap and the audit slice measure whether today's loop is honest.
-- **Negative:** four new learned components are four new ways to be subtly wrong, and each needs a holdout, which costs tasks that could have been training. Holdout exhaustion is the structural cost: human-anchored truth is the bottleneck being removed, and every gate here spends some of it. Trust measurement on synthesized verifiers is continuous, not a one-time gate. Recipe search multiplies GPU time per generation on hardware that is already the constraint. And the critic's honest crux is unresolved: it is measured where verifiers see and used where they do not.
+- **Positive:** the improvement rate stops being capped by one person's throughput on the trainer; a new domain costs one authored seed instead of a full suite; every capability change keeps a named cause, a frozen artifact, and now an attributable reward source, so the audit story that makes this sellable gets stronger rather than weaker; the boundary engine becomes load-bearing instead of observational; and the instruments added here are worth having even if every seam stayed shut, because the visible-minus-held-out gap and the audit slice measure whether today's loop is sound.
+- **Negative:** four new learned components are four new ways to be subtly wrong, and each needs a holdout, which costs tasks that could have been training. Holdout exhaustion is the structural cost: human-anchored truth is the bottleneck being removed, and every gate here spends some of it. Trust measurement on synthesized verifiers is continuous, not a one-time gate. Recipe search multiplies GPU time per generation on hardware that is already the constraint. And the critic's central crux is unresolved: it is measured where verifiers see and used where they do not.
 - **Neutral:** none of this changes the serving path or the runtime surface. Every seam is per-tenant and default-off, so a tenant that wants none of it gets exactly today's behaviour, and the seams can land in any order. The refusal of implementation-derived oracles means generated unit tests stay out of the reward path entirely, which will feel like a missing feature to anyone who expects test generation to be the obvious win.
 
 ## Alternatives considered
@@ -336,7 +336,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The record:** a `population_baseline` row per measured generation, holding the routed population's mean, the best single expert, and that expert's mean alone. The difference is what routing adds.
    - **The headroom:** the row also keeps the oracle, the mean of each task's best score among the gate's choice and every expert alone. The warm-start grow run with learned-router admission ended with routing adding nothing over its best single expert. The oracle separates a gate that chooses badly (well above the population) from experts too alike for any routing to help (close to it).
    - **Cost:** it costs one more evaluation of the live tasks per expert, and it is on whenever contribution is measured.
-   - **What it said first:** in the test that pins it down, routing added nothing over sending every task to the one good expert. The record reports that as 0.00 rather than leaving it out. When the rolling difference collapses, the honest answer is fewer and broader experts, as the record says.
+   - **What it said first:** in the test that pins it down, routing added nothing over sending every task to the one good expert. The record reports that as 0.00 rather than leaving it out. When the rolling difference collapses, the right answer is fewer and broader experts, as the record says.
 
    **The gate is re-frozen while the population holds still.** Every `train`, `teach` and `evolve` used to retrain the learned router after it ran, whether or not anything had changed. Now an automatic refresh retrains only when the experts the gate may route to, those with exemplars, are not the ones the stored router was trained over: an expert admitted, demoted, archived or revived. Otherwise the router stays as it was. The gate re-opens when the population changes, then closes. `gate-train` still always retrains.
 
@@ -437,7 +437,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    So on graduations the grow arms tie the status quo and each other. Per unit of compute they come out ahead only because a focused generation is cheaper: 60 to 75 minutes against two hours. That is not the credit objective at work, and by the record's own test the step stays unchecked.
 
    Three readings of the run:
-   - **The guards held.** Admission, twin and leave-one-in together, admitted nothing that would have made the population worse. The paired census read 0.72 every generation in every arm, so every credit was an honest +0.00.
+   - **The guards held.** Admission, twin and leave-one-in together, admitted nothing that would have made the population worse. The paired census read 0.72 every generation in every arm, so every credit was a true +0.00.
    - **That same +0.00 leaves the bandit nothing to learn from.** Credit only moves when a choice changes the population. A policy whose every choice is turned away cannot tell a good region from a bad one, and its choices here were learnability ordered.
    - **The binding constraint is not where to probe but what a probe can produce.** This is the third run to show it. A specialist trained from the base on one region's 32 to 40 tasks does not match a generalist trained on 236, on that region or near it. Diversity rose as designed (entropy 0.53 and coverage 0.38 by generation 3, nothing revived), but a diverse set of weaker candidates is still a set of weaker candidates.
 
@@ -675,7 +675,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    Still to come for this step:
    - **The record's own test, restated so it can fail:** samples to reach the verifier-only arm's final live-task score, paired across arms, over a repeat.
-   - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
+   - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's stated limit applies in full: every check here sees only where a verifier can.
    - **Reading the twin's decline:** the watch above reports the twin's agreement every generation, but nothing yet reads a decline across generations or acts on one.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
 8. Never: S-6.

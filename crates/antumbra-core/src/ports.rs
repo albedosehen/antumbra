@@ -75,7 +75,7 @@ pub struct TrainRequest {
     pub base_model: String,
     pub corpus_task_ids: Vec<String>,
     /// What this run must withhold from learning (ADR-0022). `None` learns from
-    /// every task and measures nothing apart, which is the honest shape for a
+    /// every task and measures nothing apart, which is the right shape for a
     /// run with nothing held out: its generation carries no instruments.
     #[serde(default)]
     pub holdout: Option<Holdout>,
@@ -100,7 +100,7 @@ pub struct TrainRequest {
 
 /// One corpus task, as the final training round found it.
 ///
-/// The loop needs this to say anything honest about a generation. Aggregate
+/// The loop needs this to say anything true about a generation. Aggregate
 /// fitness cannot be sliced -- a visible-minus-held-out gap computed from one
 /// number is not a measurement of anything (ADR-0022) -- and the trainer knows
 /// the per-task answer already, because it is what it averages to get fitness.
@@ -502,8 +502,8 @@ pub enum Answer {
 ///
 /// The contract that makes this worth having is the training objective rather
 /// than the interface: an implementation must be trained against a strictly
-/// proper scoring rule over outcomes a VERIFIER produced, so that reporting an
-/// honest probability is the only way to score well. A head trained on its own
+/// proper scoring rule over outcomes a VERIFIER produced, so that reporting the
+/// true probability is the only way to score well. A head trained on its own
 /// past answers, or on a critic's, violates ADR-0022's anchor invariant and is
 /// not an admissible implementation of this port however well it performs.
 ///

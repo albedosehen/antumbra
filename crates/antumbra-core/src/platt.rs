@@ -27,7 +27,7 @@
 //! rule over outcomes a VERIFIER produced. Both halves hold here: the labels
 //! come from `scripts/d2-labels.sh`, whose verifier is span provenance with the
 //! span excised, derived from no model; and the fit minimises log loss, which is
-//! strictly proper, so reporting an honest probability is the only way to score
+//! strictly proper, so reporting the true probability is the only way to score
 //! well. Fitting on a model's own past answers would violate ADR-0022's anchor
 //! invariant — fitting on a deterministic verifier's does not.
 //!
@@ -177,9 +177,9 @@ mod tests {
     /// wrong ones have a lot. The metric has to separate those or it says
     /// nothing.
     #[test]
-    fn calibration_error_separates_honest_from_overconfident() {
+    fn calibration_error_separates_calibrated_from_overconfident() {
         // Half the samples at p=1.0 and true, half at p=0.0 and false.
-        let honest: Vec<(f32, bool)> = (0..100)
+        let calibrated: Vec<(f32, bool)> = (0..100)
             .map(|i| {
                 if i % 2 == 0 {
                     (1.0, true)
@@ -188,7 +188,7 @@ mod tests {
                 }
             })
             .collect();
-        assert!(expected_calibration_error(&honest, 10) < 0.01);
+        assert!(expected_calibration_error(&calibrated, 10) < 0.01);
 
         // Confidently wrong about everything.
         let wrong: Vec<(f32, bool)> = (0..100)

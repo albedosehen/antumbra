@@ -112,7 +112,7 @@ const RERANK_POOL_MAX: usize = 100;
 /// (ADR-0023 B-2). A default the caller may move with `floor`, never the only
 /// option, because "the best of a bad lot" is occasionally what is wanted.
 ///
-/// Half was the honest starting point while no decider existed and the floor was
+/// Half was the neutral starting point while no decider existed and the floor was
 /// inert: it is where a calibrated probability says "more likely than not".
 /// **Now that a calibrated decider ships, the measurement decides instead**, and
 /// it says half is the wrong side of a flat curve.

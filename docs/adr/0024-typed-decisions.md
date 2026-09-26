@@ -16,7 +16,7 @@ That conflation is structural. One scalar carries two questions, so no threshold
 
 These are one problem wearing two faces: **an uncalibrated number standing in for a decision that has a type.** The gate is principled about the number and still cannot split two questions out of one. Recall is not principled about the number at all.
 
-Two external systems shipped in September 2026 that answer this shape directly. **Jev** (TypeSafe AI, 15 September) and **Laya** (Convai Innovations, 18 September) are non-autoregressive decision models: given a state and a set of typed questions, they answer all of them in a single forward pass with calibrated probabilities instead of generating prose. Laya is ModernBERT-large plus a two-layer decision head, 421M parameters, Apache 2.0, roughly 33ms on a T4, and its training objective is the part that matters here: reinforcement learning against a **strictly proper scoring rule**, under which expected reward is maximised only by reporting honest probabilities.
+Two external systems shipped in September 2026 that answer this shape directly. **Jev** (TypeSafe AI, 15 September) and **Laya** (Convai Innovations, 18 September) are non-autoregressive decision models: given a state and a set of typed questions, they answer all of them in a single forward pass with calibrated probabilities instead of generating prose. Laya is ModernBERT-large plus a two-layer decision head, 421M parameters, Apache 2.0, roughly 33ms on a T4, and its training objective is the part that matters here: reinforcement learning against a **strictly proper scoring rule**, under which expected reward is maximised only by reporting true probabilities.
 
 ## Decision
 
@@ -101,9 +101,9 @@ It was found by disbelieving a good result. Chunking was swept across sizes once
 
 **The fix keeps the determinism and removes the shortcut: the twelve words are excised from the memory they were cut from.** What remains is the passage around them, which concerns the query's subject without containing its words. The verifier stays checkable, reproducible and model-free — the properties that let D-2 be measured on a deployment with no evaluation runs — while no longer being answerable by grep. `scripts/d2-relevance-baseline.sh` now *reads* that label file rather than rebuilding it, because the two scripts each carried a comment insisting their constructions be identical, and they were: identical and identically wrong.
 
-On the honest set, 800 pairs, 400 held out, split by memory:
+On the clean set, 800 pairs, 400 held out, split by memory:
 
-| | accuracy | F1 (honest) | F1 (degenerate) |
+| | accuracy | F1 (clean) | F1 (degenerate) |
 |---|---|---|---|
 | no model — `contains` | 0.500 | **0.000** | **1.000** |
 | joined, mean-pooled | 0.517 | 0.519 | 0.519 |
@@ -114,7 +114,7 @@ On the honest set, 800 pairs, 400 held out, split by memory:
 | best chunk, 450 | 0.558 | 0.540 | 0.599 |
 | **control (cross-encoder)** | 0.802 | **0.785** | 0.782 |
 
-**The most informative row is the control's.** The cross-encoder scores 0.785 on the honest set against 0.782 on the degenerate one — it never touched the shortcut, and was doing real relevance judgement the whole time. The frozen-encoder head fell from 0.940 to 0.613 because exploiting the shortcut was all it was doing. That asymmetry is the strongest evidence in this record that the control is a real instrument and the cheap head is not.
+**The most informative row is the control's.** The cross-encoder scores 0.785 on the clean set against 0.782 on the degenerate one — it never touched the shortcut, and was doing real relevance judgement the whole time. The frozen-encoder head fell from 0.940 to 0.613 because exploiting the shortcut was all it was doing. That asymmetry is the strongest evidence in this record that the control is a real instrument and the cheap head is not.
 
 **So the conclusion is unchanged and its support is not.** Chunking helps, 0.519 to 0.613, which is real but modest; the best chunk size is now 200 and the curve peaks in the middle rather than running to the smallest chunk — agreeing in shape with an independent chunk-and-max-pool measurement for ranking. Chunking remains **necessary and not sufficient** against a 0.785 bar, and a fine-tuned pair encoder with cross-attention is still what D-2 needs.
 
@@ -138,7 +138,7 @@ A second model enters the serving path. It is 421M against a 7 to 8 B base, it s
 
 Laya ships over-confident before temperature calibration, which lands it squarely in ADR-0022's per-generation recalibration step rather than beside it.
 
-The failure mode to watch is a head that is well calibrated on the slices a verifier can see and arbitrary everywhere else. That is the same honest limit ADR-0022 names for the critic, it is unsolved there too, and it is why D-1 keeps the margin as a fallback rather than deleting it.
+The failure mode to watch is a head that is well calibrated on the slices a verifier can see and arbitrary everywhere else. That is the same limit ADR-0022 names for the critic, it is unsolved there too, and it is why D-1 keeps the margin as a fallback rather than deleting it.
 
 ## Alternatives considered
 
@@ -219,7 +219,7 @@ The weights are not where the name suggests. `convaiinnovations/laya` is card-on
 
 It also ships its temperature calibration — a `temperature` array and a `temperature_by_options` map keyed by how many options a question offers. So the card's over-confidence caveat is something the artefact addresses rather than something an adopter inherits, and the per-option-count keying is itself an argument that calibration varies with answer-space size, which is what Validation 4 asks to be sliced by.
 
-**The encoder path is in-stack and the head is not.** `candle-transformers` 0.10.2 ships `modernbert.rs` with `ModernBertClassifier`, `ClassifierConfig` and `ClassifierPooling`, so serving a ModernBERT classifier in-process needs no new dependency and no second runtime. Laya's head is not that classifier: it is a custom two-layer decision head with typed-question prefixes and its own RL configuration, so it must be ported rather than loaded. The honest estimate is therefore encoder free, head written, and the calibration table usable as data.
+**The encoder path is in-stack and the head is not.** `candle-transformers` 0.10.2 ships `modernbert.rs` with `ModernBertClassifier`, `ClassifierConfig` and `ClassifierPooling`, so serving a ModernBERT classifier in-process needs no new dependency and no second runtime. Laya's head is not that classifier: it is a custom two-layer decision head with typed-question prefixes and its own RL configuration, so it must be ported rather than loaded. The estimate is therefore encoder free, head written, and the calibration table usable as data.
 
 Laya's figures are from its own model card and are quoted with its own caveats: 0.766 on typed decisions after fine-tuning against a 0.735 teacher-agreement ceiling, 0.362 zero-shot, sharp degradation past roughly twenty options, weak ordinal scoring, and over-confidence before temperature calibration. The launch benchmarks against Jev were published by one party without access to the other's API, and on Banking77's 77 labels Laya scored 0.425 against Jev's 0.870, which is the large-label-space weakness showing up exactly where the model card says it will. None of those numbers are load-bearing here, because Validation requires Antumbra's own measurement on Antumbra's own outcomes.
 

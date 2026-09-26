@@ -29,7 +29,7 @@ pub(super) fn resource() -> Resource {
             FieldExposure::column("created_at"),
         ],
         // tenant_id rides every read; both composite indexes lead with it,
-        // which is what makes from_id and to_id honest filter claims.
+        // which is what makes from_id and to_id valid filter claims.
         pinned: vec!["tenant_id".into()],
         pinned_either: vec![],
         filterable: vec!["from_id".into(), "to_id".into()],

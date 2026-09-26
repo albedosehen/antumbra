@@ -72,7 +72,7 @@ class AuditTest(unittest.TestCase):
         built = generate.build(PYTHON, "probe", TEMPLATE, draft("def f(x):\n    return x * 2\n", [[1], [2], [-3]]))
         self.assertEqual(generate.audit(PYTHON, built), [])
 
-    def test_an_impossible_task_fails_its_honest_attempt_and_every_forgery(self) -> None:
+    def test_an_impossible_task_fails_its_faithful_attempt_and_every_forgery(self) -> None:
         item = Impossible(
             slug="probe",
             fn="f",

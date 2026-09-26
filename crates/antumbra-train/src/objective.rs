@@ -47,7 +47,7 @@ pub fn causal_lm_loss(
 ///
 /// That property is the whole reason this objective exists rather than any
 /// other. Under a strictly proper rule the expected loss is minimised *only* by
-/// reporting the honest probability, so a head trained against it has no way to
+/// reporting the true probability, so a head trained against it has no way to
 /// score better by being confident than by being right. An accuracy objective,
 /// or a cross-entropy over a hard label, buys a confident answer at the same
 /// price as a calibrated one; this does not, and ADR-0024 turns on the
@@ -158,7 +158,7 @@ mod tests {
 
 /// ADR-0024's calibration objective, and the property that makes it the right
 /// one. These are the tests the record's argument rests on: it claims a head can
-/// be trained to report honest probabilities, and that claim is only as good as
+/// be trained to report true probabilities, and that claim is only as good as
 /// the objective being strictly proper.
 #[cfg(test)]
 mod proper_scoring {
@@ -170,7 +170,7 @@ mod proper_scoring {
     }
 
     /// The expected Brier loss of *reporting* `q` when the world is `p`, which
-    /// is what an honest-reporting argument is actually about. A decision head
+    /// is what a truthful-reporting argument is actually about. A decision head
     /// does not see one outcome; it sees many draws from `p` and is scored on
     /// all of them, so the question is which `q` minimises the average.
     fn expected_loss(q: f32, p: f32, dev: &Device) -> f32 {
@@ -188,14 +188,14 @@ mod proper_scoring {
         p * a + (1.0 - p) * b
     }
 
-    /// **Strict properness**: honesty is the unique minimum. Sweep every report
+    /// **Strict properness**: the true report is the unique minimum. Sweep every report
     /// from 0 to 1 against a world that says 0.7, and the best report is 0.7.
     ///
     /// This is the property ADR-0024 needs and the reason the objective is not
     /// simply accuracy: there is no report that scores better than the truth, so
     /// a head cannot buy a lower loss with confidence it has not earned.
     #[test]
-    fn honesty_is_the_unique_minimum() {
+    fn the_true_report_is_the_unique_minimum() {
         let dev = Device::Cpu;
         let truth = 0.7f32;
         let (mut best_q, mut best) = (0.0f32, f32::MAX);
@@ -216,16 +216,16 @@ mod proper_scoring {
     /// Overconfidence is punished, and so is underconfidence. A rule that only
     /// punished one would be a bias dressed as a loss.
     #[test]
-    fn confidence_beyond_the_evidence_costs_more_than_honesty() {
+    fn confidence_beyond_the_evidence_costs_more_than_the_truth() {
         let dev = Device::Cpu;
         let truth = 0.7f32;
-        let honest = expected_loss(truth, truth, &dev);
+        let truthful = expected_loss(truth, truth, &dev);
         assert!(
-            expected_loss(0.95, truth, &dev) > honest,
+            expected_loss(0.95, truth, &dev) > truthful,
             "claiming 0.95 when the world is 0.70 must cost more than saying 0.70"
         );
         assert!(
-            expected_loss(0.50, truth, &dev) > honest,
+            expected_loss(0.50, truth, &dev) > truthful,
             "hedging to 0.50 when the world is 0.70 must also cost more"
         );
     }

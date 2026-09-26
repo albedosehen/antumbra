@@ -40,8 +40,8 @@ pub(super) fn resource() -> Resource {
         ],
         pinned: vec![],
         pinned_either: vec![],
-        // expert_key_uq is the only ordering index, so key is the one honest
-        // filter and the one honest sort.
+        // expert_key_uq is the only ordering index, so key is the one indexed
+        // filter and the one indexed sort.
         filterable: vec!["key".into()],
         filter_options: Default::default(),
         sortable: vec!["key".into()],

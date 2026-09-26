@@ -33,7 +33,7 @@
 //!
 //! The instruments are worth having even with every seam shut. The consequences
 //! section of the record says so directly: they measure whether today's loop is
-//! honest, which is a question that predates the seams.
+//! sound, which is a question that predates the seams.
 
 pub mod instrument;
 pub mod isomorphic;

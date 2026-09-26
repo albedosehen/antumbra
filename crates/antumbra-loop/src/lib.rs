@@ -92,7 +92,7 @@ pub struct LoopConfig {
     /// The trainer is asked to enforce it, so it changes what a run learns:
     /// held-out and audit tasks are measured and never trained on, and fitness
     /// is computed over visible tasks alone. `None` (the default) trains on
-    /// every task and leaves generations unmeasured, which is the honest shape
+    /// every task and leaves generations unmeasured, which is the right shape
     /// for a run with nothing held out. It is off by default because the corpora
     /// shipped with the repository are a handful of tasks each, and several hash
     /// entirely into the withheld slices.

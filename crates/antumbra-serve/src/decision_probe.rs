@@ -100,7 +100,7 @@ pub enum Pairing {
     /// With the span excised — same memories, same hard negatives, same split —
     /// the shortcut dies (`contains` scores 0.000) and so does most of the gain:
     ///
-    /// | chunk | F1 (honest) | F1 (degenerate) |
+    /// | chunk | F1 (clean) | F1 (degenerate) |
     /// |---|---|---|
     /// | 150 | 0.594 | 0.940 |
     /// | 200 | **0.613** | 0.862 |
@@ -109,7 +109,7 @@ pub enum Pairing {
     /// | 600 | 0.520 | 0.658 |
     ///
     /// Two things survive. Chunking still helps, 0.519 to 0.613, which is real
-    /// but modest. And the honest curve PEAKS IN THE MIDDLE rather than running
+    /// but modest. And the clean curve PEAKS IN THE MIDDLE rather than running
     /// to the smallest chunk, which is what an independent measurement of
     /// chunk-and-max-pool found for ranking (a topical/nonsense gap of 0.149 at
     /// 300 characters against 0.083 unchunked and 0.091 at 120, because very
@@ -266,7 +266,7 @@ pub async fn train_and_score(
     for (row, want) in probs.iter().zip(test.iter().map(|p| p.relevant)) {
         // Half is where a calibrated probability says "more likely than not",
         // and it is the floor recall defaults to. Scoring at the same point the
-        // system will actually use is the only honest comparison.
+        // system will actually use is the only fair comparison.
         match (row[0] >= 0.5, want) {
             (true, true) => tp += 1.0,
             (true, false) => fp += 1.0,
@@ -303,7 +303,7 @@ mod tests {
     /// benchmark's own validity is visible in the same output.
     ///
     /// The cross-encoder scored 0.782 on the degenerate set and 0.785 on the
-    /// honest one, which is worth knowing: it never used the verbatim shortcut,
+    /// clean one, which is worth knowing: it never used the verbatim shortcut,
     /// while the frozen-encoder head fell from 0.940 to 0.613 because that was
     /// all it had been doing.
     ///
