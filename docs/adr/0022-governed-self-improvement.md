@@ -644,8 +644,30 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    At that size a half-split is noise as much as signal, so one reading proves nothing either way. Every slice here is one skill; the per-slice report earns its keep only across several.
 
+   **The record's own test ran, and as stated it cannot tell the arms apart.** `critic-compare.sh 9487fda` ran GRPO on the `strings` skill on 2026-09-26: three generations an arm, four samples, two rounds, held out. One arm took verifier-only reward. The other had this critic shaping its advantages at weight 0.5.
+
+   | | verifier-only | critic |
+   | --- | --- | --- |
+   | wall clock | 104 min | 107 min |
+   | pass rate by round, generation 0 | 0.50, 0.64 | 0.56, 0.79 |
+   | generation 1 | 0.61, 0.67 | 0.65, 0.76 |
+   | generation 2 | 0.47, 0.61 | 0.55, 0.70 |
+   | graduations | 3 | 2 |
+   | the expert's score on the live tasks, generation by generation | 0.47, 0.69, 0.72 | 0.88, 0.90, not admitted (0.77 against 0.86) |
+   | audit slice, generations 0 and 2 (7 tasks) | 0.57, 0.71 | 1.00, 0.86 |
+
+   - **Graduation:** both arms graduated on their first generation, so neither reached it on fewer samples. At a threshold of 0.3, graduation is too easy a mark to measure a critic by.
+   - **What the samples bought:** the critic arm's first expert scored 0.88 on the live tasks. That is above anything the verifier-only arm reached in three generations, 0.72. Each later graduate in both arms was a twin of the one before, admitted only by beating it head to head. The critic arm's third was turned away for scoring 0.77 against its predecessor's 0.86.
+   - **The audit slice agrees:** no decision can reach it, and it read higher in the critic arm at both points it was due. The authored judge scores it, so the gain shows on tasks nothing selected on, under the verifier rather than the critic.
+   - **How far that goes:**
+     - It is one run an arm, on one skill, with one critic.
+     - Training samples are not seeded. The first round's pass rate, drawn before any step, already differed between the arms by 0.06.
+     - The live-task scores come from each arm's own admission measurement, which drew its seeds from the arm's run name, so the arms were not scored under the same draws.
+
+   So the reading is a strong lead, not the test passed. `critic-compare.sh` now runs both arms under one run name, so the loop's measurements pair across arms. A repeat under another name is what would confirm it.
+
    Still to come for this step:
-   - **The record's own test:** fewer samples to graduation with the critic than with verifier-only reward. `critic-compare.sh` runs it with this critic, queued behind the warm-start grow comparison.
+   - **The record's own test, restated so it can fail:** samples to reach the verifier-only arm's final live-task score, paired across arms, over a repeat.
    - **Recalibration and the twin inside the loop,** each generation, and critic-derived labels held to the floor once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
    - **The twin.** A second critic on another seed and slice, kept as an instrument, whose agreement with the first is watched for decline.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.

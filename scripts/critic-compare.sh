@@ -19,7 +19,14 @@
 # Each arm gets a fresh directory under ~/antumbra-critic-runs with its own
 # store. Nothing here touches the deploy checkout, the production database or
 # the running services. Knobs: SKILL (strings), GENERATIONS (3), SAMPLES (4),
-# ROUNDS (2), WEIGHT (the critic's weight, 0.5), LOG.
+# ROUNDS (2), WEIGHT (the critic's weight, 0.5), RUN (the run name, critic:compare)
+# and LOG.
+#
+# Both arms train under the same run name, each in its own store. The loop's
+# measurements draw their seeds from the run, so the head-to-head scores
+# admission takes in one arm are drawn under the same seeds as the other's, and
+# the arms compare pair by pair. A repeat takes another name. Each arm's log is
+# kept in its run directory.
 
 export PATH=$PATH:/run/current-system/sw/bin:/run/wrappers/bin
 SHA="$1"
@@ -29,11 +36,12 @@ GENERATIONS="${GENERATIONS:-3}"
 SAMPLES="${SAMPLES:-4}"
 ROUNDS="${ROUNDS:-2}"
 WEIGHT="${WEIGHT:-0.5}"
+RUN="${RUN:-critic:compare}"
 LOG="${LOG:-/tmp/critic-compare.log}"
 SRC="$HOME/antumbra-search-src/$SHA"
 exec >"$LOG" 2>&1
 set -uo pipefail
-echo "== critic comparison $SHA start $(date -u +%FT%TZ): $SKILL, $GENERATIONS generation(s), critic $CRITIC at $WEIGHT"
+echo "== critic comparison $SHA start $(date -u +%FT%TZ): $SKILL, $GENERATIONS generation(s), critic $CRITIC at $WEIGHT, run $RUN"
 test -f "$CRITIC" || { echo "no critic adapter at $CRITIC"; exit 1; }
 
 rm -rf "$SRC"
@@ -63,9 +71,10 @@ for arm in verifier-only critic; do
         "antumbra-calibrate:$SHA" \
         --url surrealkv:///reports/store.skv \
         train --algo grpo --corpus "/build/corpora/workbench/$SKILL.json" \
-        --run "critic:$arm" --generations "$GENERATIONS" --samples "$SAMPLES" \
+        --run "$RUN" --generations "$GENERATIONS" --samples "$SAMPLES" \
         --rounds "$ROUNDS" --holdout $extra >"/tmp/critic-compare-$arm.log" 2>&1
     status=$?
+    cp "/tmp/critic-compare-$arm.log" "$run/train.log"
     minutes=$(( ($(date -u +%s) - start) / 60 ))
     graduated=$(grep -c "graduated=true" "/tmp/critic-compare-$arm.log" || true)
     echo "== $arm: exit $status, $minutes min, $graduated graduation(s), run $run"
