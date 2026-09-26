@@ -14,7 +14,7 @@ use serde_json::json;
 
 use std::sync::Arc;
 
-use antumbra_core::critic::shaped_advantages;
+use antumbra_core::critic::{shaped_advantages, watch};
 use antumbra_core::ports::{Critic, TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{
     count_grant, AntumbraError, JudgedSample, Result, RunId, TrainingRecipe, VerifierGrant,
@@ -154,21 +154,44 @@ pub trait GrpoModelLoader: Send + Sync {
 pub struct CriticShaping {
     pub critic: Arc<dyn Critic>,
     pub weight: f32,
+    /// A second critic, trained on another seed, that scores the same
+    /// answers and shapes nothing: its agreement with the critic is the
+    /// instrument the record keeps it for.
+    pub twin: Option<Arc<dyn Critic>>,
+}
+
+/// Each completion's score from `critic`; `None` when any went unscored.
+async fn scored_by(
+    critic: &dyn Critic,
+    prompt: &str,
+    samples: &[GrpoSample],
+) -> Result<Option<Vec<f32>>> {
+    let mut out = Vec::with_capacity(samples.len());
+    for sample in samples {
+        match critic.score(prompt, &sample.completion).await? {
+            Some(score) => out.push(score),
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(out))
 }
 
 impl CriticShaping {
     /// Each completion's score; `None` when any went unscored, and then the
     /// group is not shaped at all.
     async fn scores(&self, prompt: &str, samples: &[GrpoSample]) -> Result<Option<Vec<f32>>> {
-        let mut out = Vec::with_capacity(samples.len());
-        for sample in samples {
-            match self.critic.score(prompt, &sample.completion).await? {
-                Some(score) => out.push(score),
-                None => return Ok(None),
-            }
-        }
-        Ok(Some(out))
+        scored_by(self.critic.as_ref(), prompt, samples).await
     }
+}
+
+/// What the critic scored over a run, for its watch.
+#[derive(Default)]
+struct Watched {
+    scores: Vec<f32>,
+    passed: Vec<bool>,
+    twin: Vec<f32>,
+    /// A group the twin could not score: its agreement is then unread.
+    twin_missed: bool,
 }
 
 /// Run GRPO for `cfg.rounds` rounds (group size = `cfg.samples_per_task`) and
@@ -198,6 +221,7 @@ pub async fn grpo_train(
     // Every verdict a named verifier gave on a learned task, for the loop's
     // recheck against anchored truth.
     let mut judged: Vec<JudgedSample> = Vec::new();
+    let mut watched = Watched::default();
 
     let last_round = cfg.rounds.saturating_sub(1);
     for round in 0..cfg.rounds {
@@ -276,7 +300,15 @@ pub async fn grpo_train(
             if let Some(shaping) = critic {
                 if let Some(scores) = shaping.scores(&task.prompt, &samples).await? {
                     let bits: Vec<bool> = rewards.iter().map(|&r| r > 0.0).collect();
+                    if let Some(twin) = &shaping.twin {
+                        match scored_by(twin.as_ref(), &task.prompt, &samples).await? {
+                            Some(t) => watched.twin.extend(t),
+                            None => watched.twin_missed = true,
+                        }
+                    }
                     advantages = shaped_advantages(&bits, &scores, shaping.weight);
+                    watched.scores.extend(scores);
+                    watched.passed.extend(bits);
                 }
             }
             // The group steps, so every pass in it is reward granted.
@@ -324,6 +356,11 @@ pub async fn grpo_train(
         recipe: None,
         granted_by,
         judged,
+        critic_watch: critic.map(|shaping| {
+            let twin =
+                (shaping.twin.is_some() && !watched.twin_missed).then_some(watched.twin.as_slice());
+            watch(&watched.scores, &watched.passed, twin)
+        }),
     })
 }
 
@@ -523,6 +560,25 @@ mod tests {
         (lm.stepped.remove(0), out)
     }
 
+    /// Every answer the critic scored is read against the verifier, and a
+    /// twin scoring the same answers is read against the critic.
+    #[tokio::test]
+    async fn a_critic_is_watched_against_the_verifier_and_its_twin() {
+        let (_, plain) = stepped_with(None).await;
+        assert_eq!(plain.critic_watch, None);
+        let shaping = CriticShaping {
+            critic: Arc::new(Digit { invert: false }),
+            weight: 1.0,
+            twin: Some(Arc::new(Digit { invert: true })),
+        };
+        let (_, out) = stepped_with(Some(shaping)).await;
+        let w = out.critic_watch.expect("watched");
+        assert_eq!(w.n, 4);
+        assert!(w.correlation.unwrap() > 0.0, "{w:?}");
+        // The inverted twin ranks the answers against the critic.
+        assert!(w.twin_agreement.unwrap() < 0.0, "{w:?}");
+    }
+
     #[tokio::test]
     async fn a_critic_reorders_only_inside_the_verifiers_parts_and_fitness_ignores_it() {
         let (plain, plain_out) = stepped_with(None).await;
@@ -530,6 +586,7 @@ mod tests {
         let tracking = CriticShaping {
             critic: Arc::new(Digit { invert: false }),
             weight: 1.0,
+            twin: None,
         };
         let (shaped, out) = stepped_with(Some(tracking)).await;
         // "PASS 9" over "PASS 3" and "FAIL 7" over "FAIL 1", and every pass
@@ -545,6 +602,7 @@ mod tests {
         let inverted = CriticShaping {
             critic: Arc::new(Digit { invert: true }),
             weight: 1.0,
+            twin: None,
         };
         let (flipped, _) = stepped_with(Some(inverted)).await;
         assert!(

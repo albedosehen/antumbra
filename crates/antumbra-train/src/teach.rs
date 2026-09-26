@@ -176,6 +176,7 @@ pub async fn capture_corrections(
         recipe: None,
         granted_by,
         judged,
+        critic_watch: None,
     })
 }
 

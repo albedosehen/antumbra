@@ -243,6 +243,9 @@ pub struct GenerationReport {
     /// The task scores the contribution measurement asked for, and how many
     /// of them the run had already paid for.
     pub contribution_scores: Evaluations,
+    /// How the critic that shaped this generation read against the verifier
+    /// and its twin (ADR-0022 S-2). `None` without a critic.
+    pub critic: Option<antumbra_core::critic::CriticWatch>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -461,6 +464,7 @@ impl<'a> GenerationLoop<'a> {
             rechecks,
             withdrawn,
             contribution_scores: self.scores.counted().since(scored_before),
+            critic: outcome.critic_watch.clone(),
         })
     }
 

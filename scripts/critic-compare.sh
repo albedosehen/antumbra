@@ -19,8 +19,9 @@
 # Each arm gets a fresh directory under ~/antumbra-critic-runs with its own
 # store. Nothing here touches the deploy checkout, the production database or
 # the running services. Knobs: SKILL (strings), GENERATIONS (3), SAMPLES (4),
-# ROUNDS (2), WEIGHT (the critic's weight, 0.5), RUN (the run name, critic:compare)
-# and LOG.
+# ROUNDS (2), WEIGHT (the critic's weight, 0.5), RUN (the run name, critic:compare),
+# TWIN (a second critic adapter the critic arm reads its critic against every
+# generation, shaping nothing; none by default) and LOG.
 #
 # Both arms train under the same run name, each in its own store. The loop's
 # measurements draw their seeds from the run, so the head-to-head scores
@@ -37,6 +38,7 @@ SAMPLES="${SAMPLES:-4}"
 ROUNDS="${ROUNDS:-2}"
 WEIGHT="${WEIGHT:-0.5}"
 RUN="${RUN:-critic:compare}"
+TWIN="${TWIN:-}"
 LOG="${LOG:-/tmp/critic-compare.log}"
 SRC="$HOME/antumbra-search-src/$SHA"
 exec >"$LOG" 2>&1
@@ -63,6 +65,10 @@ for arm in verifier-only critic; do
     if [ "$arm" = "critic" ]; then
         cp "$CRITIC" "$run/critic.safetensors"
         extra="--critic /reports/critic.safetensors --critic-weight $WEIGHT"
+        if [ -n "$TWIN" ]; then
+            cp "$TWIN" "$run/twin.safetensors"
+            extra="$extra --critic-twin /reports/twin.safetensors"
+        fi
     fi
     start=$(date -u +%s)
     docker run --rm --device nvidia.com/gpu=all \
@@ -78,6 +84,6 @@ for arm in verifier-only critic; do
     minutes=$(( ($(date -u +%s) - start) / 60 ))
     graduated=$(grep -c "graduated=true" "/tmp/critic-compare-$arm.log" || true)
     echo "== $arm: exit $status, $minutes min, $graduated graduation(s), run $run"
-    grep -E "^gen |held-out gap" "/tmp/critic-compare-$arm.log" | tail -12
+    grep -E "^gen |held-out gap|critic over" "/tmp/critic-compare-$arm.log" | tail -16
 done
 echo "== critic comparison $SHA end $(date -u +%FT%TZ)"

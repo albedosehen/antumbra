@@ -446,6 +446,10 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     if critic.is_some() && algo != "grpo" {
         anyhow::bail!("--critic shapes GRPO's advantages; use it with --algo grpo");
     }
+    let critic_twin = args.critic_twin;
+    if critic_twin.is_some() && critic.is_none() {
+        anyhow::bail!("--critic-twin is read against a critic; give --critic too");
+    }
     let quantize_base = args.quantize_base;
     let parent = args.parent;
     let holdout = args.holdout;
@@ -553,7 +557,18 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                             ModelLoader::load(&judge, &cfg.base_model, Some(adapter)).await?;
                         println!("critic: {adapter} at weight {critic_weight}");
                         let critic = antumbra_train::critic::ModelCritic::new(Box::new(model));
-                        Box::new(grpo.with_critic(std::sync::Arc::new(critic), critic_weight))
+                        let shaped = grpo.with_critic(std::sync::Arc::new(critic), critic_weight);
+                        match &critic_twin {
+                            Some(twin) => {
+                                let model =
+                                    ModelLoader::load(&judge, &cfg.base_model, Some(twin)).await?;
+                                println!("critic twin: {twin}, watched and shaping nothing");
+                                let twin =
+                                    antumbra_train::critic::ModelCritic::new(Box::new(model));
+                                Box::new(shaped.with_critic_twin(std::sync::Arc::new(twin)))
+                            }
+                            None => Box::new(shaped),
+                        }
                     }
                     None => Box::new(grpo),
                 }
@@ -685,6 +700,17 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     nearest: Some((id, s)),
                 }) => println!("        admitted: nearest expert {id} at similarity {s:.3}"),
                 _ => {}
+            }
+            if let Some(w) = &r.critic {
+                let read = |v: Option<f32>| v.map_or("-".to_string(), |v| format!("{v:.2}"));
+                println!(
+                    "        critic over {} answer(s): correlation {}, calibration error {} ({} recalibrated), twin agreement {}",
+                    w.n,
+                    read(w.correlation),
+                    read(w.ece),
+                    read(w.recalibrated_ece),
+                    read(w.twin_agreement)
+                );
             }
             for c in &r.rechecks {
                 let verdict = c

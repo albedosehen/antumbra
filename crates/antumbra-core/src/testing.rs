@@ -141,6 +141,8 @@ pub struct ScriptedTrainer {
     pub granted_by: Vec<crate::VerifierGrant>,
     /// The answers a run reports its named verifiers judged.
     pub judged: Vec<crate::JudgedSample>,
+    /// How a run reports its critic read.
+    pub critic_watch: Option<crate::critic::CriticWatch>,
 }
 
 /// The recipe a scripted trainer is configured with.
@@ -165,6 +167,7 @@ impl ScriptedTrainer {
             remeasured: None,
             granted_by: Vec::new(),
             judged: Vec::new(),
+            critic_watch: None,
         }
     }
 
@@ -182,6 +185,7 @@ impl ScriptedTrainer {
             remeasured: None,
             granted_by: Vec::new(),
             judged: Vec::new(),
+            critic_watch: None,
         }
     }
 
@@ -232,6 +236,7 @@ impl Trainer for ScriptedTrainer {
             },
             granted_by: self.granted_by.clone(),
             judged: self.judged.clone(),
+            critic_watch: self.critic_watch.clone(),
         })
     }
 

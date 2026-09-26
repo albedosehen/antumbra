@@ -163,6 +163,11 @@ pub struct TrainOutcome {
     /// truth (ADR-0022 S-4).
     #[serde(default)]
     pub judged: Vec<crate::verifier::JudgedSample>,
+    /// How the critic that shaped this run read against the verifier, and
+    /// against its twin, on the answers it scored (ADR-0022 S-2). `None`
+    /// without a critic.
+    #[serde(default)]
+    pub critic_watch: Option<crate::critic::CriticWatch>,
 }
 
 /// Measure a trained shadow again for graduation (ADR-0022 S-1): the

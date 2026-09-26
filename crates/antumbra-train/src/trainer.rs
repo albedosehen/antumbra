@@ -239,7 +239,21 @@ impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
         critic: Arc<dyn antumbra_core::ports::Critic>,
         weight: f32,
     ) -> Self {
-        self.shaping = Some(CriticShaping { critic, weight });
+        self.shaping = Some(CriticShaping {
+            critic,
+            weight,
+            twin: None,
+        });
+        self
+    }
+
+    /// Have `twin` score every answer the critic scores, shaping nothing, so
+    /// each generation reports how far the two agree (ADR-0022 S-2). Without
+    /// a critic it does nothing.
+    pub fn with_critic_twin(mut self, twin: Arc<dyn antumbra_core::ports::Critic>) -> Self {
+        if let Some(shaping) = &mut self.shaping {
+            shaping.twin = Some(twin);
+        }
         self
     }
 }
