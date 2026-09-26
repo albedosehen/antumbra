@@ -85,6 +85,17 @@ The three levels of rule that have no repository map onto 0017's hierarchy: a de
 6. A read-only page in the console (in). It queries nothing: the rules and the counters are keyed memories among the ones the console already loads and already watches, so the page is a pure reading of them, made once per reload. The keys' spelling moved to `antumbra_core::keyed` so the CLI that writes them and the console that reads them cannot drift apart.
 7. `apply` (in), and the handoff compartment as a roadmap entry (in: R-7 in `docs/roadmap.md`).
 
+**Re-verified against 2.1.283 on 2026-09-26.** Three losses ended, one depends on the switch, and one is new:
+- **Ended:**
+  - `AGENTS.md` is read with telemetry off from 2.1.281, when no `CLAUDE.md` or `CLAUDE.local.md` sits at or above the working directory.
+  - Auto mode is the built-in starting mode for terminal and VS Code sessions from 2.1.283.
+  - The VS Code starting-mode loss is no longer on the list.
+
+  Each rule now carries the release its loss ended in. The doctor and the brief drop it for that release and later: the installed release when the doctor asks, and the verified one in the brief, which does not.
+- **Depends on the switch:** from 2.1.283, Remote Control stays available when only `DISABLE_TELEMETRY` or `DO_NOT_TRACK` turned the flags off, unless the organization requires Trusted Devices. With the traffic or flag switch it is still lost. The doctor reads the triggers and reports it either way, and the brief no longer tells the agent it is gone when it is not.
+- **New:** a large paste now reaches Claude as typed text, with what sits behind a `[Pasted text #N]` placeholder unmarked. It is recorded as an accepted loss.
+- **The bridge stays:** an untracked `CLAUDE.local.md` that imports `AGENTS.md` still counts as instructions, so a bridged repository reads `AGENTS.md` through it on any release.
+
 ## Consequences
 
 - **Positive:** turning telemetry off stops costing a user features they were never told were attached to it. The doctor is useful to anyone in this state, with or without the rest of Antumbra. The rules become recallable knowledge with an expiry instead of tribal knowledge.

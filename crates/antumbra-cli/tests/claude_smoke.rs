@@ -79,8 +79,9 @@ fn brief_is_silent_outside_sovereign_mode_and_speaks_inside_it() -> anyhow::Resu
     assert!(loud.status.success(), "{}", text(&loud.stderr));
     let said = text(&loud.stdout);
     assert!(said.contains("Sovereign mode"), "{said}");
-    assert!(said.contains("AGENTS.md"), "{said}");
-    assert!(said.contains("Read it now"), "{said}");
+    // From 2.1.281 an AGENTS.md with no CLAUDE.md beside it is read with the
+    // flags off, so the agent is not told to read it again.
+    assert!(!said.contains("Read it now"), "{said}");
     Ok(())
 }
 
@@ -440,7 +441,9 @@ fn apply_writes_only_the_env_names_and_keeps_a_backup() -> anyhow::Result<()> {
     assert!(out.status.success(), "{}", text(&out.stderr));
     let said = text(&out.stdout);
     assert!(said.contains("MCP_PROTOCOL_NEGOTIATION"), "{said}");
-    assert!(said.contains("left     permissions.defaultMode"), "{said}");
+    // Auto mode is the built-in start from 2.1.283, so there is no default
+    // mode to leave for the user.
+    assert!(!said.contains("permissions.defaultMode"), "{said}");
 
     let after = std::fs::read_to_string(&settings)?;
     // The user's bytes are all still there, in their order, with their tabs.
