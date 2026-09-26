@@ -668,10 +668,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    So the reading is a strong lead, not the test passed. `critic-compare.sh` now runs both arms under one run name, so the loop's measurements pair across arms. A repeat under another name is what would confirm it.
 
+   **The critic is now read every generation it shapes.** GRPO keeps every answer the critic scored to shape advantage, with the verifier's verdict on it, and reports a `CriticWatch` on the outcome. The loop puts it on the generation's report, and `train` prints it.
+   - **Correlation:** the critic's rank correlation with the verifier on those answers, the same number that scales its influence inside a group.
+   - **Calibration error:** raw, and after an isotonic map fitted on every other answer and read on the rest. That is the per-generation recalibration the record asks for. Shaping reads the critic by rank, which a monotone map does not change, so recalibration here is an instrument rather than a correction.
+   - **The twin:** `train --critic-twin <adapter>` loads a second critic that scores the same answers and shapes nothing. Its rank agreement with the critic is reported each generation, the signal the record says falls before fitness turns over. `critic-compare.sh` takes it as `TWIN`.
+
    Still to come for this step:
    - **The record's own test, restated so it can fail:** samples to reach the verifier-only arm's final live-task score, paired across arms, over a repeat.
-   - **Recalibration and the twin inside the loop,** each generation, and critic-derived labels held to the floor once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
-   - **The twin.** A second critic on another seed and slice, kept as an instrument, whose agreement with the first is watched for decline.
+   - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's honest limit applies in full: every check here sees only where a verifier can.
+   - **Reading the twin's decline:** the watch above reports the twin's agreement every generation, but nothing yet reads a decline across generations or acts on one.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
 8. Never: S-6.
 

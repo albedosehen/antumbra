@@ -20,6 +20,8 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::ports::CriticScore;
 
 /// A trace's score from its steps: the weakest one, not the sum, since a sum
@@ -261,6 +263,90 @@ pub fn agreement(a: &[f32], b: &[f32]) -> Option<f32> {
     spearman(a, b)
 }
 
+/// How a critic read during one generation's training (ADR-0022 S-2): on the
+/// answers it scored to shape advantage, against the verifier's verdicts on
+/// the same answers, and against its twin. The record asks for calibration to
+/// be re-earned every generation, because the policy the critic judges changes
+/// every generation, and for the twin's agreement to be watched, because it
+/// falls under optimization pressure before fitness turns over. Shaping reads
+/// the critic by rank, which a monotone recalibration does not change, so the
+/// recalibration here is an instrument, not a correction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CriticWatch {
+    /// Answers scored.
+    pub n: u32,
+    /// Rank correlation with the verifier's verdicts.
+    pub correlation: Option<f32>,
+    /// Calibration error of the raw scores.
+    pub ece: Option<f32>,
+    /// Calibration error after an isotonic map fitted on every other answer
+    /// and read on the rest.
+    pub recalibrated_ece: Option<f32>,
+    /// Rank agreement with the twin on the same answers, when there is one.
+    #[serde(default)]
+    pub twin_agreement: Option<f32>,
+}
+
+/// Calibration error over `scored` as one slice, with ten bins.
+fn ece(scored: &[Scored]) -> Option<f32> {
+    let all: Vec<Scored> = scored
+        .iter()
+        .map(|s| Scored {
+            slice: "all".into(),
+            ..s.clone()
+        })
+        .collect();
+    calibration_by_slice(&all, 10).first().map(|c| c.ece)
+}
+
+/// Read a critic's `scores` against the verifier's `passed` on the same
+/// answers, and against `twin`'s scores on them when given.
+pub fn watch(scores: &[f32], passed: &[bool], twin: Option<&[f32]>) -> CriticWatch {
+    let n = scores.len().min(passed.len());
+    let scored: Vec<Scored> = (0..n)
+        .map(|i| Scored {
+            slice: "all".into(),
+            predicted: scores[i],
+            passed: passed[i],
+        })
+        .collect();
+    let verdicts: Vec<f32> = passed[..n]
+        .iter()
+        .map(|&p| if p { 1.0 } else { 0.0 })
+        .collect();
+    let (mut fit, mut held) = (Vec::new(), Vec::new());
+    for (i, s) in scored.iter().enumerate() {
+        if i % 2 == 0 {
+            fit.push(s);
+        } else {
+            held.push(s);
+        }
+    }
+    let recalibrated_ece = Isotonic::fit(
+        &fit.iter().map(|s| s.predicted).collect::<Vec<_>>(),
+        &fit.iter().map(|s| s.passed).collect::<Vec<_>>(),
+    )
+    .and_then(|map| {
+        let mapped: Vec<Scored> = held
+            .iter()
+            .map(|s| Scored {
+                predicted: map.apply(s.predicted),
+                ..(*s).clone()
+            })
+            .collect();
+        ece(&mapped)
+    });
+    CriticWatch {
+        n: u32::try_from(n).unwrap_or(u32::MAX),
+        correlation: spearman(&scores[..n], &verdicts),
+        ece: ece(&scored),
+        recalibrated_ece,
+        twin_agreement: twin
+            .filter(|t| t.len() >= n)
+            .and_then(|t| agreement(&scores[..n], &t[..n])),
+    }
+}
+
 /// The exogenous floor: how many labels derived from the critic (critic-scored
 /// or critic-selected) a training set with `fresh` fresh verifier labels may
 /// hold, so that the fresh share is at least `floor`. A floor of 1 admits none;
@@ -281,6 +367,28 @@ mod tests {
 
     fn group() -> Vec<bool> {
         vec![true, true, true, false, false, false]
+    }
+
+    #[test]
+    fn a_watch_reads_the_critic_against_the_verifier_and_its_twin() {
+        let scores = [0.9, 0.8, 0.7, 0.3, 0.2, 0.1];
+        let passed = [true, true, true, false, false, false];
+        let agreeing = [0.95, 0.85, 0.6, 0.4, 0.25, 0.05];
+        let w = watch(&scores, &passed, Some(&agreeing));
+        assert_eq!(w.n, 6);
+        assert!(w.correlation.unwrap() > 0.8);
+        assert_eq!(w.twin_agreement, Some(1.0));
+        assert!(w.ece.is_some() && w.recalibrated_ece.is_some());
+        // A twin that ranks the answers the other way round disagrees.
+        let inverted: Vec<f32> = scores.iter().map(|s| 1.0 - s).collect();
+        assert_eq!(
+            watch(&scores, &passed, Some(&inverted)).twin_agreement,
+            Some(-1.0)
+        );
+        assert_eq!(watch(&scores, &passed, None).twin_agreement, None);
+        // Nothing scored reads nothing.
+        let empty = watch(&[], &[], None);
+        assert_eq!((empty.n, empty.correlation), (0, None));
     }
 
     #[test]

@@ -33,6 +33,11 @@ pub struct TrainArgs {
     /// above every fail.
     #[arg(long, default_value_t = 0.5)]
     pub critic_weight: f32,
+    /// A second critic adapter, trained on another seed, that scores every
+    /// answer the critic scores and shapes nothing. Each generation reports
+    /// how far the two agree (ADR-0022 S-2). Needs --critic.
+    #[arg(long)]
+    pub critic_twin: Option<String>,
     /// Quantize the frozen base to 4-bit Q4_K (QLoRA).
     #[arg(long)]
     pub quantize_base: bool,

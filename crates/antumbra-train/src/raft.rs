@@ -144,6 +144,7 @@ pub async fn raft_train(
         recipe: None,
         granted_by,
         judged,
+        critic_watch: None,
     })
 }
 
