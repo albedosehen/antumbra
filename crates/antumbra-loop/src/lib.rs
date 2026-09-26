@@ -42,6 +42,7 @@ mod merging;
 mod recheck;
 mod recipe;
 mod retirement;
+mod scores;
 pub mod search;
 mod serving;
 pub use admission::{Admission, AdmissionPolicy};
@@ -53,6 +54,7 @@ use measure::Measurement;
 pub use merging::{Merge, MergePolicy};
 pub use recheck::{Recheck, MAX_RECHECKED};
 pub use retirement::{confirms, warnings, Detection, RetirementPolicy, Warning};
+pub use scores::Evaluations;
 
 /// The shadow a generation of a run trains. It also names that generation's
 /// recipe row, so the two are found from each other.
@@ -238,6 +240,9 @@ pub struct GenerationReport {
     /// The named verifiers the shadow trained under that no longer grant
     /// reward. A shadow with any does not graduate.
     pub withdrawn: Vec<antumbra_core::VerifierId>,
+    /// The task scores the contribution measurement asked for, and how many
+    /// of them the run had already paid for.
+    pub contribution_scores: Evaluations,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -267,6 +272,7 @@ pub struct GenerationLoop<'a> {
     embedder: &'a dyn Embedder,
     cfg: LoopConfig,
     rechecker: Option<&'a dyn Verifier>,
+    scores: scores::ScoreCache,
 }
 
 impl<'a> GenerationLoop<'a> {
@@ -282,6 +288,7 @@ impl<'a> GenerationLoop<'a> {
             embedder,
             cfg,
             rechecker: None,
+            scores: scores::ScoreCache::default(),
         }
     }
 
@@ -309,6 +316,7 @@ impl<'a> GenerationLoop<'a> {
     pub async fn run_generation(&self, head: &mut GenerationHead) -> Result<GenerationReport> {
         let run_id = head.run_id.clone();
         let generation = head.generation;
+        let scored_before = self.scores.counted();
 
         // grow -> explore: spawn the shadows that hold the plasticity and
         // train them on verified outcomes, withholding what the partition keeps
@@ -452,6 +460,7 @@ impl<'a> GenerationLoop<'a> {
             census,
             rechecks,
             withdrawn,
+            contribution_scores: self.scores.counted().since(scored_before),
         })
     }
 

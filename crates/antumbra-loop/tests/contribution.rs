@@ -251,16 +251,32 @@ async fn contribution_is_measured_on_its_schedule_and_off_by_default() -> Result
 
 /// Every generation's measurement draws the same seeds, so an unchanged
 /// population measures the same and what the grow step credits is change,
-/// not seed noise.
+/// not seed noise. The same adapters under the same seeds score the same, so
+/// the second generation asks the trainer for nothing it asked before.
 #[tokio::test]
 async fn every_generation_is_measured_under_the_same_seeds() -> Result<()> {
     let store = population().await?;
     let trainer = Scorer::default();
-    GenerationLoop::new(&store, &trainer, &Axes, every(1))
+    let reports = GenerationLoop::new(&store, &trainer, &Axes, every(1))
         .run_until(&RunId::new("run:paired"), 2)
         .await?;
     let asked = trainer.asked.lock().unwrap().clone();
-    assert!(asked.len() >= 6, "two generations measured: {asked:?}");
+    assert_eq!(asked.len(), 3, "the first generation only: {asked:?}");
     assert!(asked.iter().all(|r| r.seeds == asked[0].seeds));
+
+    let first = reports[0].contribution_scores;
+    assert!(first.asked > 0);
+    assert_eq!(first.reused, 0);
+    let second = reports[1].contribution_scores;
+    assert_eq!(second.asked, first.asked);
+    assert_eq!(second.reused, second.asked);
+    // Measured the same, from the scores it already had.
+    let read = |r: &antumbra_loop::GenerationReport| -> Vec<(ExpertId, Option<f32>, Option<f32>)> {
+        r.contribution
+            .iter()
+            .map(|c| (c.expert.clone(), c.with, c.without))
+            .collect()
+    };
+    assert_eq!(read(&reports[0]), read(&reports[1]));
     Ok(())
 }

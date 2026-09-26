@@ -407,6 +407,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The rule:** the candidate joins only if the population does better on them with it. One the gate would route nothing to adds nothing, and is not admitted either.
    - **The pinning test:** a specialist that scores 1.0 on its own tasks against the generalist's 0.8 is turned away, because joining it makes four other tasks escalate to the base model. The population would score 0.33 on the six it reroutes, against 0.80 without it.
    - **The paired census:** the contribution measurement, and so the census, now draws the same seeds every generation. An unchanged population measures the same, and the credit a choice realizes is change, not noise.
+   - **What the pairing also buys:** a frozen expert and the base model score a task the same way under the same seeds. So the loop keeps every contribution score it has taken for the rest of the run, and asks the trainer only for scores it does not have. With the baseline on, every expert is scored on every live task each generation. By the fourth generation of a grow run, the new expert's tasks are then about all that costs an evaluation.
 
    **The comparison ran, and the grow step did not beat its baselines.** `scripts/grow-compare.sh` ran three arms back to back on the RTX 3090 Ti (7326a17, 2026-09-24/25). Each arm ran the full workbench corpus for four generations, measuring contribution every generation over the same 64 live tasks, with admission on.
 
