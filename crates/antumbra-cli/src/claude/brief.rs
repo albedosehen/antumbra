@@ -62,6 +62,7 @@ fn unavailable_line(report: &Report) -> Option<String> {
     let gone: Vec<&str> = report
         .findings
         .iter()
+        .filter(|f| !matches!(f.standing, Standing::Fine(_)))
         .filter_map(|f| f.rule.unavailable)
         .collect();
     (!gone.is_empty()).then(|| {
@@ -93,6 +94,13 @@ pub fn brief(report: &Report, instructions: &Instructions, os: Os) -> Option<Str
         .unverified_version
         .as_ref()
         .map(|installed| format!("Installed is {installed}, so this list may be out of date."));
+    // An AGENTS.md without a bridge is only unread while that loss lasts.
+    let instructions = match instructions {
+        Instructions::Unread(_) if finding(report, "agents-md").is_none() => {
+            &Instructions::NotApplicable
+        }
+        other => other,
+    };
     let lines = [
         instructions_line(instructions),
         shell_line(report, os),
@@ -158,7 +166,9 @@ mod tests {
     fn an_unread_instruction_file_is_named_and_the_agent_is_told_to_read_it() -> anyhow::Result<()>
     {
         let path = PathBuf::from("/work/project/AGENTS.md");
-        let here = inputs(Os::Other, &[SOVEREIGN], Instructions::Unread(path.clone()));
+        // A release before AGENTS.md was read with telemetry off.
+        let mut here = inputs(Os::Other, &[SOVEREIGN], Instructions::Unread(path.clone()));
+        here.installed_version = Some("2.1.278".to_string());
         let Some(text) = said(&here) else {
             anyhow::bail!("sovereign mode said nothing");
         };
@@ -206,7 +216,12 @@ mod tests {
 
     #[test]
     fn every_rule_an_agent_can_reach_for_is_listed_and_no_other() -> anyhow::Result<()> {
-        let here = inputs(Os::Other, &[SOVEREIGN], Instructions::NotApplicable);
+        // A traffic switch loses Remote Control too, so every rule is gone.
+        let here = inputs(
+            Os::Other,
+            &[SOVEREIGN, ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")],
+            Instructions::NotApplicable,
+        );
         let Some(text) = said(&here) else {
             anyhow::bail!("sovereign mode said nothing");
         };

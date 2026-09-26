@@ -25,13 +25,14 @@ pub mod mcp_stdio;
 pub mod reanchor;
 pub mod run;
 pub mod skills;
+pub mod version;
 
 /// The Claude Code release the rules below were verified against, the day, and
 /// the page that says so. The gated list changes between releases, so a rule is
 /// only as good as its last check; the report says when the installed version
 /// differs.
-pub const VERIFIED_AGAINST: &str = "2.1.278";
-pub const VERIFIED_ON: &str = "2026-09-19";
+pub const VERIFIED_AGAINST: &str = "2.1.283";
+pub const VERIFIED_ON: &str = "2026-09-26";
 pub const SOURCE: &str =
     "https://code.claude.com/docs/en/env-vars#features-that-need-feature-flag-fetching";
 
@@ -192,6 +193,8 @@ pub struct Rule {
     /// environment variable settles, including the default permission mode:
     /// that lives under `permissions`, which nothing here writes.
     pub env: Option<EnvSetting>,
+    /// The first release in which the loss is gone. `None` while it lasts.
+    pub until: Option<&'static str>,
 }
 
 /// The matrix of ADR-0021, in the order the report prints it.
@@ -205,6 +208,7 @@ pub fn rules() -> Vec<Rule> {
             response: "`antumbra claude bridge` writes an untracked CLAUDE.local.md that imports it, so it is read natively again",
             unavailable: None,
             env: None,
+            until: Some("2.1.281"),
         },
         Rule {
             id: "mcp-schemas",
@@ -213,6 +217,7 @@ pub fn rules() -> Vec<Rule> {
             response: "`antumbra claude mcp-lint`, run outside the agent, names each such tool and prints the deny rule that keeps it out of the request",
             unavailable: None,
             env: None,
+            until: None,
         },
         Rule {
             id: "mcp-root-combinators",
@@ -221,6 +226,7 @@ pub fn rules() -> Vec<Rule> {
             response: "`antumbra claude mcp-lint` names them; only the server can fix it, by flattening the schema",
             unavailable: None,
             env: None,
+            until: None,
         },
         Rule {
             id: "powershell-tool",
@@ -229,6 +235,7 @@ pub fn rules() -> Vec<Rule> {
             response: "set CLAUDE_CODE_USE_POWERSHELL_TOOL=1",
             unavailable: None,
             env: Some(EnvSetting { name: "CLAUDE_CODE_USE_POWERSHELL_TOOL", value: "1" }),
+            until: None,
         },
         Rule {
             id: "mcp-protocol-probe",
@@ -237,6 +244,7 @@ pub fn rules() -> Vec<Rule> {
             response: "set MCP_PROTOCOL_NEGOTIATION=auto",
             unavailable: None,
             env: Some(EnvSetting { name: "MCP_PROTOCOL_NEGOTIATION", value: "auto" }),
+            until: None,
         },
         Rule {
             id: "auto-mode-default",
@@ -245,6 +253,7 @@ pub fn rules() -> Vec<Rule> {
             response: "set permissions.defaultMode to \"auto\" in your own settings file (it is ignored in a project's)",
             unavailable: None,
             env: None,
+            until: Some("2.1.283"),
         },
         Rule {
             id: "auto-mode-setup",
@@ -253,14 +262,16 @@ pub fn rules() -> Vec<Rule> {
             response: "`antumbra claude auto-mode-env` drafts them from your working trees' remotes and Antumbra's memories, reads no transcript, and prints the block without writing it",
             unavailable: Some("/auto-mode-setup (`antumbra claude auto-mode-env` drafts the same entries, from outside the agent)"),
             env: None,
+            until: None,
         },
         Rule {
             id: "skill-doctor",
-            lost: "/skill-doctor cannot report unused skills",
+            lost: "/skill-doctor cannot report unused skills, nor the /plugin Stats tab show its report",
             class: Restored,
             response: "`antumbra claude skill-used`, run by two hooks, counts each use as a reinforcement of one volatile memory per skill, and `antumbra claude skills` reports the ones never or no longer used",
             unavailable: Some("/skill-doctor (`antumbra claude skills` reports the same, from outside the agent)"),
             env: None,
+            until: None,
         },
         Rule {
             id: "remote-control",
@@ -269,6 +280,7 @@ pub fn rules() -> Vec<Rule> {
             response: "in part and later: an asynchronous handoff compartment, no live control",
             unavailable: Some("Remote Control and messaging sessions on other machines"),
             env: None,
+            until: None,
         },
         Rule {
             id: "account-sync",
@@ -277,6 +289,7 @@ pub fn rules() -> Vec<Rule> {
             response: "off is the sovereign default",
             unavailable: None,
             env: None,
+            until: None,
         },
         Rule {
             id: "vscode-starting-mode",
@@ -285,6 +298,7 @@ pub fn rules() -> Vec<Rule> {
             response: "out of Antumbra's reach",
             unavailable: None,
             env: None,
+            until: Some("2.1.283"),
         },
         Rule {
             id: "advisor",
@@ -293,6 +307,7 @@ pub fn rules() -> Vec<Rule> {
             response: "it sends the whole conversation to a stronger model on the vendor's infrastructure, the opposite of `route` and `answer`",
             unavailable: Some("the advisor tool"),
             env: None,
+            until: None,
         },
         Rule {
             id: "artifact-comments",
@@ -301,6 +316,7 @@ pub fn rules() -> Vec<Rule> {
             response: "read them in the browser; ADR-0020 makes a comment a memory",
             unavailable: Some("comments on hosted artifacts (the user reads them in the browser)"),
             env: None,
+            until: None,
         },
         Rule {
             id: "drafted-feedback",
@@ -309,6 +325,16 @@ pub fn rules() -> Vec<Rule> {
             response: "friction is kept locally as `bank` memories by the capture hook",
             unavailable: Some("vendor-bound drafted feedback (keep friction as a `bank` memory instead)"),
             env: None,
+            until: None,
+        },
+        Rule {
+            id: "pasted-text",
+            lost: "a large paste reaches Claude as typed text: what sits behind a [Pasted text #N] placeholder is not marked as pasted",
+            class: AcceptedLoss,
+            response: "out of Antumbra's reach",
+            unavailable: None,
+            env: None,
+            until: None,
         },
         Rule {
             id: "import",
@@ -317,6 +343,7 @@ pub fn rules() -> Vec<Rule> {
             response: "a one-time migration from other agents; nothing to compensate",
             unavailable: None,
             env: None,
+            until: None,
         },
     ]
 }
@@ -398,6 +425,9 @@ fn standing_of(rule: &Rule, inputs: &Inputs) -> Standing {
                 }
             }
         }
+        ("remote-control", _) if version::remote_control_spared(inputs) => Standing::Fine(
+            "available: only a telemetry switch turned the flags off, which it survives unless your organization requires Trusted Devices".into(),
+        ),
         ("agents-md", _) => match &inputs.instructions {
             bridge::Instructions::Unread(path) => Standing::Attention(format!(
                 "{} is not being read. Run `antumbra claude bridge` here: it writes an untracked CLAUDE.local.md that imports it",
@@ -428,6 +458,10 @@ pub fn examine(inputs: &Inputs) -> Report {
     } else {
         rules()
             .into_iter()
+            .filter(|rule| {
+                rule.until
+                    .is_none_or(|ended| !version::at_least(version::judged_for(inputs), ended))
+            })
             .map(|rule| Finding {
                 standing: standing_of(&rule, inputs),
                 rule,
@@ -756,7 +790,12 @@ mod tests {
 
     #[test]
     fn advisory_settings_hint_and_never_fail() {
-        let bare = examine(&inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")]));
+        // The default mode is a loss only before 2.1.283.
+        let older = |i: Inputs| Inputs {
+            installed_version: Some("2.1.278".into()),
+            ..i
+        };
+        let bare = examine(&older(inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")])));
         assert_eq!(bare.required_missing(), 0);
         for id in ["mcp-protocol-probe", "auto-mode-default"] {
             assert!(
@@ -770,7 +809,7 @@ mod tests {
                 "{id}"
             );
         }
-        let set = examine(&Inputs {
+        let set = examine(&older(Inputs {
             user_default_mode: Some("auto".into()),
             ..inputs(
                 Os::Other,
@@ -779,7 +818,7 @@ mod tests {
                     ("MCP_PROTOCOL_NEGOTIATION", "auto"),
                 ],
             )
-        });
+        }));
         for id in ["mcp-protocol-probe", "auto-mode-default"] {
             assert!(
                 matches!(standing(&set, id), Some(Standing::Fine(_))),
@@ -790,8 +829,10 @@ mod tests {
 
     #[test]
     fn an_unread_agents_md_is_called_out_by_path() -> Result<(), String> {
+        // Read natively with telemetry off from 2.1.281; lost before it.
         let report = examine(&Inputs {
             instructions: bridge::Instructions::Unread(PathBuf::from("/work/repo/AGENTS.md")),
+            installed_version: Some("2.1.278".into()),
             ..inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")])
         });
         let Some(Standing::Attention(what)) = standing(&report, "agents-md") else {
@@ -903,7 +944,11 @@ mod tests {
 
     #[test]
     fn every_rule_is_judged_and_the_report_names_why() {
-        let report = examine(&inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")]));
+        // On a release before any loss ended, every rule applies.
+        let report = examine(&Inputs {
+            installed_version: Some("2.1.278".into()),
+            ..inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")])
+        });
         assert_eq!(report.findings.len(), rules().len());
         let text = render(&report);
         assert!(
