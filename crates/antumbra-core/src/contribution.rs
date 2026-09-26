@@ -77,6 +77,12 @@ pub struct BaselineRecord {
     pub best: Option<ExpertId>,
     #[serde(default)]
     pub best_alone: Option<f32>,
+    /// The mean of each task's best score, the gate's own choice or any
+    /// expert alone: what these experts would score routed as well as they
+    /// could be. An upper bound, biased up by taking the highest of noisy
+    /// scores. `None` on records from before it was kept.
+    #[serde(default)]
+    pub oracle: Option<f32>,
     pub seeds: u32,
     pub at: DateTime<Utc>,
 }
@@ -85,6 +91,12 @@ impl BaselineRecord {
     /// What routing across the population adds over its best single expert.
     pub fn delta(&self) -> Option<f32> {
         Some(self.population - self.best_alone?)
+    }
+
+    /// What better routing among these experts could still add: the oracle
+    /// over the population.
+    pub fn headroom(&self) -> Option<f32> {
+        Some(self.oracle? - self.population)
     }
 }
 
@@ -116,5 +128,24 @@ mod tests {
         assert_eq!(useless.delta(), Some(0.0));
         assert_eq!(useless.share(), 0.5);
         assert_eq!(record(2, Some(0.75), Some(0.25)).delta(), Some(0.5));
+    }
+
+    #[test]
+    fn headroom_is_the_oracle_over_the_population() {
+        let mut b = BaselineRecord {
+            run_id: RunId::new("run"),
+            generation: Generation(1),
+            tasks: 8,
+            population: 0.75,
+            best: Some(ExpertId::new("expert:e")),
+            best_alone: Some(0.5),
+            oracle: Some(0.875),
+            seeds: 2,
+            at: Utc::now(),
+        };
+        assert_eq!(b.delta(), Some(0.25));
+        assert_eq!(b.headroom(), Some(0.125));
+        b.oracle = None;
+        assert_eq!(b.headroom(), None);
     }
 }

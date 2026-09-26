@@ -782,8 +782,14 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     }
                     _ => "no single expert to compare".to_string(),
                 };
+                let headroom = b.headroom().map_or(String::new(), |h| {
+                    format!(
+                        "; routed as well as it could be, {:.2} ({h:+.2})",
+                        b.population + h
+                    )
+                });
                 println!(
-                    "        population {:.2} over {} live task(s) against {best}",
+                    "        population {:.2} over {} live task(s) against {best}{headroom}",
                     b.population, b.tasks
                 );
             }

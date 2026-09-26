@@ -130,6 +130,7 @@ mod tests {
             population,
             best: Some(ExpertId::new("expert:a")),
             best_alone: Some(0.6),
+            oracle: None,
             seeds: 2,
             at: Utc::now(),
         };
