@@ -112,9 +112,11 @@ antumbra verifier measure <address or prefix> --cases strings-cases.json
 # every trusted synthesized verifier in a domain against deliberately wrong artifacts
 antumbra verifier challenge --domain strings --cases wrong.json
 antumbra verifier list --domain strings
+# a corpus whose tasks take reward from the checks that grant it
+antumbra verifier name --corpus corpora/workbench/strings.json --domain strings --out named.json
 ```
 
-Synthesized checks start with `antumbra verifier synthesize`, where the model proposes the inputs of a differential check for each task. `corpora/workbench/synthesize.py` turns those inputs into specs from each task's reference, and `propose --batch` adds them. `measure --domain` then measures every proposed or trusted check in a domain. `eval --completions --seed` writes the model's own answers for labeling, and `scripts/verifier-validate.sh` runs all of it on the GPU host.
+Synthesized checks start with `antumbra verifier synthesize`, where the model proposes the inputs of a differential check for each task. `corpora/workbench/synthesize.py` turns those inputs into specs from each task's reference, and `propose --batch` adds them. `measure --domain` then measures every proposed or trusted check in a domain. `eval --completions --seed` writes the model's own answers for labeling, and `scripts/verifier-validate.sh` runs all of it on the GPU host. `scripts/verifier-train.sh` then trains on a copy of that namespace, with the corpus rewritten by `name` so each task with a trusted check takes its reward from it.
 
 - **Measurement:** every case runs three times (`--repeats`). A verifier that disagrees with itself, or passes anything on an impossible task, is revoked.
 - **Trust:** the 95% upper bound on its false-positive rate must be at or under 0.10 (`--confidence`, `--max-false-positive`), which takes at least 29 known-bad cases with none passed. It must also accept half the known-good ones (`--min-accepted`).
