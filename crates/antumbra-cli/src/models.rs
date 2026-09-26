@@ -799,6 +799,13 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     c.expert, c.routed, c.tasks
                 );
             }
+            let scored = r.contribution_scores;
+            if scored.asked > 0 {
+                println!(
+                    "        contribution scores: {} task score(s) asked, {} already known",
+                    scored.asked, scored.reused
+                );
+            }
         }
         println!("population: {} experts", expert::list(&store).await?.len());
         // Self-maintaining gate: keep the learned router current with the

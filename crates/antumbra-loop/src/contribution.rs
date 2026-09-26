@@ -344,15 +344,21 @@ impl GenerationLoop<'_> {
                 Some(_) => continue,
                 None => None,
             };
+            // The same seeds every generation: what a frozen expert or the
+            // base scored before is what it scores now, so it is not asked
+            // again.
             let scored = self
-                .trainer
-                .evaluate(EvaluateRequest {
-                    label: format!("contribution:{run_id}:g{}", generation.0),
-                    base_model: self.cfg.base_model.clone(),
-                    adapter_uri,
-                    task_ids: task_ids.into_iter().collect(),
-                    seeds: draws.to_vec(),
-                })
+                .scores
+                .evaluate(
+                    self.trainer,
+                    EvaluateRequest {
+                        label: format!("contribution:{run_id}:g{}", generation.0),
+                        base_model: self.cfg.base_model.clone(),
+                        adapter_uri,
+                        task_ids: task_ids.into_iter().collect(),
+                        seeds: draws.to_vec(),
+                    },
+                )
                 .await?;
             scores.insert(who, scored);
         }
