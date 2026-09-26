@@ -9,7 +9,8 @@
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{
-    count_grant, governing_feature_from_pair, BoundaryFinding, Result, RunId, VerifierGrant,
+    count_grant, governing_feature_from_pair, BoundaryFinding, JudgedSample, Result, RunId,
+    VerifierGrant,
 };
 use serde_json::json;
 
@@ -67,12 +68,20 @@ pub async fn capture_corrections(
     // routing (the same ground-truth gate the population itself sits behind).
     let mut findings: Vec<BoundaryFinding> = Vec::new();
     let mut granted_by: Vec<VerifierGrant> = Vec::new();
+    let mut judged: Vec<JudgedSample> = Vec::new();
     for (i, task) in tasks.iter().enumerate() {
         let Some(correction) = task.completion.as_deref() else {
             continue;
         };
         let req = verify_request(run_id, i, task, correction);
-        if verifier.verify(&req).await?.passed {
+        let passed = verifier.verify(&req).await?.passed;
+        judged.extend(JudgedSample::named(
+            &task.verify,
+            &task.id,
+            correction,
+            passed,
+        ));
+        if passed {
             winners.push(SftExample {
                 prompt: task.prompt.clone(),
                 completion: correction.to_string(),
@@ -166,6 +175,7 @@ pub async fn capture_corrections(
         holdout: None,
         recipe: None,
         granted_by,
+        judged,
     })
 }
 

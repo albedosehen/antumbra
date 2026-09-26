@@ -15,6 +15,9 @@ antumbra-store = { path = "../antumbra-store" }
 # Promotes a verified correction's BoundaryFinding into a persistable, embedded
 # actionable counterfactual boundary.
 antumbra-boundary = { path = "../antumbra-boundary" }
+# The trust protocol's measurement, so the loop can recheck the verifiers that
+# judged its training against their anchors.
+antumbra-critic = { path = "../antumbra-critic" }
 chrono.workspace = true
 serde_json.workspace = true
 # sha256 of a frozen adapter's bytes = the no-forgetting regression fingerprint

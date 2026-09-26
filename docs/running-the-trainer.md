@@ -121,6 +121,11 @@ Synthesized checks start with `antumbra verifier synthesize`, where the model pr
 - **Time to live:** trust lasts seven days (`--ttl-days`), then lapses unless a new measurement renews it.
 - **Quarantine:** a trusted verifier re-measured as unsound, or caught by `challenge`, stops granting at once. `quarantine` and `revoke` are the manual moves. No command promotes one.
 - **What it taught:** `train` records the passes each named verifier granted, on the reward rows and on the card of the expert that graduates. Quarantining or revoking a verifier archives every expert that trained under it. `revive` brings one back.
+- **The recheck in `train`:** every generation, each trusted synthesized verifier that judged the generation's training is measured again on the policy's own answers, up to 128 of them. Each answer is labeled by the task's authored verifier in the same domain.
+  - **Outcome:** the measurement is recorded like any other, so it quarantines the verifier or renews its trust.
+  - **Output:** each generation prints, per verifier, the answers anchored, the rewarded answers the anchor failed, and the verdict.
+  - **Withdrawn verifiers:** a shadow that trained under a verifier that no longer grants reward does not graduate.
+  - **No anchor:** answers on a task with no authored verifier in the domain cannot be rechecked, and that verifier's trust still lapses on its time to live.
 
 ## Corpus format
 

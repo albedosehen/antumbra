@@ -139,6 +139,8 @@ pub struct ScriptedTrainer {
     pub remeasured: Option<Vec<f32>>,
     /// The named verifiers a run reports it trained under.
     pub granted_by: Vec<crate::VerifierGrant>,
+    /// The answers a run reports its named verifiers judged.
+    pub judged: Vec<crate::JudgedSample>,
 }
 
 /// The recipe a scripted trainer is configured with.
@@ -162,6 +164,7 @@ impl ScriptedTrainer {
             ignores_recipe: false,
             remeasured: None,
             granted_by: Vec::new(),
+            judged: Vec::new(),
         }
     }
 
@@ -178,6 +181,7 @@ impl ScriptedTrainer {
             ignores_recipe: false,
             remeasured: None,
             granted_by: Vec::new(),
+            judged: Vec::new(),
         }
     }
 
@@ -227,6 +231,7 @@ impl Trainer for ScriptedTrainer {
                 req.recipe.or(self.own_recipe)
             },
             granted_by: self.granted_by.clone(),
+            judged: self.judged.clone(),
         })
     }
 

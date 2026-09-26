@@ -16,7 +16,9 @@ use std::sync::Arc;
 
 use antumbra_core::critic::shaped_advantages;
 use antumbra_core::ports::{Critic, TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{count_grant, AntumbraError, Result, RunId, TrainingRecipe, VerifierGrant};
+use antumbra_core::{
+    count_grant, AntumbraError, JudgedSample, Result, RunId, TrainingRecipe, VerifierGrant,
+};
 
 use crate::config::RaftConfig;
 use crate::model::CorpusTask;
@@ -193,6 +195,9 @@ pub async fn grpo_train(
     let mut per_task: Vec<TaskOutcome> = Vec::new();
     // Every pass in a group that steps is reward granted (ADR-0022 S-4).
     let mut granted_by: Vec<VerifierGrant> = Vec::new();
+    // Every verdict a named verifier gave on a learned task, for the loop's
+    // recheck against anchored truth.
+    let mut judged: Vec<JudgedSample> = Vec::new();
 
     let last_round = cfg.rounds.saturating_sub(1);
     for round in 0..cfg.rounds {
@@ -209,6 +214,7 @@ pub async fn grpo_train(
                 .await?;
 
             let mut rewards = Vec::with_capacity(samples.len());
+            let group_judged = judged.len();
             for (i, sample) in samples.iter().enumerate() {
                 let req = VerifyRequest {
                     run_id: run_id.clone(),
@@ -227,6 +233,12 @@ pub async fn grpo_train(
                 if !learn {
                     continue;
                 }
+                judged.extend(JudgedSample::named(
+                    &task.verify,
+                    &task.id,
+                    &sample.completion,
+                    won,
+                ));
                 total += 1;
                 if won {
                     passed += 1;
@@ -255,6 +267,10 @@ pub async fn grpo_train(
             // nothing, mirroring RAFT's empty-winner guard). The critic cannot
             // make a signal the verifier did not.
             if advantages.iter().all(|a| a.abs() < 1e-6) {
+                // A group that takes no step rewards nothing it passed.
+                for j in &mut judged[group_judged..] {
+                    j.rewarded = false;
+                }
                 continue;
             }
             if let Some(shaping) = critic {
@@ -307,6 +323,7 @@ pub async fn grpo_train(
         holdout: None,
         recipe: None,
         granted_by,
+        judged,
     })
 }
 
@@ -605,6 +622,49 @@ mod tests {
         fn save_adapter(&self, _path: &str) -> Result<()> {
             Ok(())
         }
+    }
+
+    /// A named verifier's verdicts are all kept for the recheck, and a pass is
+    /// a reward only when its group stepped.
+    #[tokio::test]
+    async fn judged_answers_are_kept_and_rewarded_only_when_their_group_steps() -> Result<()> {
+        let mut lm = Recording {
+            mastered: vec!["mastered".into()],
+            ..Recording::default()
+        };
+        let verifier = MarkerVerifier {
+            expect: "PASS".into(),
+        };
+        let named = serde_json::json!({ "verifier": "verifier:a" });
+        let tasks = vec![
+            CorpusTask::new("mixed", "mixed").with_verify(named.clone()),
+            CorpusTask::new("mastered", "mastered").with_verify(named),
+        ];
+        let cfg = RaftConfig {
+            samples_per_task: 4,
+            rounds: 1,
+            ..RaftConfig::default()
+        };
+        let out = grpo_train(
+            &mut lm,
+            &verifier,
+            &tasks,
+            &[],
+            &RunId::new("shadow:judged"),
+            &cfg,
+            None,
+        )
+        .await?;
+        let (mixed, mastered): (Vec<&JudgedSample>, Vec<&JudgedSample>) =
+            out.judged.iter().partition(|j| j.task == "mixed");
+        assert_eq!(mixed.len(), 4);
+        assert_eq!(mixed.iter().filter(|j| j.rewarded).count(), 2);
+        assert!(mixed.iter().all(|j| j.rewarded == j.passed));
+        // Every answer passed, so the group had no spread and took no step.
+        assert_eq!(mastered.iter().filter(|j| j.passed).count(), 4);
+        assert_eq!(mastered.iter().filter(|j| j.rewarded).count(), 0);
+        assert_eq!(out.granted_by[0].passes, 2);
+        Ok(())
     }
 
     /// Two things the per-task results must not do: lose a task because its

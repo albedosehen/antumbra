@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 
 use antumbra_boundary::finding_to_boundary;
 use antumbra_core::generational::{GenerationHead, LoopCommand, LoopState};
-use antumbra_core::ports::{Embedder, TrainOutcome, Trainer};
+use antumbra_core::ports::{Embedder, TrainOutcome, Trainer, Verifier};
 use antumbra_core::slice::Partition;
 use antumbra_core::{
     BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Grain,
@@ -39,6 +39,7 @@ mod gate;
 mod grow;
 mod measure;
 mod merging;
+mod recheck;
 mod recipe;
 mod retirement;
 pub mod search;
@@ -50,6 +51,7 @@ pub use gate::gate_exemplars;
 pub use grow::{by_credit, choose, diversity, Choosing, Diversity, GrowPolicy, Growth};
 use measure::Measurement;
 pub use merging::{Merge, MergePolicy};
+pub use recheck::{Recheck, MAX_RECHECKED};
 pub use retirement::{confirms, warnings, Detection, RetirementPolicy, Warning};
 
 /// The shadow a generation of a run trains. It also names that generation's
@@ -229,6 +231,13 @@ pub struct GenerationReport {
     pub growth: Option<Growth>,
     /// The region census this generation's contribution measurement took.
     pub census: Vec<antumbra_core::RegionCensus>,
+    /// What rechecking the verifiers that judged this generation's training
+    /// against their anchors found (ADR-0022 S-4). Empty when the loop has no
+    /// verifier to recheck with, or no named verifier judged anything.
+    pub rechecks: Vec<Recheck>,
+    /// The named verifiers the shadow trained under that no longer grant
+    /// reward. A shadow with any does not graduate.
+    pub withdrawn: Vec<antumbra_core::VerifierId>,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -257,6 +266,7 @@ pub struct GenerationLoop<'a> {
     trainer: &'a dyn Trainer,
     embedder: &'a dyn Embedder,
     cfg: LoopConfig,
+    rechecker: Option<&'a dyn Verifier>,
 }
 
 impl<'a> GenerationLoop<'a> {
@@ -271,7 +281,16 @@ impl<'a> GenerationLoop<'a> {
             trainer,
             embedder,
             cfg,
+            rechecker: None,
         }
+    }
+
+    /// Recheck, with `verifier`, every trusted synthesized verifier that
+    /// judged a generation's training against the tasks' authored anchors
+    /// (ADR-0022 S-4). Without it, trust lapses after its time to live.
+    pub fn rechecking(mut self, verifier: &'a dyn Verifier) -> Self {
+        self.rechecker = Some(verifier);
+        self
     }
 
     /// Resume from the persisted head, or initialize and persist a fresh one.
@@ -318,6 +337,8 @@ impl<'a> GenerationLoop<'a> {
         // no-op for discovery runs.
         self.persist_correction_boundaries(&run_id, generation, &outcome)
             .await?;
+        let rechecks = self.recheck(&outcome).await?;
+        let withdrawn = self.withdrawn(&outcome).await?;
         let fitness = outcome.final_fitness;
 
         // score -> decide: graduate the winner or prune + log a boundary.
@@ -337,7 +358,16 @@ impl<'a> GenerationLoop<'a> {
             .judge(&run_id, generation, &shadow_id, &outcome, &cohort, shortcut)
             .await?;
         measured.remeasured = remeasured.clone();
-        let cleared = graduation_score >= self.cfg.graduate_threshold && !shortcut;
+        // ADR-0022 S-4: what a withdrawn verifier taught is kept out of the
+        // population, so a shadow that learned from one does not graduate.
+        if !withdrawn.is_empty() {
+            eprintln!(
+                "recheck: generation {} trained under {withdrawn:?}, which no longer grant reward; it does not graduate",
+                generation.0
+            );
+        }
+        let cleared =
+            graduation_score >= self.cfg.graduate_threshold && !shortcut && withdrawn.is_empty();
         let mut admission = None;
         let graduated = if cleared {
             let candidate = self
@@ -367,7 +397,11 @@ impl<'a> GenerationLoop<'a> {
         } else {
             sh.advance_to(ShadowStatus::Pruned)?;
             shadow::upsert(self.store, &sh).await?;
-            self.log_open_boundary(generation, &shadow_id).await?;
+            // A shadow kept out for what it learned from is not a failure of
+            // competence, so no boundary is logged for it.
+            if withdrawn.is_empty() {
+                self.log_open_boundary(generation, &shadow_id).await?;
+            }
             false
         };
         self.record_evaluation(
@@ -416,6 +450,8 @@ impl<'a> GenerationLoop<'a> {
             merge,
             growth,
             census,
+            rechecks,
+            withdrawn,
         })
     }
 
