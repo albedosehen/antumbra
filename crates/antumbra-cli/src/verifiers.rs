@@ -173,6 +173,23 @@ pub async fn run(url: &str, action: VerifierAction) -> anyhow::Result<()> {
             }
             println!("{challenged} trusted synthesized verifier(s) in {domain} challenged");
         }
+        VerifierAction::Name {
+            corpus,
+            domain,
+            out,
+        } => {
+            let text =
+                std::fs::read_to_string(&corpus).with_context(|| format!("reading {corpus}"))?;
+            let mut tasks: Vec<serde_json::Value> = serde_json::from_str(&text)?;
+            let granting = crate::verifier_name::granting(&store, &domain, Utc::now()).await?;
+            let named = crate::verifier_name::name_tasks(&mut tasks, &granting);
+            std::fs::write(&out, serde_json::to_string_pretty(&tasks)?)
+                .with_context(|| format!("writing {out}"))?;
+            println!(
+                "named {named} of {} task(s) after the {domain} verifiers that grant reward: {out}",
+                tasks.len()
+            );
+        }
         VerifierAction::List { domain } => {
             let now = Utc::now();
             for record in verifier::list(&store).await? {

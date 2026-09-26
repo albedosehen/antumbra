@@ -31,6 +31,7 @@ mod models;
 mod ops;
 mod train_args;
 mod verifier_args;
+mod verifier_name;
 mod verifier_synth;
 mod verifiers;
 

@@ -126,6 +126,20 @@ pub enum VerifierAction {
         #[arg(long)]
         cases: String,
     },
+    /// Write a corpus whose tasks take reward from the namespace: each task
+    /// with a synthesized verifier that grants reward for it names that
+    /// verifier instead of carrying its spec. The authored verifiers stay in
+    /// the namespace as the anchors `train` rechecks against.
+    Name {
+        /// The corpus to rewrite: a JSON array of tasks.
+        #[arg(long)]
+        corpus: String,
+        #[arg(long)]
+        domain: String,
+        /// Where the named corpus is written.
+        #[arg(long)]
+        out: String,
+    },
     /// Every verifier, with its state and whether it grants reward now.
     List {
         #[arg(long)]

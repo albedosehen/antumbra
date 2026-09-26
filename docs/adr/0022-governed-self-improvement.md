@@ -606,7 +606,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
      - A sound one is measured again, stays trusted, and its graduate joins.
 
    Still to come for this step:
-   - **A run that trains under synthesized verifiers.** No GPU run has yet taken reward from one, so the recheck has only met the tests. The `strings` checks trusted above can stand in for the authored specs of their tasks, with the authored ones kept as anchors.
+   - **A run that trains under synthesized verifiers.** No GPU run has yet taken reward from one, so the recheck has only met the tests. `antumbra verifier name` rewrites a corpus so each task with a check that grants reward names it, and `scripts/verifier-train.sh` trains on a copy of a measured namespace with that corpus. The `strings` checks trusted above stand in for the authored specs of their tasks, and the authored ones stay as anchors.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.
