@@ -275,7 +275,7 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "remote-control",
-            lost: "Remote Control, and messaging sessions on other machines",
+            lost: "Remote Control, and messaging sessions on other machines, when the traffic or flag switch turned the flags off; from 2.1.283 the telemetry switches alone spare it, unless the organization requires Trusted Devices",
             class: Restored,
             response: "in part and later: an asynchronous handoff compartment, no live control",
             unavailable: Some("Remote Control and messaging sessions on other machines"),
@@ -456,12 +456,8 @@ pub fn examine(inputs: &Inputs) -> Report {
     let findings = if triggers.is_empty() {
         Vec::new()
     } else {
-        rules()
+        version::rules_for(version::judged_for(inputs))
             .into_iter()
-            .filter(|rule| {
-                rule.until
-                    .is_none_or(|ended| !version::at_least(version::judged_for(inputs), ended))
-            })
             .map(|rule| Finding {
                 standing: standing_of(&rule, inputs),
                 rule,
