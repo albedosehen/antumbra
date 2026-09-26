@@ -167,8 +167,14 @@ fn listed_tools(
 pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
     match action {
         ClaudeAction::Doctor { dir } => {
-            let report = examine(&Inputs::gather(home().as_deref(), &project(dir)?));
+            let project = project(dir)?;
+            let report = examine(&Inputs::gather(home().as_deref(), &project));
             println!("{}", render(&report));
+            // Advisory: a drifted hook is worth knowing, not a missing setting.
+            print!(
+                "{}",
+                super::hooks::render(&super::hooks::installed(home().as_deref(), &project))
+            );
             let missing = report.required_missing();
             if missing > 0 {
                 anyhow::bail!("{missing} required setting(s) missing");
