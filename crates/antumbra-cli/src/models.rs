@@ -578,7 +578,11 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             grow,
             ..LoopConfig::default()
         };
-        let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg);
+        // Every generation, the synthesized verifiers that judged its training
+        // are measured again against the tasks' authored anchors (ADR-0022 S-4).
+        let rechecker = antumbra_critic::CommandVerifier;
+        let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg)
+            .rechecking(&rechecker);
         let reports = lp.run_until(&RunId::new(run), generations).await?;
         for r in &reports {
             let curve: Vec<String> = r.reward_curve.iter().map(|p| format!("{p:.2}")).collect();
@@ -681,6 +685,26 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     nearest: Some((id, s)),
                 }) => println!("        admitted: nearest expert {id} at similarity {s:.3}"),
                 _ => {}
+            }
+            for c in &r.rechecks {
+                let verdict = c
+                    .measurement
+                    .as_ref()
+                    .map_or("not measured".to_string(), |m| format!("{:?}", m.verdict));
+                let moved = c.moved.map_or(String::new(), |to| {
+                    format!("; now {to:?}, {} expert(s) archived", c.archived.len())
+                });
+                println!(
+                    "        recheck {}: {} answer(s) anchored, {} not; {} rewarded answer(s) the anchor failed; {verdict}{moved}",
+                    c.verifier, c.anchored, c.unanchored, c.rewarded_wrong
+                );
+            }
+            if !r.withdrawn.is_empty() {
+                let ids: Vec<&str> = r.withdrawn.iter().map(|v| v.as_str()).collect();
+                println!(
+                    "        not graduated: trained under {}, which no longer grant reward",
+                    ids.join(", ")
+                );
             }
             for (expert, warning) in &r.detection.warnings {
                 println!("        warning (advisory) {expert}: {warning:?}");

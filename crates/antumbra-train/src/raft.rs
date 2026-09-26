@@ -8,7 +8,7 @@
 use serde_json::json;
 
 use antumbra_core::ports::{TaskOutcome, TrainOutcome, Verifier, VerifyRequest};
-use antumbra_core::{count_grant, Result, RunId, VerifierGrant};
+use antumbra_core::{count_grant, JudgedSample, Result, RunId, VerifierGrant};
 
 use crate::config::RaftConfig;
 use crate::model::{CausalLm, CorpusTask, SftExample};
@@ -39,6 +39,9 @@ pub async fn raft_train(
     let mut per_task: Vec<TaskOutcome> = Vec::new();
     // Every winner a named verifier passed is reward it granted (ADR-0022 S-4).
     let mut granted_by: Vec<VerifierGrant> = Vec::new();
+    // Every verdict a named verifier gave on a learned task, for the loop's
+    // recheck against anchored truth.
+    let mut judged: Vec<JudgedSample> = Vec::new();
 
     let last_round = cfg.rounds.saturating_sub(1);
     for round in 0..cfg.rounds {
@@ -75,6 +78,12 @@ pub async fn raft_train(
                 if !learn {
                     continue;
                 }
+                judged.extend(JudgedSample::named(
+                    &task.verify,
+                    &task.id,
+                    sample,
+                    verified,
+                ));
                 total += 1;
                 if verified {
                     passed += 1;
@@ -134,6 +143,7 @@ pub async fn raft_train(
         holdout: None,
         recipe: None,
         granted_by,
+        judged,
     })
 }
 
@@ -243,6 +253,15 @@ mod tests {
                 passes: 3
             }]
         );
+        // Every verdict it gave on t1 is kept for the recheck, the failed one
+        // too; a winner is a reward.
+        assert_eq!(out.judged.len(), 4);
+        assert!(out
+            .judged
+            .iter()
+            .all(|j| j.task == "t1" && j.verifier.as_str() == "verifier:a"));
+        assert_eq!(out.judged.iter().filter(|j| j.passed).count(), 3);
+        assert!(out.judged.iter().all(|j| j.rewarded == j.passed));
     }
 
     #[tokio::test]

@@ -158,6 +158,11 @@ pub struct TrainOutcome {
     /// what it taught.
     #[serde(default)]
     pub granted_by: Vec<crate::verifier::VerifierGrant>,
+    /// Every answer a named verifier judged on a task this run learned from,
+    /// passed or not, so the loop can recheck the verdicts against anchored
+    /// truth (ADR-0022 S-4).
+    #[serde(default)]
+    pub judged: Vec<crate::verifier::JudgedSample>,
 }
 
 /// Measure a trained shadow again for graduation (ADR-0022 S-1): the

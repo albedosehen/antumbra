@@ -472,7 +472,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **Serving uses the router admission judged with.** Admitting an expert, or merging two, now retrains and stores the gate at once, rather than at the end of the run. The rest of the run, and serving, route under it.
    - **The pinning test:** the specialist the heuristic gate turns away, which would escalate four tasks and score 0.33 on the six it reroutes, is admitted under a retrained router. That router sends all six to it, at 1.0 against the generalist's 0.8. The router it was judged with is the one stored.
 
-   The warm comparison runs again on this: uniform and credit.
+   The credit arm ran with the warm start too (292 minutes), and the same held:
+
+   | generation | region | pass rate by round | tasks rerouted | population with it | without it |
+   | ---: | --- | --- | ---: | ---: | ---: |
+   | 1 | numbers | 0.60, 0.73 | 46 | 0.59 | 0.77 |
+   | 2 | dates | 0.65, 0.68 | 15 | 0.71 | 0.87 |
+   | 3 | mappings | 0.67, 0.74 | 20 | 0.51 | 0.52 |
+
+   Both arms ended where they began: the generalist alone, 0.71 on the live tasks. The warm comparison runs again on this change: uniform and credit.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 
    **The namespace and the trust protocol are in. Synthesis is not.**
@@ -582,8 +590,23 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    So the rule moved the failure the challenge had caught to promotion, where it costs nothing. What remains is the bound doing what a bound does: 13 of 14 checks trusted on one set of answers held on the next, and the one that did not was quarantined.
 
+   **Loop-driven quarantine is in: the loop rechecks the verifiers that judged its training.** The record asks for re-measurement on the loop's own schedule, because a check that was sound against one population is not thereby sound against the next. It also asks for quarantine when a verifier's visible and held-out pass rates diverge. Both are now one step in every generation.
+   - **What a trainer keeps:** every answer a named verifier judged on a task it learned from, passed or failed, and whether the pass became training data (`TrainOutcome::judged`). A RAFT winner is a reward. A GRPO pass is one only when its group stepped.
+   - **The recheck:** each trusted synthesized verifier among them is measured again on those answers, at most 128 spread evenly. Each answer is labeled by the task's anchor: a trusted authored verifier in the same domain, one written for the task preferred, run three times. An answer the anchor disagrees with itself on is left out, as the cases builder leaves it out.
+   - **Visible and held-out:** the two rates are the verifier's pass rate and the anchor's, on the same answers. Training saw the first and never the second. Where they part on the policy's wrong answers is the false-positive rate on the population as it now is.
+   - **The move:** the measurement goes through the trust protocol and is recorded like any other.
+     - A verifier passing the policy's wrong answers past its bound is quarantined, and every expert it taught is archived with it.
+     - A sound one has its trust renewed, so a verifier in use does not lapse while the loop keeps measuring it.
+     - Too few wrong answers to bound the rate leaves it as it was.
+   - **The shadow:** one that trained under a verifier that no longer grants reward, withdrawn by the recheck or by a person, does not graduate. No boundary is logged for it, since what kept it out is what it learned from, not what it can do.
+   - **The report:** for each verifier, the answers anchored and not, and the rewarded answers the anchor failed, which is the kill criterion's own count. Then the verdict and any move.
+   - **Where it does not reach:** a task with no authored verifier in its domain cannot be rechecked. Its answers are counted unanchored, and the verifier's trust still lapses on its time to live.
+   - **The pinning tests:**
+     - A verifier that rewarded three wrong answers among eight is quarantined. The expert an earlier generation learned from it is archived with it, and the generation's shadow does not join.
+     - A sound one is measured again, stays trusted, and its graduate joins.
+
    Still to come for this step:
-   - **Loop-driven quarantine:** re-measurement on the loop's own schedule, and quarantine when the gap between a verifier's visible and held-out pass rates crosses a threshold. Until then, trust lapses after its time to live.
+   - **A run that trains under synthesized verifiers.** No GPU run has yet taken reward from one, so the recheck has only met the tests. The `strings` checks trusted above can stand in for the authored specs of their tasks, with the authored ones kept as anchors.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.

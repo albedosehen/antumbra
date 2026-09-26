@@ -324,6 +324,41 @@ pub fn count_grant(grants: &mut Vec<VerifierGrant>, spec: &serde_json::Value) {
     }
 }
 
+/// An answer a named verifier judged in training, on a task training learns
+/// from. The loop rechecks these against the tasks' authored anchors, so a
+/// trusted verifier is measured again on the answers of the policy it is
+/// rewarding, not only on the cases it was promoted on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JudgedSample {
+    pub verifier: VerifierId,
+    pub task: String,
+    pub completion: String,
+    /// Its verdict as training saw it.
+    pub passed: bool,
+    /// Whether the pass became training data.
+    pub rewarded: bool,
+}
+
+impl JudgedSample {
+    /// The sample to keep when `spec` names a verifier, rewarded when it
+    /// passed. `None` for a spec written into the task: it is authored, and
+    /// there is nothing to recheck.
+    pub fn named(
+        spec: &serde_json::Value,
+        task: &str,
+        completion: &str,
+        passed: bool,
+    ) -> Option<Self> {
+        named_verifier(spec).map(|verifier| JudgedSample {
+            verifier,
+            task: task.to_string(),
+            completion: completion.to_string(),
+            passed,
+            rewarded: passed,
+        })
+    }
+}
+
 /// The state a history leaves a verifier in: the last move's, or where its
 /// origin starts it when it has none.
 pub fn current_trust(origin: VerifierOrigin, history: &[VerifierTransition]) -> TrustState {
@@ -468,6 +503,22 @@ mod tests {
             ]
         );
         assert_eq!(named_verifier(&inline), None);
+    }
+
+    #[test]
+    fn only_a_named_verifiers_verdict_is_kept_for_the_recheck() {
+        let named = serde_json::json!({ "verifier": "verifier:a" });
+        let kept = JudgedSample::named(&named, "t1", "answer", true).expect("named");
+        assert_eq!(kept.verifier, VerifierId::new("verifier:a"));
+        assert_eq!(
+            (kept.task.as_str(), kept.completion.as_str()),
+            ("t1", "answer")
+        );
+        assert!(kept.passed && kept.rewarded);
+        let failed = JudgedSample::named(&named, "t1", "answer", false).expect("named");
+        assert!(!failed.rewarded);
+        let inline = serde_json::json!({ "program": "python" });
+        assert_eq!(JudgedSample::named(&inline, "t1", "answer", true), None);
     }
 
     #[test]
