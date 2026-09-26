@@ -10,11 +10,23 @@
 #   ANTUMBRA_URL         the antumbra-mcp engine (default http://127.0.0.1:8081)
 #   ANTUMBRA_TOKEN       bearer JWT, or
 #   ANTUMBRA_TOKEN_FILE  a file holding it (default ~/.antumbra/token.txt)
+#   ANTUMBRA_RECALL_BUDGET_SEC  wall-clock budget for the whole hook (default 10)
 #
 # It never fails a prompt. Every failure path exits 0 with no output: a recall
 # that cannot answer must not stop the user from talking to the agent.
+#
+# The budget is measured from process start, not per request, and must stay
+# below the hook's "timeout" in settings.json. A recall costs the server several
+# seconds and the server answers one at a time, so a prompt that lands behind
+# another recall can wait well past a per-request timeout; the harness then
+# kills the hook and discards its output with a warning. Giving up inside the
+# budget is the same outcome without the warning.
 
 $ErrorActionPreference = 'Stop'
+$clock = [System.Diagnostics.Stopwatch]::StartNew()
+try { Add-Type -AssemblyName System.Net.Http } catch { exit 0 }
+$budgetSec = 10
+if ($env:ANTUMBRA_RECALL_BUDGET_SEC) { [void][int]::TryParse($env:ANTUMBRA_RECALL_BUDGET_SEC, [ref]$budgetSec) }
 
 $apiUrl = if ($env:ANTUMBRA_URL) { $env:ANTUMBRA_URL } else { 'http://127.0.0.1:8081' }
 $token = if ($env:ANTUMBRA_TOKEN) { $env:ANTUMBRA_TOKEN } else {
@@ -60,9 +72,31 @@ try {
     if ($repo) { $arguments['repo'] = [string]$repo }
     if ($branch -and $branch -ne 'HEAD') { $arguments['branch'] = [string]$branch }
     $body = @{ tool = 'recall_memories'; arguments = $arguments } | ConvertTo-Json -Compress -Depth 6
-    $resp = Invoke-RestMethod -Method Post -Uri "$apiUrl/mcp/call" `
-        -Headers @{ 'Content-Type' = 'application/json'; 'Authorization' = "Bearer $token" } `
-        -Body $body -TimeoutSec 10 -ErrorAction Stop
+
+    # Whatever the budget has left, less a margin to format and print.
+    $remainingMs = ($budgetSec * 1000) - $clock.ElapsedMilliseconds - 500
+    if ($remainingMs -lt 1000) { exit 0 }
+
+    # HttpClient rather than Invoke-RestMethod, for two reasons. Its Timeout
+    # bounds the whole exchange (connect, send, and reading the body). And the
+    # body is decoded as UTF-8 here: the server sends application/json with no
+    # charset, which Windows PowerShell's Invoke-RestMethod decodes as
+    # ISO-8859-1, so every em dash in a memory arrived as mojibake. The proxy is
+    # bypassed because the engine is a LAN address and proxy discovery only
+    # spends the budget.
+    $handler = New-Object System.Net.Http.HttpClientHandler
+    $handler.UseProxy = $false
+    $client = New-Object System.Net.Http.HttpClient($handler)
+    try {
+        $client.Timeout = [TimeSpan]::FromMilliseconds($remainingMs)
+        $client.DefaultRequestHeaders.Authorization =
+            New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $token)
+        $content = New-Object System.Net.Http.StringContent($body, [System.Text.Encoding]::UTF8, 'application/json')
+        $response = $client.PostAsync("$apiUrl/mcp/call", $content).GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) { exit 0 }
+        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        $resp = [System.Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
+    } finally { $client.Dispose() }
     # recall_memories answers {"memories":[...]} at the TOP LEVEL -- there is no
     # `result` wrapper. Reading $resp.result.memories yields one $null element and
     # then throws on .content, which looks like a server fault and is not one.
@@ -91,9 +125,16 @@ $context = "## Antumbra recall (top matches for this prompt)`n`n" +
     ($lines -join "`n`n") +
     "`n`nThese are automatic; call recall_memories for a deeper or differently-phrased search."
 
-@{
+$json = @{
     hookSpecificOutput = @{
         hookEventName     = 'UserPromptSubmit'
         additionalContext = $context
     }
 } | ConvertTo-Json -Compress -Depth 10
+
+# Written as UTF-8 bytes. Plain output goes through the console code page, which
+# turns anything outside it into '?' before the harness ever reads it.
+$out = [System.Text.UTF8Encoding]::new($false).GetBytes($json)
+$stdout = [Console]::OpenStandardOutput()
+$stdout.Write($out, 0, $out.Length)
+$stdout.Flush()

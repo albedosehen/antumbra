@@ -95,8 +95,9 @@ job_hooks() {
     esac
     if command -v pwsh >/dev/null; then
         step pwsh -NoProfile -File scripts/hooks/tests/session-start.ps1 || return 1
+        step pwsh -NoProfile -File scripts/hooks/tests/prompt-recall.ps1 || return 1
     else
-        echo "SKIPPED (the .ps1 session-start test): pwsh is not installed"
+        echo "SKIPPED (the .ps1 session-start and prompt-recall tests): pwsh is not installed"
         part=1
     fi
     [ "$part" = 0 ] || return 3

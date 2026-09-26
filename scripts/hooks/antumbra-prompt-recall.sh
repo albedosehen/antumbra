@@ -12,6 +12,7 @@
 #   ANTUMBRA_URL         the antumbra-mcp engine (default http://127.0.0.1:8081)
 #   ANTUMBRA_TOKEN       bearer JWT, or
 #   ANTUMBRA_TOKEN_FILE  a file holding it (default ~/.antumbra/token.txt)
+#   ANTUMBRA_RECALL_BUDGET_SEC  wall-clock budget for the recall (default 10)
 #
 # It never fails a prompt. Every failure path exits 0 with no output: a recall
 # that cannot answer must not stop the user from talking to the agent.
@@ -49,6 +50,12 @@ if [ -n "$CWD" ] && [ -d "$CWD" ]; then
     [ "$BRANCH" = "HEAD" ] && BRANCH=""
 fi
 
+# The whole exchange must finish inside the hook's budget, which stays below
+# the hook's "timeout" in settings.json: the server answers one recall at a
+# time, and a hook the harness has to kill is discarded with a warning.
+BUDGET="${ANTUMBRA_RECALL_BUDGET_SEC:-10}"
+case "$BUDGET" in '' | *[!0-9]*) BUDGET=10 ;; esac
+
 BODY="$(jq -nc --arg q "$QUERY" --arg repo "$REPO" --arg branch "$BRANCH" '
     { tool: "recall_memories",
       arguments: ({ query: $q, top_k: 3 }
@@ -58,7 +65,7 @@ BODY="$(jq -nc --arg q "$QUERY" --arg repo "$REPO" --arg branch "$BRANCH" '
 RESP="$(curl -s -X POST "$URL/mcp/call" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $TOKEN" \
-    --max-time 10 --data-binary "$BODY" 2>/dev/null || true)"
+    --max-time "$BUDGET" --data-binary "$BODY" 2>/dev/null || true)"
 [ -z "$RESP" ] && exit 0
 
 # recall_memories answers {"memories":[...]} at the TOP LEVEL -- there is no
