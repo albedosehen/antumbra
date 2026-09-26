@@ -35,6 +35,7 @@ mod admission;
 mod baseline;
 mod cohort;
 mod contribution;
+mod gate;
 mod grow;
 mod measure;
 mod merging;
@@ -45,6 +46,7 @@ mod serving;
 pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
 pub use contribution::ContributionPolicy;
+pub use gate::gate_exemplars;
 pub use grow::{by_credit, choose, diversity, Choosing, Diversity, GrowPolicy, Growth};
 use measure::Measurement;
 pub use merging::{Merge, MergePolicy};
@@ -583,8 +585,9 @@ impl<'a> GenerationLoop<'a> {
         Ok(expert)
     }
 
-    /// Put an admitted expert into the population, freeze its baseline, and
-    /// archive the twin it superseded, if it superseded one.
+    /// Put an admitted expert into the population, freeze its baseline,
+    /// archive the twin it superseded, if it superseded one, and retrain the
+    /// gate over the population it joined.
     async fn admit(
         &self,
         run_id: &RunId,
@@ -598,6 +601,7 @@ impl<'a> GenerationLoop<'a> {
             self.archive_as_redundant(archived, &expert.id, generation)
                 .await?;
         }
+        self.refresh_gate().await?;
         Ok(())
     }
 

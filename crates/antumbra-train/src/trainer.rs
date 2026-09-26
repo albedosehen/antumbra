@@ -21,7 +21,7 @@ use antumbra_core::ports::{
     TaskScores, TrainOutcome, TrainRequest, Trainer, Verifier,
 };
 use antumbra_core::slice::{Holdout, Slice};
-use antumbra_core::{Result, RunId, TrainingRecipe};
+use antumbra_core::{ExpertId, LearnedRouter, Result, RunId, TrainingRecipe};
 
 use crate::config::RaftConfig;
 use crate::contribution;
@@ -30,6 +30,7 @@ use crate::grpo_eval::EvalLoader;
 use crate::holdout::{split, Split};
 use crate::model::{Corpus, CorpusTask, ModelLoader};
 use crate::raft::raft_train;
+use crate::router::{train_learned_router, ROUTER_EPOCHS};
 use crate::teach::capture_corrections;
 
 /// The recipe a run trains under: the one its request names, or the trainer's
@@ -194,6 +195,10 @@ impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
         merge_with(req)
     }
 
+    async fn train_router(&self, exemplars: &[(ExpertId, Vec<f32>)]) -> Result<LearnedRouter> {
+        train_learned_router(exemplars, ROUTER_EPOCHS)
+    }
+
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
         contribution::evaluate_with(
             &self.loader,
@@ -296,6 +301,10 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
         merge_with(req)
     }
 
+    async fn train_router(&self, exemplars: &[(ExpertId, Vec<f32>)]) -> Result<LearnedRouter> {
+        train_learned_router(exemplars, ROUTER_EPOCHS)
+    }
+
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
         contribution::evaluate_with(
             &EvalLoader(&self.loader),
@@ -384,6 +393,10 @@ impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
 
     async fn merge(&self, req: MergeRequest) -> Result<MergeOutcome> {
         merge_with(req)
+    }
+
+    async fn train_router(&self, exemplars: &[(ExpertId, Vec<f32>)]) -> Result<LearnedRouter> {
+        train_learned_router(exemplars, ROUTER_EPOCHS)
     }
 
     async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
