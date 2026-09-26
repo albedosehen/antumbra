@@ -193,6 +193,10 @@ fn demo_app() -> App {
         render_tier: crate::render::RenderTier::default(),
         demo: false,
         store_url: "surrealkv://./data/antumbra.skv".into(),
+        git: antumbra_core::GitContext {
+            repo: Some("github.com/acme/orders".into()),
+            branch: Some("main".into()),
+        },
         should_quit: false,
     }
 }
@@ -284,6 +288,26 @@ fn golden_memory_page() {
     app.set_page(crate::app::Page::Memory);
     let buf = render(&mut app, 120, 36, 1600.0).unwrap();
     assert_golden("memory_page", &to_text(&buf));
+}
+
+// A memory anchored to a commit says where it was learned and how that sits
+// against where the console was started: here a branch other than the one
+// checked out, then the checked-out one.
+#[test]
+fn the_memory_detail_names_its_anchor_and_scope() -> anyhow::Result<()> {
+    let mut app = demo_app();
+    app.set_page(crate::app::Page::Memory);
+    let anchor = antumbra_core::GitProvenance::new("github.com/acme/orders", "abc1234def5678")
+        .on_branch("feature/retry");
+    app.memories[0].evidence.push(anchor.to_evidence());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
+    assert!(text.contains("github.com/acme/orders@abc1234"), "{text}");
+    assert!(text.contains("branch     feature/retry"), "{text}");
+    assert!(text.contains("other_branch"), "{text}");
+    app.git.branch = Some("feature/retry".into());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
+    assert!(text.contains("in_scope"), "{text}");
+    Ok(())
 }
 
 // Golden the Sovereign page: the rules on the left, skill use on the right,

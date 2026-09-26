@@ -14,7 +14,7 @@ use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use antumbra_core::{EdgeType, MemoryNetwork};
+use antumbra_core::{scope_of_evidence, EdgeType, GitProvenance, MemoryNetwork, Scope};
 
 use crate::app::App;
 use crate::theme::Theme;
@@ -152,6 +152,35 @@ fn group<'a>(t: &Theme, label: String) -> Line<'a> {
     ))
 }
 
+/// Where a memory was learned, and how that relates to where the console was
+/// started: the scope recall would tag it with (ADR-0018). `None` for a memory
+/// with no git anchor.
+fn anchor_lines<'a>(t: &Theme, evidence: &[String], app: &App, w: usize) -> Option<Vec<Line<'a>>> {
+    let anchor = GitProvenance::from_evidence(evidence)?;
+    let commit: String = anchor.commit.chars().take(7).collect();
+    let room = w.saturating_sub(11);
+    let mut lines = vec![kv(
+        t,
+        "anchor",
+        &clip(&format!("{}@{commit}", anchor.repo), room),
+    )];
+    if let Some(branch) = &anchor.branch {
+        lines.push(kv(t, "branch", &clip(branch, room)));
+    }
+    let scope = scope_of_evidence(evidence, &app.git);
+    let color = match scope {
+        Scope::InScope => t.accent,
+        Scope::OtherBranch | Scope::OtherRepo => t.warning,
+        Scope::Orphaned => t.alert,
+        Scope::Unknown => t.dim,
+    };
+    lines.push(Line::from(vec![
+        Span::styled(format!("{:<11}", "scope"), Style::default().fg(t.dim)),
+        Span::styled(scope.as_str(), Style::default().fg(color)),
+    ]));
+    Some(lines)
+}
+
 /// Clip `s` to `max` columns, ending in an ellipsis when cut.
 fn clip(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -195,6 +224,9 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     if let Some(author) = &m.author {
         let host = m.author_host.as_deref().unwrap_or("-");
         lines.push(kv(&t, "author", &format!("{} · {host}", author.as_str())));
+    }
+    if let Some(anchor) = anchor_lines(&t, &m.evidence, app, w) {
+        lines.extend(anchor);
     }
 
     if !m.evidence.is_empty() {
