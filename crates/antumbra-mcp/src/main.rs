@@ -220,6 +220,12 @@ struct Cli {
         default_value = "https://api.github.com"
     )]
     github_api_url: String,
+    /// Post a knowledge diff on every pull request in a mapped repository: a
+    /// neutral check run listing the memories and documents anchored to the
+    /// paths it changes and to its branch. Needs the App (--github-app-id)
+    /// with the Checks permission (write). Off by default.
+    #[arg(long, env = "ANTUMBRA_GITHUB_KNOWLEDGE_DIFF")]
+    github_knowledge_diff: bool,
 }
 
 async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
@@ -579,6 +585,12 @@ async fn run() -> Result<()> {
         cli.github_app_key_file.as_deref(),
         &cli.github_api_url,
     )?;
+    if cli.github_knowledge_diff && !github.as_ref().is_some_and(|g| g.reads_contents()) {
+        anyhow::bail!(
+            "--github-knowledge-diff posts check runs as the App: it needs the webhook receiver              and --github-app-id with --github-app-key-file"
+        );
+    }
+    let github = github.map(|g| g.with_knowledge_diff(cli.github_knowledge_diff));
     if github.is_some() && cli.http.is_none() {
         anyhow::bail!("the GitHub webhook receiver needs --http: deliveries arrive over the networked surface");
     }

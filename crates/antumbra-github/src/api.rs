@@ -13,6 +13,7 @@ use serde_json::Value;
 use antumbra_core::normalize_repo;
 
 use crate::app::{AppCredentials, AppError};
+use crate::knowledge::CheckOutput;
 
 /// GitHub's public API. An Enterprise Server host is `https://<host>/api/v3`.
 pub const DEFAULT_API_URL: &str = "https://api.github.com";
@@ -194,6 +195,34 @@ impl GithubApi {
             .await?;
         expect_success(&resp, "installation token")?;
         serde_json::from_slice(&resp.body).map_err(|e| ApiError::Shape(e.to_string()))
+    }
+
+    /// Post a completed, neutral check run named `name` on `head_sha`: an
+    /// informational report that never blocks a merge. Needs the App's Checks
+    /// permission (write).
+    pub async fn create_check_run(
+        &self,
+        token: &str,
+        full_name: &str,
+        head_sha: &str,
+        name: &str,
+        output: &CheckOutput,
+    ) -> Result<(), ApiError> {
+        let url = format!("{}/repos/{full_name}/check-runs", self.base);
+        let body = serde_json::json!({
+            "name": name,
+            "head_sha": head_sha,
+            "status": "completed",
+            "conclusion": "neutral",
+            "output": {
+                "title": output.title,
+                "summary": output.summary,
+                "text": output.text,
+            },
+        });
+        let token = token.to_string();
+        let resp = self.call(move |t| t.post_json(&url, &token, &body)).await?;
+        expect_success(&resp, "check run")
     }
 
     /// Every file a pull request changed (paged; capped at
@@ -485,6 +514,31 @@ mod tests {
         assert!(calls[0].starts_with("POST https://api.github.com/app/installations/77"));
         // The bearer on that call was the App JWT, not an installation token.
         assert!(fake.bearers()[0].starts_with("eyJ"), "{:?}", fake.bearers());
+    }
+
+    #[tokio::test]
+    async fn a_check_run_is_posted_with_the_installation_token() {
+        let url = format!("https://api.github.com/repos/{FULL}/check-runs");
+        let output = CheckOutput {
+            title: "t".into(),
+            summary: "s".into(),
+            text: String::new(),
+        };
+        let (posting, fake) = api(FakeTransport::new().json("POST", &url, 201, &json!({"id": 1})));
+        posting
+            .create_check_run("ghs_x", FULL, "abc", "Antumbra knowledge diff", &output)
+            .await
+            .unwrap();
+        assert_eq!(fake.calls(), vec![format!("POST {url}")]);
+        assert_eq!(fake.bearers(), vec!["ghs_x".to_string()]);
+
+        // Without the Checks permission GitHub answers 403, and that is an error.
+        let (refusing, _) =
+            api(FakeTransport::new().json("POST", &url, 403, &json!({"message": "no"})));
+        let refused = refusing
+            .create_check_run("ghs_x", FULL, "abc", "Antumbra knowledge diff", &output)
+            .await;
+        assert!(matches!(refused, Err(ApiError::Status { status: 403, .. })));
     }
 
     #[tokio::test]

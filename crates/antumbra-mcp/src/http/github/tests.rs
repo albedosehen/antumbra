@@ -690,3 +690,72 @@ fn from_flags_requires_matching_halves() {
     .unwrap_err();
     assert!(err.to_string().contains("cannot read"), "{err}");
 }
+
+fn opened_pr() -> serde_json::Value {
+    let mut pr = merged_pr();
+    pr["action"] = json!("opened");
+    pr["pull_request"]["merged"] = json!(false);
+    pr["pull_request"]["merge_commit_sha"] = serde_json::Value::Null;
+    pr
+}
+
+/// With the knowledge diff on, an opened pull request gets a neutral check
+/// run on its head naming what is anchored to the files it changes and to its
+/// branch. Off, it is only acknowledged.
+#[tokio::test]
+async fn an_opened_pull_request_gets_a_knowledge_diff() -> anyhow::Result<()> {
+    let checks = format!("{API}/repos/{FULL}/check-runs");
+    let fake = Arc::new(
+        token_route(FakeTransport::new())
+            .json(
+                "GET",
+                &format!("{API}/repos/{FULL}/pulls/42/files?per_page=100&page=1"),
+                200,
+                &json!([
+                    {"filename": "src/orders.rs", "status": "modified"},
+                    {"filename": "docs/orders.md", "status": "modified"}
+                ]),
+            )
+            .json("POST", &checks, 201, &json!({"id": 1})),
+    );
+    let cfg = plain()
+        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM).unwrap())
+        .with_api(GithubApi::with_transport(API, fake.clone()))
+        .with_knowledge_diff(true);
+    let st = state(Some(cfg)).await;
+    seed(
+        &st,
+        "memory:orders",
+        &format!("git:{REPO}@abc1234#main:src/orders.rs"),
+    )
+    .await;
+    seed(
+        &st,
+        "memory:outbox",
+        &format!("git:{REPO}@abc1234#feat/outbox"),
+    )
+    .await;
+    seed_document(&st, &format!("{REPO}:docs/orders.md"), "orders doc").await?;
+
+    let out = deliver(&st, "pull_request", &opened_pr()).await;
+    assert!(out.knowledge_diff_queued, "{:?}", out.ignored);
+    assert_eq!(out.reanchored, 0, "an open pull request moves nothing");
+    let mut posted = false;
+    for _ in 0..100 {
+        if fake.calls().contains(&format!("POST {checks}")) {
+            posted = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(posted, "no check run was posted: {:?}", fake.calls());
+
+    let off = state(Some(plain())).await;
+    let out = deliver(&off, "pull_request", &opened_pr()).await;
+    assert!(!out.knowledge_diff_queued);
+    assert_eq!(
+        out.ignored.as_deref(),
+        Some("action 'opened': the knowledge diff is off")
+    );
+    Ok(())
+}
