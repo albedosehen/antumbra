@@ -33,7 +33,7 @@ exclude = ["crates/antumbra-control-server"]
 [workspace.package]
 edition = "2021"
 license = "AGPL-3.0-only"
-rust-version = "1.90"
+rust-version = "1.95"
 repository = "https://github.com/Oneiriq/antumbra"
 authors = ["Shon Thomas <shon@oneiriq.com>"]
 
@@ -48,7 +48,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
 tachyonfx = "0.25"
-oneiriq-surql = { version = "0.33", default-features = false, features = ["client-rustls"] }
+oneiriq-surql = { version = "0.34", default-features = false, features = ["client-rustls"] }
 
 [profile.dev]
 opt-level = 0
