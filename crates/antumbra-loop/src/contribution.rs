@@ -477,9 +477,8 @@ mod tests {
                 })
                 .collect()
         };
-        let ids = |sample: Vec<TaskPrompt>| -> Vec<String> {
-            sample.into_iter().map(|t| t.id).collect()
-        };
+        let ids =
+            |sample: Vec<TaskPrompt>| -> Vec<String> { sample.into_iter().map(|t| t.id).collect() };
         let one = ids(sample_live(tasks(&["a", "b", "c", "d", "e"]), 3));
         let other = ids(sample_live(tasks(&["e", "d", "c", "b", "a"]), 3));
         assert_eq!(one.len(), 3);

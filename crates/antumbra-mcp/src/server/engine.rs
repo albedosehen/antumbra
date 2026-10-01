@@ -11,6 +11,23 @@
 
 use super::*;
 
+/// The learned router to route with. One the store holds but cannot decode,
+/// as after a rollback to a server older than the router's format, degrades
+/// to none, as one never trained does: the task escalates to the agent rather
+/// than failing the call (ADR-0024 Validation 7). Anything else the store
+/// reports still fails it.
+fn readable(
+    loaded: antumbra_core::Result<Option<antumbra_core::LearnedRouter>>,
+) -> antumbra_core::Result<Option<antumbra_core::LearnedRouter>> {
+    match loaded {
+        Err(antumbra_core::AntumbraError::Serde(e)) => {
+            eprintln!("antumbra-mcp: the learned router is unreadable, escalating instead: {e}");
+            Ok(None)
+        }
+        other => other,
+    }
+}
+
 impl McpServer {
     /// `serve` is the engine the `answer` tool drives (a real `MultiAdapterServe`
     /// under `--features models`, a fake in tests, or `None` for a route-only
@@ -596,7 +613,7 @@ impl McpServer {
             return Ok(Vec::new());
         }
         let mut routes: Vec<RouteHit> = Vec::new();
-        if let Some(router) = lifecycle::load_router(&self.store).await? {
+        if let Some(router) = readable(lifecycle::load_router(&self.store).await)? {
             if router.covers(v) {
                 for (id, probability) in router.route(v) {
                     routes.push(RouteHit {
@@ -760,5 +777,23 @@ impl ServerHandler for McpServer {
             };
             registry.register(identity, context.peer.clone()).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::readable;
+    use antumbra_core::AntumbraError;
+
+    #[test]
+    fn an_unreadable_router_routes_as_none_and_a_store_fault_still_fails() {
+        let undecodable = serde_json::from_str::<antumbra_core::LearnedRouter>("{}")
+            .expect_err("a router needs its fields");
+        assert!(matches!(readable(Err(undecodable.into())), Ok(None)));
+        assert!(matches!(
+            readable(Err(AntumbraError::Store("connection reset".into()))),
+            Err(AntumbraError::Store(_))
+        ));
+        assert!(matches!(readable(Ok(None)), Ok(None)));
     }
 }
