@@ -1,4 +1,6 @@
-# Antumbra
+<p align="center">
+  <img src="assets/banner.png" alt="Antumbra, a private agent substrate" width="100%">
+</p>
 
 Antumbra is a private substrate that plugs into a coding agent you already use (Claude Code, Cursor, any MCP client) and, instead of merely _remembering_, it **gets better** by training verified outcomes into frozen LoRA adapters over a shared base, and learning a competence boundary for each. Every milestone is a falsifiable experiment with a kill criterion; the sections below lay out the design and what has (and hasn't) held up so far.
 
