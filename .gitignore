@@ -9,6 +9,7 @@
 !/Cargo.lock
 !/LICENSE
 !/README.md
+!/assets/
 !/corpora/
 !/crates/
 !/docs/
