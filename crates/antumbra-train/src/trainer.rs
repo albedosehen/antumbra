@@ -286,7 +286,7 @@ impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
             &withheld,
             &run_id,
             &config,
-            self.shaping.as_ref(),
+            self.shaping.as_ref().filter(|_| !req.verifier_only),
         )
         .await?;
         Ok(TrainOutcome {
@@ -519,6 +519,7 @@ mod tests {
             recipe: None,
             focus: Vec::new(),
             parent_adapter: None,
+            verifier_only: false,
         };
         let out = trainer.train_shadow(req).await.unwrap();
         assert!(out.final_fitness > 0.0);
@@ -583,6 +584,7 @@ mod tests {
             recipe: None,
             focus: Vec::new(),
             parent_adapter: None,
+            verifier_only: false,
         }
     }
 
@@ -776,6 +778,7 @@ mod tests {
             recipe,
             focus: Vec::new(),
             parent_adapter: None,
+            verifier_only: false,
         }
     }
 

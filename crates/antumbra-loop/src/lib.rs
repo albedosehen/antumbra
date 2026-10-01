@@ -35,6 +35,7 @@ mod admission;
 mod baseline;
 mod cohort;
 mod contribution;
+mod critic_fallback;
 mod gate;
 mod grow;
 mod measure;
@@ -248,6 +249,10 @@ pub struct GenerationReport {
     /// How the critic that shaped this generation read against the verifier
     /// and its twin (ADR-0022 S-2). `None` without a critic.
     pub critic: Option<antumbra_core::critic::CriticWatch>,
+    /// Why the run set its critic aside, in the generation it did: from the
+    /// next one on, its shadows train on the verifier's reward alone
+    /// (ADR-0022 S-2).
+    pub critic_fallback: Option<antumbra_core::critic::Fallback>,
     /// Live tasks the contribution measurement found a clear winner for,
     /// which the gate was retrained on (ADR-0024 D-1).
     pub routing_outcomes: usize,
@@ -284,6 +289,8 @@ pub struct GenerationLoop<'a> {
     /// Each verifier the recheck has measured this run: the generations, and
     /// the counts so far.
     rechecked: std::sync::Mutex<std::collections::HashMap<String, (u32, antumbra_core::Tally)>>,
+    /// What the run has read of its critic, and whether it set it aside.
+    critic: std::sync::Mutex<critic_fallback::CriticRun>,
 }
 
 impl<'a> GenerationLoop<'a> {
@@ -301,6 +308,7 @@ impl<'a> GenerationLoop<'a> {
             rechecker: None,
             scores: scores::ScoreCache::default(),
             rechecked: std::sync::Mutex::default(),
+            critic: std::sync::Mutex::default(),
         }
     }
 
@@ -475,6 +483,7 @@ impl<'a> GenerationLoop<'a> {
             withdrawn,
             contribution_scores: self.scores.counted().since(scored_before),
             critic: outcome.critic_watch.clone(),
+            critic_fallback: self.watch_critic(outcome.critic_watch.as_ref()),
             routing_outcomes,
         })
     }

@@ -201,6 +201,7 @@ impl GenerationLoop<'_> {
                     recipe: asked,
                     focus: focus.clone(),
                     parent_adapter: parent_adapter.clone(),
+                    verifier_only: self.verifier_only(),
                 })
                 .await?;
             let recipe = self
