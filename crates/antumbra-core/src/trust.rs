@@ -14,10 +14,15 @@
 //!   verifier outright;
 //! - **the adversarial holdout:** one pass on a task that cannot be satisfied
 //!   is proof of a shortcut, not a near miss, and rejects it outright too;
-//! - **the paired holdout:** the one-sided upper confidence bound on its
-//!   false-positive rate, the rate at which it passes what anchored truth
-//!   fails, must be under the policy's. The bound, not the observed rate, so
-//!   a verifier seen on few failures cannot pass on luck;
+//! - **false positives:** known-bad cases passed with the one-sided upper
+//!   confidence bound on its false-positive rate, the rate at which it passes
+//!   what anchored truth fails, over the policy's. Evidence against it, which
+//!   needs no known-good case;
+//! - **enough evidence:** known-good and known-bad cases both, and enough
+//!   known-bad ones, none passed, to bound the rate. Missing evidence is not
+//!   evidence against it;
+//! - **the paired holdout:** the bound under the policy's. The bound, not the
+//!   observed rate, so a verifier seen on few failures cannot pass on luck;
 //! - **usefulness:** it must accept enough of the known-good artifacts. A
 //!   false negative only wastes compute, so this is a floor, not a bound.
 //!
@@ -213,6 +218,15 @@ impl Tally {
             TrustVerdict::Shortcut {
                 cases: self.shortcuts.clone(),
             }
+        } else if self.bad_passed > 0 && upper > policy.max_false_positive {
+            // Known-bad cases passed past the bound: evidence against it,
+            // which needs no known-good case to stand. Measured on the
+            // policy's own answers, a task the policy never gets right has
+            // none, and a check rewarding wrong answers there went unjudged.
+            TrustVerdict::FalsePositives {
+                upper,
+                max: policy.max_false_positive,
+            }
         } else if self.bad == 0 || self.good == 0 {
             TrustVerdict::Unmeasured {
                 reason: format!(
@@ -220,7 +234,7 @@ impl Tally {
                     self.good, self.bad
                 ),
             }
-        } else if upper > policy.max_false_positive && self.bad_passed == 0 {
+        } else if upper > policy.max_false_positive {
             // Nothing wrong was passed, but too little was tried to bound
             // the rate: missing evidence, not evidence against it.
             TrustVerdict::Unmeasured {
@@ -228,11 +242,6 @@ impl Tally {
                     "none of {} known-bad case(s) passed, too few to bound the rate under {}",
                     self.bad, policy.max_false_positive
                 ),
-            }
-        } else if upper > policy.max_false_positive {
-            TrustVerdict::FalsePositives {
-                upper,
-                max: policy.max_false_positive,
             }
         } else if accepted < policy.min_accepted {
             TrustVerdict::TooStrict {
@@ -494,6 +503,32 @@ mod tests {
             judge(&tally((10, 4), (50, 0))),
             TrustVerdict::TooStrict { .. }
         ));
+    }
+
+    /// Passing known-bad cases past the bound is evidence against a verifier
+    /// whether or not any known-good case was seen. Rechecked on the policy's
+    /// answers to a task it never gets right, a check that passed three of
+    /// sixteen wrong ones read as unmeasured, and kept granting reward.
+    #[test]
+    fn false_positives_need_no_known_good_case_to_count() {
+        assert!(matches!(
+            judge(&tally((0, 0), (16, 3))),
+            TrustVerdict::FalsePositives { .. }
+        ));
+        // Missing evidence is still not evidence against it.
+        assert!(matches!(
+            judge(&tally((0, 0), (16, 0))),
+            TrustVerdict::Unmeasured { .. }
+        ));
+        assert_eq!(
+            after_measurement(TrustState::Trusted, &judge(&tally((0, 0), (16, 3)))),
+            Some(TrustState::Quarantined)
+        );
+        assert_eq!(
+            after_measurement(TrustState::Proposed, &judge(&tally((0, 0), (16, 3)))),
+            None,
+            "a proposal stays proposed: more cases may yet bound it"
+        );
     }
 
     #[test]
