@@ -24,6 +24,8 @@ mod critic_cmd;
 mod eval_args;
 mod gate_outcomes;
 mod gate_sweep;
+#[cfg(feature = "models")]
+mod generation_report;
 mod gitctx;
 mod gitfacts;
 #[cfg(feature = "models")]
