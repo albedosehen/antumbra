@@ -3,7 +3,7 @@ name = "antumbra-control-server"
 version = "0.0.0"
 edition = "2021"
 license = "AGPL-3.0-only"
-rust-version = "1.90"
+rust-version = "1.95"
 repository = "https://github.com/Oneiriq/antumbra"
 authors = ["Shon Thomas <shon@oneiriq.com>"]
 description = "Antumbra hosted control plane: an HTTP surface for invite-gated signup, magic-link login, and RS256 token issuance, run separately from the data-plane MCP server."
@@ -52,7 +52,7 @@ lettre = { version = "0.11", default-features = false, features = [
 oneiriq-kayak = { git = "ssh://git@github.com/Oneiriq/kayak.git", branch = "main", optional = true }
 # The schema vocabulary kayak resolves the contract against; the same version
 # the store builds its TableDefinitions with, so the two speak one type.
-oneiriq-surql = { version = "0.33", default-features = false, features = ["client-rustls"], optional = true }
+oneiriq-surql = { version = "0.34.1", default-features = false, features = ["client-rustls"], optional = true }
 
 [dev-dependencies]
 # `oneshot` drives the axum router in tests without binding a socket.

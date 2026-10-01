@@ -979,6 +979,11 @@
             "in": "query",
             "name": "network",
             "schema": {
+              "enum": [
+                "world",
+                "bank",
+                "opinion"
+              ],
               "type": "string"
             }
           },
