@@ -7,7 +7,10 @@ use antumbra_store::EMBED_DIM;
 use tower::ServiceExt; // oneshot
 
 async fn state() -> Arc<HttpState> {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    state_with(Store::connect_memory(EMBED_DIM).await.unwrap()).await
+}
+
+async fn state_with(store: Store) -> Arc<HttpState> {
     Arc::new(HttpState {
         serving: Serving::Shared(store.clone()),
         store,
@@ -190,11 +193,9 @@ async fn valid_token_reaches_the_service() {
 // stream; when A writes into the shared compartment, B's stream receives the
 // `antumbra/memory_changed` notification. Drives the real `/mcp` router
 // through the full stateful handshake (initialize -> initialized -> GET SSE),
-// so it exercises the actual transport path, peer capture, audience
-// resolution, and push. The written row is handed to the propagation loop as
-// the change feed would deliver it: on this embedded store each request signs
-// the one connection in, and SurrealDB drops a LIVE query when its connection
-// signs in as another principal, so a LIVE watch here delivers nothing.
+// so it exercises the actual transport path, peer capture, the store's
+// announced write, audience resolution, and push. The store is embedded, so
+// propagation follows its announced writes, as the server does there.
 #[tokio::test]
 async fn live_notification_reaches_a_grantees_stream() {
     use antumbra_core::{
@@ -203,7 +204,9 @@ async fn live_notification_reaches_a_grantees_stream() {
     use antumbra_store::repo::{compartment, memory, principal};
     use futures::StreamExt;
 
-    let state = state().await;
+    let mut store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let announced = store.announce_changes();
+    let state = state_with(store).await;
     let tenant = TenantId::new("ws:t");
     let alice = UserId::new("user:a");
     let bob = UserId::new("user:b");
@@ -248,9 +251,8 @@ async fn live_notification_reaches_a_grantees_stream() {
     .await
     .unwrap();
 
-    // The propagation loop, fed below with the change A makes.
-    let (changes, feed) = tokio::sync::mpsc::channel(8);
-    tokio::spawn(propagate(state.clone(), feed));
+    // Start live propagation, following the store's announced writes.
+    spawn_live_propagation(state.clone(), Some(announced));
 
     let app = router(state.clone());
     let bob_jwt = format!("Bearer {}", token("ws:t", "user:b"));
@@ -341,19 +343,6 @@ async fn live_notification_reaches_a_grantees_stream() {
         )
         .in_compartment(comp.clone());
         memory::upsert(&state.store, &m).await.unwrap();
-        let row = antumbra_store::repo::sync::list_rows(&state.store, "memory")
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|r| r["content"] == "shared via SSE")
-            .expect("the written row");
-        changes
-            .send(antumbra_store::repo::sync::ChangeEvent {
-                action: antumbra_store::repo::sync::ChangeAction::Create,
-                row,
-            })
-            .await
-            .unwrap();
     }
 
     // 4. The notification arrives on bob's SSE stream.
