@@ -70,7 +70,7 @@ impl antumbra_copal::CopalTransport for CountingCopal {
         _body: &serde_json::Value,
     ) -> antumbra_core::Result<serde_json::Value> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(serde_json::json!({ "id": "file:01J", "state": "draft" }))
+        Ok(serde_json::json!({ "id": "01k6f2x9q3w8e5r7t1y4z6a8b0", "state": "draft" }))
     }
 
     fn put_bytes(
@@ -78,10 +78,13 @@ impl antumbra_copal::CopalTransport for CountingCopal {
         _url: &str,
         _credential: &antumbra_copal::CopalCredential,
         _content_type: &str,
+        _digest: &str,
         _body: &[u8],
     ) -> antumbra_core::Result<serde_json::Value> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(serde_json::json!({ "digest": "sha256:abc", "state": "ready" }))
+        Ok(
+            serde_json::json!({ "digest": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "state": "ready" }),
+        )
     }
 }
 
@@ -159,7 +162,7 @@ impl antumbra_copal::CopalTransport for CannedCopal {
         _body: &serde_json::Value,
     ) -> antumbra_core::Result<serde_json::Value> {
         if self.up {
-            Ok(serde_json::json!({ "id": "file:01J", "state": "draft" }))
+            Ok(serde_json::json!({ "id": "01k6f2x9q3w8e5r7t1y4z6a8b0", "state": "draft" }))
         } else {
             Err(antumbra_core::AntumbraError::other("connection refused"))
         }
@@ -170,10 +173,13 @@ impl antumbra_copal::CopalTransport for CannedCopal {
         _url: &str,
         _credential: &antumbra_copal::CopalCredential,
         _content_type: &str,
+        _digest: &str,
         _body: &[u8],
     ) -> antumbra_core::Result<serde_json::Value> {
         if self.up {
-            Ok(serde_json::json!({ "digest": "sha256:abc", "state": "ready" }))
+            Ok(
+                serde_json::json!({ "digest": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "state": "ready" }),
+            )
         } else {
             Err(antumbra_core::AntumbraError::other("connection refused"))
         }
@@ -215,12 +221,10 @@ async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() {
         .unwrap();
     assert!(!recalled.0.chunks.is_empty());
     // Every chunk names the archived original: the file AND the bytes.
-    assert!(recalled
-        .0
-        .chunks
-        .iter()
-        .all(|c| c.copal_file.as_deref() == Some("file:01J")
-            && c.copal_digest.as_deref() == Some("sha256:abc")));
+    assert!(recalled.0.chunks.iter().all(|c| c.copal_file.as_deref()
+        == Some("01k6f2x9q3w8e5r7t1y4z6a8b0")
+        && c.copal_digest.as_deref()
+            == Some("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")));
 }
 
 #[tokio::test]

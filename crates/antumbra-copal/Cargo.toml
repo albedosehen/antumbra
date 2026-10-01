@@ -11,6 +11,8 @@ description = "The copal document-of-record archive client: uploads an ingested 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 serde_json.workspace = true
+# The upload's declared digest, which copal verifies against the bytes.
+sha2 = "0.11"
 thiserror.workspace = true
 # `spawn_blocking`: the archive's two calls are blocking `ureq` requests run
 # off the async runtime so they never stall a worker.

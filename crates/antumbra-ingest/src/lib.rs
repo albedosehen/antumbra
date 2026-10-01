@@ -233,7 +233,7 @@ mod tests {
         ) -> antumbra_core::Result<Value> {
             self.record(body);
             if self.up {
-                Ok(json!({ "id": "file:01J" }))
+                Ok(json!({ "id": "01k6f2x9q3w8e5r7t1y4z6a8b0" }))
             } else {
                 Err(antumbra_core::AntumbraError::other("copal is down"))
             }
@@ -243,9 +243,12 @@ mod tests {
             _url: &str,
             _credential: &CopalCredential,
             _content_type: &str,
+            _digest: &str,
             _body: &[u8],
         ) -> antumbra_core::Result<Value> {
-            Ok(json!({ "digest": "sha256:abc" }))
+            Ok(
+                json!({ "digest": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" }),
+            )
         }
     }
 
@@ -350,14 +353,23 @@ mod tests {
         let archived = out.archived.expect("archived");
         assert_eq!(
             (archived.file_id.as_str(), archived.digest.as_str()),
-            ("file:01J", "sha256:abc")
+            (
+                "01k6f2x9q3w8e5r7t1y4z6a8b0",
+                "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+            )
         );
         let hits = document::recall(&store, &tenant, &embedder.embed("health").await.unwrap(), 5)
             .await
             .unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].copal_file.as_deref(), Some("file:01J"));
-        assert_eq!(hits[0].copal_digest.as_deref(), Some("sha256:abc"));
+        assert_eq!(
+            hits[0].copal_file.as_deref(),
+            Some("01k6f2x9q3w8e5r7t1y4z6a8b0")
+        );
+        assert_eq!(
+            hits[0].copal_digest.as_deref(),
+            Some("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")
+        );
         assert_eq!(hits[0].source.as_deref(), Some("$ deno task routes"));
     }
 
