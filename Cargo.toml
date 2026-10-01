@@ -48,7 +48,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
 tachyonfx = "0.25"
-oneiriq-surql = { version = "0.34", default-features = false, features = ["client-rustls"] }
+oneiriq-surql = { version = "0.34.1", default-features = false, features = ["client-rustls"] }
 
 [profile.dev]
 opt-level = 0

@@ -4779,9 +4779,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneiriq-surql"
-version = "0.34.0"
+version = "0.34.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae2b03332d3d6debe945dc901406b0cd205fbea906d0b360e7e5043eb9a34eb6"
+checksum = "a76bfda83732851be70c4721c0cedd5bba9769eb45159cc946c781ce0959a667"
 dependencies = [
  "chrono",
  "futures",
