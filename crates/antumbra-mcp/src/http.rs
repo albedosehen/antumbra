@@ -202,19 +202,28 @@ pub async fn serve(
     profile: Option<Arc<crate::profile::ToolProfile>>,
     github: Option<GithubConfig>,
 ) -> Result<()> {
-    let store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
+    let mut store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
     // on NON-root connections or the engine ACL is bypassed (R-6): give each
     // identity its own credential-less connection (schema already applied by
     // `store`), reused across its requests so the hot path needs no global lock.
     // On embedded there are no credentials and only one connection is possible, so
     // serving reuses `store`; a per-request record signin scopes it.
-    let serving = match (db_user.as_deref(), db_pass.as_deref()) {
-        (Some(_), Some(_)) => Serving::PerIdentity {
-            url: url.clone(),
-            conns: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        },
-        _ => Serving::Shared(store.clone()),
+    // Embedded, the one connection is signed in per request, which drops a LIVE
+    // query, so live propagation follows the store's own announced writes
+    // instead. Asked for before `store` is cloned, so every clone announces.
+    let (serving, announced) = match (db_user.as_deref(), db_pass.as_deref()) {
+        (Some(_), Some(_)) => (
+            Serving::PerIdentity {
+                url: url.clone(),
+                conns: Mutex::new(Bounded::new(MAX_SESSIONS)),
+            },
+            None,
+        ),
+        _ => {
+            let announced = store.announce_changes();
+            (Serving::Shared(store.clone()), Some(announced))
+        }
     };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
@@ -239,7 +248,7 @@ pub async fn serve(
         consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     });
-    spawn_live_propagation(state.clone());
+    spawn_live_propagation(state.clone(), announced);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
     axum::serve(listener, router(state)).await?;
@@ -252,26 +261,31 @@ pub async fn serve(
 /// lock in **owner** mode (it must see across tenants); the notification fan-out
 /// touches no DB. The `LIVE` subscription is registered now, while the connection
 /// is still the startup owner session (before any per-request signin).
-fn spawn_live_propagation(state: Arc<HttpState>) {
+///
+/// `announced` is the store's own write announcements, on an embedded store
+/// whose one connection cannot keep a LIVE query; `None` watches the server's
+/// LIVE feed.
+fn spawn_live_propagation(
+    state: Arc<HttpState>,
+    announced: Option<tokio::sync::mpsc::Receiver<antumbra_store::repo::sync::ChangeEvent>>,
+) {
     tokio::spawn(async move {
-        let feed = match antumbra_store::repo::sync::watch_table(&state.store, "memory").await {
-            Ok(feed) => feed,
-            Err(e) => {
-                eprintln!("antumbra-mcp: live propagation disabled (watch failed): {e}");
-                return;
+        let feed = match announced {
+            Some(feed) => {
+                eprintln!("antumbra-mcp: live propagation following this server's memory writes");
+                feed
             }
+            None => match antumbra_store::repo::sync::watch_table(&state.store, "memory").await {
+                Ok(feed) => {
+                    eprintln!("antumbra-mcp: live propagation watching shared-memory changes");
+                    feed
+                }
+                Err(e) => {
+                    eprintln!("antumbra-mcp: live propagation disabled (watch failed): {e}");
+                    return;
+                }
+            },
         };
-        eprintln!("antumbra-mcp: live propagation watching shared-memory changes");
-        // SurrealDB drops a session's LIVE queries when the session signs in as
-        // another principal. Embedded, the watch shares the one connection every
-        // request signs in on, so it delivers nothing after the first request.
-        if matches!(state.serving, Serving::Shared(_)) {
-            eprintln!(
-                "antumbra-mcp: live propagation stops after the first request on an \
-                 embedded store, whose one connection each request signs in on; \
-                 serve from a SurrealDB server to keep it"
-            );
-        }
         propagate(state, feed).await;
         // The feed only closes when the watch task ends (stream error/kill or the
         // connection dropping). Surface it: otherwise live propagation would stop

@@ -110,7 +110,16 @@ pub async fn put_row(store: &Store, row: &Value) -> Result<Written> {
         .await
         .map_err(map)?;
     Ok(match written {
-        Value::Object(_) => Written::Yes,
+        Value::Object(_) => {
+            // A replicated memory is announced like a local write.
+            if target.starts_with("memory:") {
+                store.announce(ChangeEvent {
+                    action: ChangeAction::Update,
+                    row: row.clone(),
+                });
+            }
+            Written::Yes
+        }
         _ => Written::Refused,
     })
 }

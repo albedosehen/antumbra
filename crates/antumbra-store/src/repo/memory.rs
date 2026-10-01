@@ -33,6 +33,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::fusion::{rrf_fuse, DEFAULT_RRF_K};
 use crate::knn::{candidate_pool, search_effort};
+use crate::repo::sync::{ChangeAction, ChangeEvent};
 use crate::store::Store;
 
 const TABLE: &str = "memory";
@@ -125,10 +126,19 @@ impl MemoryRow {
 /// Insert or replace a memory (addressed by its globally-unique id).
 pub async fn upsert(store: &Store, memory: &Memory) -> Result<()> {
     let id = RecordID::<()>::new(TABLE, memory.id.as_str()).map_err(map)?;
+    // Whether this write creates the memory, read only to announce it.
+    let created =
+        store.announcing() && matches!(get(store, &memory.tenant, &memory.id).await, Ok(None));
     let data: Value = serde_json::to_value(MemoryRow::from_domain(memory))?;
     upsert_record(store.client(), &id, data)
         .await
         .map_err(map)?;
+    let action = if created {
+        ChangeAction::Create
+    } else {
+        ChangeAction::Update
+    };
+    announce(store, action, Some(memory));
     Ok(())
 }
 
@@ -560,10 +570,13 @@ pub async fn reinforce(
         ))
         .return_after();
     let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
-    rows.into_iter()
+    let updated = rows
+        .into_iter()
         .next()
         .map(MemoryRow::into_domain)
-        .transpose()
+        .transpose()?;
+    announce(store, ChangeAction::Update, updated.as_ref());
+    Ok(updated)
 }
 
 /// Penalize a memory whose thesis was FALSIFIED: decay its confidence toward 0 -- the mirror
@@ -597,10 +610,13 @@ pub async fn penalize(
         ))
         .return_after();
     let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
-    rows.into_iter()
+    let updated = rows
+        .into_iter()
         .next()
         .map(MemoryRow::into_domain)
-        .transpose()
+        .transpose()?;
+    announce(store, ChangeAction::Update, updated.as_ref());
+    Ok(updated)
 }
 
 /// Record that a trace graduated into the umbra as `expert`, tenant-checked.
@@ -623,6 +639,7 @@ pub async fn mark_consolidated(
                 }),
             )
             .await?;
+            announce(store, ChangeAction::Update, Some(&m));
             Ok(Some(m))
         }
         None => Ok(None),
@@ -653,6 +670,7 @@ pub async fn soft_delete(
                 }),
             )
             .await?;
+            announce(store, ChangeAction::Update, Some(&m));
             Ok(Some(m))
         }
         None => Ok(None),
@@ -696,11 +714,29 @@ pub async fn purge(store: &Store, older_than: chrono::DateTime<chrono::Utc>) -> 
 /// tombstone path -- prefer [`soft_delete`] for user-facing forgets so the
 /// deletion propagates; this is for purges and internal cleanup.
 pub async fn delete(store: &Store, tenant: &TenantId, id: &MemoryId) -> Result<()> {
+    // What is removed, read only to announce it.
+    let removed = if store.announcing() {
+        get(store, tenant, id).await.ok().flatten()
+    } else {
+        None
+    };
     let condition = and_(eq("key", id.as_str()), eq("tenant_id", tenant.as_str()));
     delete_records(store.client(), TABLE, Some(&condition))
         .await
         .map_err(map)?;
+    announce(store, ChangeAction::Delete, removed.as_ref());
     Ok(())
+}
+
+/// Announce a memory write in-process, when the store announces its writes
+/// ([`Store::announce_changes`]), as the row a LIVE watch would deliver.
+fn announce(store: &Store, action: ChangeAction, memory: Option<&Memory>) {
+    let Some(memory) = memory.filter(|_| store.announcing()) else {
+        return;
+    };
+    if let Ok(row) = serde_json::to_value(MemoryRow::from_domain(memory)) {
+        store.announce(ChangeEvent { action, row });
+    }
 }
 
 #[cfg(test)]
