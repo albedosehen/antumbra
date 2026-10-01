@@ -667,8 +667,25 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    **The recheck now pools a run's generations.** Sixteen answers to one task in a generation hold four to ten wrong ones, too few to bound a rate under 0.10. That is why the eight that held could not be renewed. Each recheck now adds its counts to those the run already took for the same verifier, and judges the total. A verifier on a task the policy rarely fails can then be renewed once a run has seen enough of its answers. A pass anywhere in the pool still counts against it. The pool lives for one run, so no recorded measurement is counted twice.
 
+   **A second skill, and the first expert trained under synthesized checks.** `verifier-validate.sh` and then `verifier-train.sh` ran with `SKILL=numbers` on 1b7ed1b on 2026-10-01.
+   - **Synthesis and trust:**
+     - On the first set of answers, 23 checks were measured: 14 sound and trusted, 3 over the bound, 6 shortcuts.
+     - On a second, independently seeded set, 15 of the 17 measured held their bound, 1 went over it and 1 was unmeasured. Two more were trusted, 16 in all.
+     - The challenge quarantined 1 of the 16.
+   - **Training under them,** three generations, the recheck pooling the run:
+
+     | generation | pass rate by round | outcome |
+     | ---: | --- | --- |
+     | 0 | 0.28, 0.50 | graduated, the population's first expert |
+     | 1 | 0.30, 0.53 | not admitted: a twin of the first (0.999), 0.69 against its 0.73 |
+     | 2 | 0.35, 0.57 | not admitted: a twin (0.991), 0.68 against its 0.68 |
+
+   - **No check rewarded a wrong answer.** Nine trusted checks granted reward. Every generation, all 16 answers each rewarded were checked against the task's authored anchor, and none was an answer the anchor failed. Nothing was quarantined, and the kill criterion was not reached.
+   - **Pooling did what it was built for.** No check could be judged on one generation's answers: each lacked a known-good case, or saw too few known-bad ones to bound its rate. Pooled over two generations, 3 of the 9 were judged sound and renewed. The other 6 still lacked the cases after three generations, and their trust lapses on its clock.
+   - **Unlike strings, the run ended with an expert.** There, quarantines kept every shadow out. Here the checks held, and the first generation graduated under them.
+
    Still to come for this step:
-   - **Loop-driven quarantine across more than one skill.**
+   - **A check that never sees a right answer:** 6 of the 9 checks went three generations without the cases to bound their rate, so their trust can only lapse. A run that seeds known-good cases for the tasks the policy cannot yet solve would let them be judged.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.
