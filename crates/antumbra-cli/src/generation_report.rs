@@ -224,6 +224,15 @@ pub(crate) fn print(r: &GenerationReport) {
             b.population, b.tasks
         );
     }
+    match r.critic_fallback {
+        Some(antumbra_core::critic::Fallback::Uncorrelated { correlation }) => println!(
+            "        critic set aside: correlation {correlation:+.2} with the verifier; verifier-only reward from the next generation"
+        ),
+        Some(antumbra_core::critic::Fallback::TwinDeclined { from, to }) => println!(
+            "        critic set aside: twin agreement fell from {from:.2} to {to:.2}; verifier-only reward from the next generation"
+        ),
+        None => {}
+    }
     if r.routing_outcomes > 0 {
         println!(
             "        routing: {} live task(s) with a clear winner; the gate was retrained on them",

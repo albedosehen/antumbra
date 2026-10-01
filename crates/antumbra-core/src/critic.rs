@@ -347,6 +347,48 @@ pub fn watch(scores: &[f32], passed: &[bool], twin: Option<&[f32]>) -> CriticWat
     }
 }
 
+/// How far the twin's agreement may fall over consecutive generations before
+/// the critic is set aside. Between neighboring generations it has moved by
+/// up to 0.07 on the GPU with nothing wrong, so one generation's fall is
+/// noise and only a sustained one counts.
+pub const TWIN_DECLINE: f32 = 0.05;
+
+/// Why a run stops letting its critic shape advantage (ADR-0022 S-2's kill):
+/// verifier-only reward resumes for the rest of the run.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Fallback {
+    /// The rank correlation that scales its influence was not positive.
+    Uncorrelated { correlation: f32 },
+    /// Its agreement with the twin fell in consecutive generations, from
+    /// `from` to `to`.
+    TwinDeclined { from: f32, to: f32 },
+}
+
+/// Whether the critic's standing fallback fires on a run's watches so far,
+/// oldest first. It fires when the latest correlation is not positive, or
+/// when the twin's agreement fell in each of the last two generations or
+/// more, by at least [`TWIN_DECLINE`] in all. A generation with too few
+/// answers to read is skipped.
+pub fn fallback(watches: &[CriticWatch]) -> Option<Fallback> {
+    if let Some(c) = watches.iter().rev().find_map(|w| w.correlation) {
+        if c <= 0.0 {
+            return Some(Fallback::Uncorrelated { correlation: c });
+        }
+    }
+    let agreements: Vec<f32> = watches.iter().filter_map(|w| w.twin_agreement).collect();
+    let to = *agreements.last()?;
+    let mut from = to;
+    let mut falls = 0;
+    for pair in agreements.windows(2).rev() {
+        if pair[0] <= pair[1] {
+            break;
+        }
+        from = pair[0];
+        falls += 1;
+    }
+    (falls >= 2 && from - to >= TWIN_DECLINE).then_some(Fallback::TwinDeclined { from, to })
+}
+
 /// The exogenous floor: how many labels derived from the critic (critic-scored
 /// or critic-selected) a training set with `fresh` fresh verifier labels may
 /// hold, so that the fresh share is at least `floor`. A floor of 1 admits none;
@@ -524,5 +566,53 @@ mod tests {
         assert_eq!(derived_allowed(30, 1.0), 0);
         assert_eq!(derived_allowed(0, 0.5), 0);
         assert_eq!(derived_allowed(7, 0.0), usize::MAX);
+    }
+
+    fn read(correlation: Option<f32>, twin: Option<f32>) -> CriticWatch {
+        CriticWatch {
+            n: 100,
+            correlation,
+            ece: None,
+            recalibrated_ece: None,
+            twin_agreement: twin,
+        }
+    }
+
+    #[test]
+    fn the_fallback_fires_on_a_correlation_that_is_not_positive() {
+        let run = [read(Some(0.4), Some(0.9)), read(Some(-0.1), Some(0.9))];
+        assert_eq!(
+            fallback(&run),
+            Some(Fallback::Uncorrelated { correlation: -0.1 })
+        );
+        // Too few answers to read leaves the last reading standing.
+        let run = [read(Some(0.4), None), read(None, None)];
+        assert_eq!(fallback(&run), None);
+    }
+
+    #[test]
+    fn the_fallback_fires_on_a_sustained_fall_in_twin_agreement() {
+        let twin = |a: &[f32]| -> Vec<CriticWatch> {
+            a.iter().map(|&t| read(Some(0.4), Some(t))).collect()
+        };
+        // The two trajectories the GPU has run: neither is a decline.
+        assert_eq!(fallback(&twin(&[0.94, 0.94, 0.91])), None);
+        assert_eq!(fallback(&twin(&[0.88, 0.95, 0.95])), None);
+        // One generation's fall, however large, is not sustained.
+        assert_eq!(fallback(&twin(&[0.95, 0.80])), None);
+        // Two falls too small in all.
+        assert_eq!(fallback(&twin(&[0.95, 0.93, 0.92])), None);
+        assert_eq!(
+            fallback(&twin(&[0.90, 0.96, 0.93, 0.90])),
+            Some(Fallback::TwinDeclined {
+                from: 0.96,
+                to: 0.90
+            })
+        );
+        // A generation without a twin reading is skipped.
+        let mut run = twin(&[0.96, 0.93]);
+        run.push(read(Some(0.4), None));
+        run.push(read(Some(0.4), Some(0.90)));
+        assert!(fallback(&run).is_some());
     }
 }

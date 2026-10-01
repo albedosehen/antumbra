@@ -96,6 +96,11 @@ pub struct TrainRequest {
     /// chose. `None` starts from the trainer's own configuration.
     #[serde(default)]
     pub parent_adapter: Option<String>,
+    /// Train on the verifier's reward alone, whatever critic the trainer
+    /// holds: the run has set its critic aside (ADR-0022 S-2's standing
+    /// fallback).
+    #[serde(default)]
+    pub verifier_only: bool,
 }
 
 /// One corpus task, as the final training round found it.

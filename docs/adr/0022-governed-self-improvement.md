@@ -779,10 +779,15 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **Calibration error:** raw, and after an isotonic map fitted on every other answer and read on the rest. That is the per-generation recalibration the record asks for. Shaping reads the critic by rank, which a monotone map does not change, so recalibration here is an instrument rather than a correction.
    - **The twin:** `train --critic-twin <adapter>` loads a second critic that scores the same answers and shapes nothing. Its rank agreement with the critic is reported each generation, the signal the record says falls before fitness turns over. `critic-compare.sh` takes it as `TWIN`.
 
+   **The standing fallback is in: a run sets its critic aside on its own.** The record's kill is that verifier-only reward resumes. The loop now reads every generation's watch against the run's earlier ones, and sets the critic aside when either of two things happens:
+   - **The correlation is not positive.** It is the number that scales the critic's influence, and the record asks that it stay positive.
+   - **The twin's agreement declines across generations.** It must have fallen in each of the last two generations, by at least 0.05 in all. One generation's fall does not count: between neighboring generations it has moved by up to 0.07 with nothing wrong.
+
+   From the next generation on, every shadow in the run trains on the verifier's reward alone (`TrainRequest::verifier_only`), and the generation that fired reports why. Neither trajectory so far would have fired it: their correlations stayed between 0.25 and 0.45, and the twin's agreement read 0.94, 0.94, 0.91, then 0.88, 0.95, 0.95. The watches are the run's as one process has seen them, so a resumed run reads its critic afresh.
+
    Still to come for this step:
    - **More trajectories, and another skill:** two trajectories disagree on the end point, so the question needs more of them, and a skill other than `strings`. `train --seed` makes each one a run away.
    - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's stated limit applies in full: every check here sees only where a verifier can.
-   - **Reading the twin's decline:** the watch above reports the twin's agreement every generation, but nothing yet reads a decline across generations or acts on one.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
 8. Never: S-6.
 
