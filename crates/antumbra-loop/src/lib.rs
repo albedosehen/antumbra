@@ -49,7 +49,7 @@ pub mod search;
 mod serving;
 pub use admission::{Admission, AdmissionPolicy};
 pub use cohort::{CohortMember, Remeasure};
-pub use contribution::ContributionPolicy;
+pub use contribution::{sample_live, ContributionPolicy};
 pub use gate::gate_exemplars;
 pub use grow::{by_credit, choose, diversity, Choosing, Diversity, GrowPolicy, Growth};
 use measure::Measurement;

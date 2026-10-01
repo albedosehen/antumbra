@@ -1,9 +1,9 @@
 //! `antumbra gate-outcomes` (ADR-0024 D-1): the routing outcomes a population
-//! holds without a loop run to record them. Every routable expert answers
-//! every live task under the same seeds, and each task's clear winner is
-//! recorded as the contribution measurement records it, so `gate-train`
-//! learns from them. The base model is not scored, as the measurement scores
-//! it only on what the population escalates.
+//! holds without a loop run to record them. Every routable expert answers the
+//! live tasks the contribution measurement samples, under the same seeds, and
+//! each task's clear winner is recorded as the measurement records it, so
+//! `gate-train` learns from them. The base model is not scored, as the
+//! measurement scores it only on what the population escalates.
 
 /// What `gate-outcomes` is given.
 #[derive(clap::Args, Debug)]
@@ -16,6 +16,10 @@ pub struct OutcomeArgs {
     /// Completions per task per seed.
     #[arg(long, default_value_t = 4)]
     pub samples: usize,
+    /// At most this many live tasks, sampled as the contribution measurement
+    /// samples them: grow runs measure 64.
+    #[arg(long, default_value_t = 64)]
+    pub max_tasks: usize,
 }
 
 pub async fn run(url: &str, args: OutcomeArgs) -> anyhow::Result<()> {
@@ -50,7 +54,7 @@ pub async fn run(url: &str, args: OutcomeArgs) -> anyhow::Result<()> {
             corpus,
             std::sync::Arc::new(antumbra_critic::CommandVerifier),
         );
-        let tasks = trainer.live_tasks(None).await?;
+        let tasks = antumbra_loop::sample_live(trainer.live_tasks(None).await?, args.max_tasks);
         let task_ids: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
         let seeds: Vec<u64> = (1..=args.seeds.max(1)).collect();
         let mut scores: HashMap<ExpertId, HashMap<String, f32>> = HashMap::new();
@@ -106,8 +110,9 @@ pub async fn run(url: &str, args: OutcomeArgs) -> anyhow::Result<()> {
             corpus,
             seeds,
             samples,
+            max_tasks,
         } = args;
-        let _ = (url, corpus, seeds, samples);
+        let _ = (url, corpus, seeds, samples, max_tasks);
         anyhow::bail!("`gate-outcomes` requires building with --features models (candle + a GPU)")
     }
 }

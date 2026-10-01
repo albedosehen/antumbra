@@ -129,6 +129,15 @@ pub(crate) fn rank(id: &str) -> [u8; 32] {
     Sha256::digest(id.as_bytes()).into()
 }
 
+/// At most `max` of `tasks`, the same ones every time: chosen by a stable
+/// hash of their ids. The contribution measurement samples the live tasks
+/// this way, so anything that labels the tasks it labels samples them so too.
+pub fn sample_live(mut tasks: Vec<TaskPrompt>, max: usize) -> Vec<TaskPrompt> {
+    tasks.sort_by_key(|t| rank(&t.id));
+    tasks.truncate(max);
+    tasks
+}
+
 /// What a contribution measurement recorded.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Measured {
@@ -157,10 +166,7 @@ impl GenerationLoop<'_> {
         holdout: Option<Holdout>,
         max: usize,
     ) -> Result<Vec<TaskPrompt>> {
-        let mut tasks = self.trainer.live_tasks(holdout).await?;
-        tasks.sort_by_key(|t| rank(&t.id));
-        tasks.truncate(max);
-        Ok(tasks)
+        Ok(sample_live(self.trainer.live_tasks(holdout).await?, max))
     }
 
     /// Measure and record the contribution of every shared expert this node
@@ -458,6 +464,27 @@ mod tests {
         assert_eq!(to, Some(a.clone()));
         let masked = route_top1(&[1.0, 0.0, 0.0], None, &experts, &[], Some(&a));
         assert_ne!(masked, Some(a));
+    }
+
+    #[test]
+    fn the_live_sample_is_the_same_whatever_order_the_tasks_come_in() {
+        let tasks = |ids: &[&str]| -> Vec<TaskPrompt> {
+            ids.iter()
+                .map(|id| TaskPrompt {
+                    id: id.to_string(),
+                    prompt: id.to_string(),
+                    region: "r".into(),
+                })
+                .collect()
+        };
+        let ids = |sample: Vec<TaskPrompt>| -> Vec<String> {
+            sample.into_iter().map(|t| t.id).collect()
+        };
+        let one = ids(sample_live(tasks(&["a", "b", "c", "d", "e"]), 3));
+        let other = ids(sample_live(tasks(&["e", "d", "c", "b", "a"]), 3));
+        assert_eq!(one.len(), 3);
+        assert_eq!(one, other);
+        assert_eq!(sample_live(tasks(&["a"]), 3).len(), 1);
     }
 
     #[test]
