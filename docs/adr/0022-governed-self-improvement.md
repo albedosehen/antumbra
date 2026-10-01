@@ -785,6 +785,22 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    From the next generation on, every shadow in the run trains on the verifier's reward alone (`TrainRequest::verifier_only`), and the generation that fired reports why. Neither trajectory so far would have fired it: their correlations stayed between 0.25 and 0.45, and the twin's agreement read 0.94, 0.94, 0.91, then 0.88, 0.95, 0.95. The watches are the run's as one process has seen them, so a resumed run reads its critic afresh.
 
+   **A third trajectory, and the verifier-only arm ended ahead.** `critic-compare.sh f70561c` ran with `SEED=2` on 2026-10-01, the twin watched. The arms took 106 and 116 minutes.
+
+   | expert | verifier-only | critic |
+   | --- | ---: | ---: |
+   | generation 0 | 0.63 | 0.77, then 0.75 |
+   | generation 1 | 0.68, then 0.64 | 0.77, not admitted against 0.77 |
+   | generation 2 | 0.90, admitted against its predecessor's 0.64 | 0.74, not admitted against 0.75 |
+
+   - **Across the three trajectories:**
+     - The critic arm's first expert led every time: 0.89 against 0.52, 0.74 against 0.69, 0.77 against 0.63.
+     - Its best expert at the end led once, tied once and trailed once: 0.89 against 0.70, 0.74 against 0.75, 0.77 against 0.90.
+   - **The restated test** passed on the first trajectory only. Here the critic arm never reached the verifier-only arm's final 0.90.
+   - **Why the critic arm stood still:** both its later graduates were twins of its first (similarity 1.000) and scored no better head to head, so its population stayed at one expert. The verifier-only arm's graduates were twins too (0.999), and each beat its predecessor, the last by 0.26.
+   - **The critic watch:** correlation 0.39, 0.33, 0.42; calibration error 0.12, 0.10, 0.10, and 0.13, 0.06, 0.08 recalibrated; twin agreement 0.92, 0.90, 0.93. The standing fallback would not have fired.
+   - **The reading:** the early lead repeats, three trajectories of three, and the end point does not. A fourth, `SEED=3`, is running.
+
    Still to come for this step:
    - **More trajectories, and another skill:** two trajectories disagree on the end point, so the question needs more of them, and a skill other than `strings`. `train --seed` makes each one a run away.
    - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's stated limit applies in full: every check here sees only where a verifier can.
