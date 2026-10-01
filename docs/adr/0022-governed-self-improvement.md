@@ -509,6 +509,21 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **One run an arm.** The two arms' first specialists came out differently: numbers was admitted in uniform (generation 2) and turned away in credit (generation 1). So the arms' difference here is as much the draw as the policy. By the record's test, credit against uniform, the step stays unchecked.
 6. [ ] S-4, proposed verifiers and the trust protocol.
 
+   **A second comparison, and the arms traded places.** It ran on 50fd1aa on 2026-09-26 and 27, set up as before, with contribution scores reused and the routing headroom reported.
+
+   | arm | wall clock | admitted | experts | population | best single expert | routed as well as it could be |
+   | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+   | uniform | 203 min | 3 of 4 | 3 | 0.72 | 0.74 | 0.79 |
+   | credit | 211 min | 4 of 4 | 4 | 0.76 | 0.75 | 0.83 |
+
+   - **What each grew:**
+     - Uniform turned away dates (0.70 against 0.77 on the five tasks it rerouted, one escalated), then admitted sequences (+0.15) and numbers (+0.11).
+     - Credit admitted numbers (+0.12 at the end), grids (+0.23, on five tasks) and mappings (+0.14). Its realized credit read +0.06 and +0.12.
+   - **Two runs an arm, and a tie:** uniform ended at 0.76, then 0.72; credit at 0.72, then 0.76. The grow step's own test, credit against uniform, cannot tell them apart, so S-3 stays unchecked.
+   - **Why the second run is not a repeat:** a run's unseeded draws come from one process-wide counter, so anything that changes how many draws come first changes the rest of the trajectory. Here the reused scores skipped evaluations that used to draw. The two comparisons are two trajectories.
+   - **The headroom:** in both arms, the same experts routed as well as they could be would score 0.07 above the population, while the population sits within 0.02 of its best single expert. Biased up as that number is, it says the gate is choosing worse than its experts allow. That is ADR-0024 D-1's question rather than the grow step's.
+   - **The cost:** with the scores reused, the arms took 203 and 211 minutes against 261 and 273 before. By the fourth generation the measurement asked for 199 and 260 scores, of which 135 and 196 were already known.
+
    **The namespace and the trust protocol are in. Synthesis is not.**
 
    **A verifier is data with an address.** A `VerifierRecord` holds the spec `CommandVerifier` runs, a domain (a region of tasks), optionally the one task it checks, a tier, and an origin (authored or synthesized). Its id is the SHA-256 of its domain, task, tier and spec in canonical JSON, so the check that was measured is exactly the check that grants reward. The store keeps the spec as canonical text, so the database cannot reorder or retype it, and every read checks the address against the content and refuses a verifier whose check changed. Proposing the same content twice returns the verifier already there.
@@ -529,9 +544,10 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    There is no anchor for a synthesized verifier, trusted or not. A cases file that names one is refused, as is one that names the verifier being measured. Every case runs three times. The verdict comes from the first gate that fails:
    1. **Determinism:** a case whose verdict changed between runs.
    2. **The adversarial holdout:** one pass on an impossible task.
-   3. **Enough evidence:** known-good and known-bad cases both.
-   4. **The paired holdout:** the one-sided Clopper-Pearson upper bound on the false-positive rate must be at or under 0.10 at 95% confidence. The bound, not the observed rate, so it takes at least 29 known-bad cases, none passed, before a verifier can be trusted at all. Fewer than that with none passed is missing evidence, not evidence against the verifier, and reads as unmeasured.
-   5. **Usefulness:** at least half the known-good cases accepted. A false negative only wastes compute, so this is a floor and not a bound.
+   3. **False positives:** known-bad cases passed with the one-sided Clopper-Pearson upper bound on the false-positive rate over 0.10 at 95% confidence. This is evidence against the verifier, and it needs no known-good case to stand (see the recheck run below for why that order matters).
+   4. **Enough evidence:** known-good and known-bad cases both.
+   5. **The paired holdout:** the bound at or under 0.10. The bound, not the observed rate, so it takes at least 29 known-bad cases, none passed, before a verifier can be trusted at all. Fewer than that with none passed is missing evidence, not evidence against the verifier, and reads as unmeasured.
+   6. **Usefulness:** at least half the known-good cases accepted. A false negative only wastes compute, so this is a floor and not a bound.
 
    The two outright rejections come first and revoke a proposal. A proposal that passed known-bad cases and is over the bound stays proposed, since more cases may yet bound it. A trusted verifier found flaky, taking a shortcut, or passing known-bad cases past the bound is quarantined at once. One re-measured on too few cases is neither quarantined nor renewed, so its trust lapses unless better evidence comes.
 
@@ -631,8 +647,19 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
      - A verifier that rewarded three wrong answers among eight is quarantined. The expert an earlier generation learned from it is archived with it, and the generation's shadow does not join.
      - A sound one is measured again, stays trusted, and its graduate joins.
 
+   **The first run that took reward from synthesized verifiers ran, and the recheck acted.** `verifier-train.sh 13ffe82` trained RAFT on the `strings` skill on 2026-09-26, two generations, eight samples and two rounds, on a copy of the re-measured namespace. `antumbra verifier name` pointed 16 of the 48 tasks at the synthesized check trusted for them; the rest kept their authored specs. Every generation, the recheck measured each of those checks again on the sixteen answers it judged, labeled by the task's authored verifier.
+   - **Three checks were quarantined.** Each had rewarded one answer the authored verifier failed, and with five to ten wrong answers in the recheck, one pass put its bound between 0.28 and 0.47:
+     - two in generation 0, one of them the `title-for-on-or` check;
+     - one in generation 1, a `run-length` check.
+
+     Both generations' shadows had trained under a check withdrawn this way, so neither graduated, and the run ended with no expert. Nothing downstream had to be archived.
+   - **Ten checks held.** None passed a wrong answer, though four to ten wrong answers is too few to renew a bound, so they read as unmeasured and their trust kept lapsing on its clock.
+   - **The kill criterion was reached, by two checks.** On the `title-in-on-or` task and one other, every one of the policy's sixteen answers in a generation was wrong by the authored verifier. The two synthesized checks rewarded seven of those wrong answers between them across the run. The judge asked for known-good and known-bad cases both before it looked at false positives, so with no right answer to see it read them as unmeasured. That is a trusted synthesized verifier granting reward for outcomes an authored verifier failed, with no quarantine triggered: the record's kill criterion, for the protocol as it then stood.
+   - **The fix:** false positives past the bound are now judged before asking for both kinds of case. Passing wrong answers is evidence against a verifier whether or not a right one was seen, while missing evidence still reads as unmeasured. Under the fix both checks would have been quarantined in the generation they first rewarded a wrong answer. Both generations' shadows were already kept out by the other quarantines, so nothing those grants taught reached the population.
+   - **What the criterion asks:** the record's response is to revert synthesis to proposal-only and re-establish the anchor invariant by hand. Nothing outside these experiment runs takes reward from a synthesized verifier, so that holds today. Re-opening synthesis after a run under the fixed judge is the record owner's decision.
+
    Still to come for this step:
-   - **A run that trains under synthesized verifiers.** No GPU run has yet taken reward from one, so the recheck has only met the tests. `antumbra verifier name` rewrites a corpus so each task with a check that grants reward names it, and `scripts/verifier-train.sh` trains on a copy of a measured namespace with that corpus. The `strings` checks trusted above stand in for the authored specs of their tasks, and the authored ones stay as anchors.
+   - **Loop-driven quarantine across more than one skill,** and a recheck that accumulates evidence across generations, so a verifier on a task the policy rarely fails is judged on more than sixteen answers.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.
@@ -720,13 +747,31 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
      The correlation is lower than the offline reading's 0.52 to 0.67. It is read only on the groups the critic shapes, those with both passes and failures, which are the hard ones. The twin's agreement held at 0.94 for two generations and fell to 0.91 in the third, the generation whose graduate was not admitted.
    - **How far it goes:** one training trajectory an arm. Training is reproducible, so the repeat measured the same experts again under new seeds, and could not show variance between trajectories. That takes a training seed that varies between runs.
 
+   **A second trajectory: the early lead held, the end point did not.** `critic-compare.sh 017cc30` ran with `SEED=1` under the same run name on 2026-09-27, so its measurements drew the seeds the first pair drew.
+
+   | expert | verifier-only | critic |
+   | --- | ---: | ---: |
+   | generation 0 | 0.69 | 0.74 |
+   | generation 1 | 0.76, then 0.75 | 0.61, not admitted against 0.74 |
+   | generation 2 | 0.65, not admitted against 0.75 | 0.74, admitted against its predecessor's 0.71 |
+
+   - **Across the two trajectories:**
+     - The critic arm's first expert led both times: 0.89 against 0.52, then 0.74 against 0.69.
+     - Its best expert at the end led once and tied once: 0.89 against 0.70, then 0.74 against 0.75.
+   - **The restated test** passed on the first trajectory and not on the second, where the critic arm never reached the verifier-only arm's final 0.75.
+   - **The critic watch:**
+     - correlation 0.45, 0.35, 0.45;
+     - calibration error 0.12, 0.15, 0.15, and 0.05, 0.19, 0.24 recalibrated. The per-generation recalibration made calibration worse in two of three generations, fitted on about sixty answers each, the same inconclusive reading as offline;
+     - twin agreement 0.88, 0.95, 0.95.
+   - **The reading:** on this skill the critic speeds early learning and does not yet show a better end point. S-2 stays unchecked.
+
    **The critic is now read every generation it shapes.** GRPO keeps every answer the critic scored to shape advantage, with the verifier's verdict on it, and reports a `CriticWatch` on the outcome. The loop puts it on the generation's report, and `train` prints it.
    - **Correlation:** the critic's rank correlation with the verifier on those answers, the same number that scales its influence inside a group.
    - **Calibration error:** raw, and after an isotonic map fitted on every other answer and read on the rest. That is the per-generation recalibration the record asks for. Shaping reads the critic by rank, which a monotone map does not change, so recalibration here is an instrument rather than a correction.
    - **The twin:** `train --critic-twin <adapter>` loads a second critic that scores the same answers and shapes nothing. Its rank agreement with the critic is reported each generation, the signal the record says falls before fitness turns over. `critic-compare.sh` takes it as `TWIN`.
 
    Still to come for this step:
-   - **A second trajectory an arm:** the restated test passed on one. `train --seed` now shifts every unseeded draw and training shuffle (0 draws as before, so earlier runs reproduce), and `critic-compare.sh` takes it as `SEED`, so a second trajectory is one run away.
+   - **More trajectories, and another skill:** two trajectories disagree on the end point, so the question needs more of them, and a skill other than `strings`. `train --seed` makes each one a run away.
    - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's stated limit applies in full: every check here sees only where a verifier can.
    - **Reading the twin's decline:** the watch above reports the twin's agreement every generation, but nothing yet reads a decline across generations or acts on one.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
