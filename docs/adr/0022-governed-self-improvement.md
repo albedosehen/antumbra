@@ -799,7 +799,23 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The restated test** passed on the first trajectory only. Here the critic arm never reached the verifier-only arm's final 0.90.
    - **Why the critic arm stood still:** both its later graduates were twins of its first (similarity 1.000) and scored no better head to head, so its population stayed at one expert. The verifier-only arm's graduates were twins too (0.999), and each beat its predecessor, the last by 0.26.
    - **The critic watch:** correlation 0.39, 0.33, 0.42; calibration error 0.12, 0.10, 0.10, and 0.13, 0.06, 0.08 recalibrated; twin agreement 0.92, 0.90, 0.93. The standing fallback would not have fired.
-   - **The reading:** the early lead repeats, three trajectories of three, and the end point does not. A fourth, `SEED=3`, is running.
+   - **The reading:** the early lead repeats, three trajectories of three, and the end point does not.
+
+   **A fourth trajectory, and the early lead did not hold either.** `critic-compare.sh f70561c` ran with `SEED=3` on 2026-10-01. The arms took 128 and 124 minutes.
+
+   | expert | verifier-only | critic |
+   | --- | ---: | ---: |
+   | generation 0 | 0.84, then 0.84 | 0.76, then 0.77 |
+   | generation 1 | 0.70, not admitted against 0.84 | 0.72, not admitted against 0.76 |
+   | generation 2 | 0.78, not admitted against 0.84 | 0.64, not admitted against 0.77 |
+
+   - **Across the four trajectories:**
+     - The critic arm's first expert led three times and trailed once: 0.89 against 0.52, 0.74 against 0.69, 0.77 against 0.63, then 0.76 against 0.84.
+     - Its best expert at the end led once, tied once and trailed twice: 0.89 against 0.70, 0.74 against 0.75, 0.77 against 0.90, 0.77 against 0.84.
+   - **The restated test** passed on the first trajectory only.
+   - **Both arms stood still after their first expert:** every later graduate was a twin of it (similarity 0.979 to 0.997) that did no better head to head.
+   - **The critic watch:** correlation 0.29, 0.37, 0.29; calibration error 0.16, 0.12, 0.15, and 0.18, 0.09, 0.09 recalibrated; twin agreement 0.92, 0.93, 0.95. The standing fallback would not have fired.
+   - **The reading:** on `strings` the critic does not earn fewer samples to graduation, the record's criterion. An early lead in three trajectories of four is not a better end point, and S-2 stays unchecked. The next evidence has to come from another skill.
 
    Still to come for this step:
    - **More trajectories, and another skill:** two trajectories disagree on the end point, so the question needs more of them, and a skill other than `strings`. `train --seed` makes each one a run away.
