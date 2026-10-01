@@ -22,6 +22,7 @@ mod cli;
 mod commands;
 mod critic_cmd;
 mod eval_args;
+mod gate_outcomes;
 mod gate_sweep;
 mod gitctx;
 mod gitfacts;
@@ -179,6 +180,7 @@ async fn run() -> anyhow::Result<()> {
         Command::Verifier { action } => verifiers::run(&cli.url, action).await?,
         Command::Critic { action } => critic_cmd::run(action).await?,
         Command::GateSweep(args) => gate_sweep::run(&cli.url, args).await?,
+        Command::GateOutcomes(args) => gate_outcomes::run(&cli.url, args).await?,
         Command::Migrate => {
             connect(&cli.url).await?;
             println!("schema applied at {}", cli.url);
@@ -456,12 +458,15 @@ async fn run() -> anyhow::Result<()> {
             .await?;
         }
 
-        Command::GateTrain { epochs } => {
+        Command::GateTrain {
+            epochs,
+            exemplars_only,
+        } => {
             #[cfg(feature = "models")]
             {
                 let store = connect(&cli.url).await?;
                 let embedder = make_embedder()?;
-                match train_router(&store, embedder.as_ref(), epochs).await? {
+                match train_router(&store, embedder.as_ref(), epochs, !exemplars_only).await? {
                     Some(r) => println!(
                         "trained learned router: {} experts, {} epochs, OOD floor={:.3}",
                         r.experts.len(),
@@ -473,7 +478,7 @@ async fn run() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = epochs;
+                let _ = (epochs, exemplars_only);
                 anyhow::bail!(
                     "`gate-train` requires building with --features models (real embedder)"
                 );

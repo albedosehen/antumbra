@@ -4,7 +4,7 @@
 
 use antumbra_core::ports::Embedder;
 use antumbra_loop::gate_exemplars;
-use antumbra_store::repo::lifecycle;
+use antumbra_store::repo::{contribution, lifecycle};
 use antumbra_store::Store;
 
 /// What a refresh did to the learned router.
@@ -39,7 +39,7 @@ pub(crate) async fn refresh_router(
             return Ok(RouterRefresh::Unchanged);
         }
     }
-    Ok(match train_router(store, embedder, epochs).await? {
+    Ok(match train_router(store, embedder, epochs, true).await? {
         Some(router) => RouterRefresh::Trained(router),
         None => RouterRefresh::Cleared,
     })
@@ -47,17 +47,24 @@ pub(crate) async fn refresh_router(
 
 /// Train the learned router over the exemplars of the experts the gate may
 /// route to (the active ones, ADR-0022 S-5) and persist it (the learned gate).
-/// Returns the router, or `None` when too few are routable to need one (<2
-/// experts/exemplars), in which case any router left from before is cleared,
-/// so routing falls back to the heuristic gate over the population as it now
-/// is.
+/// With `wins`, the live tasks each of them clearly won are exemplars of it
+/// too (ADR-0024 D-1). Returns the router, or `None` when too few are
+/// routable to need one (<2 experts/exemplars), in which case any router left
+/// from before is cleared, so routing falls back to the heuristic gate over
+/// the population as it now is.
 pub(crate) async fn train_router(
     store: &Store,
     embedder: &dyn Embedder,
     epochs: usize,
+    wins: bool,
 ) -> anyhow::Result<Option<antumbra_core::LearnedRouter>> {
     let experts = lifecycle::routable(store).await?;
-    let Some(exemplars) = gate_exemplars(&experts, embedder).await? else {
+    let outcomes = if wins {
+        contribution::outcomes(store).await?
+    } else {
+        Vec::new()
+    };
+    let Some(exemplars) = gate_exemplars(&experts, &outcomes, embedder).await? else {
         antumbra_store::repo::router::clear(store).await?;
         return Ok(None);
     };

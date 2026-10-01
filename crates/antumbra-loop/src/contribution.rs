@@ -31,6 +31,7 @@ use antumbra_store::repo::{boundary, contribution, lifecycle};
 
 use crate::baseline::compare;
 use crate::grow;
+use crate::outcome;
 use crate::GenerationLoop;
 
 /// Inhibition above which a boundary escalates a task the learned router
@@ -135,6 +136,8 @@ pub(crate) struct Measured {
     pub baseline: Option<BaselineRecord>,
     /// The region census, taken with the baseline for the grow step.
     pub census: Vec<antumbra_core::RegionCensus>,
+    /// Live tasks found to have a clear winner, which the gate learned.
+    pub routing_outcomes: usize,
 }
 
 /// Where each task routes with the whole population, and, for a task routed
@@ -266,10 +269,24 @@ impl GenerationLoop<'_> {
         } else {
             Vec::new()
         };
+        // With every expert scored on every live task, the measurement knows
+        // where each should have gone: the gate learns it (ADR-0024 D-1).
+        let routing_outcomes = if policy.baseline {
+            let recorded =
+                outcome::record_winners(self.store, &tasks, &ids, score, run_id, generation)
+                    .await?;
+            if recorded.changed {
+                self.retrain_gate().await?;
+            }
+            recorded.won
+        } else {
+            0
+        };
         Ok(Measured {
             contribution: recorded,
             baseline,
             census,
+            routing_outcomes,
         })
     }
 

@@ -112,6 +112,11 @@ pub struct SweepArgs {
     /// Write every task's outcome here.
     #[arg(long)]
     pub out: Option<String>,
+    /// Sweep the stored learned router instead of the margin gate: each task
+    /// goes to the router's top expert, its coverage is the router's
+    /// nearest-centroid similarity, and the router ships at its own floor.
+    #[arg(long)]
+    pub learned: bool,
 }
 
 pub async fn run(url: &str, args: SweepArgs) -> anyhow::Result<()> {
@@ -136,6 +141,15 @@ pub async fn run(url: &str, args: SweepArgs) -> anyhow::Result<()> {
             anyhow::bail!("the store holds no routable expert to sweep the gate over");
         }
         let boundaries = boundary::list(&store).await?;
+        // Masked to the experts swept, so a pick is always one of them.
+        let learned = if args.learned {
+            let router = antumbra_store::repo::router::load(&store)
+                .await?
+                .context("no learned router is stored; run gate-train first")?;
+            Some(router.masked(|id| experts.iter().any(|e| &e.id == id)))
+        } else {
+            None
+        };
         let tasks: Vec<serde_json::Value> = serde_json::from_str(
             &std::fs::read_to_string(&args.corpus)
                 .with_context(|| format!("reading {}", args.corpus))?,
@@ -156,9 +170,21 @@ pub async fn run(url: &str, args: SweepArgs) -> anyhow::Result<()> {
                 continue;
             }
             let v = embedder.embed(prompt).await?;
-            let decision = gate_route(&v, &experts, &boundaries, 1, &open);
-            if let Some(expert) = decision.chosen.first() {
-                routed.push((id.to_string(), expert.to_string(), decision.coverage));
+            let pick = match &learned {
+                Some(router) => router
+                    .route(&v)
+                    .first()
+                    .map(|(expert, _)| (expert.to_string(), router.top_similarity(&v))),
+                None => {
+                    let decision = gate_route(&v, &experts, &boundaries, 1, &open);
+                    decision
+                        .chosen
+                        .first()
+                        .map(|expert| (expert.to_string(), decision.coverage))
+                }
+            };
+            if let Some((expert, coverage)) = pick {
+                routed.push((id.to_string(), expert, coverage));
             }
         }
         println!("{} task(s) over {} expert(s)", routed.len(), experts.len());
@@ -216,7 +242,10 @@ pub async fn run(url: &str, args: SweepArgs) -> anyhow::Result<()> {
             })
             .collect();
         let points = sweep(&outcomes);
-        let shipped = at(&outcomes, GateConfig::default().coverage_threshold);
+        let shipped_at = learned
+            .as_ref()
+            .map_or(GateConfig::default().coverage_threshold, |r| r.floor);
+        let shipped = at(&outcomes, shipped_at);
         let show = |label: &str, p: &Point| {
             println!(
                 "{label:<10} threshold {:>8.4}  routed {:.2}  risk {:.3}  accuracy {:.3}",
@@ -252,8 +281,9 @@ pub async fn run(url: &str, args: SweepArgs) -> anyhow::Result<()> {
             seeds,
             samples,
             out,
+            learned,
         } = args;
-        let _ = (url, corpus, all_tasks, seeds, samples, out);
+        let _ = (url, corpus, all_tasks, seeds, samples, out, learned);
         anyhow::bail!("`gate-sweep` requires building with --features models (candle + a GPU)")
     }
 }

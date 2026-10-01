@@ -39,6 +39,7 @@ mod gate;
 mod grow;
 mod measure;
 mod merging;
+mod outcome;
 mod recheck;
 mod recipe;
 mod retirement;
@@ -52,6 +53,7 @@ pub use gate::gate_exemplars;
 pub use grow::{by_credit, choose, diversity, Choosing, Diversity, GrowPolicy, Growth};
 use measure::Measurement;
 pub use merging::{Merge, MergePolicy};
+pub use outcome::{record_winners, Recorded};
 pub use recheck::{Recheck, MAX_RECHECKED};
 pub use retirement::{confirms, warnings, Detection, RetirementPolicy, Warning};
 pub use scores::Evaluations;
@@ -246,6 +248,9 @@ pub struct GenerationReport {
     /// How the critic that shaped this generation read against the verifier
     /// and its twin (ADR-0022 S-2). `None` without a critic.
     pub critic: Option<antumbra_core::critic::CriticWatch>,
+    /// Live tasks the contribution measurement found a clear winner for,
+    /// which the gate was retrained on (ADR-0024 D-1).
+    pub routing_outcomes: usize,
 }
 
 /// The frozen-expert regression fingerprint: `sha256` of the adapter's bytes, so a
@@ -435,6 +440,7 @@ impl<'a> GenerationLoop<'a> {
             contribution,
             baseline,
             census,
+            routing_outcomes,
         } = self
             .measure_contribution(&run_id, generation, holdout)
             .await?;
@@ -469,6 +475,7 @@ impl<'a> GenerationLoop<'a> {
             withdrawn,
             contribution_scores: self.scores.counted().since(scored_before),
             critic: outcome.critic_watch.clone(),
+            routing_outcomes,
         })
     }
 

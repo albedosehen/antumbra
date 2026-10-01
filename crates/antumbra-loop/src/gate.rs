@@ -11,17 +11,20 @@
 //! population of two or more, so the first specialist is judged under it too.
 
 use antumbra_core::ports::Embedder;
-use antumbra_core::{AntumbraError, Expert, ExpertId, LearnedRouter, Result};
-use antumbra_store::repo::{lifecycle, router};
+use antumbra_core::{AntumbraError, Expert, ExpertId, LearnedRouter, Result, RoutingOutcome};
+use antumbra_store::repo::{contribution, lifecycle, router};
 
 use crate::GenerationLoop;
 
-/// The capability exemplars the learned router trains on, embedded and
-/// labeled with the expert each describes. `None` when fewer than two experts
-/// are given or fewer than two exemplars between them: too few to need a
-/// router, so the heuristic gate routes.
+/// What the learned router trains on, embedded and labeled with an expert:
+/// each expert's capability exemplars, and each live task an expert clearly
+/// won (ADR-0024 D-1), labeled with its winner. A win whose winner is not
+/// among `experts` is left out. `None` when fewer than two experts are given
+/// or fewer than two exemplars between them: too few to need a router, so the
+/// heuristic gate routes.
 pub async fn gate_exemplars(
     experts: &[Expert],
+    outcomes: &[RoutingOutcome],
     embedder: &dyn Embedder,
 ) -> Result<Option<Vec<(ExpertId, Vec<f32>)>>> {
     if experts.len() < 2 {
@@ -33,6 +36,12 @@ pub async fn gate_exemplars(
             exemplars.push((e.id.clone(), embedder.embed(&text).await?));
         }
     }
+    for won in outcomes
+        .iter()
+        .filter(|o| experts.iter().any(|e| e.id == o.winner))
+    {
+        exemplars.push((won.winner.clone(), embedder.embed(&won.prompt).await?));
+    }
     Ok((exemplars.len() >= 2).then_some(exemplars))
 }
 
@@ -40,7 +49,8 @@ impl GenerationLoop<'_> {
     /// A learned router retrained over `experts`. `None` when they are too few
     /// to need one, or when the trainer cannot train one.
     pub(crate) async fn retrained_gate(&self, experts: &[Expert]) -> Result<Option<LearnedRouter>> {
-        let Some(exemplars) = gate_exemplars(experts, self.embedder).await? else {
+        let outcomes = contribution::outcomes(self.store).await?;
+        let Some(exemplars) = gate_exemplars(experts, &outcomes, self.embedder).await? else {
             return Ok(None);
         };
         match self.trainer.train_router(&exemplars).await {
@@ -56,13 +66,27 @@ impl GenerationLoop<'_> {
     /// Returns the router it stored. Too few experts to need one, or a trainer
     /// that cannot train one, leave the gate as it is.
     pub(crate) async fn refresh_gate(&self) -> Result<Option<LearnedRouter>> {
+        self.refresh_gate_unless_current(true).await
+    }
+
+    /// Retrain and store the gate whatever it was trained over: what it
+    /// learns from changed though the experts did not, as when a measurement
+    /// recorded new wins.
+    pub(crate) async fn retrain_gate(&self) -> Result<Option<LearnedRouter>> {
+        self.refresh_gate_unless_current(false).await
+    }
+
+    async fn refresh_gate_unless_current(
+        &self,
+        skip_current: bool,
+    ) -> Result<Option<LearnedRouter>> {
         let routable = lifecycle::routable(self.store).await?;
         let covered = routable
             .iter()
             .filter(|e| !e.exemplars().is_empty())
             .map(|e| &e.id);
         if let Some(current) = router::load(self.store).await? {
-            if current.trained_over(covered) {
+            if skip_current && current.trained_over(covered) {
                 return Ok(None);
             }
         }
@@ -113,9 +137,13 @@ mod tests {
 
     #[tokio::test]
     async fn exemplars_are_embedded_and_labeled_by_expert() -> Result<()> {
-        let got = gate_exemplars(&[expert("a", &["x", "yy"]), expert("b", &["zzz"])], &Axis)
-            .await?
-            .expect("two experts, three exemplars");
+        let got = gate_exemplars(
+            &[expert("a", &["x", "yy"]), expert("b", &["zzz"])],
+            &[],
+            &Axis,
+        )
+        .await?
+        .expect("two experts, three exemplars");
         let labels: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(labels, ["a", "a", "b"]);
         assert_eq!(got[2].1, vec![3.0, 1.0]);
@@ -123,12 +151,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_won_task_is_an_exemplar_of_its_winner_while_it_is_routable() -> Result<()> {
+        let won = |task: &str, winner: &str| RoutingOutcome {
+            task: task.into(),
+            prompt: task.into(),
+            winner: ExpertId::new(winner),
+            score: 1.0,
+            runner_up: 0.5,
+            run_id: antumbra_core::RunId::new("run"),
+            generation: Generation::ZERO,
+            at: Utc::now(),
+        };
+        let got = gate_exemplars(
+            &[expert("a", &["x"]), expert("b", &["y"])],
+            &[won("wwww", "b"), won("vvvvv", "gone")],
+            &Axis,
+        )
+        .await?
+        .expect("two experts");
+        let labels: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(labels, ["a", "b", "b"]);
+        assert_eq!(got[2].1, vec![4.0, 1.0], "the won task's prompt, embedded");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn too_few_to_need_a_router() -> Result<()> {
-        assert!(gate_exemplars(&[expert("a", &["x", "y"])], &Axis)
+        assert!(gate_exemplars(&[expert("a", &["x", "y"])], &[], &Axis)
             .await?
             .is_none());
         assert!(
-            gate_exemplars(&[expert("a", &["x"]), expert("b", &[])], &Axis)
+            gate_exemplars(&[expert("a", &["x"]), expert("b", &[])], &[], &Axis)
                 .await?
                 .is_none()
         );

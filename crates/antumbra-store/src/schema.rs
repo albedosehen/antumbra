@@ -337,6 +337,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("baseline_run_idx", ["run_id", "generation"])]),
+        // Each live task's clear winner among the experts, from the latest
+        // contribution measurement that scored them all (ADR-0024 D-1): what
+        // the learned router trains on beside the capability exemplars.
+        table_schema("routing_outcome")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(SHARED_POPULATION_PERMS)
+            .with_indexes([index("routing_outcome_winner_idx", ["winner"])]),
         // The grow step (ADR-0022 S-3): the region census each contribution
         // measurement takes, and the decision each generation made from it.
         table_schema("region_census")
