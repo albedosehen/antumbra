@@ -27,8 +27,8 @@ use chrono::Utc;
 
 use antumbra_core::ports::{TrainOutcome, Verifier, VerifyRequest};
 use antumbra_core::{
-    Anchor, Case, ExpertId, JudgedSample, Label, Result, RunId, TrustMeasurement, TrustPolicy,
-    TrustState, VerifierId, VerifierOrigin, VerifierRecord,
+    Anchor, Case, ExpertId, JudgedSample, Label, Result, RunId, Tally, TrustMeasurement,
+    TrustPolicy, TrustState, VerifierId, VerifierOrigin, VerifierRecord,
 };
 use antumbra_store::repo::verifier;
 
@@ -56,6 +56,11 @@ pub struct Recheck {
     pub moved: Option<TrustState>,
     /// The experts that went out of use with it.
     pub archived: Vec<ExpertId>,
+    /// How many of this run's generations the measurement pools: each
+    /// recheck adds its answers to the ones this run already rechecked the
+    /// verifier on, so a verifier on a task the policy rarely fails is judged
+    /// on more than one generation's handful.
+    pub generations: u32,
 }
 
 /// At most `max` of `items`, evenly spaced, in order.
@@ -191,12 +196,23 @@ impl GenerationLoop<'_> {
             measurement: None,
             moved: None,
             archived: Vec::new(),
+            generations: 0,
         };
         if cases.is_empty() {
             return Ok(recheck);
         }
-        let measurement =
-            antumbra_critic::trust::measure(judge, record, &cases, policy, Utc::now()).await?;
+        let mut pooled = antumbra_critic::trust::tally(judge, record, &cases, policy).await?;
+        let generations = {
+            let mut earlier = self.rechecked.lock().unwrap_or_else(|e| e.into_inner());
+            let entry = earlier
+                .entry(record.id.as_str().to_string())
+                .or_insert_with(|| (0, Tally::default()));
+            pooled.merge(&entry.1);
+            *entry = (entry.0 + 1, pooled.clone());
+            entry.0
+        };
+        recheck.generations = generations;
+        let measurement = pooled.judge(&record.id, Utc::now(), policy);
         if let Some(moved) = verifier::record_measurement(self.store, record, &measurement).await? {
             recheck.moved = Some(moved.transition.to);
             recheck.archived = moved.archived;

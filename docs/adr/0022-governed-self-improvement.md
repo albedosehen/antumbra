@@ -658,8 +658,17 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The fix:** false positives past the bound are now judged before asking for both kinds of case. Passing wrong answers is evidence against a verifier whether or not a right one was seen, while missing evidence still reads as unmeasured. Under the fix both checks would have been quarantined in the generation they first rewarded a wrong answer. Both generations' shadows were already kept out by the other quarantines, so nothing those grants taught reached the population.
    - **What the criterion asks:** the record's response is to revert synthesis to proposal-only and re-establish the anchor invariant by hand. Nothing outside these experiment runs takes reward from a synthesized verifier, so that holds today. Re-opening synthesis after a run under the fixed judge is the record owner's decision.
 
+   **Under the fixed judge, the same run caught every check that rewarded a wrong answer.** `verifier-train.sh f70561c` ran the same two generations on 2026-10-01, on a fresh copy of the namespace. Generation 0 drew the same answers as before, since training is reproducible.
+   - **Five checks quarantined**, each in the generation it first rewarded a wrong answer:
+     - three in generation 0, among them the one that had rewarded three wrong answers unjudged before;
+     - two in generation 1, among them `title-in-on-or`, whose answers were all wrong and which rewarded one of them.
+   - **Eight held.** None passed a wrong answer, and none saw enough to be renewed.
+   - **No grant went unanswered.** No check rewarded a wrong answer without being quarantined in that generation, so the kill criterion was not reached. Neither shadow graduated, and the run ended with no expert, which is the cost of an untrustworthy reward rather than a failure of the check.
+
+   **The recheck now pools a run's generations.** Sixteen answers to one task in a generation hold four to ten wrong ones, too few to bound a rate under 0.10. That is why the eight that held could not be renewed. Each recheck now adds its counts to those the run already took for the same verifier, and judges the total. A verifier on a task the policy rarely fails can then be renewed once a run has seen enough of its answers. A pass anywhere in the pool still counts against it. The pool lives for one run, so no recorded measurement is counted twice.
+
    Still to come for this step:
-   - **Loop-driven quarantine across more than one skill,** and a recheck that accumulates evidence across generations, so a verifier on a task the policy rarely fails is judged on more than sixteen answers.
+   - **Loop-driven quarantine across more than one skill.**
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.

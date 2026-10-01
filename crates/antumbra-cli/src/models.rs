@@ -726,8 +726,8 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     format!("; now {to:?}, {} expert(s) archived", c.archived.len())
                 });
                 println!(
-                    "        recheck {}: {} answer(s) anchored, {} not; {} rewarded answer(s) the anchor failed; {verdict}{moved}",
-                    c.verifier, c.anchored, c.unanchored, c.rewarded_wrong
+                    "        recheck {}: {} answer(s) anchored, {} not; {} rewarded answer(s) the anchor failed; judged over {} generation(s): {verdict}{moved}",
+                    c.verifier, c.anchored, c.unanchored, c.rewarded_wrong, c.generations
                 );
             }
             if !r.withdrawn.is_empty() {

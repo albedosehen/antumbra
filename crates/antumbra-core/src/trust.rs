@@ -161,6 +161,19 @@ pub struct Tally {
 impl Tally {
     /// Count one case's runs. A case whose runs disagree is flaky and counts
     /// toward nothing else.
+    /// Fold `earlier`'s counts into this tally, so a verifier measured
+    /// several times on fresh cases is judged on all of them.
+    pub fn merge(&mut self, earlier: &Tally) {
+        self.flaky.extend(earlier.flaky.iter().cloned());
+        self.good += earlier.good;
+        self.good_passed += earlier.good_passed;
+        self.bad += earlier.bad;
+        self.bad_passed += earlier.bad_passed;
+        self.impossible += earlier.impossible;
+        self.adversarial += earlier.adversarial;
+        self.shortcuts.extend(earlier.shortcuts.iter().cloned());
+    }
+
     pub fn add(&mut self, case: &Case, runs: &[bool]) {
         let Some(&first) = runs.first() else {
             return;
@@ -509,6 +522,23 @@ mod tests {
     /// whether or not any known-good case was seen. Rechecked on the policy's
     /// answers to a task it never gets right, a check that passed three of
     /// sixteen wrong ones read as unmeasured, and kept granting reward.
+    #[test]
+    fn merged_tallies_are_judged_on_every_case() {
+        let mut later = tally((3, 3), (15, 0));
+        // Fifteen wrong answers, none passed, cannot bound the rate; thirty can.
+        assert!(matches!(judge(&later), TrustVerdict::Unmeasured { .. }));
+        later.merge(&tally((3, 3), (15, 0)));
+        assert_eq!((later.good, later.bad), (6, 30));
+        assert!(judge(&later).is_sound());
+        // A pass in either half counts against the whole.
+        let mut passed = tally((3, 3), (15, 0));
+        passed.merge(&tally((3, 3), (15, 1)));
+        assert!(matches!(
+            judge(&passed),
+            TrustVerdict::FalsePositives { .. }
+        ));
+    }
+
     #[test]
     fn false_positives_need_no_known_good_case_to_count() {
         assert!(matches!(
