@@ -100,6 +100,28 @@ impl BaselineRecord {
     }
 }
 
+/// Which of the population's experts clearly won a live task, when a
+/// contribution measurement scored every one of them on it (ADR-0024 D-1).
+/// The learned router trains on these beside the capability exemplars, so
+/// where a task goes is learned from verified outcomes as well as from the
+/// text of what each expert solved. Only a clear win is kept: the winner
+/// beat every other expert, and the base model where it was scored, by a
+/// margin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoutingOutcome {
+    /// The live task's id.
+    pub task: String,
+    /// Its prompt, which the router embeds.
+    pub prompt: String,
+    pub winner: ExpertId,
+    /// The winner's score on it, and the best of the rest.
+    pub score: f32,
+    pub runner_up: f32,
+    pub run_id: RunId,
+    pub generation: Generation,
+    pub at: DateTime<Utc>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

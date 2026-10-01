@@ -824,6 +824,12 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
                     b.population, b.tasks
                 );
             }
+            if r.routing_outcomes > 0 {
+                println!(
+                    "        routing: {} live task(s) with a clear winner; the gate was retrained on them",
+                    r.routing_outcomes
+                );
+            }
             for c in &r.contribution {
                 let delta = match (c.with, c.without, c.delta()) {
                     (Some(with), Some(without), Some(d)) => {

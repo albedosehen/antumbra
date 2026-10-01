@@ -49,7 +49,7 @@ pub use error::{AntumbraError, Result};
 // Re-export the load-bearing types at the crate root for ergonomic downstream use.
 pub use boundary::{governing_feature_from_pair, BoundaryFinding, FailureBoundary, Grain};
 pub use compartment::{Capability, Compartment, Grant, Origin};
-pub use contribution::{BaselineRecord, ContributionRecord};
+pub use contribution::{BaselineRecord, ContributionRecord, RoutingOutcome};
 pub use device::{
     backend_can_train, genesis_placement, role_for, this_host, DeviceProfile, DeviceRole,
     GenesisPlacement, GENESIS_MIN_VRAM_MIB,

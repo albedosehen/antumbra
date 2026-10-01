@@ -302,6 +302,11 @@ pub enum Command {
     /// offline. The best point is the bar a typed gate must clear. Needs
     /// --features models and a GPU.
     GateSweep(crate::gate_sweep::SweepArgs),
+    /// Record each live task's clear winner over a store's population
+    /// (ADR-0024 D-1), for `gate-train` to learn where tasks should go: every
+    /// routable expert scored on every live task. Needs --features models and
+    /// a GPU.
+    GateOutcomes(crate::gate_outcomes::OutcomeArgs),
     /// A critic trained on the verifier's verdicts (ADR-0022 S-2): train one
     /// and read it against them, per skill.
     Critic {
@@ -483,6 +488,11 @@ pub enum Command {
     GateTrain {
         #[arg(long, default_value_t = 400)]
         epochs: usize,
+        /// Train on the experts' capability exemplars alone, leaving out the
+        /// live tasks each clearly won (ADR-0024 D-1): the router to judge the
+        /// outcome-trained one against.
+        #[arg(long)]
+        exemplars_only: bool,
     },
     /// Compose several experts into one blended adapter and serve a task
     /// through it (the heterogeneous composed model): the population as a capability multiplier. Needs

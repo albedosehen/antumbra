@@ -7,17 +7,18 @@
 //! freeze baseline the byte-identity tripwire checks against.
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::{delete_record, query_records, upsert_record};
 use surql::types::operators::eq;
 use surql::types::RecordID;
 
-use antumbra_core::{BaselineRecord, ContributionRecord, ExpertId, Result, RunId};
+use antumbra_core::{BaselineRecord, ContributionRecord, ExpertId, Result, RoutingOutcome, RunId};
 
 use crate::error::map;
 use crate::store::Store;
 
 const TABLE: &str = "contribution";
 const BASELINE: &str = "population_baseline";
+const OUTCOME: &str = "routing_outcome";
 
 fn key(record: &ContributionRecord) -> String {
     format!(
@@ -56,6 +57,35 @@ pub async fn list_for_run(store: &Store, run_id: &RunId) -> Result<Vec<Contribut
         .map_err(map)?
         .where_(eq("run_id", run_id.as_str()))
         .order_by("generation", "ASC")
+        .map_err(map)?;
+    query_records(store.client(), &query).await.map_err(map)
+}
+
+/// Record a task's clear winner, replacing the one recorded for the same task
+/// before: the latest measurement is the one that describes the population as
+/// it now is.
+pub async fn upsert_outcome(store: &Store, outcome: &RoutingOutcome) -> Result<()> {
+    let id = RecordID::<()>::new(OUTCOME, outcome.task.as_str()).map_err(map)?;
+    upsert_record(store.client(), &id, serde_json::to_value(outcome)?)
+        .await
+        .map_err(map)?;
+    Ok(())
+}
+
+/// Forget a task's clear winner: the latest measurement found none.
+pub async fn clear_outcome(store: &Store, task: &str) -> Result<()> {
+    let id = RecordID::<()>::new(OUTCOME, task).map_err(map)?;
+    delete_record(store.client(), &id).await.map_err(map)?;
+    Ok(())
+}
+
+/// Every task's latest clear winner, by task id.
+pub async fn outcomes(store: &Store) -> Result<Vec<RoutingOutcome>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(OUTCOME)
+        .map_err(map)?
+        .order_by("task", "ASC")
         .map_err(map)?;
     query_records(store.client(), &query).await.map_err(map)
 }
