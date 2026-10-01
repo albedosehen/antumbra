@@ -47,6 +47,8 @@ corpora/_*.json
 
 # Local-only directories (also covered by `/*`, kept explicit for intent).
 /target/
+# Test stores some crates write under their own target directory.
+**/target/
 /data/
 /weights/
 /adapters/
