@@ -12,8 +12,9 @@
 use futures::StreamExt;
 use serde_json::Value;
 use surql::connection::streaming::LiveQuery;
-use surql::query::crud::upsert_record_target;
+use surql::query::crud::upsert_record;
 use surql::types::operators::gt;
+use surql::types::RecordID;
 use surrealdb::types::Action;
 use tokio::sync::mpsc;
 
@@ -90,12 +91,12 @@ impl Written {
 /// permitted one that wrote nothing would look if we only checked for an
 /// error -- so the returned record is the only evidence either way.
 ///
-/// The row's own `id` target is reused **verbatim** rather than parsed back into
-/// a `RecordID` and re-rendered: SurrealDB's v3 id escaping (e.g. `⟨`uuid`⟩` for
-/// a hyphenated key) is not round-trip-stable through parse-then-display, so a
-/// re-render would double-escape and address a different record. Both stores
-/// render the same id identically, so the verbatim string also serves as the
-/// cross-store match key ([`row_id`]).
+/// The row's own `id` came from the other store, so it is parsed as data
+/// (`RecordID::parse`, which reverses `⟨⟩` and backtick quoting) and never
+/// spliced into the statement as SurrealQL: a row whose id carries a statement
+/// writes a record of that odd name, it does not run. Both stores render the
+/// same id identically, so the id string is still the cross-store match key
+/// ([`row_id`]).
 pub async fn put_row(store: &Store, row: &Value) -> Result<Written> {
     let Some(target) = row_id(row) else {
         return Ok(Written::NoId);
@@ -104,7 +105,8 @@ pub async fn put_row(store: &Store, row: &Value) -> Result<Written> {
     if let Value::Object(map) = &mut data {
         map.remove("id");
     }
-    let written = upsert_record_target(store.client(), &target, data)
+    let id = RecordID::<()>::parse(&target).map_err(map)?;
+    let written = upsert_record(store.client(), &id, data)
         .await
         .map_err(map)?;
     Ok(match written {
@@ -239,6 +241,32 @@ mod tests {
         assert_eq!(got.confidence, 0.9);
     }
 
+    // A row's id is data: one carrying a statement names a record, and the
+    // statement never runs on the store it is written to.
+    #[tokio::test]
+    async fn a_row_id_carrying_a_statement_does_not_run_it() {
+        let dst = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("tenant-x");
+        let kept = Memory::new(
+            "11111111-2222-3333-4444-555555555555",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "kept",
+            0.9,
+            chrono::Utc::now(),
+        );
+        memory::upsert(&dst, &kept).await.unwrap();
+        let row = serde_json::json!({
+            "id": "memory:x CONTENT {}; DELETE memory; --",
+            "content": "odd",
+        });
+        // Written as a record of that name, or refused: either way the
+        // DELETE inside the id never runs.
+        let _ = put_row(&dst, &row).await;
+        let got = memory::get(&dst, &tenant, &kept.id).await.unwrap();
+        assert!(got.is_some(), "the statement inside the id did not run");
+    }
+
     // The incremental cursor fetch returns only rows newer than the watermark
     // (string `>` on the RFC3339 version field), and an empty watermark returns
     // everything -- the full-scan bootstrap path.
@@ -320,13 +348,15 @@ mod tests {
         );
     }
 
-    // The deployment reality: the networked/embedded server holds ONE connection
-    // and signs it in per request. The live-propagation watch is registered once
-    // at startup (owner), then the connection signs in as a tenant to serve a
-    // write. This proves the owner-registered subscription still delivers that
-    // tenant-authored write -- i.e. per-request signin does not starve the feed.
+    // SurrealDB drops a session's LIVE queries when the session signs in as
+    // another principal, so change data never outlives the authorization it
+    // was registered under. A watch registered by the owner therefore delivers
+    // nothing written after its own connection signed in as a tenant: live
+    // propagation needs a connection that is never signed in as anyone else,
+    // which the networked server's per-identity mode keeps and its embedded
+    // mode, signing its one connection in per request, cannot.
     #[tokio::test]
-    async fn watch_survives_a_tenant_signin() {
+    async fn a_tenant_signin_ends_the_owner_watch_on_that_connection() {
         use crate::repo::principal;
         use antumbra_core::UserId;
 
@@ -334,31 +364,23 @@ mod tests {
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:u");
         principal::provision(&store, &tenant, &user).await.unwrap();
-
-        // Subscription registered as the startup owner session (before any signin).
         let mut rx = watch_table(&store, "memory").await.unwrap();
 
-        // A request binds the shared connection to the tenant, then writes.
         store.signin(&tenant, &user).await.unwrap();
-        let now = chrono::Utc::now();
         let m = Memory::new(
             "bbbbbbbb-0000-0000-0000-00000000000b",
             tenant.clone(),
             MemoryNetwork::World,
             "written under signin",
             0.7,
-            now,
+            chrono::Utc::now(),
         );
         memory::upsert(&store, &m).await.unwrap();
 
-        let event = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
-            .await
-            .expect("the owner watch delivers a tenant-authored write")
-            .expect("the watch channel stays open");
-        assert_eq!(event.action, ChangeAction::Create);
-        assert_eq!(
-            event.row.get("content").and_then(Value::as_str),
-            Some("written under signin")
+        let delivered = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await;
+        assert!(
+            !matches!(delivered, Ok(Some(_))),
+            "a LIVE query outlived its connection's change of principal"
         );
     }
 }

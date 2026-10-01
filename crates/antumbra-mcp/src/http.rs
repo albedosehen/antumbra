@@ -254,7 +254,7 @@ pub async fn serve(
 /// is still the startup owner session (before any per-request signin).
 fn spawn_live_propagation(state: Arc<HttpState>) {
     tokio::spawn(async move {
-        let mut feed = match antumbra_store::repo::sync::watch_table(&state.store, "memory").await {
+        let feed = match antumbra_store::repo::sync::watch_table(&state.store, "memory").await {
             Ok(feed) => feed,
             Err(e) => {
                 eprintln!("antumbra-mcp: live propagation disabled (watch failed): {e}");
@@ -262,27 +262,46 @@ fn spawn_live_propagation(state: Arc<HttpState>) {
             }
         };
         eprintln!("antumbra-mcp: live propagation watching shared-memory changes");
-        while let Some(event) = feed.recv().await {
-            // Return the shared connection to the owner view under the lock, then
-            // resolve the audience OUTSIDE it: resolution only reads, on the
-            // always-root `store`, so holding the lock across it would needlessly
-            // serialize the watcher with every request.
-            {
-                let _guard = state.auth.lock().await;
-                if state.store.signin_root().await.is_err() {
-                    continue; // could not return to owner view; skip this event
-                }
-            }
-            let change = antumbra_sync::resolve_change(&state.store, &event).await;
-            if let Some(change) = change {
-                state.registry.notify(&change).await;
-            }
+        // SurrealDB drops a session's LIVE queries when the session signs in as
+        // another principal. Embedded, the watch shares the one connection every
+        // request signs in on, so it delivers nothing after the first request.
+        if matches!(state.serving, Serving::Shared(_)) {
+            eprintln!(
+                "antumbra-mcp: live propagation stops after the first request on an \
+                 embedded store, whose one connection each request signs in on; \
+                 serve from a SurrealDB server to keep it"
+            );
         }
+        propagate(state, feed).await;
         // The feed only closes when the watch task ends (stream error/kill or the
         // connection dropping). Surface it: otherwise live propagation would stop
         // for every connected client with no trace.
         eprintln!("antumbra-mcp: live propagation stopped (memory change feed closed)");
     });
+}
+
+/// Push each change on `feed` to its recipients' open sessions, until the feed
+/// closes.
+async fn propagate(
+    state: Arc<HttpState>,
+    mut feed: tokio::sync::mpsc::Receiver<antumbra_store::repo::sync::ChangeEvent>,
+) {
+    while let Some(event) = feed.recv().await {
+        // Return the shared connection to the owner view under the lock, then
+        // resolve the audience OUTSIDE it: resolution only reads, on the
+        // always-root `store`, so holding the lock across it would needlessly
+        // serialize the watcher with every request.
+        {
+            let _guard = state.auth.lock().await;
+            if state.store.signin_root().await.is_err() {
+                continue; // could not return to owner view; skip this event
+            }
+        }
+        let change = antumbra_sync::resolve_change(&state.store, &event).await;
+        if let Some(change) = change {
+            state.registry.notify(&change).await;
+        }
+    }
 }
 
 /// The `/mcp` router. Extracted so the auth boundary can be exercised with
