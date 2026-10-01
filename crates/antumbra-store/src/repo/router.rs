@@ -95,4 +95,22 @@ mod tests {
         save(&store, &next).await.unwrap();
         assert_eq!(load(&store).await.unwrap().unwrap().floor, 0.5);
     }
+
+    #[tokio::test]
+    async fn a_router_that_cannot_be_decoded_is_a_serde_error() {
+        // What a server older than the router's format reads: the caller can
+        // tell it from a store fault and degrade instead of failing.
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        upsert_record(
+            store.client(),
+            &record_id().unwrap(),
+            serde_json::json!({ "weights": "not a vector" }),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            load(&store).await,
+            Err(antumbra_core::AntumbraError::Serde(_))
+        ));
+    }
 }
