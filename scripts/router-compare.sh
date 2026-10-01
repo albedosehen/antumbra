@@ -60,10 +60,13 @@ if ! docker build -f docker/Dockerfile.cuda --target calibrate -t "antumbra-cali
 fi
 tail -5 "$BUILD_LOG"
 
-# The container wrote the store as root, so the copy is made from one too.
-docker run --rm --entrypoint cp \
-    -v "$RUN:/from:ro" -v "$(dirname "$RUN"):/to" \
-    "antumbra-calibrate:$SHA" -a /from "/to/$(basename "$OUT")"
+# The image runs as its own user (uid 65532), which owns the run's store and
+# adapters but cannot create a directory beside the run, so the copy lands in
+# one made here, open to it as the run directories are.
+mkdir -m 777 "$OUT"
+docker run --rm --entrypoint sh \
+    -v "$RUN:/from:ro" -v "$OUT:/to" \
+    "antumbra-calibrate:$SHA" -c 'cp -a /from/* /to/'
 antumbra() {
     docker run --rm --device nvidia.com/gpu=all \
         -v antumbra-gpu-test-weights:/weights \
