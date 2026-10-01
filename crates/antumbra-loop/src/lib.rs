@@ -276,6 +276,9 @@ pub struct GenerationLoop<'a> {
     cfg: LoopConfig,
     rechecker: Option<&'a dyn Verifier>,
     scores: scores::ScoreCache,
+    /// Each verifier the recheck has measured this run: the generations, and
+    /// the counts so far.
+    rechecked: std::sync::Mutex<std::collections::HashMap<String, (u32, antumbra_core::Tally)>>,
 }
 
 impl<'a> GenerationLoop<'a> {
@@ -292,6 +295,7 @@ impl<'a> GenerationLoop<'a> {
             cfg,
             rechecker: None,
             scores: scores::ScoreCache::default(),
+            rechecked: std::sync::Mutex::default(),
         }
     }
 

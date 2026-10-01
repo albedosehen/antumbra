@@ -22,6 +22,19 @@ pub async fn measure(
     policy: &TrustPolicy,
     now: DateTime<Utc>,
 ) -> Result<TrustMeasurement> {
+    Ok(tally(verifier, record, cases, policy)
+        .await?
+        .judge(&record.id, now, policy))
+}
+
+/// Run `record` on the cases it applies to and count the runs, unjudged, so
+/// a caller can fold in earlier tallies before judging.
+pub async fn tally(
+    verifier: &dyn Verifier,
+    record: &VerifierRecord,
+    cases: &[Case],
+    policy: &TrustPolicy,
+) -> Result<Tally> {
     let repeats = policy.repeats.max(1);
     let run_id = RunId::new(format!("trust:{}", record.id));
     let mut tally = Tally {
@@ -45,7 +58,7 @@ pub async fn measure(
         }
         tally.add(case, &runs);
     }
-    Ok(tally.judge(&record.id, now, policy))
+    Ok(tally)
 }
 
 /// The decisive test for one verifier: `record` on the known-bad and

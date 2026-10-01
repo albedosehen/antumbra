@@ -196,6 +196,44 @@ async fn a_sound_verifier_is_measured_again_and_its_graduate_joins() -> Result<(
     Ok(())
 }
 
+/// One generation's fifteen wrong answers, none passed, are too few to bound
+/// the rate; the run's second generation adds fifteen more, and on thirty the
+/// verifier is sound again.
+#[tokio::test]
+async fn a_run_pools_its_rechecks_until_they_can_bound_the_rate() -> Result<()> {
+    let store = Store::connect_memory(8).await?;
+    register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
+    let sound = trusted(&store, "strings", &["right"]).await?;
+    let mut answers = judged(&sound.id, "right", true, 5);
+    answers.extend(judged(&sound.id, "wrong", false, 15));
+    let trainer = trained_under(&sound.id, answers);
+    let reports = GenerationLoop::new(
+        &store,
+        &trainer,
+        &FixedEmbedder::new(8),
+        LoopConfig::default(),
+    )
+    .rechecking(&Accepts)
+    .run_until(&RunId::new("run:recheck-pooled"), 2)
+    .await?;
+
+    let first = &reports[0].rechecks[0];
+    assert_eq!(first.generations, 1);
+    let m = first.measurement.as_ref().expect("measured");
+    assert!(
+        matches!(m.verdict, TrustVerdict::Unmeasured { .. }),
+        "{:?}",
+        m.verdict
+    );
+    let second = &reports[1].rechecks[0];
+    assert_eq!(second.generations, 2);
+    let m = second.measurement.as_ref().expect("measured");
+    assert_eq!((m.good, m.bad), (10, 30));
+    assert!(m.verdict.is_sound(), "{:?}", m.verdict);
+    assert_eq!(verifier::measurements(&store, &sound.id).await?.len(), 3);
+    Ok(())
+}
+
 #[tokio::test]
 async fn answers_no_authored_verifier_anchors_are_not_measured() -> Result<()> {
     let store = Store::connect_memory(8).await?;
