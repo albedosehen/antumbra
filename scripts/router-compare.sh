@@ -7,8 +7,9 @@
 # them under ~/antumbra-search-runs), holding its store and its adapters. It is
 # copied to <run>-router-compare first, so the run stays as it ended; the
 # winners and both routers are written to the copy.
-#   1. gate-outcomes: every routable expert scores every live task, and each
-#      task's clear winner is recorded.
+#   1. gate-outcomes: every routable expert scores the live tasks a grow run's
+#      contribution measurement samples, and each task's clear winner is
+#      recorded.
 #   2. gate-train --exemplars-only, then gate-sweep --learned over the withheld
 #      tasks: the router as it was.
 #   3. gate-train, then the same sweep: the router that learned the winners.
@@ -22,7 +23,9 @@
 #
 # Nothing here touches the deploy checkout, the production database or the
 # running services. Knobs: CORPUS (the workbench file the run trained on,
-# default all), SEEDS (2), SAMPLES (4), LOG.
+# default all), SEEDS (2), SAMPLES (4), MAX_TASKS (the live tasks labeled, 64
+# as grow-compare.sh measures), LOG. Expect about an hour for the winners at
+# the defaults and three quarters of one for each sweep.
 
 export PATH=$PATH:/run/current-system/sw/bin:/run/wrappers/bin
 SHA="$1"
@@ -30,6 +33,7 @@ RUN="${2%/}"
 CORPUS="${CORPUS:-all}"
 SEEDS="${SEEDS:-2}"
 SAMPLES="${SAMPLES:-4}"
+MAX_TASKS="${MAX_TASKS:-64}"
 LOG="${LOG:-/tmp/router-compare.log}"
 SRC="$HOME/antumbra-search-src/$SHA"
 OUT="$RUN-router-compare"
@@ -71,7 +75,7 @@ TASKS="/build/corpora/workbench/$CORPUS.json"
 SCORING=(--corpus "$TASKS" --seeds "$SEEDS" --samples "$SAMPLES")
 
 echo "== winners $(date -u +%FT%TZ)"
-antumbra gate-outcomes "${SCORING[@]}"
+antumbra gate-outcomes "${SCORING[@]}" --max-tasks "$MAX_TASKS"
 echo "== exemplars only $(date -u +%FT%TZ)"
 antumbra gate-train --exemplars-only
 antumbra gate-sweep --learned "${SCORING[@]}" --out /reports/sweep-exemplars.json
