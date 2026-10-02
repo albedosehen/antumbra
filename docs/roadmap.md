@@ -40,7 +40,7 @@ arguments}` → the tool's JSON result) beside the JSON-RPC `/mcp` router, so a 
 
 ### P-2 · Read-only web dashboard
 
-**Status:** queued. A browser surface over the same MCP tools an agent calls: the population + experts + fitness, route hit-rate / escalation / cost-avoided stats, memory recall, and the compartment/`memory_edge` graph (2D first, 3D after). Inherits the engine ACL (engine-enforced multi-tenant isolation), so it can see no more than the bound `(tenant, user)`.
+**Status:** first slice DONE (2026-10-02). A browser surface over the same MCP tools an agent calls: the population + experts + fitness, route hit-rate / escalation / cost-avoided stats, memory recall, and the compartment/`memory_edge` graph (2D first, 3D after). Inherits the engine ACL (engine-enforced multi-tenant isolation), so it can see no more than the bound `(tenant, user)`. **Landed:** `GET /dashboard` on the HTTP server serves one page, compiled into the binary, that signs in with a pasted bearer token (kept in the tab's session storage only) and calls `workspace_stats`, `population`, `list_compartments`, `recall_memories` and `list_memories` through `POST /mcp/call`. It shows the workspace counts, the population by status and fitness, the compartments, and memory recalled by meaning or listed newest first, with each memory's network, confidence, reinforcement and git anchor. The page and its assets carry no data and need no token; a strict content security policy allows only the page's own script and style, and stored text is written as text, never as markup. **Queued:** route hit-rate / escalation / cost-avoided stats (no tool reports them yet), the document list, the `memory_edge` graph, and live updates over the SSE stream.
 
 ### P-3 · Knowledge documents
 
