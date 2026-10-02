@@ -77,14 +77,27 @@
         </div>
       </section>
 
-      <section aria-labelledby="h-compartments">
-        <div class="section-head">
-          <h2 id="h-compartments">Compartments</h2>
-        </div>
-        <div class="panel">
-          <ul id="compartments" class="list"></ul>
-        </div>
-      </section>
+      <div class="stack">
+        <section aria-labelledby="h-compartments">
+          <div class="section-head">
+            <h2 id="h-compartments">Compartments</h2>
+          </div>
+          <div class="panel">
+            <ul id="compartments" class="list"></ul>
+          </div>
+        </section>
+
+        <section aria-labelledby="h-documents">
+          <div class="section-head">
+            <h2 id="h-documents">Documents</h2>
+            <p id="documents-summary" class="muted small"></p>
+          </div>
+          <div class="panel">
+            <ul id="documents" class="list"></ul>
+          </div>
+          <button id="documents-more" type="button" class="link more" hidden></button>
+        </section>
+      </div>
     </div>
 
     <section aria-labelledby="h-memory">
