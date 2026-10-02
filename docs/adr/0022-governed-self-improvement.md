@@ -686,8 +686,14 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    **A task's reference answer is now a known-good case.** Several of those checks had no right answer to see, because the policy had not yet solved their tasks. The workbench corpus carries a reference completion for every task. The recheck now asks the trainer for the reference answer of each task a check judged (`Trainer::reference`) and labels it with the task's anchor like any other answer. It is counted once a run, so pooling never weighs it twice. A check that turns away every wrong answer can then be judged once it has seen enough of them. With 30 wrong answers and the reference, it reads sound where it read unmeasured before. Where no reference exists, nothing changes.
 
+   **Answers built to be wrong are known-bad evidence in the recheck too.** A check on a task the policy rarely fails still saw too few wrong answers to bound its rate. The validation already builds answers to be wrong: single-point mutants of each reference and the generator's forgeries (`synthesize.py`'s `artifacts.json`). `train --recheck-artifacts` now hands them to the loop, and `verifier-train.sh` passes the validation run's file along with its store. Each recheck labels them with the task's anchor once a run, by the rule `verifier cases` uses for promotion:
+   - **One the anchor fails is adversarial:** known-bad evidence for the bound, and a shortcut if the check passes it, which quarantines the check.
+   - **One the anchor passes is an equivalent answer** and counts as right.
+
+   So a check on a task the policy always answers right is judged from its first generation, where before it waited on the policy's mistakes.
+
    Still to come for this step:
-   - **Too few known-bad cases:** a check on a task the policy rarely fails still sees too few wrong answers to bound its rate. Deliberately wrong answers, which the challenge already builds, are the source to draw on.
+   - **A training run with both in place,** to see how many of a skill's checks a run can now judge, against the 3 of 9 the `numbers` run renewed.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.

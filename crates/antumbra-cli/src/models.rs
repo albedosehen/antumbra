@@ -448,6 +448,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     }
     let critic_twin = args.critic_twin;
     let seed = args.seed;
+    let recheck_artifacts = args.recheck_artifacts;
     if critic_twin.is_some() && critic.is_none() {
         anyhow::bail!("--critic-twin is read against a critic; give --critic too");
     }
@@ -601,8 +602,13 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         // Every generation, the synthesized verifiers that judged its training
         // are measured again against the tasks' authored anchors (ADR-0022 S-4).
         let rechecker = antumbra_critic::CommandVerifier;
+        let deliberate = match &recheck_artifacts {
+            Some(path) => crate::verifiers::deliberate_answers(path)?,
+            None => Vec::new(),
+        };
         let lp = GenerationLoop::new(&store, trainer.as_ref(), embedder.as_ref(), loop_cfg)
-            .rechecking(&rechecker);
+            .rechecking(&rechecker)
+            .rechecking_against(deliberate);
         let reports = lp.run_until(&RunId::new(run), generations).await?;
         for r in &reports {
             crate::generation_report::print(r);
@@ -638,6 +644,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &retirement,
             &merge,
             &grow,
+            &recheck_artifacts,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

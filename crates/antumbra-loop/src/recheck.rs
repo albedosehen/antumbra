@@ -208,7 +208,7 @@ impl GenerationLoop<'_> {
             });
         }
         cases.extend(
-            self.reference_cases(judge, record, anchors, samples, policy)
+            self.seeded_cases(judge, record, anchors, samples, policy)
                 .await?,
         );
         let mut recheck = Recheck {
@@ -243,11 +243,13 @@ impl GenerationLoop<'_> {
         Ok(recheck)
     }
 
-    /// The reference answer of each task `samples` cover, for the tasks whose
-    /// reference this run has not yet counted for `record`: a right answer
-    /// by the corpus, labeled by the task's anchor like the policy's. Each is
-    /// counted once a run, so pooling never weighs the same answer twice.
-    async fn reference_cases(
+    /// The answers the run brings besides the policy's, for each task
+    /// `samples` cover that this run has not yet seeded for `record`: the
+    /// task's reference answer, and the answers built to be wrong
+    /// ([`GenerationLoop::rechecking_against`]). Each is labeled by the
+    /// task's anchor like the policy's, and counted once a run, so pooling
+    /// never weighs the same answer twice.
+    async fn seeded_cases(
         &self,
         judge: &dyn Verifier,
         record: &VerifierRecord,
@@ -269,21 +271,35 @@ impl GenerationLoop<'_> {
             let Some(anchor) = anchor_for(anchors, record, task) else {
                 continue;
             };
-            let Some(reference) = self.trainer.reference(task).await else {
-                continue;
-            };
-            let Some(right) = label(judge, anchor, task, &reference, policy.repeats).await? else {
-                continue;
-            };
-            cases.push(Case {
-                id: format!("{task}#reference"),
+            let anchored = |id: String, completion: String, label: Label| Case {
+                id,
                 task: task.to_string(),
-                completion: reference,
-                label: if right { Label::Good } else { Label::Bad },
+                completion,
+                label,
                 anchor: Anchor::Verifier {
                     id: anchor.id.clone(),
                 },
-            });
+            };
+            if let Some(reference) = self.trainer.reference(task).await {
+                if let Some(right) = label(judge, anchor, task, &reference, policy.repeats).await? {
+                    let as_labeled = if right { Label::Good } else { Label::Bad };
+                    cases.push(anchored(format!("{task}#reference"), reference, as_labeled));
+                }
+            }
+            for (i, wrong) in self.deliberate.get(task).into_iter().flatten().enumerate() {
+                if let Some(right) = label(judge, anchor, task, wrong, policy.repeats).await? {
+                    let as_labeled = if right {
+                        Label::Good
+                    } else {
+                        Label::Adversarial
+                    };
+                    cases.push(anchored(
+                        format!("{task}#deliberate{i}"),
+                        wrong.clone(),
+                        as_labeled,
+                    ));
+                }
+            }
         }
         Ok(cases)
     }

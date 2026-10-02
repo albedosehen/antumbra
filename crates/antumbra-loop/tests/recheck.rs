@@ -349,3 +349,46 @@ async fn a_reference_answer_lets_a_verifier_the_policy_never_satisfies_be_judged
     assert!(with.verdict.is_sound(), "{:?}", with.verdict);
     Ok(())
 }
+
+/// One generation's recheck of a verifier accepting `accept`, against a
+/// policy that answers the task right every time and 29 answers built to be
+/// wrong.
+async fn against_deliberate(accept: &[&str], name: &str) -> Result<antumbra_loop::Recheck> {
+    let store = Store::connect_memory(8).await?;
+    register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
+    let checked = trusted(&store, "strings", accept).await?;
+    let trainer = trained_under(&checked.id, judged(&checked.id, "right", true, 5));
+    let deliberate = (0..29).map(|i| ("swap".to_string(), format!("wrong-{i}")));
+    let reports = GenerationLoop::new(
+        &store,
+        &trainer,
+        &FixedEmbedder::new(8),
+        LoopConfig::default(),
+    )
+    .rechecking(&Accepts)
+    .rechecking_against(deliberate)
+    .run_until(&RunId::new(name), 1)
+    .await?;
+    Ok(reports[0].rechecks[0].clone())
+}
+
+/// A policy that always answers right gives a recheck no known-bad case.
+/// Answers built to be wrong are that evidence from the first generation, and
+/// one the verifier passes is a shortcut that quarantines it.
+#[tokio::test]
+async fn deliberately_wrong_answers_are_known_bad_from_the_first_generation() -> Result<()> {
+    let sound = against_deliberate(&["right"], "run:deliberate-sound").await?;
+    let m = sound.measurement.as_ref().expect("measured");
+    assert_eq!((m.good, m.bad, m.adversarial), (5, 29, 29));
+    assert!(m.verdict.is_sound(), "{:?}", m.verdict);
+
+    let lax = against_deliberate(&["right", "wrong-3"], "run:deliberate-lax").await?;
+    let m = lax.measurement.as_ref().expect("measured");
+    assert!(
+        matches!(m.verdict, TrustVerdict::Shortcut { .. }),
+        "{:?}",
+        m.verdict
+    );
+    assert_eq!(lax.moved, Some(TrustState::Quarantined));
+    Ok(())
+}
