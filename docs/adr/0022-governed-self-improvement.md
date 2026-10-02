@@ -507,7 +507,7 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The gate was the obstacle.** Under the heuristic margin, none of the twelve region specialists the earlier arms trained, cold or warm, was admitted. Under the router that serves them, one arm admitted all three of its own.
    - **Growth is not yet specialization.** The uniform population ended at 0.76, and so did its best single expert, the numbers specialist. It scores 0.76 across all 64 tasks, above the generalist's 0.72. Much of the gain may be the warm start's continued training rather than routing among specialists. The routing headroom now kept on the baseline separates the two: the same experts routed as well as they could be, against the population.
    - **One run an arm.** The two arms' first specialists came out differently: numbers was admitted in uniform (generation 2) and turned away in credit (generation 1). So the arms' difference here is as much the draw as the policy. By the record's test, credit against uniform, the step stays unchecked.
-6. [ ] S-4, proposed verifiers and the trust protocol.
+6. [x] S-4, proposed verifiers and the trust protocol.
 
    **A second comparison, and the arms traded places.** It ran on 50fd1aa on 2026-09-26 and 27, set up as before, with contribution scores reused and the routing headroom reported.
 
@@ -703,8 +703,11 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The adversarial test held:** no trusted check passed a deliberately wrong answer the anchor failed, so none read as a shortcut, and none rewarded a wrong answer. Nothing was quarantined.
    - **Against the record's test for this step:** on `numbers`, every synthesized check that stayed trusted held its bound on re-measurement for three generations. Each also failed every deliberately wrong artifact its authored verifier failed. The challenge had already quarantined the one that did not.
 
-   Still to come for this step:
-   - **The record owner's decision:** after the kill criterion was reached under the old judge, re-opening synthesis was left to the record owner (above). This run and the `strings` run under the fixed judge are the evidence for that decision.
+   **The record owner re-opened synthesis on 2026-10-02, and the step is done.** Once the kill criterion was reached under the old judge, re-opening synthesis was the record owner's decision (above). The evidence since is under the fixed judge:
+   - **`strings`:** the recheck quarantined every check that rewarded a wrong answer, in the generation it did.
+   - **`numbers`:** all nine trusted checks were judged sound, none passed a deliberately wrong answer, and none rewarded a wrong one.
+
+   Synthesized checks may grant reward again in training runs under the recheck. Quarantine stays automatic: the recheck still runs every generation, against the reference and deliberately wrong answers as well as the policy's own. A check that rewards a wrong answer or passes a deliberately wrong one is withdrawn, and so is every expert it taught.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.
