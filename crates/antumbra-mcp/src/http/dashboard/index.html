@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Antumbra</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='84 84 344 344'%3E%3Cpath fill='%238A84CC' fill-rule='evenodd' d='M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z'/%3E%3Ccircle fill='%238A84CC' cx='148.5' cy='148.5' r='24'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="dashboard/app.css">
+<script src="dashboard/app.js" defer></script>
+</head>
+<body>
+
+<main id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <svg class="mark mark-large" viewBox="84 84 344 344" aria-hidden="true">
+      <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
+      <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
+    </svg>
+    <h1>Antumbra</h1>
+    <p class="lede">Sign in with a bearer token for this server.</p>
+    <form id="gate-form" class="gate-form" autocomplete="off">
+      <label for="token">Token</label>
+      <input id="token" name="token" type="password" spellcheck="false" autocapitalize="off" required>
+      <p class="hint">Mint one with <code>antumbra-mcp --mint-token</code>, or use the token your sign-in link gave you. It is kept in this tab only and cleared when the tab closes or you sign out.</p>
+      <p id="gate-error" class="error" role="alert" hidden></p>
+      <button type="submit">Open the dashboard</button>
+    </form>
+  </div>
+</main>
+
+<div id="app" hidden>
+  <header class="bar">
+    <div class="brand">
+      <svg class="mark" viewBox="84 84 344 344" aria-hidden="true">
+        <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
+        <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
+      </svg>
+      <span>Antumbra</span>
+    </div>
+    <p class="who"><span id="who"></span> <span id="expires" class="muted"></span></p>
+    <div class="actions">
+      <span id="updated" class="muted small" aria-live="polite"></span>
+      <button id="refresh" type="button" class="quiet">Refresh</button>
+      <button id="signout" type="button" class="quiet">Sign out</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section aria-labelledby="h-overview">
+      <h2 id="h-overview" class="visually-hidden">Overview</h2>
+      <dl id="stats" class="stats"></dl>
+    </section>
+
+    <div class="row">
+      <section aria-labelledby="h-population">
+        <div class="section-head">
+          <h2 id="h-population">Population</h2>
+          <p id="population-summary" class="muted small"></p>
+        </div>
+        <div id="population" class="panel">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Expert</th>
+                  <th scope="col" class="num">Generation</th>
+                  <th scope="col" class="num">Fitness</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Visibility</th>
+                </tr>
+              </thead>
+              <tbody id="population-rows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="h-compartments">
+        <div class="section-head">
+          <h2 id="h-compartments">Compartments</h2>
+        </div>
+        <div class="panel">
+          <ul id="compartments" class="list"></ul>
+        </div>
+      </section>
+    </div>
+
+    <section aria-labelledby="h-memory">
+      <div class="section-head">
+        <h2 id="h-memory">Memory</h2>
+        <p id="memory-summary" class="muted small" aria-live="polite"></p>
+      </div>
+      <form id="recall" class="recall" role="search">
+        <input id="query" name="query" type="search" placeholder="Recall by meaning" aria-label="What to recall">
+        <fieldset class="segmented">
+          <legend class="visually-hidden">Network</legend>
+          <input id="net-all" type="radio" name="network" value="" checked><label for="net-all">All</label>
+          <input id="net-world" type="radio" name="network" value="world"><label for="net-world">World</label>
+          <input id="net-bank" type="radio" name="network" value="bank"><label for="net-bank">Bank</label>
+          <input id="net-opinion" type="radio" name="network" value="opinion"><label for="net-opinion">Opinion</label>
+        </fieldset>
+        <button type="submit">Recall</button>
+        <button id="browse" type="button" class="quiet">List all</button>
+      </form>
+      <p id="memory-note" class="note small" hidden></p>
+      <ol id="memories" class="memories"></ol>
+      <button id="more" type="button" class="quiet more" hidden></button>
+    </section>
+  </main>
+</div>
+
+</body>
+</html>

@@ -29,6 +29,13 @@
 //! subscription (registered at startup) feeds the change watcher, audience is
 //! resolved under the auth lock in owner mode, and the change is pushed to each
 //! recipient's captured peer ([`crate::notify`]).
+//!
+//! ## The dashboard (P-2)
+//!
+//! `GET /dashboard` serves a read-only page that calls the same tools through
+//! `POST /mcp/call` with a token its user pastes in. The page and its assets
+//! carry no data and need no token; what it shows is what the token's identity
+//! may see ([`dashboard`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,6 +59,7 @@ use antumbra_store::Store;
 use crate::auth::{Identity, JwtVerifier};
 use crate::server::McpServer;
 
+mod dashboard;
 mod github;
 pub(crate) use github::GithubConfig;
 
@@ -325,6 +333,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/mcp", any(handle))
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
+        .merge(dashboard::routes())
         .with_state(state)
 }
 

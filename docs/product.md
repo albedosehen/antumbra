@@ -41,7 +41,7 @@ These are about the **user's ability to see, steer, and onboard**; they are not 
 
 | Capability (predecessor)                         | Antumbra today                           | Gap to close                                                                                                 |
 | ------------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Web dashboard                                    | CLI + TUI only                           | A web UI over the existing MCP/store surface                                                                 |
+| Web dashboard                                    | CLI + TUI; first slice at `/dashboard`   | A web UI over the existing MCP/store surface                                                                 |
 | 2D/3D memory graph explorer                      | `memory_edge` graph in the store; no viz | Render the graph (recall, edges, compartments) in the browser                                                |
 | Stats / observability                            | `status` CLI                             | Web stats: population size, fitness, route hit-rate, escalation rate, cost-avoided                           |
 | Behavior mixer (compose behaviors)               | `compose_adapters` precursor             | An **expert mixer** UI: pick experts + weights, preview, save a composed serve profile                       |

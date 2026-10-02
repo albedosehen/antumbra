@@ -65,6 +65,31 @@ async fn non_bearer_scheme_is_unauthorized() {
     );
 }
 
+/// The dashboard's page needs no token, since it carries no data, and serving
+/// it opens nothing else: the tools behind it still refuse a call without one.
+#[tokio::test]
+async fn the_dashboard_is_public_and_the_tools_behind_it_are_not() {
+    let app = router(state().await);
+    let page = Request::builder()
+        .uri("/dashboard")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(page).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let call = Request::builder()
+        .method("POST")
+        .uri("/mcp/call")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"tool":"workspace_stats"}"#))
+        .unwrap();
+    assert_eq!(
+        app.oneshot(call).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
 fn token(tenant: &str, user: &str) -> String {
     use jsonwebtoken::{encode, get_current_timestamp, Algorithm, EncodingKey, Header};
     #[derive(serde::Serialize)]
