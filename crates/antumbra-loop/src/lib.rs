@@ -285,6 +285,9 @@ pub struct GenerationLoop<'a> {
     embedder: &'a dyn Embedder,
     cfg: LoopConfig,
     rechecker: Option<&'a dyn Verifier>,
+    /// Answers built to be wrong, by task: what the recheck counts as
+    /// known-bad evidence besides the policy's own wrong answers.
+    deliberate: std::collections::BTreeMap<String, Vec<String>>,
     scores: scores::ScoreCache,
     /// Each verifier the recheck has measured this run: the generations, and
     /// the counts so far.
@@ -306,6 +309,7 @@ impl<'a> GenerationLoop<'a> {
             embedder,
             cfg,
             rechecker: None,
+            deliberate: std::collections::BTreeMap::new(),
             scores: scores::ScoreCache::default(),
             rechecked: std::sync::Mutex::default(),
             critic: std::sync::Mutex::default(),
@@ -317,6 +321,22 @@ impl<'a> GenerationLoop<'a> {
     /// (ADR-0022 S-4). Without it, trust lapses after its time to live.
     pub fn rechecking(mut self, verifier: &'a dyn Verifier) -> Self {
         self.rechecker = Some(verifier);
+        self
+    }
+
+    /// Recheck against these answers too, each `(task, completion)` built to
+    /// be wrong: a mutant of the task's reference or a forgery (ADR-0022
+    /// S-4). Each is labeled by the task's anchor once a run. One the anchor
+    /// fails is adversarial: known-bad evidence for the bound, and a shortcut
+    /// if the verifier passes it. One the anchor passes is an equivalent
+    /// answer and counts as right.
+    pub fn rechecking_against(
+        mut self,
+        deliberate: impl IntoIterator<Item = (String, String)>,
+    ) -> Self {
+        for (task, completion) in deliberate {
+            self.deliberate.entry(task).or_default().push(completion);
+        }
         self
     }
 

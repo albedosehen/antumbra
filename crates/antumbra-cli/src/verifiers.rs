@@ -556,9 +556,54 @@ async fn label_with(
     Ok(runs.iter().all(|&r| r == runs[0]).then_some(runs[0]))
 }
 
+/// The answers built to be wrong in a `verifier cases` completions file at
+/// `path`: the entries marked `deliberate`, as `(task, completion)`.
+#[cfg(any(feature = "models", test))]
+pub(crate) fn deliberate_answers(path: &str) -> anyhow::Result<Vec<(String, String)>> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(
+        &std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?,
+    )
+    .with_context(|| format!("{path} is not a JSON array of completions"))?;
+    Ok(entries
+        .iter()
+        .filter(|e| e["deliberate"].as_bool().unwrap_or(false))
+        .filter_map(|e| {
+            Some((
+                e["task"].as_str()?.to_string(),
+                e["completion"].as_str()?.to_string(),
+            ))
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_deliberate_completions_are_read_as_built_to_be_wrong() {
+        let path = std::env::temp_dir().join(format!("deliberate-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            serde_json::json!([
+                { "task": "swap", "completion": "mutant", "deliberate": true },
+                { "task": "swap", "completion": "policy answer" },
+                { "task": "pad", "completion": "forgery", "deliberate": true },
+                { "task": "pad", "deliberate": true },
+            ])
+            .to_string(),
+        )
+        .unwrap();
+        let got = deliberate_answers(path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            got,
+            [
+                ("swap".to_string(), "mutant".to_string()),
+                ("pad".to_string(), "forgery".to_string()),
+            ]
+        );
+    }
 
     fn corpus() -> Vec<serde_json::Value> {
         serde_json::from_value(serde_json::json!([

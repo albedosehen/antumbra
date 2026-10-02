@@ -20,6 +20,10 @@
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/verifier-train.sh <host>:/tmp/
 #   ssh <host> 'nohup bash /tmp/verifier-train.sh <sha> <directory> >/dev/null 2>&1 &'
 #
+# The answers verifier-validate.sh built to be wrong (its artifacts.json) come
+# along with the store when the directory has them, and every recheck counts
+# them as known-bad evidence (`train --recheck-artifacts`).
+#
 # Each run gets a fresh directory under ~/antumbra-verifier-runs. Nothing here
 # touches the deploy checkout, the production database or the running
 # services. Knobs: SKILL (strings), GENERATIONS (2), SAMPLES (8), ROUNDS (2),
@@ -75,7 +79,11 @@ antumbra() {
 # The container wrote the store as its own user, and part of it is not
 # readable from the host, so the copy is made by that user.
 docker run --rm -v "$FROM:/from:ro" -v "$RUN:/to" --entrypoint python "antumbra-calibrate:$SHA" \
-    -c "import shutil; shutil.copytree('/from/store.skv', '/to/store.skv')"
+    -c "import os, shutil; shutil.copytree('/from/store.skv', '/to/store.skv'); \
+os.path.exists('/from/artifacts.json') and shutil.copy('/from/artifacts.json', '/to/artifacts.json')"
+if [ -e "$RUN/artifacts.json" ]; then
+    ARGS="$ARGS --recheck-artifacts /reports/artifacts.json"
+fi
 
 antumbra migrate
 echo "== the namespace before"

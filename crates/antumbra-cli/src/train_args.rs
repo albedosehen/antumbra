@@ -38,6 +38,12 @@ pub struct TrainArgs {
     /// how far the two agree (ADR-0022 S-2). Needs --critic.
     #[arg(long)]
     pub critic_twin: Option<String>,
+    /// A completions file of answers built to be wrong, as `verifier cases`
+    /// reads (entries marked `deliberate`: mutants of a reference, forgeries).
+    /// Every recheck of a synthesized verifier counts them as known-bad
+    /// evidence (ADR-0022 S-4).
+    #[arg(long)]
+    pub recheck_artifacts: Option<String>,
     /// The generation seed: shifts every unseeded draw and training shuffle,
     /// so a run can be repeated as another trajectory rather than the same
     /// one. 0, the default, draws as every earlier run did.
