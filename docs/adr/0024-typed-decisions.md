@@ -230,7 +230,18 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
 
    - **Where they differ:** the two routers sent 95 of the 97 tasks to the same expert. Of the other two, one moved at an equal score. The other moved from an expert that solved it (1.00) to one that mostly did not (0.38), which is the whole 0.008.
    - **The reading:** six wins barely moved the router, and the one task they moved got worse. That meets the refutation, so the loop no longer trains the gate on wins (`LoopConfig::route_on_outcomes`, off by default). `gate-train` takes them only with `--with-outcomes`. The winners are still recorded each measurement.
-   - **What this does not show:** whether wins help a population whose experts differ. On this one, 6 labels in 64 is too few to test it. The routing headroom recorded in ADR-0022 S-3 (+0.07 on the live tasks) is still unexplained.
+   - **What this does not show:** whether wins help a population whose experts differ. On this one, 6 labels in 64 is too few to test it.
+
+   **The headroom that started this is the size sampling noise gives identical experts.** ADR-0022 S-3 read +0.07 between the population and the same experts routed as well as they could be, and this work began as a way to close it. That oracle takes, for each live task, the best of the experts' scores. Each score is a pass rate over eight samples (two seeds of four). The best of several noisy estimates of one rate sits above the rate, so the oracle reads high even when the experts are the same.
+   - **The simulation:** identical experts score each task at its true rate p, eight samples each. The rates are the 97 withheld tasks' observed ones (mean 0.63, 36 at 1 and 19 at 0), 64 tasks a draw, 400 draws.
+
+     | identical experts | headroom from noise, mean | 5% to 95% |
+     | ---: | ---: | --- |
+     | 3 | +0.050 | +0.031 to +0.070 |
+     | 4 | +0.061 | +0.039 to +0.084 |
+
+   - **The reading:** the measured +0.07, with three and four experts, sits inside that band. Taking observed rates as true ones understates the noise, since a rate observed at 0 or 1 is often not one, so the true band is if anything higher. The experts score alike on the live tasks (0.697 to 0.715), whatever their regions. Routing among them has little to gain, which is also why so few tasks had a clear winner.
+   - **What the oracle needs:** it should choose each task's best expert on one set of seeds and score that choice on another, so its own noise does not count as headroom. Until it does, its headroom reads only against this noise band.
 2. [~] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated.
 
    **A floor now ships, and it is not the head this record specifies.** `antumbra-rerank/src/floor.rs` answers `Noul` by mapping the deployed cross-encoder's score through a logistic fitted on the same verifier labels, reaching 0.803 accuracy and 0.797 F1 on a held-out half against the 0.785 the best in-sample threshold manages, with an expected calibration error of 0.033. It satisfies the `TypedDecider` contract on the contract's own terms: log loss is strictly proper, and the labels come from a deterministic verifier rather than from any model's answers.
