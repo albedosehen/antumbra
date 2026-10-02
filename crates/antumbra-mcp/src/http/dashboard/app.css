@@ -618,11 +618,6 @@ td .id {
   line-clamp: none;
 }
 
-.memory .toggle {
-  margin-top: 8px;
-  font-size: var(--t-s);
-}
-
 .meta {
   display: flex;
   flex-wrap: wrap;
@@ -650,6 +645,53 @@ td .id {
 
 .more {
   margin-top: 16px;
+}
+
+.actions-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.actions-row button.link {
+  font-size: var(--t-s);
+}
+
+/* A memory's relations sit inside its card, set off by a rule rather than a
+   second box. */
+.relations {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.relations .empty,
+.relations .failed {
+  padding: 0;
+}
+
+.relation-list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relation-list .meta {
+  margin-top: 0;
+}
+
+.relation-content {
+  display: -webkit-box;
+  max-width: 76ch;
+  margin: 4px 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
 }
 
 /* Narrow screens */
