@@ -468,6 +468,24 @@ pub(super) struct AnswerOut {
     pub(super) note: Option<String>,
 }
 
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct DocumentView {
+    /// The title it was ingested under, which is what identifies it.
+    pub(super) title: String,
+    /// How many chunks it was cut into.
+    pub(super) chunks: u32,
+    /// Whether its file of record is archived (copal).
+    pub(super) archived: bool,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct DocumentsOut {
+    /// One row per document you can see, sorted by title. Empty means none
+    /// has been ingested rather than none matched, since this lists rather
+    /// than searches.
+    pub(super) documents: Vec<DocumentView>,
+}
+
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct CreateCompartmentParams {
     /// A display name for the new compartment.

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, query_records, upsert_record};
+use surql::query::expressions::{as_, count_all, count_if, field};
 use surql::query::helpers::fulltext_search_query;
 use surql::types::operators::{and_, eq, is_none};
 use surql::types::RecordID;
@@ -256,15 +257,60 @@ pub async fn title_exists(
 
 /// Distinct document titles the tenant has ingested (the document list).
 pub async fn list_titles(store: &Store, tenant: &TenantId) -> Result<Vec<String>> {
-    // Paged by id (see `Store::read_paged`): a tenant's whole chunk corpus, one
-    // row per chunk, is large enough to overflow a frame. The titles are sorted
-    // and deduped below, so the row order off the wire is irrelevant.
-    let filter = eq("tenant_id", tenant.as_str());
-    let rows: Vec<ChunkRow> = store.read_paged(TABLE, None, Some(&filter)).await?;
-    let mut titles: Vec<String> = rows.into_iter().map(|r| r.title).collect();
-    titles.sort();
-    titles.dedup();
-    Ok(titles)
+    Ok(summaries(store, tenant)
+        .await?
+        .into_iter()
+        .map(|d| d.title)
+        .collect())
+}
+
+/// One document as its chunks describe it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentSummary {
+    pub title: String,
+    /// How many chunks it was cut into.
+    pub chunks: u32,
+    /// Whether any of its chunks names an archived file of record (copal).
+    pub archived: bool,
+}
+
+/// Every document the tenant holds, by title, with its chunk count, grouped
+/// by the ENGINE.
+///
+/// Reading the chunks to count them is the trap [`super::memory::count`]
+/// records: every chunk row carries its 384-float embedding, so listing a
+/// large corpus that way drags millions of floats across the wire to produce
+/// a few titles. Grouped where the rows live, only one row per title comes
+/// back. Sorted by title.
+pub async fn summaries(store: &Store, tenant: &TenantId) -> Result<Vec<DocumentSummary>> {
+    #[derive(Deserialize)]
+    struct Group {
+        title: String,
+        chunks: u64,
+        #[serde(default)]
+        archived: u64,
+    }
+    let query = Query::new()
+        .select_expr(vec![
+            field("title"),
+            as_(&count_all(), "chunks"),
+            as_(&count_if("copal_file != NONE"), "archived"),
+        ])
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(eq("tenant_id", tenant.as_str()))
+        .group_by(["title"]);
+    let groups: Vec<Group> = query_records(store.client(), &query).await.map_err(map)?;
+    let mut documents: Vec<DocumentSummary> = groups
+        .into_iter()
+        .map(|g| DocumentSummary {
+            title: g.title,
+            chunks: g.chunks as u32,
+            archived: g.archived > 0,
+        })
+        .collect();
+    documents.sort_by(|a, b| a.title.cmp(&b.title));
+    Ok(documents)
 }
 
 #[cfg(test)]
@@ -307,10 +353,19 @@ mod tests {
         assert_eq!(near[0].id.as_str(), "dc:1");
         assert_eq!(near[0].title, "onboarding guide");
 
-        // The document list dedups the title across its chunks.
+        // The document list dedups the title across its chunks, and counts
+        // them.
         assert_eq!(
             list_titles(&store, &tenant).await.unwrap(),
             vec!["onboarding guide".to_string()]
+        );
+        assert_eq!(
+            summaries(&store, &tenant).await.unwrap(),
+            vec![DocumentSummary {
+                title: "onboarding guide".into(),
+                chunks: 2,
+                archived: false,
+            }]
         );
 
         // Another tenant sees none of it (defense-in-depth filter; the engine
@@ -367,6 +422,45 @@ mod delete_title_tests {
             copal_digest: None,
             compartment: None,
         }
+    }
+
+    /// Each title is one row, counted per tenant, and archived when any of
+    /// its chunks names a file of record.
+    #[tokio::test]
+    async fn summaries_count_each_titles_chunks_in_its_tenant() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let mut archived = chunk("docchunk:b0", "ws:t", "b");
+        archived.copal_file = Some("file:b".into());
+        insert_chunks(
+            &store,
+            &[
+                chunk("docchunk:a0", "ws:t", "a"),
+                chunk("docchunk:a1", "ws:t", "a"),
+                chunk("docchunk:a2", "ws:t", "a"),
+                archived,
+                chunk("docchunk:b1", "ws:t", "b"),
+                chunk("docchunk:ua", "ws:u", "a"),
+            ],
+        )
+        .await
+        .unwrap();
+        let summary = |title: &str, chunks: u32, archived: bool| DocumentSummary {
+            title: title.into(),
+            chunks,
+            archived,
+        };
+        assert_eq!(
+            summaries(&store, &TenantId::new("ws:t")).await.unwrap(),
+            vec![summary("a", 3, false), summary("b", 2, true)]
+        );
+        assert_eq!(
+            summaries(&store, &TenantId::new("ws:u")).await.unwrap(),
+            vec![summary("a", 1, false)]
+        );
+        assert!(summaries(&store, &TenantId::new("ws:none"))
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

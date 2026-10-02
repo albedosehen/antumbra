@@ -137,10 +137,14 @@ impl McpServer {
 
     /// Every tool this server has, by name, profile or not: what `--tools`
     /// is validated against.
-    /// Every tool: the memory tools in `server.rs` and the provenance tools in
-    /// `provenance.rs`, each block building its own router.
+    /// Every tool: the memory tools in `server.rs`, the provenance tools in
+    /// `provenance.rs`, and the compartment and document tools in theirs, each
+    /// block building its own router.
     pub(super) fn tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Self> {
-        Self::memory_router() + Self::provenance_router() + Self::compartment_router()
+        Self::memory_router()
+            + Self::provenance_router()
+            + Self::compartment_router()
+            + Self::document_router()
     }
 
     pub fn all_tool_names() -> Vec<String> {
@@ -694,6 +698,11 @@ impl McpServer {
             }
             "population" => {
                 let Json(out) = self.population().await?;
+                serde_json::to_value(out)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+            }
+            "list_documents" => {
+                let Json(out) = self.list_documents().await?;
                 serde_json::to_value(out)
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))
             }

@@ -275,6 +275,7 @@ fn default_capability() -> String {
 
 mod compartments;
 pub(crate) mod consolidation;
+mod documents;
 mod engine;
 mod params;
 mod provenance;
@@ -706,7 +707,7 @@ impl McpServer {
         let memories = memory::count(&self.store, &self.tenant)
             .await
             .map_err(err)?;
-        let documents = document::list_titles(&self.store, &self.tenant)
+        let documents = document::summaries(&self.store, &self.tenant)
             .await
             .map_err(err)?
             .len() as u32;
