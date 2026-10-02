@@ -10,9 +10,10 @@
 #   1. gate-outcomes: every routable expert scores the live tasks a grow run's
 #      contribution measurement samples, and each task's clear winner is
 #      recorded.
-#   2. gate-train --exemplars-only, then gate-sweep --learned over the withheld
+#   2. gate-train, then gate-sweep --learned over the withheld
 #      tasks: the router as it was.
-#   3. gate-train, then the same sweep: the router that learned the winners.
+#   3. gate-train --with-outcomes, then the same sweep: the router that learned
+#      the winners.
 # Both sweeps score the same withheld tasks under the same seeds, and their
 # outcomes land in the copy as sweep-exemplars.json and sweep-outcomes.json.
 #
@@ -80,9 +81,9 @@ SCORING=(--corpus "$TASKS" --seeds "$SEEDS" --samples "$SAMPLES")
 echo "== winners $(date -u +%FT%TZ)"
 antumbra gate-outcomes "${SCORING[@]}" --max-tasks "$MAX_TASKS"
 echo "== exemplars only $(date -u +%FT%TZ)"
-antumbra gate-train --exemplars-only
+antumbra gate-train
 antumbra gate-sweep --learned "${SCORING[@]}" --out /reports/sweep-exemplars.json
 echo "== with the winners $(date -u +%FT%TZ)"
-antumbra gate-train
+antumbra gate-train --with-outcomes
 antumbra gate-sweep --learned "${SCORING[@]}" --out /reports/sweep-outcomes.json
 echo "== router compare $SHA end $(date -u +%FT%TZ) OK"

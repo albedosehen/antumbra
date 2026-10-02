@@ -462,13 +462,13 @@ async fn run() -> anyhow::Result<()> {
 
         Command::GateTrain {
             epochs,
-            exemplars_only,
+            with_outcomes,
         } => {
             #[cfg(feature = "models")]
             {
                 let store = connect(&cli.url).await?;
                 let embedder = make_embedder()?;
-                match train_router(&store, embedder.as_ref(), epochs, !exemplars_only).await? {
+                match train_router(&store, embedder.as_ref(), epochs, with_outcomes).await? {
                     Some(r) => println!(
                         "trained learned router: {} experts, {} epochs, OOD floor={:.3}",
                         r.experts.len(),
@@ -480,7 +480,7 @@ async fn run() -> anyhow::Result<()> {
             }
             #[cfg(not(feature = "models"))]
             {
-                let _ = (epochs, exemplars_only);
+                let _ = (epochs, with_outcomes);
                 anyhow::bail!(
                     "`gate-train` requires building with --features models (real embedder)"
                 );

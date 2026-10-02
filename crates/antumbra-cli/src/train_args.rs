@@ -99,6 +99,12 @@ pub struct TrainArgs {
     /// the same sample.
     #[arg(long)]
     pub contribution_tasks: Option<usize>,
+    /// Train the learned gate on each live task's clear winner as well as
+    /// the capability exemplars, whenever a measurement's winners change
+    /// (ADR-0024 D-1). Off by default: the outcome-trained router scored no
+    /// higher on the withheld tasks. Winners are recorded either way.
+    #[arg(long)]
+    pub route_on_outcomes: bool,
     /// Gate admission (ADR-0022 S-5): a graduate whose capability vector
     /// is at least this similar (cosine) to an active shared expert's is a
     /// twin. It joins only if it beats that expert head to head on the

@@ -449,6 +449,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
     let critic_twin = args.critic_twin;
     let seed = args.seed;
     let recheck_artifacts = args.recheck_artifacts;
+    let route_on_outcomes = args.route_on_outcomes;
     if critic_twin.is_some() && critic.is_none() {
         anyhow::bail!("--critic-twin is read against a critic; give --critic too");
     }
@@ -597,6 +598,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             retirement,
             merge,
             grow,
+            route_on_outcomes,
             ..LoopConfig::default()
         };
         // Every generation, the synthesized verifiers that judged its training
@@ -645,6 +647,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             &merge,
             &grow,
             &recheck_artifacts,
+            route_on_outcomes,
         );
         anyhow::bail!("`train` requires building with --features models (candle + a GPU)");
     }

@@ -281,7 +281,7 @@ impl GenerationLoop<'_> {
             let recorded =
                 outcome::record_winners(self.store, &tasks, &ids, score, run_id, generation)
                     .await?;
-            if recorded.changed {
+            if recorded.changed && self.cfg.route_on_outcomes {
                 self.retrain_gate().await?;
             }
             recorded.won

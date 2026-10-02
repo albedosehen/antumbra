@@ -167,6 +167,7 @@ async fn the_gate_is_retrained_on_each_tasks_clear_winner() -> Result<()> {
             max_tasks: 16,
             baseline: true,
         }),
+        route_on_outcomes: true,
         ..LoopConfig::default()
     };
     let reports = GenerationLoop::new(&store, &trainer, &Places, cfg)
@@ -193,5 +194,47 @@ async fn the_gate_is_retrained_on_each_tasks_clear_winner() -> Result<()> {
     assert!(last
         .iter()
         .any(|(id, v)| id.as_str() == "expert:beta" && v == &vec![0.9, 0.3, 0.0, 0.0]));
+    Ok(())
+}
+
+/// By default the winners are recorded and the gate does not learn them: on
+/// the comparison the record set (ADR-0024 D-1), the outcome-trained router
+/// scored no higher on the withheld tasks.
+#[tokio::test]
+async fn by_default_the_winners_are_recorded_and_not_routed_on() -> Result<()> {
+    let store = Store::connect_memory(DIM).await?;
+    expert::insert(
+        &store,
+        &shared("alpha", "alpha task", vec![1.0, 0.0, 0.0, 0.0]),
+    )
+    .await?;
+    expert::insert(
+        &store,
+        &shared("beta", "beta task", vec![0.0, 1.0, 0.0, 0.0]),
+    )
+    .await?;
+    let trainer = Scorer::default();
+    let cfg = LoopConfig {
+        contribution: Some(ContributionPolicy {
+            every: 1,
+            seeds: 2,
+            max_tasks: 16,
+            baseline: true,
+        }),
+        ..LoopConfig::default()
+    };
+    let reports = GenerationLoop::new(&store, &trainer, &Places, cfg)
+        .run_until(&RunId::new("run:outcomes-off"), 1)
+        .await?;
+    assert_eq!(reports[0].routing_outcomes, 2);
+    assert_eq!(contribution::outcomes(&store).await?.len(), 2);
+    let trained = trainer.trained_on.lock().unwrap();
+    assert!(
+        trained
+            .iter()
+            .flatten()
+            .all(|(_, v)| v != &vec![0.9, 0.3, 0.0, 0.0]),
+        "no router learned a won task"
+    );
     Ok(())
 }
