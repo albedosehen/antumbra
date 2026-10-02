@@ -35,4 +35,23 @@ ignore = [
   # is why it is written down instead of waved through. Re-check whenever `rsa`
   # ships a fix.
   "RUSTSEC-2023-0071",
+
+  # quick-xml 0.39.4 -- quadratic time checking a start tag for duplicate
+  # attributes (-0194), and unbounded allocation for namespace declarations
+  # in `NsReader` (-0195). Both fixed in 0.41.
+  #
+  # Not clearable by a bump: quick-xml arrives through object_store 0.13.2,
+  # which surrealdb-core 3.3.0 pins (`^0.13.2`) with its aws, gcp and azure
+  # features on, and object_store moves to quick-xml 0.41 only in 0.14.1.
+  #
+  # Unreachable as Antumbra runs SurrealDB. object_store parses XML only in
+  # its cloud backends, reading the replies of S3, GCS and Azure. surrealdb
+  # reaches those only through a `SURREAL_OBJECT_STORE` url naming a cloud
+  # store, or a bucket defined on one. Antumbra sets neither, and defines no
+  # buckets; its embedded stores are local and its remote store is another
+  # process. The XML a cloud backend parses would also come from that cloud
+  # provider, not from a client. Drop these when surrealdb-core moves to
+  # object_store 0.14.1 or later.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
 ]
