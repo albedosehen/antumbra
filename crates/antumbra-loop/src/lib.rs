@@ -288,7 +288,7 @@ pub struct GenerationLoop<'a> {
     scores: scores::ScoreCache,
     /// Each verifier the recheck has measured this run: the generations, and
     /// the counts so far.
-    rechecked: std::sync::Mutex<std::collections::HashMap<String, (u32, antumbra_core::Tally)>>,
+    rechecked: std::sync::Mutex<std::collections::HashMap<String, recheck::Pooled>>,
     /// What the run has read of its critic, and whether it set it aside.
     critic: std::sync::Mutex<critic_fallback::CriticRun>,
 }

@@ -314,6 +314,16 @@ pub trait Trainer: Send + Sync {
         let _ = exemplars;
         Err(AntumbraError::Unimplemented("router training"))
     }
+
+    /// The right answer a task's corpus carries for it, when it carries one.
+    /// The loop's recheck takes it as a known-good case for a synthesized
+    /// verifier, labeled by the task's anchor like any other answer, so a
+    /// verifier the policy has not yet answered right can still be judged
+    /// (ADR-0022 S-4). The default has none.
+    async fn reference(&self, task_id: &str) -> Option<String> {
+        let _ = task_id;
+        None
+    }
 }
 
 // --- reward ----------------------------------------------------------------

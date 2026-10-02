@@ -684,8 +684,10 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **Pooling did what it was built for.** No check could be judged on one generation's answers: each lacked a known-good case, or saw too few known-bad ones to bound its rate. Pooled over two generations, 3 of the 9 were judged sound and renewed. The other 6 still lacked the cases after three generations, and their trust lapses on its clock.
    - **Unlike strings, the run ended with an expert.** There, quarantines kept every shadow out. Here the checks held, and the first generation graduated under them.
 
+   **A task's reference answer is now a known-good case.** Several of those checks had no right answer to see, because the policy had not yet solved their tasks. The workbench corpus carries a reference completion for every task. The recheck now asks the trainer for the reference answer of each task a check judged (`Trainer::reference`) and labels it with the task's anchor like any other answer. It is counted once a run, so pooling never weighs it twice. A check that turns away every wrong answer can then be judged once it has seen enough of them. With 30 wrong answers and the reference, it reads sound where it read unmeasured before. Where no reference exists, nothing changes.
+
    Still to come for this step:
-   - **A check that never sees a right answer:** 6 of the 9 checks went three generations without the cases to bound their rate, so their trust can only lapse. A run that seeds known-good cases for the tasks the policy cannot yet solve would let them be judged.
+   - **Too few known-bad cases:** a check on a task the policy rarely fails still sees too few wrong answers to bound its rate. Deliberately wrong answers, which the challenge already builds, are the source to draw on.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.

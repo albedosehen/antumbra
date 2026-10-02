@@ -63,6 +63,15 @@ pub struct Recheck {
     pub generations: u32,
 }
 
+/// What a run has rechecked one verifier on so far: the generations, the
+/// pooled counts, and the tasks whose reference answer is already in them.
+#[derive(Debug, Default)]
+pub(crate) struct Pooled {
+    generations: u32,
+    tally: Tally,
+    referenced: BTreeSet<String>,
+}
+
 /// At most `max` of `items`, evenly spaced, in order.
 pub(crate) fn spread<T: Copy>(items: &[T], max: usize) -> Vec<T> {
     if items.len() <= max {
@@ -85,11 +94,13 @@ pub(crate) fn anchor_for<'r>(
         .max_by_key(|a| a.task.is_some())
 }
 
-/// The anchor's verdict on `sample`, or `None` when its runs disagree.
+/// The anchor's verdict on `completion` for `task`, or `None` when its runs
+/// disagree.
 async fn label(
     judge: &dyn Verifier,
     anchor: &VerifierRecord,
-    sample: &JudgedSample,
+    task: &str,
+    completion: &str,
     repeats: u32,
 ) -> Result<Option<bool>> {
     let run_id = RunId::new(format!("recheck:{}", anchor.id));
@@ -100,8 +111,8 @@ async fn label(
             step_idx,
             dimension: "anchor".into(),
             artifact: serde_json::json!({
-                "task": sample.task,
-                "completion": sample.completion,
+                "task": task,
+                "completion": completion,
                 "verify": anchor.spec,
             }),
         };
@@ -173,7 +184,15 @@ impl GenerationLoop<'_> {
                 unanchored += 1;
                 continue;
             };
-            let Some(right) = label(judge, anchor, sample, policy.repeats).await? else {
+            let Some(right) = label(
+                judge,
+                anchor,
+                &sample.task,
+                &sample.completion,
+                policy.repeats,
+            )
+            .await?
+            else {
                 unanchored += 1;
                 continue;
             };
@@ -188,6 +207,10 @@ impl GenerationLoop<'_> {
                 },
             });
         }
+        cases.extend(
+            self.reference_cases(judge, record, anchors, samples, policy)
+                .await?,
+        );
         let mut recheck = Recheck {
             verifier: record.id.clone(),
             anchored: u32::try_from(cases.len()).unwrap_or(u32::MAX),
@@ -204,12 +227,11 @@ impl GenerationLoop<'_> {
         let mut pooled = antumbra_critic::trust::tally(judge, record, &cases, policy).await?;
         let generations = {
             let mut earlier = self.rechecked.lock().unwrap_or_else(|e| e.into_inner());
-            let entry = earlier
-                .entry(record.id.as_str().to_string())
-                .or_insert_with(|| (0, Tally::default()));
-            pooled.merge(&entry.1);
-            *entry = (entry.0 + 1, pooled.clone());
-            entry.0
+            let entry = earlier.entry(record.id.as_str().to_string()).or_default();
+            pooled.merge(&entry.tally);
+            entry.tally = pooled.clone();
+            entry.generations += 1;
+            entry.generations
         };
         recheck.generations = generations;
         let measurement = pooled.judge(&record.id, Utc::now(), policy);
@@ -219,6 +241,51 @@ impl GenerationLoop<'_> {
         }
         recheck.measurement = Some(measurement);
         Ok(recheck)
+    }
+
+    /// The reference answer of each task `samples` cover, for the tasks whose
+    /// reference this run has not yet counted for `record`: a right answer
+    /// by the corpus, labeled by the task's anchor like the policy's. Each is
+    /// counted once a run, so pooling never weighs the same answer twice.
+    async fn reference_cases(
+        &self,
+        judge: &dyn Verifier,
+        record: &VerifierRecord,
+        anchors: &[VerifierRecord],
+        samples: &[&JudgedSample],
+        policy: &TrustPolicy,
+    ) -> Result<Vec<Case>> {
+        let tasks: BTreeSet<&str> = samples.iter().map(|s| s.task.as_str()).collect();
+        let mut cases = Vec::new();
+        for task in tasks {
+            let fresh = {
+                let mut earlier = self.rechecked.lock().unwrap_or_else(|e| e.into_inner());
+                let entry = earlier.entry(record.id.as_str().to_string()).or_default();
+                entry.referenced.insert(task.to_string())
+            };
+            if !fresh {
+                continue;
+            }
+            let Some(anchor) = anchor_for(anchors, record, task) else {
+                continue;
+            };
+            let Some(reference) = self.trainer.reference(task).await else {
+                continue;
+            };
+            let Some(right) = label(judge, anchor, task, &reference, policy.repeats).await? else {
+                continue;
+            };
+            cases.push(Case {
+                id: format!("{task}#reference"),
+                task: task.to_string(),
+                completion: reference,
+                label: if right { Label::Good } else { Label::Bad },
+                anchor: Anchor::Verifier {
+                    id: anchor.id.clone(),
+                },
+            });
+        }
+        Ok(cases)
     }
 
     /// The named verifiers `outcome` trained under that no longer grant
