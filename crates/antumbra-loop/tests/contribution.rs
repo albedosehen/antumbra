@@ -214,11 +214,18 @@ async fn the_population_is_compared_with_its_best_single_expert() -> Result<()> 
     assert_eq!(b.best, Some(ExpertId::new("expert:alpha")));
     assert_eq!(b.best_alone, Some(0.75));
     assert_eq!(b.delta(), Some(0.0));
+    // Each adapter was scored once per half of the seeds, over everything it
+    // was needed for, so the oracle is cross-fitted.
+    assert!(b.oracle_cross_fitted);
     let kept = contribution::baselines_for_run(&store, &RunId::new("run:base")).await?;
     assert_eq!(kept, vec![b]);
-    // Each adapter was still scored once, over everything it was needed for.
     let asked = trainer.asked.lock().unwrap().clone();
-    assert_eq!(asked.len(), 4, "alpha, beta, unused and the base");
+    assert_eq!(
+        asked.len(),
+        8,
+        "alpha, beta, unused and the base, each on both halves"
+    );
+    assert!(asked.iter().all(|r| r.seeds.len() == 1));
     assert!(asked
         .iter()
         .filter(|r| r.adapter_uri.is_some())

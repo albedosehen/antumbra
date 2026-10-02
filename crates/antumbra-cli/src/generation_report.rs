@@ -214,8 +214,15 @@ pub(crate) fn print(r: &GenerationReport) {
             _ => "no single expert to compare".to_string(),
         };
         let headroom = b.headroom().map_or(String::new(), |h| {
+            // Uncross-fitted, the oracle is the highest of noisy scores and
+            // reads high even over identical experts.
+            let how = if b.oracle_cross_fitted {
+                "cross-fitted"
+            } else {
+                "highest scores, biased up"
+            };
             format!(
-                "; routed as well as it could be, {:.2} ({h:+.2})",
+                "; routed as well as it could be ({how}), {:.2} ({h:+.2})",
                 b.population + h
             )
         });

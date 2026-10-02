@@ -9,8 +9,13 @@
 //! best is known: the gate's own choice or any expert alone. Their mean is
 //! what these experts would score routed as well as they could be. Well above
 //! the population, the gate is choosing badly. Close to it, the experts are
-//! too alike for any routing to help. It is an upper bound and biased up,
-//! since it takes the highest of noisy scores.
+//! too alike for any routing to help.
+//!
+//! Taken as the highest of each task's noisy scores, that oracle reads high
+//! even when the experts are identical: on eight samples a score, by 0.05 to
+//! 0.08 (ADR-0024 D-1). So where the scores come in two halves of the seeds,
+//! the oracle is cross-fitted ([`cross_fitted_oracle`]): each task's best is
+//! chosen on one half and scored on the other.
 
 use antumbra_core::ExpertId;
 
@@ -70,6 +75,43 @@ pub(crate) fn compare(
         best,
         oracle,
     })
+}
+
+/// The oracle without its own noise. Each task's candidates are the gate's
+/// own choice and every expert alone, each scored on two halves of the seeds
+/// (`halves`). The best is chosen on one half and scored on the other, both
+/// ways round, and the two are averaged. A tie keeps the gate's own choice.
+/// The highest of noisy scores sits above the best expert's true score even
+/// when the experts are identical; a choice scored on draws it was not chosen
+/// on does not. `None` when no task has both halves for every candidate.
+pub(crate) fn cross_fitted_oracle(
+    routed: &[(String, Option<ExpertId>)],
+    experts: &[ExpertId],
+    halves: impl Fn(&Option<ExpertId>, &str) -> Option<(f32, f32)>,
+) -> Option<f32> {
+    let mut total = 0.0;
+    let mut tasks = 0u32;
+    for (task, to) in routed {
+        let candidates: Option<Vec<(f32, f32)>> = std::iter::once(halves(to, task))
+            .chain(experts.iter().map(|e| halves(&Some(e.clone()), task)))
+            .collect();
+        let Some(candidates) = candidates else {
+            continue;
+        };
+        // The candidate best on `choose`, scored on `score`.
+        let pick = |choose: fn(&(f32, f32)) -> f32, score: fn(&(f32, f32)) -> f32| {
+            let mut best = candidates[0];
+            for c in &candidates[1..] {
+                if choose(c) > choose(&best) {
+                    best = *c;
+                }
+            }
+            score(&best)
+        };
+        total += 0.5 * (pick(|c| c.0, |c| c.1) + pick(|c| c.1, |c| c.0));
+        tasks += 1;
+    }
+    (tasks > 0).then(|| total / tasks as f32)
 }
 
 #[cfg(test)]
@@ -155,5 +197,38 @@ mod tests {
         // t2 goes to the expert rather than the base it escalated to.
         assert_eq!(c.oracle, 0.875);
         assert!(compare(&[], &[id("a")], |_, _| Some(1.0)).is_none());
+    }
+
+    /// Two identical experts whose halves disagree by noise: the highest of
+    /// their scores reads above either, the cross-fitted oracle does not.
+    #[test]
+    fn noise_alone_is_not_headroom_once_cross_fitted() {
+        let (a, b) = (id("a"), id("b"));
+        let routed = vec![("t".to_string(), Some(a.clone()))];
+        let halves = |who: &Option<ExpertId>, _: &str| match who.as_ref().map(ExpertId::as_str) {
+            Some("a") => Some((1.0, 0.0)),
+            Some("b") => Some((0.0, 1.0)),
+            _ => None,
+        };
+        // Chosen on the first half, a scores 0 on the second; chosen on the
+        // second, b scores 0 on the first.
+        assert_eq!(cross_fitted_oracle(&routed, &[a, b], halves), Some(0.0));
+    }
+
+    /// An expert better on both halves keeps its headroom.
+    #[test]
+    fn a_consistently_better_expert_keeps_its_headroom() {
+        let (a, b) = (id("a"), id("b"));
+        let routed = vec![("t".to_string(), Some(a.clone()))];
+        let halves = |who: &Option<ExpertId>, _: &str| match who.as_ref().map(ExpertId::as_str) {
+            Some("a") => Some((0.5, 0.5)),
+            Some("b") => Some((1.0, 1.0)),
+            _ => None,
+        };
+        assert_eq!(
+            cross_fitted_oracle(&routed, &[a.clone(), b], halves),
+            Some(1.0)
+        );
+        assert_eq!(cross_fitted_oracle(&routed, &[a], |_, _| None), None);
     }
 }

@@ -79,10 +79,16 @@ pub struct BaselineRecord {
     pub best_alone: Option<f32>,
     /// The mean of each task's best score, the gate's own choice or any
     /// expert alone: what these experts would score routed as well as they
-    /// could be. An upper bound, biased up by taking the highest of noisy
-    /// scores. `None` on records from before it was kept.
+    /// could be. `None` on records from before it was kept.
     #[serde(default)]
     pub oracle: Option<f32>,
+    /// Whether `oracle` is cross-fitted: each task's best chosen on one half
+    /// of the seeds and scored on the other, so its own noise does not read
+    /// as headroom (ADR-0024 D-1). Otherwise it is the highest of noisy
+    /// scores, biased up: identical experts read +0.05 to +0.08 on eight
+    /// samples a score.
+    #[serde(default)]
+    pub oracle_cross_fitted: bool,
     pub seeds: u32,
     pub at: DateTime<Utc>,
 }
@@ -162,6 +168,7 @@ mod tests {
             best: Some(ExpertId::new("expert:e")),
             best_alone: Some(0.5),
             oracle: Some(0.875),
+            oracle_cross_fitted: false,
             seeds: 2,
             at: Utc::now(),
         };

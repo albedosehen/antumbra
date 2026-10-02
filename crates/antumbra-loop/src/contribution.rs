@@ -29,10 +29,39 @@ use antumbra_core::{
 use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_store::repo::{boundary, contribution, lifecycle};
 
-use crate::baseline::compare;
+use crate::baseline::{compare, cross_fitted_oracle};
 use crate::grow;
 use crate::outcome;
 use crate::GenerationLoop;
+
+/// What a measurement scored: every candidate over all the draws, and, where
+/// the draws were scored in two halves, each half apart.
+#[derive(Default)]
+struct Scored {
+    scores: HashMap<Option<ExpertId>, TaskScores>,
+    halves: HashMap<Option<ExpertId>, [TaskScores; 2]>,
+}
+
+/// The scores over every draw, from scores over `parts` of them: each task's
+/// mean weighted by how many draws each part holds, which is the score one
+/// request over all of them gives.
+fn combined(scored: &[TaskScores], parts: &[&[u64]]) -> TaskScores {
+    let mut sums: BTreeMap<String, (f32, f32)> = BTreeMap::new();
+    for (scores, part) in scored.iter().zip(parts) {
+        let weight = part.len() as f32;
+        for (task, score) in &scores.scores {
+            let entry = sums.entry(task.clone()).or_default();
+            entry.0 += score * weight;
+            entry.1 += weight;
+        }
+    }
+    TaskScores {
+        scores: sums
+            .into_iter()
+            .map(|(task, (sum, weight))| (task, sum / weight.max(1.0)))
+            .collect(),
+    }
+}
 
 /// Inhibition above which a boundary escalates a task the learned router
 /// covers, as `ask` and the MCP surface escalate it.
@@ -200,7 +229,7 @@ impl GenerationLoop<'_> {
         // The same seeds every generation, so an unchanged population measures
         // the same and the grow step's credit reads change, not seed noise.
         let draws = seeds("contribution", run_id, Generation::ZERO, policy.seeds);
-        let scores = self
+        let Scored { scores, halves } = self
             .score_routes(
                 run_id,
                 generation,
@@ -212,6 +241,10 @@ impl GenerationLoop<'_> {
             .await?;
         let score = |who: &Option<ExpertId>, task: &str| -> Option<f32> {
             scores.get(who).and_then(|s| s.scores.get(task)).copied()
+        };
+        let halved = |who: &Option<ExpertId>, task: &str| -> Option<(f32, f32)> {
+            let [first, second] = halves.get(who)?;
+            Some((*first.scores.get(task)?, *second.scores.get(task)?))
         };
 
         let mut recorded = Vec::with_capacity(experts.len());
@@ -253,6 +286,7 @@ impl GenerationLoop<'_> {
         let ids: Vec<ExpertId> = experts.iter().map(|e| e.id.clone()).collect();
         let baseline = match compare(&routes.full, &ids, score).filter(|_| policy.baseline) {
             Some(c) => {
+                let cross_fitted = cross_fitted_oracle(&routes.full, &ids, halved);
                 let record = BaselineRecord {
                     run_id: run_id.clone(),
                     generation,
@@ -260,7 +294,8 @@ impl GenerationLoop<'_> {
                     population: c.population,
                     best_alone: c.best.as_ref().map(|b| b.1),
                     best: c.best.map(|b| b.0),
-                    oracle: Some(c.oracle),
+                    oracle: Some(cross_fitted.unwrap_or(c.oracle)),
+                    oracle_cross_fitted: cross_fitted.is_some(),
                     seeds: policy.seeds,
                     at: Utc::now(),
                 };
@@ -331,7 +366,7 @@ impl GenerationLoop<'_> {
         experts: &[Expert],
         draws: &[u64],
         baseline: bool,
-    ) -> Result<HashMap<Option<ExpertId>, TaskScores>> {
+    ) -> Result<Scored> {
         let mut needed: HashMap<Option<ExpertId>, BTreeSet<String>> = HashMap::new();
         if baseline {
             for (task, to) in &routes.full {
@@ -358,7 +393,17 @@ impl GenerationLoop<'_> {
             }
         }
         let known: HashSet<&ExpertId> = experts.iter().map(|e| &e.id).collect();
-        let mut scores = HashMap::new();
+        // With the baseline on, each half of the draws is scored apart, so its
+        // oracle can be cross-fitted. Every draw is seeded on its own, so the
+        // two halves together are the same samples as one request.
+        let split = baseline && draws.len() >= 2;
+        let parts: Vec<&[u64]> = if split {
+            let (first, second) = draws.split_at(draws.len() / 2);
+            vec![first, second]
+        } else {
+            vec![draws]
+        };
+        let mut scored = Scored::default();
         for (who, task_ids) in needed {
             let adapter_uri = match &who {
                 Some(id) if known.contains(id) => experts
@@ -368,25 +413,37 @@ impl GenerationLoop<'_> {
                 Some(_) => continue,
                 None => None,
             };
-            // The same seeds every generation: what a frozen expert or the
-            // base scored before is what it scores now, so it is not asked
-            // again.
-            let scored = self
-                .scores
-                .evaluate(
-                    self.trainer,
-                    EvaluateRequest {
-                        label: format!("contribution:{run_id}:g{}", generation.0),
-                        base_model: self.cfg.base_model.clone(),
-                        adapter_uri,
-                        task_ids: task_ids.into_iter().collect(),
-                        seeds: draws.to_vec(),
-                    },
-                )
-                .await?;
-            scores.insert(who, scored);
+            let task_ids: Vec<String> = task_ids.into_iter().collect();
+            let mut by_part = Vec::with_capacity(parts.len());
+            for part in &parts {
+                // The same seeds every generation: what a frozen expert or the
+                // base scored before is what it scores now, so it is not asked
+                // again.
+                by_part.push(
+                    self.scores
+                        .evaluate(
+                            self.trainer,
+                            EvaluateRequest {
+                                label: format!("contribution:{run_id}:g{}", generation.0),
+                                base_model: self.cfg.base_model.clone(),
+                                adapter_uri: adapter_uri.clone(),
+                                task_ids: task_ids.clone(),
+                                seeds: part.to_vec(),
+                            },
+                        )
+                        .await?,
+                );
+            }
+            if split {
+                if let [first, second] = &by_part[..] {
+                    scored
+                        .halves
+                        .insert(who.clone(), [first.clone(), second.clone()]);
+                }
+            }
+            scored.scores.insert(who, combined(&by_part, &parts));
         }
-        Ok(scores)
+        Ok(scored)
     }
 }
 
