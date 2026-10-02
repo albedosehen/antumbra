@@ -217,6 +217,20 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
    - **Where it is judged:** the live tasks now shape routing, so the population's score and headroom on them read high from then on. Routing is judged on the withheld tasks instead. `gate-sweep --learned` routes them with the stored learned router. Its coverage is the nearest-centroid similarity, and it ships at the router's own floor.
    - **The comparison:** one population's router trained with `--exemplars-only` and without, swept on the same withheld tasks under the same seeds.
    - **What would refute it:** the outcome-trained router scoring no higher than the exemplar-only one at full coverage on the withheld tasks. Then the wins taught the live tasks and nothing that carries to new ones, and they come out of the router's training.
+
+   **It was refuted, and the wins are out of the router's training.** `router-compare.sh 1b7ed1b` ran on 2026-10-02 over the S-3 grow comparison's credit arm (50fd1aa), four experts.
+   - **The labels:** of the 64 live tasks, 6 had a clear winner. The experts score alike there, 0.697 to 0.715 each, so few tasks separate them by 0.25.
+   - **The sweep,** on the 97 withheld tasks under the same seeds:
+
+     | router | its floor | routed at the floor | accuracy there | accuracy routing every task |
+     | --- | ---: | ---: | ---: | ---: |
+     | exemplars only | 0.232 | 0.98 | 0.616 | **0.634** |
+     | exemplars and wins | 0.264 | 0.91 | 0.620 | **0.626** |
+     | base model alone | - | 0.00 | 0.366 | - |
+
+   - **Where they differ:** the two routers sent 95 of the 97 tasks to the same expert. Of the other two, one moved at an equal score. The other moved from an expert that solved it (1.00) to one that mostly did not (0.38), which is the whole 0.008.
+   - **The reading:** six wins barely moved the router, and the one task they moved got worse. That meets the refutation, so the loop no longer trains the gate on wins (`LoopConfig::route_on_outcomes`, off by default). `gate-train` takes them only with `--with-outcomes`. The winners are still recorded each measurement.
+   - **What this does not show:** whether wins help a population whose experts differ. On this one, 6 labels in 64 is too few to test it. The routing headroom recorded in ADR-0022 S-3 (+0.07 on the live tasks) is still unexplained.
 2. [~] **D-2, the relevance floor.** It is the smallest surface, it closes ADR-0023's open B-2, and it is the one place where the current signal is measurably broken rather than merely uncalibrated.
 
    **A floor now ships, and it is not the head this record specifies.** `antumbra-rerank/src/floor.rs` answers `Noul` by mapping the deployed cross-encoder's score through a logistic fitted on the same verifier labels, reaching 0.803 accuracy and 0.797 F1 on a held-out half against the 0.785 the best in-sample threshold manages, with an expected calibration error of 0.033. It satisfies the `TypedDecider` contract on the contract's own terms: log loss is strictly proper, and the labels come from a deterministic verifier rather than from any model's answers.

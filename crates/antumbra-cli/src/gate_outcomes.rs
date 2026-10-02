@@ -94,7 +94,7 @@ pub async fn run(url: &str, args: OutcomeArgs) -> anyhow::Result<()> {
             recorded.won,
             tasks.len(),
             if recorded.changed {
-                "; the winners changed, run gate-train to learn them"
+                "; the winners changed, run gate-train --with-outcomes to learn them"
             } else {
                 ""
             }

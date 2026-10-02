@@ -39,7 +39,7 @@ pub(crate) async fn refresh_router(
             return Ok(RouterRefresh::Unchanged);
         }
     }
-    Ok(match train_router(store, embedder, epochs, true).await? {
+    Ok(match train_router(store, embedder, epochs, false).await? {
         Some(router) => RouterRefresh::Trained(router),
         None => RouterRefresh::Cleared,
     })

@@ -49,7 +49,11 @@ impl GenerationLoop<'_> {
     /// A learned router retrained over `experts`. `None` when they are too few
     /// to need one, or when the trainer cannot train one.
     pub(crate) async fn retrained_gate(&self, experts: &[Expert]) -> Result<Option<LearnedRouter>> {
-        let outcomes = contribution::outcomes(self.store).await?;
+        let outcomes = if self.cfg.route_on_outcomes {
+            contribution::outcomes(self.store).await?
+        } else {
+            Vec::new()
+        };
         let Some(exemplars) = gate_exemplars(experts, &outcomes, self.embedder).await? else {
             return Ok(None);
         };

@@ -156,6 +156,11 @@ pub struct LoopConfig {
     /// measurement, so it chooses only once one has been taken. `None` (the
     /// default) learns from every visible task, as always.
     pub grow: Option<GrowPolicy>,
+    /// Train the learned gate on each live task's clear winner as well as
+    /// the capability exemplars (ADR-0024 D-1). Off by default: on the
+    /// comparison the record set for it, the outcome-trained router scored no
+    /// higher on the withheld tasks. Winners are recorded either way.
+    pub route_on_outcomes: bool,
 }
 
 impl Default for LoopConfig {
@@ -174,6 +179,7 @@ impl Default for LoopConfig {
             retirement: None,
             merge: None,
             grow: None,
+            route_on_outcomes: false,
         }
     }
 }

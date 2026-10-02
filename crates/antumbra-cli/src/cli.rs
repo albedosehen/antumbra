@@ -488,11 +488,12 @@ pub enum Command {
     GateTrain {
         #[arg(long, default_value_t = 400)]
         epochs: usize,
-        /// Train on the experts' capability exemplars alone, leaving out the
-        /// live tasks each clearly won (ADR-0024 D-1): the router to judge the
-        /// outcome-trained one against.
+        /// Train on the live tasks each expert clearly won as well as the
+        /// capability exemplars (ADR-0024 D-1; `gate-outcomes` records them).
+        /// Off by default: the outcome-trained router scored no higher on the
+        /// withheld tasks.
         #[arg(long)]
-        exemplars_only: bool,
+        with_outcomes: bool,
     },
     /// Compose several experts into one blended adapter and serve a task
     /// through it (the heterogeneous composed model): the population as a capability multiplier. Needs
