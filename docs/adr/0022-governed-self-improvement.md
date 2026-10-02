@@ -692,8 +692,19 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
 
    So a check on a task the policy always answers right is judged from its first generation, where before it waited on the policy's mistakes.
 
+   **With both in place, every check was judged.** `verifier-train.sh cb05ca4` ran the same `numbers` training again on 2026-10-02, from the same namespace. It carried the reference answers and the validation's `artifacts.json`. Training reproduced the first run exactly: the same pass rates each round, and the same nine checks granting reward.
+
+   | checks judged sound, of 9 | generation 0 | generation 1 | generation 2 |
+   | --- | ---: | ---: | ---: |
+   | the first run (1b7ed1b) | 0 | 3 | 3 |
+   | with the reference and deliberate answers (cb05ca4) | 7 | 8 | 9 |
+
+   - **The evidence grew:** each check was rechecked on 30 to 59 answers in its first generation, where the first run had 16. The two not yet judged then had about 20 known-bad cases. Pooling the next generations' answers took them past the bound.
+   - **The adversarial test held:** no trusted check passed a deliberately wrong answer the anchor failed, so none read as a shortcut, and none rewarded a wrong answer. Nothing was quarantined.
+   - **Against the record's test for this step:** on `numbers`, every synthesized check that stayed trusted held its bound on re-measurement for three generations. Each also failed every deliberately wrong artifact its authored verifier failed. The challenge had already quarantined the one that did not.
+
    Still to come for this step:
-   - **A training run with both in place,** to see how many of a skill's checks a run can now judge, against the 3 of 9 the `numbers` run renewed.
+   - **The record owner's decision:** after the kill criterion was reached under the old judge, re-opening synthesis was left to the record owner (above). This run and the `strings` run under the fixed judge are the evidence for that decision.
 7. [ ] S-2, gated on the calibration instruments of step 1 being in use, not merely present.
 
    **The bound on the critic's influence is in. There is no critic yet to put under it.** The seam's first piece is its structure, as S-1's was. The bound has to exist before any critic can be trained, or the first one would train with nothing limiting it.
