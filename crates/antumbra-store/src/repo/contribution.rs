@@ -161,6 +161,7 @@ mod tests {
             best: Some(ExpertId::new("expert:a")),
             best_alone: Some(0.6),
             oracle: None,
+            oracle_cross_fitted: false,
             seeds: 2,
             at: Utc::now(),
         };
