@@ -6,7 +6,9 @@
 use async_trait::async_trait;
 use chrono::Utc;
 
-use antumbra_core::ports::{Verifier, VerifierVerdict, VerifyRequest};
+use antumbra_core::ports::{
+    TrainOutcome, TrainRequest, Trainer, Verifier, VerifierVerdict, VerifyRequest,
+};
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{
     Expert, ExpertId, ExpertStatus, Generation, JudgedSample, Result, RunId, Tally, TrustPolicy,
@@ -278,5 +280,72 @@ async fn a_shadow_trained_under_a_withdrawn_verifier_does_not_graduate() -> Resu
     assert_eq!(reports[0].withdrawn, vec![pulled.id.clone()]);
     assert!(!reports[0].graduated);
     assert!(expert::list(&store).await?.is_empty());
+    Ok(())
+}
+
+/// Trains as `inner` does, and carries `reference` as the right answer to
+/// every task.
+struct WithReference {
+    inner: ScriptedTrainer,
+    reference: Option<String>,
+}
+
+#[async_trait]
+impl Trainer for WithReference {
+    async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
+        self.inner.train_shadow(req).await
+    }
+
+    async fn reference(&self, _task_id: &str) -> Option<String> {
+        self.reference.clone()
+    }
+}
+
+/// The pooled measurement after two generations whose policy never answers
+/// the task right, with `reference` as the task's right answer.
+async fn never_right(
+    reference: Option<&str>,
+    name: &str,
+) -> Result<antumbra_core::TrustMeasurement> {
+    let store = Store::connect_memory(8).await?;
+    register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
+    let sound = trusted(&store, "strings", &["right"]).await?;
+    let trainer = WithReference {
+        inner: trained_under(&sound.id, judged(&sound.id, "wrong", false, 15)),
+        reference: reference.map(str::to_string),
+    };
+    let reports = GenerationLoop::new(
+        &store,
+        &trainer,
+        &FixedEmbedder::new(8),
+        LoopConfig::default(),
+    )
+    .rechecking(&Accepts)
+    .run_until(&RunId::new(name), 2)
+    .await?;
+    Ok(reports[1].rechecks[0]
+        .measurement
+        .clone()
+        .expect("measured"))
+}
+
+/// A policy that never answers the task right gives a recheck no known-good
+/// case, so the verifier cannot be judged however many wrong answers it
+/// turns away. The task's reference answer is that case: labeled by the
+/// anchor like the policy's answers, and counted once a run however many
+/// generations recheck it.
+#[tokio::test]
+async fn a_reference_answer_lets_a_verifier_the_policy_never_satisfies_be_judged() -> Result<()> {
+    let without = never_right(None, "run:no-reference").await?;
+    assert_eq!((without.good, without.bad), (0, 30));
+    assert!(
+        matches!(without.verdict, TrustVerdict::Unmeasured { .. }),
+        "{:?}",
+        without.verdict
+    );
+
+    let with = never_right(Some("right"), "run:reference").await?;
+    assert_eq!((with.good, with.bad), (1, 30), "the reference counted once");
+    assert!(with.verdict.is_sound(), "{:?}", with.verdict);
     Ok(())
 }

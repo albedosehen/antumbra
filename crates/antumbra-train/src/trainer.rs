@@ -139,8 +139,21 @@ impl<L: ModelLoader, C: Corpus> RaftTrainer<L, C> {
     }
 }
 
+/// The reference completion `corpus` carries for `task_id`, when it has one.
+fn reference_in<C: Corpus>(corpus: &C, task_id: &str) -> Option<String> {
+    corpus
+        .tasks(&[task_id.to_string()])
+        .into_iter()
+        .next()
+        .and_then(|t| t.completion)
+}
+
 #[async_trait]
 impl<L: ModelLoader, C: Corpus> Trainer for RaftTrainer<L, C> {
+    async fn reference(&self, task_id: &str) -> Option<String> {
+        reference_in(&self.corpus, task_id)
+    }
+
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
         let recipe = recipe_for(&req, &self.config)?;
         let Split { learn, withheld } = split(
@@ -260,6 +273,10 @@ impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
 
 #[async_trait]
 impl<L: GrpoModelLoader, C: Corpus> Trainer for GrpoTrainer<L, C> {
+    async fn reference(&self, task_id: &str) -> Option<String> {
+        reference_in(&self.corpus, task_id)
+    }
+
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
         let recipe = recipe_for(&req, &self.config)?;
         let Split { learn, withheld } = split(
@@ -354,6 +371,10 @@ impl<L: ModelLoader, C: Corpus> CaptureTrainer<L, C> {
 
 #[async_trait]
 impl<L: ModelLoader, C: Corpus> Trainer for CaptureTrainer<L, C> {
+    async fn reference(&self, task_id: &str) -> Option<String> {
+        reference_in(&self.corpus, task_id)
+    }
+
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
         let recipe = recipe_for(&req, &self.config)?;
         let Split { learn, withheld } = split(
