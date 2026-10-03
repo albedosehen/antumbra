@@ -16,6 +16,8 @@ use axum::http::header;
 use serde_json::json;
 use tower::ServiceExt;
 
+mod dependencies;
+
 const SECRET: &[u8] = b"webhook-test-secret";
 const TENANT: &str = "ws:acme";
 const REPO: &str = "github.com/acme/orders";
@@ -607,6 +609,7 @@ async fn the_runner_reports_per_document_and_reuses_the_token() {
             "docs/missing.md".into(),
         ],
         vacated: Vec::new(),
+        manifests: None,
         truncated: false,
         token,
     };

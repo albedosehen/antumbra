@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::depgraph::{Claim, Source};
+use crate::provenance::{normalize_repo, GitProvenance};
 
 /// Which package namespace a name belongs to. Two ecosystems can share a name
 /// without being the same package.
@@ -33,7 +34,7 @@ pub enum Ecosystem {
 }
 
 /// What one manifest file declares.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub ecosystem: Ecosystem,
     /// The file, relative to the repository root.
@@ -43,6 +44,7 @@ pub struct Manifest {
     /// The repository the manifest says it comes from (`repository` in
     /// Cargo.toml or package.json, a project URL in pyproject.toml, a forge
     /// module path in go.mod), as a `host/org/name` slug, when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<String>,
 }
 
@@ -495,6 +497,80 @@ pub fn declared(repos: &[(String, Vec<Manifest>)]) -> Vec<(Claim, String)> {
         }
     }
     out.into_values().collect()
+}
+
+/// A repository's manifests as they were read at one commit: what is kept per
+/// repository so the edges into and out of any one of them can be worked out
+/// again when it changes, without reading every other repository again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestSet {
+    /// The repository slug.
+    pub repo: String,
+    /// The commit the manifests were read at.
+    pub commit: String,
+    pub branch: Option<String>,
+    pub manifests: Vec<Manifest>,
+}
+
+/// What reading one repository's manifests again changes in the declared
+/// edges.
+#[derive(Debug, Default, PartialEq)]
+pub struct DeclaredSync {
+    /// Every declared edge into or out of the repository, each with the file
+    /// that declares it at the commit it was read, to record or reinforce.
+    pub record: Vec<(Claim, GitProvenance)>,
+    /// Declared edges into or out of it that no manifest declares any more.
+    pub retract: Vec<Claim>,
+}
+
+/// The declared edges into and out of `repo` among every repository whose
+/// manifests are known (`sets`), against the declared edges already recorded
+/// (`existing`, as `(from, to)`). An edge whose other end has no set is never
+/// retracted: nothing read here can say it is gone, and it may have come from
+/// a scan of a repository this side cannot see.
+pub fn sync(sets: &[ManifestSet], repo: &str, existing: &[(String, String)]) -> DeclaredSync {
+    let repo = normalize_repo(repo);
+    let repos: Vec<(String, Vec<Manifest>)> = sets
+        .iter()
+        .map(|s| (normalize_repo(&s.repo), s.manifests.clone()))
+        .collect();
+    let known: BTreeSet<&str> = repos.iter().map(|(r, _)| r.as_str()).collect();
+    let touching: Vec<(Claim, String)> = declared(&repos)
+        .into_iter()
+        .filter(|(c, _)| c.from == repo || c.to == repo)
+        .collect();
+    let still: BTreeSet<(&str, &str)> = touching
+        .iter()
+        .map(|(c, _)| (c.from.as_str(), c.to.as_str()))
+        .collect();
+    let retract = existing
+        .iter()
+        .map(|(from, to)| (normalize_repo(from), normalize_repo(to)))
+        .filter(|(from, to)| {
+            (*from == repo || *to == repo)
+                && known.contains(from.as_str())
+                && known.contains(to.as_str())
+                && !still.contains(&(from.as_str(), to.as_str()))
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|(from, to)| Claim::new(&from, &to, Source::Declared, ""))
+        .collect();
+    let record = touching
+        .iter()
+        .filter_map(|(claim, path)| {
+            let set = sets
+                .iter()
+                .find(|s| normalize_repo(&s.repo) == claim.from)?;
+            let mut anchor =
+                GitProvenance::new(claim.from.clone(), set.commit.clone()).at_path(path.clone());
+            if let Some(branch) = &set.branch {
+                anchor = anchor.on_branch(branch.clone());
+            }
+            Some((claim.clone(), anchor))
+        })
+        .collect();
+    DeclaredSync { record, retract }
 }
 
 #[cfg(test)]

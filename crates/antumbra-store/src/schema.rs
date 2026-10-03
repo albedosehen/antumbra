@@ -204,6 +204,17 @@ const HIVE_PERMS: [(&str, &str); 4] = [
     ("delete", "false"),
 ];
 
+/// What a repository's manifests declared, as the server last read them from
+/// GitHub (`repo::manifest_set`). Members read it; only the rootful owner
+/// writes it, so nobody can forge a manifest into the dependency graph's
+/// evidence.
+const MANIFEST_SET_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "false"),
+    ("update", "false"),
+    ("delete", "false"),
+];
+
 /// The member's hive gate. A member reads who has joined -- the read rule needs
 /// it, and a hive whose membership were secret could not be audited by the
 /// people in it -- and writes only their own row. So an owner cannot opt a
@@ -407,6 +418,14 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions(GENESIS_REQUEST_PERMS)
             .with_indexes([index("genesis_user_idx", ["user", "status"])]),
+        // Each repository's manifests as last read through the GitHub App, one
+        // row per (tenant, repository), so the declared edges into and out of
+        // one repository can be worked out again from every other's last
+        // reading (ADR-0019).
+        table_schema("manifest_set")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(MANIFEST_SET_PERMS)
+            .with_indexes([index("manifest_set_tenant_idx", ["tenant_id"])]),
         // Learned router singleton (the learned gate). Shared population: tenants read
         // it to route a task across the shared experts; the owner trains/writes
         // it. Previously auto-created (which defaulted to deny for record

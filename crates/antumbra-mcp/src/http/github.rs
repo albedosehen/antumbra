@@ -20,6 +20,7 @@
 //! delivery reports how many documents were queued and the log reports what
 //! each one did.
 
+mod dependencies;
 mod ingest;
 mod knowledge;
 #[cfg(test)]
