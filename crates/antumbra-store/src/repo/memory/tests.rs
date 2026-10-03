@@ -652,3 +652,56 @@ async fn recent_pages_live_memories_newest_first() -> Result<()> {
     );
     Ok(())
 }
+
+/// Only the live memories of this tenant that carry one of the entries come
+/// back, and without their vectors.
+#[tokio::test]
+async fn with_any_evidence_finds_exactly_the_tagged_memories() -> Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("t");
+    let now = chrono::Utc::now();
+    let tagged = |id: &str, tenant: &TenantId, evidence: &[&str]| {
+        let mut m = Memory::new(id, tenant.clone(), MemoryNetwork::World, id, 0.9, now)
+            .with_evidence(evidence.iter().map(|e| e.to_string()).collect());
+        m.embedding = Some(vec![0.1; EMBED_DIM]);
+        m
+    };
+    for m in [
+        tagged(
+            "memory:edge-a",
+            &tenant,
+            &["dep:a -> b", "dep-source:declared"],
+        ),
+        tagged(
+            "memory:edge-b",
+            &tenant,
+            &["dep:c -> b", "dep-source:claimed", "git:x@1"],
+        ),
+        tagged("memory:plain", &tenant, &["git:x@1"]),
+        tagged("memory:near", &tenant, &["dep-source:declared-ish"]),
+        tagged("memory:gone", &tenant, &["dep-source:observed"]),
+        tagged(
+            "memory:other",
+            &TenantId::new("u"),
+            &["dep-source:declared"],
+        ),
+    ] {
+        upsert(&store, &m).await?;
+    }
+    soft_delete(&store, &tenant, &MemoryId::new("memory:gone"), now).await?;
+    let wanted: Vec<String> = ["declared", "observed", "learned", "claimed"]
+        .iter()
+        .map(|s| format!("dep-source:{s}"))
+        .collect();
+    let mut found = with_any_evidence(&store, &tenant, &wanted).await?;
+    found.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+    let ids: Vec<&str> = found.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["memory:edge-a", "memory:edge-b"],
+        "whole entries only"
+    );
+    assert!(found.iter().all(|m| m.embedding.is_none()));
+    assert!(with_any_evidence(&store, &tenant, &[]).await?.is_empty());
+    Ok(())
+}

@@ -240,6 +240,10 @@ The contract:
 
 ---
 
+## What a change to a service reaches
+
+Which services depend on which is kept as claims with evidence, never as a parse (ADR-0019). Record one with `record_dependency`: the two services as repository slugs, and the source, `declared` (a manifest or config names it), `observed` (telemetry saw the calls), `learned` (they change or deploy together) or `claimed` (read from the code). Ask `blast_radius` what depends on a service, or what it depends on, and each service comes back by its strongest path with every hop's evidence, source and current weight, so the answer can be checked rather than trusted. A claim alone counts for little until a declaration or an observation backs it, and an edge nobody records again fades. The edges are the workspace's, readable by every member.
+
 ## Why this beats a plain memory layer
 
 Retrieval-memory tools (give the agent a vector store to recall from) make the agent _remember_. Antumbra makes it **learn**:

@@ -679,3 +679,88 @@ pub(super) struct CompletedHandoffOut {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) already_done: bool,
 }
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct RecordDependencyParams {
+    /// The service that depends, as a repository slug (`host/org/name`).
+    pub(super) from: String,
+    /// The service depended on, as a repository slug.
+    pub(super) to: String,
+    /// `declared`, `observed`, `learned` or `claimed`.
+    pub(super) source: String,
+    /// What the evidence is, in a line: "package.json names @acme/orders".
+    pub(super) detail: Option<String>,
+    /// The file that declares it, at the commit it was read.
+    pub(super) provenance: Option<ProvenanceParams>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct RecordedDependencyOut {
+    pub(super) id: String,
+    /// False when the edge was already recorded from this source and was
+    /// reinforced instead.
+    pub(super) created: bool,
+    pub(super) confidence: f32,
+    pub(super) reinforcement: u32,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct BlastRadiusParams {
+    /// The service to start from, as a repository slug.
+    pub(super) service: String,
+    /// `dependents` (the default) or `dependencies`.
+    pub(super) direction: Option<String>,
+    /// Hops to walk, default 3, at most 6.
+    pub(super) depth: Option<u32>,
+    /// The weakest pair walked, in `[0, 1]`, default 0.4.
+    pub(super) min_weight: Option<f32>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct EdgeView {
+    /// `declared`, `observed`, `learned` or `claimed`.
+    pub(super) source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) detail: Option<String>,
+    pub(super) confidence: f32,
+    /// The confidence faded by the time since it was last seen.
+    pub(super) weight: f32,
+    pub(super) reinforcement: u32,
+    pub(super) last_seen: String,
+    pub(super) memory_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) anchor: Option<ProvenanceView>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct HopView {
+    pub(super) from: String,
+    pub(super) to: String,
+    /// The pair's sources combined as independent evidence.
+    pub(super) weight: f32,
+    /// Every recorded edge between the two, strongest first, at most 4 (one
+    /// per source).
+    pub(super) evidence: Vec<EdgeView>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ReachedView {
+    pub(super) service: String,
+    pub(super) depth: u32,
+    /// The path's weight: the product of its hops' weights.
+    pub(super) weight: f32,
+    /// The strongest path to it, from the start outward, at most 6 hops.
+    pub(super) path: Vec<HopView>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct BlastRadiusOut {
+    /// The start, normalized.
+    pub(super) service: String,
+    pub(super) direction: String,
+    /// How many dependency edges the workspace holds, walked or not.
+    pub(super) edges: u32,
+    /// Strongest first, at most 100. Empty when nothing reaches the start
+    /// above `min_weight`, including when the service has no edges at all.
+    pub(super) reached: Vec<ReachedView>,
+}

@@ -275,6 +275,7 @@ fn default_capability() -> String {
 
 mod compartments;
 pub(crate) mod consolidation;
+mod depgraph;
 mod documents;
 mod engine;
 mod handoff;

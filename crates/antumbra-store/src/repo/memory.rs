@@ -20,7 +20,7 @@ use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::expressions::{field, value};
 use surql::query::helpers::fulltext_search_query;
-use surql::types::operators::{and_, eq, is_none, is_not_none, lt};
+use surql::types::operators::{and_, contains_any, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
 use antumbra_core::calibrate::calibrated_score;
@@ -343,6 +343,31 @@ pub async fn recent(
         .offset(i64::from(offset))
         .map_err(map)?;
     let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(MemoryRow::into_domain).collect()
+}
+
+/// `tenant`'s live memories carrying any of `entries` as an evidence entry,
+/// matched whole and filtered by the engine, read without the embeddings.
+///
+/// The evidence graph (ADR-0019) finds its edges this way: every edge carries
+/// exactly one `dep-source:<source>` entry, so asking for the four of them
+/// returns the edges and nothing else, without reading every memory of a
+/// large store to find the few that are edges.
+pub async fn with_any_evidence(
+    store: &Store,
+    tenant: &TenantId,
+    entries: &[String],
+) -> Result<Vec<Memory>> {
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let filter = and_(
+        and_(eq("tenant_id", tenant.as_str()), is_none("deleted_at")),
+        contains_any("evidence", entries.iter().map(|e| Value::String(e.clone()))),
+    );
+    let rows: Vec<MemoryRow> = store
+        .read_paged(TABLE, Some(without_embedding()), Some(&filter))
+        .await?;
     rows.into_iter().map(MemoryRow::into_domain).collect()
 }
 
