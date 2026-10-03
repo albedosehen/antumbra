@@ -255,6 +255,11 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
 4. [ ] **D-3, the boundary probe**, once D-1 and D-2 have a calibration history.
 5. [ ] **D-4, the critic**, after ADR-0022's S-2, not before.
 
+   **The pair encoder is in; its measurement waits for the card.** `antumbra_serve::pair_encoder` builds ModernBERT's backbone and its own prediction head from the checkpoint, puts a fresh two-way classifier on the pooled output, and fine-tunes all of it on the label file's training half. It reads each pair as one sequence, `[CLS] query [SEP] memory [SEP]`, cut at 1,024 tokens by default, twice what the control reads: it is `BAAI/bge-reranker-base`, which the deployed text-embeddings-inference truncates at 512 (`max_input_length` 512, `auto_truncate` on). That matters on this set: the query is cut from about 60% of the way through memories that average about 3,000 characters, so on the longer ones the control never sees the passage. It is split, cut and scored as the frozen-encoder heads are (`split_by_memory`, `score_at_half`), so its F1 compares with theirs and with the 0.785 bar.
+   - **The checkpoint is loaded strictly.** Every variable comes from the checkpoint except the classifier; a name the checkpoint lacks is an error when the model is built. The first real run found one: ModernBERT's first layer has no attention-norm weight, and a builder that creates whatever it is asked for would have given it a fresh norm that re-normalized the embeddings. Under the strict builder candle leaves it out, as the pretrained model does.
+   - **Where it runs:** `scripts/d2-pair.sh` builds the `d2-probe` image on the GPU host and runs `d2_pair_encoder_against_the_control` over the label file there, with the encoder, length, epochs, batch, learning rate and seed as knobs.
+
+
 ## Notes on the evidence
 
 **What adopting it would actually cost, read off the artefact rather than the card.** Checked on 2026-09-22, because "adopt the open one" is the load-bearing half of the Jev comparison and the shape of the repository decides how much of it transfers.

@@ -24,6 +24,9 @@ pub use embed::BertEmbedder;
 pub mod decision_probe;
 
 #[cfg(feature = "models")]
+pub mod pair_encoder;
+
+#[cfg(feature = "models")]
 mod serve_candle;
 #[cfg(feature = "models")]
 pub use serve_candle::CandleServe;
