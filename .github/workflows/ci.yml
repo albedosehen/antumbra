@@ -108,6 +108,10 @@ jobs:
         run: bash scripts/hooks/tests/session-start.sh
       - name: session-start stays under the agent's limit and says what is different first (.ps1)
         run: pwsh -NoProfile -File scripts/hooks/tests/session-start.ps1
+      - name: prompt-recall recalls for a prompt, not for a task notification (.sh)
+        run: bash scripts/hooks/tests/prompt-recall.sh
+      - name: prompt-recall recalls for a prompt, not for a task notification (.ps1)
+        run: pwsh -NoProfile -File scripts/hooks/tests/prompt-recall.ps1
 
   audit:
     name: cargo audit (advisories)

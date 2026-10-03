@@ -93,6 +93,7 @@ job_hooks() {
             ;;
         *) step bash scripts/hooks/tests/session-start.sh || return 1 ;;
     esac
+    step bash scripts/hooks/tests/prompt-recall.sh || return 1
     if command -v pwsh >/dev/null; then
         step pwsh -NoProfile -File scripts/hooks/tests/session-start.ps1 || return 1
         step pwsh -NoProfile -File scripts/hooks/tests/prompt-recall.ps1 || return 1

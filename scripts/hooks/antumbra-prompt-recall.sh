@@ -32,6 +32,14 @@ PROMPT="$(printf '%s' "$PAYLOAD" | jq -r '.prompt // ""' 2>/dev/null || echo '')
 CWD="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // ""' 2>/dev/null || echo '')"
 [ "${#PROMPT}" -lt 2 ] && exit 0
 
+# A background task's notification reaches this hook as a prompt too
+# (`<task-notification>...`). It is the harness reporting, not the user asking,
+# and a recall on its wording finds the memories about notifications, every
+# time one arrives.
+case "${PROMPT#"${PROMPT%%[![:space:]]*}"}" in
+    '<task-notification>'*) exit 0 ;;
+esac
+
 # Bound the query; the embedder has a 512-token window and a novel would be
 # truncated into noise anyway.
 QUERY="$(printf '%s' "$PROMPT" | cut -c1-500)"
