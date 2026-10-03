@@ -142,7 +142,7 @@ Offline is the default and the privacy floor: nothing leaves the building. The h
 
 ### The dashboard
 
-The HTTP server also serves a read-only dashboard at `/dashboard` (for example `http://localhost:8081/dashboard`). Sign in with the same kind of bearer token a hook uses (`antumbra-mcp --mint-token`, or the token your sign-in link gave you). It shows the workspace counts, the expert population with each expert's status and fitness, your compartments, your knowledge documents, and memory: recalled by meaning or listed newest first, filtered by network, each with its git anchor. It calls the same tools through `/mcp/call`, so it sees exactly what the token's identity may see. The token stays in that browser tab and is gone when the tab closes or you sign out.
+The HTTP server also serves a read-only dashboard at `/dashboard` (for example `http://localhost:8081/dashboard`). Sign in with the same kind of bearer token a hook uses (`antumbra-mcp --mint-token`, or the token your sign-in link gave you). It shows the workspace counts, the expert population with each expert's status and fitness, your compartments, your knowledge documents, and memory: recalled by meaning or listed newest first, filtered by network, each with its git anchor and its relations to other memories. It calls the same tools through `/mcp/call`, so it sees exactly what the token's identity may see. The token stays in that browser tab and is gone when the tab closes or you sign out.
 
 ---
 

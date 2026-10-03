@@ -415,7 +415,15 @@ function offerToggles() {
 
 function memoryItem(m) {
   const toggle = h("button", { type: "button", class: "link toggle", "aria-expanded": "false", hidden: true }, "Show all");
-  const item = h("li", { class: "memory" }, h("p", { class: "content" }, m.content), toggle, memoryMeta(m));
+  const [relate, relations] = relationsOf(m);
+  const item = h(
+    "li",
+    { class: "memory" },
+    h("p", { class: "content" }, m.content),
+    memoryMeta(m),
+    h("div", { class: "actions-row" }, toggle, relate),
+    relations,
+  );
   toggle.addEventListener("click", () => {
     const open = item.classList.toggle("open");
     toggle.setAttribute("aria-expanded", String(open));
@@ -453,6 +461,53 @@ function memoryMeta(m) {
     m.truncated && h("span", {}, `the start of ${numbers.format(m.content_chars)} characters`),
     m.orphaned_at && h("span", { class: "flag" }, "orphaned ", when(m.orphaned_at)),
     h("span", { class: "id" }, m.id),
+  );
+}
+
+/** A memory's relations to others (the `memory_edge` graph, one step out):
+ *  a toggle, and the panel it opens, fetched the first time it opens. */
+function relationsOf(m) {
+  const button = h("button", { type: "button", class: "link", "aria-expanded": "false" }, "Relations");
+  const panel = h("div", { class: "relations", hidden: true });
+  let loaded = false;
+  button.addEventListener("click", async () => {
+    const open = panel.hidden;
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+    if (!open || loaded) return;
+    loaded = true;
+    panel.replaceChildren(h("p", { class: "empty" }, "Loading"));
+    try {
+      const { neighbors } = await call("get_neighbors", { memory_id: m.id });
+      panel.replaceChildren(
+        neighbors.length
+          ? h("ul", { class: "relation-list" }, ...neighbors.map(relationRow))
+          : h("p", { class: "empty" }, "No relations from this memory."),
+      );
+    } catch (error) {
+      if (error instanceof SignedOut) signOut(REFUSED);
+      if (error instanceof SignedOut || error instanceof Superseded) return;
+      loaded = false;
+      panel.replaceChildren(h("p", { class: "failed", role: "alert" }, `Could not load: ${error.message}`));
+    }
+  });
+  return [button, panel];
+}
+
+/** One relation: its type and weight, then the memory it leads to. */
+function relationRow(n) {
+  return h(
+    "li",
+    {},
+    h(
+      "div",
+      { class: "meta" },
+      h("span", { class: "tag" }, n.edge_type),
+      h("span", {}, `weight ${fixed(n.weight, 2)}`),
+      h("span", {}, n.memory.network),
+      h("span", { class: "id" }, n.memory.id),
+    ),
+    h("p", { class: "relation-content" }, n.memory.content),
   );
 }
 
