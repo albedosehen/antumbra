@@ -891,14 +891,15 @@ impl McpServer {
         Parameters(p): Parameters<RouteParams>,
     ) -> Result<Json<RouteOut>, ErrorData> {
         let v = self.embedder.embed(&p.task).await.map_err(err)?;
-        let routes = self
-            .ranked_routes(&v, p.top_k.unwrap_or(3) as usize)
+        let (routes, why) = self
+            .routed(&v, p.top_k.unwrap_or(3) as usize)
             .await
             .map_err(err)?;
         let covered = !routes.is_empty();
         Ok(Json(RouteOut {
             covered,
             escalate: !covered,
+            reason: why.map(str::to_string),
             routes,
         }))
     }
@@ -922,13 +923,16 @@ impl McpServer {
             }));
         };
         let v = self.embedder.embed(&p.task).await.map_err(err)?;
-        let routes = self.ranked_routes(&v, 1).await.map_err(err)?;
+        let (routes, why) = self.routed(&v, 1).await.map_err(err)?;
         let Some(top) = routes.first() else {
             return Ok(Json(AnswerOut {
                 answer: String::new(),
                 expert_id: None,
                 escalate: true,
-                note: Some("no in-scope expert; escalate".into()),
+                note: Some(format!(
+                    "no in-scope expert ({}); escalate",
+                    why.unwrap_or("nothing covers it")
+                )),
             }));
         };
         let expert_id = top.expert_id.clone();

@@ -708,6 +708,29 @@ td .id {
   color: var(--ink-2);
 }
 
+/* Routing a task */
+
+.route {
+  margin: 16px 0 0;
+}
+
+.routed .panel {
+  margin-top: 16px;
+}
+
+.routed .note {
+  margin: 16px 0 0;
+}
+
+.answer {
+  margin: 0;
+  padding: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: var(--t-s);
+}
+
 /* Dependencies */
 
 .pair-service {

@@ -458,6 +458,10 @@ pub(super) struct RouteOut {
     pub(super) covered: bool,
     /// `true` when no expert covers it: defer to the generalist.
     pub(super) escalate: bool,
+    /// Why it escalated, when it did: a failure boundary, no router yet, or
+    /// outside what the population covers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) reason: Option<String>,
     pub(super) routes: Vec<RouteHit>,
 }
 

@@ -75,6 +75,12 @@
             </table>
           </div>
         </div>
+        <form id="route" class="recall route" role="search">
+          <input id="task" name="task" type="search" placeholder="A task, to see which expert would take it" aria-label="Task to route">
+          <button type="submit">Route</button>
+          <button id="answer" type="button" class="quiet">Answer</button>
+        </form>
+        <div id="routed" class="routed" aria-live="polite"></div>
       </section>
 
       <div class="stack">

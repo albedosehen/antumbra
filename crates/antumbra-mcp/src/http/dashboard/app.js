@@ -30,6 +30,9 @@ const state = {
   memories: null,
   memory: { view: null, rows: [], shown: 0, more: false, ticket: 0 },
   radius: 0,
+  // Expert names by id, from the population, for naming a route.
+  experts: new Map(),
+  route: 0,
   // The blast radius showing, or null for every pair.
   dependencies: null,
 };
@@ -154,13 +157,16 @@ function signOut(message) {
 /** Empty every section, so nothing one token loaded is left in the page for
  *  the next sign-in to show. */
 function clearSections() {
-  for (const id of ["stats", "population-rows", "compartments", "documents", "memories", "dependencies", "services"]) {
+  for (const id of ["stats", "population-rows", "compartments", "documents", "memories", "dependencies", "services", "routed"]) {
     byId(id).replaceChildren();
   }
   for (const id of ["who", "expires", "updated", "population-summary", "documents-summary", "dependencies-summary", "memory-summary", "memory-note"]) {
     byId(id).textContent = "";
   }
   state.radius += 1;
+  state.route += 1;
+  state.experts = new Map();
+  byId("route").reset();
   state.dependencies = null;
   byId("pairs-more").hidden = true;
   byId("all-pairs").hidden = true;
@@ -260,6 +266,7 @@ function statusRank(status) {
 
 async function loadPopulation() {
   const { experts } = await call("population");
+  state.experts = new Map(experts.map((e) => [e.id, e.name]));
   const rows = byId("population-rows");
   const summary = byId("population-summary");
   if (!experts.length) {
@@ -353,6 +360,87 @@ async function loadDocuments() {
       list.append(...rest.map(row));
       more.hidden = true;
     };
+  }
+}
+
+// Routing a task: which expert would take it, by the same gate an agent's
+// `route` goes through, and the answer through it where the server serves.
+// Neither writes anything.
+
+function routedNote(text) {
+  return h("p", { class: "note small" }, text);
+}
+
+async function runRoute(task) {
+  const ticket = ++state.route;
+  const out = await call("route", { task, top_k: 5 });
+  if (ticket !== state.route) return;
+  const target = byId("routed");
+  if (out.escalate) {
+    target.replaceChildren(
+      routedNote(`No expert takes it; it goes to your agent. Why: ${out.reason || "nothing covers it"}.`),
+    );
+    return;
+  }
+  target.replaceChildren(
+    h(
+      "div",
+      { class: "panel" },
+      h(
+        "ul",
+        { class: "list" },
+        ...out.routes.map((r) =>
+          h(
+            "li",
+            {},
+            h(
+              "div",
+              {},
+              h("span", { class: "name" }, state.experts.get(r.expert_id) || r.expert_id),
+              h("span", { class: "id" }, r.expert_id),
+            ),
+            h(
+              "span",
+              { class: "nowrap" },
+              r.private && h("span", { class: "tag" }, "private"),
+              " ",
+              weightCell(r.probability),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+async function runAnswer(task) {
+  const ticket = ++state.route;
+  byId("routed").replaceChildren(routedNote("Answering"));
+  const out = await call("answer", { task });
+  if (ticket !== state.route) return;
+  const target = byId("routed");
+  if (out.escalate) {
+    target.replaceChildren(routedNote(`Not answered here; it goes to your agent. ${out.note || ""}`.trim()));
+    return;
+  }
+  const by = out.expert_id ? state.experts.get(out.expert_id) || out.expert_id : "an expert";
+  target.replaceChildren(
+    routedNote(`Answered by ${by}.`),
+    h("div", { class: "panel" }, h("p", { class: "answer" }, out.answer)),
+  );
+}
+
+/** Run a route or an answer from the form, showing a failure under it. */
+async function routeAction(run) {
+  const task = byId("route").elements.task.value.trim();
+  if (!task) {
+    byId("task").focus();
+    return;
+  }
+  try {
+    await section(byId("routed"), () => run(task));
+  } catch (error) {
+    if (error instanceof SignedOut) signOut(REFUSED);
   }
 }
 
@@ -809,6 +897,11 @@ function start() {
     }
   });
   byId("more").addEventListener("click", showMore);
+  byId("route").addEventListener("submit", (event) => {
+    event.preventDefault();
+    routeAction(runRoute);
+  });
+  byId("answer").addEventListener("click", () => routeAction(runAnswer));
   byId("radius").addEventListener("submit", (event) => {
     event.preventDefault();
     radiusAction();
