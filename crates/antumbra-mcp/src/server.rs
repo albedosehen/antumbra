@@ -277,6 +277,7 @@ mod compartments;
 pub(crate) mod consolidation;
 mod documents;
 mod engine;
+mod handoff;
 mod listing;
 mod params;
 mod provenance;

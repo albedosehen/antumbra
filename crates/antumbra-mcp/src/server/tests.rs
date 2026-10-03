@@ -696,6 +696,7 @@ async fn call_tool_dispatches_a_named_tool() {
         .is_err());
 }
 
+mod handoff;
 mod lifecycle;
 mod workspace;
 

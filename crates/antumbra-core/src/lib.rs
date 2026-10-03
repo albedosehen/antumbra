@@ -22,6 +22,7 @@ pub mod expert;
 pub mod generational;
 pub mod genesis;
 pub mod grow;
+pub mod handoff;
 pub mod hive;
 pub mod ids;
 pub mod keyed;

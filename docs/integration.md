@@ -146,6 +146,10 @@ The HTTP server also serves a read-only dashboard at `/dashboard` (for example `
 
 ---
 
+## Leaving work for another of your machines
+
+A session can leave a note for a session on another of your machines: "rerun this on the GPU box", "check the dashboard after the deploy". The agent calls `leave_handoff` with the text (its first line is the title) and `for_host`, the machine's host name, or nothing for whichever of your machines starts a session next. A session that starts there opens with the count and a line for each handoff waiting for it, ahead of recalled memories, and keeps hearing about one until a session calls `complete_handoff`; after that it is no longer announced but `handoffs` with `include_done` still shows it. The machine's name is `ANTUMBRA_HOST_ID`, the same one the bootstrap prints in its first line, so set it on each machine. Handoffs are yours alone: they live in your own `handoff` compartment, and no other user's session sees them. It is a note, not remote control: nothing runs on the other machine until a session there decides to.
+
 ## Claude Code with its telemetry off
 
 Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. [ADR-0021](adr/0021-sovereign-mode.md) calls the state sovereign mode and treats it as the normal case.

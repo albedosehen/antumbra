@@ -590,3 +590,92 @@ pub(super) struct ProposalsOut {
     /// `similarity_threshold` and `min_size`, which a lower threshold may fix.
     pub(super) proposals: Vec<ProposalView>,
 }
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct LeaveHandoffParams {
+    /// What to leave: the first line is the title it is announced under.
+    pub(super) content: String,
+    /// The machine it is for, by host name, or `any` (the default) for
+    /// whichever of your machines starts a session next.
+    pub(super) for_host: Option<String>,
+    /// The machine leaving it, by host name. Defaults to the server's own
+    /// host; a client session should pass its own (the session-start block
+    /// names it).
+    pub(super) from_host: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct LeftHandoffOut {
+    pub(super) id: String,
+    /// The machine it is for, normalized (trimmed, lowercased), or `any`.
+    pub(super) for_host: String,
+    /// Whether `for_host` is one of your registered devices (or `any`). False
+    /// is not an error: a machine that has not registered still receives it
+    /// when a session there reports that host. It is how a typo shows.
+    pub(super) registered_device: bool,
+    /// Your registered devices' host names, at most a few dozen.
+    pub(super) devices: Vec<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct HandoffsParams {
+    /// The machine asking. Defaults to the server's own host; a client
+    /// session should pass its own.
+    pub(super) host: Option<String>,
+    /// Also list handoffs already marked done. Default false.
+    pub(super) include_done: Option<bool>,
+    /// Return each handoff's whole text instead of a 900-character prefix.
+    pub(super) full: Option<bool>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct HandoffView {
+    pub(super) id: String,
+    /// Its first line, as it is announced, at most 80 characters.
+    pub(super) title: String,
+    /// The text, a 900-character prefix unless `full` was asked for.
+    pub(super) content: String,
+    pub(super) content_chars: u32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) truncated: bool,
+    /// The machine that left it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) from_host: Option<String>,
+    /// The machine it is for, or `any`.
+    pub(super) for_host: String,
+    pub(super) left_at: String,
+    /// When it was marked done and by which machine; absent while it waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) done_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) done_by: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct HandoffsOut {
+    /// The machine the list is for, normalized.
+    pub(super) host: String,
+    /// Newest first, at most 50. Without `include_done`, only the ones still
+    /// waiting; empty when nothing waits.
+    pub(super) handoffs: Vec<HandoffView>,
+    /// The lines a session-start block shows for what waits: a count and one
+    /// line per handoff. Absent when nothing waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) announcement: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct CompleteHandoffParams {
+    pub(super) handoff_id: String,
+    /// The machine that dealt with it. Defaults to the server's own host.
+    pub(super) host: Option<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct CompletedHandoffOut {
+    /// False when no handoff of yours has that id.
+    pub(super) found: bool,
+    /// True when it had already been marked done; it is left as it was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) already_done: bool,
+}

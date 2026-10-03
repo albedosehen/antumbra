@@ -112,6 +112,17 @@ $ctx = Get-Context $small $stub
 Check 'keeps everything' $ctx.Contains('second small')
 Check 'mentions no omission' (-not $ctx.Contains('left out'))
 
+Write-Output 'a handoff waiting for this machine'
+$handoff = @{
+    memories     = @(@{ id = 'memory:a'; content = 'first small' })
+    announcement = "1 handoff waiting for this machine (windows):`n- Rerun the probe (from kuskokwim, 2h ago; id memory:h)"
+} | ConvertTo-Json -Depth 5 -Compress
+$ctx = Get-Context $handoff $stub
+Check 'announces it' $ctx.Contains('1 handoff waiting for this machine (windows):')
+Check 'puts it before any memory' (($ctx.IndexOf('handoff waiting') -ge 0) -and ($ctx.IndexOf('handoff waiting') -lt $ctx.IndexOf('first small')))
+$ctx = Get-Context $small $stub
+Check 'says nothing of handoffs when none wait' (-not $ctx.Contains('handoff'))
+
 Write-Output 'no antumbra on the path'
 $ctx = Get-Context $small 'antumbra-is-not-installed'
 Check 'still answers' $ctx.Contains('first small')
