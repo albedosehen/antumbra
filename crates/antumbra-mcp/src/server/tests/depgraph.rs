@@ -253,4 +253,94 @@ async fn the_rest_dispatcher_reaches_the_graph_tools() {
         .await
         .unwrap();
     assert_eq!(walked["reached"][0]["service"], "web");
+    let listed = s
+        .call_tool("list_dependencies", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed["total"], 1);
+    assert_eq!(listed["pairs"][0]["from"], "web");
+}
+
+/// The list shows every pair, the weak ones a walk would skip included,
+/// strongest first, with a count of them all and the services they name;
+/// `service` keeps the pairs on either end of it, and `limit` how many.
+#[tokio::test]
+async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
+    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let s = server_in(&store, "ws:test", "user:a");
+    record(
+        &s,
+        "github.com/a/web",
+        "github.com/a/orders",
+        "declared",
+        "package.json names orders",
+    )
+    .await;
+    record(
+        &s,
+        "github.com/a/web",
+        "github.com/a/orders",
+        "observed",
+        "traces, 7 days",
+    )
+    .await;
+    record(
+        &s,
+        "github.com/a/orders",
+        "github.com/a/db",
+        "declared",
+        "Cargo.toml names db",
+    )
+    .await;
+    record(
+        &s,
+        "github.com/a/billing",
+        "github.com/a/ledger",
+        "claimed",
+        "read from the code",
+    )
+    .await;
+
+    let list = |service: Option<&str>, limit: Option<u32>| {
+        let s = &s;
+        let service = service.map(str::to_string);
+        async move {
+            s.list_dependencies(Parameters(ListDependenciesParams { service, limit }))
+                .await
+                .unwrap()
+                .0
+        }
+    };
+    let all = list(None, None).await;
+    assert_eq!(all.total, 3);
+    let pairs: Vec<(&str, &str, usize)> = all
+        .pairs
+        .iter()
+        .map(|p| (p.from.as_str(), p.to.as_str(), p.evidence.len()))
+        .collect();
+    assert_eq!(
+        pairs,
+        [
+            ("github.com/a/web", "github.com/a/orders", 2),
+            ("github.com/a/orders", "github.com/a/db", 1),
+            ("github.com/a/billing", "github.com/a/ledger", 1),
+        ],
+        "a claim alone is listed, last"
+    );
+    assert_eq!(
+        all.services,
+        [
+            "github.com/a/billing",
+            "github.com/a/db",
+            "github.com/a/ledger",
+            "github.com/a/orders",
+            "github.com/a/web"
+        ]
+    );
+    assert_eq!(all.pairs[0].evidence[0].source, "declared");
+
+    let orders = list(Some("github.com/a/orders"), None).await;
+    assert_eq!(orders.total, 2);
+    let first = list(None, Some(1)).await;
+    assert_eq!((first.pairs.len(), first.total), (1, 3));
 }

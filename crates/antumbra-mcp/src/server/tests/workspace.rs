@@ -850,7 +850,7 @@ async fn provenance_is_stored_and_scopes_recall() {
 #[tokio::test]
 async fn a_tool_profile_narrows_what_is_advertised_and_served() {
     let all = McpServer::all_tool_names();
-    assert_eq!(all.len(), 26, "{all:?}");
+    assert_eq!(all.len(), 27, "{all:?}");
     let profile = crate::profile::ToolProfile::parse("agent", &all)
         .unwrap()
         .expect("agent is a profile, not `all`");
@@ -884,5 +884,5 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() {
         err.message
     );
 
-    assert_eq!(server().await.advertised_tools().len(), 26);
+    assert_eq!(server().await.advertised_tools().len(), 27);
 }

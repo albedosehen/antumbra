@@ -100,6 +100,26 @@
       </div>
     </div>
 
+    <section aria-labelledby="h-dependencies">
+      <div class="section-head">
+        <h2 id="h-dependencies">Dependencies</h2>
+        <p id="dependencies-summary" class="muted small" aria-live="polite"></p>
+      </div>
+      <form id="radius" class="recall" role="search">
+        <input id="service" name="service" type="search" list="services" placeholder="A service, as host/org/name" aria-label="Service" spellcheck="false" autocapitalize="off">
+        <datalist id="services"></datalist>
+        <fieldset class="segmented">
+          <legend class="visually-hidden">Direction</legend>
+          <input id="dir-dependents" type="radio" name="direction" value="dependents" checked><label for="dir-dependents">Depends on it</label>
+          <input id="dir-dependencies" type="radio" name="direction" value="dependencies"><label for="dir-dependencies">It depends on</label>
+        </fieldset>
+        <button type="submit">Blast radius</button>
+        <button id="all-pairs" type="button" class="quiet" hidden>Every pair</button>
+      </form>
+      <div id="dependencies" class="panel"></div>
+      <button id="pairs-more" type="button" class="link more" hidden></button>
+    </section>
+
     <section aria-labelledby="h-memory">
       <div class="section-head">
         <h2 id="h-memory">Memory</h2>

@@ -143,7 +143,7 @@ Offline is the default and the privacy floor: nothing leaves the building. The h
 
 ### The dashboard
 
-The HTTP server also serves a read-only dashboard at `/dashboard` (for example `http://localhost:8081/dashboard`). Sign in with the same kind of bearer token a hook uses (`antumbra-mcp --mint-token`, or the token your sign-in link gave you). It shows the workspace counts, the expert population with each expert's status and fitness, your compartments, your knowledge documents, and memory: recalled by meaning or listed newest first, filtered by network, each with its git anchor and its relations to other memories. It calls the same tools through `/mcp/call`, so it sees exactly what the token's identity may see. The token stays in that browser tab and is gone when the tab closes or you sign out.
+The HTTP server also serves a read-only dashboard at `/dashboard` (for example `http://localhost:8081/dashboard`). Sign in with the same kind of bearer token a hook uses (`antumbra-mcp --mint-token`, or the token your sign-in link gave you). It shows the workspace counts, the expert population with each expert's status and fitness, your compartments, your knowledge documents, the dependency graph (every pair of services with its evidence, and any service's blast radius either way), and memory: recalled by meaning or listed newest first, filtered by network, each with its git anchor and its relations to other memories. It calls the same tools through `/mcp/call`, so it sees exactly what the token's identity may see. The token stays in that browser tab and is gone when the tab closes or you sign out.
 
 ---
 
@@ -243,7 +243,7 @@ The contract:
 
 ## What a change to a service reaches
 
-Which services depend on which is kept as claims with evidence, never as a parse (ADR-0019). Record one with `record_dependency`: the two services as repository slugs, and the source, `declared` (a manifest or config names it), `observed` (telemetry saw the calls), `learned` (they change or deploy together) or `claimed` (read from the code). Ask `blast_radius` what depends on a service, or what it depends on, and each service comes back by its strongest path with every hop's evidence, source and current weight, so the answer can be checked rather than trusted. A claim alone counts for little until a declaration or an observation backs it, and an edge nobody records again fades. The edges are the workspace's, readable by every member.
+Which services depend on which is kept as claims with evidence, never as a parse (ADR-0019). Record one with `record_dependency`: the two services as repository slugs, and the source, `declared` (a manifest or config names it), `observed` (telemetry saw the calls), `learned` (they change or deploy together) or `claimed` (read from the code). `list_dependencies` lists every pair with its evidence, weak ones included. Ask `blast_radius` what depends on a service, or what it depends on, and each service comes back by its strongest path with every hop's evidence, source and current weight, so the answer can be checked rather than trusted. A claim alone counts for little until a declaration or an observation backs it, and an edge nobody records again fades. The edges are the workspace's, readable by every member.
 
 The declared edges can be read from your checkouts instead of recorded by hand:
 
