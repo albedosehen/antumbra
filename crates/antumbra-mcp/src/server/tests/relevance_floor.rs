@@ -72,7 +72,10 @@ async fn when_nothing_clears_the_floor_the_answer_says_so() {
 async fn when_something_clears_the_floor_the_rows_come_back() {
     let s = seeded()
         .await
-        .with_decider(Arc::new(ScriptedDecider::on_substring("QUERY", 0.9)));
+        .with_decider(Arc::new(ScriptedDecider::on_substring(
+            "deploy runbook",
+            0.9,
+        )));
     let out = recall(&s, "deploy runbook", None).await;
     assert!(!out.memories.is_empty(), "relevant rows survive the floor");
     assert!(
@@ -87,7 +90,10 @@ async fn when_something_clears_the_floor_the_rows_come_back() {
 async fn the_caller_can_move_the_floor() {
     let s = seeded()
         .await
-        .with_decider(Arc::new(ScriptedDecider::on_substring("QUERY", 0.6)));
+        .with_decider(Arc::new(ScriptedDecider::on_substring(
+            "deploy runbook",
+            0.6,
+        )));
     assert!(
         recall(&s, "deploy runbook", Some(0.95))
             .await
@@ -102,6 +108,35 @@ async fn the_caller_can_move_the_floor() {
             .is_empty(),
         "and lowering it takes the rows back -- the best of a bad lot is a choice"
     );
+}
+
+/// The floor holds for a query of several lines, which is what a pasted
+/// prompt is: the calibrated floor, over a scorer that finds only the runbook
+/// relevant, keeps the runbook and drops the rest. Before the state was
+/// carried as JSON, the floor could not parse such a query and every one went
+/// out unfiltered.
+#[tokio::test]
+async fn the_floor_holds_for_a_query_of_several_lines() {
+    struct RunbookOnly;
+    #[async_trait::async_trait]
+    impl antumbra_core::ports::RelevanceScorer for RunbookOnly {
+        async fn relevance(&self, _q: &str, texts: &[String]) -> antumbra_core::Result<Vec<f32>> {
+            Ok(texts
+                .iter()
+                .map(|t| if t.contains("runbook") { 5e-3 } else { 3.7e-5 })
+                .collect())
+        }
+    }
+    let floor = antumbra_rerank::floor::CalibratedFloor::new(Arc::new(RunbookOnly));
+    let s = seeded().await.with_decider(Arc::new(floor));
+    let out = recall(
+        &s,
+        "where is the deploy\nrunbook for orders?\n\n---\nthanks",
+        None,
+    )
+    .await;
+    let kept: Vec<&str> = out.memories.iter().map(|m| m.content.as_str()).collect();
+    assert_eq!(kept, ["the deploy runbook for the orders service"]);
 }
 
 /// A floor that cannot be computed must not be enforced: the rows come back

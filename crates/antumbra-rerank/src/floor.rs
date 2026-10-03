@@ -28,15 +28,10 @@
 //! `Choice` or a `Score`. ADR-0024's D-1 still needs the real head.
 
 use antumbra_core::platt::Platt;
-use antumbra_core::ports::{Answer, Question, RelevanceScorer, TypedDecider};
+use antumbra_core::ports::{Answer, Question, RelevanceScorer, RelevanceState, TypedDecider};
 use antumbra_core::{AntumbraError, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
-
-/// The separator `above_floor` joins its per-memory states with.
-const STATE_SEPARATOR: &str = "\n---\n";
-const QUERY_PREFIX: &str = "QUERY: ";
-const MEMORY_PREFIX: &str = "MEMORY: ";
 
 /// Fitted on 800 balanced pairs drawn from 400 distinct queries against
 /// `ws:default`, by `antumbra_core::platt::Platt::fit` minimising log loss, and
@@ -72,28 +67,6 @@ impl CalibratedFloor {
             calibration,
         }
     }
-
-    /// Split the joined state back into its `(query, memory)` pairs.
-    ///
-    /// The state arrives as one string because [`TypedDecider`] takes one state
-    /// and many questions — the questions about one state share an encoding,
-    /// which is what makes a batch cheap. For this decider they do not share an
-    /// encoding at all, so the join has to be undone. That is a wart in the
-    /// contract rather than in this code, and it is written out here so the next
-    /// reader sees the seam instead of guessing at it.
-    fn pairs(state: &str) -> Vec<(String, String)> {
-        state
-            .split(STATE_SEPARATOR)
-            .filter_map(|chunk| {
-                let rest = chunk.strip_prefix(QUERY_PREFIX)?;
-                let (query, memory) = rest.split_once('\n')?;
-                Some((
-                    query.to_string(),
-                    memory.strip_prefix(MEMORY_PREFIX)?.to_string(),
-                ))
-            })
-            .collect()
-    }
 }
 
 #[async_trait]
@@ -110,17 +83,23 @@ impl TypedDecider for CalibratedFloor {
                 "CalibratedFloor answers Noul only, asked {bad:?}"
             )));
         }
-        let pairs = Self::pairs(state);
-        if pairs.len() != questions.len() {
+        // The state arrives as one string because the port takes one state and
+        // many questions; for this decider the questions share a query and
+        // nothing else, so it is decoded back into the query and its memories.
+        let Some(RelevanceState { query, memories }) = RelevanceState::decode(state) else {
+            return Err(AntumbraError::other(
+                "the state is not a relevance state (a query and its memories)",
+            ));
+        };
+        if memories.len() != questions.len() {
             return Err(AntumbraError::other(format!(
-                "state parsed into {} pairs for {} questions",
-                pairs.len(),
+                "the state holds {} memories for {} questions",
+                memories.len(),
                 questions.len()
             )));
         }
-        // Every pair shares one query, so this is one call rather than N.
-        let query = pairs[0].0.clone();
-        let texts: Vec<String> = pairs.into_iter().map(|(_, m)| m).collect();
+        // Every memory shares one query, so this is one call rather than N.
+        let texts = memories;
         let scores = self.scorer.relevance(&query, &texts).await?;
         if scores.len() != questions.len() {
             return Err(AntumbraError::other(format!(
@@ -152,24 +131,47 @@ mod tests {
     }
 
     fn state(query: &str, memories: &[&str]) -> String {
-        memories
-            .iter()
-            .map(|m| format!("QUERY: {query}\nMEMORY: {m}"))
-            .collect::<Vec<_>>()
-            .join(STATE_SEPARATOR)
+        RelevanceState {
+            query: query.to_string(),
+            memories: memories.iter().map(|m| m.to_string()).collect(),
+        }
+        .encode()
     }
 
-    /// The seam that matters: the state `above_floor` builds must parse back
-    /// into exactly the pairs that went in. If this drifts, the floor silently
-    /// stops being applied.
-    #[test]
-    fn the_joined_state_round_trips() {
-        let s = state("what is a boundary", &["a memory", "another memory"]);
-        let pairs = CalibratedFloor::pairs(&s);
-        assert_eq!(pairs.len(), 2);
-        assert_eq!(pairs[0].0, "what is a boundary");
-        assert_eq!(pairs[0].1, "a memory");
-        assert_eq!(pairs[1].1, "another memory");
+    /// Records what it was asked, and scores every text the same.
+    struct Recording(std::sync::Mutex<Vec<(String, Vec<String>)>>);
+
+    #[async_trait]
+    impl RelevanceScorer for Recording {
+        async fn relevance(&self, q: &str, t: &[String]) -> Result<Vec<f32>> {
+            self.0.lock().unwrap().push((q.to_string(), t.to_vec()));
+            Ok(vec![5e-3; t.len()])
+        }
+    }
+
+    /// The seam that matters: the scorer is asked about exactly the query and
+    /// memories that went in, whatever text they hold. A query of several lines,
+    /// and a memory with a markdown rule in it, broke the text join this
+    /// replaced, and every such recall went out unfloored.
+    #[tokio::test]
+    async fn the_scorer_sees_the_query_and_memories_that_went_in() {
+        let scorer = Arc::new(Recording(std::sync::Mutex::new(Vec::new())));
+        let floor = CalibratedFloor::new(scorer.clone());
+        let query = "why does recall\nskip the floor\n\nQUERY: on long prompts";
+        let memories = ["first\n---\nsecond", "MEMORY: plain", ""];
+        let answers = floor
+            .decide(&state(query, &memories), &vec![Question::Noul; 3])
+            .await
+            .expect("decide");
+        assert_eq!(answers.len(), 3);
+        let asked = scorer.0.lock().unwrap().clone();
+        assert_eq!(
+            asked,
+            [(
+                query.to_string(),
+                memories.iter().map(|m| m.to_string()).collect::<Vec<_>>()
+            )]
+        );
     }
 
     /// A high score reads as relevant and a low one does not, through the
