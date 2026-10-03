@@ -67,6 +67,14 @@ async fn a_dormant_expert_is_not_routed_to_and_population_says_so() {
         r.0.escalate && r.0.routes.is_empty(),
         "the router still holds it, but masked"
     );
+    assert!(
+        r.0.reason
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("the experts that cover this task are dormant"),
+        "{:?}",
+        r.0.reason
+    );
 
     let population = s.population().await.unwrap().0.experts;
     assert_eq!(population.len(), 1);

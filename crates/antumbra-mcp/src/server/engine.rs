@@ -606,21 +606,29 @@ impl McpServer {
     /// same gate the CLI's learned-route path applies, so the two front doors
     /// agree. Only *actionable* boundaries inhibit (the relative C/C' margin), so
     /// this is a no-op until a verified correction has scoped one.
-    pub(super) async fn ranked_routes(
+    /// The ranked routes for a task, and when there are none, why: what a
+    /// caller needs to decide between waiting for an expert and going to the
+    /// generalist.
+    pub(super) async fn routed(
         &self,
         v: &[f32],
         k: usize,
-    ) -> antumbra_core::Result<Vec<RouteHit>> {
+    ) -> antumbra_core::Result<(Vec<RouteHit>, Option<&'static str>)> {
         let inhibition = boundary::list(&self.store)
             .await?
             .iter()
             .map(|b| b.inhibition_for(v, INHIBITION_RADIUS))
             .fold(0.0f32, f32::max);
         if inhibition > BOUNDARY_ESCALATE_THRESHOLD {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Some(UNCOVERED_INHIBITED)));
         }
         let mut routes: Vec<RouteHit> = Vec::new();
-        if let Some(router) = readable(lifecycle::load_router(&self.store).await)? {
+        let router = readable(lifecycle::load_router(&self.store).await)?;
+        let uncovered = match &router {
+            None => UNCOVERED_NO_ROUTER,
+            Some(_) => UNCOVERED_OUT_OF_DISTRIBUTION,
+        };
+        if let Some(router) = router {
             if router.covers(v) {
                 for (id, probability) in router.route(v) {
                     routes.push(RouteHit {
@@ -650,9 +658,34 @@ impl McpServer {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         routes.truncate(k);
-        Ok(routes)
+        if !routes.is_empty() {
+            return Ok((routes, None));
+        }
+        // The router as trained, before the experts it may not route to were
+        // masked out: when it covers the task, the experts for it are resting.
+        let resting = uncovered == UNCOVERED_OUT_OF_DISTRIBUTION
+            && readable(antumbra_store::repo::router::load(&self.store).await)?
+                .is_some_and(|trained| trained.covers(v));
+        Ok((
+            routes,
+            Some(if resting {
+                UNCOVERED_RESTING
+            } else {
+                uncovered
+            }),
+        ))
     }
 }
+
+/// Why a task found no expert.
+const UNCOVERED_INHIBITED: &str =
+    "a failure boundary covers this task: the population has failed at it before";
+const UNCOVERED_NO_ROUTER: &str =
+    "no learned router yet, and none of your private experts is close to this task";
+const UNCOVERED_RESTING: &str =
+    "the experts that cover this task are dormant or archived, and none of your private experts is close to it";
+const UNCOVERED_OUT_OF_DISTRIBUTION: &str =
+    "outside what the shared population covers, and none of your private experts is close to it";
 
 impl McpServer {
     /// Dispatch a tool by name with raw JSON `arguments`, returning its result as

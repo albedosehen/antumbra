@@ -532,6 +532,10 @@ async fn route_escalates_without_router_then_routes_with_one() {
         .await
         .unwrap();
     assert!(r.0.escalate && !r.0.covered && r.0.routes.is_empty());
+    assert_eq!(
+        r.0.reason.as_deref(),
+        Some("no learned router yet, and none of your private experts is close to this task")
+    );
 
     // Save a permissive router with one expert.
     router::save(
@@ -668,6 +672,14 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() {
     assert!(
         r.0.escalate && r.0.routes.is_empty(),
         "a task inside a known failure scope escalates"
+    );
+    assert!(
+        r.0.reason
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("a failure boundary covers this task"),
+        "{:?}",
+        r.0.reason
     );
 }
 

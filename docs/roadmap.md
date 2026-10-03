@@ -48,7 +48,7 @@ arguments}` → the tool's JSON result) beside the JSON-RPC `/mcp` router, so a 
 
 ### P-4 · Interactive control (expert mixer + agent drive)
 
-**Status:** queued (after P-2 lands). The **expert mixer** (pick experts + weights, preview, save a composed serve profile, the user-facing form of heterogeneous composed-model composition; `compose_adapters` is the precursor) and driving a connected agent's `answer`/`route` from the dashboard.
+**Status:** the drive half landed (2026-10-03); the mixer is queued. The **expert mixer** (pick experts + weights, preview, save a composed serve profile, the user-facing form of heterogeneous composed-model composition; `compose_adapters` is the precursor) and driving a connected agent's `answer`/`route` from the dashboard. **Landed:** the dashboard's Population section routes a task through the same gate an agent's `route` goes through, showing the experts that would take it by name with their probability (a private one marked), and answers it through the covering expert where the server serves; neither writes anything. `route` now says why it escalates (a failure boundary covers the task, no learned router yet, the experts that cover it are dormant or archived, or it is outside what the population covers), and `answer`'s note carries the same reason.
 
 ### P-5 · Hosted onboarding
 
