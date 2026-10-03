@@ -262,12 +262,23 @@ pub async fn train_and_score(
         .map_err(map_err)?
         .to_vec2::<f32>()
         .map_err(map_err)?;
+    let relevant: Vec<f32> = probs.iter().map(|row| row[0]).collect();
+    Ok(score_at_half(&relevant, test.iter().map(|p| p.relevant)))
+}
+
+/// Score probabilities that each memory answers its query against the labels,
+/// at one half.
+///
+/// Half is where a calibrated probability says "more likely than not", and it
+/// is the floor recall defaults to. Scoring at the same point the system will
+/// actually use is the only fair comparison, and every head is scored here so
+/// their numbers compare.
+pub fn score_at_half(relevant: &[f32], labels: impl Iterator<Item = bool>) -> Scored {
     let (mut tp, mut fp, mut fnn, mut tn) = (0f32, 0f32, 0f32, 0f32);
-    for (row, want) in probs.iter().zip(test.iter().map(|p| p.relevant)) {
-        // Half is where a calibrated probability says "more likely than not",
-        // and it is the floor recall defaults to. Scoring at the same point the
-        // system will actually use is the only fair comparison.
-        match (row[0] >= 0.5, want) {
+    let mut n = 0usize;
+    for (p, want) in relevant.iter().zip(labels) {
+        n += 1;
+        match (*p >= 0.5, want) {
             (true, true) => tp += 1.0,
             (true, false) => fp += 1.0,
             (false, true) => fnn += 1.0,
@@ -276,8 +287,8 @@ pub async fn train_and_score(
     }
     let precision = if tp + fp > 0.0 { tp / (tp + fp) } else { 0.0 };
     let recall = if tp + fnn > 0.0 { tp / (tp + fnn) } else { 0.0 };
-    Ok(Scored {
-        accuracy: (tp + tn) / test.len().max(1) as f32,
+    Scored {
+        accuracy: (tp + tn) / n.max(1) as f32,
         precision,
         recall,
         f1: if precision + recall > 0.0 {
@@ -285,7 +296,49 @@ pub async fn train_and_score(
         } else {
             0.0
         },
-    })
+    }
+}
+
+/// Split pairs into a training half and a held-out half by MEMORY, not by pair.
+///
+/// Each memory contributes a positive and a negative built from the same text,
+/// so splitting by pair would put the same passage on both sides and let a
+/// model recognise it rather than judge the match: the result would be a
+/// measurement of leakage. The first half of the memories, in first-seen order,
+/// trains; the rest is held out. Returns `(train, test)`.
+pub fn split_by_memory(pairs: &[LabelledPair]) -> (Vec<LabelledPair>, Vec<LabelledPair>) {
+    let mut seen: Vec<&str> = Vec::new();
+    for p in pairs {
+        if !seen.contains(&p.memory.as_str()) {
+            seen.push(&p.memory);
+        }
+    }
+    let held: Vec<&str> = seen[seen.len() / 2..].to_vec();
+    let (test, train): (Vec<_>, Vec<_>) = pairs
+        .iter()
+        .cloned()
+        .partition(|p| held.contains(&p.memory.as_str()));
+    (train, test)
+}
+
+/// The control that decides whether any score on the label set means anything:
+/// one `contains` call, no model, no training, no GPU.
+///
+/// `scripts/d2-labels.sh` builds a query by taking twelve words from ~60%
+/// through a memory. If this scores near 1.000, the labelled task is substring
+/// provenance rather than relevance, and a method scores well on it exactly
+/// insofar as it detects near-exact overlap. The span is now excised, so it
+/// should score near zero; every run prints it so a degenerate label file
+/// cannot come back quietly.
+pub fn verbatim_containment(test: &[LabelledPair]) -> Scored {
+    fn flat(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+    let hits: Vec<f32> = test
+        .iter()
+        .map(|p| f32::from(u8::from(flat(&p.memory).contains(flat(&p.query).trim()))))
+        .collect();
+    score_at_half(&hits, test.iter().map(|p| p.relevant))
 }
 
 #[cfg(test)]
@@ -329,22 +382,7 @@ mod tests {
         let pairs: Vec<LabelledPair> = serde_json::from_str(&raw).expect("parse labels");
         assert!(pairs.len() >= 20, "need a real set, got {}", pairs.len());
 
-        // Split by MEMORY, not by pair. Each memory contributes a positive and a
-        // negative built from the same text, so splitting by pair would put the
-        // same passage on both sides and let the head recognise it rather than
-        // judge the match -- the result would be a measurement of leakage.
-        let mut seen: Vec<&str> = Vec::new();
-        for p in &pairs {
-            if !seen.contains(&p.memory.as_str()) {
-                seen.push(&p.memory);
-            }
-        }
-        let cut = seen.len() / 2;
-        let held: Vec<&str> = seen[cut..].to_vec();
-        let (test, train): (Vec<_>, Vec<_>) = pairs
-            .iter()
-            .cloned()
-            .partition(|p| held.contains(&p.memory.as_str()));
+        let (train, test) = split_by_memory(&pairs);
 
         println!(
             "\n  {} pairs: {} train / {} held out, split by memory",
@@ -406,48 +444,5 @@ mod tests {
              collapses from judging relevance into detecting a substring. Read every score\n  \
              above against this line, not against the control."
         );
-    }
-
-    /// The control that decides whether any of the scores above mean anything:
-    /// one `contains` call, no model, no training, no GPU.
-    ///
-    /// `scripts/d2-labels.sh` builds a query by taking twelve words from ~60%
-    /// through a memory, so a positive pair's memory contains its query almost
-    /// verbatim -- modulo the whitespace the script normalises when it joins the
-    /// words. If this scores near 1.000, the labelled task is substring
-    /// provenance rather than relevance, and a method scores well on it exactly
-    /// insofar as it detects near-exact overlap. That is not a bug in the label
-    /// construction, which needed a deterministic verifier and got one; it is a
-    /// limit on what conclusions the resulting numbers support.
-    fn verbatim_containment(test: &[LabelledPair]) -> Scored {
-        fn flat(s: &str) -> String {
-            s.split_whitespace().collect::<Vec<_>>().join(" ")
-        }
-        let (mut tp, mut fp, mut fern, mut tn) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        for p in test {
-            let hit = flat(&p.memory).contains(flat(&p.query).trim());
-            match (hit, p.relevant) {
-                (true, true) => tp += 1.0,
-                (true, false) => fp += 1.0,
-                (false, true) => fern += 1.0,
-                (false, false) => tn += 1.0,
-            }
-        }
-        let precision = if tp + fp > 0.0 { tp / (tp + fp) } else { 0.0 };
-        let recall = if tp + fern > 0.0 {
-            tp / (tp + fern)
-        } else {
-            0.0
-        };
-        Scored {
-            accuracy: (tp + tn) / test.len().max(1) as f32,
-            precision,
-            recall,
-            f1: if precision + recall > 0.0 {
-                2.0 * precision * recall / (precision + recall)
-            } else {
-                0.0
-            },
-        }
     }
 }
