@@ -6,6 +6,7 @@
 
 const TOKEN_KEY = "antumbra.dashboard.token";
 const PAGE_SIZE = 25;
+const DOCUMENTS_SHOWN = 8;
 const RECALL_TOP_K = 20;
 const STATUS_ORDER = ["active", "dormant", "archived", "deleted"];
 const STATS = [
@@ -149,12 +150,15 @@ function signOut(message) {
 /** Empty every section, so nothing one token loaded is left in the page for
  *  the next sign-in to show. */
 function clearSections() {
-  for (const id of ["stats", "population-rows", "compartments", "memories"]) byId(id).replaceChildren();
-  for (const id of ["who", "expires", "updated", "population-summary", "memory-summary", "memory-note"]) {
+  for (const id of ["stats", "population-rows", "compartments", "documents", "memories"]) {
+    byId(id).replaceChildren();
+  }
+  for (const id of ["who", "expires", "updated", "population-summary", "documents-summary", "memory-summary", "memory-note"]) {
     byId(id).textContent = "";
   }
   byId("memory-note").hidden = true;
   byId("more").hidden = true;
+  byId("documents-more").hidden = true;
   byId("browse").textContent = "List all";
   byId("recall").reset();
 }
@@ -195,6 +199,7 @@ async function refresh() {
       section(byId("stats"), loadStats),
       section(byId("population-rows"), loadPopulation),
       section(byId("compartments"), loadCompartments),
+      section(byId("documents"), loadDocuments),
     ];
     if (state.memory.view) loads.push(section(byId("memories"), () => runMemory(state.memory.view)));
     const results = await Promise.allSettled(loads);
@@ -300,6 +305,42 @@ async function loadCompartments() {
       ),
     ),
   );
+}
+
+/** The knowledge documents, by title: the first few, and the rest on asking. */
+async function loadDocuments() {
+  const { documents } = await call("list_documents");
+  const list = byId("documents");
+  const more = byId("documents-more");
+  byId("documents-summary").textContent = documents.length
+    ? `${numbers.format(documents.length)} ingested`
+    : "";
+  more.hidden = true;
+  if (!documents.length) {
+    list.replaceChildren(h("li", { class: "empty" }, "None yet."));
+    return;
+  }
+  const row = (d) =>
+    h(
+      "li",
+      {},
+      h("span", { class: "name" }, d.title),
+      h(
+        "span",
+        { class: "muted small nowrap" },
+        `${numbers.format(d.chunks)} ${d.chunks === 1 ? "chunk" : "chunks"}${d.archived ? " · archived" : ""}`,
+      ),
+    );
+  list.replaceChildren(...documents.slice(0, DOCUMENTS_SHOWN).map(row));
+  const rest = documents.slice(DOCUMENTS_SHOWN);
+  if (rest.length) {
+    more.textContent = `Show ${numbers.format(rest.length)} more`;
+    more.hidden = false;
+    more.onclick = () => {
+      list.append(...rest.map(row));
+      more.hidden = true;
+    };
+  }
 }
 
 // Memory: recalled by meaning, or every memory listed, most recently updated

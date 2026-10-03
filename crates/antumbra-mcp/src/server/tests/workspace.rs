@@ -275,6 +275,17 @@ async fn population_and_stats_report_the_workspace() {
     assert!(stats.0.memories >= 1);
     assert_eq!(stats.0.documents, 1);
 
+    // The document list names it, with its chunks, and over the REST
+    // dispatcher too.
+    let listed = s.list_documents().await.unwrap();
+    assert_eq!(listed.0.documents.len(), 1);
+    assert!(listed.0.documents[0].chunks >= 1);
+    let via = s
+        .call_tool("list_documents", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(via["documents"].as_array().map(Vec::len), Some(1));
+
     // The stats tool is reachable over the REST dispatcher too.
     let via = s
         .call_tool("workspace_stats", serde_json::json!({}))
@@ -772,7 +783,7 @@ async fn provenance_is_stored_and_scopes_recall() {
 #[tokio::test]
 async fn a_tool_profile_narrows_what_is_advertised_and_served() {
     let all = McpServer::all_tool_names();
-    assert_eq!(all.len(), 20, "{all:?}");
+    assert_eq!(all.len(), 21, "{all:?}");
     let profile = crate::profile::ToolProfile::parse("agent", &all)
         .unwrap()
         .expect("agent is a profile, not `all`");
@@ -806,5 +817,5 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() {
         err.message
     );
 
-    assert_eq!(server().await.advertised_tools().len(), 20);
+    assert_eq!(server().await.advertised_tools().len(), 21);
 }
