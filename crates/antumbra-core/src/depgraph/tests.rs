@@ -186,3 +186,68 @@ fn depth_bounds_the_walk_and_cycles_do_not_loop() {
     assert_eq!(names, ["b", "c", "d"], "the start is never reached again");
     assert!(blast_radius(&edges, "nowhere", Direction::Dependents, 6, 0.1, now).is_empty());
 }
+
+/// The pair list keeps every pair, weak ones too, strongest first, and a
+/// service's filter keeps the pairs it is on either end of.
+#[test]
+fn every_pair_is_listed_strongest_first_and_filtered_by_either_end() {
+    let now = Utc::now();
+    let edges = [
+        edge(
+            "github.com/a/web",
+            "github.com/a/orders",
+            Source::Declared,
+            0,
+            now,
+        ),
+        edge(
+            "github.com/a/web",
+            "github.com/a/orders",
+            Source::Observed,
+            0,
+            now,
+        ),
+        edge(
+            "github.com/a/orders",
+            "github.com/a/db",
+            Source::Claimed,
+            0,
+            now,
+        ),
+        edge(
+            "github.com/a/billing",
+            "github.com/a/ledger",
+            Source::Learned,
+            0,
+            now,
+        ),
+    ];
+    let all: Vec<(String, String, usize)> = hops(&edges, None, now)
+        .into_iter()
+        .map(|h| (h.from, h.to, h.edges.len()))
+        .collect();
+    assert_eq!(
+        all,
+        [
+            ("github.com/a/web".into(), "github.com/a/orders".into(), 2),
+            (
+                "github.com/a/billing".into(),
+                "github.com/a/ledger".into(),
+                1
+            ),
+            ("github.com/a/orders".into(), "github.com/a/db".into(), 1),
+        ],
+        "a claim alone is listed, last"
+    );
+    let orders: Vec<(String, String)> = hops(&edges, Some("github.com/A/Orders"), now)
+        .into_iter()
+        .map(|h| (h.from, h.to))
+        .collect();
+    assert_eq!(
+        orders,
+        [
+            ("github.com/a/web".into(), "github.com/a/orders".into()),
+            ("github.com/a/orders".into(), "github.com/a/db".into()),
+        ]
+    );
+}

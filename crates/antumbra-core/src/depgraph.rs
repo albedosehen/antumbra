@@ -290,6 +290,25 @@ fn pairs(edges: &[Edge], now: DateTime<Utc>) -> BTreeMap<(String, String), Hop> 
     pairs
 }
 
+/// Every pair of services with its edges and combined weight, strongest
+/// first, then by the pair's names; with `service`, only the pairs it is on
+/// either end of. Nothing is left out for being weak, so this shows what a
+/// walk with a floor would not.
+pub fn hops(edges: &[Edge], service: Option<&str>, now: DateTime<Utc>) -> Vec<Hop> {
+    let service = service.map(normalize_repo);
+    let mut hops: Vec<Hop> = pairs(edges, now)
+        .into_values()
+        .filter(|h| service.as_deref().is_none_or(|s| h.from == s || h.to == s))
+        .collect();
+    hops.sort_by(|a, b| {
+        b.weight
+            .total_cmp(&a.weight)
+            .then_with(|| a.from.cmp(&b.from))
+            .then_with(|| a.to.cmp(&b.to))
+    });
+    hops
+}
+
 /// Walk the graph from `start`, up to `max_depth` hops, through pairs whose
 /// combined weight is at least `min_weight`, keeping for each service the
 /// strongest path to it. Strongest first, then nearest, then by name.

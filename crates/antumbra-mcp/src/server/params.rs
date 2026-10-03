@@ -753,6 +753,24 @@ pub(super) struct ReachedView {
     pub(super) path: Vec<HopView>,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+pub(super) struct ListDependenciesParams {
+    /// Only the pairs this service (a repository slug) is on either end of.
+    pub(super) service: Option<String>,
+    /// Pairs to return, default 100, at most 200.
+    pub(super) limit: Option<u32>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct DependenciesOut {
+    /// Strongest first, at most 200.
+    pub(super) pairs: Vec<HopView>,
+    /// How many pairs there are in all, listed or not.
+    pub(super) total: u32,
+    /// Every service on either end of a pair, by name, at most 400.
+    pub(super) services: Vec<String>,
+}
+
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct BlastRadiusOut {
     /// The start, normalized.

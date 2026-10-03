@@ -706,6 +706,7 @@ impl McpServer {
             }
             "record_dependency" => dispatch!(RecordDependencyParams, record_dependency),
             "blast_radius" => dispatch!(BlastRadiusParams, blast_radius),
+            "list_dependencies" => dispatch!(ListDependenciesParams, list_dependencies),
             "leave_handoff" => dispatch!(LeaveHandoffParams, leave_handoff),
             "handoffs" => dispatch!(HandoffsParams, handoffs),
             "complete_handoff" => dispatch!(CompleteHandoffParams, complete_handoff),

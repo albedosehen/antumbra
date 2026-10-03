@@ -316,6 +316,9 @@ input::placeholder {
 
 .page {
   display: grid;
+  /* One track no wider than the page: a wide table scrolls in its own frame
+     rather than widening everything. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 48px;
   max-width: 1200px;
   margin: 0 auto;
@@ -528,7 +531,7 @@ td .id {
   list-style: none;
 }
 
-.list li {
+.list > li {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -537,7 +540,7 @@ td .id {
   border-bottom: 1px solid var(--line);
 }
 
-.list li:last-child {
+.list > li:last-child {
   border-bottom: 0;
 }
 
@@ -703,6 +706,55 @@ td .id {
   line-clamp: 2;
   overflow-wrap: anywhere;
   color: var(--ink-2);
+}
+
+/* Dependencies */
+
+.pair-service {
+  display: block;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.evidence {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence .meta {
+  margin-top: 0;
+}
+
+.reached {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reached .path {
+  font-family: var(--mono);
+  font-size: var(--t-s);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.hop {
+  margin-top: 8px;
+}
+
+.reached .actions-row {
+  margin-top: 4px;
+}
+
+.hop > p {
+  margin: 0 0 4px;
+  font-size: var(--t-s);
+  font-weight: 600;
 }
 
 /* Narrow screens */

@@ -8,6 +8,7 @@ const TOKEN_KEY = "antumbra.dashboard.token";
 const PAGE_SIZE = 25;
 const DOCUMENTS_SHOWN = 8;
 const RECALL_TOP_K = 20;
+const PAIRS_SHOWN = 12;
 const STATUS_ORDER = ["active", "dormant", "archived", "deleted"];
 const STATS = [
   ["memories", "Memories"],
@@ -28,6 +29,9 @@ const state = {
   token: null,
   memories: null,
   memory: { view: null, rows: [], shown: 0, more: false, ticket: 0 },
+  radius: 0,
+  // The blast radius showing, or null for every pair.
+  dependencies: null,
 };
 
 /** Thrown when the server answers 401: the token no longer opens anything. */
@@ -150,12 +154,17 @@ function signOut(message) {
 /** Empty every section, so nothing one token loaded is left in the page for
  *  the next sign-in to show. */
 function clearSections() {
-  for (const id of ["stats", "population-rows", "compartments", "documents", "memories"]) {
+  for (const id of ["stats", "population-rows", "compartments", "documents", "memories", "dependencies", "services"]) {
     byId(id).replaceChildren();
   }
-  for (const id of ["who", "expires", "updated", "population-summary", "documents-summary", "memory-summary", "memory-note"]) {
+  for (const id of ["who", "expires", "updated", "population-summary", "documents-summary", "dependencies-summary", "memory-summary", "memory-note"]) {
     byId(id).textContent = "";
   }
+  state.radius += 1;
+  state.dependencies = null;
+  byId("pairs-more").hidden = true;
+  byId("all-pairs").hidden = true;
+  byId("radius").reset();
   byId("memory-note").hidden = true;
   byId("more").hidden = true;
   byId("documents-more").hidden = true;
@@ -200,6 +209,10 @@ async function refresh() {
       section(byId("population-rows"), loadPopulation),
       section(byId("compartments"), loadCompartments),
       section(byId("documents"), loadDocuments),
+      section(byId("dependencies"), () => {
+        const view = state.dependencies;
+        return view ? loadRadius(view.service, view.direction) : loadPairs();
+      }),
     ];
     if (state.memory.view) loads.push(section(byId("memories"), () => runMemory(state.memory.view)));
     const results = await Promise.allSettled(loads);
@@ -340,6 +353,218 @@ async function loadDocuments() {
       list.append(...rest.map(row));
       more.hidden = true;
     };
+  }
+}
+
+// Dependencies: every pair, strongest first, and a service's blast radius on
+// asking. Each edge shows its source and what says so, so the graph is read
+// as evidence, not taken on trust.
+
+/** One edge's evidence: its source, what it is, its weight now, the file. */
+function edgeItem(e) {
+  return h(
+    "li",
+    {},
+    h(
+      "div",
+      { class: "meta" },
+      h("span", { class: "tag" }, e.source),
+      e.detail && h("span", {}, e.detail),
+      h("span", {}, `weight ${fixed(e.weight, 2)}`),
+      e.reinforcement > 0 && h("span", {}, `seen ${numbers.format(e.reinforcement + 1)}×`),
+      h("span", {}, "last seen ", when(e.last_seen)),
+      e.anchor && anchor(e.anchor),
+    ),
+  );
+}
+
+/** A service name that opens its blast radius. */
+function serviceButton(name) {
+  const button = h("button", { type: "button", class: "link pair-service" }, name);
+  button.addEventListener("click", () => {
+    byId("service").value = name;
+    radiusAction();
+  });
+  return button;
+}
+
+function weightCell(weight) {
+  const fill = h("span");
+  fill.style.setProperty("--value", String(Math.min(1, Math.max(0, weight || 0))));
+  return h(
+    "span",
+    { class: "fitness" },
+    h("span", { class: "meter", "aria-hidden": "true" }, fill),
+    fixed(weight, 2),
+  );
+}
+
+/** Every pair in the workspace: the strongest few, and the rest on asking. */
+async function loadPairs() {
+  const ticket = ++state.radius;
+  const out = await call("list_dependencies", { limit: 200 });
+  if (ticket !== state.radius) return;
+  state.dependencies = null;
+  byId("services").replaceChildren(...out.services.map((s) => h("option", { value: s })));
+  byId("all-pairs").hidden = true;
+  const summary = byId("dependencies-summary");
+  const panel = byId("dependencies");
+  const more = byId("pairs-more");
+  more.hidden = true;
+  if (!out.pairs.length) {
+    summary.textContent = "";
+    panel.replaceChildren(
+      h(
+        "p",
+        { class: "empty" },
+        "No dependencies recorded. `antumbra claude dependencies` reads them from your repositories' manifests, and the GitHub App keeps them current.",
+      ),
+    );
+    return;
+  }
+  summary.textContent =
+    `${numbers.format(out.total)} ${out.total === 1 ? "pair" : "pairs"} among ` +
+    `${numbers.format(out.services.length)} services, strongest first`;
+  const body = h("tbody");
+  const row = (p) =>
+    h(
+      "tr",
+      {},
+      h("td", {}, serviceButton(p.from)),
+      h("td", {}, serviceButton(p.to)),
+      h("td", { class: "num" }, weightCell(p.weight)),
+      h("td", {}, h("ul", { class: "evidence" }, ...p.evidence.map(edgeItem))),
+    );
+  body.append(...out.pairs.slice(0, PAIRS_SHOWN).map(row));
+  panel.replaceChildren(
+    h(
+      "div",
+      { class: "table-wrap" },
+      h(
+        "table",
+        {},
+        h(
+          "thead",
+          {},
+          h(
+            "tr",
+            {},
+            h("th", { scope: "col" }, "Service"),
+            h("th", { scope: "col" }, "Depends on"),
+            h("th", { scope: "col", class: "num" }, "Weight"),
+            h("th", { scope: "col" }, "Evidence"),
+          ),
+        ),
+        body,
+      ),
+    ),
+  );
+  const rest = out.pairs.slice(PAIRS_SHOWN);
+  if (rest.length) {
+    more.textContent = `Show ${numbers.format(rest.length)} more`;
+    more.hidden = false;
+    more.onclick = () => {
+      body.append(...rest.map(row));
+      more.hidden = true;
+    };
+  }
+}
+
+/** What a change to a service reaches, or what it needs, each by its
+ *  strongest path with every hop's evidence. */
+async function loadRadius(service, direction) {
+  const ticket = ++state.radius;
+  const summary = byId("dependencies-summary");
+  summary.textContent = "Loading";
+  const out = await call("blast_radius", { service, direction });
+  if (ticket !== state.radius) return;
+  state.dependencies = { service, direction };
+  byId("pairs-more").hidden = true;
+  byId("all-pairs").hidden = false;
+  const panel = byId("dependencies");
+  const dependents = out.direction === "dependents";
+  const n = out.reached.length;
+  summary.textContent = dependents
+    ? `${numbers.format(n)} ${n === 1 ? "service depends" : "services depend"} on ${out.service}, strongest path first`
+    : `${out.service} depends on ${numbers.format(n)} ${n === 1 ? "service" : "services"}, strongest path first`;
+  if (!n) {
+    panel.replaceChildren(
+      h(
+        "p",
+        { class: "empty" },
+        out.edges
+          ? "Nothing this way above the weight floor: no edge, or only ones too weak or too faded to walk."
+          : "No dependencies recorded in this workspace yet.",
+      ),
+    );
+    return;
+  }
+  const hop = (p) =>
+    h(
+      "div",
+      { class: "hop" },
+      h("p", {}, `${p.from} → ${p.to} · weight ${fixed(p.weight, 2)}`),
+      h("ul", { class: "evidence" }, ...p.evidence.map(edgeItem)),
+    );
+  panel.replaceChildren(
+    h(
+      "ul",
+      { class: "list" },
+      ...out.reached.map((r) => {
+        const chain = dependents
+          ? [...r.path].reverse().map((p) => p.from).concat(out.service)
+          : [out.service, ...r.path.map((p) => p.to)];
+        // The hop that joins this service to the path is its own evidence;
+        // the hops nearer the start are shown with the services they reach,
+        // and here on asking.
+        const own = r.path[r.path.length - 1];
+        const nearer = r.path.slice(0, -1);
+        const rest = h("div", { hidden: true }, ...nearer.map(hop));
+        const toggle =
+          nearer.length > 0 &&
+          h("button", { type: "button", class: "link", "aria-expanded": "false" }, "The whole path");
+        if (toggle) {
+          toggle.addEventListener("click", () => {
+            rest.hidden = !rest.hidden;
+            toggle.setAttribute("aria-expanded", String(!rest.hidden));
+            toggle.textContent = rest.hidden ? "The whole path" : "Only its own hop";
+          });
+        }
+        return h(
+          "li",
+          {},
+          h(
+            "div",
+            { class: "reached" },
+            serviceButton(r.service),
+            h("span", { class: "path" }, chain.join(" → ")),
+            hop(own),
+            rest,
+            toggle && h("div", { class: "actions-row" }, toggle),
+          ),
+          h(
+            "span",
+            { class: "muted small nowrap" },
+            `${numbers.format(r.depth)} ${r.depth === 1 ? "hop" : "hops"} · ${fixed(r.weight, 2)}`,
+          ),
+        );
+      }),
+    ),
+  );
+}
+
+/** Run a blast radius from the form, showing a failure in the section. */
+async function radiusAction() {
+  const form = byId("radius");
+  const service = form.elements.service.value.trim();
+  if (!service) {
+    byId("service").focus();
+    return;
+  }
+  try {
+    await section(byId("dependencies"), () => loadRadius(service, form.elements.direction.value));
+  } catch (error) {
+    if (error instanceof SignedOut) signOut(REFUSED);
   }
 }
 
@@ -584,6 +809,21 @@ function start() {
     }
   });
   byId("more").addEventListener("click", showMore);
+  byId("radius").addEventListener("submit", (event) => {
+    event.preventDefault();
+    radiusAction();
+  });
+  // A different direction re-runs what is showing, the other way.
+  byId("radius").addEventListener("change", (event) => {
+    if (event.target.name === "direction" && !byId("all-pairs").hidden) radiusAction();
+  });
+  byId("all-pairs").addEventListener("click", async () => {
+    try {
+      await section(byId("dependencies"), loadPairs);
+    } catch (error) {
+      if (error instanceof SignedOut) signOut(REFUSED);
+    }
+  });
 
   const token = storedToken();
   if (token) open(token);
