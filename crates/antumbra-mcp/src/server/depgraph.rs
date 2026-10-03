@@ -47,66 +47,22 @@ impl McpServer {
             ));
         }
         let anchor = p.provenance.map(anchor_from).transpose()?;
-        let evidence = claim.evidence(anchor.as_ref());
-        let content = claim.content();
-        let id = MemoryId::new(claim.memory_id(&self.tenant));
-        let now = Utc::now();
-
-        if let Some(mut m) = memory::get(&self.store, &self.tenant, &id)
-            .await
-            .map_err(err)?
-        {
-            // Seen again: the latest evidence replaces the old, and the edge is
-            // reinforced, which is what keeps it from fading.
-            if m.content != content {
-                m.embedding = Some(self.embedder.embed(&content).await.map_err(err)?);
-                m.content = content;
-            }
-            m.evidence = evidence;
-            memory::upsert(&self.store, &m).await.map_err(err)?;
-            let reinforced = memory::reinforce(&self.store, &self.tenant, &id, now)
-                .await
-                .map_err(err)?
-                .ok_or_else(|| ErrorData::internal_error("the edge vanished", None))?;
-            return Ok(Json(RecordedDependencyOut {
-                id: id.as_str().to_string(),
-                created: false,
-                confidence: reinforced.confidence,
-                reinforcement: reinforced.reinforcement,
-            }));
-        }
-
-        let embedding = self.embedder.embed(&content).await.map_err(err)?;
-        let m = Memory::new(
-            id.clone(),
-            self.tenant.clone(),
-            MemoryNetwork::World,
-            content,
-            source.confidence(),
-            now,
+        let recorded = crate::dependencies::record(
+            &self.store,
+            self.embedder.as_ref(),
+            &self.tenant,
+            (&self.user, &self.host),
+            &claim,
+            anchor.as_ref(),
+            Utc::now(),
         )
-        .with_embedding(embedding)
-        // The tenant's shared pool, not the recording user's default
-        // compartment: a dependency is the workspace's knowledge, and every
-        // member's blast radius should read it.
-        .by(self.user.clone(), self.host.clone())
-        .with_evidence(evidence);
-        memory::upsert(&self.store, &m).await.map_err(err)?;
-        if memory::get(&self.store, &self.tenant, &id)
-            .await
-            .map_err(err)?
-            .is_none()
-        {
-            return Err(ErrorData::internal_error(
-                "the dependency did not land in the workspace's shared pool",
-                None,
-            ));
-        }
+        .await
+        .map_err(err)?;
         Ok(Json(RecordedDependencyOut {
-            id: id.as_str().to_string(),
-            created: true,
-            confidence: source.confidence(),
-            reinforcement: 0,
+            id: recorded.id.as_str().to_string(),
+            created: recorded.created,
+            confidence: recorded.confidence,
+            reinforcement: recorded.reinforcement,
         }))
     }
 

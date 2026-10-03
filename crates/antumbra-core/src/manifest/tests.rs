@@ -294,3 +294,92 @@ fn a_fork_does_not_publish_its_upstreams_names() {
         .collect();
     assert_eq!(edges, [("github.com/me/engine", "github.com/me/orders")]);
 }
+
+fn set(repo: &str, commit: &str, manifests: Vec<Manifest>) -> ManifestSet {
+    ManifestSet {
+        repo: repo.to_string(),
+        commit: commit.to_string(),
+        branch: Some("main".to_string()),
+        manifests,
+    }
+}
+
+fn edge(from: &str, to: &str) -> (String, String) {
+    (from.to_string(), to.to_string())
+}
+
+/// Reading one repository again records every declared edge into and out of
+/// it, anchored to the declaring file at the commit that repository was read
+/// at, and retracts the ones no longer declared, but only between
+/// repositories whose manifests are known.
+#[test]
+fn a_repository_read_again_records_its_edges_and_retracts_the_dropped_ones() {
+    let orders = read("Cargo.toml", "[package]\nname = \"acme-orders\"\n").unwrap();
+    let web = read(
+        "Cargo.toml",
+        "[package]\nname = \"acme-web\"\n\n[dependencies]\nacme-orders = \"1\"\n",
+    )
+    .unwrap();
+    let checkout_now = read("Cargo.toml", "[package]\nname = \"acme-checkout\"\n").unwrap();
+    let sets = [
+        set("github.com/acme/orders", "aaaaaaa", vec![orders]),
+        set("github.com/Acme/Web", "bbbbbbb", vec![web]),
+        set("github.com/acme/checkout", "ccccccc", vec![checkout_now]),
+    ];
+    let existing = [
+        // Still declared: recorded again, not retracted.
+        edge("github.com/acme/web", "github.com/acme/orders"),
+        // Checkout dropped its dependency on orders.
+        edge("github.com/acme/checkout", "github.com/acme/orders"),
+        // Recorded by a scan of a repository with no set here: left alone.
+        edge("github.com/acme/mobile", "github.com/acme/orders"),
+        // Not touching orders at all: not this reading's business.
+        edge("github.com/acme/checkout", "github.com/acme/web"),
+    ];
+    let out = sync(&sets, "github.com/acme/orders", &existing);
+    let recorded: Vec<(&str, &str, String)> = out
+        .record
+        .iter()
+        .map(|(c, a)| (c.from.as_str(), c.to.as_str(), a.to_evidence()))
+        .collect();
+    assert_eq!(
+        recorded,
+        [(
+            "github.com/acme/web",
+            "github.com/acme/orders",
+            "git:github.com/acme/web@bbbbbbb#main:Cargo.toml".to_string()
+        )]
+    );
+    let retracted: Vec<(&str, &str)> = out
+        .retract
+        .iter()
+        .map(|c| (c.from.as_str(), c.to.as_str()))
+        .collect();
+    assert_eq!(
+        retracted,
+        [("github.com/acme/checkout", "github.com/acme/orders")]
+    );
+    assert!(out.retract.iter().all(|c| c.source == Source::Declared));
+
+    let alone = sync(&sets[..1], "github.com/acme/orders", &existing);
+    assert!(alone.record.is_empty());
+    assert!(
+        alone.retract.is_empty(),
+        "with no other set known, nothing can be said to be gone"
+    );
+}
+
+#[test]
+fn a_manifest_set_round_trips_as_json() {
+    let m = read(
+        "package.json",
+        r#"{"name":"@acme/web","repository":"acme/web","dependencies":{"react":"18"}}"#,
+    )
+    .unwrap();
+    let plain = read("go.mod", "module golang.org/x/sync\n").unwrap();
+    let s = set("github.com/acme/web", "abc1234", vec![m, plain]);
+    let json = serde_json::to_value(&s).unwrap();
+    assert_eq!(json["manifests"][0]["ecosystem"], "npm");
+    assert!(json["manifests"][1].get("home").is_none());
+    assert_eq!(serde_json::from_value::<ManifestSet>(json).unwrap(), s);
+}

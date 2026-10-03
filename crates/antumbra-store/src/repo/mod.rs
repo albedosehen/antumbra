@@ -21,6 +21,7 @@ pub mod invite;
 pub mod lifecycle;
 pub mod loop_control;
 pub mod magic_use;
+pub mod manifest_set;
 pub mod memory;
 pub mod principal;
 pub mod recipe;

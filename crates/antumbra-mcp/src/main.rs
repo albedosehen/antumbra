@@ -27,6 +27,7 @@ use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
 mod auth {
     pub use antumbra_auth::*;
 }
+mod dependencies;
 mod embed;
 mod hardware;
 mod http;

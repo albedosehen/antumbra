@@ -14,11 +14,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
+use antumbra_core::manifest;
 use antumbra_core::{GitProvenance, TenantId};
 use antumbra_github::{is_knowledge_document, Merge, PullRequestEvent, MAX_DOCUMENT_BYTES};
 use antumbra_ingest::Document;
 
-use super::{GithubConfig, HttpState};
+use super::{dependencies, GithubConfig, HttpState};
 
 /// The documents to read and ingest, and the anchor they get.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +37,10 @@ pub(super) struct IngestPlan {
     /// Knowledge documents the change took out of the tree (removed, or renamed
     /// away from), whose chunks have to go with them.
     pub vacated: Vec<String>,
+    /// Every manifest in the tree at the commit, to read for the declared
+    /// edges; `None` when nothing changed them, or the commit is not on the
+    /// default branch, whose reading is the repository's.
+    pub manifests: Option<Vec<String>>,
     /// The listing GitHub returned was incomplete (a very large tree).
     pub truncated: bool,
     /// The installation token the reads authenticate with.
@@ -90,10 +95,23 @@ pub(super) async fn plan_for_merge(
         .map(str::to_string)
         .collect();
     let paths = files
-        .into_iter()
+        .iter()
         .filter(|f| f.is_present() && is_knowledge_document(&f.path))
-        .map(|f| f.path)
+        .map(|f| f.path.clone())
         .collect();
+    let manifests = if touches_a_manifest(&files)
+        && on_default_branch(cfg, event, merge, &token).await?
+    {
+        let tree = cfg
+            .api()
+            .tree_paths(&token, &full_name, &merge.merge_commit)
+            .await
+            .with_context(|| format!("listing the tree of {full_name}@{}", merge.merge_commit))?;
+        // A listing GitHub cut short would read as manifests removed.
+        (!tree.truncated).then(|| manifest_paths(tree.paths))
+    } else {
+        None
+    };
     Ok(Some(IngestPlan {
         tenant: tenant.clone(),
         full_name,
@@ -102,9 +120,43 @@ pub(super) async fn plan_for_merge(
         branch: merge.base_branch.clone(),
         paths,
         vacated,
+        manifests,
         truncated: false,
         token,
     }))
+}
+
+/// Whether a change added, changed or took away a manifest.
+fn touches_a_manifest(files: &[antumbra_github::ChangedFile]) -> bool {
+    files.iter().any(|f| {
+        manifest::is_manifest(&f.path) || f.vacated_path().is_some_and(manifest::is_manifest)
+    })
+}
+
+/// Whether the merge landed on the repository's default branch, from the
+/// delivery when GitHub sent it, else asked.
+async fn on_default_branch(
+    cfg: &GithubConfig,
+    event: &PullRequestEvent,
+    merge: &Merge,
+    token: &str,
+) -> Result<bool> {
+    let default = match event.repository.default_branch.clone() {
+        Some(branch) => branch,
+        None => cfg
+            .api()
+            .default_branch(token, &event.repository.full_name)
+            .await
+            .context("reading the default branch")?,
+    };
+    Ok(merge.base_branch == default)
+}
+
+fn manifest_paths(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|p| manifest::is_manifest(p))
+        .collect()
 }
 
 /// Every knowledge document in a repository at the head of its default
@@ -140,11 +192,14 @@ pub(super) async fn plan_for_repository(
         branch,
         paths: tree
             .paths
-            .into_iter()
+            .iter()
             .filter(|p| is_knowledge_document(p))
+            .cloned()
             .collect(),
         // A cold start reads the tree as it is; nothing has been taken out of it.
         vacated: Vec::new(),
+        // A listing GitHub cut short would read as manifests removed.
+        manifests: (!tree.truncated).then(|| manifest_paths(tree.paths)),
         truncated: tree.truncated,
         token,
     })
@@ -164,6 +219,7 @@ pub(super) fn spawn(state: Arc<HttpState>, plan: IngestPlan) {
         }
     );
     tokio::spawn(async move {
+        let reading = plan.clone();
         let report = run(&state, plan).await;
         eprintln!(
             "antumbra-mcp: github ingest {what}: {} ingested, {} dropped, {} skipped, {} failed",
@@ -174,6 +230,19 @@ pub(super) fn spawn(state: Arc<HttpState>, plan: IngestPlan) {
         );
         for (path, why) in &report.failed {
             eprintln!("antumbra-mcp: github ingest failed for {path}: {why}");
+        }
+        if let Some(paths) = &reading.manifests {
+            let declared = dependencies::run(&state, &reading, paths).await;
+            eprintln!(
+                "antumbra-mcp: github manifests {what}: {} read, {} edge(s) recorded, {} retracted, {} failed",
+                declared.read,
+                declared.recorded,
+                declared.retracted,
+                declared.failed.len()
+            );
+            for (path, why) in &declared.failed {
+                eprintln!("antumbra-mcp: github manifest reading failed for {path}: {why}");
+            }
         }
     });
 }

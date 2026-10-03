@@ -67,6 +67,12 @@ impl Source {
         Source::ALL.into_iter().find(|v| v.as_str() == s.trim())
     }
 
+    /// The evidence entry that marks an edge as this source's, for a store
+    /// asked for one source's edges.
+    pub fn evidence_entry(self) -> String {
+        format!("{SOURCE}{}", self.as_str())
+    }
+
     /// How much an edge from this source is believed when first recorded.
     pub fn confidence(self) -> f32 {
         match self {
@@ -94,10 +100,7 @@ impl Source {
 /// edge carries exactly one, so a store asked for any of these returns the
 /// edges and nothing else.
 pub fn source_entries() -> Vec<String> {
-    Source::ALL
-        .iter()
-        .map(|s| format!("{SOURCE}{}", s.as_str()))
-        .collect()
+    Source::ALL.iter().map(|s| s.evidence_entry()).collect()
 }
 
 /// One claim that `from` depends on `to`.
