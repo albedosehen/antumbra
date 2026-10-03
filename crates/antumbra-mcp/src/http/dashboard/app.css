@@ -10,11 +10,14 @@
   --raised: #ffffff;
   --ink: #1b1a2e;
   --ink-2: rgb(27 26 46 / 0.74);
-  --ink-3: rgb(27 26 46 / 0.6);
+  --ink-3: rgb(27 26 46 / 0.65);
   --line: rgb(27 26 46 / 0.1);
   --line-strong: rgb(27 26 46 / 0.2);
   --accent: #6a63b8;
   --accent-hover: #5c55a8;
+  /* The accent as small text: a step darker on light, so a link on the page
+     ground clears 4.5:1 where the brand shade reads 4.4. */
+  --accent-text: #5c55a8;
   --accent-ink: #ffffff;
   --accent-soft: rgb(106 99 184 / 0.12);
   --danger: #9c4636;
@@ -45,6 +48,7 @@
     --line-strong: rgb(239 231 216 / 0.18);
     --accent: #8a84cc;
     --accent-hover: #9a95d6;
+    --accent-text: #8a84cc;
     --accent-ink: #12121b;
     --accent-soft: rgb(138 132 204 / 0.16);
     --danger: #d9917f;
@@ -173,7 +177,7 @@ button.link {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 button.link:hover {
@@ -277,7 +281,14 @@ input::placeholder {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* The page's one heading of the first level while signed in: the product's
+   name, set as the bar's wordmark rather than as a headline. */
+.brand h1 {
+  font-size: var(--t-m);
   font-weight: 600;
+  line-height: 1.5;
   letter-spacing: 0.02em;
 }
 
@@ -483,7 +494,7 @@ td .id {
 }
 
 .status-active {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
