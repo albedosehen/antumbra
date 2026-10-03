@@ -80,7 +80,11 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
     assert_eq!(r.0.reinforcement, 1);
 
     let listed = s
-        .list_memories(Parameters(ListParams { network: None }))
+        .list_memories(Parameters(ListParams {
+            network: None,
+            limit: None,
+            offset: None,
+        }))
         .await
         .unwrap();
     assert_eq!(listed.0.memories.len(), 1);
@@ -89,7 +93,11 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
         .await
         .unwrap();
     assert!(s
-        .list_memories(Parameters(ListParams { network: None }))
+        .list_memories(Parameters(ListParams {
+            network: None,
+            limit: None,
+            offset: None
+        }))
         .await
         .unwrap()
         .0
@@ -125,7 +133,13 @@ async fn a_view_says_when_a_memory_was_last_written_and_reinforcing_moves_it() -
             .map(|m| m.updated_at.clone())
             .ok_or_else(|| anyhow::anyhow!("the memory is not listed"))
     };
-    let list = || s.list_memories(Parameters(ListParams { network: None }));
+    let list = || {
+        s.list_memories(Parameters(ListParams {
+            network: None,
+            limit: None,
+            offset: None,
+        }))
+    };
 
     let before = written(&list().await.map_err(said)?)?;
     let at = chrono::DateTime::parse_from_rfc3339(&before)?;

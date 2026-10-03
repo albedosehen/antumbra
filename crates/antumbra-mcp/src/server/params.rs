@@ -83,6 +83,12 @@ pub(super) struct RecallParams {
 pub(super) struct ListParams {
     /// Optional network filter (`world`/`bank`/`opinion`).
     pub(super) network: Option<String>,
+    /// Return one page of at most this many (up to 200), the most recently
+    /// updated first. Omitted: every memory, in no set order.
+    pub(super) limit: Option<u32>,
+    /// With `limit`, how many of the most recently updated to skip: the
+    /// previous page's offset plus its length. Default 0.
+    pub(super) offset: Option<u32>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -231,6 +237,8 @@ impl MemoryView {
 
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct MemoriesOut {
+    /// At most `top_k` for a recall, at most `limit` (up to 200) for a paged
+    /// list, and every memory for a list that was not paged.
     pub(super) memories: Vec<MemoryView>,
     /// Present, and `true`, when a relevance floor ran and NOTHING cleared it
     /// (ADR-0023 B-2). Absent otherwise, including when no floor ran at all.
@@ -243,6 +251,11 @@ pub(super) struct MemoriesOut {
     /// answer would have.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) nothing_cleared_the_floor: bool,
+    /// Present, and `true`, when this is a page of `list_memories` and another
+    /// follows it. Absent otherwise: the last page, or a call that was not
+    /// paged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) more: bool,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]

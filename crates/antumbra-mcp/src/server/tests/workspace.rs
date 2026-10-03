@@ -294,6 +294,49 @@ async fn population_and_stats_report_the_workspace() {
     assert!(via.get("memories").is_some());
 }
 
+/// A page of `list_memories` is the most recently updated first, says
+/// whether another follows, and continues from `offset`, over the REST
+/// dispatcher as over JSON-RPC.
+#[tokio::test]
+async fn list_memories_pages_newest_first() {
+    let s = server().await;
+    for content in ["first", "second", "third"] {
+        s.call_tool("store_memory", serde_json::json!({ "content": content }))
+            .await
+            .unwrap();
+        // Distinct update times, so the order is the order of storing.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let page = |offset: u32| {
+        s.call_tool(
+            "list_memories",
+            serde_json::json!({ "limit": 2, "offset": offset }),
+        )
+    };
+    let contents = |v: &serde_json::Value| -> Vec<String> {
+        v["memories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["content"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let first = page(0).await.unwrap();
+    assert_eq!(contents(&first), ["third", "second"]);
+    assert_eq!(first["more"], true);
+    let last = page(2).await.unwrap();
+    assert_eq!(contents(&last), ["first"]);
+    assert!(
+        last.get("more").is_none(),
+        "the last page says nothing follows"
+    );
+    let unpaged = s
+        .call_tool("list_memories", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(contents(&unpaged).len(), 3);
+}
+
 #[tokio::test]
 async fn compartment_tools_create_list_store_share() {
     let s = server().await;
@@ -473,7 +516,11 @@ async fn shared_connection_isolates_tenants_under_signin() {
     // Request 2: re-bind the SAME connection as tenant b; b must not see it.
     store.signin(&tb, &ub).await.unwrap();
     let b_view = server_b
-        .list_memories(Parameters(ListParams { network: None }))
+        .list_memories(Parameters(ListParams {
+            network: None,
+            limit: None,
+            offset: None,
+        }))
         .await
         .unwrap();
     assert!(
@@ -484,11 +531,31 @@ async fn shared_connection_isolates_tenants_under_signin() {
             .all(|m| !m.content.contains("alpha")),
         "tenant b must not see tenant a's memory over the shared connection"
     );
+    let b_page = server_b
+        .list_memories(Parameters(ListParams {
+            network: None,
+            limit: Some(50),
+            offset: None,
+        }))
+        .await
+        .unwrap();
+    assert!(
+        b_page
+            .0
+            .memories
+            .iter()
+            .all(|m| !m.content.contains("alpha")),
+        "nor in a page, which the engine orders and cuts under b's session"
+    );
 
     // Request 3: a re-binds and DOES see its own memory.
     store.signin(&ta, &ua).await.unwrap();
     let a_view = server_a
-        .list_memories(Parameters(ListParams { network: None }))
+        .list_memories(Parameters(ListParams {
+            network: None,
+            limit: None,
+            offset: None,
+        }))
         .await
         .unwrap();
     assert!(
