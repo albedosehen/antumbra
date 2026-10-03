@@ -98,6 +98,18 @@ if ($repo -and $env:ANTUMBRA_REANCHOR -ne '0' -and (Get-Command $bin -ErrorActio
     } catch { }
 }
 
+# --- handoffs waiting for this machine (R-7) ---------------------------------
+# What a session on another of the user's machines left for this one, announced
+# until a session marks it done. The server writes the lines; this only places
+# them. No answer, no line: it fails open like everything else here.
+$handoffs = ''
+try {
+    $payload = @{ tool = 'handoffs'; arguments = @{ host = $hostId } } | ConvertTo-Json -Compress -Depth 5
+    $resp = Invoke-RestMethod -Method Post -Uri "$url/mcp/call" -Headers $headers -Body $payload -TimeoutSec 5 -ErrorAction Stop
+    $said = if ($resp.announcement) { $resp.announcement } elseif ($resp.result.announcement) { $resp.result.announcement } else { '' }
+    if ($said) { $handoffs = "$said`n`n" }
+} catch { $handoffs = '' }
+
 # --- recall, scoped to here when known --------------------------------------
 $mems = @()
 try {
@@ -195,6 +207,7 @@ if ($commit) {
 $limit = 9500
 $sep   = "`n`n---`n`n"
 $head  = "# Antumbra session bootstrap (host=$hostId)`n`n"
+$head += $handoffs
 if ($brief) { $head += "$brief`n`n" }
 $head += $gitLine
 

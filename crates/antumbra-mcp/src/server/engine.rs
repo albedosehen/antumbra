@@ -146,6 +146,7 @@ impl McpServer {
             + Self::compartment_router()
             + Self::document_router()
             + Self::listing_router()
+            + Self::handoff_router()
     }
 
     pub fn all_tool_names() -> Vec<String> {
@@ -702,6 +703,9 @@ impl McpServer {
                 serde_json::to_value(out)
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))
             }
+            "leave_handoff" => dispatch!(LeaveHandoffParams, leave_handoff),
+            "handoffs" => dispatch!(HandoffsParams, handoffs),
+            "complete_handoff" => dispatch!(CompleteHandoffParams, complete_handoff),
             "list_documents" => {
                 let Json(out) = self.list_documents().await?;
                 serde_json::to_value(out)

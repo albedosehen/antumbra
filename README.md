@@ -180,7 +180,7 @@ cargo run -p antumbra-cli --features models,cuda -- \
   ask "Write a Python function add(a, b) that returns their sum."   # route -> load adapter -> generate
 ```
 
-The networked MCP server (`antumbra-mcp --http 0.0.0.0:8081 --url ws://... --db-user root --db-pass <pw> --embedder-url <your /embeddings endpoint> --tools agent`, with a JWT key; `--tools agent` advertises only the eight tools a coding agent needs, so operator actions are never one agent call away and every session carries less tool text; without `--features models` the server refuses to start with no embedder rather than fall back to the `--fake-embedder` stand-in) and its live multi-tenant validation are reproducible with the probes under `docs/` (against a SurrealDB v3 server, e.g. `docker run -p 8000:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root
+The networked MCP server (`antumbra-mcp --http 0.0.0.0:8081 --url ws://... --db-user root --db-pass <pw> --embedder-url <your /embeddings endpoint> --tools agent`, with a JWT key; `--tools agent` advertises only the eleven tools a coding agent needs, so operator actions are never one agent call away and every session carries less tool text; without `--features models` the server refuses to start with no embedder rather than fall back to the `--fake-embedder` stand-in) and its live multi-tenant validation are reproducible with the probes under `docs/` (against a SurrealDB v3 server, e.g. `docker run -p 8000:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root
 memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUDA recipe and the validated generation-quality settings.
 
 ---

@@ -10,7 +10,8 @@
 //! advertisement, not at a permission prompt that still ships the text.
 //!
 //! `agent` is the developer-agent profile ([`AGENT_PROFILE`]): the memory loop
-//! with its feedback signal, anchored documents in and out, and route/answer.
+//! with its feedback signal, anchored documents in and out, route/answer, and
+//! the handoffs a session leaves for another of the user's machines (R-7).
 //! A spec can also be an explicit comma-separated list, and `agent,population`
 //! extends the named profile. Unknown names are refused with the full list, so
 //! a typo cannot silently hide a tool.
@@ -29,6 +30,9 @@ pub const AGENT_PROFILE: &[&str] = &[
     "ingest_document",
     "route",
     "answer",
+    "leave_handoff",
+    "handoffs",
+    "complete_handoff",
 ];
 
 /// The tools a session advertises and serves.
@@ -134,6 +138,9 @@ mod tests {
             "ingest_document",
             "route",
             "answer",
+            "leave_handoff",
+            "handoffs",
+            "complete_handoff",
             "population",
             "share_compartment",
         ]

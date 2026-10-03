@@ -75,6 +75,18 @@ ctx=$(run "$work/small.json" | context)
 check "keeps everything" grep -q 'second small' <<<"$ctx"
 check "mentions no omission" bash -c '! grep -q "left out" <<<"$1"' _ "$ctx"
 
+echo "a handoff waiting for this machine"
+jq -nc '{memories: [{id: "memory:a", content: "first small"}],
+  announcement: "1 handoff waiting for this machine (windows):\n- Rerun the probe (from kuskokwim, 2h ago; id memory:h)"}' \
+  >"$work/handoff.json"
+ctx=$(run "$work/handoff.json" | context)
+check "announces it" grep -q '1 handoff waiting for this machine (windows):' <<<"$ctx"
+handoff_at=$(grep -n 'handoff waiting' <<<"$ctx" | head -1 | cut -d: -f1)
+first_at=$(grep -n 'first small' <<<"$ctx" | head -1 | cut -d: -f1)
+check "puts it before any memory" test "${handoff_at:-999}" -lt "${first_at:-0}"
+ctx=$(run "$work/small.json" | context)
+check "says nothing of handoffs when none wait" bash -c '! grep -q "handoff" <<<"$1"' _ "$ctx"
+
 echo "no antumbra on the path"
 ctx=$(run "$work/small.json" ANTUMBRA_BIN=antumbra-is-not-installed | context)
 check "still answers" grep -q 'first small' <<<"$ctx"

@@ -70,6 +70,14 @@ if [ -n "$repo" ] && [ "${ANTUMBRA_REANCHOR:-1}" != "0" ] && command -v "$BIN" >
   ( ANTUMBRA_URL="$URL" ANTUMBRA_TOKEN="$TOKEN" nohup "$BIN" claude reanchor --days 3       </dev/null >"$log" 2>&1 & ) 2>/dev/null || true
 fi
 
+# --- handoffs waiting for this machine (R-7) ---------------------------------
+# What a session on another of the user's machines left for this one, announced
+# until a session marks it done. The server writes the lines; this only places
+# them. No answer, no line: it fails open like everything else here.
+handoffs=$(curl -sS --max-time 5 -X POST "$URL/mcp/call" "${auth[@]}" \
+  -d "$(jq -nc --arg host "$HOST_ID" '{tool: "handoffs", arguments: {host: $host}}')" 2>/dev/null \
+  | jq -r '.announcement // .result.announcement // empty' 2>/dev/null || true)
+
 # --- recall, scoped to here when known --------------------------------------
 args=$(jq -nc --arg repo "$repo" --arg branch "$branch" '
   {query: "standing conventions, project context, and active tasks for this agent", top_k: 12}
@@ -152,8 +160,9 @@ fi
 # are counted so the agent knows to recall them.
 LIMIT=9500
 context=$(jq -nc --argjson entries "$entries" --arg host "$HOST_ID" --arg git "$git_line" \
-  --arg brief "$brief" --argjson limit "$LIMIT" '
+  --arg brief "$brief" --arg handoffs "$handoffs" --argjson limit "$LIMIT" '
   ( "# Antumbra session bootstrap (host=" + $host + ")\n\n"
+    + (if $handoffs != "" then $handoffs + "\n\n" else "" end)
     + (if $brief != "" then $brief + "\n\n" else "" end)
     + (if $git != "" then $git + "\n\n" else "" end) ) as $head
   | "\n\n---\n\n" as $sep

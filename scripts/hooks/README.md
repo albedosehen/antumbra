@@ -138,6 +138,8 @@ Claude Code caps a hook's context at 10,000 characters. Past the cap the agent i
 
 `scripts/hooks/tests/session-start.sh` (bash, jq) and `scripts/hooks/tests/session-start.ps1` (pwsh) hold both siblings to this with no server and no `antumbra` installed.
 
+Handoffs (R-7) come right after the first line: the bootstrap asks `handoffs` for `ANTUMBRA_HOST_ID` and, when something waits for this machine, places the server's count-and-titles lines ahead of everything recalled, a few hundred characters of the budget. Nothing waiting, or no answer, adds nothing.
+
 ## Git provenance: stale memories are visible, not silently wrong
 
 A memory about code is only as good as its anchor. The hooks keep that anchor as **provenance on the memory** and judge it at recall, where git is, instead of re-extracting symbol tables and pruning them:
