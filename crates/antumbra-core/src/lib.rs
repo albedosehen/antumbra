@@ -28,6 +28,7 @@ pub mod hive;
 pub mod ids;
 pub mod keyed;
 pub mod lifecycle;
+pub mod manifest;
 pub mod memory;
 pub mod orchestration;
 pub mod penumbra;

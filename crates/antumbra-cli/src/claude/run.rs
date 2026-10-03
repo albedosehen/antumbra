@@ -7,8 +7,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::{
-    apply, auto_mode, bridge, brief, conventions, examine, mcp_lint, mcp_stdio, reanchor, render,
-    repository_root, skills, Inputs, Standing,
+    apply, auto_mode, bridge, brief, conventions, dependencies, examine, mcp_lint, mcp_stdio,
+    reanchor, render, repository_root, skills, Inputs, Standing,
 };
 use crate::cli::ClaudeAction;
 
@@ -110,6 +110,20 @@ fn merged_pull_requests(repo: &str, limit: u32) -> anyhow::Result<String> {
 }
 
 /// The project, and every repository directly under `repos`.
+fn tree_dirs(project: &Path, repos: Option<&Path>) -> Vec<PathBuf> {
+    let children = repos
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.join(".git").exists());
+    std::iter::once(project.to_path_buf())
+        .chain(children)
+        .collect()
+}
+
+/// The project, and every repository directly under `repos`.
 fn working_trees(project: &Path, repos: Option<&Path>) -> Vec<auto_mode::Seen> {
     let children = repos
         .and_then(|dir| std::fs::read_dir(dir).ok())
@@ -203,6 +217,37 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             let inputs = Inputs::gather_without_version(home().as_deref(), &project(dir)?);
             if let Some(text) = brief::brief(&examine(&inputs), &inputs.instructions, inputs.os) {
                 println!("{text}");
+            }
+        }
+        ClaudeAction::Dependencies {
+            dir,
+            repos,
+            surface,
+            token,
+            dry_run,
+        } => {
+            let trees: Vec<dependencies::Tree> = tree_dirs(&project(dir)?, repos.as_deref())
+                .iter()
+                .filter_map(|dir| {
+                    let anchor = crate::gitctx::detect_in(dir)?;
+                    let files = crate::gitctx::tracked_files(dir);
+                    Some(dependencies::Tree::read(anchor, &files, |path| {
+                        std::fs::read_to_string(dir.join(path)).ok()
+                    }))
+                })
+                .collect();
+            if trees.is_empty() {
+                anyhow::bail!("no repository with an `origin` remote to read");
+            }
+            let agent = surface_agent();
+            let call = |tool: &str, arguments: Value| {
+                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+            };
+            if dry_run {
+                println!("dry run: nothing recorded");
+            }
+            for line in dependencies::record(&call, &trees, dry_run)? {
+                println!("{line}");
             }
         }
         ClaudeAction::Remember {

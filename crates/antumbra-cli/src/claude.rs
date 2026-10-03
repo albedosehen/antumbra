@@ -19,6 +19,7 @@ pub mod auto_mode;
 pub mod bridge;
 pub mod brief;
 pub mod conventions;
+pub mod dependencies;
 pub mod hooks;
 pub mod mcp_lint;
 pub mod mcp_stdio;
