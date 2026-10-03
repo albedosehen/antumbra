@@ -600,3 +600,55 @@ async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
             .collect::<Vec<_>>()
     );
 }
+
+/// A page is the most recently updated live memories, cut by the engine:
+/// newest first, offset past the ones already shown, one network when asked,
+/// and never a forgotten one, another tenant's, or a vector.
+#[tokio::test]
+async fn recent_pages_live_memories_newest_first() -> Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("t");
+    let start = chrono::Utc::now() - chrono::Duration::hours(1);
+    let put = |id: &str, tenant: &TenantId, network: MemoryNetwork, minutes: i64| {
+        let mut m = Memory::new(
+            id,
+            tenant.clone(),
+            network,
+            id,
+            0.9,
+            start + chrono::Duration::minutes(minutes),
+        );
+        m.embedding = Some(vec![0.1; EMBED_DIM]);
+        m
+    };
+    for m in [
+        put("memory:a", &tenant, MemoryNetwork::World, 1),
+        put("memory:b", &tenant, MemoryNetwork::Bank, 2),
+        put("memory:c", &tenant, MemoryNetwork::World, 3),
+        put("memory:d", &tenant, MemoryNetwork::World, 4),
+        put("memory:gone", &tenant, MemoryNetwork::World, 5),
+        put("memory:other", &TenantId::new("u"), MemoryNetwork::World, 6),
+    ] {
+        upsert(&store, &m).await?;
+    }
+    soft_delete(&store, &tenant, &MemoryId::new("memory:gone"), start).await?;
+
+    let ids = |page: &[Memory]| {
+        page.iter()
+            .map(|m| m.id.as_str().to_string())
+            .collect::<Vec<_>>()
+    };
+    let first = recent(&store, &tenant, None, 2, 0).await?;
+    assert_eq!(ids(&first), ["memory:d", "memory:c"]);
+    assert!(first.iter().all(|m| m.embedding.is_none()));
+    assert_eq!(
+        ids(&recent(&store, &tenant, None, 2, 2).await?),
+        ["memory:b", "memory:a"]
+    );
+    assert!(recent(&store, &tenant, None, 2, 4).await?.is_empty());
+    assert_eq!(
+        ids(&recent(&store, &tenant, Some(MemoryNetwork::World), 5, 0).await?),
+        ["memory:d", "memory:c", "memory:a"]
+    );
+    Ok(())
+}

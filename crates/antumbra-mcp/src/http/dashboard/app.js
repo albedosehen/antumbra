@@ -27,7 +27,7 @@ const clock = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" });
 const state = {
   token: null,
   memories: null,
-  memory: { view: null, rows: [], shown: 0, ticket: 0 },
+  memory: { view: null, rows: [], shown: 0, more: false, ticket: 0 },
 };
 
 /** Thrown when the server answers 401: the token no longer opens anything. */
@@ -141,7 +141,7 @@ function showGate(message) {
 function signOut(message) {
   state.token = null;
   state.memories = null;
-  state.memory = { view: null, rows: [], shown: 0, ticket: state.memory.ticket + 1 };
+  state.memory = { view: null, rows: [], shown: 0, more: false, ticket: state.memory.ticket + 1 };
   forgetToken();
   clearSections();
   showGate(message);
@@ -343,8 +343,9 @@ async function loadDocuments() {
   }
 }
 
-// Memory: recalled by meaning, or every memory listed, most recently updated
-// first. Shown a page at a time.
+// Memory: recalled by meaning, or listed most recently updated first. A list
+// comes from the server a page at a time, so a large store costs one page per
+// "Show more"; a recall is one answer, shown a page at a time.
 
 function memoryForm() {
   const form = byId("recall");
@@ -363,13 +364,13 @@ async function runMemory(view) {
   const request =
     view.mode === "recall"
       ? call("recall_memories", { ...filter, query: view.query, top_k: RECALL_TOP_K })
-      : call("list_memories", filter);
+      : call("list_memories", { ...filter, limit: PAGE_SIZE });
   // A later search started while this one was in flight; it owns the list,
   // whether this one answered or failed.
   const out = await request.finally(() => {
     if (ticket !== state.memory.ticket) throw new Superseded();
   });
-  let rows = out.memories;
+  const rows = out.memories;
   note.hidden = true;
   byId("more").hidden = true;
   if (view.mode === "recall") {
@@ -378,11 +379,9 @@ async function runMemory(view) {
       note.textContent = "Nothing recalled cleared the relevance floor: no stored memory answers this.";
       note.hidden = false;
     }
-  } else {
-    rows = rows.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
-    summary.textContent = `${numbers.format(rows.length)} memories${where}, most recently updated first`;
   }
   state.memory.rows = rows;
+  state.memory.more = Boolean(out.more);
   state.memory.shown = 0;
   list.replaceChildren();
   if (!rows.length && note.hidden) {
@@ -391,18 +390,56 @@ async function runMemory(view) {
   showMore();
 }
 
-function showMore() {
-  const { rows, shown } = state.memory;
-  const next = rows.slice(shown, shown + PAGE_SIZE);
-  byId("memories").append(...next.map(memoryItem));
-  state.memory.shown = shown + next.length;
-  const left = rows.length - state.memory.shown;
+/** Show the next page: the rest of what is loaded, or, in a list with every
+ *  loaded row shown, the server's next page. */
+async function showMore() {
+  const memory = state.memory;
   const more = byId("more");
-  more.hidden = left <= 0;
-  more.textContent = `Show ${numbers.format(Math.min(PAGE_SIZE, left))} more of ${numbers.format(left)}`;
+  if (memory.shown >= memory.rows.length && memory.more) {
+    const ticket = memory.ticket;
+    const filter = memory.view.network ? { network: memory.view.network } : {};
+    more.disabled = true;
+    try {
+      const out = await call("list_memories", { ...filter, limit: PAGE_SIZE, offset: memory.rows.length });
+      // A newer search owns the list now.
+      if (ticket !== state.memory.ticket) return;
+      memory.rows.push(...out.memories);
+      memory.more = Boolean(out.more);
+    } catch (error) {
+      if (error instanceof SignedOut) signOut(REFUSED);
+      if (!(error instanceof SignedOut || error instanceof Superseded)) {
+        const note = byId("memory-note");
+        note.textContent = `Could not load more: ${error.message}`;
+        note.hidden = false;
+      }
+      return;
+    } finally {
+      more.disabled = false;
+    }
+  }
+  const next = memory.rows.slice(memory.shown, memory.shown + PAGE_SIZE);
+  byId("memories").append(...next.map(memoryItem));
+  memory.shown += next.length;
+  const left = memory.rows.length - memory.shown;
+  more.hidden = left <= 0 && !memory.more;
+  more.textContent =
+    left > 0 ? `Show ${numbers.format(Math.min(PAGE_SIZE, left))} more of ${numbers.format(left)}` : "Show more";
+  if (memory.view && memory.view.mode === "list") byId("memory-summary").textContent = listSummary();
   // Only a memory long enough to be clamped gets a toggle, which takes layout
   // to know.
   requestAnimationFrame(offerToggles);
+}
+
+/** How much of a list is showing: of how many, when the count is known. */
+function listSummary() {
+  const { view, shown, more } = state.memory;
+  const total = !view.network && state.memories !== null ? state.memories : null;
+  const where = view.network ? ` in ${view.network}` : "";
+  const count =
+    total !== null
+      ? `${numbers.format(shown)} of ${numbers.format(total)}`
+      : `${numbers.format(shown)}${more ? " so far" : ""}${where}`;
+  return `${count}, most recently updated first`;
 }
 
 function offerToggles() {

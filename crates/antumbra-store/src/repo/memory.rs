@@ -181,7 +181,7 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
 /// came to fail with "connection error: Connection reset" on a store where every
 /// other tool worked -- it had been fine at 9 memories and could not survive the
 /// migrated corpus. The same hazard is already recorded on
-/// [`all_unscoped_without_embeddings`]; this is the counting case of it.
+/// [`all_unscoped_lite`]; this is the counting case of it.
 ///
 /// Tombstones are excluded here rather than in Rust, because the whole point is
 /// that no row crosses the wire.
@@ -276,8 +276,21 @@ pub async fn all_unscoped(store: &Store) -> Result<Vec<Memory>> {
 /// a full store's worth of 384-float embeddings is megabytes that stalls a
 /// `ws://` client, so omit them here. Recall still uses the indexed vectors.
 pub async fn all_unscoped_lite(store: &Store) -> Result<Vec<Memory>> {
-    // Every MemoryRow field except `embedding` (left `None` by its serde default).
-    let fields: Vec<String> = [
+    let fields = without_embedding();
+    // Paged by id (see `Store::read_paged`): the whole population, minus the
+    // vectors. Dropping the embeddings shrinks each row, but the row *count* is
+    // still the full store, so the frame can still overflow without paging.
+    let rows: Vec<MemoryRow> = store.read_paged(TABLE, Some(fields), None).await?;
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(MemoryRow::into_domain)
+        .collect()
+}
+
+/// Every [`MemoryRow`] field but `embedding`, for a read that never uses the
+/// vector: the row's serde default leaves it `None`.
+fn without_embedding() -> Vec<String> {
+    [
         "key",
         "tenant_id",
         "network",
@@ -297,15 +310,40 @@ pub async fn all_unscoped_lite(store: &Store) -> Result<Vec<Memory>> {
     ]
     .iter()
     .map(|s| (*s).to_string())
-    .collect();
-    // Paged by id (see `Store::read_paged`): the whole population, minus the
-    // vectors. Dropping the embeddings shrinks each row, but the row *count* is
-    // still the full store, so the frame can still overflow without paging.
-    let rows: Vec<MemoryRow> = store.read_paged(TABLE, Some(fields), None).await?;
-    rows.into_iter()
-        .filter(|r| r.deleted_at.is_none())
-        .map(MemoryRow::into_domain)
-        .collect()
+    .collect()
+}
+
+/// A page of `tenant`'s live memories, most recently updated first: `limit`
+/// of them after the first `offset`, in one network when one is given.
+///
+/// Ordered and cut by the engine, and read without the embeddings, so a page
+/// costs its own rows however large the store is. [`list`] reads every row,
+/// vector and all, to answer the same question about the first few.
+pub async fn recent(
+    store: &Store,
+    tenant: &TenantId,
+    network: Option<MemoryNetwork>,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<Memory>> {
+    let live = and_(eq("tenant_id", tenant.as_str()), is_none("deleted_at"));
+    let filter = match network {
+        Some(n) => and_(live, eq("network", n.as_str())),
+        None => live,
+    };
+    let query = Query::new()
+        .select(Some(without_embedding()))
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(filter)
+        .order_by("updated_at", "DESC")
+        .map_err(map)?
+        .limit(i64::from(limit))
+        .map_err(map)?
+        .offset(i64::from(offset))
+        .map_err(map)?;
+    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(MemoryRow::into_domain).collect()
 }
 
 /// A compartment's memories (the corpus for per-compartment consolidation,

@@ -145,6 +145,7 @@ impl McpServer {
             + Self::provenance_router()
             + Self::compartment_router()
             + Self::document_router()
+            + Self::listing_router()
     }
 
     pub fn all_tool_names() -> Vec<String> {

@@ -277,6 +277,7 @@ mod compartments;
 pub(crate) mod consolidation;
 mod documents;
 mod engine;
+mod listing;
 mod params;
 mod provenance;
 mod rerank_cache;
@@ -521,6 +522,7 @@ impl McpServer {
             // caller cannot check.
             nothing_cleared_the_floor: had_rows && memories.is_empty(),
             memories,
+            more: false,
         }))
     }
 
@@ -812,27 +814,6 @@ impl McpServer {
         .map_err(err)?
         .is_some();
         Ok(Json(ForgetOut { forgotten }))
-    }
-
-    /// List this tenant's memories (optionally one network).
-    #[tool(
-        description = "List your workspace's memories, optionally filtered to one network (world/bank/opinion)."
-    )]
-    async fn list_memories(
-        &self,
-        Parameters(p): Parameters<ListParams>,
-    ) -> Result<Json<MemoriesOut>, ErrorData> {
-        let mems = match p.network.as_deref().map(parse_network) {
-            Some(net) => memory::list_by_network(&self.store, &self.tenant, net)
-                .await
-                .map_err(err)?,
-            None => memory::list(&self.store, &self.tenant).await.map_err(err)?,
-        };
-        Ok(Json(MemoriesOut {
-            memories: mems.iter().map(MemoryView::from).collect(),
-            // list_memories has no query, so there is nothing to floor.
-            nothing_cleared_the_floor: false,
-        }))
     }
 
     /// Relate two memories with a typed edge (the Penumbra graph).
