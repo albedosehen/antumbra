@@ -147,6 +147,7 @@ impl McpServer {
             + Self::document_router()
             + Self::listing_router()
             + Self::handoff_router()
+            + Self::depgraph_router()
     }
 
     pub fn all_tool_names() -> Vec<String> {
@@ -703,6 +704,8 @@ impl McpServer {
                 serde_json::to_value(out)
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))
             }
+            "record_dependency" => dispatch!(RecordDependencyParams, record_dependency),
+            "blast_radius" => dispatch!(BlastRadiusParams, blast_radius),
             "leave_handoff" => dispatch!(LeaveHandoffParams, leave_handoff),
             "handoffs" => dispatch!(HandoffsParams, handoffs),
             "complete_handoff" => dispatch!(CompleteHandoffParams, complete_handoff),
