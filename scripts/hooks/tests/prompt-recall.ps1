@@ -93,6 +93,12 @@ foreach ($script:runner in $runners) {
     Set-Surface '{"memories":[]}'
     Check 'says nothing' ((Invoke-Hook 'anything at all') -eq '')
 
+    Write-Output "a background task's notification"
+    Set-Surface $recall
+    $note = "<task-notification>`n<task-id>b1</task-id>`n<status>completed</status>`n</task-notification>"
+    Check 'is not recalled for' ((Invoke-Hook $note) -eq '')
+    Check 'a prompt that only mentions one is' ((Invoke-Hook 'why does a <task-notification> arrive twice') -ne '')
+
     Write-Output 'a one-character prompt'
     Set-Surface $recall
     Check 'is not recalled for' ((Invoke-Hook 'k') -eq '')

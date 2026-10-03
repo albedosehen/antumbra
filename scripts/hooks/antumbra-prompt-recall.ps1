@@ -44,6 +44,12 @@ try {
 
 if (-not $prompt -or $prompt.Trim().Length -lt 2) { exit 0 }
 
+# A background task's notification reaches this hook as a prompt too
+# (`<task-notification>...`). It is the harness reporting, not the user asking,
+# and a recall on its wording finds the memories about notifications, every
+# time one arrives.
+if ($prompt.TrimStart().StartsWith('<task-notification>')) { exit 0 }
+
 # Bound the query; the embedder has a 512-token window and a novel would be
 # truncated into noise anyway.
 $query = $prompt.Trim()
