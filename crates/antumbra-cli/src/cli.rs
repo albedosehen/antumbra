@@ -113,6 +113,34 @@ pub enum ClaudeAction {
         #[arg(long)]
         dir: Option<std::path::PathBuf>,
     },
+    /// Record which of your repositories depend on which, from their manifests
+    /// (package.json, Cargo.toml, go.mod, pyproject.toml, requirements*.txt),
+    /// as `declared` edges in the workspace's dependency graph, for
+    /// `blast_radius`. A repository depends on another when one of its
+    /// manifests names a package the other publishes; only the repositories
+    /// read together are matched. Recording an edge again reinforces it.
+    Dependencies {
+        /// A repository to read. Defaults to the current directory.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// A directory whose child directories are your repositories, read
+        /// alongside `dir`.
+        #[arg(long)]
+        repos: Option<std::path::PathBuf>,
+        /// The Antumbra MCP surface to record through, as the hooks know it.
+        #[arg(
+            long = "surface",
+            env = "ANTUMBRA_URL",
+            default_value = "http://127.0.0.1:8081"
+        )]
+        surface: String,
+        /// The bearer token for that surface. Prefer the environment variable.
+        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
+        token: Option<String>,
+        /// Say which edges were found and record nothing.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     /// Keep the rules as memories too, in a `claude-code` compartment of your
     /// own, so an agent can recall why a feature is missing. Written through the
     /// same surface an agent writes through. Volatile, so they never train an
