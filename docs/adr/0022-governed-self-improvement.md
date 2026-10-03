@@ -856,8 +856,44 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The critic watch:** correlation 0.29, 0.37, 0.29; calibration error 0.16, 0.12, 0.15, and 0.18, 0.09, 0.09 recalibrated; twin agreement 0.92, 0.93, 0.95. The standing fallback would not have fired.
    - **The reading:** on `strings` the critic does not earn fewer samples to graduation, the record's criterion. An early lead in three trajectories of four is not a better end point, and S-2 stays unchecked. The next evidence has to come from another skill.
 
+   **On `numbers`, the critic reads the verifier about as well, and its twin agrees with it less.** `critic-validate.sh 00444cc` ran on the `numbers` skill on 2026-10-02, on the same plan as `strings`. The base answered the skill's 50 tasks 16 times under each of three seeds, 800 answers a set, and passed 0.25, 0.28 and 0.24 of them, below `strings`' 0.33 to 0.38.
+
+   | | `strings` | `numbers` |
+   | --- | ---: | ---: |
+   | critic on its withheld tasks: correlation, calibration error, agreement | 0.52, 0.15, 0.72 | 0.61, 0.15, 0.80 |
+   | the twin on its own | 0.65, 0.21, 0.78 | 0.68, 0.09, 0.87 |
+   | both on set 3, which neither saw: correlation, calibration error, agreement | 0.67, 0.11, 0.79 | 0.66, 0.16, 0.80 |
+   | agreement between critic and twin | 0.93 | 0.84 |
+   | recalibrated on half the withheld tasks, the critic's calibration error | 0.20 to 0.21 | 0.11 to 0.07 |
+   | the same, the twin's | 0.25 to 0.10 | 0.08 to 0.08 |
+
+   - **What carries over:** the rank correlation with the verifier, the number that scales the critic's influence, is the same on a second skill, 0.66 against 0.67 on unseen answers.
+   - **What does not:** calibration error on unseen answers is higher, 0.16 against 0.11, and the two critics agree less, 0.84 against 0.93. Each trained on balanced verdicts while the base passes a quarter of the time, so their raw scores sit high on the natural mix; that is what recalibration is for.
+   - **Recalibration:** this time it helped the critic, 0.11 to 0.07, and left the twin where it was. On 128 answers a half that is still one reading.
+
+   **On `numbers` the critic arm trailed, first expert and end point, in both trajectories.** `critic-compare.sh 00444cc` ran `SKILL=numbers` with `SEED=0` and `SEED=1` on 2026-10-02 and 03, the twin watched, under the plan the `strings` runs used: three generations an arm, GRPO, the critic at weight 0.5. The arms took 98 and 93 minutes, then 114 and 100.
+
+   | expert, on the live tasks | verifier-only, seed 0 | critic, seed 0 | verifier-only, seed 1 | critic, seed 1 |
+   | --- | ---: | ---: | ---: | ---: |
+   | generation 0 | 0.68 | 0.49 | 0.66, then 0.67 | 0.57 |
+   | generation 1 | 0.70, admitted against 0.68, then 0.73 | 0.61, admitted against 0.49, then 0.62 | 0.52, not admitted against 0.66 | 0.62, admitted against 0.57, then 0.64 |
+   | generation 2 | 0.65, not admitted against 0.73 | 0.60, not admitted against 0.62 | 0.62, not admitted against 0.67 | 0.65, admitted against 0.64 |
+   | graduations | 2 | 2 | 1 | 3 |
+   | audit slice, generations 0 and 2 (8 tasks) | 0.50, 0.38 | 0.62, 0.38 | 0.38, 0.38 | 0.38, 0.50 |
+
+   - **The first expert:** the critic arm's trailed both times, 0.49 against 0.68 and 0.57 against 0.66. The early lead `strings` showed in three trajectories of four did not appear.
+   - **The end point:** the critic arm's best trailed both times, 0.62 against 0.73 and 0.65 against 0.67. The second gap is inside the seeds' noise; the first is not.
+   - **The restated test** failed both times: the critic arm never reached the verifier-only arm's final score.
+   - **Graduation** came on the first generation in every arm, as on `strings`, so it still cannot tell the arms apart.
+   - **The critic watch, seed 0:** correlation 0.53, 0.58, 0.61; calibration error 0.15, 0.14, 0.17, and 0.15, 0.06, 0.05 recalibrated; twin agreement 0.88, 0.75, 0.75.
+   - **The standing fallback fired for the first time,** in seed 0's last generation: "critic set aside: twin agreement fell from 0.88 to 0.75; verifier-only reward from the next generation". There was no next generation, so no shadow trained on verifier-only reward because of it. The instrument works on a real run, not only in its tests.
+   - **The critic watch, seed 1:** correlation 0.66, 0.61, 0.63; calibration error 0.21, 0.20, 0.19, and 0.15, 0.12, 0.09 recalibrated; twin agreement 0.80, 0.88, 0.86. The fallback would not have fired.
+   - **Correlation is not the bottleneck.** On `numbers` the critic tracked the verifier better than on `strings` (0.53 to 0.66 against 0.25 to 0.45) and helped less. A critic that ranks answers the way the verifier does adds little inside a group the verifier has already split; what it would have to add is order among answers the verifier calls equal, and nothing here measures that.
+
+   **Across six trajectories on two skills, the critic has not earned its criterion.** Its first expert led three times and trailed three. Its best expert at the end led once, tied once and trailed four times. The restated test passed once in six. S-2 stays unchecked, and verifier-only reward, the record's standing fallback, stays the default the loop runs without `--critic`.
+
    Still to come for this step:
-   - **More trajectories, and another skill:** two trajectories disagree on the end point, so the question needs more of them, and a skill other than `strings`. `train --seed` makes each one a run away.
+   - **Whether to pursue the seam further.** Another skill or more seeds would refine the reading, but the evidence so far does not favor the critic. What would change it is a measure of what the critic adds where the verifier is silent, which is the record's open crux, not more of the same comparison.
    - **Critic-derived labels held to the floor,** once a critic trains on anything but fresh verdicts. The record's stated limit applies in full: every check here sees only where a verifier can.
    - **The drift budget** on the critic, bounded by the square root of the divergence from the frozen base.
 8. Never: S-6.
