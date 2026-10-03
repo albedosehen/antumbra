@@ -11,8 +11,12 @@
 # the grow arms need its census, and the status quo takes it too, so the
 # population is read the same way in all three. Admission is on in all three,
 # as it is by default. Knobs: CORPUS (all), GENERATIONS (4), ARMS (the arms to
-# run, default "status-quo uniform credit") and GROW_FROM (where a grow arm's
-# region shadow starts: incumbent, the default, or base).
+# run, default "status-quo uniform credit"), GROW_FROM (where a grow arm's
+# region shadow starts: incumbent, the default, or base) and SEED (the
+# generation seed every arm trains under, `train --seed`; 0 by default, which
+# is what the arms ran under before the knob existed). A nonzero seed is
+# another trajectory of the same comparison, and its logs carry the seed in
+# their names so a second run does not overwrite the first.
 #
 #   git archive --format=tar.gz -o /tmp/antumbra-<sha>.tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/search-validate.sh scripts/grow-compare.sh <host>:/tmp/
@@ -23,9 +27,12 @@ CORPUS="${CORPUS:-all}"
 GENERATIONS="${GENERATIONS:-4}"
 ARMS="${ARMS:-status-quo uniform credit}"
 GROW_FROM="${GROW_FROM:-incumbent}"
-exec >/tmp/grow-compare.log 2>&1
+SEED="${SEED:-0}"
+suffix=""
+[ "$SEED" = 0 ] || suffix="-seed$SEED"
+exec >"/tmp/grow-compare$suffix.log" 2>&1
 set -uo pipefail
-echo "== grow comparison $SHA start $(date -u +%FT%TZ): $CORPUS, $GENERATIONS generation(s) an arm, arms: $ARMS, grow from $GROW_FROM"
+echo "== grow comparison $SHA start $(date -u +%FT%TZ): $CORPUS, $GENERATIONS generation(s) an arm, arms: $ARMS, grow from $GROW_FROM, seed $SEED"
 
 for arm in $ARMS; do
     case "$arm" in
@@ -34,7 +41,8 @@ for arm in $ARMS; do
         credit) args="--grow --grow-by credit --grow-from $GROW_FROM --contribution-tasks 64" ;;
         *) echo "== unknown arm $arm"; continue ;;
     esac
-    log="/tmp/grow-compare-$arm.log"
+    args="$args --seed $SEED"
+    log="/tmp/grow-compare-$arm$suffix.log"
     start=$(date -u +%s)
     CORPUS="$CORPUS" SEARCH=0 GENERATIONS="$GENERATIONS" ARGS="$args" LOG="$log" \
         bash /tmp/search-validate.sh "$SHA"
