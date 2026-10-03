@@ -52,7 +52,7 @@ lettre = { version = "0.11", default-features = false, features = [
 oneiriq-kayak = { git = "ssh://git@github.com/Oneiriq/kayak.git", branch = "main", optional = true }
 # The schema vocabulary kayak resolves the contract against; the same version
 # the store builds its TableDefinitions with, so the two speak one type.
-oneiriq-surql = { version = "0.34.1", default-features = false, features = ["client-rustls"], optional = true }
+oneiriq-surql = { version = "0.34.2", default-features = false, features = ["client-rustls"], optional = true }
 
 [dev-dependencies]
 # `oneshot` drives the axum router in tests without binding a socket.
