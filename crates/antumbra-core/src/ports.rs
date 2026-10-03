@@ -533,6 +533,29 @@ pub trait TypedDecider: Send + Sync {
     async fn decide(&self, state: &str, questions: &[Question]) -> Result<Vec<Answer>>;
 }
 
+/// The state a relevance floor judges: one query and the memories recalled for
+/// it, one `Noul` question each, in order. It travels through
+/// [`TypedDecider`]'s one-string state as JSON, so a query or a memory may
+/// hold any text: a prompt of many lines, a memory with a markdown rule in it.
+/// The recall path encodes it and a floor decodes it, through this one type,
+/// so the two cannot drift apart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelevanceState {
+    pub query: String,
+    pub memories: Vec<String>,
+}
+
+impl RelevanceState {
+    pub fn encode(&self) -> String {
+        serde_json::to_string(self).expect("two strings and a list of them serialize")
+    }
+
+    /// `None` for a state that is not one of these.
+    pub fn decode(state: &str) -> Option<Self> {
+        serde_json::from_str(state).ok()
+    }
+}
+
 /// Replays the frozen population to judge whether a behavior is acceptable in a
 /// given context. This is what makes counterfactual search affordable:
 /// cheap, repeatable re-probing over frozen experts.

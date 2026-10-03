@@ -549,11 +549,11 @@ impl McpServer {
         // One question per candidate, in order, against a state that names both
         // sides of the judgement.
         let questions = vec![Question::Noul; memories.len()];
-        let state = memories
-            .iter()
-            .map(|m| format!("QUERY: {query}\nMEMORY: {}", m.content))
-            .collect::<Vec<_>>()
-            .join("\n---\n");
+        let state = antumbra_core::ports::RelevanceState {
+            query: query.to_string(),
+            memories: memories.iter().map(|m| m.content.clone()).collect(),
+        }
+        .encode();
         match decider.decide(&state, &questions).await {
             Ok(answers) if answers.len() == memories.len() => memories
                 .into_iter()
