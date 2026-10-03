@@ -28,6 +28,7 @@ async fn state_with(store: Store) -> Arc<HttpState> {
         profile: None,
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
+        servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     })
@@ -170,6 +171,47 @@ async fn rest_call_dispatches_a_tool_then_reads_it_back() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// An identity's REST calls share one server: provisioned, and this node
+/// registered, on the first call only. Built per call, each one signed in as
+/// root and re-registered the node under the owner lock, and the node's
+/// registration time moved with every call.
+#[tokio::test]
+async fn rest_calls_provision_the_identity_once() {
+    let st = state().await;
+    let tok = token("ws:once", "user:once");
+    let registered = || async {
+        st.store.signin_root().await.unwrap();
+        antumbra_store::repo::device::list_for_user(
+            &st.store,
+            &TenantId::new("ws:once"),
+            &UserId::new("user:once"),
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| d.updated_at)
+        .collect::<Vec<_>>()
+    };
+    let call = || call_request(Some(&tok), r#"{"tool":"list_memories","arguments":{}}"#);
+
+    let resp = router(st.clone()).oneshot(call()).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let first = registered().await;
+    assert_eq!(first.len(), 1, "the first call registers this node");
+
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    for _ in 0..3 {
+        let resp = router(st.clone()).oneshot(call()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+    assert_eq!(
+        registered().await,
+        first,
+        "later calls register nothing again"
+    );
+    assert_eq!(st.servers.lock().await.map.len(), 1);
 }
 
 // The happy path: a valid token verifies, the shared connection signs in as

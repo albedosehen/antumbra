@@ -179,10 +179,16 @@ struct HttpState {
     /// Bounded so a host that sees many distinct identities cannot grow it without
     /// limit; an evicted identity rebuilds its service on the next request.
     sessions: Mutex<Bounded<Identity, IdentityService>>,
+    /// One server per identity for the REST shim (`/mcp/call`), provisioned once
+    /// like `sessions`. Built per request, every hook call and dashboard load
+    /// signed in as root, provisioned the identity and re-registered this node
+    /// under `auth`, queueing every other request behind it.
+    servers: Mutex<Bounded<Identity, McpServer>>,
     /// Consolidation state, SHARED across every per-identity server so concurrent
-    /// reinforces of the same compartment collapse into one train (each request
-    /// builds a fresh `McpServer`, so per-instance state never coalesces and they
-    /// race on the weight download).
+    /// reinforces of the same compartment collapse into one train (an identity's
+    /// REST server and its SSE session are two instances, and an evicted
+    /// identity's rebuilt server a third, so per-instance state would not
+    /// coalesce and they would race on the weight download).
     consolidating: crate::server::consolidation::SharedConsolidation,
     /// Live-propagation (R-2) delivery: each session registers its peer here on
     /// initialize; the change watcher pushes shared-memory changes to recipients.
@@ -253,6 +259,7 @@ pub async fn serve(
         profile,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
+        servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     });
@@ -403,6 +410,22 @@ impl HttpState {
         Ok(service)
     }
 
+    /// The REST shim's server for an identity, built (and the identity
+    /// provisioned) on its first call and reused after, as the SSE path reuses
+    /// its service. Two first calls racing both build; provisioning is
+    /// idempotent, and the later one is kept.
+    async fn rest_server_for(&self, identity: &Identity) -> Result<McpServer> {
+        if let Some(s) = self.servers.lock().await.get(identity) {
+            return Ok(s.clone());
+        }
+        let mcp = self.mcp_for(identity).await?;
+        self.servers
+            .lock()
+            .await
+            .insert(identity.clone(), mcp.clone());
+        Ok(mcp)
+    }
+
     /// Provision (owner-side) and build the per-identity [`McpServer`]: the base
     /// the JSON-RPC SSE service wraps, and the one the REST `/mcp/call` shim drives
     /// directly. Its tools run on the SCOPED serving connection so the engine ACL
@@ -421,7 +444,8 @@ impl HttpState {
             // hosted server is not "nobody's machine": the agent's recall and
             // store really are happening here, and if this box can train then
             // it is where that user's genesis belongs. Registered once per
-            // identity, because `mcp_for` is cached per identity.
+            // identity, because both callers of `mcp_for` cache what it builds
+            // per identity (`service_for`, `rest_server_for`).
             //
             // Written as owner rather than under the user's record session,
             // like the principal and the default compartment either side of
@@ -663,10 +687,10 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         Err(e) => return bad_request(&format!("invalid JSON body: {e}")),
     };
 
-    // Provision + build the per-identity server (its dedicated serving connection
-    // is created and warmed here on a remote, retrying the cold-start race once
-    // per identity rather than per request).
-    let mcp = match state.mcp_for(&identity).await {
+    // The identity's server, provisioned and built on its first call (its
+    // dedicated serving connection is created and warmed then on a remote,
+    // retrying the cold-start race once per identity rather than per request).
+    let mcp = match state.rest_server_for(&identity).await {
         Ok(m) => m,
         Err(e) => {
             eprintln!(
