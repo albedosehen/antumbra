@@ -251,6 +251,21 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
    What is settled: the bar is **0.785 F1** (D-2's corrected table), the frozen-encoder shortcut is closed, and chunking is established as necessary and not sufficient — best at 200 characters, worth 0.519 to 0.613, against 0.785. What remains is the part that was never cheap — a pair encoder that reads both texts together, which is `ModernBertClassifier` with `ClassifierPooling` from the `candle-transformers` already in the tree, fine-tuned on constructed pairs. `scripts/d2-labels.sh` produces its training data today and `crates/antumbra-serve/src/decision_probe.rs` already holds the training and scoring harness to judge it by, so what is missing is the encoder and the fine-tuning run, not the measurement apparatus.
 
    Two constraints on doing it, both learned rather than assumed. It needs a GPU: the 22M encoder took 161 minutes on CPU for an 800-pair three-way run and did not finish, and ModernBERT-large is 400M with a training pass rather than inference only. And the floor it feeds must sit on the fused score, never on `similarity` — ADR-0023's B-2 correction, which holds for the reranker too.
+
+   **The pair encoder was fine-tuned, and it does not reach the bar.** `answerdotai/ModernBERT-base`, the masked-language-model checkpoint (149M), fine-tuned end to end as a pair classifier on the 400 training pairs and scored on the other 400, split by memory (`pair_encoder::tests::d2_pair_encoder_against_the_control`, `scripts/d2-pair.sh`), on the 3090 Ti, 2026-10-03 and 04, at c229215:
+
+   | tokens | epochs | learning rate | final training loss | accuracy | F1 |
+   | ---: | ---: | ---: | ---: | ---: | ---: |
+   | 512 | 3 | 3e-5 | 0.717 | 0.522 | 0.636 |
+   | 512 | 10 | 5e-5 | 0.694 | 0.570 | 0.602 |
+   | 1,024 | 3 | 3e-5 | out of GPU memory at batch 4 | | |
+
+   Against the control's 0.785 and the shipped floor's 0.797.
+
+   - **It never fit its own training pairs.** Training loss ends at ln 2 (0.693), the loss of a model that says the same thing for every pair. The pipeline is not at fault: on a 24-pair subset the same run takes training loss from 0.84 to 1e-4 in fifteen epochs, through the checkpoint, the padding and the GPU, and then scores chance on the 24 held-out pairs, as memorizing should. From a masked-language-model start, 400 constructed pairs do not teach relevance; the reranker the control uses learned it from far more.
+   - **1,024 tokens does not fit at batch 4 on 24 GB.** candle keeps every layer's attention for the backward pass. It was not retried with a smaller batch: at 512 tokens, the control's own length, the encoder is far below the control, so length is not what it lacks.
+
+   So the floor stays the calibrated cross-encoder, and the head D-1 needs for `Choice` and `Score` wants a different start: a checkpoint already trained on pairs (a reranker, or an embedding model trained for retrieval) rather than a masked-language one, or a label set an order of magnitude larger.
 3. [ ] **D-1, the gate.** Two questions, with the margin retained as fallback and control.
 4. [ ] **D-3, the boundary probe**, once D-1 and D-2 have a calibration history.
 5. [ ] **D-4, the critic**, after ADR-0022's S-2, not before.
