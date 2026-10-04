@@ -507,7 +507,6 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **The gate was the obstacle.** Under the heuristic margin, none of the twelve region specialists the earlier arms trained, cold or warm, was admitted. Under the router that serves them, one arm admitted all three of its own.
    - **Growth is not yet specialization.** The uniform population ended at 0.76, and so did its best single expert, the numbers specialist. It scores 0.76 across all 64 tasks, above the generalist's 0.72. Much of the gain may be the warm start's continued training rather than routing among specialists. The routing headroom now kept on the baseline separates the two: the same experts routed as well as they could be, against the population.
    - **One run an arm.** The two arms' first specialists came out differently: numbers was admitted in uniform (generation 2) and turned away in credit (generation 1). So the arms' difference here is as much the draw as the policy. By the record's test, credit against uniform, the step stays unchecked.
-6. [x] S-4, proposed verifiers and the trust protocol.
 
    **A second comparison, and the arms traded places.** It ran on 50fd1aa on 2026-09-26 and 27, set up as before, with contribution scores reused and the routing headroom reported.
 
@@ -523,6 +522,26 @@ The record's own ordering, from Alternatives considered: "The standing instrumen
    - **Why the second run is not a repeat:** a run's unseeded draws come from one process-wide counter, so anything that changes how many draws come first changes the rest of the trajectory. Here the reused scores skipped evaluations that used to draw. The two comparisons are two trajectories.
    - **The headroom:** in both arms, the same experts routed as well as they could be would score 0.07 above the population, while the population sits within 0.02 of its best single expert. It was first read as the gate choosing worse than its experts allow. It is not evidence of that (ADR-0024 D-1). The oracle takes each task's best of three or four scores of eight samples each, and identical experts give that much from sampling noise alone.
    - **The cost:** with the scores reused, the arms took 203 and 211 minutes against 261 and 273 before. By the fourth generation the measurement asked for 199 and 260 scores, of which 135 and 196 were already known.
+
+   **Two more runs an arm, seeded, under the cross-fitted oracle.** They ran on af201ae on 2026-10-03, set up as before, each with a seed of its own (`grow-compare.sh` passes `train --seed`), and with the oracle cross-fitted (ADR-0024 D-1).
+
+   | seed | arm | wall clock | admitted | population | best single expert | routing adds | routed as well as it could be |
+   | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+   | 1 | uniform | 201 min | 4 of 4 | 0.76 | 0.78 | -0.02 | 0.78 (+0.02) |
+   | 1 | credit | 325 min | 4 of 4 | 0.77 | 0.79 | -0.02 | 0.79 (+0.02) |
+   | 2 | uniform | 196 min | 3 of 4 | 0.66 | 0.69 | -0.03 | 0.68 (+0.01) |
+   | 2 | credit | 208 min | 4 of 4 | 0.70 | 0.71 | -0.02 | 0.74 (+0.05) |
+
+   - **What each grew:**
+     - Seed 1, uniform: its fourth graduate replaced the third, a near-duplicate (similarity 0.995, 0.79 against 0.75). At the end its specialists added +0.21 on seven tasks and +0.31 on four.
+     - Seed 1, credit: all four admitted; its specialists added +0.18 on five tasks and +0.16 on four.
+     - Seed 2, uniform: the fourth was turned away as a duplicate of the third (similarity 0.994, 0.69 against 0.69).
+     - Seed 2, credit: its second graduate replaced the first (similarity 0.991, 0.72 against 0.71). The loop then retired the generalist they grew from, demoted to dormant after three generations contributing -0.02, 0.00 and -0.06: S-5 doing its job inside a grow run.
+   - **Credit against uniform, four runs an arm:** -0.04, +0.04, +0.01 and +0.04, a mean of +0.01 against a spread of 0.04. The seed moves the outcome more than the arm does: the uniform arm ended at 0.76 under seed 1 and 0.66 under seed 2, because the first generalist, which every later generation grows from, came out at 0.73 and 0.67. So S-3 stays unchecked. A difference this small needs more seeds than an arm can afford at three to five hours each, or a cheaper outcome to compare on.
+   - **Per unit of compute:** seed 1's credit arm took 325 minutes for 0.01 more than uniform, seed 2's took 208 for 0.04. Neither seed shows the learned step buying more per hour than uniform sampling, which is the record's test.
+   - **The headroom, cross-fitted:** +0.02, +0.02, +0.01 and +0.05, where the biased oracle read +0.07. As D-1's noise simulation predicted, most of the earlier headroom was sampling noise. The populations route about as well as their experts allow, and sit 0.01 to 0.03 under their best single expert, so growth here is still mostly the warm start's continued training rather than specialization.
+
+6. [x] S-4, proposed verifiers and the trust protocol.
 
    **The namespace and the trust protocol are in. Synthesis is not.**
 
