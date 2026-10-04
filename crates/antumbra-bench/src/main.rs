@@ -48,6 +48,15 @@
 //! embedder reads. Each config is scored twice, hybrid as recall runs and dense
 //! alone, so what the embedder itself contributes shows.
 //!
+//! ## Chunks (ADR-0025)
+//!
+//! `ANTUMBRA_BENCH_CHUNK_CHARS=<n>` stores each document as pieces of about
+//! `n` characters, each a memory of its own, and scores a document at the rank
+//! of its best piece: the measurement the chunk index was decided on.
+//! `ANTUMBRA_BENCH_CHUNK_INDEX=1` stores it the way the server does instead:
+//! whole, with its pieces in the chunk index at the server's size, recalled
+//! through the same dense leg, so the number is the deployed path's.
+//!
 //! ## Run
 //!
 //! ```text
@@ -63,10 +72,11 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
+use antumbra_core::chunk::{cut_hash, split, MEMORY_CHUNK_CHARS};
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::FixedEmbedder;
 use antumbra_core::{Memory, MemoryNetwork, Result, TenantId};
-use antumbra_store::repo::memory;
+use antumbra_store::repo::{memory, memory_chunk};
 use antumbra_store::{Store, EMBED_DIM};
 
 /// The labeled corpus, baked into the binary so the harness is self-contained
@@ -268,11 +278,15 @@ async fn evaluate(
         let store = Store::connect_memory(EMBED_DIM).await?;
 
         for doc in &domain.documents {
+            if chunk_index() {
+                index(&store, embedder, &tenant, doc, now).await?;
+                continue;
+            }
             // Whole, or in chunks each stored on its own, `doc~j`, when
             // ANTUMBRA_BENCH_CHUNK_CHARS asks: a long memory's one vector blurs
             // a passage from its middle, a chunk's vector does not.
             let pieces = match chunk_chars() {
-                Some(size) => antumbra_core::chunk::split(&doc.text, size),
+                Some(size) => split(&doc.text, size),
                 None => vec![doc.text.clone()],
             };
             let whole = pieces.len() == 1;
@@ -291,7 +305,7 @@ async fn evaluate(
 
         // Chunks of one document compete for the same ranks, so fetch deeper and
         // keep each document's best chunk.
-        let fetch = if chunk_chars().is_some() {
+        let fetch = if chunk_chars().is_some() && !chunk_index() {
             deepest * 10
         } else {
             deepest
@@ -304,6 +318,10 @@ async fn evaluate(
                     memory::recall_hybrid(&store, &tenant, &label.query, &qv, fetch, None, &[])
                         .await?
                 }
+                // A blank query text is the dense leg alone, chunk leg and all.
+                Mode::Dense if chunk_index() => {
+                    memory::recall_hybrid(&store, &tenant, "", &qv, fetch, None, &[]).await?
+                }
                 Mode::Dense => memory::recall(&store, &tenant, &qv, fetch, None).await?,
             };
             let rank = rank_of(&documents_of(&hits), &label.relevant_doc_id);
@@ -314,7 +332,11 @@ async fn evaluate(
         per_domain.insert(domain.name.clone(), metrics);
     }
 
-    let chunked = chunk_chars().map_or(String::new(), |n| format!(", chunks of {n} chars"));
+    let chunked = if chunk_index() {
+        format!(", the chunk index ({MEMORY_CHUNK_CHARS} chars)")
+    } else {
+        chunk_chars().map_or(String::new(), |n| format!(", chunks of {n} chars"))
+    };
     Ok(ConfigReport {
         config_name: format!("{config_name} / {}{chunked}", mode.name()),
         per_domain,
@@ -324,6 +346,43 @@ async fn evaluate(
 
 /// What separates a document's id from its chunk's number.
 const CHUNK_MARK: char = '~';
+
+/// Whether to store documents the way the server does: whole, with their
+/// pieces in the chunk index.
+fn chunk_index() -> bool {
+    std::env::var("ANTUMBRA_BENCH_CHUNK_INDEX").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Store `doc` the way the server does: whole, and, when it is longer than one
+/// piece, its pieces in the chunk index, as the server's keeper cuts them.
+async fn index(
+    store: &Store,
+    embedder: &dyn Embedder,
+    tenant: &TenantId,
+    doc: &Document,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    let whole = embedder.embed(&doc.text).await?;
+    let mem = Memory::new(
+        format!("{ID_PREFIX}{}", doc.id),
+        tenant.clone(),
+        MemoryNetwork::World,
+        doc.text.clone(),
+        1.0,
+        now,
+    )
+    .with_embedding(whole);
+    memory::upsert(store, &mem).await?;
+    let pieces = split(&doc.text, MEMORY_CHUNK_CHARS);
+    if pieces.len() > 1 {
+        let mut vectors = Vec::with_capacity(pieces.len());
+        for piece in &pieces {
+            vectors.push(embedder.embed(piece).await?);
+        }
+        memory_chunk::replace(store, &mem, &cut_hash(&doc.text), vectors).await?;
+    }
+    Ok(())
+}
 
 fn chunk_chars() -> Option<usize> {
     std::env::var("ANTUMBRA_BENCH_CHUNK_CHARS")
@@ -555,6 +614,38 @@ mod tests {
                 "two documents: everything is in the top 30"
             );
         }
+    }
+
+    /// The server's way of storing a document: whole, and its pieces in the
+    /// chunk index when it is longer than one; a piece's own vector finds it
+    /// through the dense leg.
+    #[tokio::test]
+    async fn the_chunk_index_mode_stores_a_document_as_the_server_does() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let tenant = TenantId::new("ws:bench");
+        let embedder = FixedEmbedder::new(EMBED_DIM);
+        let now = chrono::Utc::now();
+        let long = (0..200)
+            .map(|i| format!("word{i:03}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        for (id, text) in [("long", long.clone()), ("short", "a short one".into())] {
+            let doc = Document {
+                id: id.into(),
+                text,
+            };
+            index(&store, &embedder, &tenant, &doc, now).await.unwrap();
+        }
+        let held = memory_chunk::indexed(&store, &tenant).await.unwrap();
+        assert_eq!(held.len(), 1, "the short document is one piece");
+        assert_eq!(held["memory:long"].content_hash, cut_hash(&long));
+
+        let piece = &split(&long, MEMORY_CHUNK_CHARS)[2];
+        let qv = embedder.embed(piece).await.unwrap();
+        let hits = memory::recall_hybrid(&store, &tenant, "", &qv, 1, None, &[])
+            .await
+            .unwrap();
+        assert_eq!(rank_of(&hits, "long"), Some(1));
     }
 
     /// `rank_of` maps a stored memory id back to its labeled doc id and reports a
