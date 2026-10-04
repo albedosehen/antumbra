@@ -20,7 +20,7 @@ use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::expressions::{field, value};
 use surql::query::helpers::fulltext_search_query;
-use surql::types::operators::{and_, contains_any, eq, is_none, is_not_none, lt};
+use surql::types::operators::{and_, contains_any, eq, inside, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
 use antumbra_core::calibrate::calibrated_score;
@@ -39,7 +39,7 @@ use crate::store::Store;
 const TABLE: &str = "memory";
 
 #[derive(Serialize, Deserialize)]
-struct MemoryRow {
+pub(crate) struct MemoryRow {
     key: String,
     tenant_id: String,
     network: MemoryNetwork,
@@ -71,7 +71,7 @@ struct MemoryRow {
     // Tombstone marker. Absent (NONE) for a live trace so read paths can test it
     // cheaply; an RFC3339 timestamp once forgotten.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    deleted_at: Option<String>,
+    pub(crate) deleted_at: Option<String>,
 }
 
 impl MemoryRow {
@@ -100,7 +100,7 @@ impl MemoryRow {
         }
     }
 
-    fn into_domain(self) -> Result<Memory> {
+    pub(crate) fn into_domain(self) -> Result<Memory> {
         Ok(Memory {
             id: MemoryId::new(self.key),
             tenant: TenantId::new(self.tenant_id),
@@ -289,7 +289,7 @@ pub async fn all_unscoped_lite(store: &Store) -> Result<Vec<Memory>> {
 
 /// Every [`MemoryRow`] field but `embedding`, for a read that never uses the
 /// vector: the row's serde default leaves it `None`.
-fn without_embedding() -> Vec<String> {
+pub(crate) fn without_embedding() -> Vec<String> {
     [
         "key",
         "tenant_id",
@@ -529,6 +529,26 @@ pub async fn recall_hybrid(
             score(b).total_cmp(&score(a))
         });
     }
+    // The chunk index (ADR-0025): each memory scores by its best vector, its
+    // whole one or one of its pieces', through the same calibration. A memory
+    // with no chunks yet scores by its whole vector as before, so the index can
+    // be empty, partial or rebuilt; a failing chunk leg leaves the whole-memory
+    // list as it was.
+    let chunk_leg =
+        crate::repo::memory_chunk::nearest(store, tenant, query_vec, pool, network).await;
+    let dense = match chunk_leg {
+        Ok(pieces) if !pieces.is_empty() => {
+            let score = |v: &[f32]| calibrated_score(query_vec, v, probes);
+            best_of(store, tenant, dense, pieces, score, pool).await?
+        }
+        Ok(_) => dense,
+        Err(e) => {
+            eprintln!(
+                "antumbra-store: chunk leg failed, the dense leg reads whole memories only: {e}"
+            );
+            dense
+        }
+    };
     // Best-effort, but never SILENTLY: a failing lexical leg degrades recall to
     // dense-only, which looks exactly like a ranking quirk from the outside. That
     // is not hypothetical -- a missing `ORDER BY` in this very function went
@@ -563,6 +583,69 @@ pub async fn recall_hybrid(
         .take(k)
         .filter_map(|id| by_id.remove(&id))
         .collect())
+}
+
+/// Rank the whole-memory list and the memories the chunk leg found together,
+/// each memory by its best vector: its whole one or its nearest piece, under
+/// `score`. Scores, not ranks, so a piece that is not near the query cannot
+/// tie a whole memory that is. A memory forgotten since its chunks were cut is
+/// not fetched, so it drops out here.
+async fn best_of(
+    store: &Store,
+    tenant: &TenantId,
+    dense: Vec<Memory>,
+    pieces: Vec<(String, Vec<f32>)>,
+    score: impl Fn(&[f32]) -> f32,
+    k: usize,
+) -> Result<Vec<Memory>> {
+    let mut best_piece: HashMap<String, f32> = HashMap::new();
+    for (memory, vector) in &pieces {
+        let s = score(vector);
+        best_piece
+            .entry(memory.clone())
+            .and_modify(|b| *b = b.max(s))
+            .or_insert(s);
+    }
+    let mut by_id: HashMap<String, Memory> = dense
+        .into_iter()
+        .map(|m| (m.id.as_str().to_string(), m))
+        .collect();
+    let missing: Vec<String> = best_piece
+        .keys()
+        .filter(|id| !by_id.contains_key(*id))
+        .cloned()
+        .collect();
+    for m in get_many(store, tenant, &missing).await? {
+        by_id.insert(m.id.as_str().to_string(), m);
+    }
+    let mut scored: Vec<(f32, Memory)> = by_id
+        .into_iter()
+        .map(|(id, m)| {
+            let whole = m.embedding.as_deref().map_or(f32::MIN, &score);
+            let best = best_piece.get(&id).map_or(whole, |p| p.max(whole));
+            (best, m)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    Ok(scored.into_iter().take(k).map(|(_, m)| m).collect())
+}
+
+/// The live memories of `tenant` among `ids`, in no particular order.
+pub async fn get_many(store: &Store, tenant: &TenantId, ids: &[String]) -> Result<Vec<Memory>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let condition = and_(
+        and_(eq("tenant_id", tenant.as_str()), is_none("deleted_at")),
+        inside("key", ids.iter().map(|id| Value::String(id.clone()))),
+    );
+    let query = Query::new()
+        .select(None)
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(condition);
+    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(MemoryRow::into_domain).collect()
 }
 
 /// The BM25 full-text (sparse) leg of [`recall_hybrid`]: the `k` memories whose

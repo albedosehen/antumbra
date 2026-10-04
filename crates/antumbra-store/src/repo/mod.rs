@@ -23,6 +23,7 @@ pub mod loop_control;
 pub mod magic_use;
 pub mod manifest_set;
 pub mod memory;
+pub mod memory_chunk;
 pub mod principal;
 pub mod recipe;
 pub mod reward;

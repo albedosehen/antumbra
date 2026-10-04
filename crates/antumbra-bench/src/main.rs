@@ -272,7 +272,7 @@ async fn evaluate(
             // ANTUMBRA_BENCH_CHUNK_CHARS asks: a long memory's one vector blurs
             // a passage from its middle, a chunk's vector does not.
             let pieces = match chunk_chars() {
-                Some(size) => chunks(&doc.text, size),
+                Some(size) => antumbra_core::chunk::split(&doc.text, size),
                 None => vec![doc.text.clone()],
             };
             let whole = pieces.len() == 1;
@@ -330,39 +330,6 @@ fn chunk_chars() -> Option<usize> {
         .ok()
         .and_then(|s| s.parse().ok())
         .filter(|&n: &usize| n > 0)
-}
-
-/// `text` in pieces of about `size` characters, cut between words, each
-/// overlapping the one before by about a fifth so a passage cut at a boundary
-/// is whole in one of them.
-fn chunks(text: &str, size: usize) -> Vec<String> {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    let mut out = Vec::new();
-    let mut start = 0;
-    while start < words.len() {
-        let mut end = start;
-        let mut length = 0;
-        while end < words.len() && (length == 0 || length + words[end].len() < size) {
-            length += words[end].len() + 1;
-            end += 1;
-        }
-        out.push(words[start..end].join(" "));
-        if end == words.len() {
-            break;
-        }
-        // Step back about a fifth of a chunk for the overlap.
-        let mut back = end;
-        let mut overlap = 0;
-        while back > start + 1 && overlap < size / 5 {
-            back -= 1;
-            overlap += words[back].len() + 1;
-        }
-        start = back;
-    }
-    if out.is_empty() {
-        out.push(text.to_string());
-    }
-    out
 }
 
 /// A recalled list as documents, each at the rank of its best chunk.
@@ -592,21 +559,6 @@ mod tests {
 
     /// `rank_of` maps a stored memory id back to its labeled doc id and reports a
     /// 1-based rank (or `None` when absent).
-    #[test]
-    fn chunks_cover_the_text_overlapping() {
-        let text = (0..100)
-            .map(|i| format!("w{i:02}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let pieces = chunks(&text, 40);
-        assert!(pieces.len() > 5, "{pieces:?}");
-        assert!(pieces.iter().all(|p| p.len() <= 44), "{pieces:?}");
-        assert!(pieces[0].starts_with("w00") && pieces.last().unwrap().ends_with("w99"));
-        let first_end = pieces[0].split(' ').next_back().unwrap();
-        assert!(pieces[1].contains(first_end), "consecutive pieces overlap");
-        assert_eq!(chunks("short", 40), ["short"]);
-    }
-
     #[tokio::test]
     async fn rank_of_strips_prefix_and_is_one_based() {
         let now = chrono::Utc::now();

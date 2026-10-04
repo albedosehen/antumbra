@@ -472,6 +472,31 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 // fused with the HNSW dense leg by Reciprocal Rank Fusion.
                 bm25_index("memory_content_fts", ["content"], CONTENT_ANALYZER),
             ]),
+        // The chunk index (ADR-0025): each memory's text in overlapping pieces,
+        // each with its own vector, so a passage from the middle of a long
+        // memory can find it. It carries the memory's workspace and
+        // compartment, so its select rule is the memory's own and a chunk is
+        // visible exactly when its memory is. Only the server writes it.
+        table_schema("memory_chunk")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions([
+                ("select", memory_select_rule()),
+                ("create", "false".to_string()),
+                ("update", "false".to_string()),
+                ("delete", "false".to_string()),
+            ])
+            .with_indexes([
+                index("memory_chunk_tenant_memory_idx", ["tenant_id", "memory"]),
+                hnsw_index(
+                    "memory_chunk_embedding_hnsw",
+                    "embedding",
+                    embed_dim,
+                    HnswDistanceType::Cosine,
+                    MTreeVectorType::F32,
+                    None,
+                    None,
+                ),
+            ]),
         // Penumbra graph: typed, directed edges between memories
         // (references/supersedes/contradicts/follows/caused). Tenant-isolated
         // like `memory` (engine-enforced PERMISSIONS + the repo's explicit
