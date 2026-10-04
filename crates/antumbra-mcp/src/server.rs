@@ -479,16 +479,12 @@ impl McpServer {
         // can. Attached here rather than afterwards because the demotion below
         // reorders the views, and a similarity paired with the wrong memory
         // would be worse than none.
-        // Bound the prose unless the caller asked for all of it (ADR-0023 B-1).
-        // Applied here, where the view is built, so every path out of recall is
-        // bounded by construction rather than by each caller remembering to.
-        let full = p.full.unwrap_or(false);
         let with_similarity = |m: &Memory, mut view: MemoryView| {
             view.similarity = m
                 .embedding
                 .as_deref()
                 .map(|e| antumbra_core::cosine_similarity(&q, e));
-            view.bounded(full, params::RECALL_CONTENT_CHARS)
+            view
         };
         let memories: Vec<MemoryView> = if p.repo.is_some() || p.branch.is_some() {
             let ctx = GitContext {
@@ -525,6 +521,16 @@ impl McpServer {
             }
             None => memories,
         };
+        // Bound the prose unless the caller asked for all of it (ADR-0023 B-1),
+        // once the floor has judged the whole memory, as the reranker read it:
+        // judged on the bounded prefix, a long memory whose answer sits past the
+        // cut was dropped though it ranked first, which on the user's own
+        // memories was more than a third of the right answers.
+        let full = p.full.unwrap_or(false);
+        let memories: Vec<MemoryView> = memories
+            .into_iter()
+            .map(|v| v.bounded(full, params::RECALL_CONTENT_CHARS))
+            .collect();
         Ok(Json(MemoriesOut {
             // Only claim the floor emptied the result when it had something to
             // empty. A store with no matching rows at all is a different answer,
