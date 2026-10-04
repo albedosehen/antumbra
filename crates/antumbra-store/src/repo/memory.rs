@@ -453,6 +453,39 @@ pub async fn recall(
         .collect()
 }
 
+/// Hybrid recall for several queries at once, fused by rank: the whole of a
+/// prompt and each part of one that asks for more than one thing
+/// (`antumbra_core::query::parts`). Each query runs as [`recall_hybrid`] does,
+/// and the lists are fused by Reciprocal Rank Fusion, so each part's best
+/// matches stand beside the whole prompt's before the top `k` are kept. With
+/// one query it is [`recall_hybrid`].
+pub async fn recall_hybrid_many(
+    store: &Store,
+    tenant: &TenantId,
+    queries: &[(String, Vec<f32>)],
+    k: usize,
+    network: Option<MemoryNetwork>,
+    probes: &[Vec<f32>],
+) -> Result<Vec<Memory>> {
+    if let [(text, vector)] = queries {
+        return recall_hybrid(store, tenant, text, vector, k, network, probes).await;
+    }
+    let mut rankings: Vec<Vec<String>> = Vec::with_capacity(queries.len());
+    let mut found: std::collections::HashMap<String, Memory> = std::collections::HashMap::new();
+    for (text, vector) in queries {
+        let hits = recall_hybrid(store, tenant, text, vector, k, network, probes).await?;
+        rankings.push(hits.iter().map(|m| m.id.as_str().to_string()).collect());
+        for m in hits {
+            found.entry(m.id.as_str().to_string()).or_insert(m);
+        }
+    }
+    Ok(rrf_fuse(&rankings, DEFAULT_RRF_K)
+        .into_iter()
+        .filter_map(|id| found.remove(&id))
+        .take(k)
+        .collect())
+}
+
 /// Hybrid recall: fuse the dense (HNSW vector) and sparse (BM25 full-text) legs
 /// over `query_text` and its `query_vec` embedding via Reciprocal Rank Fusion,
 /// returning the top `k` memories for `tenant` (optionally one network).
