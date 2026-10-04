@@ -144,6 +144,31 @@ pub async fn remove(store: &Store, tenant: &TenantId, memory: &str) -> Result<()
     Ok(())
 }
 
+/// A memory's first chunk, as [`indexed`] reads it.
+#[derive(Deserialize)]
+struct Head {
+    memory: String,
+    content_hash: String,
+    #[serde(default)]
+    compartment: Option<String>,
+    network: MemoryNetwork,
+}
+
+fn by_memory(rows: Vec<Head>) -> HashMap<String, Indexed> {
+    rows.into_iter()
+        .map(|h| {
+            (
+                h.memory,
+                Indexed {
+                    content_hash: h.content_hash,
+                    compartment: h.compartment,
+                    network: h.network,
+                },
+            )
+        })
+        .collect()
+}
+
 /// What the index holds for every memory of `tenant` it has chunks for, by
 /// memory id. Read from each memory's first chunk.
 pub async fn indexed(store: &Store, tenant: &TenantId) -> Result<HashMap<String, Indexed>> {
@@ -157,28 +182,21 @@ pub async fn indexed(store: &Store, tenant: &TenantId) -> Result<HashMap<String,
         .from_table(TABLE)
         .map_err(map)?
         .where_(and_(eq("tenant_id", tenant.as_str()), eq("ordinal", 0)));
-    #[derive(Deserialize)]
-    struct Head {
-        memory: String,
-        content_hash: String,
-        #[serde(default)]
-        compartment: Option<String>,
-        network: MemoryNetwork,
-    }
     let rows: Vec<Head> = query_records(store.client(), &query).await.map_err(map)?;
-    Ok(rows
-        .into_iter()
-        .map(|h| {
-            (
-                h.memory,
-                Indexed {
-                    content_hash: h.content_hash,
-                    compartment: h.compartment,
-                    network: h.network,
-                },
-            )
-        })
-        .collect())
+    Ok(by_memory(rows))
+}
+
+/// [`indexed`] for `memories` alone, each read by its first chunk's key: what
+/// a pass over a few changed memories needs, without reading the first chunk
+/// of every memory in the workspace.
+pub async fn indexed_among(
+    store: &Store,
+    tenant: &TenantId,
+    memories: &[String],
+) -> Result<HashMap<String, Indexed>> {
+    let keys: Vec<String> = memories.iter().map(|m| format!("{m}~0")).collect();
+    let rows: Vec<Head> = store.rows_by_key(TABLE, &keys, tenant, "").await?;
+    Ok(by_memory(rows))
 }
 
 /// The pieces nearest `vector`, as `(memory id, piece vector)`, nearest

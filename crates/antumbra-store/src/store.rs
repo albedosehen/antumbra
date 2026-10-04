@@ -223,6 +223,41 @@ impl Store {
             .await
     }
 
+    /// The rows of `table` among the record keys `keys` that belong to
+    /// `tenant`, in no particular order: one direct lookup per key. A filter
+    /// on a key field (`key INSIDE [...]`) reads every row of the workspace to
+    /// answer instead, 178 ms against 4 ms for 150 memories on kuskokwim.
+    /// `also` is any further condition on the row, in SurrealQL.
+    pub(crate) async fn rows_by_key<T: DeserializeOwned>(
+        &self,
+        table: &'static str,
+        keys: &[String],
+        tenant: &TenantId,
+        also: &str,
+    ) -> Result<Vec<T>> {
+        if keys.is_empty() {
+            return Ok(Vec::new());
+        }
+        let also = if also.is_empty() {
+            String::new()
+        } else {
+            format!(" AND ({also})")
+        };
+        let surql = format!(
+            "SELECT * FROM $keys.map(|$k| type::record('{table}', $k))              WHERE tenant_id = $tenant{also}"
+        );
+        let vars = std::collections::BTreeMap::from([
+            ("keys".to_string(), serde_json::json!(keys)),
+            ("tenant".to_string(), serde_json::json!(tenant.as_str())),
+        ]);
+        let raw = self
+            .client
+            .query_with_vars(&surql, vars)
+            .await
+            .map_err(map)?;
+        rows_of_first_statement(raw)
+    }
+
     /// [`read_paged`](Self::read_paged) with the page size named: for a
     /// projection whose rows are far smaller than a memory's, and so fit many
     /// more to a page, and for testing paging itself with pages of a few rows.
@@ -286,6 +321,26 @@ pub const DEFAULT_EMBED_DIM: usize = EMBED_DIM;
 /// "Connection reset". At 500 rows a page is a few megabytes, well inside the
 /// WebSocket limits, and 6,000 memories take twelve round trips.
 const READ_PAGE_ROWS: i64 = 500;
+
+/// The rows a one-statement raw query returned, as `T`: the response is one
+/// entry per statement, each either the rows or `{ "result": rows }`.
+fn rows_of_first_statement<T: DeserializeOwned>(raw: serde_json::Value) -> Result<Vec<T>> {
+    use serde_json::Value;
+    let first = match raw {
+        Value::Array(mut statements) if !statements.is_empty() => statements.swap_remove(0),
+        _ => return Ok(Vec::new()),
+    };
+    let rows = match first {
+        Value::Object(mut statement) if statement.contains_key("result") => {
+            statement.remove("result").unwrap_or(Value::Null)
+        }
+        rows => rows,
+    };
+    match rows {
+        Value::Null => Ok(Vec::new()),
+        rows => Ok(serde_json::from_value(rows)?),
+    }
+}
 
 #[cfg(test)]
 mod tests {

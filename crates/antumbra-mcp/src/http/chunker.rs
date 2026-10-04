@@ -163,7 +163,17 @@ async fn workspace(
         if sources.is_empty() && since.is_some() {
             return Ok(());
         }
-        let held = memory_chunk::indexed(&state.store, tenant).await?;
+        // A full pass needs every memory's chunks, to find those whose memory
+        // is gone; a pass over what changed needs only theirs.
+        let held = if since.is_none() {
+            memory_chunk::indexed(&state.store, tenant).await?
+        } else {
+            let ids: Vec<String> = sources
+                .iter()
+                .map(|s| s.memory.id.as_str().to_string())
+                .collect();
+            memory_chunk::indexed_among(&state.store, tenant, &ids).await?
+        };
         (sources, held, state.embedder_for(tenant).await)
     };
     let mut failures = 0;

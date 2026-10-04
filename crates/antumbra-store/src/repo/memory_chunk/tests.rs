@@ -44,6 +44,15 @@ async fn chunks_are_replaced_found_and_removed_by_their_memory() -> Result<()> {
         }),
         "the second cut replaced the first"
     );
+    let among = ["memory:long", "memory:uncut"].map(String::from);
+    assert_eq!(
+        indexed_among(&store, &tenant, &among).await?,
+        held,
+        "read by key, the same as read whole"
+    );
+    assert!(indexed_among(&store, &TenantId::new("ws:b"), &among)
+        .await?
+        .is_empty());
     let near = nearest(&store, &tenant, &axis(5), 5, None).await?;
     assert_eq!(
         near[0],
@@ -179,5 +188,50 @@ async fn the_chunker_reads_what_changed_and_every_workspace() -> Result<()> {
         .collect();
     tenants.sort();
     assert_eq!(tenants, ["ws:a", "ws:b"]);
+    Ok(())
+}
+
+/// The chunk leg fetches the memories only it found by their keys: the live
+/// ones of the workspace, never a forgotten one, another workspace's, or one
+/// that is not there.
+#[tokio::test]
+async fn the_chunk_leg_fetches_its_memories_by_key() -> Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("ws:a");
+    for (id, ws) in [
+        ("memory:one", "ws:a"),
+        ("memory:two", "ws:a"),
+        ("memory:gone", "ws:a"),
+        ("memory:theirs", "ws:b"),
+    ] {
+        memory::upsert(&store, &memory(id, ws, id, axis(1))).await?;
+    }
+    memory::soft_delete(
+        &store,
+        &tenant,
+        &antumbra_core::MemoryId::new("memory:gone"),
+        chrono::Utc::now(),
+    )
+    .await?;
+    let keys: Vec<String> = [
+        "memory:one",
+        "memory:two",
+        "memory:gone",
+        "memory:theirs",
+        "memory:absent",
+    ]
+    .map(String::from)
+    .to_vec();
+    let mut got: Vec<String> = memory::get_many(&store, &tenant, &keys)
+        .await?
+        .into_iter()
+        .map(|m| {
+            assert!(m.embedding.is_some(), "with the vector the leg scores");
+            m.id.as_str().to_string()
+        })
+        .collect();
+    got.sort();
+    assert_eq!(got, ["memory:one", "memory:two"]);
+    assert!(memory::get_many(&store, &tenant, &[]).await?.is_empty());
     Ok(())
 }
