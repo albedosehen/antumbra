@@ -1,6 +1,6 @@
 # ADR-0025: Chunked memory retrieval
 
-**Status:** Accepted (in progress) · **Date:** 2026-10-04 · **Related:** 0023 (bounded answers: the floor and the reranker read what retrieval hands them), 0024 (typed decisions: D-2's label construction, reused here), 0007 (the SurrealDB substrate and its vector and full-text indexes)
+**Status:** Accepted · **Date:** 2026-10-04 · **Related:** 0023 (bounded answers: the floor and the reranker read what retrieval hands them), 0024 (typed decisions: D-2's label construction, reused here), 0007 (the SurrealDB substrate and its vector and full-text indexes)
 
 ## Context
 
@@ -76,10 +76,10 @@ That is the chunks-of-400 measurement above to within half a point, so scoring a
 
 Every one is well inside the prompt hook's ten seconds and the session hook's five. The first deploy's cost was mostly fetching the memories that only the chunk leg found, through a filter that read every row of the workspace (178 ms for 150 memories, against 4 ms by key).
 
-**The first pass.** kuskokwim cut 6,314 memories into 38,817 pieces in 654 s on its GPU embedder, with no failures. A restart's full pass with nothing to cut takes 3.7 s, and each later pass cuts the memories written since. On shaman, the first pass ran the Orin Nano's llama.cpp `embed-server` out of memory twice. llama.cpp keeps a host-memory prompt cache (`--cache-ram`, 8,192 MiB by default) that grows with every distinct text embedded, and the pass is about 39,000 distinct texts. Replaying 4,000 of the user's pieces against a test instance took it from 329 MB to 926 MB and still climbing; with `--cache-ram 0` it stayed flat at 600 MB. Shaman's keeper is off (`ANTUMBRA_CHUNK_IN_FLIGHT=0`) until the embed-server runs with the cache off. The chunks it had already cut are read, and recall reads the rest of its memories whole.
+**The first pass.** kuskokwim cut 6,314 memories into 38,817 pieces in 654 s on its GPU embedder, with no failures. A restart's full pass with nothing to cut takes 3.7 s, and each later pass cuts the memories written since. On shaman, the first pass ran the Orin Nano's llama.cpp `embed-server` out of memory twice. llama.cpp keeps a host-memory prompt cache (`--cache-ram`, 8,192 MiB by default) that grows with every distinct text embedded, and the pass is about 39,000 distinct texts. Replaying 4,000 of the user's pieces against a test instance took it from 329 MB to 926 MB and still climbing; with `--cache-ram 0` it stayed flat at 600 MB. With the embed-server restarted with `--cache-ram 0` and `MemoryMax=2G` (a systemd drop-in on the Orin), shaman's keeper went back on at two pieces at a time. It finished the first pass in 150 s (952 more memories, 4,844 pieces, no failures), while the embed-server went from 626 MB to 687 MB and stayed there.
 
 ## Order of work
 
 1. [x] **The measurement and this record**, with the bench's label corpus, dense mode and chunked mode (`ANTUMBRA_BENCH_LABELS`, `ANTUMBRA_BENCH_CHUNK_CHARS`), against `all-MiniLM-L6-v2`, `bge-small-en-v1.5` and `gte-modernbert-base` served by text-embeddings-inference on kuskokwim.
 2. [x] **The chunk index and the chunker**: the table, the fused dense leg, the server's pass, tests. The bench cuts with the same `antumbra_core::chunk::split` the server does.
-3. [ ] **Deploy, the first pass, and validations 2 and 3** on kuskokwim (done 2026-10-04); then shaman (deployed, its keeper off until the Orin's `embed-server` runs with `--cache-ram 0`).
+3. [x] **Deploy, the first pass, and validations 2 and 3** on kuskokwim, then shaman (2026-10-04).
