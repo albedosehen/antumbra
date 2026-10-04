@@ -38,6 +38,16 @@
 //!   renormalized `EMBED_DIM` prefix is stored — the very path this feature
 //!   adds.
 //!
+//! ## A corpus of your own memories
+//!
+//! `ANTUMBRA_BENCH_LABELS` names a label file from `scripts/d2-labels.sh`
+//! instead: every distinct memory becomes a document, and every positive pair
+//! a query whose answer is its memory. The query is twelve words cut from about
+//! 60% of the way through the memory and excised from it, so neither leg can
+//! match it verbatim, and it sits past the first few hundred tokens a short
+//! embedder reads. Each config is scored twice, hybrid as recall runs and dense
+//! alone, so what the embedder itself contributes shows.
+//!
 //! ## Run
 //!
 //! ```text
@@ -65,7 +75,7 @@ const CORPUS_JSON: &str = include_str!("../corpus/multidomain.json");
 
 /// The `recall@k` cutoffs reported, plus the deepest pool the harness requests
 /// from recall. Ascending; the largest also bounds how many candidates we fetch.
-const K_VALUES: [usize; 4] = [1, 3, 5, 10];
+const K_VALUES: [usize; 5] = [1, 3, 5, 10, 30];
 
 /// The id prefix under which corpus docs are stored as memories; stripped to map
 /// a recalled `Memory` back to its labeled doc id.
@@ -102,6 +112,64 @@ impl Corpus {
     fn load() -> Result<Self> {
         serde_json::from_str(CORPUS_JSON)
             .map_err(|e| antumbra_core::AntumbraError::other(format!("bad bench corpus: {e}")))
+    }
+
+    /// A corpus from a D-2 label file: every distinct memory is a document,
+    /// and every positive pair a query whose answer is its memory.
+    fn from_labels(text: &str) -> Result<Self> {
+        #[derive(Deserialize)]
+        struct Pair {
+            query: String,
+            memory: String,
+            relevant: bool,
+        }
+        let pairs: Vec<Pair> = serde_json::from_str(text)
+            .map_err(|e| antumbra_core::AntumbraError::other(format!("bad label file: {e}")))?;
+        let mut ids: BTreeMap<String, String> = BTreeMap::new();
+        let mut documents = Vec::new();
+        for pair in &pairs {
+            if !ids.contains_key(&pair.memory) {
+                let id = format!("m{}", ids.len());
+                ids.insert(pair.memory.clone(), id.clone());
+                documents.push(Document {
+                    id,
+                    text: pair.memory.clone(),
+                });
+            }
+        }
+        let labels = pairs
+            .iter()
+            .filter(|pair| pair.relevant)
+            .map(|pair| Label {
+                query: pair.query.clone(),
+                relevant_doc_id: ids[&pair.memory].clone(),
+            })
+            .collect();
+        Ok(Corpus {
+            domains: vec![Domain {
+                name: "memories".into(),
+                documents,
+                labels,
+            }],
+        })
+    }
+}
+
+/// Which retrieval the queries run through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Dense and BM25 fused by rank, as recall runs.
+    Hybrid,
+    /// The embedding alone: what the embedder itself contributes.
+    Dense,
+}
+
+impl Mode {
+    fn name(self) -> &'static str {
+        match self {
+            Mode::Hybrid => "hybrid",
+            Mode::Dense => "dense",
+        }
     }
 }
 
@@ -185,6 +253,7 @@ async fn evaluate(
     config_name: &str,
     embedder: &dyn Embedder,
     corpus: &Corpus,
+    mode: Mode,
 ) -> Result<ConfigReport> {
     let deepest = K_VALUES.iter().copied().max().unwrap_or(10);
     let tenant = TenantId::new("ws:bench");
@@ -199,26 +268,45 @@ async fn evaluate(
         let store = Store::connect_memory(EMBED_DIM).await?;
 
         for doc in &domain.documents {
-            let emb = embedder.embed(&doc.text).await?;
-            let mem = Memory::new(
-                format!("{ID_PREFIX}{}", doc.id),
-                tenant.clone(),
-                MemoryNetwork::World,
-                doc.text.clone(),
-                1.0,
-                now,
-            )
-            .with_embedding(emb);
-            memory::upsert(&store, &mem).await?;
+            // Whole, or in chunks each stored on its own, `doc~j`, when
+            // ANTUMBRA_BENCH_CHUNK_CHARS asks: a long memory's one vector blurs
+            // a passage from its middle, a chunk's vector does not.
+            let pieces = match chunk_chars() {
+                Some(size) => chunks(&doc.text, size),
+                None => vec![doc.text.clone()],
+            };
+            let whole = pieces.len() == 1;
+            for (j, piece) in pieces.into_iter().enumerate() {
+                let emb = embedder.embed(&piece).await?;
+                let id = if whole {
+                    format!("{ID_PREFIX}{}", doc.id)
+                } else {
+                    format!("{ID_PREFIX}{}{CHUNK_MARK}{j}", doc.id)
+                };
+                let mem = Memory::new(id, tenant.clone(), MemoryNetwork::World, piece, 1.0, now)
+                    .with_embedding(emb);
+                memory::upsert(&store, &mem).await?;
+            }
         }
 
+        // Chunks of one document compete for the same ranks, so fetch deeper and
+        // keep each document's best chunk.
+        let fetch = if chunk_chars().is_some() {
+            deepest * 10
+        } else {
+            deepest
+        };
         let mut metrics = Metrics::default();
         for label in &domain.labels {
             let qv = embedder.embed(&label.query).await?;
-            let hits =
-                memory::recall_hybrid(&store, &tenant, &label.query, &qv, deepest, None, &[])
-                    .await?;
-            let rank = rank_of(&hits, &label.relevant_doc_id);
+            let hits = match mode {
+                Mode::Hybrid => {
+                    memory::recall_hybrid(&store, &tenant, &label.query, &qv, fetch, None, &[])
+                        .await?
+                }
+                Mode::Dense => memory::recall(&store, &tenant, &qv, fetch, None).await?,
+            };
+            let rank = rank_of(&documents_of(&hits), &label.relevant_doc_id);
             metrics.record(rank);
         }
 
@@ -226,11 +314,82 @@ async fn evaluate(
         per_domain.insert(domain.name.clone(), metrics);
     }
 
+    let chunked = chunk_chars().map_or(String::new(), |n| format!(", chunks of {n} chars"));
     Ok(ConfigReport {
-        config_name: config_name.to_string(),
+        config_name: format!("{config_name} / {}{chunked}", mode.name()),
         per_domain,
         overall,
     })
+}
+
+/// What separates a document's id from its chunk's number.
+const CHUNK_MARK: char = '~';
+
+fn chunk_chars() -> Option<usize> {
+    std::env::var("ANTUMBRA_BENCH_CHUNK_CHARS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|&n: &usize| n > 0)
+}
+
+/// `text` in pieces of about `size` characters, cut between words, each
+/// overlapping the one before by about a fifth so a passage cut at a boundary
+/// is whole in one of them.
+fn chunks(text: &str, size: usize) -> Vec<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut out = Vec::new();
+    let mut start = 0;
+    while start < words.len() {
+        let mut end = start;
+        let mut length = 0;
+        while end < words.len() && (length == 0 || length + words[end].len() < size) {
+            length += words[end].len() + 1;
+            end += 1;
+        }
+        out.push(words[start..end].join(" "));
+        if end == words.len() {
+            break;
+        }
+        // Step back about a fifth of a chunk for the overlap.
+        let mut back = end;
+        let mut overlap = 0;
+        while back > start + 1 && overlap < size / 5 {
+            back -= 1;
+            overlap += words[back].len() + 1;
+        }
+        start = back;
+    }
+    if out.is_empty() {
+        out.push(text.to_string());
+    }
+    out
+}
+
+/// A recalled list as documents, each at the rank of its best chunk.
+fn documents_of(hits: &[Memory]) -> Vec<Memory> {
+    let mut seen = std::collections::BTreeSet::new();
+    hits.iter()
+        .filter(|m| {
+            let doc =
+                m.id.as_str()
+                    .split(CHUNK_MARK)
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+            seen.insert(doc)
+        })
+        .map(|m| {
+            let mut m = m.clone();
+            let doc =
+                m.id.as_str()
+                    .split(CHUNK_MARK)
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+            m.id = doc.into();
+            m
+        })
+        .collect()
 }
 
 /// The 1-based rank of `relevant_doc_id` in a recalled list (mapping each
@@ -319,12 +478,20 @@ fn configs() -> Vec<(String, Arc<dyn Embedder>)> {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
-    let corpus = Corpus::load()?;
+    let corpus = match std::env::var("ANTUMBRA_BENCH_LABELS") {
+        Ok(path) => Corpus::from_labels(
+            &std::fs::read_to_string(&path)
+                .map_err(|e| antumbra_core::AntumbraError::other(format!("read {path}: {e}")))?,
+        )?,
+        Err(_) => Corpus::load()?,
+    };
     let configs = configs();
 
-    let mut reports = Vec::with_capacity(configs.len());
+    let mut reports = Vec::with_capacity(configs.len() * 2);
     for (name, embedder) in &configs {
-        reports.push(evaluate(name, embedder.as_ref(), &corpus).await?);
+        for mode in [Mode::Hybrid, Mode::Dense] {
+            reports.push(evaluate(name, embedder.as_ref(), &corpus, mode).await?);
+        }
     }
 
     print!("{}", render_table(&reports));
@@ -350,7 +517,7 @@ mod tests {
         assert_eq!(corpus.domains.len(), 3, "code / finance / news");
 
         let embedder = FixedEmbedder::new(EMBED_DIM);
-        let report = evaluate("baseline", &embedder, &corpus)
+        let report = evaluate("baseline", &embedder, &corpus, Mode::Hybrid)
             .await
             .expect("eval runs");
 
@@ -393,8 +560,53 @@ mod tests {
         }
     }
 
+    /// A label file becomes one domain: each distinct memory a document, each
+    /// positive pair a query answered by its memory; a negative pair adds no
+    /// query. Both modes run over it.
+    #[tokio::test]
+    async fn a_label_file_is_a_corpus_and_both_modes_score_it() {
+        let labels = serde_json::json!([
+            {"query": "the outbox pattern", "memory": "orders write through an outbox table", "relevant": true},
+            {"query": "the outbox pattern", "memory": "parcels leave the warehouse at noon", "relevant": false},
+            {"query": "parcels leave", "memory": "parcels leave the warehouse at noon", "relevant": true},
+            {"query": "parcels leave", "memory": "orders write through an outbox table", "relevant": false}
+        ]);
+        let corpus = Corpus::from_labels(&labels.to_string()).expect("label file parses");
+        let domain = &corpus.domains[0];
+        assert_eq!(domain.documents.len(), 2);
+        assert_eq!(domain.labels.len(), 2);
+        assert_eq!(domain.labels[1].relevant_doc_id, "m1");
+        let embedder = FixedEmbedder::new(EMBED_DIM);
+        for mode in [Mode::Hybrid, Mode::Dense] {
+            let report = evaluate("baseline", &embedder, &corpus, mode)
+                .await
+                .expect("eval runs");
+            assert_eq!(report.overall.queries, 2);
+            assert!(report.config_name.ends_with(mode.name()));
+            assert!(
+                (report.overall.recall_at(30) - 1.0).abs() < 1e-9,
+                "two documents: everything is in the top 30"
+            );
+        }
+    }
+
     /// `rank_of` maps a stored memory id back to its labeled doc id and reports a
     /// 1-based rank (or `None` when absent).
+    #[test]
+    fn chunks_cover_the_text_overlapping() {
+        let text = (0..100)
+            .map(|i| format!("w{i:02}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let pieces = chunks(&text, 40);
+        assert!(pieces.len() > 5, "{pieces:?}");
+        assert!(pieces.iter().all(|p| p.len() <= 44), "{pieces:?}");
+        assert!(pieces[0].starts_with("w00") && pieces.last().unwrap().ends_with("w99"));
+        let first_end = pieces[0].split(' ').next_back().unwrap();
+        assert!(pieces[1].contains(first_end), "consecutive pieces overlap");
+        assert_eq!(chunks("short", 40), ["short"]);
+    }
+
     #[tokio::test]
     async fn rank_of_strips_prefix_and_is_one_based() {
         let now = chrono::Utc::now();
