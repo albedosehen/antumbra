@@ -35,6 +35,7 @@ pub mod penumbra;
 pub mod platt;
 pub mod ports;
 pub mod provenance;
+pub mod query;
 pub mod recipe;
 pub mod reward;
 pub mod router;

@@ -705,3 +705,65 @@ async fn with_any_evidence_finds_exactly_the_tagged_memories() -> Result<()> {
     assert!(with_any_evidence(&store, &tenant, &[]).await?.is_empty());
     Ok(())
 }
+
+/// A prompt that asks for two things: the whole prompt's words are shared by
+/// generic rows that outrank both specific ones, while each part finds its
+/// own. Fused, both specific rows come back; the whole prompt alone loses one.
+/// The dense leg is silenced (a zero vector), so this is the lexical half of
+/// the effect; the dense half is the same blend, in one vector.
+#[tokio::test]
+async fn each_part_of_a_compound_query_finds_its_own_memory() -> Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("t");
+    let rows = [
+        (
+            "55555555-0000-0000-0000-000000000001",
+            "rotate the penpot token stored in the claude config",
+        ),
+        (
+            "55555555-0000-0000-0000-000000000002",
+            "count the kuskokwim dependency edges after the scan",
+        ),
+        (
+            "55555555-0000-0000-0000-000000000003",
+            "rotate the token and count the edges and the config and the scan",
+        ),
+        (
+            "55555555-0000-0000-0000-000000000004",
+            "rotate the config, count the token, scan the edges, then count again",
+        ),
+        (
+            "55555555-0000-0000-0000-000000000005",
+            "count the edges and rotate the token in the config after the scan",
+        ),
+    ];
+    for (id, content) in rows {
+        seed(&store, &tenant, id, content).await?;
+    }
+    let zero = vec![0.0; EMBED_DIM];
+    let whole =
+        "rotate the penpot token in the config and count the kuskokwim edges after the scan";
+    let specific = |hits: &[Memory]| {
+        let has = |word: &str| hits.iter().any(|m| m.content.contains(word));
+        (has("penpot"), has("kuskokwim"))
+    };
+    let alone = recall_hybrid(&store, &tenant, whole, &zero, 2, None, &[]).await?;
+    assert_ne!(
+        specific(&alone),
+        (true, true),
+        "the whole prompt alone keeps both: the test proves nothing"
+    );
+    let queries: Vec<(String, Vec<f32>)> = std::iter::once(whole.to_string())
+        .chain(antumbra_core::query::parts(whole))
+        .map(|q| (q, zero.clone()))
+        .collect();
+    assert_eq!(queries.len(), 3, "the prompt splits into two parts");
+    let fused = recall_hybrid_many(&store, &tenant, &queries, 2, None, &[]).await?;
+    assert_eq!(
+        specific(&fused),
+        (true, true),
+        "each part's own memory must come back: {:?}",
+        fused.iter().map(|m| &m.content).collect::<Vec<_>>()
+    );
+    Ok(())
+}

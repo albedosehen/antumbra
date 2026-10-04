@@ -431,11 +431,19 @@ impl McpServer {
         // never reached the pool. Retrieval has to give them a chance to compete
         // before the ordering can prefer them.
         let scoped = p.repo.is_some() || p.branch.is_some();
-        let hits = memory::recall_hybrid(
+        // A prompt that asks for more than one thing is retrieved for each part
+        // as well as for the whole, since its blended embedding can land near
+        // none of the memories each part is about. The reranker and the floor
+        // still read the whole prompt.
+        let mut queries = vec![(p.query.clone(), q.clone())];
+        for part in antumbra_core::query::parts(&p.query) {
+            let vector = self.embedder.embed(&part).await.map_err(err)?;
+            queries.push((part, vector));
+        }
+        let hits = memory::recall_hybrid_many(
             &self.store,
             &self.tenant,
-            &p.query,
-            &q,
+            &queries,
             self.recall_pool(k, scoped),
             net,
             self.probe_vectors().await,
