@@ -20,7 +20,7 @@ use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::expressions::{field, value};
 use surql::query::helpers::fulltext_search_query;
-use surql::types::operators::{and_, contains_any, eq, inside, is_none, is_not_none, lt};
+use surql::types::operators::{and_, contains_any, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
 use antumbra_core::calibrate::calibrated_score;
@@ -632,19 +632,9 @@ async fn best_of(
 
 /// The live memories of `tenant` among `ids`, in no particular order.
 pub async fn get_many(store: &Store, tenant: &TenantId, ids: &[String]) -> Result<Vec<Memory>> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let condition = and_(
-        and_(eq("tenant_id", tenant.as_str()), is_none("deleted_at")),
-        inside("key", ids.iter().map(|id| Value::String(id.clone()))),
-    );
-    let query = Query::new()
-        .select(None)
-        .from_table(TABLE)
-        .map_err(map)?
-        .where_(condition);
-    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    let rows: Vec<MemoryRow> = store
+        .rows_by_key(TABLE, ids, tenant, "deleted_at = NONE")
+        .await?;
     rows.into_iter().map(MemoryRow::into_domain).collect()
 }
 
