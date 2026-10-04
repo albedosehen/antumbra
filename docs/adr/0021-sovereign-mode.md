@@ -44,19 +44,20 @@ Three classes. **Restored**: Antumbra supplies it. **Setting**: a local setting 
 | Remote Control, messaging sessions on other machines | Restored, in part | An asynchronous handoff compartment over the networked tier, R-7 in the roadmap, built on 2026-10-03: a session leaves a note for one of the user's machines, and a session starting there is told it waits until one marks it done. No live control |
 | Skills and plugins synced from the hosted account | Accepted loss by intent | Off is the sovereign default |
 | PowerShell tool on Windows with Git Bash installed | Setting | `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`, required on Windows by principle 7 |
-| MCP protocol probe | Setting, advisory | `MCP_PROTOCOL_NEGOTIATION=auto` |
+| MCP protocol probe, for claude.ai connector servers and stdio servers | Setting, advisory | `MCP_PROTOCOL_NEGOTIATION=auto` |
 | Sessions start in auto mode | Setting, advisory | Only the built-in default falls back. An explicit `permissions.defaultMode: "auto"` in the user's own settings is an earlier step and is still honored (probed: three headless runs under `DISABLE_TELEMETRY=1`). Ignored in project settings |
 | The VS Code extension reading settings for its starting mode | Accepted loss | Documented: with the flags off it ignores every settings file |
 | The advisor tool | Accepted loss | It sends the whole conversation, every tool call and result, to a stronger model on the vendor's infrastructure. That is escalation upward and off the machine, the opposite of `route` and `answer`. No analog is claimed |
 | Comments on hosted artifacts | Accepted loss now | The sovereign answer is 0020: a comment becomes a memory |
+| Reading another organization's public artifact | Accepted loss | Open it in the browser |
 | Vendor-bound drafted feedback | Accepted loss | Friction is kept locally as `bank` memories by the capture hook |
-| `claude import` | Accepted loss | A one-time migration of configuration from other agents. Nothing to compensate |
+| `claude import` and the `/import` command | Accepted loss | A one-time migration of configuration from other agents. Nothing to compensate |
 
 ### 3. The doctor
 
-`antumbra claude doctor` reads the environment and the agent's settings files (the user's, then the project's and the project's local file), decides whether the session is in sovereign mode and why, and prints each rule with its state. It exits non-zero when a required setting is missing. It runs outside the agent, which matters: it is the way back in when a bad MCP schema has made every request fail.
+`antumbra claude doctor` reads the environment and the agent's settings files (the organization's managed files, then the user's, then the project's and the project's local file), decides whether the session is in sovereign mode and why, and prints each rule with its state. It exits non-zero when a required setting is missing. It runs outside the agent, which matters: it is the way back in when a bad MCP schema has made every request fail.
 
-Detection follows the documented semantics exactly, because they differ. `DISABLE_TELEMETRY` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` count when set to any non-empty value, `0` and `false` included. `DO_NOT_TRACK` and `DISABLE_GROWTHBOOK` are ordinary booleans. A provider switch counts unless the host platform has declared that it manages the provider.
+Detection follows the documented semantics exactly, because they differ. `DISABLE_TELEMETRY` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` count when set to any non-empty value, `0` and `false` included. `DO_NOT_TRACK` and `DISABLE_GROWTHBOOK` are ordinary booleans. A provider switch counts unless the host platform has declared that it manages the provider; Mantle, Amazon Bedrock's other endpoint, is one. A sign-in forced through a Claude apps gateway counts too: only managed settings can force it (`forceLoginMethod: "gateway"` with `forceLoginGatewayUrl`), so the doctor reads the file-based managed tier, `managed-settings.json` and the `managed-settings.d/` drop-ins merged as the agent merges them, and puts its `env` block above the user's. A policy delivered by MDM (a macOS profile, the Windows registry) is not read.
 
 It does not edit the agent's settings. The file is the user's, its key order is theirs, and Antumbra's JSON handling would re-sort it; the doctor prints the exact lines to add.
 
@@ -95,6 +96,15 @@ The three levels of rule that have no repository map onto 0017's hierarchy: a de
 - **Depends on the switch:** from 2.1.283, Remote Control stays available when only `DISABLE_TELEMETRY` or `DO_NOT_TRACK` turned the flags off, unless the organization requires Trusted Devices. With the traffic or flag switch it is still lost. The doctor reads the triggers and reports it either way, and the brief no longer tells the agent it is gone when it is not.
 - **New:** a large paste now reaches Claude as typed text, with what sits behind a `[Pasted text #N]` placeholder unmarked. It is recorded as an accepted loss.
 - **The bridge stays:** an untracked `CLAUDE.local.md` that imports `AGENTS.md` still counts as instructions, so a bridged repository reads `AGENTS.md` through it on any release.
+
+**Re-verified against 2.1.289 on 2026-10-04.** Nothing ended; two losses widened and one is new:
+- **Widened:**
+  - The MCP protocol probe now skips stdio servers as well as claude.ai connector servers, so `MCP_PROTOCOL_NEGOTIATION=auto` matters to anyone running a local MCP server, not only to connector users.
+  - The import loss names the `/import` command beside `claude import`.
+- **New:**
+  - Claude cannot read another organization's public artifact. Recorded as an accepted loss; the agent is told, and the person opens it in the browser.
+  - Two more ways into sovereign mode, now detected: a Claude apps gateway session, and Mantle as a provider.
+- **Unchanged:** Remote Control's carve-out for the telemetry switches still holds from 2.1.283, unless the organization requires Trusted Devices.
 
 ## Consequences
 

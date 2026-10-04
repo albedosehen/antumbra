@@ -21,6 +21,7 @@ pub mod brief;
 pub mod conventions;
 pub mod dependencies;
 pub mod hooks;
+pub mod managed;
 pub mod mcp_lint;
 pub mod mcp_stdio;
 pub mod reanchor;
@@ -32,8 +33,8 @@ pub mod version;
 /// the page that says so. The gated list changes between releases, so a rule is
 /// only as good as its last check; the report says when the installed version
 /// differs.
-pub const VERIFIED_AGAINST: &str = "2.1.283";
-pub const VERIFIED_ON: &str = "2026-09-26";
+pub const VERIFIED_AGAINST: &str = "2.1.289";
+pub const VERIFIED_ON: &str = "2026-10-04";
 pub const SOURCE: &str =
     "https://code.claude.com/docs/en/env-vars#features-that-need-feature-flag-fetching";
 
@@ -85,8 +86,8 @@ impl Os {
 pub struct Inputs {
     pub os: Os,
     /// Settings `env` blocks and the environment, merged: the first source to
-    /// name a variable keeps it, in the order user, project, project-local,
-    /// environment.
+    /// name a variable keeps it, in the order managed (the organization's
+    /// files), user, project, project-local, environment.
     pub variables: BTreeMap<String, Variable>,
     /// `permissions.defaultMode` from the USER's settings. The agent ignores
     /// `auto` there anywhere else.
@@ -115,9 +116,11 @@ const PRESENCE_TRIGGERS: [&str; 2] = [
 const BOOLEAN_TRIGGERS: [&str; 2] = ["DO_NOT_TRACK", "DISABLE_GROWTHBOOK"];
 
 /// A third-party provider skips the flag fetch, unless the host platform has
-/// declared that it manages the provider.
-const PROVIDER_SWITCHES: [&str; 4] = [
+/// declared that it manages the provider. Mantle is Amazon Bedrock's other
+/// endpoint, and selects Bedrock on its own.
+const PROVIDER_SWITCHES: [&str; 5] = [
     "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_MANTLE",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
@@ -155,7 +158,13 @@ pub fn detect(variables: &BTreeMap<String, Variable>) -> Vec<Trigger> {
         .iter()
         .filter(|_| !host_managed)
         .filter_map(|name| named(name, &is_true));
-    presence.chain(boolean).chain(provider).collect()
+    // A Claude apps gateway session, which only managed settings can force.
+    let gateway = named(managed::GATEWAY_LOGIN, &|value| value == "gateway");
+    presence
+        .chain(boolean)
+        .chain(provider)
+        .chain(gateway)
+        .collect()
 }
 
 /// What is done about a loss.
@@ -240,7 +249,7 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "mcp-protocol-probe",
-            lost: "claude.ai connector servers are not probed for MCP protocol 2026-07-28",
+            lost: "claude.ai connector servers and stdio servers are not probed for MCP protocol 2026-07-28",
             class: Setting { required: false },
             response: "set MCP_PROTOCOL_NEGOTIATION=auto",
             unavailable: None,
@@ -320,6 +329,15 @@ pub fn rules() -> Vec<Rule> {
             until: None,
         },
         Rule {
+            id: "foreign-artifacts",
+            lost: "having Claude read another organization's public artifact",
+            class: AcceptedLoss,
+            response: "open it in the browser",
+            unavailable: Some("reading another organization's public artifact (open it in the browser)"),
+            env: None,
+            until: None,
+        },
+        Rule {
             id: "drafted-feedback",
             lost: "vendor-bound drafted feedback",
             class: AcceptedLoss,
@@ -339,7 +357,7 @@ pub fn rules() -> Vec<Rule> {
         },
         Rule {
             id: "import",
-            lost: "`claude import`",
+            lost: "`claude import` and the `/import` command",
             class: AcceptedLoss,
             response: "a one-time migration from other agents; nothing to compensate",
             unavailable: None,
@@ -412,7 +430,7 @@ fn standing_of(rule: &Rule, inputs: &Inputs) -> Standing {
             } else {
                 Standing::Missing {
                     required,
-                    fix: "add \"MCP_PROTOCOL_NEGOTIATION\": \"auto\" to the env block, if you use claude.ai connectors".into(),
+                    fix: "add \"MCP_PROTOCOL_NEGOTIATION\": \"auto\" to the env block, if you use claude.ai connectors or stdio MCP servers".into(),
                 }
             }
         }
@@ -548,14 +566,21 @@ impl Inputs {
         .filter_map(read);
 
         let user_default_mode = user.as_ref().and_then(|(_, s)| s.default_mode.clone());
+        // The organization's policy outranks every other level, so it names
+        // its variables first.
+        let managed =
+            managed::read(&managed::dir()).map(|m| (Origin::Settings(m.path), m.variables));
         // Settings files first. The agent copies its settings' `env` block into
         // the environment, so a variable configured in a file shows up in both;
         // the file is where the user goes to change it, so the file gets the
         // credit. Only what no file names is attributed to the environment.
-        let sources = user
+        let sources = managed
             .into_iter()
-            .chain(project_files)
-            .map(|(path, settings)| (Origin::Settings(path), settings.env))
+            .chain(
+                user.into_iter()
+                    .chain(project_files)
+                    .map(|(path, settings)| (Origin::Settings(path), settings.env)),
+            )
             .chain(std::iter::once((
                 Origin::Environment,
                 std::env::vars().collect(),
