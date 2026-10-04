@@ -106,6 +106,12 @@ struct Cli {
     /// actually train. Off when unset.
     #[arg(long, default_value_t = false)]
     auto_consolidate: bool,
+    /// The chunk index (ADR-0025), on the networked surface: how many pieces
+    /// of a memory to embed at once while cutting memories into the pieces
+    /// recall searches. Zero leaves the index as it is; recall then reads whole
+    /// memories for anything not in it.
+    #[arg(long, env = "ANTUMBRA_CHUNK_IN_FLIGHT", default_value_t = 4)]
+    chunk_in_flight: usize,
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -673,6 +679,7 @@ async fn run() -> Result<()> {
             verifier,
             cli.auto_propose,
             cli.auto_consolidate,
+            cli.chunk_in_flight,
             reranker,
             decider,
             copal,

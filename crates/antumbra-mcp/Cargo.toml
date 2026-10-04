@@ -45,14 +45,15 @@ axum = "0.8"
 jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # The `Embedder` port (and the answer-escalate test fake) are `#[async_trait]`.
 async-trait.workspace = true
+# The chunk index's keeper embeds a memory's pieces a few at a time; the tests
+# also read the SSE response body incrementally with it.
+futures = "0.3"
 
 [dev-dependencies]
 # The canned GitHub transport and the throwaway App key the receiver's tests drive.
 antumbra-github = { path = "../antumbra-github", features = ["testing"] }
 # `oneshot` to drive the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
-# Read the SSE response body incrementally in the live-notification round-trip test.
-futures = "0.3"
 
 [features]
 default = []

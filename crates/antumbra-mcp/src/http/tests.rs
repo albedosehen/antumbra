@@ -11,12 +11,17 @@ async fn state() -> Arc<HttpState> {
 }
 
 async fn state_with(store: Store) -> Arc<HttpState> {
+    state_embedding(store, Arc::new(FixedEmbedder::new(EMBED_DIM))).await
+}
+
+/// A server state over `store` whose default embedder is `embedder`.
+pub(super) async fn state_embedding(store: Store, embedder: Arc<dyn Embedder>) -> Arc<HttpState> {
     Arc::new(HttpState {
         serving: Serving::Shared(store.clone()),
         store,
         host: "test".into(),
         verifier: JwtVerifier::hs256(b"test-secret"),
-        embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
+        embedder,
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
         auth: Mutex::new(()),
         auto_propose: None,

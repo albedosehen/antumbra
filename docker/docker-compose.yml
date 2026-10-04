@@ -81,6 +81,10 @@ services:
       # The same model name the rerank service loads, so the relevance floor
       # picks that model's calibration even before the endpoint answers.
       - ANTUMBRA_RERANK_MODEL=${ANTUMBRA_RERANK_MODEL:-}
+      # The chunk index (ADR-0025): how many pieces of a memory the server
+      # embeds at once while it cuts memories into the pieces recall searches.
+      # 0 stops it; recall then reads whole memories for anything not cut.
+      - ANTUMBRA_CHUNK_IN_FLIGHT=${ANTUMBRA_CHUNK_IN_FLIGHT:-4}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

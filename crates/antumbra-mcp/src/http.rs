@@ -36,6 +36,12 @@
 //! `POST /mcp/call` with a token its user pastes in. The page and its assets
 //! carry no data and need no token; what it shows is what the token's identity
 //! may see ([`dashboard`]).
+//!
+//! ## The chunk index (ADR-0025)
+//!
+//! One background task keeps every memory cut into the pieces recall's dense
+//! leg searches, in owner mode under the auth lock, a memory at a time
+//! ([`chunker`]).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -59,6 +65,7 @@ use antumbra_store::Store;
 use crate::auth::{Identity, JwtVerifier};
 use crate::server::McpServer;
 
+mod chunker;
 mod dashboard;
 mod github;
 pub(crate) use github::GithubConfig;
@@ -208,6 +215,7 @@ pub async fn serve(
     verifier: JwtVerifier,
     auto_propose: Option<usize>,
     auto_consolidate: bool,
+    chunk_in_flight: usize,
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
     // The relevance floor (ADR-0023 B-2), built where the flags are so this
     // module stays free of any calibration choice.
@@ -264,6 +272,7 @@ pub async fn serve(
         registry: crate::notify::PeerRegistry::new(),
     });
     spawn_live_propagation(state.clone(), announced);
+    chunker::spawn(state.clone(), chunk_in_flight);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
     axum::serve(listener, router(state)).await?;
