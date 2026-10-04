@@ -139,6 +139,53 @@ async fn the_floor_holds_for_a_query_of_several_lines() {
     assert_eq!(kept, ["the deploy runbook for the orders service"]);
 }
 
+/// The floor judges the whole memory, as the reranker read it, and only then is
+/// the view cut to its prefix. A long memory whose answer sits past the cut is
+/// kept; judged on the prefix, it was dropped though it ranked first.
+#[tokio::test]
+async fn the_floor_judges_the_whole_memory_not_the_prefix_it_returns() {
+    struct RunbookOnly;
+    #[async_trait::async_trait]
+    impl antumbra_core::ports::RelevanceScorer for RunbookOnly {
+        async fn relevance(&self, _q: &str, texts: &[String]) -> antumbra_core::Result<Vec<f32>> {
+            Ok(texts
+                .iter()
+                .map(|t| if t.contains("runbook") { 5e-3 } else { 3.7e-5 })
+                .collect())
+        }
+    }
+    let s = server().await;
+    let preamble = "notes on the orders service and its history ".repeat(40);
+    assert!(preamble.chars().count() > params::RECALL_CONTENT_CHARS);
+    for content in [
+        format!("{preamble}and at the end, the deploy runbook"),
+        "how the billing reconciliation job retries".to_string(),
+    ] {
+        s.store_memory(Parameters(StoreParams {
+            provenance: None,
+            content,
+            network: "world".into(),
+            confidence: Some(0.8),
+            evidence: None,
+            volatile: None,
+            compartment: None,
+        }))
+        .await
+        .unwrap();
+    }
+    let floor = antumbra_rerank::floor::CalibratedFloor::new(Arc::new(RunbookOnly));
+    let s = s.with_decider(Arc::new(floor));
+    let out = recall(&s, "the deploy runbook", None).await;
+    assert_eq!(out.memories.len(), 1, "the long memory cleared the floor");
+    let kept = &out.memories[0];
+    assert!(kept.truncated, "and came back bounded");
+    assert_eq!(kept.content.chars().count(), params::RECALL_CONTENT_CHARS);
+    assert!(
+        !kept.content.contains("runbook"),
+        "its answer is past the cut"
+    );
+}
+
 /// A floor that cannot be computed must not be enforced: the rows come back
 /// unfiltered, and nothing claims they were judged. ADR-0024 requires a head
 /// that fails to degrade to the path it replaced rather than to nothing.
