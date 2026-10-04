@@ -127,6 +127,38 @@ impl RerankTransport for UreqTransport {
     }
 }
 
+/// The model a text-embeddings-inference endpoint serves, from its `/info`, if
+/// it answers within two seconds: what the relevance floor's calibration is
+/// chosen by. `None` for an endpoint with no `/info` (Cohere, Jina) or one not
+/// up yet.
+pub fn served_model(rerank_url: &str, api_key: Option<&str>) -> Option<String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(2)))
+        .build()
+        .into();
+    let mut req = agent.get(&info_url(rerank_url));
+    if let Some(key) = api_key {
+        req = req.header("authorization", &format!("Bearer {key}"));
+    }
+    let info = req.call().ok()?.body_mut().read_json::<Value>().ok()?;
+    model_from_info(&info)
+}
+
+/// `/info` beside the `/rerank` endpoint.
+fn info_url(rerank_url: &str) -> String {
+    let base = rerank_url.trim_end_matches('/');
+    let base = base.strip_suffix("/rerank").unwrap_or(base);
+    format!("{base}/info")
+}
+
+fn model_from_info(info: &Value) -> Option<String> {
+    info.get("model_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+}
+
 /// Re-scores candidates by calling a TEI/Cohere-style `/rerank` endpoint.
 pub struct HttpReranker {
     url: String,
@@ -552,6 +584,23 @@ mod tests {
         assert_eq!(body["raw_scores"], false);
         assert_eq!(body["truncate"], true, "a long memory is cut, not refused");
         assert!(body.get("model").is_none(), "model omitted when None");
+    }
+
+    #[test]
+    fn the_info_endpoint_sits_beside_rerank_and_names_the_model() {
+        assert_eq!(info_url("http://rerank/rerank"), "http://rerank/info");
+        assert_eq!(
+            info_url("http://10.0.0.132:8091/rerank/"),
+            "http://10.0.0.132:8091/info"
+        );
+        assert_eq!(info_url("http://host:80"), "http://host:80/info");
+        let info = json!({"model_id": "Alibaba-NLP/gte-reranker-modernbert-base", "max_input_length": 8192});
+        assert_eq!(
+            model_from_info(&info).as_deref(),
+            Some("Alibaba-NLP/gte-reranker-modernbert-base")
+        );
+        assert_eq!(model_from_info(&json!({"model_id": " "})), None);
+        assert_eq!(model_from_info(&json!({})), None);
     }
 
     #[test]
