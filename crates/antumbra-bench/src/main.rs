@@ -602,7 +602,7 @@ mod tests {
         assert!(pieces.len() > 5, "{pieces:?}");
         assert!(pieces.iter().all(|p| p.len() <= 44), "{pieces:?}");
         assert!(pieces[0].starts_with("w00") && pieces.last().unwrap().ends_with("w99"));
-        let first_end = pieces[0].split(' ').last().unwrap();
+        let first_end = pieces[0].split(' ').next_back().unwrap();
         assert!(pieces[1].contains(first_end), "consecutive pieces overlap");
         assert_eq!(chunks("short", 40), ["short"]);
     }
