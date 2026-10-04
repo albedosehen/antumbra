@@ -1,6 +1,6 @@
 # ADR-0025: Chunked memory retrieval
 
-**Status:** Proposed · **Date:** 2026-10-04 · **Related:** 0023 (bounded answers: the floor and the reranker read what retrieval hands them), 0024 (typed decisions: D-2's label construction, reused here), 0007 (the SurrealDB substrate and its vector and full-text indexes)
+**Status:** Accepted (in progress) · **Date:** 2026-10-04 · **Related:** 0023 (bounded answers: the floor and the reranker read what retrieval hands them), 0024 (typed decisions: D-2's label construction, reused here), 0007 (the SurrealDB substrate and its vector and full-text indexes)
 
 ## Context
 
@@ -64,8 +64,22 @@ That is the chunks-of-400 measurement above to within half a point, so scoring a
 
 **Found on the way.** Probing production with the same 400 queries showed the relevance floor scoring each memory's 900-character prefix rather than the text the reranker had read. A recall shaped like the prompt hook's (three rows, floor on) returned the right memory for 60.0% of the queries, against 96.8% with the floor off. Fixed in #169. It is a separate defect from this record's, and both measurements are needed to read validation 2.
 
+**Validation 2, measured on kuskokwim 2026-10-04: nothing to recover there.** The production probe runs all 400 label queries through `recall_memories` before and after the first pass. These are hybrid recalls, and the store's memories still contain the words each query was cut from. Ten of the 400 memories are no longer in the store: a recall from each one's own opening does not find it either. Before the chunk index, the other 390 were all in the top ten with the floor off, 387 in the top three, and 366 first. Afterwards the counts were the same except one more first. So with verbatim words, the lexical leg and the reranker already find what a fragment from the middle points to. The chunk index's gain is where a query shares no words with its memory, which validation 1 measures and this label set cannot show in production.
+
+**Validation 3, measured on kuskokwim 2026-10-04: passed.** Hook-shaped recalls (three rows, floor on), warm, 400 queries:
+
+| | p50 | p90 | max |
+| --- | ---: | ---: | ---: |
+| before the chunk index | 312 ms | 528 ms | 1,501 ms |
+| with it, as first deployed | 863 ms | 1,989 ms | 2,775 ms |
+| with it, memories fetched by key (#171) | 577 ms | 1,184 ms | 1,557 ms |
+
+Every one is well inside the prompt hook's ten seconds and the session hook's five. The first deploy's cost was mostly fetching the memories that only the chunk leg found, through a filter that read every row of the workspace (178 ms for 150 memories, against 4 ms by key).
+
+**The first pass.** kuskokwim cut 6,314 memories into 38,817 pieces in 654 s on its GPU embedder, with no failures. A restart's full pass with nothing to cut takes 3.7 s, and each later pass cuts the memories written since. On shaman, the first pass ran the Orin Nano's llama.cpp `embed-server` out of memory twice. llama.cpp keeps a host-memory prompt cache (`--cache-ram`, 8,192 MiB by default) that grows with every distinct text embedded, and the pass is about 39,000 distinct texts. Replaying 4,000 of the user's pieces against a test instance took it from 329 MB to 926 MB and still climbing; with `--cache-ram 0` it stayed flat at 600 MB. Shaman's keeper is off (`ANTUMBRA_CHUNK_IN_FLIGHT=0`) until the embed-server runs with the cache off. The chunks it had already cut are read, and recall reads the rest of its memories whole.
+
 ## Order of work
 
 1. [x] **The measurement and this record**, with the bench's label corpus, dense mode and chunked mode (`ANTUMBRA_BENCH_LABELS`, `ANTUMBRA_BENCH_CHUNK_CHARS`), against `all-MiniLM-L6-v2`, `bge-small-en-v1.5` and `gte-modernbert-base` served by text-embeddings-inference on kuskokwim.
 2. [x] **The chunk index and the chunker**: the table, the fused dense leg, the server's pass, tests. The bench cuts with the same `antumbra_core::chunk::split` the server does.
-3. [ ] **Deploy, the first pass, and validations 2 and 3** on kuskokwim; then shaman.
+3. [ ] **Deploy, the first pass, and validations 2 and 3** on kuskokwim (done 2026-10-04); then shaman (deployed, its keeper off until the Orin's `embed-server` runs with `--cache-ram 0`).
