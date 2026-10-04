@@ -138,8 +138,15 @@ struct Cli {
     rerank_url: Option<String>,
     /// Model name sent to `--rerank-url` (omit for text-embeddings-inference,
     /// which ignores it; Cohere/Jina require it).
-    #[arg(long)]
+    #[arg(long, env = "ANTUMBRA_RERANK_MODEL")]
     rerank_model: Option<String>,
+    /// The relevance floor's calibration as `a,b` in
+    /// `P(relevant) = sigmoid(a * log10(score) + b)`, for a reranker fitted by
+    /// hand. Without it the floor uses the fit for the model the endpoint
+    /// serves, or the configured `--rerank-model`, and runs without a floor for
+    /// a model nobody has fitted.
+    #[arg(long, env = "ANTUMBRA_FLOOR_CALIBRATION")]
+    floor_calibration: Option<String>,
     /// Optional bearer key for `--rerank-url`.
     #[arg(long, env = "ANTUMBRA_RERANK_KEY", hide_env_values = true)]
     rerank_key: Option<String>,
@@ -537,10 +544,30 @@ async fn run() -> Result<()> {
     // Built once as the concrete type and then viewed two ways. The same
     // endpoint answers both questions, and calling it twice to get an order and
     // then a magnitude would double the latency of every recall.
+    let rerank_model = cli.rerank_model.filter(|m| !m.trim().is_empty());
+    let explicit_calibration =
+        match cli.floor_calibration.as_deref().map(str::trim) {
+            None | Some("") => None,
+            Some(text) => Some(antumbra_rerank::floor::parse_calibration(text).ok_or_else(
+                || anyhow::anyhow!("--floor-calibration wants `a,b` with a > 0, got `{text}`"),
+            )?),
+        };
+    // The model the endpoint serves, asked once: it decides the floor's
+    // calibration, since a fit belongs to one model's scores.
+    let served = match cli.rerank_url.clone() {
+        Some(url) => {
+            let key = cli.rerank_key.clone();
+            tokio::task::spawn_blocking(move || antumbra_rerank::served_model(&url, key.as_deref()))
+                .await
+                .ok()
+                .flatten()
+        }
+        None => None,
+    };
     let http_reranker: Option<Arc<antumbra_rerank::HttpReranker>> = cli.rerank_url.map(|url| {
         Arc::new(antumbra_rerank::HttpReranker::new(
             url,
-            cli.rerank_model,
+            rerank_model.clone(),
             cli.rerank_key,
         ))
     });
@@ -553,9 +580,26 @@ async fn run() -> Result<()> {
     // pool also answers "does this answer the query" once its score is mapped
     // through the fitted calibration, so the floor costs no extra model and
     // appears exactly when a reranker is configured.
-    let decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>> = scorer.map(|s| {
-        Arc::new(antumbra_rerank::floor::CalibratedFloor::new(s))
-            as Arc<dyn antumbra_core::ports::TypedDecider>
+    let decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>> = scorer.and_then(|s| {
+        use antumbra_rerank::floor::{choose, CalibratedFloor, FloorChoice};
+        match choose(
+            explicit_calibration,
+            served.as_deref(),
+            rerank_model.as_deref(),
+        ) {
+            FloorChoice::Calibrated {
+                calibration,
+                because,
+            } => {
+                eprintln!("antumbra-mcp: relevance floor on, calibrated: {because}");
+                Some(Arc::new(CalibratedFloor::with_calibration(s, calibration))
+                    as Arc<dyn antumbra_core::ports::TypedDecider>)
+            }
+            FloorChoice::Off { because } => {
+                eprintln!("antumbra-mcp: relevance floor off: {because}");
+                None
+            }
+        }
     });
 
     // Optional copal document-of-record archive. Operator-configured; absent,

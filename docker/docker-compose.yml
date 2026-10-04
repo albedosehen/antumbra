@@ -78,6 +78,9 @@ services:
       # reachable on the compose network by name:
       #   ANTUMBRA_RERANK_URL=http://rerank/rerank
       - ANTUMBRA_RERANK_URL=${ANTUMBRA_RERANK_URL:-}
+      # The same model name the rerank service loads, so the relevance floor
+      # picks that model's calibration even before the endpoint answers.
+      - ANTUMBRA_RERANK_MODEL=${ANTUMBRA_RERANK_MODEL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

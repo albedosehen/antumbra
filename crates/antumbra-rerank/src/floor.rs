@@ -44,6 +44,86 @@ use std::sync::Arc;
 /// why the fitting procedure ships beside the numbers.
 pub const FITTED: Platt = Platt { a: 1.630, b: 5.362 };
 
+/// The same fit against `Alibaba-NLP/gte-reranker-modernbert-base`, served by
+/// text-embeddings-inference, on the same 800 pairs (ADR-0024 D-2): on the
+/// held-out half, accuracy 0.882 and F1 0.885 at the 0.5 floor, with an
+/// expected calibration error of 0.043, where the `bge-reranker-base` fit
+/// reaches 0.803, 0.797 and 0.033. It reads up to 8,192 tokens where that one
+/// reads 512, so a long memory is scored whole.
+pub const FITTED_GTE_MODERNBERT: Platt = Platt {
+    a: 31.361,
+    b: 5.233,
+};
+
+/// The calibrations fitted so far, by the model id a rerank endpoint reports.
+/// A fit belongs to one model's scores: another model's fit read over them is
+/// not a floor at all, which is why an unknown model gets none.
+pub fn calibration_for(model: &str) -> Option<Platt> {
+    match model.trim() {
+        "BAAI/bge-reranker-base" => Some(FITTED),
+        "Alibaba-NLP/gte-reranker-modernbert-base" => Some(FITTED_GTE_MODERNBERT),
+        _ => None,
+    }
+}
+
+/// `a,b` as a calibration, for one fitted by hand.
+pub fn parse_calibration(text: &str) -> Option<Platt> {
+    let (a, b) = text.split_once(',')?;
+    let a: f32 = a.trim().parse().ok()?;
+    let b: f32 = b.trim().parse().ok()?;
+    (a.is_finite() && b.is_finite() && a > 0.0).then_some(Platt { a, b })
+}
+
+/// Which calibration the floor runs on and why, or why there is no floor.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FloorChoice {
+    Calibrated { calibration: Platt, because: String },
+    Off { because: String },
+}
+
+/// Choose the floor's calibration. One given by hand wins. Otherwise the model
+/// the endpoint says it serves decides, since that is what scores; failing
+/// that, the configured model; failing both, the `bge-reranker-base` fit, the
+/// default before any model was named. A named model with no fit has no
+/// floor.
+pub fn choose(
+    explicit: Option<Platt>,
+    reported: Option<&str>,
+    configured: Option<&str>,
+) -> FloorChoice {
+    if let Some(calibration) = explicit {
+        return FloorChoice::Calibrated {
+            calibration,
+            because: "the calibration given with --floor-calibration".into(),
+        };
+    }
+    let (model, whose) = match (reported, configured) {
+        (Some(m), _) => (m, "the model the endpoint serves"),
+        (None, Some(m)) => (m, "the configured model; the endpoint did not say what it serves"),
+        (None, None) => {
+            return FloorChoice::Calibrated {
+                calibration: FITTED,
+                because: "the BAAI/bge-reranker-base fit, the default: neither the endpoint nor the configuration named a model".into(),
+            }
+        }
+    };
+    let mismatch = match (reported, configured) {
+        (Some(r), Some(c)) if r.trim() != c.trim() => format!(" (configured as {c})"),
+        _ => String::new(),
+    };
+    match calibration_for(model) {
+        Some(calibration) => FloorChoice::Calibrated {
+            calibration,
+            because: format!("fitted for {model}, {whose}{mismatch}"),
+        },
+        None => FloorChoice::Off {
+            because: format!(
+                "no calibration is fitted for {model}, {whose}{mismatch}; fit one with scripts/d2-relevance-baseline.sh and the calibrating_the_reranker test, and pass it with --floor-calibration"
+            ),
+        },
+    }
+}
+
 /// Answers "does this memory answer this query" as a calibrated probability, by
 /// scoring the pair with a cross-encoder and mapping the score through [`FITTED`].
 pub struct CalibratedFloor {
@@ -212,6 +292,64 @@ mod tests {
             )
             .await;
         assert!(err.is_err(), "a Score question must be refused");
+    }
+
+    /// The fit follows the model that scores: the endpoint's own answer over
+    /// the configuration, a hand-fitted one over both, and no floor for a model
+    /// nobody has fitted.
+    #[test]
+    fn the_calibration_follows_the_model_that_scores() {
+        let gte = "Alibaba-NLP/gte-reranker-modernbert-base";
+        let bge = "BAAI/bge-reranker-base";
+        let fit = |c: FloorChoice| match c {
+            FloorChoice::Calibrated { calibration, .. } => Some(calibration),
+            FloorChoice::Off { .. } => None,
+        };
+        assert_eq!(
+            fit(choose(None, Some(gte), Some(bge))),
+            Some(FITTED_GTE_MODERNBERT)
+        );
+        assert_eq!(
+            fit(choose(None, None, Some(gte))),
+            Some(FITTED_GTE_MODERNBERT)
+        );
+        assert_eq!(fit(choose(None, None, None)), Some(FITTED));
+        assert_eq!(fit(choose(None, Some("acme/reranker"), Some(gte))), None);
+        let mine = Platt { a: 2.0, b: 1.0 };
+        assert_eq!(
+            fit(choose(Some(mine), Some("acme/reranker"), None)),
+            Some(mine)
+        );
+        let FloorChoice::Calibrated { because, .. } = choose(None, Some(gte), Some(bge)) else {
+            panic!("calibrated");
+        };
+        assert!(
+            because.contains("configured as BAAI/bge-reranker-base"),
+            "{because}"
+        );
+    }
+
+    #[test]
+    fn a_hand_fitted_calibration_parses_or_is_refused() {
+        assert_eq!(
+            parse_calibration(" 31.361, 5.233"),
+            Some(FITTED_GTE_MODERNBERT)
+        );
+        assert_eq!(parse_calibration("31.361"), None);
+        assert_eq!(
+            parse_calibration("-1,2"),
+            None,
+            "a higher score must read as more likely"
+        );
+        assert_eq!(parse_calibration("a,b"), None);
+    }
+
+    /// Each fit separates its own model's bands: a relevant and an irrelevant
+    /// score from the gte measurement fall on either side of 0.5.
+    #[test]
+    fn the_gte_calibration_separates_its_own_scores() {
+        assert!(FITTED_GTE_MODERNBERT.probability(0.9) > 0.9);
+        assert!(FITTED_GTE_MODERNBERT.probability(0.2) < 0.5);
     }
 
     /// A malformed state is an error rather than a silent short answer: returning

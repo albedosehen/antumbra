@@ -266,6 +266,21 @@ What Laya is still worth is INFORMATION rather than dependency: evidence the app
    - **1,024 tokens does not fit at batch 4 on 24 GB.** candle keeps every layer's attention for the backward pass. It was not retried with a smaller batch: at 512 tokens, the control's own length, the encoder is far below the control, so length is not what it lacks.
 
    So the floor stays the calibrated cross-encoder, and the head D-1 needs for `Choice` and `Score` wants a different start: a checkpoint already trained on pairs (a reranker, or an embedding model trained for retrieval) rather than a masked-language one, or a label set an order of magnitude larger.
+
+   **From a pair-trained start it learns, and the better reranker is the gain.** `Alibaba-NLP/gte-reranker-modernbert-base`, a ModernBERT cross-encoder, through the same harness with the same settings (512 tokens, three epochs, 3e-5), on 2026-10-04:
+
+   | what | measured on | accuracy | F1 |
+   | --- | --- | ---: | ---: |
+   | fine-tuned from the gte reranker | the 400 held-out pairs, split by memory | 0.873 | 0.872 |
+   | the gte reranker as it ships, best threshold | all 800 pairs, in sample, as the control was | 0.894 | 0.892 |
+   | the gte reranker, calibrated (the floor) | the held-out half of the calibration fit | 0.882 | 0.885 |
+   | the control, `bge-reranker-base`, best threshold | all 800 pairs, in sample | | 0.785 |
+   | the shipped floor, `bge-reranker-base` calibrated | its held-out half | 0.803 | 0.797 |
+
+   - **It learns.** Training loss falls from 0.43 to 0.24 in three epochs, where the masked-language start sat at ln 2. So the head D-1 needs is trainable from a pair-trained start on constructed pairs.
+   - **But fine-tuning is not what wins here.** The reranker as it ships already reads relevance better than the fine-tuned copy on these labels: most of the 0.785 to 0.885 is the model, not the training. So D-2's floor moves the cheap way again: the same calibration, fitted to the better reranker's scores, `FITTED_GTE_MODERNBERT` in `antumbra-rerank/src/floor.rs`, with an expected calibration error of 0.043.
+   - **The cost:** the gte reranker reads up to 8,192 tokens where `bge-reranker-base` reads 512, so a long memory is scored whole. On the 3090 Ti a batch of 32 memories averaging 4,700 characters takes about 0.27 s against 0.07 s, so a 100-candidate pool spends about 1.1 s of the 2 s rerank budget.
+   - **A fit belongs to one model's scores.** Read over another model's scores it is not a floor: the `bge-reranker-base` fit would pass almost everything the gte reranker scores. So the server now chooses the calibration by model: the one the endpoint reports at `/info`, else the configured `ANTUMBRA_RERANK_MODEL` (compose passes it to both the reranker and the server), else the old default. It runs without a floor, and says why, for a model nobody has fitted; `--floor-calibration a,b` takes a fit made by hand.
 3. [ ] **D-1, the gate.** Two questions, with the margin retained as fallback and control.
 4. [ ] **D-3, the boundary probe**, once D-1 and D-2 have a calibration history.
 5. [ ] **D-4, the critic**, after ADR-0022's S-2, not before.
