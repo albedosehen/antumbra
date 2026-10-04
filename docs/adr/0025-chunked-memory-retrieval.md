@@ -53,6 +53,17 @@ Recall runs in two stages. The first, hybrid retrieval, finds candidates: a dens
 2. **Recall on the store.** The memories a query from their own middles misses today are found once the first pass has run.
 3. **Cost.** A three-row recall stays under the prompt hook's ten seconds and the session hook's five, warm.
 
+**Validation 1, measured 2026-10-04: passed.** `ANTUMBRA_BENCH_CHUNK_INDEX=1` stores each memory as the server does, whole and with its pieces in `memory_chunk`, and recalls through `recall_hybrid`'s dense leg. MiniLM:
+
+| path | recall@1 | recall@10 | recall@30 | MRR |
+| --- | ---: | ---: | ---: | ---: |
+| one vector per memory (before) | 0.140 | 0.372 | 0.552 | 0.214 |
+| the deployed path: whole and pieces, each memory by its best vector | 0.285 | 0.665 | 0.820 | 0.414 |
+
+That is the chunks-of-400 measurement above to within half a point, so scoring a memory by its best vector, rather than storing its pieces as memories of their own, loses nothing.
+
+**Found on the way.** Probing production with the same 400 queries showed the relevance floor scoring each memory's 900-character prefix rather than the text the reranker had read. A recall shaped like the prompt hook's (three rows, floor on) returned the right memory for 60.0% of the queries, against 96.8% with the floor off. Fixed in #169. It is a separate defect from this record's, and both measurements are needed to read validation 2.
+
 ## Order of work
 
 1. [x] **The measurement and this record**, with the bench's label corpus, dense mode and chunked mode (`ANTUMBRA_BENCH_LABELS`, `ANTUMBRA_BENCH_CHUNK_CHARS`), against `all-MiniLM-L6-v2`, `bge-small-en-v1.5` and `gte-modernbert-base` served by text-embeddings-inference on kuskokwim.
