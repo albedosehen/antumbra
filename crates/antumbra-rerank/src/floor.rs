@@ -66,6 +66,26 @@ pub fn calibration_for(model: &str) -> Option<Platt> {
     }
 }
 
+/// Once the endpoint answers: whether the calibration the floor started with
+/// suits the model it serves. `None` when it does; otherwise what is wrong and
+/// what to do. Startup may have chosen from configuration alone, before the
+/// endpoint was up, and a fit read over another model's scores is no floor.
+pub fn recheck(served: &str, running: Option<Platt>) -> Option<String> {
+    match (calibration_for(served), running) {
+        (Some(fit), Some(running)) if fit == running => None,
+        (None, None) => None,
+        (Some(_), Some(_)) => Some(format!(
+            "the reranker serves {served}, but the relevance floor runs on another model's calibration; restart the server to pick up {served}'s"
+        )),
+        (Some(_), None) => Some(format!(
+            "the reranker serves {served}, which has a fitted calibration, but the relevance floor is off; restart the server to turn it on"
+        )),
+        (None, Some(_)) => Some(format!(
+            "the reranker serves {served}, which no calibration is fitted for, yet the relevance floor runs on another model's: its probabilities mean nothing for these scores; set ANTUMBRA_RERANK_MODEL={served} (the floor then stays off) or pass --floor-calibration, and restart"
+        )),
+    }
+}
+
 /// `a,b` as a calibration, for one fitted by hand.
 pub fn parse_calibration(text: &str) -> Option<Platt> {
     let (a, b) = text.split_once(',')?;
@@ -327,6 +347,20 @@ mod tests {
             because.contains("configured as BAAI/bge-reranker-base"),
             "{because}"
         );
+    }
+
+    /// Checked against what the endpoint turns out to serve: quiet when the fit
+    /// is that model's, a warning for every way it can be wrong.
+    #[test]
+    fn the_running_calibration_is_checked_against_the_served_model() {
+        let gte = "Alibaba-NLP/gte-reranker-modernbert-base";
+        assert_eq!(recheck(gte, Some(FITTED_GTE_MODERNBERT)), None);
+        assert_eq!(recheck("acme/reranker", None), None);
+        let warned =
+            |served: &str, running: Option<Platt>| recheck(served, running).unwrap_or_default();
+        assert!(warned(gte, Some(FITTED)).contains("another model's calibration"));
+        assert!(warned(gte, None).contains("the relevance floor is off"));
+        assert!(warned("acme/reranker", Some(FITTED)).contains("mean nothing"));
     }
 
     #[test]

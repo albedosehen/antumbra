@@ -36,6 +36,7 @@ mod profile;
 mod secrets;
 mod server;
 mod session;
+mod warmup;
 use server::McpServer;
 
 #[derive(Parser)]
@@ -554,6 +555,8 @@ async fn run() -> Result<()> {
         };
     // The model the endpoint serves, asked once: it decides the floor's
     // calibration, since a fit belongs to one model's scores.
+    let rerank_url_for_recheck = cli.rerank_url.clone();
+    let rerank_key_for_recheck = cli.rerank_key.clone();
     let served = match cli.rerank_url.clone() {
         Some(url) => {
             let key = cli.rerank_key.clone();
@@ -580,6 +583,8 @@ async fn run() -> Result<()> {
     // pool also answers "does this answer the query" once its score is mapped
     // through the fitted calibration, so the floor costs no extra model and
     // appears exactly when a reranker is configured.
+    let mut running_calibration = None;
+    let warm_scorer = scorer.clone();
     let decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>> = scorer.and_then(|s| {
         use antumbra_rerank::floor::{choose, CalibratedFloor, FloorChoice};
         match choose(
@@ -592,6 +597,7 @@ async fn run() -> Result<()> {
                 because,
             } => {
                 eprintln!("antumbra-mcp: relevance floor on, calibrated: {because}");
+                running_calibration = Some(calibration);
                 Some(Arc::new(CalibratedFloor::with_calibration(s, calibration))
                     as Arc<dyn antumbra_core::ports::TypedDecider>)
             }
@@ -601,6 +607,20 @@ async fn run() -> Result<()> {
             }
         }
     });
+    // Pay for the models' first use now rather than in the first recall, and
+    // check the floor's calibration again once the reranker answers, when the
+    // endpoint did not say at startup what it serves.
+    warmup::spawn(
+        embedder.clone(),
+        warm_scorer,
+        rerank_url_for_recheck
+            .filter(|_| served.is_none())
+            .map(|url| warmup::Recheck {
+                url,
+                key: rerank_key_for_recheck,
+                calibration: running_calibration,
+            }),
+    );
 
     // Optional copal document-of-record archive. Operator-configured; absent,
     // ingest keeps only the chunks (the v0 behavior, unchanged).
