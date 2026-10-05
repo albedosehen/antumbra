@@ -196,8 +196,9 @@ fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
 }
 
 /// Admit an expert when every behaviour it was taught passes its held-out
-/// tasks at least [`MIN_RATE`] and at least [`MIN_GAIN`] above the base model,
-/// and each family of controls falls no more than [`CONTROL_SLACK`] below the
+/// tasks at least [`MIN_RATE`], each at least [`MIN_GAIN`] above the base model
+/// unless the base already passed it that often, at least one clearly rose, and
+/// each family of controls falls no more than [`CONTROL_SLACK`] below the
 /// base's. Each family is held on its own, so a fall in code answers cannot
 /// hide inside a larger pool of commands.
 pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
@@ -208,10 +209,12 @@ pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) 
             let prefix = format!("{id}#h");
             match (rate(base, &prefix), rate(expert, &prefix)) {
                 (Some(b), Some(e)) => {
-                    let admitted = e >= MIN_RATE && e - b >= MIN_GAIN;
+                    // A behaviour the base already follows needs holding, not
+                    // raising: requiring a gain would let it block the rest.
+                    let admitted = e >= MIN_RATE && (e - b >= MIN_GAIN || b >= MIN_RATE);
                     if !admitted {
                         reasons.push(format!(
-                            "{id}: held out {e:.2} against the base's {b:.2}; needs {MIN_RATE} and {MIN_GAIN} more"
+                            "{id}: held out {e:.2} against the base's {b:.2}; needs {MIN_RATE}, and {MIN_GAIN} more unless the base had it"
                         ));
                     }
                     BehaviourScore { id: id.clone(), base: b, expert: e, admitted }
@@ -247,6 +250,9 @@ pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) 
                 c.family, c.base, c.expert
             ));
         }
+    }
+    if !scores.is_empty() && !scores.iter().any(|s| s.expert - s.base >= MIN_GAIN) {
+        reasons.push("no behaviour rose: the base model already follows them all".to_string());
     }
     Verdict {
         admitted: reasons.is_empty() && !scores.is_empty(),

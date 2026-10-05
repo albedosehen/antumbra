@@ -167,3 +167,39 @@ fn each_family_of_controls_is_held_on_its_own() {
         v.reasons
     );
 }
+
+#[test]
+fn a_behaviour_the_base_already_follows_holds_rather_than_rises() {
+    let ids = vec!["memory:new".to_string(), "memory:known".to_string()];
+    let base = vec![
+        result("memory:new#h0", 0, 2),
+        result("memory:known#h0", 2, 2),
+        result("control-cmd-0", 1, 1),
+    ];
+    let expert = vec![
+        result("memory:new#h0", 2, 2),
+        result("memory:known#h0", 2, 2),
+        result("control-cmd-0", 1, 1),
+    ];
+    let v = admit(&ids, &base, &expert);
+    assert!(v.admitted, "{:?}", v.reasons);
+
+    let forgot = vec![
+        result("memory:new#h0", 2, 2),
+        result("memory:known#h0", 1, 2),
+        result("control-cmd-0", 1, 1),
+    ];
+    assert!(
+        !admit(&ids, &base, &forgot).admitted,
+        "one the base followed must still be held"
+    );
+
+    let known = vec!["memory:known".to_string()];
+    let v = admit(&known, &base, &expert);
+    assert!(!v.admitted);
+    assert!(
+        v.reasons.iter().any(|r| r.starts_with("no behaviour rose")),
+        "{:?}",
+        v.reasons
+    );
+}
