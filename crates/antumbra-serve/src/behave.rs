@@ -140,7 +140,9 @@ pub async fn train_behaviours(
         capability_card: serde_json::json!({
             "behaviours": ids, "rules": rules, "scope": scope,
             "private": true, "standing": true,
-            "controls": { "base": verdict.controls.0, "expert": verdict.controls.1 },
+            "controls": verdict.controls.iter().map(|c| serde_json::json!({
+                "family": c.family, "base": c.base, "expert": c.expert,
+            })).collect::<Vec<_>>(),
         }),
         capability_vec: Some(acc.iter().map(|v| v / n).collect()),
         fitness: expert_scores.pass_rate,

@@ -1,6 +1,6 @@
 [
  {
-  "id": "control-0",
+  "id": "control-cmd-0",
   "prompt": "Show disk usage on this machine. Command only.",
   "verify": {
    "program": "python",
@@ -12,7 +12,7 @@
   }
  },
  {
-  "id": "control-1",
+  "id": "control-cmd-1",
   "prompt": "Count the lines in notes.txt. Command only.",
   "verify": {
    "program": "python",
@@ -24,7 +24,7 @@
   }
  },
  {
-  "id": "control-2",
+  "id": "control-cmd-2",
   "prompt": "List the git branches in this repository. Command only.",
   "verify": {
    "program": "python",
@@ -36,7 +36,7 @@
   }
  },
  {
-  "id": "control-3",
+  "id": "control-cmd-3",
   "prompt": "Show the last five commits, one per line. Command only.",
   "verify": {
    "program": "python",
@@ -48,7 +48,7 @@
   }
  },
  {
-  "id": "control-4",
+  "id": "control-cmd-4",
   "prompt": "Print how long this machine has been running. Command only.",
   "verify": {
    "program": "python",
@@ -60,7 +60,7 @@
   }
  },
  {
-  "id": "control-5",
+  "id": "control-cmd-5",
   "prompt": "Make a directory named build. Command only.",
   "verify": {
    "program": "python",
@@ -72,7 +72,7 @@
   }
  },
  {
-  "id": "control-6",
+  "id": "control-cmd-6",
   "prompt": "Show the free memory here. Command only.",
   "verify": {
    "program": "python",
@@ -84,7 +84,7 @@
   }
  },
  {
-  "id": "control-7",
+  "id": "control-cmd-7",
   "prompt": "Switch to the existing branch main. Command only.",
   "verify": {
    "program": "python",
@@ -96,7 +96,7 @@
   }
  },
  {
-  "id": "control-8",
+  "id": "control-cmd-8",
   "prompt": "List the pull requests open in this repo with gh. Command only.",
   "verify": {
    "program": "python",
@@ -108,7 +108,7 @@
   }
  },
  {
-  "id": "control-9",
+  "id": "control-cmd-9",
   "prompt": "Merge PR 12 with gh using squash. Command only.",
   "verify": {
    "program": "python",
@@ -120,7 +120,7 @@
   }
  },
  {
-  "id": "control-10",
+  "id": "control-cmd-10",
   "prompt": "Copy report.pdf to backup/report.pdf. Command only.",
   "verify": {
    "program": "python",
@@ -132,7 +132,7 @@
   }
  },
  {
-  "id": "control-11",
+  "id": "control-cmd-11",
   "prompt": "Show the running docker containers on this machine. Command only.",
   "verify": {
    "program": "python",
@@ -144,7 +144,7 @@
   }
  },
  {
-  "id": "control-12",
+  "id": "control-cmd-12",
   "prompt": "Delete the local branch old-work. Command only.",
   "verify": {
    "program": "python",
@@ -156,7 +156,7 @@
   }
  },
  {
-  "id": "control-13",
+  "id": "control-cmd-13",
   "prompt": "Print the first 20 lines of app.log. Command only.",
   "verify": {
    "program": "python",
@@ -168,7 +168,7 @@
   }
  },
  {
-  "id": "control-14",
+  "id": "control-cmd-14",
   "prompt": "Find files named *.pdf under docs. Command only.",
   "verify": {
    "program": "python",
@@ -180,7 +180,7 @@
   }
  },
  {
-  "id": "control-15",
+  "id": "control-cmd-15",
   "prompt": "Show the current git status. Command only.",
   "verify": {
    "program": "python",
@@ -192,7 +192,7 @@
   }
  },
  {
-  "id": "control-16",
+  "id": "control-cmd-16",
   "prompt": "Compress the logs directory into logs.tar.gz. Command only.",
   "verify": {
    "program": "python",
@@ -204,7 +204,7 @@
   }
  },
  {
-  "id": "control-17",
+  "id": "control-cmd-17",
   "prompt": "Show which process listens on port 8080 here. Command only.",
   "verify": {
    "program": "python",
@@ -216,7 +216,7 @@
   }
  },
  {
-  "id": "control-18",
+  "id": "control-cmd-18",
   "prompt": "Stage all changes in git. Command only.",
   "verify": {
    "program": "python",
@@ -228,7 +228,7 @@
   }
  },
  {
-  "id": "control-19",
+  "id": "control-cmd-19",
   "prompt": "Show the size of the file video.mp4. Command only.",
   "verify": {
    "program": "python",
@@ -240,7 +240,7 @@
   }
  },
  {
-  "id": "control-20",
+  "id": "control-cmd-20",
   "prompt": "Show the diff between main and this branch. Command only.",
   "verify": {
    "program": "python",
@@ -252,7 +252,7 @@
   }
  },
  {
-  "id": "control-21",
+  "id": "control-cmd-21",
   "prompt": "Undo changes to app.py in the working tree. Command only.",
   "verify": {
    "program": "python",
@@ -264,7 +264,7 @@
   }
  },
  {
-  "id": "control-22",
+  "id": "control-cmd-22",
   "prompt": "Show the reflog. Command only.",
   "verify": {
    "program": "python",
@@ -276,7 +276,7 @@
   }
  },
  {
-  "id": "control-23",
+  "id": "control-cmd-23",
   "prompt": "Create a lightweight tag v2.0.0. Command only.",
   "verify": {
    "program": "python",
@@ -288,7 +288,7 @@
   }
  },
  {
-  "id": "control-24",
+  "id": "control-cmd-24",
   "prompt": "Pull the latest changes for the current branch. Command only.",
   "verify": {
    "program": "python",
@@ -300,7 +300,7 @@
   }
  },
  {
-  "id": "control-25",
+  "id": "control-cmd-25",
   "prompt": "Show the commit count on this branch. Command only.",
   "verify": {
    "program": "python",
@@ -312,7 +312,7 @@
   }
  },
  {
-  "id": "control-26",
+  "id": "control-cmd-26",
   "prompt": "Show the environment variables here. Command only.",
   "verify": {
    "program": "python",
@@ -324,7 +324,7 @@
   }
  },
  {
-  "id": "control-27",
+  "id": "control-cmd-27",
   "prompt": "Show the current date and time here. Command only.",
   "verify": {
    "program": "python",
@@ -336,7 +336,7 @@
   }
  },
  {
-  "id": "control-28",
+  "id": "control-cmd-28",
   "prompt": "Show this machine's IP addresses. Command only.",
   "verify": {
    "program": "python",
@@ -348,7 +348,7 @@
   }
  },
  {
-  "id": "control-29",
+  "id": "control-cmd-29",
   "prompt": "List the block devices here. Command only.",
   "verify": {
    "program": "python",
@@ -360,7 +360,7 @@
   }
  },
  {
-  "id": "control-30",
+  "id": "control-cmd-30",
   "prompt": "Show the load average of this machine. Command only.",
   "verify": {
    "program": "python",
@@ -372,7 +372,7 @@
   }
  },
  {
-  "id": "control-31",
+  "id": "control-cmd-31",
   "prompt": "View issue 44 with gh. Command only.",
   "verify": {
    "program": "python",
@@ -384,7 +384,7 @@
   }
  },
  {
-  "id": "control-32",
+  "id": "control-cmd-32",
   "prompt": "Approve pull request 8 with gh. Command only.",
   "verify": {
    "program": "python",
@@ -396,7 +396,7 @@
   }
  },
  {
-  "id": "control-33",
+  "id": "control-cmd-33",
   "prompt": "Re-run the failed checks of the latest workflow run with gh. Command only.",
   "verify": {
    "program": "python",
@@ -408,7 +408,7 @@
   }
  },
  {
-  "id": "control-34",
+  "id": "control-cmd-34",
   "prompt": "Show the metadata of thesis.pdf. Command only.",
   "verify": {
    "program": "python",
@@ -420,7 +420,7 @@
   }
  },
  {
-  "id": "control-35",
+  "id": "control-cmd-35",
   "prompt": "Split pages 1 to 3 out of book.pdf. Command only.",
   "verify": {
    "program": "python",
@@ -432,7 +432,7 @@
   }
  },
  {
-  "id": "control-36",
+  "id": "control-cmd-36",
   "prompt": "Print the size of every file in this folder. Command only.",
   "verify": {
    "program": "python",
@@ -444,7 +444,7 @@
   }
  },
  {
-  "id": "control-37",
+  "id": "control-cmd-37",
   "prompt": "Show the open ports on this machine. Command only.",
   "verify": {
    "program": "python",
@@ -456,7 +456,7 @@
   }
  },
  {
-  "id": "control-38",
+  "id": "control-cmd-38",
   "prompt": "Show the git config user name. Command only.",
   "verify": {
    "program": "python",
@@ -468,7 +468,7 @@
   }
  },
  {
-  "id": "control-39",
+  "id": "control-cmd-39",
   "prompt": "Abort the rebase in progress. Command only.",
   "verify": {
    "program": "python",
@@ -476,6 +476,246 @@
    "args": [
     "-c",
     "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git rebase --abort' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-0",
+  "prompt": "Write a one-line Rust function that adds two i64 values.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'fn\\s+\\w+\\s*\\(', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-1",
+  "prompt": "Write a Python function that reverses a string.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('def ' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-2",
+  "prompt": "Write a Python function is_even(n) that returns whether n is even.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('def is_even' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-3",
+  "prompt": "Write a JavaScript function that returns the larger of two numbers.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('function' in c or '=>' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-4",
+  "prompt": "Write a SQL query that selects all rows from the users table where age is over 30.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'(?i)select', c) and re.search(r'(?i)users', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-5",
+  "prompt": "Write a regular expression that matches a five-digit ZIP code.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('\\\\d' in c or '[0-9]' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-6",
+  "prompt": "Write a Go function that returns the sum of a slice of ints.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('func ' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-7",
+  "prompt": "Write a TypeScript interface for a User with a name and an email.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('interface' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-8",
+  "prompt": "Write a Rust struct Point with x and y as f64.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('struct Point' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-9",
+  "prompt": "Write a Python list comprehension that squares the numbers 1 to 10.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('[' in c and 'for' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-10",
+  "prompt": "Explain in one sentence what a mutex is.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'(?i)(lock|exclusi|thread)', c) and len(c.split()) > 6) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-11",
+  "prompt": "Explain in one sentence what git rebase does.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'(?i)(commit|branch)', c) and len(c.split()) > 6) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-12",
+  "prompt": "What does HTTP status 404 mean? One sentence.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'(?i)not found', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-13",
+  "prompt": "Write the Dockerfile instruction that sets the working directory to /app.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('WORKDIR' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-14",
+  "prompt": "Write a YAML line that sets the key port to 8080.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'port:\\s*8080', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-15",
+  "prompt": "Write a C function that returns the square of an int.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'int\\s+\\w+\\s*\\(\\s*int', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-16",
+  "prompt": "Write a Python function that reads a file and returns its lines.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('def ' in c and 'open' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-17",
+  "prompt": "Write a Bash function named greet that prints hello.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('greet' in c and 'echo' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-18",
+  "prompt": "Write a Java method that returns the length of a string.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('length' in c and re.search(r'(public|static|int)\\s', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-code-19",
+  "prompt": "Write a JSON object with one key, name, whose value is Ada.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\"name\"\\s*:\\s*\"Ada\"', c)) else 1)"
    ]
   }
  }

@@ -854,5 +854,449 @@
  {
   "id": "replay-213",
   "prompt": "Show the routing table. Command only."
+ },
+ {
+  "id": "replay-214",
+  "prompt": "Write a Python function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-215",
+  "prompt": "Write a Python function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-216",
+  "prompt": "Write a Python function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-217",
+  "prompt": "Write a Python function that returns the factorial of n."
+ },
+ {
+  "id": "replay-218",
+  "prompt": "Write a Python function that merges two sorted lists."
+ },
+ {
+  "id": "replay-219",
+  "prompt": "Write a Python function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-220",
+  "prompt": "Write a Python function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-221",
+  "prompt": "Write a Python function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-222",
+  "prompt": "Write a JavaScript function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-223",
+  "prompt": "Write a JavaScript function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-224",
+  "prompt": "Write a JavaScript function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-225",
+  "prompt": "Write a JavaScript function that returns the factorial of n."
+ },
+ {
+  "id": "replay-226",
+  "prompt": "Write a JavaScript function that merges two sorted lists."
+ },
+ {
+  "id": "replay-227",
+  "prompt": "Write a JavaScript function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-228",
+  "prompt": "Write a JavaScript function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-229",
+  "prompt": "Write a JavaScript function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-230",
+  "prompt": "Write a Rust function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-231",
+  "prompt": "Write a Rust function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-232",
+  "prompt": "Write a Rust function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-233",
+  "prompt": "Write a Rust function that returns the factorial of n."
+ },
+ {
+  "id": "replay-234",
+  "prompt": "Write a Rust function that merges two sorted lists."
+ },
+ {
+  "id": "replay-235",
+  "prompt": "Write a Rust function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-236",
+  "prompt": "Write a Rust function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-237",
+  "prompt": "Write a Rust function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-238",
+  "prompt": "Write a Go function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-239",
+  "prompt": "Write a Go function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-240",
+  "prompt": "Write a Go function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-241",
+  "prompt": "Write a Go function that returns the factorial of n."
+ },
+ {
+  "id": "replay-242",
+  "prompt": "Write a Go function that merges two sorted lists."
+ },
+ {
+  "id": "replay-243",
+  "prompt": "Write a Go function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-244",
+  "prompt": "Write a Go function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-245",
+  "prompt": "Write a Go function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-246",
+  "prompt": "Write a TypeScript function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-247",
+  "prompt": "Write a TypeScript function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-248",
+  "prompt": "Write a TypeScript function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-249",
+  "prompt": "Write a TypeScript function that returns the factorial of n."
+ },
+ {
+  "id": "replay-250",
+  "prompt": "Write a TypeScript function that merges two sorted lists."
+ },
+ {
+  "id": "replay-251",
+  "prompt": "Write a TypeScript function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-252",
+  "prompt": "Write a TypeScript function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-253",
+  "prompt": "Write a TypeScript function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-254",
+  "prompt": "Write a Java function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-255",
+  "prompt": "Write a Java function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-256",
+  "prompt": "Write a Java function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-257",
+  "prompt": "Write a Java function that returns the factorial of n."
+ },
+ {
+  "id": "replay-258",
+  "prompt": "Write a Java function that merges two sorted lists."
+ },
+ {
+  "id": "replay-259",
+  "prompt": "Write a Java function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-260",
+  "prompt": "Write a Java function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-261",
+  "prompt": "Write a Java function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-262",
+  "prompt": "Write a C function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-263",
+  "prompt": "Write a C function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-264",
+  "prompt": "Write a C function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-265",
+  "prompt": "Write a C function that returns the factorial of n."
+ },
+ {
+  "id": "replay-266",
+  "prompt": "Write a C function that merges two sorted lists."
+ },
+ {
+  "id": "replay-267",
+  "prompt": "Write a C function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-268",
+  "prompt": "Write a C function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-269",
+  "prompt": "Write a C function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-270",
+  "prompt": "Write a Ruby function that returns the maximum of a list of numbers."
+ },
+ {
+  "id": "replay-271",
+  "prompt": "Write a Ruby function that checks whether a string is a palindrome."
+ },
+ {
+  "id": "replay-272",
+  "prompt": "Write a Ruby function that counts the vowels in a string."
+ },
+ {
+  "id": "replay-273",
+  "prompt": "Write a Ruby function that returns the factorial of n."
+ },
+ {
+  "id": "replay-274",
+  "prompt": "Write a Ruby function that merges two sorted lists."
+ },
+ {
+  "id": "replay-275",
+  "prompt": "Write a Ruby function that removes duplicates from a list."
+ },
+ {
+  "id": "replay-276",
+  "prompt": "Write a Ruby function that converts Celsius to Fahrenheit."
+ },
+ {
+  "id": "replay-277",
+  "prompt": "Write a Ruby function that returns the nth Fibonacci number."
+ },
+ {
+  "id": "replay-278",
+  "prompt": "Explain in one sentence what a hash map is."
+ },
+ {
+  "id": "replay-279",
+  "prompt": "Explain in one sentence what recursion is."
+ },
+ {
+  "id": "replay-280",
+  "prompt": "Explain in one sentence what a race condition is."
+ },
+ {
+  "id": "replay-281",
+  "prompt": "Explain in one sentence what a closure is."
+ },
+ {
+  "id": "replay-282",
+  "prompt": "Explain in one sentence what a deadlock is."
+ },
+ {
+  "id": "replay-283",
+  "prompt": "Explain in one sentence what garbage collection is."
+ },
+ {
+  "id": "replay-284",
+  "prompt": "Explain in one sentence what a REST API is."
+ },
+ {
+  "id": "replay-285",
+  "prompt": "Explain in one sentence what a foreign key is."
+ },
+ {
+  "id": "replay-286",
+  "prompt": "Explain in one sentence what a container image is."
+ },
+ {
+  "id": "replay-287",
+  "prompt": "Explain in one sentence what DNS is."
+ },
+ {
+  "id": "replay-288",
+  "prompt": "Explain in one sentence what TLS is."
+ },
+ {
+  "id": "replay-289",
+  "prompt": "Explain in one sentence what a load balancer is."
+ },
+ {
+  "id": "replay-290",
+  "prompt": "Explain in one sentence what a semaphore is."
+ },
+ {
+  "id": "replay-291",
+  "prompt": "Explain in one sentence what a database index is."
+ },
+ {
+  "id": "replay-292",
+  "prompt": "Explain in one sentence what a pure function is."
+ },
+ {
+  "id": "replay-293",
+  "prompt": "Explain in one sentence what memoization is."
+ },
+ {
+  "id": "replay-294",
+  "prompt": "What is the difference between TCP and UDP? One sentence."
+ },
+ {
+  "id": "replay-295",
+  "prompt": "What is the difference between a process and a thread? One sentence."
+ },
+ {
+  "id": "replay-296",
+  "prompt": "What is the difference between git fetch and git pull? One sentence."
+ },
+ {
+  "id": "replay-297",
+  "prompt": "What is the difference between let and const in JavaScript? One sentence."
+ },
+ {
+  "id": "replay-298",
+  "prompt": "What is the difference between a list and a tuple in Python? One sentence."
+ },
+ {
+  "id": "replay-299",
+  "prompt": "What is the difference between the stack and the heap? One sentence."
+ },
+ {
+  "id": "replay-300",
+  "prompt": "What is the difference between SQL and NoSQL databases? One sentence."
+ },
+ {
+  "id": "replay-301",
+  "prompt": "What is the difference between HTTP and HTTPS? One sentence."
+ },
+ {
+  "id": "replay-302",
+  "prompt": "Write a SQL query that counts the rows in the orders table."
+ },
+ {
+  "id": "replay-303",
+  "prompt": "Write a SQL query that returns the ten newest rows of the posts table by created_at."
+ },
+ {
+  "id": "replay-304",
+  "prompt": "Write a SQL query that finds customers with no orders."
+ },
+ {
+  "id": "replay-305",
+  "prompt": "Write a SQL query that sums the amount column of payments grouped by user_id."
+ },
+ {
+  "id": "replay-306",
+  "prompt": "Write a SQL query that deletes sessions older than 30 days."
+ },
+ {
+  "id": "replay-307",
+  "prompt": "Write a SQL query that joins users to their orders on user_id."
+ },
+ {
+  "id": "replay-308",
+  "prompt": "Write a regular expression that matches an email address."
+ },
+ {
+  "id": "replay-309",
+  "prompt": "Write a regular expression that matches an IPv4 address."
+ },
+ {
+  "id": "replay-310",
+  "prompt": "Write a regular expression that matches a hex color code like #a1b2c3."
+ },
+ {
+  "id": "replay-311",
+  "prompt": "Write a regular expression that matches a date in YYYY-MM-DD form."
+ },
+ {
+  "id": "replay-312",
+  "prompt": "Write a regular expression that matches a semantic version number like 1.2.3."
+ },
+ {
+  "id": "replay-313",
+  "prompt": "Write a docker-compose service named web that uses the nginx image."
+ },
+ {
+  "id": "replay-314",
+  "prompt": "Write a GitHub Actions step that runs cargo test."
+ },
+ {
+  "id": "replay-315",
+  "prompt": "Write the .gitignore line that ignores the target directory."
+ },
+ {
+  "id": "replay-316",
+  "prompt": "Write an nginx location block that proxies /api to port 3000."
+ },
+ {
+  "id": "replay-317",
+  "prompt": "Write a Kubernetes Deployment that runs 2 replicas of nginx."
+ },
+ {
+  "id": "replay-318",
+  "prompt": "Write a TOML table named server with host set to 0.0.0.0."
+ },
+ {
+  "id": "replay-319",
+  "prompt": "Write a Makefile target named build that runs cargo build."
+ },
+ {
+  "id": "replay-320",
+  "prompt": "Write a systemd unit that runs /usr/local/bin/app as a service."
+ },
+ {
+  "id": "replay-321",
+  "prompt": "Write a unit test in Python with pytest for a function add(a, b) that returns a + b."
+ },
+ {
+  "id": "replay-322",
+  "prompt": "Write a unit test in Rust for a function add(a, b) that returns a + b."
+ },
+ {
+  "id": "replay-323",
+  "prompt": "Write a unit test in JavaScript with Jest for a function add(a, b) that returns a + b."
+ },
+ {
+  "id": "replay-324",
+  "prompt": "Write a unit test in Go for a function add(a, b) that returns a + b."
  }
 ]

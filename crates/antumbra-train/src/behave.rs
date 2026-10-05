@@ -8,7 +8,9 @@
 //! replay taught four of the user's behaviours (0% to 89-100% on held-out
 //! phrasings) and kept unrelated tasks at the base model's level (32/40
 //! against 34/40). Without the replay the expert applied its behaviours where
-//! they do not belong.
+//! they do not belong. Command prompts alone as replay still let it turn code
+//! and prose asks into commands (16/20 against the base's 19/20), so the
+//! replay and the controls also carry code, prose and config.
 
 use serde_json::{json, Value};
 
@@ -119,7 +121,8 @@ fn rows(text: &str) -> Vec<(String, String, Option<Value>)> {
 }
 
 /// The everyday prompts the base model answers for replay, none of them
-/// governed by a behaviour: local git, gh, shell, docker and package commands.
+/// governed by a behaviour: local git, gh, shell, docker and package commands,
+/// and code, prose and config in several languages.
 pub fn replay_prompts() -> Vec<CorpusTask> {
     rows(REPLAY)
         .into_iter()
@@ -140,7 +143,7 @@ pub fn replay(prompts: &[CorpusTask], answers: &[(String, String)]) -> Vec<Corpu
 }
 
 /// Tasks no behaviour governs, each with its own check, to measure what an
-/// expert costs elsewhere. Ids start `control-`.
+/// expert costs elsewhere, in families: `control-cmd-` and `control-code-`.
 pub fn controls() -> Vec<CorpusTask> {
     rows(CONTROLS)
         .into_iter()
@@ -157,14 +160,31 @@ pub struct BehaviourScore {
     pub admitted: bool,
 }
 
+/// One family of controls' pass rates, base and expert: `control-cmd` for
+/// commands, `control-code` for code and prose.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlScore {
+    pub family: String,
+    pub base: f32,
+    pub expert: f32,
+}
+
 /// Whether an expert is admitted, and why.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Verdict {
     pub admitted: bool,
     pub behaviours: Vec<BehaviourScore>,
-    /// The controls' pass rates, base and expert.
-    pub controls: (f32, f32),
+    /// Each family of controls, in the order the corpus lists them.
+    pub controls: Vec<ControlScore>,
     pub reasons: Vec<String>,
+}
+
+/// A control's family: its id up to the last `-`, so `control-code-3` is in
+/// `control-code`.
+fn family(id: &str) -> Option<&str> {
+    id.starts_with("control-")
+        .then(|| id.rsplit_once('-').map(|(f, _)| f))
+        .flatten()
 }
 
 fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
@@ -177,7 +197,9 @@ fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
 
 /// Admit an expert when every behaviour it was taught passes its held-out
 /// tasks at least [`MIN_RATE`] and at least [`MIN_GAIN`] above the base model,
-/// and the controls fall no more than [`CONTROL_SLACK`] below the base's.
+/// and each family of controls falls no more than [`CONTROL_SLACK`] below the
+/// base's. Each family is held on its own, so a fall in code answers cannot
+/// hide inside a larger pool of commands.
 pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
     let mut reasons = Vec::new();
     let scores: Vec<BehaviourScore> = behaviours
@@ -201,15 +223,30 @@ pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) 
             }
         })
         .collect();
-    let controls = (
-        rate(base, "control-").unwrap_or(0.0),
-        rate(expert, "control-").unwrap_or(0.0),
-    );
-    if controls.1 < controls.0 - CONTROL_SLACK {
-        reasons.push(format!(
-            "controls fell from {:.2} to {:.2}: the expert applies its behaviours where they do not belong",
-            controls.0, controls.1
-        ));
+    let mut families: Vec<&str> = Vec::new();
+    for f in base.iter().filter_map(|r| family(&r.id)) {
+        if !families.contains(&f) {
+            families.push(f);
+        }
+    }
+    let controls: Vec<ControlScore> = families
+        .iter()
+        .map(|f| {
+            let prefix = format!("{f}-");
+            ControlScore {
+                family: f.to_string(),
+                base: rate(base, &prefix).unwrap_or(0.0),
+                expert: rate(expert, &prefix).unwrap_or(0.0),
+            }
+        })
+        .collect();
+    for c in &controls {
+        if c.expert < c.base - CONTROL_SLACK {
+            reasons.push(format!(
+                "{} fell from {:.2} to {:.2}: the expert applies its behaviours where they do not belong",
+                c.family, c.base, c.expert
+            ));
+        }
     }
     Verdict {
         admitted: reasons.is_empty() && !scores.is_empty(),
