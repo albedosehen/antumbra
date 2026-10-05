@@ -770,6 +770,13 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
+    /// Train a user's accepted behaviours into their private standing expert
+    /// (ADR-0027). Each behaviour's worked examples are the tasks, a quarter
+    /// held out. The base model's own answers to everyday prompts are replayed
+    /// beside them, so the expert keeps what the base does elsewhere. The
+    /// expert is minted only if every behaviour clearly rose on its held-out
+    /// tasks and the controls held. Needs --features models + a GPU.
+    Behave(crate::behave::BehaveArgs),
     /// Consolidate a private compartment into a **private expert** (a memory compartment):
     /// gather the compartment's memories, score them through the consolidation
     /// gate, capture the graduates, and mint an expert owned by the user (not in

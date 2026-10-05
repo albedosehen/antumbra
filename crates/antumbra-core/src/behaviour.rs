@@ -25,6 +25,7 @@ pub const MIN_EXAMPLES: usize = 3;
 const STATUS: &str = "behaviour-status:";
 const SCOPE: &str = "behaviour-scope:";
 const SUPERSEDES: &str = "behaviour-supersedes:";
+const EXPERT: &str = "behaviour-expert:";
 const FENCE: &str = "```behaviour";
 
 /// A task the behaviour governs and an answer that follows it.
@@ -218,12 +219,22 @@ pub fn set_status(evidence: &mut Vec<String>, status: Status) {
     evidence.push(status_evidence(status));
 }
 
+/// Mark a behaviour trained into `expert`, replacing the expert it was
+/// trained into before, if any.
+pub fn mark_trained(evidence: &mut Vec<String>, expert: &str) {
+    set_status(evidence, Status::Trained);
+    evidence.retain(|e| !e.starts_with(EXPERT));
+    evidence.push(format!("{EXPERT}{expert}"));
+}
+
 /// A behaviour's state, read back from its evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {
     pub status: Status,
     pub scope: String,
     pub supersedes: Option<String>,
+    /// The expert it was last trained into.
+    pub expert: Option<String>,
 }
 
 impl State {
@@ -239,6 +250,7 @@ impl State {
             status: Status::parse(&field(STATUS)?)?,
             scope: field(SCOPE).unwrap_or_else(|| EVERYWHERE.to_string()),
             supersedes: field(SUPERSEDES),
+            expert: field(EXPERT),
         })
     }
 }

@@ -1,0 +1,858 @@
+[
+ {
+  "id": "replay-0",
+  "prompt": "Show the contents of notes.md. Command only."
+ },
+ {
+  "id": "replay-1",
+  "prompt": "Show the contents of data.csv. Command only."
+ },
+ {
+  "id": "replay-2",
+  "prompt": "Show the contents of main.py. Command only."
+ },
+ {
+  "id": "replay-3",
+  "prompt": "Show the contents of server.log. Command only."
+ },
+ {
+  "id": "replay-4",
+  "prompt": "Show the contents of index.html. Command only."
+ },
+ {
+  "id": "replay-5",
+  "prompt": "Show the contents of Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-6",
+  "prompt": "Show the contents of package.json. Command only."
+ },
+ {
+  "id": "replay-7",
+  "prompt": "Show the contents of build.sh. Command only."
+ },
+ {
+  "id": "replay-8",
+  "prompt": "Count the lines of notes.md. Command only."
+ },
+ {
+  "id": "replay-9",
+  "prompt": "Count the lines of data.csv. Command only."
+ },
+ {
+  "id": "replay-10",
+  "prompt": "Count the lines of main.py. Command only."
+ },
+ {
+  "id": "replay-11",
+  "prompt": "Count the lines of server.log. Command only."
+ },
+ {
+  "id": "replay-12",
+  "prompt": "Count the lines of index.html. Command only."
+ },
+ {
+  "id": "replay-13",
+  "prompt": "Count the lines of Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-14",
+  "prompt": "Count the lines of package.json. Command only."
+ },
+ {
+  "id": "replay-15",
+  "prompt": "Count the lines of build.sh. Command only."
+ },
+ {
+  "id": "replay-16",
+  "prompt": "Find every line containing ERROR in notes.md. Command only."
+ },
+ {
+  "id": "replay-17",
+  "prompt": "Find every line containing ERROR in data.csv. Command only."
+ },
+ {
+  "id": "replay-18",
+  "prompt": "Find every line containing ERROR in main.py. Command only."
+ },
+ {
+  "id": "replay-19",
+  "prompt": "Find every line containing ERROR in server.log. Command only."
+ },
+ {
+  "id": "replay-20",
+  "prompt": "Find every line containing ERROR in index.html. Command only."
+ },
+ {
+  "id": "replay-21",
+  "prompt": "Find every line containing ERROR in Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-22",
+  "prompt": "Find every line containing ERROR in package.json. Command only."
+ },
+ {
+  "id": "replay-23",
+  "prompt": "Find every line containing ERROR in build.sh. Command only."
+ },
+ {
+  "id": "replay-24",
+  "prompt": "Print the first 10 lines of notes.md. Command only."
+ },
+ {
+  "id": "replay-25",
+  "prompt": "Print the first 10 lines of data.csv. Command only."
+ },
+ {
+  "id": "replay-26",
+  "prompt": "Print the first 10 lines of main.py. Command only."
+ },
+ {
+  "id": "replay-27",
+  "prompt": "Print the first 10 lines of server.log. Command only."
+ },
+ {
+  "id": "replay-28",
+  "prompt": "Print the first 10 lines of index.html. Command only."
+ },
+ {
+  "id": "replay-29",
+  "prompt": "Print the first 10 lines of Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-30",
+  "prompt": "Print the first 10 lines of package.json. Command only."
+ },
+ {
+  "id": "replay-31",
+  "prompt": "Print the first 10 lines of build.sh. Command only."
+ },
+ {
+  "id": "replay-32",
+  "prompt": "Show the last 30 lines of notes.md. Command only."
+ },
+ {
+  "id": "replay-33",
+  "prompt": "Show the last 30 lines of data.csv. Command only."
+ },
+ {
+  "id": "replay-34",
+  "prompt": "Show the last 30 lines of main.py. Command only."
+ },
+ {
+  "id": "replay-35",
+  "prompt": "Show the last 30 lines of server.log. Command only."
+ },
+ {
+  "id": "replay-36",
+  "prompt": "Show the last 30 lines of index.html. Command only."
+ },
+ {
+  "id": "replay-37",
+  "prompt": "Show the last 30 lines of Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-38",
+  "prompt": "Show the last 30 lines of package.json. Command only."
+ },
+ {
+  "id": "replay-39",
+  "prompt": "Show the last 30 lines of build.sh. Command only."
+ },
+ {
+  "id": "replay-40",
+  "prompt": "Copy notes.md to notes.md.bak. Command only."
+ },
+ {
+  "id": "replay-41",
+  "prompt": "Copy data.csv to data.csv.bak. Command only."
+ },
+ {
+  "id": "replay-42",
+  "prompt": "Copy main.py to main.py.bak. Command only."
+ },
+ {
+  "id": "replay-43",
+  "prompt": "Copy server.log to server.log.bak. Command only."
+ },
+ {
+  "id": "replay-44",
+  "prompt": "Copy index.html to index.html.bak. Command only."
+ },
+ {
+  "id": "replay-45",
+  "prompt": "Copy Cargo.toml to Cargo.toml.bak. Command only."
+ },
+ {
+  "id": "replay-46",
+  "prompt": "Copy package.json to package.json.bak. Command only."
+ },
+ {
+  "id": "replay-47",
+  "prompt": "Copy build.sh to build.sh.bak. Command only."
+ },
+ {
+  "id": "replay-48",
+  "prompt": "Delete notes.md. Command only."
+ },
+ {
+  "id": "replay-49",
+  "prompt": "Delete data.csv. Command only."
+ },
+ {
+  "id": "replay-50",
+  "prompt": "Delete main.py. Command only."
+ },
+ {
+  "id": "replay-51",
+  "prompt": "Delete server.log. Command only."
+ },
+ {
+  "id": "replay-52",
+  "prompt": "Delete index.html. Command only."
+ },
+ {
+  "id": "replay-53",
+  "prompt": "Delete Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-54",
+  "prompt": "Delete package.json. Command only."
+ },
+ {
+  "id": "replay-55",
+  "prompt": "Delete build.sh. Command only."
+ },
+ {
+  "id": "replay-56",
+  "prompt": "Show the permissions of notes.md. Command only."
+ },
+ {
+  "id": "replay-57",
+  "prompt": "Show the permissions of data.csv. Command only."
+ },
+ {
+  "id": "replay-58",
+  "prompt": "Show the permissions of main.py. Command only."
+ },
+ {
+  "id": "replay-59",
+  "prompt": "Show the permissions of server.log. Command only."
+ },
+ {
+  "id": "replay-60",
+  "prompt": "Show the permissions of index.html. Command only."
+ },
+ {
+  "id": "replay-61",
+  "prompt": "Show the permissions of Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-62",
+  "prompt": "Show the permissions of package.json. Command only."
+ },
+ {
+  "id": "replay-63",
+  "prompt": "Show the permissions of build.sh. Command only."
+ },
+ {
+  "id": "replay-64",
+  "prompt": "Rename notes.md to old-notes.md. Command only."
+ },
+ {
+  "id": "replay-65",
+  "prompt": "Rename data.csv to old-data.csv. Command only."
+ },
+ {
+  "id": "replay-66",
+  "prompt": "Rename main.py to old-main.py. Command only."
+ },
+ {
+  "id": "replay-67",
+  "prompt": "Rename server.log to old-server.log. Command only."
+ },
+ {
+  "id": "replay-68",
+  "prompt": "Rename index.html to old-index.html. Command only."
+ },
+ {
+  "id": "replay-69",
+  "prompt": "Rename Cargo.toml to old-Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-70",
+  "prompt": "Rename package.json to old-package.json. Command only."
+ },
+ {
+  "id": "replay-71",
+  "prompt": "Rename build.sh to old-build.sh. Command only."
+ },
+ {
+  "id": "replay-72",
+  "prompt": "Show the git history of notes.md. Command only."
+ },
+ {
+  "id": "replay-73",
+  "prompt": "Show the git history of data.csv. Command only."
+ },
+ {
+  "id": "replay-74",
+  "prompt": "Show the git history of main.py. Command only."
+ },
+ {
+  "id": "replay-75",
+  "prompt": "Show the git history of server.log. Command only."
+ },
+ {
+  "id": "replay-76",
+  "prompt": "Show the git history of index.html. Command only."
+ },
+ {
+  "id": "replay-77",
+  "prompt": "Show the git history of Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-78",
+  "prompt": "Show the git history of package.json. Command only."
+ },
+ {
+  "id": "replay-79",
+  "prompt": "Show the git history of build.sh. Command only."
+ },
+ {
+  "id": "replay-80",
+  "prompt": "Unstage notes.md. Command only."
+ },
+ {
+  "id": "replay-81",
+  "prompt": "Unstage data.csv. Command only."
+ },
+ {
+  "id": "replay-82",
+  "prompt": "Unstage main.py. Command only."
+ },
+ {
+  "id": "replay-83",
+  "prompt": "Unstage server.log. Command only."
+ },
+ {
+  "id": "replay-84",
+  "prompt": "Unstage index.html. Command only."
+ },
+ {
+  "id": "replay-85",
+  "prompt": "Unstage Cargo.toml. Command only."
+ },
+ {
+  "id": "replay-86",
+  "prompt": "Unstage package.json. Command only."
+ },
+ {
+  "id": "replay-87",
+  "prompt": "Unstage build.sh. Command only."
+ },
+ {
+  "id": "replay-88",
+  "prompt": "Show the line count of every file in src. Command only."
+ },
+ {
+  "id": "replay-89",
+  "prompt": "Show the line count of every file in tests. Command only."
+ },
+ {
+  "id": "replay-90",
+  "prompt": "Show the line count of every file in assets. Command only."
+ },
+ {
+  "id": "replay-91",
+  "prompt": "Show the line count of every file in dist. Command only."
+ },
+ {
+  "id": "replay-92",
+  "prompt": "Show the line count of every file in logs. Command only."
+ },
+ {
+  "id": "replay-93",
+  "prompt": "Show the line count of every file in config. Command only."
+ },
+ {
+  "id": "replay-94",
+  "prompt": "List everything in src, including hidden files. Command only."
+ },
+ {
+  "id": "replay-95",
+  "prompt": "List everything in tests, including hidden files. Command only."
+ },
+ {
+  "id": "replay-96",
+  "prompt": "List everything in assets, including hidden files. Command only."
+ },
+ {
+  "id": "replay-97",
+  "prompt": "List everything in dist, including hidden files. Command only."
+ },
+ {
+  "id": "replay-98",
+  "prompt": "List everything in logs, including hidden files. Command only."
+ },
+ {
+  "id": "replay-99",
+  "prompt": "List everything in config, including hidden files. Command only."
+ },
+ {
+  "id": "replay-100",
+  "prompt": "Create the directory src/archive. Command only."
+ },
+ {
+  "id": "replay-101",
+  "prompt": "Create the directory tests/archive. Command only."
+ },
+ {
+  "id": "replay-102",
+  "prompt": "Create the directory assets/archive. Command only."
+ },
+ {
+  "id": "replay-103",
+  "prompt": "Create the directory dist/archive. Command only."
+ },
+ {
+  "id": "replay-104",
+  "prompt": "Create the directory logs/archive. Command only."
+ },
+ {
+  "id": "replay-105",
+  "prompt": "Create the directory config/archive. Command only."
+ },
+ {
+  "id": "replay-106",
+  "prompt": "Delete the src directory and everything in it. Command only."
+ },
+ {
+  "id": "replay-107",
+  "prompt": "Delete the tests directory and everything in it. Command only."
+ },
+ {
+  "id": "replay-108",
+  "prompt": "Delete the assets directory and everything in it. Command only."
+ },
+ {
+  "id": "replay-109",
+  "prompt": "Delete the dist directory and everything in it. Command only."
+ },
+ {
+  "id": "replay-110",
+  "prompt": "Delete the logs directory and everything in it. Command only."
+ },
+ {
+  "id": "replay-111",
+  "prompt": "Delete the config directory and everything in it. Command only."
+ },
+ {
+  "id": "replay-112",
+  "prompt": "Show the total size of src. Command only."
+ },
+ {
+  "id": "replay-113",
+  "prompt": "Show the total size of tests. Command only."
+ },
+ {
+  "id": "replay-114",
+  "prompt": "Show the total size of assets. Command only."
+ },
+ {
+  "id": "replay-115",
+  "prompt": "Show the total size of dist. Command only."
+ },
+ {
+  "id": "replay-116",
+  "prompt": "Show the total size of logs. Command only."
+ },
+ {
+  "id": "replay-117",
+  "prompt": "Show the total size of config. Command only."
+ },
+ {
+  "id": "replay-118",
+  "prompt": "Find all .py files under src. Command only."
+ },
+ {
+  "id": "replay-119",
+  "prompt": "Find all .py files under tests. Command only."
+ },
+ {
+  "id": "replay-120",
+  "prompt": "Find all .py files under assets. Command only."
+ },
+ {
+  "id": "replay-121",
+  "prompt": "Find all .py files under dist. Command only."
+ },
+ {
+  "id": "replay-122",
+  "prompt": "Find all .py files under logs. Command only."
+ },
+ {
+  "id": "replay-123",
+  "prompt": "Find all .py files under config. Command only."
+ },
+ {
+  "id": "replay-124",
+  "prompt": "Check out the existing branch develop. Command only."
+ },
+ {
+  "id": "replay-125",
+  "prompt": "Check out the existing branch release. Command only."
+ },
+ {
+  "id": "replay-126",
+  "prompt": "Check out the existing branch staging. Command only."
+ },
+ {
+  "id": "replay-127",
+  "prompt": "Check out the existing branch hotfix-ui. Command only."
+ },
+ {
+  "id": "replay-128",
+  "prompt": "Merge develop into the current branch. Command only."
+ },
+ {
+  "id": "replay-129",
+  "prompt": "Merge release into the current branch. Command only."
+ },
+ {
+  "id": "replay-130",
+  "prompt": "Merge staging into the current branch. Command only."
+ },
+ {
+  "id": "replay-131",
+  "prompt": "Merge hotfix-ui into the current branch. Command only."
+ },
+ {
+  "id": "replay-132",
+  "prompt": "Show the commits on develop that are not on main. Command only."
+ },
+ {
+  "id": "replay-133",
+  "prompt": "Show the commits on release that are not on main. Command only."
+ },
+ {
+  "id": "replay-134",
+  "prompt": "Show the commits on staging that are not on main. Command only."
+ },
+ {
+  "id": "replay-135",
+  "prompt": "Show the commits on hotfix-ui that are not on main. Command only."
+ },
+ {
+  "id": "replay-136",
+  "prompt": "Delete the local branch develop. Command only."
+ },
+ {
+  "id": "replay-137",
+  "prompt": "Delete the local branch release. Command only."
+ },
+ {
+  "id": "replay-138",
+  "prompt": "Delete the local branch staging. Command only."
+ },
+ {
+  "id": "replay-139",
+  "prompt": "Delete the local branch hotfix-ui. Command only."
+ },
+ {
+  "id": "replay-140",
+  "prompt": "Show the logs of the web container. Command only."
+ },
+ {
+  "id": "replay-141",
+  "prompt": "Show the logs of the db container. Command only."
+ },
+ {
+  "id": "replay-142",
+  "prompt": "Show the logs of the cache container. Command only."
+ },
+ {
+  "id": "replay-143",
+  "prompt": "Show the logs of the worker container. Command only."
+ },
+ {
+  "id": "replay-144",
+  "prompt": "Restart the web container. Command only."
+ },
+ {
+  "id": "replay-145",
+  "prompt": "Restart the db container. Command only."
+ },
+ {
+  "id": "replay-146",
+  "prompt": "Restart the cache container. Command only."
+ },
+ {
+  "id": "replay-147",
+  "prompt": "Restart the worker container. Command only."
+ },
+ {
+  "id": "replay-148",
+  "prompt": "Open a shell in the web container. Command only."
+ },
+ {
+  "id": "replay-149",
+  "prompt": "Open a shell in the db container. Command only."
+ },
+ {
+  "id": "replay-150",
+  "prompt": "Open a shell in the cache container. Command only."
+ },
+ {
+  "id": "replay-151",
+  "prompt": "Open a shell in the worker container. Command only."
+ },
+ {
+  "id": "replay-152",
+  "prompt": "Stop the web container. Command only."
+ },
+ {
+  "id": "replay-153",
+  "prompt": "Stop the db container. Command only."
+ },
+ {
+  "id": "replay-154",
+  "prompt": "Stop the cache container. Command only."
+ },
+ {
+  "id": "replay-155",
+  "prompt": "Stop the worker container. Command only."
+ },
+ {
+  "id": "replay-156",
+  "prompt": "Install the Python package requests with pip. Command only."
+ },
+ {
+  "id": "replay-157",
+  "prompt": "Install the Python package numpy with pip. Command only."
+ },
+ {
+  "id": "replay-158",
+  "prompt": "Install the Python package pytest with pip. Command only."
+ },
+ {
+  "id": "replay-159",
+  "prompt": "Install the Python package rich with pip. Command only."
+ },
+ {
+  "id": "replay-160",
+  "prompt": "Add the crate serde to this Rust project. Command only."
+ },
+ {
+  "id": "replay-161",
+  "prompt": "Add the crate tokio to this Rust project. Command only."
+ },
+ {
+  "id": "replay-162",
+  "prompt": "Add the crate anyhow to this Rust project. Command only."
+ },
+ {
+  "id": "replay-163",
+  "prompt": "Add the crate clap to this Rust project. Command only."
+ },
+ {
+  "id": "replay-164",
+  "prompt": "Show the current git branch. Command only."
+ },
+ {
+  "id": "replay-165",
+  "prompt": "Show the staged changes. Command only."
+ },
+ {
+  "id": "replay-166",
+  "prompt": "Discard all uncommitted changes. Command only."
+ },
+ {
+  "id": "replay-167",
+  "prompt": "Show the last commit. Command only."
+ },
+ {
+  "id": "replay-168",
+  "prompt": "Squash the last three commits into one. Command only."
+ },
+ {
+  "id": "replay-169",
+  "prompt": "Show which files changed in the last commit. Command only."
+ },
+ {
+  "id": "replay-170",
+  "prompt": "List all git tags. Command only."
+ },
+ {
+  "id": "replay-171",
+  "prompt": "Show the URL of the origin remote. Command only."
+ },
+ {
+  "id": "replay-172",
+  "prompt": "Set the upstream of the current branch to origin. Command only."
+ },
+ {
+  "id": "replay-173",
+  "prompt": "Show the git version. Command only."
+ },
+ {
+  "id": "replay-174",
+  "prompt": "Run the Rust tests in this project. Command only."
+ },
+ {
+  "id": "replay-175",
+  "prompt": "Build this Rust project in release mode. Command only."
+ },
+ {
+  "id": "replay-176",
+  "prompt": "Format this Rust project. Command only."
+ },
+ {
+  "id": "replay-177",
+  "prompt": "Run clippy on this Rust project. Command only."
+ },
+ {
+  "id": "replay-178",
+  "prompt": "Run the Python tests with pytest. Command only."
+ },
+ {
+  "id": "replay-179",
+  "prompt": "Create a Python virtual environment named .venv. Command only."
+ },
+ {
+  "id": "replay-180",
+  "prompt": "Install the dependencies listed in requirements.txt. Command only."
+ },
+ {
+  "id": "replay-181",
+  "prompt": "Install the npm dependencies of this project. Command only."
+ },
+ {
+  "id": "replay-182",
+  "prompt": "Run the npm script named build. Command only."
+ },
+ {
+  "id": "replay-183",
+  "prompt": "Show the installed Node.js version. Command only."
+ },
+ {
+  "id": "replay-184",
+  "prompt": "Show the installed Python version. Command only."
+ },
+ {
+  "id": "replay-185",
+  "prompt": "List all docker images. Command only."
+ },
+ {
+  "id": "replay-186",
+  "prompt": "Remove all stopped docker containers. Command only."
+ },
+ {
+  "id": "replay-187",
+  "prompt": "Show docker disk usage. Command only."
+ },
+ {
+  "id": "replay-188",
+  "prompt": "Build a docker image tagged app:dev from this directory. Command only."
+ },
+ {
+  "id": "replay-189",
+  "prompt": "Show the kubernetes pods in the default namespace. Command only."
+ },
+ {
+  "id": "replay-190",
+  "prompt": "Show the kubernetes nodes. Command only."
+ },
+ {
+  "id": "replay-191",
+  "prompt": "Show the logs of the kubernetes pod api-0. Command only."
+ },
+ {
+  "id": "replay-192",
+  "prompt": "Show the systemd status of nginx here. Command only."
+ },
+ {
+  "id": "replay-193",
+  "prompt": "Restart the nginx service on this machine. Command only."
+ },
+ {
+  "id": "replay-194",
+  "prompt": "Show the last 100 lines of the journal here. Command only."
+ },
+ {
+  "id": "replay-195",
+  "prompt": "Show the users logged in here. Command only."
+ },
+ {
+  "id": "replay-196",
+  "prompt": "Show the size of each mounted filesystem. Command only."
+ },
+ {
+  "id": "replay-197",
+  "prompt": "Show the top memory-consuming processes. Command only."
+ },
+ {
+  "id": "replay-198",
+  "prompt": "Show the PATH variable. Command only."
+ },
+ {
+  "id": "replay-199",
+  "prompt": "Download https://example.com/file.zip. Command only."
+ },
+ {
+  "id": "replay-200",
+  "prompt": "Unzip archive.zip. Command only."
+ },
+ {
+  "id": "replay-201",
+  "prompt": "Extract archive.tar.gz. Command only."
+ },
+ {
+  "id": "replay-202",
+  "prompt": "Show the SHA-256 of image.iso. Command only."
+ },
+ {
+  "id": "replay-203",
+  "prompt": "Generate a random 32-character hex string. Command only."
+ },
+ {
+  "id": "replay-204",
+  "prompt": "Show the calendar for this month. Command only."
+ },
+ {
+  "id": "replay-205",
+  "prompt": "Show the timezone of this machine. Command only."
+ },
+ {
+  "id": "replay-206",
+  "prompt": "Sort data.csv by its second column. Command only."
+ },
+ {
+  "id": "replay-207",
+  "prompt": "Remove duplicate lines from list.txt. Command only."
+ },
+ {
+  "id": "replay-208",
+  "prompt": "Replace foo with bar in config.yaml. Command only."
+ },
+ {
+  "id": "replay-209",
+  "prompt": "Show the differences between a.txt and b.txt. Command only."
+ },
+ {
+  "id": "replay-210",
+  "prompt": "Count how many files are in this directory. Command only."
+ },
+ {
+  "id": "replay-211",
+  "prompt": "Watch the disk usage refresh every two seconds. Command only."
+ },
+ {
+  "id": "replay-212",
+  "prompt": "Show the open files of process 2222. Command only."
+ },
+ {
+  "id": "replay-213",
+  "prompt": "Show the routing table. Command only."
+ }
+]

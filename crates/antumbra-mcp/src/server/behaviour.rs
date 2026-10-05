@@ -8,6 +8,7 @@
 
 use super::*;
 use antumbra_core::behaviour::{self, Example, Spec, State, Status};
+use antumbra_store::repo::behaviour as store_behaviour;
 
 /// The most behaviours one answer lists, newest first.
 const MAX_LISTED: usize = 200;
@@ -140,43 +141,31 @@ impl McpServer {
             Status::Proposed
         };
         let scope = behaviour::normalize_scope(p.scope.as_deref());
-        let mut evidence = vec![
-            behaviour::status_evidence(status),
-            behaviour::scope_evidence(&scope),
-        ];
-        if let Some(old) = &p.supersedes {
-            evidence.push(behaviour::supersedes_evidence(old));
-        }
-        let content = behaviour::content(&spec);
-        let compartment = self.behaviour_compartment().await?;
-        let embedding = self.embedder.embed(&content).await.map_err(err)?;
-        let id = next_id("memory");
-        let m = Memory::new(
-            id.clone(),
-            self.tenant.clone(),
-            MemoryNetwork::Opinion,
-            content,
-            1.0,
-            Utc::now(),
+        let embedding = self
+            .embedder
+            .embed(&behaviour::content(&spec))
+            .await
+            .map_err(err)?;
+        let stored = store_behaviour::record(
+            &self.store,
+            &self.tenant,
+            &self.user,
+            &self.host,
+            MemoryId::new(next_id("memory")),
+            &spec,
+            status,
+            &scope,
+            p.supersedes.as_deref(),
+            embedding,
         )
-        .with_embedding(embedding)
-        .in_compartment(compartment)
-        .by(self.user.clone(), self.host.clone())
-        .with_evidence(evidence)
-        // Trained through its tasks and check (`antumbra behave`), never by
-        // the write-time consolidation, which would teach it to echo itself.
-        .volatile(true);
-        memory::upsert(&self.store, &m).await.map_err(err)?;
-        let superseded = match &p.supersedes {
-            Some(old) => Some(self.set_behaviour_status(old, Status::Retired).await?.found),
-            None => None,
-        };
+        .await
+        .map_err(err)?;
         Ok(Json(RecordedBehaviourOut {
             recorded: true,
-            id: Some(id),
+            id: Some(stored.id.as_str().to_string()),
             status: Some(status.as_str().to_string()),
             problems: Vec::new(),
-            superseded,
+            superseded: stored.superseded,
         }))
     }
 
@@ -267,49 +256,12 @@ impl McpServer {
         id: &str,
         status: Status,
     ) -> Result<BehaviourStatusOut, ErrorData> {
-        let compartment = behaviour::compartment_id(&self.tenant, &self.user);
-        let found = memory::get(&self.store, &self.tenant, &MemoryId::new(id))
-            .await
-            .map_err(err)?
-            .filter(|m| m.compartment.as_ref() == Some(&compartment))
-            .filter(|m| State::of(&m.evidence).is_some());
-        let Some(mut m) = found else {
-            return Ok(BehaviourStatusOut {
-                found: false,
-                status: None,
-            });
-        };
-        behaviour::set_status(&mut m.evidence, status);
-        m.updated_at = Utc::now();
-        memory::upsert(&self.store, &m).await.map_err(err)?;
-        Ok(BehaviourStatusOut {
-            found: true,
-            status: Some(status.as_str().to_string()),
-        })
-    }
-
-    /// The user's behaviour compartment, created the first time it is needed.
-    async fn behaviour_compartment(&self) -> Result<CompartmentId, ErrorData> {
-        let id = behaviour::compartment_id(&self.tenant, &self.user);
-        let exists = compartment::list_owned(&self.store, &self.tenant, &self.user)
-            .await
-            .map_err(err)?
-            .iter()
-            .any(|c| c.id == id);
-        if !exists {
-            compartment::create(
-                &self.store,
-                &Compartment::new(
-                    id.clone(),
-                    self.tenant.clone(),
-                    self.user.clone(),
-                    "behaviour",
-                    Utc::now(),
-                ),
-            )
+        let set = store_behaviour::set_status(&self.store, &self.tenant, &self.user, id, status)
             .await
             .map_err(err)?;
-        }
-        Ok(id)
+        Ok(BehaviourStatusOut {
+            found: set.is_some(),
+            status: set.map(|s| s.as_str().to_string()),
+        })
     }
 }

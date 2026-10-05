@@ -32,6 +32,8 @@ mod serve_candle;
 pub use serve_candle::CandleServe;
 
 #[cfg(feature = "models")]
+pub mod behave;
+#[cfg(feature = "models")]
 mod consolidate;
 #[cfg(feature = "models")]
 pub use consolidate::{consolidate_compartment, Consolidation, ConsolidationOutcome};
