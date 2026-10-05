@@ -96,11 +96,6 @@ pub struct McpServer {
     /// and every recalled row is returned, which is the behaviour before this
     /// existed and the behaviour a deployment without a head keeps.
     decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
-    /// The probe vectors the dense leg is calibrated against
-    /// ([`antumbra_core::calibrate`]), embedded once on first recall by THIS
-    /// server's embedder -- so a tenant configured with a different model
-    /// calibrates in its own space rather than someone else's.
-    probes: Arc<tokio::sync::OnceCell<Vec<Vec<f32>>>>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -440,13 +435,20 @@ impl McpServer {
             let vector = self.embedder.embed(&part).await.map_err(err)?;
             queries.push((part, vector));
         }
+        // The dense leg ranks by raw cosine, not calibrated against probes
+        // (`antumbra_core::calibrate`). Measured on 2026-10-04 over 2,000 of the
+        // user's memories with the chunk index, calibrating cost recall@10 on
+        // the dense leg from 0.882 to 0.411 for 399 questions and recall@30
+        // from 0.820 to 0.605 for 400 fragments: it inflates the short pieces.
+        // The stubs it was built to demote are 25 of this store's 6,422
+        // memories.
         let hits = memory::recall_hybrid_many(
             &self.store,
             &self.tenant,
             &queries,
             self.recall_pool(k, scoped),
             net,
-            self.probe_vectors().await,
+            &[],
         )
         .await
         .map_err(err)?;

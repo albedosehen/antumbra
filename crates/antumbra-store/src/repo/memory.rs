@@ -19,7 +19,6 @@ use serde_json::Value;
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
 use surql::query::expressions::{field, value};
-use surql::query::helpers::fulltext_search_query;
 use surql::types::operators::{and_, contains_any, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
 
@@ -639,48 +638,20 @@ pub async fn get_many(store: &Store, tenant: &TenantId, ids: &[String]) -> Resul
 }
 
 /// The BM25 full-text (sparse) leg of [`recall_hybrid`]: the `k` memories whose
-/// `content` best matches `query_text`, tenant- (and optionally network-)scoped,
-/// in the engine's BM25 relevance order. An empty/blank query returns nothing.
-async fn sparse_recall(
+/// `content` best matches any word of `query_text`, tenant- (and optionally
+/// network-)scoped, in the engine's BM25 relevance order (see
+/// `crate::lexical`). An empty/blank query returns nothing. Public for the
+/// bench, whose no-model baseline it is.
+pub async fn sparse_recall(
     store: &Store,
     tenant: &TenantId,
     query_text: &str,
     k: usize,
     network: Option<MemoryNetwork>,
 ) -> Result<Vec<Memory>> {
-    if query_text.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let condition = match network {
-        Some(net) => and_(
-            eq("tenant_id", tenant.as_str()),
-            eq("network", net.as_str()),
-        ),
-        None => eq("tenant_id", tenant.as_str()),
-    };
-    // `SELECT *, search::score(1) AS score FROM memory WHERE content @1@ <query>
-    //  AND <tenant/network> ORDER BY score DESC LIMIT k` -- the projected score
-    // column is ignored by MemoryRow (serde drops it), but it still has to be
-    // ORDERED BY, not merely selected.
-    //
-    // The `ORDER BY` is load-bearing and was missing: `@1@` returns every row that
-    // matches *at all*, in the engine's record order, so `LIMIT k` without it
-    // truncates to an arbitrary k of the match set rather than the best k. Seen on
-    // a 5538-memory store: `RUST_MIN_STACK` matched 11 rows and the unordered
-    // query returned scores 5.065, 5.542, 8.524, 6.628, 8.792 -- the true winner
-    // (11.29) was never in the first five and so never reached RRF fusion, while
-    // the 5.065 row surfaced as the top recall hit. The shape hid itself twice
-    // over: `recall_hybrid` turns a sparse `Err` into dense-only via
-    // `unwrap_or_default`, and a wrong-but-nonempty sparse leg like this one is
-    // indistinguishable from a ranking quirk.
-    let q = fulltext_search_query(TABLE, "content", 1, query_text, None, "score")
-        .map_err(map)?
-        .where_(condition)
-        .order_by("score", "DESC")
-        .map_err(map)?
-        .limit(k as i64)
-        .map_err(map)?;
-    let rows: Vec<MemoryRow> = query_records(store.client(), &q).await.map_err(map)?;
+    let network = network.map(|n| n.as_str());
+    let rows: Vec<MemoryRow> =
+        crate::lexical::any_word(store, TABLE, tenant, query_text, k, network).await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none())
         .map(MemoryRow::into_domain)

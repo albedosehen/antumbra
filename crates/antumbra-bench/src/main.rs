@@ -57,6 +57,20 @@
 //! whole, with its pieces in the chunk index at the server's size, recalled
 //! through the same dense leg, so the number is the deployed path's.
 //!
+//! ## Questions, and embedders that want prefixes
+//!
+//! `scripts/question-labels.sh` writes a label file of the same shape whose
+//! queries are questions a chat model wrote for each memory, in its own words,
+//! with distractor memories that have no question. Every labelled run also
+//! scores BM25 alone, the no-model baseline. Embedders trained for asymmetric
+//! search read a marker before the text: `ANTUMBRA_BENCH_QUERY_PREFIX` goes
+//! before every query (`query: ` for e5) and `ANTUMBRA_BENCH_DOC_PREFIX`
+//! before every document and piece (`passage: `).
+//!
+//! `ANTUMBRA_BENCH_CALIBRATE=1` ranks the dense leg as the server does, by
+//! each memory's similarity above its own baseline over the probe texts,
+//! instead of by raw cosine.
+//!
 //! ## Run
 //!
 //! ```text
@@ -72,6 +86,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
+use antumbra_core::calibrate::PROBE_TEXTS;
 use antumbra_core::chunk::{cut_hash, split, MEMORY_CHUNK_CHARS};
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::FixedEmbedder;
@@ -172,6 +187,9 @@ enum Mode {
     Hybrid,
     /// The embedding alone: what the embedder itself contributes.
     Dense,
+    /// BM25 alone, no model: the baseline a constructed benchmark is read
+    /// against before any model is.
+    Lexical,
 }
 
 impl Mode {
@@ -179,6 +197,7 @@ impl Mode {
         match self {
             Mode::Hybrid => "hybrid",
             Mode::Dense => "dense",
+            Mode::Lexical => "lexical, no model",
         }
     }
 }
@@ -291,7 +310,7 @@ async fn evaluate(
             };
             let whole = pieces.len() == 1;
             for (j, piece) in pieces.into_iter().enumerate() {
-                let emb = embedder.embed(&piece).await?;
+                let emb = embedder.embed(&as_document(&piece)).await?;
                 let id = if whole {
                     format!("{ID_PREFIX}{}", doc.id)
                 } else {
@@ -310,17 +329,30 @@ async fn evaluate(
         } else {
             deepest
         };
+        // The probes the server calibrates its dense leg with, when asked.
+        let probes = if calibrated() {
+            let mut out = Vec::with_capacity(PROBE_TEXTS.len());
+            for text in PROBE_TEXTS {
+                out.push(embedder.embed(&as_query(text)).await?);
+            }
+            out
+        } else {
+            Vec::new()
+        };
         let mut metrics = Metrics::default();
         for label in &domain.labels {
-            let qv = embedder.embed(&label.query).await?;
+            let qv = embedder.embed(&as_query(&label.query)).await?;
             let hits = match mode {
+                Mode::Lexical => {
+                    memory::sparse_recall(&store, &tenant, &label.query, fetch, None).await?
+                }
                 Mode::Hybrid => {
-                    memory::recall_hybrid(&store, &tenant, &label.query, &qv, fetch, None, &[])
+                    memory::recall_hybrid(&store, &tenant, &label.query, &qv, fetch, None, &probes)
                         .await?
                 }
                 // A blank query text is the dense leg alone, chunk leg and all.
                 Mode::Dense if chunk_index() => {
-                    memory::recall_hybrid(&store, &tenant, "", &qv, fetch, None, &[]).await?
+                    memory::recall_hybrid(&store, &tenant, "", &qv, fetch, None, &probes).await?
                 }
                 Mode::Dense => memory::recall(&store, &tenant, &qv, fetch, None).await?,
             };
@@ -338,7 +370,7 @@ async fn evaluate(
         chunk_chars().map_or(String::new(), |n| format!(", chunks of {n} chars"))
     };
     Ok(ConfigReport {
-        config_name: format!("{config_name} / {}{chunked}", mode.name()),
+        config_name: format!("{config_name} / {}{chunked}{}", mode.name(), prefixes()),
         per_domain,
         overall,
     })
@@ -346,6 +378,41 @@ async fn evaluate(
 
 /// What separates a document's id from its chunk's number.
 const CHUNK_MARK: char = '~';
+
+/// Whether to rank the dense leg as the server does, by each memory's
+/// similarity above its own baseline over the probe texts
+/// (`antumbra_core::calibrate`), rather than by raw cosine.
+fn calibrated() -> bool {
+    std::env::var("ANTUMBRA_BENCH_CALIBRATE").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+/// The prefixes in force, and the calibration, for a report's name.
+fn prefixes() -> String {
+    let query = std::env::var("ANTUMBRA_BENCH_QUERY_PREFIX").unwrap_or_default();
+    let document = std::env::var("ANTUMBRA_BENCH_DOC_PREFIX").unwrap_or_default();
+    let calibration = if calibrated() { ", calibrated" } else { "" };
+    if query.is_empty() && document.is_empty() {
+        calibration.to_string()
+    } else {
+        format!(", prefixes {query:?} / {document:?}{calibration}")
+    }
+}
+
+/// `text` as a query, behind `ANTUMBRA_BENCH_QUERY_PREFIX` when one is set.
+fn as_query(text: &str) -> String {
+    format!(
+        "{}{text}",
+        std::env::var("ANTUMBRA_BENCH_QUERY_PREFIX").unwrap_or_default()
+    )
+}
+
+/// `text` as a document, behind `ANTUMBRA_BENCH_DOC_PREFIX` when one is set.
+fn as_document(text: &str) -> String {
+    format!(
+        "{}{text}",
+        std::env::var("ANTUMBRA_BENCH_DOC_PREFIX").unwrap_or_default()
+    )
+}
 
 /// Whether to store documents the way the server does: whole, with their
 /// pieces in the chunk index.
@@ -362,7 +429,7 @@ async fn index(
     doc: &Document,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let whole = embedder.embed(&doc.text).await?;
+    let whole = embedder.embed(&as_document(&doc.text)).await?;
     let mem = Memory::new(
         format!("{ID_PREFIX}{}", doc.id),
         tenant.clone(),
@@ -377,7 +444,7 @@ async fn index(
     if pieces.len() > 1 {
         let mut vectors = Vec::with_capacity(pieces.len());
         for piece in &pieces {
-            vectors.push(embedder.embed(piece).await?);
+            vectors.push(embedder.embed(&as_document(piece)).await?);
         }
         memory_chunk::replace(store, &mem, &cut_hash(&doc.text), vectors).await?;
     }
@@ -513,7 +580,12 @@ async fn main() -> Result<()> {
     };
     let configs = configs();
 
-    let mut reports = Vec::with_capacity(configs.len() * 2);
+    let mut reports = Vec::with_capacity(configs.len() * 2 + 1);
+    if std::env::var("ANTUMBRA_BENCH_LABELS").is_ok() {
+        // The lexical leg reads no vector, so the baseline embedder stands in.
+        let (_, baseline) = &configs[0];
+        reports.push(evaluate("BM25", baseline.as_ref(), &corpus, Mode::Lexical).await?);
+    }
     for (name, embedder) in &configs {
         for mode in [Mode::Hybrid, Mode::Dense] {
             reports.push(evaluate(name, embedder.as_ref(), &corpus, mode).await?);
@@ -603,7 +675,7 @@ mod tests {
         assert_eq!(domain.labels.len(), 2);
         assert_eq!(domain.labels[1].relevant_doc_id, "m1");
         let embedder = FixedEmbedder::new(EMBED_DIM);
-        for mode in [Mode::Hybrid, Mode::Dense] {
+        for mode in [Mode::Hybrid, Mode::Dense, Mode::Lexical] {
             let report = evaluate("baseline", &embedder, &corpus, mode)
                 .await
                 .expect("eval runs");
