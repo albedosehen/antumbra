@@ -29,7 +29,7 @@ pub fn backend() -> &'static str {
 /// quantity, so it is left unanswered rather than answered wrongly.
 ///
 /// Asked once. The answer does not change while the process runs, and the
-/// consolidation trigger consults the role on every write.
+/// standing-expert keeper consults the role when it starts.
 pub fn vram_mib() -> Option<u64> {
     static VRAM: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     *VRAM.get_or_init(probe_vram_mib)
@@ -38,6 +38,7 @@ pub fn vram_mib() -> Option<u64> {
 /// What this node is, from what it found. The same derivation the registry
 /// records, so the role a node advertises and the role it acts on are one
 /// answer rather than two that can drift.
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub fn role() -> antumbra_core::DeviceRole {
     antumbra_core::role_for(backend(), vram_mib())
 }

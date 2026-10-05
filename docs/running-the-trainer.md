@@ -214,9 +214,9 @@ Release builds also need the `surrealdb` / `surrealdb-core` `opt-level = 1` over
 
 **Note (2026-06-10):** a Developer-shell alternative to the `vcvars64.bat` + `fallback-latest` recipe above also works and is what the autonomous-server validation used: enter a VS dev shell (`Enter-VsDevShell` via `vswhere`, which puts `cl.exe` on `PATH`), put `%CUDA_PATH%\bin\x64;%CUDA_PATH%\bin` on `PATH`, and pin cudarc explicitly with `CUDARC_CUDA_VERSION=13020` (13.2 bindings, ABI-compatible with the 13.3 runtime) instead of relying on the off-`PATH` fallback. Either path produces the same binary; the non-negotiable is that **`cl.exe` must be on `PATH`** when candle's kernels compile (a fresh kernel build with no `cl.exe` fails as `nvcc fatal: Cannot find compiler 'cl.exe'`, sometimes surfaced as an empty `nvcc error`).
 
-## The autonomous server (serving + consolidation)
+## The GPU server (serving + standing experts)
 
-The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds the **light** server: it does memory (store / recall / route / compartments / sync), but `answer` reports _serving not configured_ and `--auto-consolidate` is a no-op, because both need the candle/GPU half. To get real expert serving **and** autonomous consolidation (a reinforced or high-confidence memory auto-graduates its compartment into a private expert on the GPU, hot-registered so `answer` serves it without a restart), run the `models,cuda` server where the GPU is.
+The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds the **light** server: it does memory (store / recall / route / compartments / sync), but `answer` reports _serving not configured_, because serving needs the candle/GPU half. Run the `models,cuda` server where the GPU is to get real expert serving, and the keeper that trains each user's **standing experts** from the behaviours they accepted.
 
 **Docker (Linux, or Windows via WSL2; needs the NVIDIA Container Toolkit):**
 
@@ -224,19 +224,20 @@ The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds th
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 ```
 
-The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, adds `--auto-consolidate`, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). On a CDI host (NixOS, or any daemon without a named nvidia runtime) add `-f docker/docker-compose.gpu-cdi.yml` last. _The image is validated on a Linux GPU host (EXP-022) and still not built in CI, which has no GPU._
+The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). On a CDI host (NixOS, or any daemon without a named nvidia runtime) add `-f docker/docker-compose.gpu-cdi.yml` last. _The image is validated on a Linux GPU host (EXP-022) and still not built in CI, which has no GPU._
 
 **Native (e.g. a Windows GPU box):** build `antumbra-mcp` per the CUDA section above (`--features models,cuda`), then run it with the runtime `PATH` set:
 
 ```bat
 target\release\antumbra-mcp.exe --http 127.0.0.1:8081 --url ws://127.0.0.1:8000/rpc ^
   --db-user root --db-pass %SURREAL_PASS% ^
-  --embedder-url http://127.0.0.1:11434/v1/embeddings --embedder-model all-minilm ^
-  --auto-consolidate
+  --embedder-url http://127.0.0.1:11434/v1/embeddings --embedder-model all-minilm
 ```
 
-Either way, the gate defaults are deliberately conservative (recurrence ≥ 2, confidence ≥ 0.5; `world`/`bank` facts need a check, `opinion`s graduate on a ≥ 0.9 provenance tier). The autonomous capture is light (8 rounds) since it re-fires and supersedes; the manual `antumbra consolidate-compartment` keeps the heavier 40-round capture for a deliberate one-off.
+**Standing experts.** A behaviour is a rule for how an agent should act, recorded with a check (`record_behaviour`) and accepted by the user. On a node that serves and can train, the keeper reads every user's behaviours every ten minutes. A scope (everywhere, or one repository) whose accepted behaviours differ from what its standing expert holds is trained again: each behaviour's examples beside the base model's own answers to everyday prompts. The expert is admitted only when every behaviour rose on examples it never saw and the command and code controls held. `answer` then composes it into every answer in its scope. `antumbra behave` runs the same training by hand and prints the scores.
 
-**What the server log tells you.** Every outcome of the trigger is one `[auto-consolidate]` line: `N graduated -> expert:... (internalized 1.00, now servable)` after a mint; `0 of 400 graduate (397 under-reinforced, 3 volatile)` when nothing clears the gate, said once per change and not on every write; `N graduated but the capture did not learn` when the verifier passed nothing. Recurrence is the reinforcement _count_, so memories that were each reinforced once are all under-reinforced: that one line is usually the answer to "why has nothing trained". A write that arrives while its compartment is training is not lost to the trigger; the run in flight is followed by another.
+**What the server log tells you.** `standing experts kept here` at start; then, per pass that did anything, how many were trained, refused and dropped, with one line per expert: `trained on N behaviour(s), now served`, or `not admitted:` and the reason. A set of behaviours that was refused is not tried again until it changes.
+
+The write-time trigger that trained a compartment's memories into an expert, `--auto-consolidate`, is retired: it taught experts to echo memories. The flag is still accepted and does nothing.
 
 **The GPU-gated tests.** CI has no GPU, so the tests that close this loop are `#[ignore]`d there. On a GPU host, `just test-gpu` builds the `gpu-test` target of `Dockerfile.cuda` and runs the server's whole test binary with them included (pass `gpu="--gpus all"` on a daemon with a named nvidia runtime). Run it before tagging a release.

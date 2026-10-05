@@ -25,7 +25,6 @@ pub(super) async fn state_embedding(store: Store, embedder: Arc<dyn Embedder>) -
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
         auth: Mutex::new(()),
         auto_propose: None,
-        auto_consolidate: false,
         serve: None,
         reranker: None,
         decider: None,
@@ -34,7 +33,6 @@ pub(super) async fn state_embedding(store: Store, embedder: Arc<dyn Embedder>) -
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     })
 }
