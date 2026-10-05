@@ -32,7 +32,7 @@ exclude = ["crates/antumbra-control-server"]
 
 [workspace.package]
 edition = "2021"
-license = "AGPL-3.0-only"
+license = "Elastic-2.0"
 rust-version = "1.95"
 repository = "https://github.com/Oneiriq/antumbra"
 authors = ["Shon Thomas <shon@oneiriq.com>"]
