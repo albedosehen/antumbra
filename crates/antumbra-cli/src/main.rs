@@ -539,6 +539,7 @@ async fn run() -> anyhow::Result<()> {
                         task_id: "compose".into(),
                         prompt: task.clone(),
                         adapters: vec![],
+                        weights: Vec::new(),
                     })
                     .await?;
                 println!("---");

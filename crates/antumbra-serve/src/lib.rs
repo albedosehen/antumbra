@@ -35,6 +35,8 @@ pub use serve_candle::CandleServe;
 pub mod behave;
 #[cfg(feature = "models")]
 mod consolidate;
+#[cfg(all(test, feature = "models"))]
+mod gpu_blend;
 #[cfg(feature = "models")]
 pub use consolidate::{consolidate_compartment, Consolidation, ConsolidationOutcome};
 
@@ -51,11 +53,14 @@ pub use antumbra_train::consolidate::{ConsolidationPolicy, GateReport};
 // --- the real resident multi-adapter engine (models build) ----------------
 
 /// Multi-adapter server over a shared base. Loads the base once (with neutral
-/// zero LoRA factors), then [`load_adapter`](antumbra_train::models::QwenCausalLm::load_adapter)s
-/// the routed expert's weights into the resident model: an O(adapter) swap, not
-/// an O(base) reload. A `register`ed map resolves the gate's `ExpertId`s to
-/// adapter files; the currently-resident adapter is tracked so repeated routes
-/// to the same expert skip the swap.
+/// zero LoRA factors), then [`load_blend`](antumbra_train::models::QwenCausalLm::load_blend)s
+/// the request's experts into the resident model: an O(adapter) swap, not an
+/// O(base) reload. The base is built at [`BLEND_SLOTS`] times the trained rank,
+/// alpha raised in step, so one expert serves exactly as at its trained rank
+/// and a blend of up to that many (a routed expert with the user's standing
+/// ones) needs no rebuild. A `register`ed map resolves the gate's `ExpertId`s
+/// to adapter files; the resident blend is tracked so repeated requests for
+/// the same one skip the swap.
 #[cfg(feature = "models")]
 pub struct MultiAdapterServe {
     base_model: String,
@@ -66,12 +71,29 @@ pub struct MultiAdapterServe {
     state: tokio::sync::Mutex<Resident>,
 }
 
-/// The resident base and which adapter's factors currently sit on it.
+/// How many adapters one request may blend: a routed expert and the user's
+/// standing experts for everywhere and for the repository.
+#[cfg(feature = "models")]
+pub const BLEND_SLOTS: usize = 3;
+
+/// The resident model's configuration: [`BLEND_SLOTS`] times the trained rank,
+/// with alpha raised in step so `alpha / rank`, the scale every expert was
+/// trained at, holds.
+#[cfg(feature = "models")]
+fn blend_config(trained: &antumbra_train::RaftConfig) -> antumbra_train::RaftConfig {
+    antumbra_train::RaftConfig {
+        lora_rank: trained.lora_rank * BLEND_SLOTS,
+        lora_alpha: trained.lora_alpha * BLEND_SLOTS as f64,
+        ..trained.clone()
+    }
+}
+
+/// The resident base and which blend's factors currently sit on it.
 #[cfg(feature = "models")]
 #[derive(Default)]
 struct Resident {
     model: Option<antumbra_train::models::QwenCausalLm>,
-    current: Option<antumbra_core::ExpertId>,
+    current: Option<Vec<(antumbra_core::ExpertId, u32)>>,
 }
 
 #[cfg(feature = "models")]
@@ -148,30 +170,40 @@ impl Serve for MultiAdapterServe {
         use antumbra_core::AntumbraError;
         use antumbra_train::CausalLm;
 
-        // The gate selects experts in rank order; v0 serves the top one. A true
-        // latent blend of several adapters (routing-as-retrieval) needs `compose_adapters`,
-        // which changes the LoRA rank and so a differently-shaped base. That is
-        // the `ask --with` path, not an in-place swap, and is deferred here.
-        let target = req.adapters.first().cloned().ok_or_else(|| {
-            AntumbraError::other(
+        let blend = req.blend();
+        if blend.is_empty() {
+            return Err(AntumbraError::other(
                 "MultiAdapterServe: no adapter selected (the gate escalates out-of-scope tasks; \
                  base-only generation is the probe's job, not this engine's)",
-            )
-        })?;
+            ));
+        }
+        if blend.len() > BLEND_SLOTS {
+            return Err(AntumbraError::other(format!(
+                "MultiAdapterServe: {} adapters asked for; a blend holds at most {BLEND_SLOTS}",
+                blend.len()
+            )));
+        }
         // Resolve before touching the device: an unknown expert is a config
         // error, not a generation failure, and must not pay a model load.
-        let path = self
-            .registry
-            .read()
-            .expect("registry lock")
-            .get(&target)
-            .cloned()
-            .ok_or_else(|| {
-                AntumbraError::other(format!(
-                    "MultiAdapterServe: no adapter registered for {target} (register the population \
-                     before serving)"
-                ))
-            })?;
+        let specs: Vec<(String, f32)> = {
+            let registry = self.registry.read().expect("registry lock");
+            blend
+                .iter()
+                .map(|(e, w)| {
+                    let path = registry.get(e).cloned().ok_or_else(|| {
+                        AntumbraError::other(format!(
+                            "MultiAdapterServe: no adapter registered for {e} (register the \
+                             population before serving)"
+                        ))
+                    })?;
+                    Ok((path, *w))
+                })
+                .collect::<antumbra_core::Result<_>>()?
+        };
+        let key: Vec<(antumbra_core::ExpertId, u32)> = blend
+            .iter()
+            .map(|(e, w)| (e.clone(), w.to_bits()))
+            .collect();
 
         // candle generation is synchronous and device-bound. Run it under
         // `block_in_place` so the runtime spawns a replacement worker and other
@@ -184,20 +216,23 @@ impl Serve for MultiAdapterServe {
                     // Load the base with neutral (zero) LoRA factors; adapters are
                     // swapped in below. Reuse the trainer's loader so the model is
                     // byte-identical to what training produced.
-                    let loader = antumbra_train::CandleModelLoader::new(self.config.clone());
+                    let loader = antumbra_train::CandleModelLoader::new(blend_config(&self.config));
                     let model =
                         antumbra_train::ModelLoader::load(&loader, &self.base_model, None).await?;
                     st.model = Some(model);
                     st.current = None;
                 }
-                // Hot-swap only when the routed expert differs from the resident
-                // one; repeated routes to the same expert reuse the loaded factors.
-                if st.current.as_ref() != Some(&target) {
+                // Swap only when the blend differs from the resident one; repeated
+                // requests for the same blend reuse the loaded factors.
+                if st.current.as_ref() != Some(&key) {
+                    // A failed load can leave the factors half-written: forget
+                    // what was resident before trying.
+                    st.current = None;
                     st.model
                         .as_mut()
                         .expect("base loaded above")
-                        .load_adapter(&path)?;
-                    st.current = Some(target.clone());
+                        .load_blend(&specs)?;
+                    st.current = Some(key);
                 }
                 let outputs = st
                     .model
@@ -268,6 +303,7 @@ mod tests {
             task_id: "t:1".into(),
             prompt: "hello".into(),
             adapters: vec![],
+            weights: Vec::new(),
         };
         let err = serve.act(req).await.unwrap_err();
         assert!(matches!(err, AntumbraError::Unimplemented(_)));
@@ -289,6 +325,7 @@ mod tests {
             task_id: "t".into(),
             prompt: "hi".into(),
             adapters: vec![],
+            weights: Vec::new(),
         };
         let msg = serve.act(req).await.unwrap_err().to_string();
         assert!(msg.contains("no adapter selected"), "{msg}");
@@ -301,9 +338,35 @@ mod tests {
             task_id: "t".into(),
             prompt: "hi".into(),
             adapters: vec![ExpertId::new("expert:ghost")],
+            weights: Vec::new(),
         };
         let msg = serve.act(req).await.unwrap_err().to_string();
         assert!(msg.contains("no adapter registered"), "{msg}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_blend_beyond_the_slots_errors_before_load() {
+        let mut serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B", Default::default());
+        let ids: Vec<ExpertId> = (0..=BLEND_SLOTS)
+            .map(|i| ExpertId::new(format!("expert:{i}")))
+            .collect();
+        for id in &ids {
+            serve.register(id.clone(), "adapters/never-read.safetensors");
+        }
+        let msg = serve
+            .act(ActRequest::new("t", "hi", ids))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("at most"), "{msg}");
+    }
+
+    #[test]
+    fn the_resident_rank_holds_every_slot_at_the_trained_scale() {
+        let trained = RaftConfig::default();
+        let resident = blend_config(&trained);
+        assert_eq!(resident.lora_rank, trained.lora_rank * BLEND_SLOTS);
+        assert!((resident.lora_scale() - trained.lora_scale()).abs() < 1e-12);
     }
 
     #[test]

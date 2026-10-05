@@ -683,6 +683,7 @@ async fn serve_prompt(
                     task_id: "serve".into(),
                     prompt: prompt.into(),
                     adapters: vec![id.clone()],
+                    weights: Vec::new(),
                 })
                 .await?;
             let name = experts

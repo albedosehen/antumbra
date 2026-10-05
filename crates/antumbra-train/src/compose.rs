@@ -23,36 +23,13 @@ fn ce(e: candle_core::Error) -> AntumbraError {
 /// `out_path`; returns the merged rank. `A` (`rank x in`) stacks along its rank
 /// rows, `B` (`out x rank`) along its rank columns, each scaled by `sqrt(w_i)`.
 pub fn compose_adapters(specs: &[(String, f32)], out_path: &str) -> Result<usize> {
-    if specs.is_empty() {
-        return Err(AntumbraError::other("compose: no adapters"));
-    }
     let device = Device::Cpu;
-    let maps: Vec<HashMap<String, Tensor>> = specs
+    let parts: Vec<(HashMap<String, Tensor>, f32)> = specs
         .iter()
-        .map(|(p, _)| candle_core::safetensors::load(p, &device).map_err(ce))
+        .map(|(p, w)| Ok((candle_core::safetensors::load(p, &device).map_err(ce)?, *w)))
         .collect::<Result<_>>()?;
-
-    let keys: Vec<String> = maps[0].keys().cloned().collect();
-    let mut out: HashMap<String, Tensor> = HashMap::new();
-    for key in &keys {
-        // The adapter holds only LoRA factors. A: stack rows (rank dim 0);
-        // B: stack cols (rank dim 1). Both fold sqrt(w) so the product is w.
-        let dim = if key.ends_with("lora_a") { 0 } else { 1 };
-        let mut parts = Vec::with_capacity(specs.len());
-        for (i, (_, w)) in specs.iter().enumerate() {
-            let t = maps[i]
-                .get(key)
-                .ok_or_else(|| AntumbraError::other(format!("compose: key {key} missing")))?;
-            parts.push((t * (w.max(0.0).sqrt() as f64)).map_err(ce)?);
-        }
-        out.insert(key.clone(), Tensor::cat(&parts, dim).map_err(ce)?);
-    }
-
-    let rank = out
-        .iter()
-        .find(|(k, _)| k.ends_with("lora_a"))
-        .map(|(_, t)| t.dim(0).unwrap_or(0))
-        .unwrap_or(0);
+    let out = blend(&parts, None)?;
+    let rank = rank_of(&out);
     // A rank-0 result (no `lora_a` rows) would scale to a NaN `alpha/rank` and
     // poison generation; reject it before writing a garbage adapter to disk.
     if rank == 0 {
@@ -62,6 +39,57 @@ pub fn compose_adapters(specs: &[(String, f32)], out_path: &str) -> Result<usize
     }
     candle_core::safetensors::save(&out, out_path).map_err(ce)?;
     Ok(rank)
+}
+
+/// The rank of an adapter's factors: the rows of any `lora_a`.
+pub fn rank_of(factors: &HashMap<String, Tensor>) -> usize {
+    factors
+        .iter()
+        .find(|(k, _)| k.ends_with("lora_a"))
+        .map(|(_, t)| t.dim(0).unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Stack `(factors, weight)` adapters into one, block `i` scaled to contribute
+/// `w_i * delta_i`. With `rank`, the result is zero-padded to that rank, so a
+/// model built at a higher rank serves it exactly: the padded rows of `A` and
+/// columns of `B` add nothing. A model built at `rank` with alpha raised in
+/// step keeps the trained scale, and then serves one adapter or a blend of
+/// several without being rebuilt.
+pub fn blend(
+    parts: &[(HashMap<String, Tensor>, f32)],
+    rank: Option<usize>,
+) -> Result<HashMap<String, Tensor>> {
+    let Some((first, _)) = parts.first() else {
+        return Err(AntumbraError::other("compose: no adapters"));
+    };
+    let mut out: HashMap<String, Tensor> = HashMap::new();
+    for key in first.keys() {
+        // The adapter holds only LoRA factors. A: stack rows (rank dim 0);
+        // B: stack cols (rank dim 1). Both fold sqrt(w) so the product is w.
+        let dim = if key.ends_with("lora_a") { 0 } else { 1 };
+        let mut stacked = Vec::with_capacity(parts.len() + 1);
+        for (factors, w) in parts {
+            let t = factors
+                .get(key)
+                .ok_or_else(|| AntumbraError::other(format!("compose: key {key} missing")))?;
+            stacked.push((t * (w.max(0.0).sqrt() as f64)).map_err(ce)?);
+        }
+        let mut t = Tensor::cat(&stacked, dim).map_err(ce)?;
+        if let Some(rank) = rank {
+            let have = t.dim(dim).map_err(ce)?;
+            if have > rank {
+                return Err(AntumbraError::other(format!(
+                    "compose: the blend has rank {have}, above the model's {rank}"
+                )));
+            }
+            if have < rank {
+                t = t.pad_with_zeros(dim, 0, rank - have).map_err(ce)?;
+            }
+        }
+        out.insert(key.clone(), t);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -139,5 +167,68 @@ mod tests {
         for q in [p, pm] {
             std::fs::remove_file(q).ok();
         }
+    }
+
+    fn factors(
+        a: &[f32],
+        b: &[f32],
+        rank: usize,
+        inn: usize,
+        out: usize,
+    ) -> HashMap<String, Tensor> {
+        let device = Device::Cpu;
+        HashMap::from([
+            (
+                "p.lora_a".to_string(),
+                Tensor::from_vec(a.to_vec(), (rank, inn), &device).unwrap(),
+            ),
+            (
+                "p.lora_b".to_string(),
+                Tensor::from_vec(b.to_vec(), (out, rank), &device).unwrap(),
+            ),
+        ])
+    }
+
+    /// `B (A x)` for `x = [1, 2]`.
+    fn delta(f: &HashMap<String, Tensor>) -> f32 {
+        let x = Tensor::from_vec(vec![1.0f32, 2.0], (2, 1), &Device::Cpu).unwrap();
+        let ax = f["p.lora_a"].matmul(&x).unwrap();
+        f["p.lora_b"]
+            .matmul(&ax)
+            .unwrap()
+            .flatten_all()
+            .unwrap()
+            .to_vec1::<f32>()
+            .unwrap()[0]
+    }
+
+    #[test]
+    fn one_adapter_padded_to_a_higher_rank_serves_the_same_delta() {
+        let one = factors(&[1.0, 3.0], &[2.0], 1, 2, 1);
+        let padded = blend(&[(one.clone(), 1.0)], Some(3)).unwrap();
+        assert_eq!(padded["p.lora_a"].dims(), &[3, 2]);
+        assert_eq!(padded["p.lora_b"].dims(), &[1, 3]);
+        assert_eq!(rank_of(&padded), 3);
+        assert!((delta(&padded) - delta(&one)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_padded_blend_is_the_weighted_sum_and_halves_make_a_whole() {
+        let p = factors(&[1.0, 0.0], &[2.0], 1, 2, 1);
+        let q = factors(&[0.0, 1.0], &[3.0], 1, 2, 1);
+        let mixed = blend(&[(p.clone(), 0.25), (q.clone(), 1.0)], Some(4)).unwrap();
+        assert!((delta(&mixed) - (0.25 * delta(&p) + delta(&q))).abs() < 1e-5);
+        let halves = blend(&[(p.clone(), 0.5), (p.clone(), 0.5)], Some(3)).unwrap();
+        assert!((delta(&halves) - delta(&p)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_blend_above_the_model_rank_or_missing_a_factor_is_refused() {
+        let p = factors(&[1.0, 0.0], &[2.0], 1, 2, 1);
+        assert!(blend(&[(p.clone(), 1.0), (p.clone(), 1.0)], Some(1)).is_err());
+        let mut partial = p.clone();
+        partial.remove("p.lora_b");
+        assert!(blend(&[(p, 1.0), (partial, 1.0)], Some(2)).is_err());
+        assert!(blend(&[], Some(2)).is_err());
     }
 }
