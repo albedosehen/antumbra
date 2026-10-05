@@ -14,6 +14,10 @@ async-trait.workspace = true
 chrono.workspace = true
 # Content addresses of verifiers (ADR-0022 S-4).
 sha2 = "0.11"
+# A behaviour's check (ADR-0027): the patterns an answer must and must not
+# match. fancy-regex rather than regex, for the lookarounds the trainer's
+# Python checks accept.
+fancy-regex = "0.17"
 
 [features]
 # Exposes in-memory fakes of the ports so downstream crates can drive the

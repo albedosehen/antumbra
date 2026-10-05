@@ -708,6 +708,7 @@ async fn call_tool_dispatches_a_named_tool() {
         .is_err());
 }
 
+mod behaviour;
 mod depgraph;
 mod handoff;
 mod lifecycle;

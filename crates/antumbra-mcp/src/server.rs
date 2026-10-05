@@ -268,6 +268,7 @@ fn default_capability() -> String {
     "reference".into()
 }
 
+mod behaviour;
 mod compartments;
 pub(crate) mod consolidation;
 mod depgraph;
