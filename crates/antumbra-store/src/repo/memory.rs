@@ -471,8 +471,14 @@ pub async fn recall_hybrid_many(
     }
     let mut rankings: Vec<Vec<String>> = Vec::with_capacity(queries.len());
     let mut found: std::collections::HashMap<String, Memory> = std::collections::HashMap::new();
-    for (text, vector) in queries {
-        let hits = recall_hybrid(store, tenant, text, vector, k, network, probes).await?;
+    // Each query's recall runs at once with the others', as its legs do.
+    let lists = futures::future::try_join_all(
+        queries
+            .iter()
+            .map(|(text, vector)| recall_hybrid(store, tenant, text, vector, k, network, probes)),
+    )
+    .await?;
+    for hits in lists {
         rankings.push(hits.iter().map(|m| m.id.as_str().to_string()).collect());
         for m in hits {
             found.entry(m.id.as_str().to_string()).or_insert(m);
@@ -511,13 +517,18 @@ pub async fn recall_hybrid(
     // against its own residual filters, for the same reason.
     let pool = candidate_pool(k);
 
-    let mut dense = recall(store, tenant, query_vec, pool, network).await?;
-    // The index retrieves by raw cosine, which is the right RECALL stage -- it is
-    // a superset, and cheap. Ranking is the part raw cosine gets wrong: it tracks
-    // a memory's LENGTH more than its topic, so short rows lead every result. So
-    // re-rank the pool the index returned, and do it HERE, before fusion: sorting
-    // the FUSED list by a dense score would throw away the lexical leg, which is
-    // currently the only thing surfacing the right answers at all.
+    // The three legs read independently of one another, so they run at once:
+    // a recall costs its slowest leg rather than the sum of them.
+    let (dense, chunk_leg, sparse) = futures::join!(
+        recall(store, tenant, query_vec, pool, network),
+        crate::repo::memory_chunk::nearest(store, tenant, query_vec, pool, network),
+        sparse_recall(store, tenant, query_text, pool, network),
+    );
+    let mut dense = dense?;
+    // With probes, re-rank the pool the index returned by calibrated score, here
+    // and before fusion: sorting the FUSED list by a dense score would throw away
+    // the lexical leg. The server passes none (ADR-0026: on the user's store the
+    // calibration cost more recall than it saved); the bench can.
     if !probes.is_empty() {
         dense.sort_by(|a, b| {
             let score = |m: &Memory| {
@@ -533,8 +544,6 @@ pub async fn recall_hybrid(
     // with no chunks yet scores by its whole vector as before, so the index can
     // be empty, partial or rebuilt; a failing chunk leg leaves the whole-memory
     // list as it was.
-    let chunk_leg =
-        crate::repo::memory_chunk::nearest(store, tenant, query_vec, pool, network).await;
     let dense = match chunk_leg {
         Ok(pieces) if !pieces.is_empty() => {
             let score = |v: &[f32]| calibrated_score(query_vec, v, probes);
@@ -554,7 +563,7 @@ pub async fn recall_hybrid(
     // unnoticed for months because the symptom was indistinguishable from "the
     // embedding is bad at this query". Say so, the way the rerank stage already
     // says so when it falls back to RRF order.
-    let sparse = match sparse_recall(store, tenant, query_text, pool, network).await {
+    let sparse = match sparse {
         Ok(rows) => rows,
         Err(e) => {
             eprintln!("antumbra-store: lexical leg failed, recall is dense-only: {e}");
