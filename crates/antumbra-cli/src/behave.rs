@@ -32,7 +32,10 @@ pub struct BehaveArgs {
     /// behaviours.
     #[arg(long, default_value_t = 3)]
     pub rounds: usize,
-    #[arg(long, default_value_t = 64)]
+    /// The longest answer generated: the base model's replay answers among
+    /// them. One cut short would teach the expert to stop mid-answer, since
+    /// training ends every answer it is given.
+    #[arg(long, default_value_t = 256)]
     pub max_new_tokens: usize,
     #[arg(long, default_value_t = 3e-4)]
     pub lr: f64,
@@ -159,10 +162,12 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
             if b.admitted { "ok" } else { "short" }
         );
     }
-    println!(
-        "  controls: base {:.2} -> expert {:.2}",
-        r.verdict.controls.0, r.verdict.controls.1
-    );
+    for c in &r.verdict.controls {
+        println!(
+            "  {:<40} base {:.2} -> expert {:.2}",
+            c.family, c.base, c.expert
+        );
+    }
     match &r.expert {
         Some((id, uri)) => println!("admitted: private expert {} ({uri})", id.as_str()),
         None => {

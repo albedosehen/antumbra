@@ -54,11 +54,22 @@ fn tasks_carry_the_check_the_answer_and_the_behaviour() {
 #[test]
 fn the_shipped_replay_and_controls_load() {
     let prompts = replay_prompts();
-    assert_eq!(prompts.len(), 214);
+    assert_eq!(prompts.len(), 325);
     assert!(prompts.iter().all(|p| p.verify == always()));
     let c = controls();
-    assert_eq!(c.len(), 40);
-    assert!(c.iter().all(|t| t.id.starts_with("control-")));
+    assert_eq!(c.len(), 60);
+    assert_eq!(
+        c.iter()
+            .filter(|t| t.id.starts_with("control-cmd-"))
+            .count(),
+        40
+    );
+    assert_eq!(
+        c.iter()
+            .filter(|t| t.id.starts_with("control-code-"))
+            .count(),
+        20
+    );
 
     let answered = replay(
         &prompts[..3],
@@ -82,36 +93,43 @@ fn an_expert_that_learned_and_kept_the_rest_is_admitted() {
         result("memory:b1#h0", 0, 1),
         result("memory:b1#h1", 0, 1),
         result("memory:b2#h0", 0, 1),
-        result("control-0", 1, 1),
-        result("control-1", 1, 1),
+        result("control-cmd-0", 1, 1),
+        result("control-cmd-1", 1, 1),
     ];
     let expert = vec![
         result("memory:b1#h0", 1, 1),
         result("memory:b1#h1", 1, 1),
         result("memory:b2#h0", 1, 1),
-        result("control-0", 1, 1),
-        result("control-1", 1, 1),
+        result("control-cmd-0", 1, 1),
+        result("control-cmd-1", 1, 1),
     ];
     let v = admit(&ids, &base, &expert);
     assert!(v.admitted, "{:?}", v.reasons);
-    assert_eq!(v.controls, (1.0, 1.0));
+    assert_eq!(
+        v.controls,
+        [ControlScore {
+            family: "control-cmd".into(),
+            base: 1.0,
+            expert: 1.0
+        }]
+    );
     assert!(v.behaviours.iter().all(|b| b.admitted));
 }
 
 #[test]
 fn an_expert_that_did_not_learn_or_broke_the_controls_is_refused() {
     let ids = vec!["memory:b1".to_string()];
-    let base = vec![result("memory:b1#h0", 0, 2), result("control-0", 4, 4)];
-    let unlearned = vec![result("memory:b1#h0", 1, 2), result("control-0", 4, 4)];
+    let base = vec![result("memory:b1#h0", 0, 2), result("control-cmd-0", 4, 4)];
+    let unlearned = vec![result("memory:b1#h0", 1, 2), result("control-cmd-0", 4, 4)];
     let v = admit(&ids, &base, &unlearned);
     assert!(!v.admitted);
     assert!(v.reasons[0].contains("held out 0.50"), "{:?}", v.reasons);
 
-    let interfering = vec![result("memory:b1#h0", 2, 2), result("control-0", 2, 4)];
+    let interfering = vec![result("memory:b1#h0", 2, 2), result("control-cmd-0", 2, 4)];
     let v = admit(&ids, &base, &interfering);
     assert!(!v.admitted);
     assert!(
-        v.reasons.iter().any(|r| r.contains("controls fell")),
+        v.reasons.iter().any(|r| r.starts_with("control-cmd fell")),
         "{:?}",
         v.reasons
     );
@@ -121,5 +139,31 @@ fn an_expert_that_did_not_learn_or_broke_the_controls_is_refused() {
     assert!(
         !admit(&[], &base, &base).admitted,
         "nothing taught, nothing admitted"
+    );
+}
+
+#[test]
+fn each_family_of_controls_is_held_on_its_own() {
+    let ids = vec!["memory:b1".to_string()];
+    let mut base = vec![result("memory:b1#h0", 0, 2)];
+    let mut expert = vec![result("memory:b1#h0", 2, 2)];
+    // Forty commands held, and three of twenty code answers lost: pooled, the
+    // fall is 3/60, inside the slack; on its own, code fell 0.15.
+    for i in 0..40 {
+        base.push(result(&format!("control-cmd-{i}"), 1, 1));
+        expert.push(result(&format!("control-cmd-{i}"), 1, 1));
+    }
+    for i in 0..20 {
+        base.push(result(&format!("control-code-{i}"), 1, 1));
+        expert.push(result(&format!("control-code-{i}"), usize::from(i >= 3), 1));
+    }
+    let v = admit(&ids, &base, &expert);
+    assert!(!v.admitted);
+    let families: Vec<&str> = v.controls.iter().map(|c| c.family.as_str()).collect();
+    assert_eq!(families, ["control-cmd", "control-code"]);
+    assert!(
+        v.reasons.iter().any(|r| r.starts_with("control-code fell")),
+        "{:?}",
+        v.reasons
     );
 }
