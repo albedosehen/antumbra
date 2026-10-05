@@ -48,14 +48,17 @@ pub fn expert_id(user: &UserId, scope: &str) -> ExpertId {
     ExpertId::new(format!("expert:{}:behaviour:{scope}", user.as_str()))
 }
 
-/// The training a standing expert gets when nobody chose one: validation 2's
-/// three epochs at 3e-4, with answers up to 256 tokens so no replay answer is
-/// cut short. `antumbra behave` defaults to the same.
+/// The training a standing expert gets when nobody chose one: three epochs at
+/// 1.5e-4, with answers up to 256 tokens so no replay answer is cut short.
+/// `antumbra behave` defaults to the same. Validation 2 trained four behaviours
+/// at 3e-4; at that rate nine taught together broke the expert (command
+/// controls 34/40 to 20/40), and at 1.5e-4 the same nine were all learned with
+/// every control held, as were the four.
 pub fn standing_config() -> RaftConfig {
     RaftConfig {
         rounds: 3,
         max_new_tokens: 256,
-        learning_rate: 3e-4,
+        learning_rate: 1.5e-4,
         ..RaftConfig::default()
     }
 }
@@ -267,6 +270,13 @@ pub async fn train_behaviours(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_standing_expert_trains_at_the_rate_nine_behaviours_held_at() {
+        let cfg = standing_config();
+        assert!(cfg.learning_rate <= 1.5e-4, "3e-4 broke nine behaviours");
+        assert_eq!((cfg.rounds, cfg.max_new_tokens), (3, 256));
+    }
 
     #[test]
     fn a_standing_expert_is_named_for_its_owner_and_scope() {

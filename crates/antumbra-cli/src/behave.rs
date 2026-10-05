@@ -42,7 +42,9 @@ pub struct BehaveArgs {
     /// training ends every answer it is given.
     #[arg(long, default_value_t = 256)]
     pub max_new_tokens: usize,
-    #[arg(long, default_value_t = 3e-4)]
+    /// The learning rate. Above 1.5e-4, a set of more than a few behaviours
+    /// pulls the expert off the base model's answers everywhere else.
+    #[arg(long, default_value_t = 1.5e-4)]
     pub lr: f64,
 }
 
