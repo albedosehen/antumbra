@@ -1,7 +1,8 @@
 //! `antumbra behave`: train a user's accepted behaviours into their private
 //! standing expert (ADR-0027). The work is `antumbra_serve::behave`; this
 //! prints what it did and why. `--import` records behaviours from a file
-//! instead, as the `record_behaviour` tool would, accepted.
+//! instead, as the `record_behaviour` tool would: accepted, or with
+//! `--propose` proposed, for the user to accept.
 
 use std::hash::{Hash, Hasher};
 
@@ -28,6 +29,10 @@ pub struct BehaveArgs {
     /// same rule again replaces it.
     #[arg(long)]
     pub import: Option<String>,
+    /// With `--import`, record them proposed: for the user to accept, as a
+    /// behaviour drawn from older memories is, rather than one they stated.
+    #[arg(long, default_value_t = false)]
+    pub propose: bool,
     /// Epochs over the examples and the replay: three taught validation 2's
     /// behaviours.
     #[arg(long, default_value_t = 3)]
@@ -80,6 +85,11 @@ async fn import(url: &str, a: &BehaveArgs, path: &str) -> anyhow::Result<()> {
         UserId::new(a.user.as_str()),
     );
     let host = antumbra_core::this_host();
+    let status = if a.propose {
+        Status::Proposed
+    } else {
+        Status::Accepted
+    };
     let mut refused = 0;
     for row in rows {
         let problems = row.spec.problems();
@@ -103,13 +113,18 @@ async fn import(url: &str, a: &BehaveArgs, path: &str) -> anyhow::Result<()> {
             &host,
             id.clone(),
             &row.spec,
-            Status::Accepted,
+            status,
             &scope,
             None,
             embedding,
         )
         .await?;
-        println!("accepted {} ({scope}): {}", id.as_str(), row.spec.rule);
+        println!(
+            "{} {} ({scope}): {}",
+            status.as_str(),
+            id.as_str(),
+            row.spec.rule
+        );
     }
     if refused > 0 {
         anyhow::bail!("{refused} behaviour(s) refused; nothing was written for them");
