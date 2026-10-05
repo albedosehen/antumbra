@@ -9,7 +9,9 @@ These are template lifecycle hooks that turn Antumbra into your agent's persiste
 | `antumbra-capture`       | `Stop`, `PreCompact`  | **Capture**: nudge the agent to write non-obvious observations back via `store_memory` before the turn ends or context is compacted (sentinel = fire once). |
 | `strip-attribution`      | `PreToolUse` (git/gh) | **Override**: deny commits/PRs that embed model-vendor attribution, so work is attributed to you.                                                           |
 
-**Keeping installed copies current.** The hooks are copied into place by hand, and a copy edited in place drifts from the repository. `antumbra claude doctor` finds every hook script your user and project settings run, and says for each one it ships whether it is the same as this build's (line endings aside), differs, or is missing.
+**The easy way.** `antumbra setup local` (or `antumbra setup hosted <url>`) writes the scripts for your OS to `~/.antumbra/hooks`, wires them into `~/.claude/settings.json`, and registers the MCP server with the headers helper below; `antumbra setup check` confirms it. The rest of this page is for wiring them by hand, or into another agent.
+
+**Keeping installed copies current.** The hooks are often copied into place by hand, and a copy edited in place drifts from the repository. Re-running `antumbra setup` rewrites the copies in `~/.antumbra/hooks` from the build you run. `antumbra claude doctor` finds every hook script your user and project settings run, and says for each one it ships whether it is the same as this build's (line endings aside), differs, or is missing.
 
 **Both platforms are provided.** Each hook ships as a `.ps1` (Windows / PowerShell) and a `.sh` (macOS / Linux, POSIX `bash`) sibling with identical behavior; use the one for your OS. The `.sh` scripts need **`jq`** and **`curl`** (preinstalled on most macOS/Linux dev machines; `brew install jq` / `apt install jq` otherwise). The bodies are ~20 lines: read the hook JSON on stdin, optionally call the MCP surface, emit the hook's JSON response.
 

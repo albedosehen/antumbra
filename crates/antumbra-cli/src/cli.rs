@@ -311,6 +311,13 @@ pub enum ClaudeAction {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Set Antumbra up for Claude Code in one command: on this machine
+    /// (`setup local`), against a hosted workspace (`setup hosted <url>`),
+    /// or check what is there (`setup check`). With no mode, it asks.
+    Setup {
+        #[command(subcommand)]
+        mode: Option<crate::setup::SetupMode>,
+    },
     /// Claude Code with its telemetry off (ADR-0021): what that silently costs,
     /// and what is done about it.
     Claude {

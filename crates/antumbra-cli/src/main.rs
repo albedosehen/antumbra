@@ -32,6 +32,7 @@ mod gitfacts;
 mod learned_gate;
 mod models;
 mod ops;
+mod setup;
 mod train_args;
 mod verifier_args;
 mod verifier_name;
@@ -175,6 +176,10 @@ async fn run() -> anyhow::Result<()> {
         cli.copal_keys.as_deref(),
     )?);
     match cli.command {
+        Command::Setup { mode } => {
+            // Files, Docker, HTTP and prompts: all blocking, so off the runtime.
+            tokio::task::spawn_blocking(move || setup::run(mode)).await??;
+        }
         Command::Claude { action } => {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.
             tokio::task::spawn_blocking(move || claude::run::run(action)).await??;

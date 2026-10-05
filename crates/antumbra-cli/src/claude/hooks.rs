@@ -57,6 +57,15 @@ const BUNDLED: &[(&str, &str)] = &[
     ),
 ];
 
+/// The text this build ships for a hook, by file name (`antumbra setup`
+/// writes these out).
+pub fn bundled(name: &str) -> Option<&'static str> {
+    BUNDLED
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, text)| *text)
+}
+
 /// How an installed hook compares with the bundled one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookState {

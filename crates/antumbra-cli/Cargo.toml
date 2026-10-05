@@ -49,6 +49,10 @@ ureq = { version = "3", features = ["json"] }
 # meta-schema, as the agent does. No default features: the meta-schemas are
 # compiled in, and nothing is ever fetched over HTTP or read from a file.
 jsonschema = { version = "0.56.0", default-features = false }
+# `antumbra setup`: the local stack's generated secrets (the OS random source,
+# base64), and reading the workspace out of a token's claims.
+getrandom = "0.3"
+base64 = "0.22"
 
 [features]
 default = []
