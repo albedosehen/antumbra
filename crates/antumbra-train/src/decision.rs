@@ -180,7 +180,11 @@ mod tests {
     fn a_soft_label_is_learned_as_a_rate_and_not_rounded_up() {
         let dev = Device::Cpu;
         let (h, varmap) = head(2, &dev);
-        let xs = Tensor::from_vec(vec![1.0f32; ENCODER_DIM], (1, ENCODER_DIM), &dev).unwrap();
+        // A unit vector, as a pooled embedding is. A vector of ones is 20 times
+        // longer, and from about 3 random starts in 100 the head overshot to
+        // p = 1.0 on it (seen in CI on 2026-10-04, then 9 runs in 300 locally).
+        let unit = 1.0 / (ENCODER_DIM as f32).sqrt();
+        let xs = Tensor::from_vec(vec![unit; ENCODER_DIM], (1, ENCODER_DIM), &dev).unwrap();
         let ys = Tensor::from_vec(vec![0.7f32, 0.3], (1, 2), &dev).unwrap();
 
         let mut opt = AdamW::new(
