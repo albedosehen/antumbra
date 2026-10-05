@@ -202,10 +202,12 @@ The design records (the ADRs the code names by number, such as `ADR-0025`), the 
 
 ## License
 
-Copyright (C) 2026 Shon Thomas.
+Copyright (c) 2026 Shon Thomas.
 
-Antumbra is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, version 3 only ([`LICENSE`](LICENSE), SPDX `AGPL-3.0-only`).
+Antumbra is source-available under the [Elastic License 2.0](LICENSE) (ELv2, SPDX `Elastic-2.0`); Shon Thomas is the licensor. You may use, copy, modify and distribute it, and run it for yourself or inside your own organization, subject to three limitations:
 
-Antumbra is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+- You may not provide it to third parties as a hosted or managed service that gives them access to any substantial set of its features or functionality.
+- You may not move, change, disable or circumvent any license key functionality, or remove functionality it protects.
+- You may not alter, remove or obscure the licensor's licensing, copyright or other notices.
 
-The AGPL extends to use over a network: anyone who runs a modified Antumbra as a service, such as its MCP server, must offer the users of that service the source of the version they run.
+Anyone you give a copy to gets these terms with it, and modified copies must say they were modified. ELv2 is not an open source license as the OSI defines one. The [`LICENSE`](LICENSE) file is the license; this summary is not.
