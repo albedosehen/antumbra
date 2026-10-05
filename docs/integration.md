@@ -82,7 +82,7 @@ Start the server with `--tools agent` (or `ANTUMBRA_TOOLS=agent`) for a coding a
 
 ## Memories about code carry their anchor (provenance over extraction)
 
-A memory about code is only as good as its anchor. Static extraction keeps a symbol table fresh by re-extracting and pruning; with many concurrent branches that snapshot goes stale silently. Antumbra keeps the anchor **on the memory** and judges it at recall, where git is ([ADR-0018](adr/0018-provenance-over-extraction.md)):
+A memory about code is only as good as its anchor. Static extraction keeps a symbol table fresh by re-extracting and pruning; with many concurrent branches that snapshot goes stale silently. Antumbra keeps the anchor **on the memory** and judges it at recall, where git is ([ADR-0018](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0018-provenance-over-extraction.md)):
 
 - **Capture** stamps memories about code with `provenance {repo, commit, branch[, path]}` (the capture hook computes it; `store_memory` stores it as one `git:` evidence entry).
 - **Recall** takes the caller's `repo` and `branch` and returns every hit with a `scope` (`in_scope`, `other_branch`, `other_repo`), demoting out-of-scope hits below in-scope ones without hiding them: the branch is a governing feature, exactly as a repo-scoped convention is.
@@ -101,7 +101,7 @@ antumbra git-facts --tenant ws:me --user user:me --compartment comp:repo --days 
 
 ## The GitHub App tells Antumbra when an anchor goes stale
 
-The events that make an anchor stale, a merge and a branch deletion, happen on the hosting platform, so the platform reports them directly instead of a session hook noticing later ([ADR-0019](adr/0019-github-integration-and-evidence-graph.md)). The networked server serves `POST /github/webhook` when given the App's webhook secret and a repository-to-workspace map:
+The events that make an anchor stale, a merge and a branch deletion, happen on the hosting platform, so the platform reports them directly instead of a session hook noticing later ([ADR-0019](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0019-github-integration-and-evidence-graph.md)). The networked server serves `POST /github/webhook` when given the App's webhook secret and a repository-to-workspace map:
 
 ```bash
 antumbra-mcp --http 0.0.0.0:8081 --jwt-secret-file /run/secrets/jwt \
@@ -153,7 +153,7 @@ A session can leave a note for a session on another of your machines: "rerun thi
 
 ## Claude Code with its telemetry off
 
-Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. [ADR-0021](adr/0021-sovereign-mode.md) calls the state sovereign mode and treats it as the normal case.
+Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. [ADR-0021](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0021-sovereign-mode.md) calls the state sovereign mode and treats it as the normal case.
 
 ```sh
 antumbra claude doctor            # judge the current project
@@ -265,4 +265,4 @@ Retrieval-memory tools (give the agent a vector store to recall from) make the a
 
 Next session, step 1 includes a skill that did not exist before, and the work it covers is now served locally for free. The scaffolding (loops, prompts, lookups) shrinks into weights. A memory layer is static; Antumbra compounds.
 
-See **[Architecture](architecture.md)** for the engine, **[Roadmap](roadmap.md)** for what is built vs queued, and **[Product surface](product.md)** for the control plane (dashboard, knowledge documents, onboarding) and how Antumbra supersedes a separate agent-memory engine.
+See **[Architecture](architecture.md)** for the engine, **[Roadmap](https://github.com/albedosehen/antumbra-meta/blob/main/roadmap.md)** for what is built vs queued, and **[Product surface](https://github.com/albedosehen/antumbra-meta/blob/main/product.md)** for the control plane (dashboard, knowledge documents, onboarding) and how Antumbra supersedes a separate agent-memory engine.
