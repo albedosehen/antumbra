@@ -137,4 +137,21 @@ fn status_scope_and_supersession_ride_in_evidence() {
         "not a behaviour"
     );
     assert_eq!(Status::parse("Retired"), Some(Status::Retired));
+
+    mark_trained(&mut evidence, "expert:user:a:behaviour:everywhere");
+    mark_trained(&mut evidence, "expert:user:a:behaviour:everywhere");
+    let trained = State::of(&evidence).expect("a behaviour");
+    assert_eq!(trained.status, Status::Trained);
+    assert_eq!(
+        trained.expert.as_deref(),
+        Some("expert:user:a:behaviour:everywhere")
+    );
+    assert_eq!(
+        evidence
+            .iter()
+            .filter(|e| e.starts_with("behaviour-expert:"))
+            .count(),
+        1,
+        "one expert at a time"
+    );
 }

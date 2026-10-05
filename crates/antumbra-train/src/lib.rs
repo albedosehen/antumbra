@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use antumbra_core::{AntumbraError, Result, TrainingRecipe};
 
 pub mod accumulate;
+pub mod behave;
 pub mod compose;
 pub mod config;
 pub mod consolidate;

@@ -17,6 +17,7 @@ use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::Parser;
 
+mod behave;
 mod claude;
 mod cli;
 mod commands;
@@ -674,6 +675,7 @@ async fn run() -> anyhow::Result<()> {
             )
             .await?;
         }
+        Command::Behave(args) => behave::run(&cli.url, args).await?,
         Command::ConsolidateCompartment {
             tenant,
             user,

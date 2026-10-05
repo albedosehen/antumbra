@@ -4,6 +4,7 @@
 //! and `crud` helpers, never raw SurrealQL.
 
 pub mod account;
+pub mod behaviour;
 pub mod boundary;
 pub mod compartment;
 pub mod contribution;

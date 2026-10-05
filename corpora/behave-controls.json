@@ -1,0 +1,482 @@
+[
+ {
+  "id": "control-0",
+  "prompt": "Show disk usage on this machine. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\\bdf\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-1",
+  "prompt": "Count the lines in notes.txt. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('wc -l' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-2",
+  "prompt": "List the git branches in this repository. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'git\\s+branch', c) and 'feat/' not in c and 'checkout -b' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-3",
+  "prompt": "Show the last five commits, one per line. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git log' in c and 'checkout' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-4",
+  "prompt": "Print how long this machine has been running. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('uptime' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-5",
+  "prompt": "Make a directory named build. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('mkdir' in c and 'build' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-6",
+  "prompt": "Show the free memory here. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('free' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-7",
+  "prompt": "Switch to the existing branch main. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'git\\s+(checkout|switch)\\s+main', c) and 'feat/' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-8",
+  "prompt": "List the pull requests open in this repo with gh. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('gh pr list' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-9",
+  "prompt": "Merge PR 12 with gh using squash. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('gh pr merge' in c and '12' in c and 'create' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-10",
+  "prompt": "Copy report.pdf to backup/report.pdf. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('cp' in c and 'pdftotext' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-11",
+  "prompt": "Show the running docker containers on this machine. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('docker ps' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-12",
+  "prompt": "Delete the local branch old-work. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'git\\s+branch\\s+-[dD]\\s+old-work', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-13",
+  "prompt": "Print the first 20 lines of app.log. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('head' in c and '20' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-14",
+  "prompt": "Find files named *.pdf under docs. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('find' in c and 'pdftotext' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-15",
+  "prompt": "Show the current git status. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git status' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-16",
+  "prompt": "Compress the logs directory into logs.tar.gz. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('tar' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-17",
+  "prompt": "Show which process listens on port 8080 here. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\\b(ss|lsof|netstat)\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-18",
+  "prompt": "Stage all changes in git. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'git\\s+add', c)) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-19",
+  "prompt": "Show the size of the file video.mp4. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\\b(ls|du|stat)\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-20",
+  "prompt": "Show the diff between main and this branch. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git diff' in c and 'checkout -b' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-21",
+  "prompt": "Undo changes to app.py in the working tree. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('app.py' in c and 'checkout -b' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-22",
+  "prompt": "Show the reflog. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git reflog' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-23",
+  "prompt": "Create a lightweight tag v2.0.0. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git tag' in c and 'v2.0.0' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-24",
+  "prompt": "Pull the latest changes for the current branch. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git pull' in c and 'checkout -b' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-25",
+  "prompt": "Show the commit count on this branch. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'git\\s+(rev-list|log)', c) and 'checkout -b' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-26",
+  "prompt": "Show the environment variables here. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\\b(env|printenv)\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-27",
+  "prompt": "Show the current date and time here. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('date' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-28",
+  "prompt": "Show this machine's IP addresses. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\\b(ip|ifconfig|hostname)\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-29",
+  "prompt": "List the block devices here. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('lsblk' in c and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-30",
+  "prompt": "Show the load average of this machine. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'uptime|loadavg|\\btop\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-31",
+  "prompt": "View issue 44 with gh. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('gh issue view 44' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-32",
+  "prompt": "Approve pull request 8 with gh. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('gh pr review 8' in c and 'create' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-33",
+  "prompt": "Re-run the failed checks of the latest workflow run with gh. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('gh run' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-34",
+  "prompt": "Show the metadata of thesis.pdf. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('pdfinfo' in c and 'pdftotext' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-35",
+  "prompt": "Split pages 1 to 3 out of book.pdf. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'pdfseparate|qpdf|pdftk|gs', c) and 'pdftotext' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-36",
+  "prompt": "Print the size of every file in this folder. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\\b(ls|du)\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-37",
+  "prompt": "Show the open ports on this machine. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if (re.search(r'\\b(ss|netstat|lsof)\\b', c) and 'ssh' not in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-38",
+  "prompt": "Show the git config user name. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git config' in c) else 1)"
+   ]
+  }
+ },
+ {
+  "id": "control-39",
+  "prompt": "Abort the rebase in progress. Command only.",
+  "verify": {
+   "program": "python",
+   "extract_code": false,
+   "args": [
+    "-c",
+    "import os,re,sys; c=os.environ.get('ANTUMBRA_COMPLETION',''); sys.exit(0 if ('git rebase --abort' in c) else 1)"
+   ]
+  }
+ }
+]
