@@ -106,7 +106,7 @@ The fleet (MacBook M4 Pro 48 GB, RTX 3080 mobile, GTX 1080, Jetson Orin Nano) an
 
 ## 5. Schema (SurrealDB) - summary
 
-Full DDL in [the SurrealDB substrate record](adr/0007-surrealdb-substrate.md). In v0 an `expert` row describes a **frozen LoRA adapter over the shared base** (`base_model` = the shared base, `artifact_uri` = adapter path). Patterns reuse a **prior memory engine** (HNSW recall, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** (`C:\Users\shonp\repos\data-plane-builder-graph`: schema-as-code, drift detection, migrations, tenant perms).
+Full DDL in [the SurrealDB substrate record](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0007-surrealdb-substrate.md). In v0 an `expert` row describes a **frozen LoRA adapter over the shared base** (`base_model` = the shared base, `artifact_uri` = adapter path). Patterns reuse a **prior memory engine** (HNSW recall, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** (`C:\Users\shonp\repos\data-plane-builder-graph`: schema-as-code, drift detection, migrations, tenant perms).
 
 ```mermaid
 erDiagram
@@ -175,8 +175,7 @@ antumbra/
     antumbra-control/      # hosted onboarding flow (invites, magic links, tenant provisioning)
     antumbra-control-server/ # its HTTP surface; a separate cargo workspace (its `contract` feature is the one private dependency)
   corpora/               # verifiable corpora - selected repos for the coding domain
-  experiments/           # the falsifiable validations ARE the milestones
-  docs/adr/              # 0001..0017
+  experiments/           # probes the experiment ledger runs (the ledger itself is in antumbra-meta)
 ```
 
 The Penumbra memory store, engine-enforced multi-tenancy, and compartments live in `antumbra-core` (domain) + `antumbra-store` (the `memory`/`memory_edge`/`compartment`/`grant`/`principal` tables, record-access auth, and the engine-enforced ACL); `antumbra-train` carries the consolidation gate + replay; the `antumbra-mcp` server is the agent-facing runtime surface.
@@ -195,7 +194,7 @@ All **nineteen crates** exist and compile (eighteen workspace members plus the s
 | embed (the MCP runtime surface)                                                | **implemented + tested** - the OpenAI-compatible `HttpEmbedder` (behind the `Embedder` port, dimension-enforced) shared by the MCP server and the TUI, so route/ask/recall embed with the same model the population was built with.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | tui (the boundary-conditioned gate, the operator console)                      | **interactive operator console** (ratatui + tachyonfx) over the live population/gate: route-ask through the gate (`--embed-url`), a live event stream of store changes, drill-down inspection, a tabbed multi-page shell (population · memory · loop · evals), switchable layouts (focused / dashboard / graph / sortable table), a KPI metric strip, time-series charts and a reward-landscape heatmap, multi-monitor high-refresh pacing, fuzzy filter/command palette, switchable themes, and operator actions (prune/graduate shadow · freeze/thaw expert · delete boundary · graceful-stop the loop) behind a confirm, plus drill-downs (route-ask, evaluation regression, gate/router inspector). Capability-tiered rendering (`--render`; raster sixel/kitty behind a `raster` feature) keeps the Braille/Canvas path universal. A headless `snapshot` mode emits a text grid (e2e) + a PNG screenshot. |
 
-Not yet runtime-validated / built: GPU validation of `MultiAdapterServe`'s swap and a real private-LoRA mint (`consolidate-compartment`); a live multi-tenant deployment of the networked MCP against a `ws://` server; the learned latent gate (v0 is the heuristic coverage gate); GGUF-Q4 quantized backward (MT-4); `SCHEMAFULL` + the surql-rs migration-history runner. Forward-looking work is tracked in the [roadmap](roadmap.md); validations to date are in the [experiment ledger](../experiments/README.md).
+Not yet runtime-validated / built: GPU validation of `MultiAdapterServe`'s swap and a real private-LoRA mint (`consolidate-compartment`); a live multi-tenant deployment of the networked MCP against a `ws://` server; the learned latent gate (v0 is the heuristic coverage gate); GGUF-Q4 quantized backward (MT-4); `SCHEMAFULL` + the surql-rs migration-history runner. Forward-looking work is tracked in the [roadmap](https://github.com/albedosehen/antumbra-meta/blob/main/roadmap.md); validations to date are in the [experiment ledger](https://github.com/albedosehen/antumbra-meta/blob/main/experiments.md).
 
 ---
 

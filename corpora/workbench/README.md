@@ -1,6 +1,6 @@
 # The workbench corpus
 
-A corpus built for the loop to be measured on: 349 Python function-writing tasks across eight skills and three spec sizes, each checked by a judge that cannot be passed without computing the right answers. The corpora beside it are one to three tasks each, which is enough to see training happen and too few to hold anything out ([ADR-0022](../../docs/adr/0022-governed-self-improvement.md)).
+A corpus built for the loop to be measured on: 349 Python function-writing tasks across eight skills and three spec sizes, each checked by a judge that cannot be passed without computing the right answers. The corpora beside it are one to three tasks each, which is enough to see training happen and too few to hold anything out ([ADR-0022](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0022-governed-self-improvement.md)).
 
 | file            | what it is                                                                      |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -78,7 +78,7 @@ uv run --python 3.12 python -m unittest discover -s corpora/workbench
 ANTUMBRA_PYTHON=<python> cargo test -p antumbra-critic --test corpora -- --ignored
 ```
 
-Before writing anything, the generator runs every reference through the judge exactly as `CommandVerifier` would, and runs eight completions that solve nothing: empty code, a stub returning `None`, one returning its first argument, one returning the first case's answer every time, three ways of exiting 0, and a forged result line. Every reference must pass and every one of those must fail. A single exception stops the run. This is the no-model baseline [ADR-0024](../../docs/adr/0024-typed-decisions.md) asks every constructed benchmark to be checked against. The unit tests show that these checks do fail when they should. The Rust tests repeat them through the real verifier and fail as soon as any Python verifier under `corpora/` can be passed by exiting.
+Before writing anything, the generator runs every reference through the judge exactly as `CommandVerifier` would, and runs eight completions that solve nothing: empty code, a stub returning `None`, one returning its first argument, one returning the first case's answer every time, three ways of exiting 0, and a forged result line. Every reference must pass and every one of those must fail. A single exception stops the run. This is the no-model baseline [ADR-0024](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0024-typed-decisions.md) asks every constructed benchmark to be checked against. The unit tests show that these checks do fail when they should. The Rust tests repeat them through the real verifier and fail as soon as any Python verifier under `corpora/` can be passed by exiting.
 
 Generation is deterministic: two runs under different hash seeds produce the same files. Lint and types come from `uvx ruff check`, `uvx ruff format --check` and `uvx mypy --strict`, all run from this directory.
 

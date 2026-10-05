@@ -92,8 +92,8 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 **Validated (toward 2026-06):**
 
-- **Provenance over extraction ([ADR-0018](docs/adr/0018-provenance-over-extraction.md)).** Memories about code carry a git anchor (repo, commit, branch) that recall scopes to where the caller is and the session hook judges against HEAD (`[live]`, `[not-on-head]`, `[orphaned]`); inventory answers come from ingesting what the framework itself prints (`antumbra ingest -- <lister>`) and from `git log` (`antumbra git-facts`), never from a parser Antumbra would have to maintain.
-- **Native GitHub integration ([ADR-0019](docs/adr/0019-github-integration-and-evidence-graph.md)).** A GitHub App webhook (`--github-webhook-secret`) keeps those anchors accurate from the platform's own events: a merged pull request re-anchors the merged branch's memories to the merge commit, becomes a memory of its own, and (with the App's key) has its changed documents ingested at that commit; a deleted branch marks its memories orphaned server-side; installing the App cold-starts a repository from its default branch. The knowledge diff check run and the evidence-based dependency graph are the next increments.
+- **Provenance over extraction ([ADR-0018](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0018-provenance-over-extraction.md)).** Memories about code carry a git anchor (repo, commit, branch) that recall scopes to where the caller is and the session hook judges against HEAD (`[live]`, `[not-on-head]`, `[orphaned]`); inventory answers come from ingesting what the framework itself prints (`antumbra ingest -- <lister>`) and from `git log` (`antumbra git-facts`), never from a parser Antumbra would have to maintain.
+- **Native GitHub integration ([ADR-0019](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0019-github-integration-and-evidence-graph.md)).** A GitHub App webhook (`--github-webhook-secret`) keeps those anchors accurate from the platform's own events: a merged pull request re-anchors the merged branch's memories to the merge commit, becomes a memory of its own, and (with the App's key) has its changed documents ingested at that commit; a deleted branch marks its memories orphaned server-side; installing the App cold-starts a repository from its default branch. The knowledge diff check run and the evidence-based dependency graph are the next increments.
 - **Training works on a real GPU.** RAFT lifts pass-rate to 1.0 under both a convention reward and a verifier that _executes_ generated code; the generation-quality recipe is dialed in, and a small corpus trains an expert that generalizes to held-out inputs.
 - **Consolidation closes the loop:** memories score through the gate and graduate into a specialist; a private compartment consolidates into a private expert.
 - **Routing + boundary:** a real embedder drives a gate that routes to the right specialist and escalates out-of-scope queries by _relative coverage_, not an absolute floor; the counterfactual boundary composes end-to-end.
@@ -192,11 +192,20 @@ memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUD
 - **[Using Antumbra](docs/integration.md)**: wire it into a coding agent (the bootstrap/capture lifecycle hooks), offline vs networked. Start here.
 - **[Architecture](docs/architecture.md)**: system, substrate, decision chain, training and data flow, schema.
 - **[Security posture](docs/security.md)**: the trust model, engine-enforced isolation, and the threat-model conclusions of the security review.
-- **[Roadmap](docs/roadmap.md)**: what is built and what is queued, per item.
 - **[Running the trainer](docs/running-the-trainer.md)**: the CUDA GPU recipe.
-- **[Architecture Decision Records](docs/adr/README.md)**: every load-bearing decision, from the population of frozen experts through the control plane and product surface.
-- **[Experiment Ledger](experiments/README.md)**: each falsifiable validation: claim, method, result, kill criterion, reproduce command.
+
+The design records (the ADRs the code names by number, such as `ADR-0025`), the roadmap and the experiment ledger are kept in a private companion repository, [antumbra-meta](https://github.com/albedosehen/antumbra-meta).
 
 ### Crates
 
 `antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-copal` (the copal document-of-record archive client, shared by the server and the CLI) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-rerank` (cross-encoder `/rerank` client behind the `Reranker` port) · `antumbra-bench` (retrieval-quality harness) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.
+
+## License
+
+Copyright (C) 2026 Shon Thomas.
+
+Antumbra is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, version 3 only ([`LICENSE`](LICENSE), SPDX `AGPL-3.0-only`).
+
+Antumbra is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+The AGPL extends to use over a network: anyone who runs a modified Antumbra as a service, such as its MCP server, must offer the users of that service the source of the version they run.

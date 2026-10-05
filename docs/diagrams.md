@@ -120,7 +120,7 @@ flowchart LR
 
 ### 6. Schema - entities
 
-Conceptual ER view; full DDL is in [the SurrealDB substrate decision](adr/0007-surrealdb-substrate.md). Source: [architecture §5](architecture.md#5-schema-surrealdb---summary).
+Conceptual ER view; full DDL is in [the SurrealDB substrate decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0007-surrealdb-substrate.md). Source: [architecture §5](architecture.md#5-schema-surrealdb---summary).
 
 ```mermaid
 erDiagram
@@ -151,7 +151,7 @@ erDiagram
 
 ### 7. Umbra: the frozen population
 
-A base + a growing library of frozen adapters, mixed in latent space by the gate. Source: [the frozen-experts decision](adr/0001-frozen-experts.md).
+A base + a growing library of frozen adapters, mixed in latent space by the gate. Source: [the frozen-experts decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0001-frozen-experts.md).
 
 ```mermaid
 flowchart LR
@@ -169,7 +169,7 @@ flowchart LR
 
 ### 8. Penumbra: the shadow lifecycle
 
-Plasticity lives only in short-lived shadows: spawn → explore → score → graduate (deepen to umbra) or prune. Source: [the shadow-plasticity decision](adr/0002-shadow-plasticity.md).
+Plasticity lives only in short-lived shadows: spawn → explore → score → graduate (deepen to umbra) or prune. Source: [the shadow-plasticity decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0002-shadow-plasticity.md).
 
 ```mermaid
 stateDiagram-v2
@@ -185,7 +185,7 @@ stateDiagram-v2
 
 ### 9. Critic/verifier credit
 
-Verifiers are primary ground truth; the critic only interpolates dense per-step credit between them and can never override a verifier. Source: [the critic credit-assignment decision](adr/0003-critic-credit-assignment.md).
+Verifiers are primary ground truth; the critic only interpolates dense per-step credit between them and can never override a verifier. Source: [the critic credit-assignment decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0003-critic-credit-assignment.md).
 
 ```mermaid
 flowchart LR
@@ -199,7 +199,7 @@ flowchart LR
 
 ### 10. The boundary engine (antumbra)
 
-The antumbra made mechanical: hold behavior fixed, vary context until acceptability flips, recover the governing feature + grain, then inhibit _only in-scope_ and steer. Source: [the inhibitory-boundaries decision](adr/0004-inhibitory-boundaries.md).
+The antumbra made mechanical: hold behavior fixed, vary context until acceptability flips, recover the governing feature + grain, then inhibit _only in-scope_ and steer. Source: [the inhibitory-boundaries decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0004-inhibitory-boundaries.md).
 
 ```mermaid
 flowchart TB
@@ -221,7 +221,7 @@ flowchart TB
 
 ### 11. The boundary-conditioned gate
 
-A learned in-model mixer: score adapters, let the scope gate/steer, blend in-scope experts in latent space, or escalate out-of-scope (which becomes the next training example). Source: [the orchestrator/router decision](adr/0005-orchestrator-router.md).
+A learned in-model mixer: score adapters, let the scope gate/steer, blend in-scope experts in latent space, or escalate out-of-scope (which becomes the next training example). Source: [the orchestrator/router decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0005-orchestrator-router.md).
 
 ```mermaid
 flowchart TB
@@ -238,7 +238,7 @@ flowchart TB
 
 ### 12. Single-GPU serving
 
-v0 is one base + an adapter library (S-LoRA-style) served and trained on one RTX 3090 Ti; the fleet, ternary tier, and heterogeneous composition all defer. Source: [the hardware-serving decision](adr/0006-hardware-serving.md).
+v0 is one base + an adapter library (S-LoRA-style) served and trained on one RTX 3090 Ti; the fleet, ternary tier, and heterogeneous composition all defer. Source: [the hardware-serving decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0006-hardware-serving.md).
 
 ```mermaid
 flowchart TB
@@ -258,7 +258,7 @@ flowchart TB
 
 ### 13. SurrealDB substrate
 
-One multi-model engine is every store + vector index + graph + durable flow state, reached only through `surql-rs`. Full DDL lives in the linked source document. Source: [the SurrealDB substrate decision](adr/0007-surrealdb-substrate.md).
+One multi-model engine is every store + vector index + graph + durable flow state, reached only through `surql-rs`. Full DDL lives in the linked source document. Source: [the SurrealDB substrate decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0007-surrealdb-substrate.md).
 
 ```mermaid
 flowchart TB
@@ -277,7 +277,7 @@ flowchart TB
 
 ### 14. The generational loop
 
-A resumable state-machine-in-DB: grow → explore → score → graduate/prune → consolidate, restartable from the persisted `status` checkpoint. Source: [the generational-loop decision](adr/0008-generational-loop.md).
+A resumable state-machine-in-DB: grow → explore → score → graduate/prune → consolidate, restartable from the persisted `status` checkpoint. Source: [the generational-loop decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0008-generational-loop.md).
 
 ```mermaid
 stateDiagram-v2
@@ -294,7 +294,7 @@ stateDiagram-v2
 
 ### 15. Heterogeneous composition
 
-The north star: sparse top-k selection over genuinely separate frozen experts wired by learned, per-expert cross-attention bridges, with the scope gating both selection and bridge gain. Source: [the heterogeneous-composition decision](adr/0009-heterogeneous-composition.md).
+The north star: sparse top-k selection over genuinely separate frozen experts wired by learned, per-expert cross-attention bridges, with the scope gating both selection and bridge gain. Source: [the heterogeneous-composition decision](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0009-heterogeneous-composition.md).
 
 ```mermaid
 flowchart TB
@@ -311,7 +311,7 @@ flowchart TB
 
 The newer subsystems carry their diagrams inline in their source documents, to avoid drift:
 
-- **[Penumbra, the memory store](adr/0012-penumbra-memory.md)** - the consolidation arc (penumbra memory → score → capture+replay → umbra; contradiction → retire).
-- **[Multi-tenant isolation and identity](adr/0013-tenant-isolation-identity.md)** - the identity hierarchy and the engine `PERMISSIONS` boundary (tenant org → user → compartment → agent; shared umbra, private penumbra).
-- **[Compartments, latent-spaces of memory](adr/0014-compartments.md)** - penumbra → antumbra-clustered compartments → (share / consolidate into a private expert).
-- **[The MCP runtime surface](adr/0015-mcp-runtime-surface.md)** - the 14-tool MCP surface over the bound `(tenant, user)`.
+- **[Penumbra, the memory store](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0012-penumbra-memory.md)** - the consolidation arc (penumbra memory → score → capture+replay → umbra; contradiction → retire).
+- **[Multi-tenant isolation and identity](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0013-tenant-isolation-identity.md)** - the identity hierarchy and the engine `PERMISSIONS` boundary (tenant org → user → compartment → agent; shared umbra, private penumbra).
+- **[Compartments, latent-spaces of memory](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0014-compartments.md)** - penumbra → antumbra-clustered compartments → (share / consolidate into a private expert).
+- **[The MCP runtime surface](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0015-mcp-runtime-surface.md)** - the 14-tool MCP surface over the bound `(tenant, user)`.

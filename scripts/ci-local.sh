@@ -6,7 +6,7 @@
 #   bash scripts/ci-local.sh                 # every job
 #   bash scripts/ci-local.sh check hooks     # just these
 #
-# Jobs: check, models-build, docs, hooks, audit, control-server. A job whose
+# Jobs: check, models-build, hooks, audit, control-server. A job whose
 # tool is missing (jq for hooks, cargo-audit for audit) is reported SKIPPED
 # with the reason, never passed, and a job run in part is reported PART. The
 # hooks job has a POSIX half and a PowerShell half, and each runs where it
@@ -29,7 +29,7 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
 JOBS=("$@")
 if [ ${#JOBS[@]} -eq 0 ]; then
-    JOBS=(check models-build docs hooks audit control-server)
+    JOBS=(check models-build hooks audit control-server)
 fi
 declare -a SUMMARY=()
 FAILED=0
@@ -56,10 +56,6 @@ job_check() {
 job_models_build() {
     step cargo clippy -p antumbra-train -p antumbra-serve -p antumbra-mcp -p antumbra-cli \
         --features models --all-targets -- -D warnings
-}
-
-job_docs() {
-    step bash scripts/adr-index-check.sh
 }
 
 job_hooks() {
@@ -130,7 +126,6 @@ for job in "${JOBS[@]}"; do
     case "$job" in
         check) job_check ;;
         models-build) job_models_build ;;
-        docs) job_docs ;;
         hooks) job_hooks ;;
         audit) job_audit ;;
         control-server) job_control_server ;;

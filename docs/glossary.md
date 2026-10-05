@@ -1,6 +1,6 @@
 # Antumbra - Glossary (trainer vocabulary)
 
-Plain-English definitions plus a diagram for every trainer acronym. Read alongside [the candle QLoRA trainer](adr/0010-candle-qlora-trainer.md) and the [diagram atlas](diagrams.md).
+Plain-English definitions plus a diagram for every trainer acronym. Read alongside [the candle QLoRA trainer](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0010-candle-qlora-trainer.md) and the [diagram atlas](diagrams.md).
 
 - Naming: [why "candle"](#why-candle)
 - Learning algorithm: [RLVR](#rlvr---reinforcement-learning-with-verifiable-rewards) · [RAFT](#raft---reward-ranked-finetuning) · [GRPO](#grpo---group-relative-policy-optimization)
