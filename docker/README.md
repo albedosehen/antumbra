@@ -46,7 +46,7 @@ One-time setup -- generate the RS256 issuer keypair into `docker/keys/` (gitigno
 openssl genrsa -out docker/keys/control-signing.pem 2048
 openssl rsa -in docker/keys/control-signing.pem -pubout -out docker/keys/control-signing.pub.pem
 # in docker/.env: ANTUMBRA_MAGIC_SECRET (openssl rand -base64 32), ANTUMBRA_CONTROL_BASE_URL
-docker compose -f docker/docker-compose.yml up -d antumbra-control-server
+docker compose -f docker/docker-compose.yml --profile control up -d antumbra-control-server
 ```
 
 The server refuses to start while `ANTUMBRA_MAGIC_SECRET` is the `.env.example` placeholder (or shorter than 32 chars) -- a copied example file must not ship forgeable links.
@@ -67,7 +67,7 @@ echo "DEFINE USER antumbra_control ON DATABASE PASSWORD '<generated>' ROLES OWNE
 #   ANTUMBRA_CONTROL_DB_USER=antumbra_control
 #   ANTUMBRA_CONTROL_DB_PASS=<generated>
 #   ANTUMBRA_CONTROL_DB_AUTH=database
-docker compose -f docker/docker-compose.yml up -d antumbra-control-server
+docker compose -f docker/docker-compose.yml --profile control up -d antumbra-control-server
 ```
 
 ## Notes

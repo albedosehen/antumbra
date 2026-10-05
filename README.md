@@ -106,7 +106,15 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 ## Install
 
-New here? **[docs/getting-started.md](docs/getting-started.md)** is the full end-to-end setup (the Docker stack, the embedder, and your agent) for macOS, Windows, and Linux. The quick paths below cover just the binaries.
+New here? With Docker and ollama running, one command sets everything up and connects Claude Code:
+
+```bash
+cargo install --path crates/antumbra-cli --locked   # from a clone, until the first release
+antumbra setup local                                # or: antumbra setup hosted <url> --token-file <file>
+antumbra setup check
+```
+
+**[docs/getting-started.md](docs/getting-started.md)** walks through it, and through each step by hand, for macOS, Windows, and Linux. Agents setting it up for someone follow **[docs/agent-setup.md](docs/agent-setup.md)**. The paths below cover just the binaries.
 
 ### Prebuilt binaries (no Rust toolchain)
 

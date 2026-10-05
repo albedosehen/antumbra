@@ -1,5 +1,7 @@
 # Antumbra local stack
-# To run:
+# The easy way, which also fills in docker/.env and connects Claude Code:
+#   antumbra setup local
+# By hand:
 #   cp docker/.env.example docker/.env   # then fill in the secrets + data path
 #   docker compose -f docker/docker-compose.yml up -d
 
@@ -106,9 +108,10 @@ services:
     restart: unless-stopped
 
   # Hosted control plane: invite-gated signup + magic-link login that mints the
-  # RS256 tokens the MCP server verifies. Optional -- omit it for the offline /
-  # HS256 (mint-token) flow. Run alongside the rest:
-  #   docker compose -f docker/docker-compose.yml up -d antumbra-control-server
+  # RS256 tokens the MCP server verifies. OPT-IN, behind the `control` profile:
+  # a local install uses the offline / HS256 (mint-token) flow and never needs
+  # it, and without its secret and keys it cannot start. Run it with:
+  #   docker compose -f docker/docker-compose.yml --profile control up -d antumbra-control-server
   # To make the MCP server accept its tokens, start it with
   # --jwt-public-key /keys/control-signing.pub.pem --jwt-audience antumbra.
   antumbra-control-server:
@@ -117,6 +120,7 @@ services:
       dockerfile: docker/Dockerfile.control
     image: antumbra-control-server:local
     container_name: antumbra-control-server
+    profiles: ["control"]
     depends_on:
       surrealdb:
         condition: service_healthy
@@ -139,7 +143,10 @@ services:
       - --signing-key
       - /keys/control-signing.pem
     environment:
-      - ANTUMBRA_MAGIC_SECRET=${ANTUMBRA_MAGIC_SECRET:?set ANTUMBRA_MAGIC_SECRET in docker/.env}
+      # Not `:?`: compose reads the whole file for every command, so a required
+      # variable here would stop `up` of the local stack too. The server
+      # refuses to start on an empty or placeholder secret itself.
+      - ANTUMBRA_MAGIC_SECRET=${ANTUMBRA_MAGIC_SECRET:-}
       - ANTUMBRA_DB_PASS=${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
       # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email; left
       # empty, links are logged to this container's stderr (dev mailer).
