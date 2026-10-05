@@ -48,6 +48,7 @@ async fn train_graduate_route_then_serve() {
             task_id: "t".into(),
             prompt: "reverse 'abc'".into(),
             adapters: vec![chosen],
+            weights: Vec::new(),
         })
         .await
         .unwrap();

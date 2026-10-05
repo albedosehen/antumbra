@@ -25,6 +25,35 @@ pub struct ActRequest {
     /// The adapters the gate selected to blend in latent space.
     #[serde(default)]
     pub adapters: Vec<ExpertId>,
+    /// Each adapter's weight in the blend, by position; an adapter without one
+    /// weighs 1.0.
+    #[serde(default)]
+    pub weights: Vec<f32>,
+}
+
+impl ActRequest {
+    /// A request served by `adapters`, each at full weight.
+    pub fn new(
+        task_id: impl Into<String>,
+        prompt: impl Into<String>,
+        adapters: Vec<ExpertId>,
+    ) -> Self {
+        Self {
+            task_id: task_id.into(),
+            prompt: prompt.into(),
+            adapters,
+            weights: Vec::new(),
+        }
+    }
+
+    /// The adapters with their weights.
+    pub fn blend(&self) -> Vec<(ExpertId, f32)> {
+        self.adapters
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.clone(), self.weights.get(i).copied().unwrap_or(1.0)))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -628,5 +657,31 @@ mod typed_decisions {
     #[test]
     fn a_noul_is_always_answerable() {
         assert!(Question::Noul.is_answerable());
+    }
+}
+
+#[cfg(test)]
+mod act_request_tests {
+    use super::*;
+
+    #[test]
+    fn an_adapter_without_a_weight_weighs_one() {
+        let mut req = ActRequest::new("t", "p", vec![ExpertId::new("a"), ExpertId::new("b")]);
+        assert_eq!(
+            req.blend(),
+            vec![(ExpertId::new("a"), 1.0), (ExpertId::new("b"), 1.0)]
+        );
+        req.weights = vec![0.4];
+        assert_eq!(
+            req.blend(),
+            vec![(ExpertId::new("a"), 0.4), (ExpertId::new("b"), 1.0)]
+        );
+    }
+
+    #[test]
+    fn a_request_without_weights_still_parses() {
+        let req: ActRequest =
+            serde_json::from_str(r#"{"task_id":"t","prompt":"p","adapters":["a"]}"#).unwrap();
+        assert!(req.weights.is_empty());
     }
 }

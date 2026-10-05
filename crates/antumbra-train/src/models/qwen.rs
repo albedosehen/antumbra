@@ -352,6 +352,41 @@ impl QwenCausalLm {
             .map_err(|e| AntumbraError::other(format!("load adapter `{path}`: {e}")))
     }
 
+    /// Load `(adapter_path, weight)` adapters as one blend: stacked, each block
+    /// contributing `weight` times its delta, and zero-padded to this model's
+    /// rank (`crate::compose::blend`). A model built at a multiple of the
+    /// trained rank, with alpha raised in step, serves one adapter exactly as a
+    /// model at the trained rank would, and a blend without a rebuild.
+    pub fn load_blend(&mut self, specs: &[(String, f32)]) -> Result<()> {
+        let vars = self.model.varmap.data().lock().expect("varmap lock");
+        let Some(device) = vars.values().next().map(|v| v.device().clone()) else {
+            return Err(AntumbraError::other(
+                "load blend: the model has no LoRA factors",
+            ));
+        };
+        let rank = vars
+            .iter()
+            .find(|(k, _)| k.ends_with("lora_a"))
+            .map(|(_, v)| v.dim(0).unwrap_or(0))
+            .unwrap_or(0);
+        let parts = specs
+            .iter()
+            .map(|(p, w)| {
+                let factors = candle_core::safetensors::load(p, &device)
+                    .map_err(|e| AntumbraError::other(format!("load adapter `{p}`: {e}")))?;
+                Ok((factors, *w))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let blended = crate::compose::blend(&parts, Some(rank))?;
+        for (name, var) in vars.iter() {
+            let t = blended
+                .get(name)
+                .ok_or_else(|| AntumbraError::other(format!("load blend: no factor {name}")))?;
+            var.set(&t.to_dtype(var.dtype()).map_err(ce)?).map_err(ce)?;
+        }
+        Ok(())
+    }
+
     /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so
     /// the model is prompted the way it was tuned (a `user` turn, then the open
     /// `assistant` turn it completes). A plain base sees the prompt unchanged.

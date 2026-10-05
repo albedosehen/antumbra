@@ -258,6 +258,7 @@ pub async fn ask(url: &str, args: AskArgs) -> anyhow::Result<()> {
                     task_id: "ask".into(),
                     prompt: task.clone(),
                     adapters: vec![expert.id.clone()],
+                    weights: Vec::new(),
                 })
                 .await?;
             println!("---");

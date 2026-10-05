@@ -971,6 +971,7 @@ impl McpServer {
             task_id: next_id("answer"),
             prompt: p.task,
             adapters: vec![expert],
+            weights: Vec::new(),
         };
         let out = consolidation::spawn_heavy(async move { serve.act(request).await })
             .await

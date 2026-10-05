@@ -59,6 +59,7 @@ async fn multi_adapter_serve_generates_on_gpu() {
             task_id: "gpu-probe".into(),
             prompt: "Write a one-line Rust function that adds two i64 values.".into(),
             adapters: vec![expert.clone()],
+            weights: Vec::new(),
         })
         .await
         .expect("real GPU generation succeeds");
@@ -80,6 +81,7 @@ async fn multi_adapter_serve_generates_on_gpu() {
             task_id: "gpu-probe-2".into(),
             prompt: "Now write one that multiplies them.".into(),
             adapters: vec![expert],
+            weights: Vec::new(),
         })
         .await
         .expect("second generation on the resident base succeeds");

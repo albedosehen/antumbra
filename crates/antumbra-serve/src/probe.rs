@@ -74,6 +74,7 @@ impl<S: Serve, V: Verifier> AcceptabilityProbe for GenerateVerifyProbe<S, V> {
                     task_id: "probe".into(),
                     prompt: prompt.clone(),
                     adapters: Vec::new(),
+                    weights: Vec::new(),
                 })
                 .await?;
             let request = VerifyRequest {
