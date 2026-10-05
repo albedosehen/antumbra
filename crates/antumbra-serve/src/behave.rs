@@ -1,7 +1,7 @@
 //! Train a user's accepted behaviours into a private standing expert
 //! (ADR-0027), on the GPU.
 //!
-//! Validation 2's procedure, as one step:
+//! Validation 2's procedure:
 //! 1. Score the base model on each behaviour's held-out examples and on
 //!    controls no behaviour governs.
 //! 2. Collect its own answers to everyday prompts as replay.
@@ -11,15 +11,22 @@
 //!
 //! The expert is the user's own, private, and one per scope: a repository,
 //! or everywhere. A re-run replaces it.
+//!
+//! The work is three phases, so a server can hold its store only for the
+//! first and the last: [`plan`] reads the behaviours, [`train`] runs on the
+//! GPU and touches no store, and [`mint`] writes the expert.
+//! [`train_behaviours`] runs all three.
 
 use chrono::Utc;
 
-use antumbra_core::behaviour::{self, Spec, State, Status};
+use antumbra_core::behaviour::{self, learnable, Spec, State, Status};
 use antumbra_core::ports::Embedder;
-use antumbra_core::{Expert, ExpertId, Generation, Memory, Result, RunId, TenantId, UserId};
+use antumbra_core::{
+    Expert, ExpertId, Generation, Memory, MemoryId, Result, RunId, TenantId, UserId,
+};
 use antumbra_store::repo::{expert, memory, principal};
 use antumbra_store::{Store, EMBED_DIM};
-use antumbra_train::behave::{self as plan, Verdict};
+use antumbra_train::behave::{self as course, Verdict};
 use antumbra_train::{
     capture_corrections, eval_pass_rate, CandleModelLoader, CorpusTask, ModelLoader, RaftConfig,
 };
@@ -41,24 +48,205 @@ pub fn expert_id(user: &UserId, scope: &str) -> ExpertId {
     ExpertId::new(format!("expert:{}:behaviour:{scope}", user.as_str()))
 }
 
-/// The behaviours a run teaches: accepted, or trained before and still in
-/// force, in `scope`, each with a spec. Retired and proposed ones are left out.
-fn learnable(memories: &[Memory], scope: &str) -> Vec<(Memory, Spec)> {
-    memories
-        .iter()
-        .filter_map(|m| {
-            let state = State::of(&m.evidence)?;
-            let wanted = matches!(state.status, Status::Accepted | Status::Trained);
-            (wanted && state.scope == scope)
-                .then(|| Some((m.clone(), behaviour::spec_of(&m.content)?)))
-                .flatten()
-        })
-        .collect()
+/// The training a standing expert gets when nobody chose one: validation 2's
+/// three epochs at 3e-4, with answers up to 256 tokens so no replay answer is
+/// cut short. `antumbra behave` defaults to the same.
+pub fn standing_config() -> RaftConfig {
+    RaftConfig {
+        rounds: 3,
+        max_new_tokens: 256,
+        learning_rate: 3e-4,
+        ..RaftConfig::default()
+    }
 }
 
-/// Train `user`'s behaviours in `scope` into their standing expert. `None`
-/// when there is nothing to teach. `cfg` sets the base model, epochs and
-/// learning rate; scoring is greedy, one answer per task.
+/// What a run teaches: one user's behaviours in one scope, as read.
+#[derive(Debug, Clone)]
+pub struct Plan {
+    pub tenant: TenantId,
+    pub user: UserId,
+    pub scope: String,
+    pub taught: Vec<(Memory, Spec)>,
+}
+
+impl Plan {
+    /// The behaviours `memories` hold for `scope`. `None` when there is
+    /// nothing to teach.
+    pub fn of(tenant: &TenantId, user: &UserId, scope: &str, memories: &[Memory]) -> Option<Plan> {
+        let taught = learnable(memories, scope);
+        (!taught.is_empty()).then(|| Plan {
+            tenant: tenant.clone(),
+            user: user.clone(),
+            scope: scope.to_string(),
+            taught,
+        })
+    }
+
+    /// The behaviours taught, by id.
+    pub fn behaviours(&self) -> Vec<String> {
+        self.taught
+            .iter()
+            .map(|(m, _)| m.id.as_str().to_string())
+            .collect()
+    }
+}
+
+/// Read `user`'s behaviours in `scope`. `None` when there is nothing to teach.
+pub async fn plan(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+    scope: &str,
+) -> Result<Option<Plan>> {
+    principal::provision(store, tenant, user).await?;
+    let compartment = behaviour::compartment_id(tenant, user);
+    let memories = memory::list_by_compartment(store, tenant, &compartment).await?;
+    Ok(Plan::of(tenant, user, scope, &memories))
+}
+
+/// A trained expert's scores and, when admitted, what minting needs.
+#[derive(Debug, Clone)]
+pub struct Trained {
+    pub verdict: Verdict,
+    pub replay: usize,
+    pub adapter_uri: String,
+    pub base_model: String,
+    pub fitness: f32,
+    /// The centroid of the tasks it was taught, which routes it for its owner.
+    pub capability_vec: Vec<f32>,
+}
+
+/// Score the base, train beside its own replay, and score again. Touches no
+/// store. `cfg` sets the base model, epochs and learning rate; scoring is
+/// greedy, one answer per task.
+pub async fn train(plan: &Plan, embedder: &dyn Embedder, cfg: &RaftConfig) -> Result<Trained> {
+    let (mut tasks, mut held): (Vec<CorpusTask>, Vec<CorpusTask>) = (Vec::new(), Vec::new());
+    for (m, spec) in &plan.taught {
+        let t = course::tasks(m.id.as_str(), spec);
+        tasks.extend(t.train);
+        held.extend(t.held);
+    }
+    held.extend(course::controls());
+    let taught_prompts: Vec<String> = tasks.iter().map(|t| t.prompt.clone()).collect();
+
+    let cfg = RaftConfig {
+        temperature: 0.0,
+        samples_per_task: 1,
+        ..cfg.clone()
+    };
+    let run = RunId::new(expert_id(&plan.user, &plan.scope).as_str().to_string());
+    let loader = CandleModelLoader::new(cfg.clone());
+    let verifier = antumbra_critic::CommandVerifier;
+    let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
+
+    let base = eval_pass_rate(&mut model, &verifier, &held, &run, 1).await?;
+    let prompts = course::replay_prompts();
+    let answered = eval_pass_rate(&mut model, &verifier, &prompts, &run, 1).await?;
+    let answers: Vec<(String, String)> = answered
+        .draws
+        .into_iter()
+        .map(|d| (d.task, d.completion))
+        .collect();
+    let replay = course::replay(&prompts, &answers);
+    let replayed = replay.len();
+    tasks.extend(replay);
+
+    let out = capture_corrections(&mut model, &verifier, &tasks, &[], &run, &cfg, &[]).await?;
+    let scores = eval_pass_rate(&mut model, &verifier, &held, &run, 1).await?;
+    let verdict = course::admit(&plan.behaviours(), &base.per_task, &scores.per_task);
+
+    let mut acc = vec![0.0f32; EMBED_DIM];
+    if verdict.admitted {
+        for p in &taught_prompts {
+            for (x, b) in acc.iter_mut().zip(embedder.embed(p).await?) {
+                *x += b;
+            }
+        }
+    }
+    let n = taught_prompts.len().max(1) as f32;
+    Ok(Trained {
+        verdict,
+        replay: replayed,
+        adapter_uri: out.adapter_uri,
+        base_model: cfg.base_model.clone(),
+        fitness: scores.pass_rate,
+        capability_vec: acc.iter().map(|v| v / n).collect(),
+    })
+}
+
+/// Mint the standing expert when `trained` was admitted, replacing the one
+/// before, and mark its behaviours trained. It is placed on `host`, the
+/// machine whose disk holds its adapter. A behaviour retired or recorded
+/// again while it trained is left as it now is: the next run sees it.
+pub async fn mint(
+    store: &Store,
+    plan: &Plan,
+    trained: Trained,
+    host: &str,
+) -> Result<BehaveReport> {
+    let ids = plan.behaviours();
+    if !trained.verdict.admitted {
+        return Ok(BehaveReport {
+            behaviours: ids,
+            replay: trained.replay,
+            verdict: trained.verdict,
+            expert: None,
+        });
+    }
+    let id = expert_id(&plan.user, &plan.scope);
+    let rules: Vec<&str> = plan.taught.iter().map(|(_, s)| s.rule.as_str()).collect();
+    let verdict = trained.verdict;
+    let now = Utc::now();
+    let e = Expert {
+        id: id.clone(),
+        name: id.as_str().to_string(),
+        base_model: trained.base_model,
+        artifact_uri: trained.adapter_uri.clone(),
+        capability_card: serde_json::json!({
+            "behaviours": ids, "rules": rules, "scope": plan.scope,
+            "private": true, "standing": true,
+            "controls": verdict.controls.iter().map(|c| serde_json::json!({
+                "family": c.family, "base": c.base, "expert": c.expert,
+            })).collect::<Vec<_>>(),
+        }),
+        capability_vec: Some(trained.capability_vec),
+        fitness: trained.fitness,
+        frozen_at: Some(now),
+        generation: Generation::ZERO,
+        owner: Some(plan.user.clone()),
+        compartment: Some(behaviour::compartment_id(&plan.tenant, &plan.user)),
+        // The adapter is on `host`'s disk, and adapters stay out of sync
+        // (ADR-0017), so the row says which machine can open it.
+        placed_on: Some(host.to_string()),
+        created_at: now,
+    };
+    expert::delete(store, &e.id).await?;
+    expert::insert(store, &e).await?;
+    for (taught, _) in &plan.taught {
+        let Some(mut m) =
+            memory::get(store, &plan.tenant, &MemoryId::new(taught.id.as_str())).await?
+        else {
+            continue;
+        };
+        let unchanged = m.content == taught.content
+            && State::of(&m.evidence)
+                .is_some_and(|s| matches!(s.status, Status::Accepted | Status::Trained));
+        if unchanged {
+            behaviour::mark_trained(&mut m.evidence, id.as_str());
+            m.updated_at = now;
+            memory::upsert(store, &m).await?;
+        }
+    }
+    Ok(BehaveReport {
+        behaviours: ids,
+        replay: trained.replay,
+        verdict,
+        expert: Some((e.id, trained.adapter_uri)),
+    })
+}
+
+/// Train `user`'s behaviours in `scope` into their standing expert: [`plan`],
+/// [`train`] and [`mint`] in one. `None` when there is nothing to teach.
 pub async fn train_behaviours(
     store: &Store,
     embedder: &dyn Embedder,
@@ -67,115 +255,32 @@ pub async fn train_behaviours(
     scope: &str,
     cfg: &RaftConfig,
 ) -> Result<Option<BehaveReport>> {
-    principal::provision(store, tenant, user).await?;
-    let compartment = behaviour::compartment_id(tenant, user);
-    let memories = memory::list_by_compartment(store, tenant, &compartment).await?;
-    let taught = learnable(&memories, scope);
-    if taught.is_empty() {
+    let Some(plan) = plan(store, tenant, user, scope).await? else {
         return Ok(None);
-    }
-    let ids: Vec<String> = taught
-        .iter()
-        .map(|(m, _)| m.id.as_str().to_string())
-        .collect();
-    let (mut train, mut held): (Vec<CorpusTask>, Vec<CorpusTask>) = (Vec::new(), Vec::new());
-    for (m, spec) in &taught {
-        let t = plan::tasks(m.id.as_str(), spec);
-        train.extend(t.train);
-        held.extend(t.held);
-    }
-    held.extend(plan::controls());
-
-    let cfg = RaftConfig {
-        temperature: 0.0,
-        samples_per_task: 1,
-        ..cfg.clone()
     };
-    let id = expert_id(user, scope);
-    let run = RunId::new(id.as_str().to_string());
-    let loader = CandleModelLoader::new(cfg.clone());
-    let verifier = antumbra_critic::CommandVerifier;
-    let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
-
-    let base = eval_pass_rate(&mut model, &verifier, &held, &run, 1).await?;
-    let prompts = plan::replay_prompts();
-    let answered = eval_pass_rate(&mut model, &verifier, &prompts, &run, 1).await?;
-    let answers: Vec<(String, String)> = answered
-        .draws
-        .into_iter()
-        .map(|d| (d.task, d.completion))
-        .collect();
-    let replay = plan::replay(&prompts, &answers);
-    let replayed = replay.len();
-    let mut tasks = train.clone();
-    tasks.extend(replay);
-
-    let out = capture_corrections(&mut model, &verifier, &tasks, &[], &run, &cfg, &[]).await?;
-    let expert_scores = eval_pass_rate(&mut model, &verifier, &held, &run, 1).await?;
-    let verdict = plan::admit(&ids, &base.per_task, &expert_scores.per_task);
-    if !verdict.admitted {
-        return Ok(Some(BehaveReport {
-            behaviours: ids,
-            replay: replayed,
-            verdict,
-            expert: None,
-        }));
-    }
-
-    // Routed for its owner by the centroid of the tasks it was taught.
-    let mut acc = vec![0.0f32; EMBED_DIM];
-    for t in &train {
-        for (x, b) in acc.iter_mut().zip(embedder.embed(&t.prompt).await?) {
-            *x += b;
-        }
-    }
-    let n = train.len().max(1) as f32;
-    let rules: Vec<&str> = taught.iter().map(|(_, s)| s.rule.as_str()).collect();
-    let now = Utc::now();
-    let e = Expert {
-        id: id.clone(),
-        name: id.as_str().to_string(),
-        base_model: cfg.base_model.clone(),
-        artifact_uri: out.adapter_uri.clone(),
-        capability_card: serde_json::json!({
-            "behaviours": ids, "rules": rules, "scope": scope,
-            "private": true, "standing": true,
-            "controls": verdict.controls.iter().map(|c| serde_json::json!({
-                "family": c.family, "base": c.base, "expert": c.expert,
-            })).collect::<Vec<_>>(),
-        }),
-        capability_vec: Some(acc.iter().map(|v| v / n).collect()),
-        fitness: expert_scores.pass_rate,
-        frozen_at: Some(now),
-        generation: Generation::ZERO,
-        owner: Some(user.clone()),
-        compartment: Some(compartment.clone()),
-        // The adapter is on this machine's disk, and adapters stay out of sync
-        // (ADR-0017), so the row says which machine can open it.
-        placed_on: Some(antumbra_core::this_host()),
-        created_at: now,
-    };
-    expert::delete(store, &e.id).await?;
-    expert::insert(store, &e).await?;
-    for (mut m, _) in taught {
-        behaviour::mark_trained(&mut m.evidence, id.as_str());
-        m.updated_at = now;
-        memory::upsert(store, &m).await?;
-    }
-    Ok(Some(BehaveReport {
-        behaviours: ids,
-        replay: replayed,
-        verdict,
-        expert: Some((e.id, out.adapter_uri)),
-    }))
+    let trained = train(&plan, embedder, cfg).await?;
+    Ok(Some(
+        mint(store, &plan, trained, &antumbra_core::this_host()).await?,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antumbra_core::behaviour::Example;
 
-    fn behaviour(id: &str, status: Status, scope: &str) -> Memory {
+    #[test]
+    fn a_standing_expert_is_named_for_its_owner_and_scope() {
+        assert_eq!(
+            expert_id(&UserId::new("user:a"), "everywhere").as_str(),
+            "expert:user:a:behaviour:everywhere"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_marks_only_the_behaviours_still_as_they_were_taught() {
+        use antumbra_core::behaviour::{content, scope_evidence, status_evidence, Example};
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let (tenant, user) = (TenantId::new("ws:a"), UserId::new("user:a"));
         let spec = Spec {
             rule: "A rule.".into(),
             must: vec!["x".into()],
@@ -186,37 +291,72 @@ mod tests {
             }],
             violations: vec!["y".into()],
         };
-        Memory::new(
-            id,
-            TenantId::new("ws:a"),
-            antumbra_core::MemoryNetwork::Opinion,
-            behaviour::content(&spec),
-            1.0,
-            Utc::now(),
-        )
-        .with_evidence(vec![
-            behaviour::status_evidence(status),
-            behaviour::scope_evidence(scope),
-        ])
-    }
+        let comp = behaviour::compartment_id(&tenant, &user);
+        let put = |id: &str, status: Status| {
+            Memory::new(
+                id,
+                tenant.clone(),
+                antumbra_core::MemoryNetwork::Opinion,
+                content(&spec),
+                1.0,
+                Utc::now(),
+            )
+            .in_compartment(comp.clone())
+            .with_evidence(vec![status_evidence(status), scope_evidence("everywhere")])
+        };
+        for m in [
+            put("memory:kept", Status::Accepted),
+            put("memory:gone", Status::Accepted),
+        ] {
+            memory::upsert(&store, &m).await.unwrap();
+        }
+        let plan = plan(&store, &tenant, &user, "everywhere")
+            .await
+            .unwrap()
+            .unwrap();
+        let mut taught = plan.behaviours();
+        taught.sort();
+        assert_eq!(taught, ["memory:gone", "memory:kept"]);
+        // Retired while it trained.
+        memory::upsert(&store, &put("memory:gone", Status::Retired))
+            .await
+            .unwrap();
 
-    #[test]
-    fn a_run_teaches_the_accepted_and_trained_behaviours_of_its_scope() {
-        let all = vec![
-            behaviour("memory:accepted", Status::Accepted, "everywhere"),
-            behaviour("memory:trained", Status::Trained, "everywhere"),
-            behaviour("memory:proposed", Status::Proposed, "everywhere"),
-            behaviour("memory:retired", Status::Retired, "everywhere"),
-            behaviour("memory:other", Status::Accepted, "github.com/a/b"),
-        ];
-        let ids: Vec<String> = learnable(&all, "everywhere")
-            .into_iter()
-            .map(|(m, _)| m.id.as_str().to_string())
-            .collect();
-        assert_eq!(ids, ["memory:accepted", "memory:trained"]);
+        let trained = Trained {
+            verdict: Verdict {
+                admitted: true,
+                behaviours: Vec::new(),
+                controls: Vec::new(),
+                reasons: Vec::new(),
+            },
+            replay: 0,
+            adapter_uri: "adapters/x.safetensors".into(),
+            base_model: "base".into(),
+            fitness: 1.0,
+            capability_vec: vec![0.0; EMBED_DIM],
+        };
+        let report = mint(&store, &plan, trained, "rig").await.unwrap();
+        let minted = report.expert.unwrap().0;
+        assert_eq!(minted.as_str(), "expert:user:a:behaviour:everywhere");
+        let status = |id: &str| {
+            let store = store.clone();
+            let tenant = tenant.clone();
+            let id = id.to_string();
+            async move {
+                let m = memory::get(&store, &tenant, &MemoryId::new(id))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                State::of(&m.evidence).unwrap().status
+            }
+        };
+        assert_eq!(status("memory:kept").await, Status::Trained);
+        assert_eq!(status("memory:gone").await, Status::Retired);
+        let e = expert::get(&store, &minted).await.unwrap().unwrap();
         assert_eq!(
-            expert_id(&UserId::new("user:a"), "everywhere").as_str(),
-            "expert:user:a:behaviour:everywhere"
+            e.placed_on.as_deref(),
+            Some("rig"),
+            "placed where its adapter is"
         );
     }
 }
