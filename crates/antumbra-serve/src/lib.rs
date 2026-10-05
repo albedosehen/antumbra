@@ -33,22 +33,13 @@ pub use serve_candle::CandleServe;
 
 #[cfg(feature = "models")]
 pub mod behave;
-#[cfg(feature = "models")]
-mod consolidate;
 #[cfg(all(test, feature = "models"))]
 mod gpu_blend;
-#[cfg(feature = "models")]
-pub use consolidate::{consolidate_compartment, Consolidation, ConsolidationOutcome};
 
 /// Re-exported so callers can construct [`MultiAdapterServe`] without depending
 /// on `antumbra-train` directly.
 #[cfg(feature = "models")]
 pub use antumbra_train::RaftConfig;
-
-/// Re-exported so the consolidation gate can be tuned without a direct
-/// `antumbra-train` dependency (the MCP server's autonomous trigger uses it).
-#[cfg(feature = "models")]
-pub use antumbra_train::consolidate::{ConsolidationPolicy, GateReport};
 
 // --- the real resident multi-adapter engine (models build) ----------------
 
@@ -65,8 +56,9 @@ pub use antumbra_train::consolidate::{ConsolidationPolicy, GateReport};
 pub struct MultiAdapterServe {
     base_model: String,
     config: antumbra_train::RaftConfig,
-    // `RwLock` so the engine can hot-register a freshly-minted expert (autonomous
-    // consolidation) through a shared `&self`, instead of snapshotting at build.
+    // `RwLock` so the engine can hot-register a freshly-minted expert (a standing
+    // expert the keeper just trained) through a shared `&self`, instead of
+    // snapshotting at build.
     registry: std::sync::RwLock<std::collections::HashMap<antumbra_core::ExpertId, String>>,
     state: tokio::sync::Mutex<Resident>,
 }
@@ -154,7 +146,7 @@ impl Serve for MultiAdapterServe {
     }
 
     /// Hot-register a freshly-minted expert's adapter, so a route to it serves
-    /// without a restart (closes the autonomous consolidation loop end to end).
+    /// without a restart (a standing expert the keeper just trained).
     fn register_expert(&self, expert: &antumbra_core::ExpertId, adapter_uri: &str) {
         self.registry
             .write()

@@ -34,13 +34,6 @@ use antumbra_store::Store;
 #[derive(Clone)]
 pub struct McpServer {
     store: Store,
-    /// A stable OWNER connection the autonomous consolidation background task
-    /// runs on (gather + provision + mint execute as root). In the multi-tenant
-    /// HTTP server `store` is the per-request *scoped* connection, which a
-    /// detached task cannot rely on; `None` falls back to `store` (stdio /
-    /// embedded, where it is already the owner connection).
-    #[cfg_attr(not(feature = "models"), allow(dead_code))]
-    consolidation_store: Option<Store>,
     embedder: Arc<dyn Embedder>,
     tenant: TenantId,
     /// The user this session acts as (compartment owner / grantor).
@@ -53,16 +46,6 @@ pub struct McpServer {
     /// When set, the antumbra auto-organizes the inbox once it grows past the
     /// threshold (the autonomous propose trigger). `None` = on-demand only.
     auto_propose: Option<AutoProposeConfig>,
-    /// When set, a reinforced memory whose compartment clears the consolidation
-    /// gate auto-graduates into a private expert on the GPU (the autonomous sleep
-    /// trigger). `None` = on-demand only (the `consolidate-compartment` CLI).
-    #[cfg_attr(not(feature = "models"), allow(dead_code))]
-    auto_consolidate: Option<AutoConsolidateConfig>,
-    /// Per-compartment consolidation state: what is in flight (so a burst of
-    /// reinforces coalesces into one train instead of stacking GPU jobs), what was
-    /// written to meanwhile, and what the gate last said.
-    #[cfg_attr(not(feature = "models"), allow(dead_code))]
-    consolidating: consolidation::SharedConsolidation,
     /// The serving engine the `answer` tool drives (route → serve through the
     /// expert's adapter). `None` = serving not configured (route-only surface).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
@@ -178,21 +161,6 @@ struct AutoProposeConfig {
     similarity_threshold: f32,
 }
 
-/// Tuning for the autonomous consolidation trigger. Plain primitives so the
-/// server struct stays free of the models-gated trainer types; the gate policy
-/// and `RaftConfig` are built from these inside the models-gated trigger.
-#[cfg_attr(not(feature = "models"), allow(dead_code))]
-#[derive(Clone)]
-struct AutoConsolidateConfig {
-    min_recurrence: u32,
-    min_confidence: f32,
-    rounds: usize,
-    samples: usize,
-    max_new_tokens: usize,
-    lr: f64,
-    replay_ratio: f64,
-}
-
 fn err(e: impl std::fmt::Display) -> ErrorData {
     ErrorData::internal_error(e.to_string(), None)
 }
@@ -271,11 +239,11 @@ fn default_capability() -> String {
 mod answer;
 mod behaviour;
 mod compartments;
-pub(crate) mod consolidation;
 mod depgraph;
 mod documents;
 mod engine;
 mod handoff;
+pub(crate) mod heavy;
 mod listing;
 mod params;
 mod provenance;
@@ -324,7 +292,7 @@ impl McpServer {
         // The compartment write-ACL silently drops a write into a compartment the
         // caller may not write to (an UPSERT under a record session succeeds but
         // persists nothing). Verify the row landed, so the caller gets a real
-        // error instead of a phantom id -- and we never consolidate a vanished write.
+        // error instead of a phantom id.
         if memory::get(&self.store, &self.tenant, &MemoryId::new(id.clone()))
             .await
             .map_err(err)?
@@ -339,10 +307,8 @@ impl McpServer {
                 None,
             ));
         }
-        // Autonomous triggers (both no-ops when disabled / below threshold): the
-        // antumbra organizes the inbox once it grows, and a write that itself
-        // clears the consolidation gate graduates its compartment now.
-        self.maybe_consolidate(&m).await;
+        // The autonomous propose trigger (a no-op when disabled or below its
+        // threshold): the antumbra organizes the inbox once it grows.
         let auto_proposed = self.maybe_auto_propose().await.map_err(err)?;
         Ok(Json(StoredOut { id, auto_proposed }))
     }
@@ -765,16 +731,11 @@ impl McpServer {
         .await
         .map_err(err)?
         {
-            Some(m) => {
-                // A reinforcement may push this memory's compartment over the
-                // consolidation gate; graduate it into a private expert if so.
-                self.maybe_consolidate(&m).await;
-                Ok(Json(ReinforceOut {
-                    found: true,
-                    reinforcement: m.reinforcement,
-                    confidence: m.confidence,
-                }))
-            }
+            Some(m) => Ok(Json(ReinforceOut {
+                found: true,
+                reinforcement: m.reinforcement,
+                confidence: m.confidence,
+            })),
             None => Ok(Json(ReinforceOut {
                 found: false,
                 reinforcement: 0,
@@ -785,14 +746,12 @@ impl McpServer {
 
     /// Penalize a memory whose thesis was falsified (the inverse of reinforce).
     #[tool(
-        description = "Penalize a memory (a falsified thesis, e.g. a losing trade): decay its confidence so it does not clear the consolidation gate and graduate into an expert. The inverse of reinforce_memory."
+        description = "Penalize a memory (a falsified thesis, e.g. a losing trade): decay its confidence. The inverse of reinforce_memory."
     )]
     async fn penalize_memory(
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<Json<ReinforceOut>, ErrorData> {
-        // No consolidation trigger here: a penalty can only LOWER confidence, so unlike
-        // reinforce it never pushes a compartment over the graduation gate.
         match memory::penalize(
             &self.store,
             &self.tenant,

@@ -100,11 +100,11 @@ struct Cli {
     /// compartments (reversible; the user curates). Off when unset.
     #[arg(long)]
     auto_propose: Option<usize>,
-    /// Enable the autonomous consolidation trigger: when a reinforced memory's
-    /// compartment clears the consolidation gate, it graduates into a private
-    /// expert on the GPU in the background. Needs `--features models` + a GPU to
-    /// actually train. Off when unset.
-    #[arg(long, default_value_t = false)]
+    /// Retired (ADR-0027): a reinforced memory no longer trains its compartment
+    /// into an expert, which taught experts to echo memories. Standing experts
+    /// are trained from accepted behaviours by the keeper, on any node that can
+    /// train. Still accepted, so a deployment that passes it keeps starting.
+    #[arg(long, default_value_t = false, hide = true)]
     auto_consolidate: bool,
     /// The chunk index (ADR-0025), on the networked surface: how many pieces
     /// of a memory to embed at once while cutting memories into the pieces
@@ -533,6 +533,12 @@ async fn run() -> Result<()> {
         return Ok(());
     }
 
+    if cli.auto_consolidate {
+        eprintln!(
+            "antumbra-mcp: --auto-consolidate is retired and does nothing; standing experts \
+             are trained from accepted behaviours (ADR-0027)"
+        );
+    }
     let host = default_host(cli.host);
     // A configured endpoint embeds on the tenant's side (P-1c); otherwise the
     // built-in embedder (candle BERT under `models`; the byte-histogram stand-in
@@ -678,7 +684,6 @@ async fn run() -> Result<()> {
             embedder,
             verifier,
             cli.auto_propose,
-            cli.auto_consolidate,
             cli.chunk_in_flight,
             reranker,
             decider,
@@ -702,9 +707,6 @@ async fn run() -> Result<()> {
     .await?;
     if let Some(threshold) = cli.auto_propose {
         service = service.with_auto_propose(threshold);
-    }
-    if cli.auto_consolidate {
-        service = service.with_auto_consolidate();
     }
     if let Some(r) = reranker {
         service = service.with_reranker(r);

@@ -74,7 +74,7 @@ impl McpServer {
         // Generation is synchronous compute inside an `async fn`, like a train: it
         // runs off the runtime's workers so other sessions' calls keep moving.
         let request = ActRequest::new(next_id("answer"), p.task, blend);
-        let out = consolidation::spawn_heavy(async move { serve.act(request).await })
+        let out = heavy::spawn_heavy(async move { serve.act(request).await })
             .await
             .map_err(err)?
             .map_err(err)?;

@@ -1,7 +1,7 @@
 # GPU override: swap the light antumbra-mcp for the `models,cuda` build, which
-# adds real expert serving (the `answer` tool) and autonomous consolidation
-# (`--auto-consolidate`: a reinforced memory auto-graduates its compartment into
-# a private expert on the GPU). Use alongside the base compose:
+# adds real expert serving (the `answer` tool) and the keeper that trains each
+# user's standing experts from the behaviours they accepted. Use alongside the
+# base compose:
 #
 #   docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 #
@@ -19,8 +19,7 @@ services:
     # base server this OMITS --embedder-url, so the IN-PROCESS candle BERT embedder
     # (all-MiniLM-L6-v2, compiled via --features models, running on the GPU) is used --
     # one embedder for embed + train + serve, with no Ollama dependency and no
-    # cross-runtime embedding drift. Plus --auto-consolidate (a reinforced memory's
-    # compartment auto-graduates into a private expert on the GPU).
+    # cross-runtime embedding drift.
     command:
       - --http
       - 0.0.0.0:8081
@@ -28,8 +27,7 @@ services:
       - ws://surrealdb:8000/rpc
       - --db-user
       - root
-      - --auto-consolidate
-    # Serving caches base weights and consolidation writes adapter files, so the
+    # Serving caches base weights and the keeper writes adapter files, so the
     # light server's read-only root is relaxed and two volumes are added.
     read_only: false
     volumes:

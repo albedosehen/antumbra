@@ -677,35 +677,6 @@ async fn run() -> anyhow::Result<()> {
             .await?;
         }
         Command::Behave(args) => behave::run(&cli.url, args).await?,
-        Command::ConsolidateCompartment {
-            tenant,
-            user,
-            compartment,
-            min_recurrence,
-            min_confidence,
-            rounds,
-            samples,
-            max_new_tokens,
-            lr,
-            replay_ratio,
-        } => {
-            ops::consolidate_compartment(
-                &cli.url,
-                ops::ConsolidateCompartmentArgs {
-                    tenant,
-                    user,
-                    compartment,
-                    min_recurrence,
-                    min_confidence,
-                    rounds,
-                    samples,
-                    max_new_tokens,
-                    lr,
-                    replay_ratio,
-                },
-            )
-            .await?;
-        }
         Command::Retire {
             expert,
             archive,

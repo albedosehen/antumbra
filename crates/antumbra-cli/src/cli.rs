@@ -777,34 +777,6 @@ pub enum Command {
     /// expert is minted only if every behaviour clearly rose on its held-out
     /// tasks and the controls held. Needs --features models + a GPU.
     Behave(crate::behave::BehaveArgs),
-    /// Consolidate a private compartment into a **private expert** (a memory compartment):
-    /// gather the compartment's memories, score them through the consolidation
-    /// gate, capture the graduates, and mint an expert owned by the user (not in
-    /// the shared router; routed for its owner by centroid). Needs --features
-    /// models + a GPU.
-    ConsolidateCompartment {
-        #[arg(long)]
-        tenant: String,
-        #[arg(long)]
-        user: String,
-        #[arg(long)]
-        compartment: String,
-        /// Reinforcement floor for a memory to graduate (0 = any in-compartment).
-        #[arg(long, default_value_t = 0)]
-        min_recurrence: u32,
-        #[arg(long, default_value_t = 0.5)]
-        min_confidence: f32,
-        #[arg(long, default_value_t = 40)]
-        rounds: usize,
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        #[arg(long, default_value_t = 32)]
-        max_new_tokens: usize,
-        #[arg(long, default_value_t = 3e-4)]
-        lr: f64,
-        #[arg(long, default_value_t = 0.5)]
-        replay_ratio: f64,
-    },
     /// Metabolize orchestration traces into the frozen-expert population: adapt a
     /// normalized trace export (loop runs, behavior-graph evaluations, task
     /// executions) into capture tasks the population internalizes, so the brain

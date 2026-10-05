@@ -161,8 +161,6 @@ struct HttpState {
     auth: Mutex<()>,
     /// Autonomous propose threshold, applied to every per-identity server.
     auto_propose: Option<usize>,
-    /// Autonomous consolidation trigger, applied to every per-identity server.
-    auto_consolidate: bool,
     /// The serving engine the `answer` tool drives, built once from the owner
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
@@ -192,12 +190,6 @@ struct HttpState {
     /// signed in as root, provisioned the identity and re-registered this node
     /// under `auth`, queueing every other request behind it.
     servers: Mutex<Bounded<Identity, McpServer>>,
-    /// Consolidation state, SHARED across every per-identity server so concurrent
-    /// reinforces of the same compartment collapse into one train (an identity's
-    /// REST server and its SSE session are two instances, and an evicted
-    /// identity's rebuilt server a third, so per-instance state would not
-    /// coalesce and they would race on the weight download).
-    consolidating: crate::server::consolidation::SharedConsolidation,
     /// Live-propagation (R-2) delivery: each session registers its peer here on
     /// initialize; the change watcher pushes shared-memory changes to recipients.
     registry: crate::notify::PeerRegistry,
@@ -215,7 +207,6 @@ pub async fn serve(
     embedder: Arc<dyn Embedder>,
     verifier: JwtVerifier,
     auto_propose: Option<usize>,
-    auto_consolidate: bool,
     chunk_in_flight: usize,
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
     // The relevance floor (ADR-0023 B-2), built where the flags are so this
@@ -260,7 +251,6 @@ pub async fn serve(
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
         auth: Mutex::new(()),
         auto_propose,
-        auto_consolidate,
         serve,
         reranker,
         decider,
@@ -269,7 +259,6 @@ pub async fn serve(
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     });
     spawn_live_propagation(state.clone(), announced);
@@ -486,17 +475,6 @@ impl HttpState {
         }
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
-        }
-        if self.auto_consolidate {
-            // The autonomous trigger must consolidate on a stable OWNER
-            // connection, not the scoped serving connection this server is built
-            // with. `store` is the root/owner connection (only ever
-            // signed-in-as-root), so the detached background task gathers,
-            // provisions, and mints as owner regardless of request churn.
-            mcp = mcp
-                .with_auto_consolidate()
-                .with_consolidation_store(self.store.clone())
-                .with_consolidating(self.consolidating.clone());
         }
         if let Some(reranker) = self.reranker.clone() {
             mcp = mcp.with_reranker(reranker);

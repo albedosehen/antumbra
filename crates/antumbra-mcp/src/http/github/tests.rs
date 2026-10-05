@@ -37,7 +37,6 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
         auth: Mutex::new(()),
         auto_propose: None,
-        auto_consolidate: false,
         serve: None,
         reranker: None,
         decider: None,
@@ -46,7 +45,6 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
-        consolidating: crate::server::consolidation::SharedConsolidation::default(),
         registry: crate::notify::PeerRegistry::new(),
     })
 }
