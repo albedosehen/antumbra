@@ -127,6 +127,7 @@ impl McpServer {
             + Self::listing_router()
             + Self::handoff_router()
             + Self::behaviour_router()
+            + Self::answer_router()
             + Self::depgraph_router()
     }
 
@@ -620,7 +621,10 @@ impl McpServer {
             }
         }
         for e in lifecycle::routable(&self.store).await? {
-            if e.owner.as_ref() == Some(&self.user) {
+            // A standing expert is composed into the answers of its scope
+            // (`answer`), never routed: its centroid would otherwise carry one
+            // repository's behaviours into another's tasks.
+            if e.owner.as_ref() == Some(&self.user) && e.standing_scope().is_none() {
                 if let Some(sim) = e.capability_similarity(v) {
                     if sim >= PRIVATE_ROUTE_FLOOR {
                         routes.push(RouteHit {

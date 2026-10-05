@@ -929,6 +929,7 @@ mod bounded_answers;
 /// did. These drive that through the typed-decision port with a scripted
 /// decider, so the behaviour is pinned before any trained head exists.
 mod relevance_floor;
+mod standing;
 
 /// Takes the `tools/list` capture ADR-0023 B-3's lint is pointed at, without
 /// standing a server up.

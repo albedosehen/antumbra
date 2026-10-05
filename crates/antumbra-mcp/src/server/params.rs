@@ -469,6 +469,11 @@ pub(super) struct RouteOut {
 pub(super) struct AnswerParams {
     /// The task to route and answer through the covering expert.
     pub(super) task: String,
+    /// The repository the task is in (`host/org/name`), so your standing
+    /// behaviours for it are composed into the answer. Those that apply
+    /// everywhere always are.
+    #[serde(default)]
+    pub(super) repo: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -483,6 +488,10 @@ pub(super) struct AnswerOut {
     /// Why it escalated, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) note: Option<String>,
+    /// Your standing experts composed into the answer: the behaviours you
+    /// accepted, for everywhere and for the repository.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) standing: Vec<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]

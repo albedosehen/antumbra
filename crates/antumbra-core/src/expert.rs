@@ -96,6 +96,17 @@ impl Expert {
             .map(|cap| cosine_similarity(cap, query))
     }
 
+    /// The scope a standing expert governs (`everywhere`, or a repository),
+    /// read from its card. `None` for an expert that is not standing: one
+    /// routed to a task, not composed into every answer in a scope.
+    pub fn standing_scope(&self) -> Option<&str> {
+        let card = &self.capability_card;
+        if card.get("standing").and_then(|v| v.as_bool()) != Some(true) {
+            return None;
+        }
+        card.get("scope").and_then(|v| v.as_str())
+    }
+
     /// The texts on its capability card the learned router trains on. None
     /// for a card that lists no exemplars.
     pub fn exemplars(&self) -> Vec<String> {
@@ -193,6 +204,18 @@ mod tests {
         assert!(e.exemplars().is_empty());
         e.capability_card = serde_json::json!({"exemplars": ["a", 1, "b"]});
         assert_eq!(e.exemplars(), vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn only_a_card_marked_standing_has_a_standing_scope() {
+        let mut e = placement_expert(None);
+        assert_eq!(e.standing_scope(), None);
+        e.capability_card = serde_json::json!({"scope": "everywhere"});
+        assert_eq!(e.standing_scope(), None);
+        e.capability_card = serde_json::json!({"standing": true, "scope": "github.com/a/b"});
+        assert_eq!(e.standing_scope(), Some("github.com/a/b"));
+        e.capability_card = serde_json::json!({"standing": true});
+        assert_eq!(e.standing_scope(), None);
     }
 
     #[test]
