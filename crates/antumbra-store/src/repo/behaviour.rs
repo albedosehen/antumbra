@@ -22,7 +22,11 @@ pub struct Recorded {
 }
 
 /// The user's behaviour compartment, created the first time it is needed.
-pub async fn compartment_of(store: &Store, tenant: &TenantId, user: &UserId) -> Result<CompartmentId> {
+pub async fn compartment_of(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+) -> Result<CompartmentId> {
     let id = behaviour::compartment_id(tenant, user);
     let exists = compartment::list_owned(store, tenant, user)
         .await?
@@ -31,7 +35,13 @@ pub async fn compartment_of(store: &Store, tenant: &TenantId, user: &UserId) -> 
     if !exists {
         compartment::create(
             store,
-            &Compartment::new(id.clone(), tenant.clone(), user.clone(), "behaviour", Utc::now()),
+            &Compartment::new(
+                id.clone(),
+                tenant.clone(),
+                user.clone(),
+                "behaviour",
+                Utc::now(),
+            ),
         )
         .await?;
     }
@@ -79,7 +89,11 @@ pub async fn record(
     .volatile(true);
     memory::upsert(store, &m).await?;
     let superseded = match supersedes {
-        Some(old) => Some(set_status(store, tenant, user, old, Status::Retired).await?.is_some()),
+        Some(old) => Some(
+            set_status(store, tenant, user, old, Status::Retired)
+                .await?
+                .is_some(),
+        ),
         None => None,
     };
     Ok(Recorded { id, superseded })

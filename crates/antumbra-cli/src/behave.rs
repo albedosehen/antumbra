@@ -188,7 +188,10 @@ mod tests {
     fn an_imported_rule_keeps_its_id_and_a_scope_or_rule_changes_it() {
         let a = import_id("user:a", "everywhere", "Use --save-exact.");
         assert_eq!(a, import_id("user:a", "everywhere", " Use --save-exact.\n"));
-        assert_ne!(a, import_id("user:a", "github.com/a/b", "Use --save-exact."));
+        assert_ne!(
+            a,
+            import_id("user:a", "github.com/a/b", "Use --save-exact.")
+        );
         assert_ne!(a, import_id("user:a", "everywhere", "Pin versions."));
         assert_ne!(a, import_id("user:b", "everywhere", "Use --save-exact."));
     }

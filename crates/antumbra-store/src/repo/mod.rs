@@ -4,6 +4,7 @@
 //! and `crud` helpers, never raw SurrealQL.
 
 pub mod account;
+pub mod behaviour;
 pub mod boundary;
 pub mod compartment;
 pub mod contribution;
@@ -22,7 +23,6 @@ pub mod lifecycle;
 pub mod loop_control;
 pub mod magic_use;
 pub mod manifest_set;
-pub mod behaviour;
 pub mod memory;
 pub mod memory_chunk;
 pub mod principal;
