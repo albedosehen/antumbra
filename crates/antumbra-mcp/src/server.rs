@@ -268,6 +268,7 @@ fn default_capability() -> String {
     "reference".into()
 }
 
+mod answer;
 mod behaviour;
 mod compartments;
 pub(crate) mod consolidation;
@@ -918,70 +919,6 @@ impl McpServer {
             escalate: !covered,
             reason: why.map(str::to_string),
             routes,
-        }))
-    }
-
-    /// Route a task and serve the answer through the covering expert's adapter
-    /// (the full recall→route→serve surface). Escalates when nothing covers it
-    /// or when no serving engine is configured.
-    #[tool(
-        description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter. Escalates if nothing covers it."
-    )]
-    async fn answer(
-        &self,
-        Parameters(p): Parameters<AnswerParams>,
-    ) -> Result<Json<AnswerOut>, ErrorData> {
-        let Some(serve) = self.serve.clone() else {
-            return Ok(Json(AnswerOut {
-                answer: String::new(),
-                expert_id: None,
-                escalate: true,
-                note: Some("serving not configured (run the server with a serving engine / --features models)".into()),
-            }));
-        };
-        let v = self.embedder.embed(&p.task).await.map_err(err)?;
-        let (routes, why) = self.routed(&v, 1).await.map_err(err)?;
-        let Some(top) = routes.first() else {
-            return Ok(Json(AnswerOut {
-                answer: String::new(),
-                expert_id: None,
-                escalate: true,
-                note: Some(format!(
-                    "no in-scope expert ({}); escalate",
-                    why.unwrap_or("nothing covers it")
-                )),
-            }));
-        };
-        let expert_id = top.expert_id.clone();
-        let expert = ExpertId::new(expert_id.clone());
-        // The serving engine snapshots its adapter population at startup; a route
-        // to an expert it can't serve (e.g. one minted afterward) escalates cleanly
-        // rather than surfacing a "no adapter registered" error.
-        if !serve.can_serve(&expert) {
-            return Ok(Json(AnswerOut {
-                answer: String::new(),
-                expert_id: Some(expert_id),
-                escalate: true,
-                note: Some("covering expert not resident in the serving engine; escalate".into()),
-            }));
-        }
-        // Generation is synchronous compute inside an `async fn`, like a train: it
-        // runs off the runtime's workers so other sessions' calls keep moving.
-        let request = ActRequest {
-            task_id: next_id("answer"),
-            prompt: p.task,
-            adapters: vec![expert],
-            weights: Vec::new(),
-        };
-        let out = consolidation::spawn_heavy(async move { serve.act(request).await })
-            .await
-            .map_err(err)?
-            .map_err(err)?;
-        Ok(Json(AnswerOut {
-            answer: out.final_output,
-            expert_id: Some(expert_id),
-            escalate: false,
-            note: None,
         }))
     }
 }
