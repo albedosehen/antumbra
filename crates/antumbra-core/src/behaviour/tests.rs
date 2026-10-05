@@ -155,3 +155,86 @@ fn status_scope_and_supersession_ride_in_evidence() {
         "one expert at a time"
     );
 }
+
+fn recorded(id: &str, status: Status, scope: &str) -> Memory {
+    Memory::new(
+        id,
+        TenantId::new("ws:a"),
+        crate::MemoryNetwork::Opinion,
+        content(&ssh()),
+        1.0,
+        chrono::Utc::now(),
+    )
+    .with_evidence(vec![status_evidence(status), scope_evidence(scope)])
+}
+
+fn standing_expert(scope: &str, behaviours: &[&str]) -> Expert {
+    let now = chrono::Utc::now();
+    Expert {
+        id: crate::ExpertId::new(format!("expert:user:a:behaviour:{scope}")),
+        name: "e".into(),
+        base_model: "base".into(),
+        artifact_uri: "adapters/e.safetensors".into(),
+        capability_card: serde_json::json!({
+            "behaviours": behaviours, "scope": scope, "standing": true,
+        }),
+        capability_vec: None,
+        fitness: 1.0,
+        frozen_at: Some(now),
+        generation: crate::Generation::ZERO,
+        owner: Some(UserId::new("user:a")),
+        compartment: None,
+        placed_on: None,
+        created_at: now,
+    }
+}
+
+#[test]
+fn a_standing_expert_learns_the_accepted_and_trained_behaviours_of_its_scope() {
+    let all = vec![
+        recorded("memory:accepted", Status::Accepted, EVERYWHERE),
+        recorded("memory:trained", Status::Trained, EVERYWHERE),
+        recorded("memory:proposed", Status::Proposed, EVERYWHERE),
+        recorded("memory:retired", Status::Retired, EVERYWHERE),
+        recorded("memory:other", Status::Accepted, "github.com/a/b"),
+    ];
+    let ids: Vec<String> = learnable(&all, EVERYWHERE)
+        .into_iter()
+        .map(|(m, _)| m.id.as_str().to_string())
+        .collect();
+    assert_eq!(ids, ["memory:accepted", "memory:trained"]);
+    let experts = [standing_expert("github.com/c/d", &[])];
+    assert_eq!(
+        scopes(&all, &experts),
+        [EVERYWHERE, "github.com/a/b", "github.com/c/d"]
+    );
+}
+
+#[test]
+fn an_expert_is_stale_when_its_behaviours_moved_on() {
+    let trained = vec![recorded("memory:t", Status::Trained, EVERYWHERE)];
+    let both = standing_expert(EVERYWHERE, &["memory:t"]);
+    let t = learnable(&trained, EVERYWHERE);
+    assert!(!stale(&t, Some(&both)), "it holds exactly what is in force");
+    assert!(stale(&t, None), "something to teach and no expert");
+    assert!(!stale(&[], None));
+
+    let mut more = trained.clone();
+    more.push(recorded("memory:new", Status::Accepted, EVERYWHERE));
+    assert!(
+        stale(&learnable(&more, EVERYWHERE), Some(&both)),
+        "a new one"
+    );
+
+    let retired = vec![recorded("memory:t", Status::Retired, EVERYWHERE)];
+    assert!(
+        stale(&learnable(&retired, EVERYWHERE), Some(&both)),
+        "nothing left to hold"
+    );
+
+    let again = vec![recorded("memory:t", Status::Accepted, EVERYWHERE)];
+    assert!(
+        stale(&learnable(&again, EVERYWHERE), Some(&both)),
+        "recorded again since it was trained"
+    );
+}

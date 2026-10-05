@@ -111,6 +111,21 @@ pub async fn list_owned(
         .collect()
 }
 
+/// Every live compartment named `name`, in every workspace: for a keeper that
+/// runs in owner mode over every user's own compartment of one kind.
+pub async fn list_named(store: &Store, name: &str) -> Result<Vec<Compartment>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(COMPARTMENT)
+        .map_err(map)?
+        .where_(eq("name", name));
+    let rows: Vec<CompartmentRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(CompartmentRow::into_domain)
+        .collect()
+}
+
 /// Fetch one **live** compartment by id within a tenant (e.g. to read its `owner`
 /// for audience resolution). `None` if absent, deleted, or owned by another
 /// tenant.

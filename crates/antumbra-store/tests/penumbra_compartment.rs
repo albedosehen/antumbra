@@ -429,3 +429,47 @@ async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() {
         "the owner writes its own compartment + the shared pool"
     );
 }
+
+#[tokio::test]
+async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let now = Utc::now();
+    for (id, tenant, owner, name) in [
+        ("comp:ws:a:user:a:behaviour", "ws:a", "user:a", "behaviour"),
+        ("comp:ws:b:user:b:behaviour", "ws:b", "user:b", "behaviour"),
+        ("comp:ws:a:user:a:notes", "ws:a", "user:a", "notes"),
+        ("comp:ws:c:user:c:behaviour", "ws:c", "user:c", "behaviour"),
+    ] {
+        compartment::create(
+            &store,
+            &Compartment::new(
+                CompartmentId::new(id),
+                TenantId::new(tenant),
+                UserId::new(owner),
+                name,
+                now,
+            ),
+        )
+        .await
+        .unwrap();
+    }
+    compartment::delete(
+        &store,
+        &TenantId::new("ws:c"),
+        &CompartmentId::new("comp:ws:c:user:c:behaviour"),
+        now,
+    )
+    .await
+    .unwrap();
+    let mut ids: Vec<String> = compartment::list_named(&store, "behaviour")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|c| c.id.as_str().to_string())
+        .collect();
+    ids.sort();
+    assert_eq!(
+        ids,
+        ["comp:ws:a:user:a:behaviour", "comp:ws:b:user:b:behaviour"]
+    );
+}

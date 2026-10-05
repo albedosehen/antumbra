@@ -16,6 +16,7 @@ use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{CompartmentId, TenantId, UserId};
+use crate::{Expert, Memory};
 
 /// The scope of a behaviour that applies in every repository.
 pub const EVERYWHERE: &str = "everywhere";
@@ -253,6 +254,78 @@ impl State {
             expert: field(EXPERT),
         })
     }
+}
+
+/// What the standing expert for `scope` is taught: the behaviours accepted,
+/// or trained before and still in force, each with its spec. Retired and
+/// proposed ones are left out.
+pub fn learnable(memories: &[Memory], scope: &str) -> Vec<(Memory, Spec)> {
+    memories
+        .iter()
+        .filter_map(|m| {
+            let state = State::of(&m.evidence)?;
+            let wanted = matches!(state.status, Status::Accepted | Status::Trained);
+            (wanted && state.scope == scope)
+                .then(|| Some((m.clone(), spec_of(&m.content)?)))
+                .flatten()
+        })
+        .collect()
+}
+
+/// The scopes a user's behaviours or standing experts are in, everywhere
+/// first: each one an expert may have to be trained, retrained, or dropped
+/// for.
+pub fn scopes(memories: &[Memory], experts: &[Expert]) -> Vec<String> {
+    let mut scopes = vec![EVERYWHERE.to_string()];
+    let found = memories
+        .iter()
+        .filter_map(|m| State::of(&m.evidence).map(|s| s.scope))
+        .chain(
+            experts
+                .iter()
+                .filter_map(|e| e.standing_scope().map(str::to_string)),
+        );
+    for s in found {
+        if !scopes.contains(&s) {
+            scopes.push(s);
+        }
+    }
+    scopes
+}
+
+/// The behaviours a standing expert was taught, from its card.
+pub fn taught_by(expert: &Expert) -> Vec<String> {
+    expert
+        .capability_card
+        .get("behaviours")
+        .and_then(|v| v.as_array())
+        .map(|xs| {
+            xs.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether a scope's standing expert is behind its behaviours: missing while
+/// there is something to teach, holding any while nothing is left, holding a
+/// different set, or with a behaviour accepted since (a new one, or one
+/// recorded again with a changed rule or check).
+pub fn stale(taught: &[(Memory, Spec)], expert: Option<&Expert>) -> bool {
+    let Some(expert) = expert else {
+        return !taught.is_empty();
+    };
+    let accepted_since = taught
+        .iter()
+        .any(|(m, _)| State::of(&m.evidence).is_some_and(|s| s.status == Status::Accepted));
+    let mut held = taught_by(expert);
+    held.sort();
+    let mut wanted: Vec<String> = taught
+        .iter()
+        .map(|(m, _)| m.id.as_str().to_string())
+        .collect();
+    wanted.sort();
+    accepted_since || held != wanted
 }
 
 #[cfg(test)]
