@@ -19,6 +19,14 @@
 //! It needs no stored column and no re-embedding: the baseline is computed from a
 //! memory's existing vector and the probe vectors, which is a handful of dot
 //! products per candidate.
+//!
+//! **The server no longer ranks recall by it (2026-10-04).** Measured over
+//! 2,000 of the user's memories with the chunk index, it cost the dense leg
+//! recall@10 from 0.882 to 0.411 on 399 questions and recall@30 from 0.820 to
+//! 0.605 on 400 fragments: a 400-character piece's baseline spread is narrow,
+//! so its z inflates. The stubs it was built to demote had become 25 of the
+//! store's 6,422 memories. The function stays for the store's `probes`
+//! argument and the bench's `ANTUMBRA_BENCH_CALIBRATE`, which measure it.
 
 use crate::cosine_similarity;
 

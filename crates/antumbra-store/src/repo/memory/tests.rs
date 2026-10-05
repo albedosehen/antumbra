@@ -303,6 +303,48 @@ async fn the_sparse_leg_returns_the_best_matches_not_the_first_ones() -> Result<
     Ok(())
 }
 
+/// A question in the caller's own words shares a few of a memory's words, never
+/// all of them. Matched on every word, as `@@` does, it found nothing; matched
+/// on any, it finds the memory, and a memory sharing none of its words stays
+/// out. Stopwords match nothing: "the" is in both memories.
+#[tokio::test]
+async fn the_sparse_leg_matches_any_word_of_a_question() -> Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("t");
+    seed(
+        &store,
+        &tenant,
+        "55555555-0000-0000-0000-000000000001",
+        "orders write through the outbox table before the relay publishes them",
+    )
+    .await?;
+    seed(
+        &store,
+        &tenant,
+        "55555555-0000-0000-0000-000000000002",
+        "parcels leave the warehouse at noon",
+    )
+    .await?;
+    let hits = sparse_recall(
+        &store,
+        &tenant,
+        "how does the outbox pattern work?",
+        5,
+        None,
+    )
+    .await?;
+    let found: Vec<&str> = hits.iter().map(|m| m.content.as_str()).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].starts_with("orders write through"), "{found:?}");
+    assert!(
+        sparse_recall(&store, &TenantId::new("other"), "outbox", 5, None)
+            .await?
+            .is_empty(),
+        "another workspace's rows never match"
+    );
+    Ok(())
+}
+
 /// The silent-degrade path, stated as a test so it cannot be mistaken for a
 /// ranking quirk again: whatever the sparse leg does, a query whose terms only
 /// the lexical leg can match must still come back from the fused call. If the
@@ -706,59 +748,72 @@ async fn with_any_evidence_finds_exactly_the_tagged_memories() -> Result<()> {
     Ok(())
 }
 
-/// A prompt that asks for two things: the whole prompt's words are shared by
-/// generic rows that outrank both specific ones, while each part finds its
-/// own. Fused, both specific rows come back; the whole prompt alone loses one.
-/// The dense leg is silenced (a zero vector), so this is the lexical half of
-/// the effect; the dense half is the same blend, in one vector.
+/// A prompt that asks for two things embeds as a blend of both, and rows near
+/// the blend outrank each thing's own memory; each part, embedded alone, finds
+/// its own. Fused, both come back, where the whole prompt alone loses both.
+/// The lexical leg is silent here (no text matches a memory), so this is the
+/// dense half of the effect. The lexical half needs no parts: the leg matches
+/// any word, so a compound prompt's rare words reach their memories from the
+/// whole prompt (`the_sparse_leg_matches_any_word_of_a_question`).
 #[tokio::test]
 async fn each_part_of_a_compound_query_finds_its_own_memory() -> Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let tenant = TenantId::new("t");
-    let rows = [
-        (
-            "55555555-0000-0000-0000-000000000001",
-            "rotate the penpot token stored in the claude config",
-        ),
-        (
-            "55555555-0000-0000-0000-000000000002",
-            "count the kuskokwim dependency edges after the scan",
-        ),
-        (
-            "55555555-0000-0000-0000-000000000003",
-            "rotate the token and count the edges and the config and the scan",
-        ),
-        (
-            "55555555-0000-0000-0000-000000000004",
-            "rotate the config, count the token, scan the edges, then count again",
-        ),
-        (
-            "55555555-0000-0000-0000-000000000005",
-            "count the edges and rotate the token in the config after the scan",
-        ),
+    let unit = |weights: &[(usize, f32)]| -> Vec<f32> {
+        let mut v = vec![0.0f32; EMBED_DIM];
+        for &(axis, w) in weights {
+            v[axis] = w;
+        }
+        let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        v.iter().map(|x| x / n).collect()
+    };
+    let mut rows: Vec<(String, Vec<f32>)> = vec![
+        ("the penpot token".into(), unit(&[(1, 1.0)])),
+        ("the kuskokwim edges".into(), unit(&[(2, 1.0)])),
     ];
-    for (id, content) in rows {
-        seed(&store, &tenant, id, content).await?;
+    // Near the blend of both subjects: closer to the whole prompt than either
+    // subject's own memory, further from each part.
+    for i in 0..3 {
+        rows.push((
+            format!("generic row {i}"),
+            unit(&[(1, 1.0), (2, 1.0), (10 + i, 0.5)]),
+        ));
     }
-    let zero = vec![0.0; EMBED_DIM];
-    let whole =
-        "rotate the penpot token in the config and count the kuskokwim edges after the scan";
+    // Near one subject only: each part's runners-up, far from the blend.
+    for j in 0..2 {
+        rows.push((format!("token aside {j}"), unit(&[(1, 1.0), (20 + j, 0.3)])));
+        rows.push((format!("edges aside {j}"), unit(&[(2, 1.0), (30 + j, 0.3)])));
+    }
+    for (i, (content, vector)) in rows.into_iter().enumerate() {
+        let m = Memory::new(
+            format!("66666666-0000-0000-0000-{i:012}"),
+            tenant.clone(),
+            MemoryNetwork::World,
+            content,
+            0.9,
+            chrono::Utc::now(),
+        )
+        .with_embedding(vector);
+        upsert(&store, &m).await?;
+    }
     let specific = |hits: &[Memory]| {
         let has = |word: &str| hits.iter().any(|m| m.content.contains(word));
         (has("penpot"), has("kuskokwim"))
     };
-    let alone = recall_hybrid(&store, &tenant, whole, &zero, 2, None, &[]).await?;
-    assert_ne!(
+    let whole = ("qqq".to_string(), unit(&[(1, 1.0), (2, 1.0)]));
+    let alone = recall_hybrid(&store, &tenant, &whole.0, &whole.1, 3, None, &[]).await?;
+    assert_eq!(
         specific(&alone),
-        (true, true),
-        "the whole prompt alone keeps both: the test proves nothing"
+        (false, false),
+        "the blend alone keeps neither: {:?}",
+        alone.iter().map(|m| &m.content).collect::<Vec<_>>()
     );
-    let queries: Vec<(String, Vec<f32>)> = std::iter::once(whole.to_string())
-        .chain(antumbra_core::query::parts(whole))
-        .map(|q| (q, zero.clone()))
-        .collect();
-    assert_eq!(queries.len(), 3, "the prompt splits into two parts");
-    let fused = recall_hybrid_many(&store, &tenant, &queries, 2, None, &[]).await?;
+    let queries = vec![
+        whole,
+        ("xxx".to_string(), unit(&[(1, 1.0)])),
+        ("yyy".to_string(), unit(&[(2, 1.0)])),
+    ];
+    let fused = recall_hybrid_many(&store, &tenant, &queries, 3, None, &[]).await?;
     assert_eq!(
         specific(&fused),
         (true, true),

@@ -60,7 +60,6 @@ impl McpServer {
             profile: None,
             session: None,
             decider: None,
-            probes: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 
@@ -78,26 +77,6 @@ impl McpServer {
     pub fn with_decider(mut self, decider: Arc<dyn antumbra_core::ports::TypedDecider>) -> Self {
         self.decider = Some(decider);
         self
-    }
-
-    /// The calibration probe vectors, embedded once and reused.
-    ///
-    /// A probe that fails to embed is dropped rather than fatal: the calibration
-    /// degrades with fewer probes and switches itself off below two, which is a
-    /// better failure than a recall that returns nothing because an embedder
-    /// hiccuped on a fixed string.
-    pub(crate) async fn probe_vectors(&self) -> &[Vec<f32>] {
-        self.probes
-            .get_or_init(|| async {
-                let mut out = Vec::with_capacity(antumbra_core::calibrate::PROBE_TEXTS.len());
-                for text in antumbra_core::calibrate::PROBE_TEXTS {
-                    if let Ok(v) = self.embedder.embed(text).await {
-                        out.push(v);
-                    }
-                }
-                out
-            })
-            .await
     }
 
     /// Make a copal file service the document of record for ingested documents:

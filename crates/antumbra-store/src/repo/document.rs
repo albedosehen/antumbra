@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, query_records, upsert_record};
 use surql::query::expressions::{as_, count_all, count_if, field};
-use surql::query::helpers::fulltext_search_query;
 use surql::types::operators::{and_, eq, is_none};
 use surql::types::RecordID;
 
@@ -206,23 +205,16 @@ pub async fn recall_hybrid(
 }
 
 /// The BM25 full-text (sparse) leg of [`recall_hybrid`]: the `k` chunks whose
-/// `content` best matches `query_text`, tenant-scoped, in BM25 relevance order.
-/// An empty/blank query returns nothing.
+/// `content` best matches any word of `query_text`, tenant-scoped, in BM25
+/// relevance order (see `crate::lexical`). An empty/blank query returns nothing.
 async fn sparse_recall(
     store: &Store,
     tenant: &TenantId,
     query_text: &str,
     k: usize,
 ) -> Result<Vec<DocumentChunk>> {
-    if query_text.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let q = fulltext_search_query(TABLE, "content", 1, query_text, None, "score")
-        .map_err(map)?
-        .where_(eq("tenant_id", tenant.as_str()))
-        .limit(k as i64)
-        .map_err(map)?;
-    let rows: Vec<ChunkRow> = query_records(store.client(), &q).await.map_err(map)?;
+    let rows: Vec<ChunkRow> =
+        crate::lexical::any_word(store, TABLE, tenant, query_text, k, None).await?;
     rows.into_iter().map(ChunkRow::into_domain).collect()
 }
 

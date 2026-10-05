@@ -9,6 +9,7 @@ mod error;
 
 pub mod fusion;
 pub mod knn;
+mod lexical;
 pub mod repo;
 pub mod schema;
 pub mod store;

@@ -250,9 +250,19 @@ impl Store {
             ("keys".to_string(), serde_json::json!(keys)),
             ("tenant".to_string(), serde_json::json!(tenant.as_str())),
         ]);
+        self.query_rows(&surql, vars).await
+    }
+
+    /// The rows of a one-statement raw query, with its variables bound, as
+    /// `T`: for the queries the builder cannot write.
+    pub(crate) async fn query_rows<T: DeserializeOwned>(
+        &self,
+        surql: &str,
+        vars: std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Result<Vec<T>> {
         let raw = self
             .client
-            .query_with_vars(&surql, vars)
+            .query_with_vars(surql, vars)
             .await
             .map_err(map)?;
         rows_of_first_statement(raw)
