@@ -586,7 +586,12 @@ async fn main() -> Result<()> {
         let (_, baseline) = &configs[0];
         reports.push(evaluate("BM25", baseline.as_ref(), &corpus, Mode::Lexical).await?);
     }
-    for (name, embedder) in &configs {
+    // On a label file the deterministic baseline scores near zero and says
+    // nothing, and a run is a recall per query per config: an endpoint's run
+    // leaves it out. Without an endpoint it is the only config, and runs.
+    let labelled = std::env::var("ANTUMBRA_BENCH_LABELS").is_ok();
+    let skip = usize::from(labelled && configs.len() > 1);
+    for (name, embedder) in configs.iter().skip(skip) {
         for mode in [Mode::Hybrid, Mode::Dense] {
             reports.push(evaluate(name, embedder.as_ref(), &corpus, mode).await?);
         }
