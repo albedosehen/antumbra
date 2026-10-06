@@ -87,6 +87,15 @@ services:
       # embeds at once while it cuts memories into the pieces recall searches.
       # 0 stops it; recall then reads whole memories for anything not cut.
       - ANTUMBRA_CHUNK_IN_FLIGHT=${ANTUMBRA_CHUNK_IN_FLIGHT:-4}
+      # Trace export over OTLP/HTTP, all optional. Empty counts as unset, so the
+      # export stays off unless docker/.env sets the endpoint, and the service
+      # is named antumbra-mcp unless it names one. The headers can carry the
+      # collector's ingest credential, which is why they ride the environment
+      # like the secrets above.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-}
+      - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

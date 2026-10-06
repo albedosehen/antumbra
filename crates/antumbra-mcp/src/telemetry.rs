@@ -7,7 +7,8 @@
 //! that collector, which the exporter addresses at `/v1/traces`.
 //! `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` describe the service.
 //! Without the endpoint, or when the exporter cannot be built, the server runs
-//! as before and exports nothing.
+//! as before and exports nothing. An empty variable counts as an unset one, as
+//! the OpenTelemetry specification reads it.
 //!
 //! Two kinds of span are exported: one per HTTP request (see the router in
 //! [`crate::http`]) and one per tool call ([`tool_span`]). Neither carries
@@ -15,6 +16,8 @@
 //! no request body. A tool call's span says which tool ran, in which
 //! workspace, and whether it failed and how, by kind and never by message,
 //! since a message can quote what the caller sent.
+
+use std::ffi::OsStr;
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
@@ -71,7 +74,7 @@ pub fn init() -> Telemetry {
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
     let mut failure = None;
-    let provider = std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").and_then(|_| {
+    let provider = if set(std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").as_deref()) {
         match opentelemetry_otlp::SpanExporter::builder()
             .with_http()
             .build()
@@ -79,7 +82,11 @@ pub fn init() -> Telemetry {
             Ok(exporter) => {
                 let mut resource = Resource::builder();
                 // A server that says what it is when the deployment does not.
-                if std::env::var_os("OTEL_SERVICE_NAME").is_none() {
+                // The SDK's own detector reads an empty name as unset too, but
+                // then names the service `unknown_service:<executable>`, and it
+                // keeps a blank one as the name. Added after the detectors have
+                // run, this wins over both.
+                if !set(std::env::var_os("OTEL_SERVICE_NAME").as_deref()) {
                     resource = resource.with_service_name(env!("CARGO_PKG_NAME"));
                 }
                 Some(
@@ -96,7 +103,9 @@ pub fn init() -> Telemetry {
                 None
             }
         }
-    });
+    } else {
+        None
+    };
 
     // stdout is the stdio transport's JSON-RPC channel, so the log goes where
     // the server's own lines go.
@@ -120,6 +129,15 @@ pub fn init() -> Telemetry {
         );
     }
     Telemetry(provider)
+}
+
+/// Whether an `OTEL_*` variable holds a value. The OpenTelemetry
+/// specification reads an empty one as unset, and so does this, a blank one
+/// too. Compose passes `${OTEL_EXPORTER_OTLP_ENDPOINT:-}` as an empty string
+/// when docker/.env sets nothing, and that must leave the export off rather
+/// than send it to the exporter's default, `localhost:4318`.
+fn set(value: Option<&OsStr>) -> bool {
+    value.is_some_and(|value| !value.to_string_lossy().trim().is_empty())
 }
 
 /// Keeps a request span's path to the route it matched. The request layer
@@ -255,5 +273,28 @@ pub(crate) fn error_kind(error: &ErrorData) -> &'static str {
         ErrorCode::METHOD_NOT_FOUND => "method_not_found",
         ErrorCode::INVALID_REQUEST => "invalid_request",
         _ => "other",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_endpoint_that_is_unset_empty_or_blank_exports_nothing() {
+        assert!(!set(None));
+        // What compose passes for `${OTEL_EXPORTER_OTLP_ENDPOINT:-}` when
+        // docker/.env does not set it.
+        assert!(!set(Some(OsStr::new(""))));
+        assert!(!set(Some(OsStr::new(" \t"))));
+        assert!(set(Some(OsStr::new("http://openobserve:5080/api/default"))));
+    }
+
+    #[test]
+    fn an_empty_service_name_leaves_the_server_to_name_itself() {
+        assert!(!set(None));
+        assert!(!set(Some(OsStr::new(""))));
+        assert!(!set(Some(OsStr::new(" "))));
+        assert!(set(Some(OsStr::new("antumbra-kuskokwim"))));
     }
 }
