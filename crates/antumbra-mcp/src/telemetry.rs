@@ -17,8 +17,10 @@
 //! since a message can quote what the caller sent.
 
 use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider, SpanData, SpanProcessor};
 use opentelemetry_sdk::Resource;
 use rmcp::model::ErrorCode;
 use rmcp::ErrorData;
@@ -83,7 +85,9 @@ pub fn init() -> Telemetry {
                 Some(
                     SdkTracerProvider::builder()
                         .with_resource(resource.build())
-                        .with_batch_exporter(exporter)
+                        .with_span_processor(RoutesOnly(
+                            BatchSpanProcessor::builder(exporter).build(),
+                        ))
                         .build(),
                 )
             }
@@ -116,6 +120,61 @@ pub fn init() -> Telemetry {
         );
     }
     Telemetry(provider)
+}
+
+/// Keeps a request span's path to the route it matched. The request layer
+/// records the raw path and query as `url.path` and `url.query`. Every route
+/// here is a fixed path (`/mcp`, `/mcp/call`, `/github/webhook`, the
+/// dashboard's), so for a request that matched one the raw path says nothing
+/// the route does not; for one that matched none it is whatever the caller
+/// sent, and so is a query, which no route reads. Recording the attribute again
+/// on the live span would only add a second value beside the first, so each
+/// finished span is rewritten here on its way to the exporter.
+#[derive(Debug)]
+pub(crate) struct RoutesOnly<P>(pub(crate) P);
+
+impl<P: SpanProcessor> SpanProcessor for RoutesOnly<P> {
+    fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &opentelemetry::Context) {
+        self.0.on_start(span, cx);
+    }
+
+    fn on_end(&self, mut span: SpanData) {
+        routes_only(&mut span.attributes);
+        self.0.on_end(span);
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.0.force_flush()
+    }
+
+    fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> OTelSdkResult {
+        self.0.shutdown_with_timeout(timeout)
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.0.set_resource(resource);
+    }
+}
+
+/// `url.path` becomes the route the request matched (`http.route`), a request
+/// that matched none keeps no path, and `url.query` goes.
+fn routes_only(attributes: &mut Vec<KeyValue>) {
+    let route = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == "http.route")
+        .map(|kv| kv.value.clone())
+        .filter(|route| !route.as_str().is_empty());
+    attributes.retain_mut(|kv| match kv.key.as_str() {
+        "url.query" => false,
+        "url.path" => match &route {
+            Some(route) => {
+                kv.value = route.clone();
+                true
+            }
+            None => false,
+        },
+        _ => true,
+    });
 }
 
 /// The trace an HTTP request runs in, carried into the request so the tool

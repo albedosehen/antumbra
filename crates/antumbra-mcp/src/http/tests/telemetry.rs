@@ -6,12 +6,15 @@
 use super::*;
 use futures::StreamExt;
 use opentelemetry::trace::{Status, TracerProvider as _};
-use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData};
+use opentelemetry_sdk::trace::{
+    InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData,
+};
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::{EnvFilter, Layer as _};
 
 /// Spans exported while it is held, from this thread: a `#[tokio::test]` runs
-/// its tasks on the test's own thread, rmcp's session tasks included.
+/// its tasks on the test's own thread, rmcp's session tasks included. Through
+/// the same filter and path rewrite as the server's export.
 struct Traces {
     exporter: InMemorySpanExporter,
     _provider: SdkTracerProvider,
@@ -22,7 +25,9 @@ impl Traces {
     fn start() -> Self {
         let exporter = InMemorySpanExporter::default();
         let provider = SdkTracerProvider::builder()
-            .with_simple_exporter(exporter.clone())
+            .with_span_processor(crate::telemetry::RoutesOnly(SimpleSpanProcessor::new(
+                exporter.clone(),
+            )))
             .build();
         let subscriber = tracing_subscriber::registry().with(
             tracing_opentelemetry::layer()
@@ -148,6 +153,40 @@ fn requests_are_traced_but_what_the_dashboard_page_loads_is_not() {
     for path in ["/dashboard/", "/dashboard/app.js", "/dashboard/app.css"] {
         assert!(!traced(path), "{path} should not be traced");
     }
+}
+
+/// A request span keeps the route as its path and no query; a request that
+/// matched no route keeps no path at all, since the path is then whatever the
+/// caller sent.
+#[tokio::test]
+async fn a_request_span_keeps_its_route_and_not_the_path_it_was_sent() {
+    let traces = Traces::start();
+    let app = router(state().await);
+    let lost = Request::builder()
+        .uri("/mcp/recite-the-launch-codes?token=sesame")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(lost).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let page = Request::builder()
+        .uri("/dashboard?token=sesame")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(app.oneshot(page).await.unwrap().status(), StatusCode::OK);
+
+    let ended = traces.ended();
+    let page = traces.one("GET /dashboard");
+    assert_eq!(attribute(&page, "url.path").as_deref(), Some("/dashboard"));
+    assert_eq!(attribute(&page, "url.query"), None);
+    let lost = ended
+        .iter()
+        .find(|s| attribute(s, "http.response.status_code").as_deref() == Some("404"))
+        .expect("the unmatched request has a span");
+    assert_eq!(attribute(lost, "url.path"), None);
+    assert!(!mentions(&ended, "launch-codes"), "the path it was sent");
+    assert!(!mentions(&ended, "sesame"), "the query");
 }
 
 /// The store turns on tracing's `release_max_level_debug`, which compiles
