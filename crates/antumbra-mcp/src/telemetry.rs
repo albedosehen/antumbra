@@ -1,13 +1,13 @@
 //! Logs and traces.
 //!
 //! The server's own lines are still `eprintln!`. What this adds is a log
-//! subscriber that puts the dependencies' warnings and errors on the same
-//! stderr (`RUST_LOG` widens it), and, when `OTEL_EXPORTER_OTLP_ENDPOINT` is
-//! set, a trace export over OTLP/HTTP to that collector, which the exporter
-//! addresses at `/v1/traces`. `OTEL_SERVICE_NAME` and
-//! `OTEL_RESOURCE_ATTRIBUTES` describe the service. Without the endpoint, or
-//! when the exporter cannot be built, the server runs as before and exports
-//! nothing.
+//! subscriber that puts the dependencies' logs on the same stderr when
+//! `RUST_LOG` asks for them (none by default, as before), and, when
+//! `OTEL_EXPORTER_OTLP_ENDPOINT` is set, a trace export over OTLP/HTTP to
+//! that collector, which the exporter addresses at `/v1/traces`.
+//! `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` describe the service.
+//! Without the endpoint, or when the exporter cannot be built, the server runs
+//! as before and exports nothing.
 //!
 //! Two kinds of span are exported: one per HTTP request (see the router in
 //! [`crate::http`]) and one per tool call ([`tool_span`]). Neither carries
@@ -28,10 +28,13 @@ use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 use tracing_subscriber::{EnvFilter, Layer as _};
 
-/// The log filter when `RUST_LOG` is not set: the dependencies' warnings and
-/// errors. Their INFO lines (rmcp's per-session chatter among them) stay out of
-/// the log, as they were before a subscriber existed.
-const LOG_FILTER: &str = "warn";
+/// The log filter when `RUST_LOG` is not set: nothing, which is what the
+/// dependencies logged before this subscriber existed. Not even their errors
+/// by default, since what they say about a request can quote it: rmcp's
+/// request errors carry a tool call's arguments, and the store's client can
+/// log the query results it failed to deliver. `RUST_LOG` turns them on to
+/// debug.
+const LOG_FILTER: &str = "off";
 
 /// What reaches the exporter: the HTTP server spans, which
 /// axum-tracing-opentelemetry opens at TRACE under the `otel::tracing`
@@ -58,9 +61,9 @@ impl Drop for Telemetry {
 }
 
 /// Installs the global subscriber: the log lines on stderr, filtered by
-/// `RUST_LOG` (default `warn`), and the trace export when it is configured. A
-/// caller's `traceparent` is honored either way, so a request's span continues
-/// the trace it arrived with.
+/// `RUST_LOG` (nothing by default), and the trace export when it is
+/// configured. A caller's `traceparent` is honored either way, so a
+/// request's span continues the trace it arrived with.
 pub fn init() -> Telemetry {
     opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 

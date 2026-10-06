@@ -48,10 +48,10 @@ async-trait.workspace = true
 # The chunk index's keeper embeds a memory's pieces a few at a time; the tests
 # also read the SSE response body incrementally with it.
 futures = "0.3"
-# Telemetry: dependency logs on stderr beside the server's own lines, and, when
-# OTEL_EXPORTER_OTLP_ENDPOINT is set, a span per HTTP request and per tool call
-# over OTLP/HTTP to that collector. The endpoint is plain HTTP, so no TLS stack
-# comes with the exporter.
+# Telemetry: dependency logs on stderr beside the server's own lines when
+# RUST_LOG asks for them, and, when OTEL_EXPORTER_OTLP_ENDPOINT is set, a span
+# per HTTP request and per tool call over OTLP/HTTP to that collector. The
+# endpoint is plain HTTP, so no TLS stack comes with the exporter.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
