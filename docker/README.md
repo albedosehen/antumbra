@@ -70,6 +70,20 @@ echo "DEFINE USER antumbra_control ON DATABASE PASSWORD '<generated>' ROLES OWNE
 docker compose -f docker/docker-compose.yml --profile control up -d antumbra-control-server
 ```
 
+## Trace export (optional)
+
+`antumbra-mcp` exports a span per HTTP request and per tool call over OTLP/HTTP once `OTEL_EXPORTER_OTLP_ENDPOINT` is set in `docker/.env`. Compose passes it and the three variables below through, empty when `docker/.env` leaves them out, and an empty one counts as unset, so the export stays off by default and the service is named `antumbra-mcp`. The exporter appends `/v1/traces` to the endpoint. For OpenObserve:
+
+```dotenv
+# in docker/.env:
+OTEL_EXPORTER_OTLP_ENDPOINT=http://<host>:<port>/api/<org>
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64>,stream-name=default
+OTEL_SERVICE_NAME=antumbra-mcp
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=<env>,host.name=<host>
+```
+
+`<base64>` is the base64 of `user:password` for an OpenObserve user allowed to ingest. The headers carry that credential, so they ride the environment like the other secrets in `docker/.env`. Name the service with `OTEL_SERVICE_NAME`, not a `service.name` in the attributes. Spans carry no query, memory or document text, no token and no request body (see `crates/antumbra-mcp/src/telemetry.rs`). Recreate the container to pick up a change: `docker compose -f docker/docker-compose.yml up -d antumbra-mcp`.
+
 ## Notes
 
 - `docker/.env` holds secrets and is gitignored. Move these to a secret manager (Doppler) for anything beyond local use. Compose passes them as environment, never as command-line arguments; a deployment that mounts secrets as files (Docker secrets, Kubernetes, a Key Vault CSI mount) passes `--db-pass-file` and `--jwt-secret-file` to `antumbra-mcp` instead, so they appear in neither the process arguments nor the environment.
