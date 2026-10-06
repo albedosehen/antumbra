@@ -37,11 +37,12 @@ use tracing_subscriber::{EnvFilter, Layer as _};
 const LOG_FILTER: &str = "off";
 
 /// What reaches the exporter: the HTTP server spans, which
-/// axum-tracing-opentelemetry opens at TRACE under the `otel::tracing`
-/// target, and this crate's tool spans, and nothing else. Not even the
-/// dependencies' warnings: an event inside a span is exported with it, and
-/// what rmcp and the store say about a failed request can quote the request.
-pub(crate) const TRACE_FILTER: &str = "off,otel::tracing=trace,antumbra_mcp=info";
+/// axum-tracing-opentelemetry opens under the `otel::tracing` target (at
+/// INFO, see the manifest), and this crate's tool spans, and nothing else.
+/// Not even the dependencies' warnings: an event inside a span is exported
+/// with it, and what rmcp and the store say about a failed request can quote
+/// the request.
+pub(crate) const TRACE_FILTER: &str = "off,otel::tracing=info,antumbra_mcp=info";
 
 /// The tracer provider, when spans are exported. Hold it for the life of the
 /// process: dropping it flushes the spans still queued and stops the exporter.

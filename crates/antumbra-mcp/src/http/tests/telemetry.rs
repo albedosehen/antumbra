@@ -150,6 +150,19 @@ fn requests_are_traced_but_what_the_dashboard_page_loads_is_not() {
     }
 }
 
+/// The store turns on tracing's `release_max_level_debug`, which compiles
+/// TRACE out of a release build. The request spans are opened above it, or a
+/// release build (what runs in the cluster) would export no request span at
+/// all while every debug build, these tests included, still did.
+#[test]
+fn request_spans_are_opened_at_a_level_a_release_build_keeps() {
+    assert!(
+        tracing_opentelemetry_instrumentation_sdk::TRACING_LEVEL <= tracing::Level::DEBUG,
+        "request spans at {}",
+        tracing_opentelemetry_instrumentation_sdk::TRACING_LEVEL
+    );
+}
+
 /// A client holds its GET /mcp stream open for as long as its session lasts.
 /// The request's span ends when the response starts, so it is exported while
 /// the stream is still open rather than hours later when it closes.
