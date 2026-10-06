@@ -10,8 +10,8 @@
 //! one signed-in session per identity (see [`http`]).
 //!
 //! Either way the server logs to stderr, and with `OTEL_EXPORTER_OTLP_ENDPOINT`
-//! set it also exports a span per HTTP request to that collector over
-//! OTLP/HTTP (see [`telemetry`]).
+//! set it also exports a span per HTTP request and per tool call to that
+//! collector over OTLP/HTTP (see [`telemetry`]).
 
 use std::sync::Arc;
 

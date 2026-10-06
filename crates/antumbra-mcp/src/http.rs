@@ -358,7 +358,7 @@ fn traced(path: &str) -> bool {
     !path.starts_with("/dashboard/")
 }
 
-async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Response {
+async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> Response {
     let header_val = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -394,6 +394,10 @@ async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Resp
             return internal_error();
         }
     };
+    // A tool call this request carries runs on the session's task, outside
+    // this request's span; the trace rides along so the call's span joins it.
+    req.extensions_mut()
+        .insert(crate::telemetry::RequestTrace::current());
     // rmcp returns its own boxed body; rewrap it as an axum body.
     let (parts, body) = service.handle(req).await.into_parts();
     Response::from_parts(parts, Body::new(body))

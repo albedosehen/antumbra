@@ -9,14 +9,21 @@
 //! when the exporter cannot be built, the server runs as before and exports
 //! nothing.
 //!
-//! The spans exported are one per HTTP request (see the router in
-//! [`crate::http`]), and they do not carry what the request was about: no
-//! query, memory or document text, no token, no request body.
+//! Two kinds of span are exported: one per HTTP request (see the router in
+//! [`crate::http`]) and one per tool call ([`tool_span`]). Neither carries
+//! what the request was about: no query, memory or document text, no token,
+//! no request body. A tool call's span says which tool ran, in which
+//! workspace, and whether it failed and how, by kind and never by message,
+//! since a message can quote what the caller sent.
 
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
+use rmcp::model::ErrorCode;
+use rmcp::ErrorData;
+use tracing::field::Empty;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 use tracing_subscriber::{EnvFilter, Layer as _};
@@ -28,7 +35,7 @@ const LOG_FILTER: &str = "warn";
 
 /// What reaches the exporter: the HTTP server spans, which
 /// axum-tracing-opentelemetry opens at TRACE under the `otel::tracing`
-/// target, and this crate's own spans, and nothing else. Not even the
+/// target, and this crate's tool spans, and nothing else. Not even the
 /// dependencies' warnings: an event inside a span is exported with it, and
 /// what rmcp and the store say about a failed request can quote the request.
 pub(crate) const TRACE_FILTER: &str = "off,otel::tracing=trace,antumbra_mcp=info";
@@ -105,4 +112,85 @@ pub fn init() -> Telemetry {
         );
     }
     Telemetry(provider)
+}
+
+/// The trace an HTTP request runs in, carried into the request so the tool
+/// call it makes over JSON-RPC can join it. rmcp runs that call on the
+/// session's own task, where the request's span is not the current one; it
+/// does hand the tool the request's parts, and this travels in their
+/// extensions. A context rather than the span itself, which would hold the
+/// request's span open for as long as the call runs.
+#[derive(Clone)]
+pub(crate) struct RequestTrace(opentelemetry::Context);
+
+impl RequestTrace {
+    /// The trace of the span the caller is in.
+    pub(crate) fn current() -> Self {
+        Self(tracing::Span::current().context())
+    }
+}
+
+/// The span one tool call runs in: `tool <name>`, with the tool and the
+/// workspace (the verified tenant) as attributes, and the outcome recorded by
+/// [`record_outcome`] once it returns. A compartment is left out: it arrives
+/// as an argument, and an argument is the caller's text until a tool has
+/// checked it.
+///
+/// `known` says whether `name` is one of this server's tools. A name that is
+/// not is the caller's text too, so the span says `unknown` in its place.
+///
+/// Joined to `parent` when the call came over an HTTP request whose trace
+/// rides along ([`RequestTrace`]); otherwise it is a child of the current
+/// span (the REST shim's request), or starts a trace of its own (stdio).
+pub(crate) fn tool_span(
+    name: &str,
+    known: bool,
+    workspace: &str,
+    parent: Option<&RequestTrace>,
+) -> tracing::Span {
+    let tool = if known { name } else { "unknown" };
+    let span = tracing::info_span!(
+        "tool",
+        otel.name = format!("tool {tool}"),
+        gen_ai.tool.name = tool,
+        antumbra.workspace = workspace,
+        antumbra.outcome = Empty,
+        "error.type" = Empty,
+        otel.status_code = Empty,
+    );
+    if let Some(RequestTrace(cx)) = parent {
+        // Fails only where nothing exports (no layer, or the span filtered
+        // out), and then there is no trace to join.
+        let _ = span.set_parent(cx.clone());
+    }
+    span
+}
+
+/// Records how a tool call ended on its span: `ok`, or `error` with the
+/// span's status set to ERROR and `error.type` naming the kind of failure.
+pub(crate) fn record_outcome(span: &tracing::Span, failure: Option<&'static str>) {
+    match failure {
+        None => {
+            span.record("antumbra.outcome", "ok");
+        }
+        Some(kind) => {
+            span.record("antumbra.outcome", "error");
+            span.record("error.type", kind);
+            span.record("otel.status_code", "ERROR");
+        }
+    }
+}
+
+/// The kind of a tool error, from its JSON-RPC code. The message stays out of
+/// telemetry: "bad arguments" quotes the arguments, and a store error can quote
+/// what was stored.
+pub(crate) fn error_kind(error: &ErrorData) -> &'static str {
+    match error.code {
+        ErrorCode::INVALID_PARAMS => "invalid_params",
+        ErrorCode::INTERNAL_ERROR => "internal_error",
+        ErrorCode::RESOURCE_NOT_FOUND => "resource_not_found",
+        ErrorCode::METHOD_NOT_FOUND => "method_not_found",
+        ErrorCode::INVALID_REQUEST => "invalid_request",
+        _ => "other",
+    }
 }
