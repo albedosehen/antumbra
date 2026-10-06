@@ -267,8 +267,76 @@ pub async fn serve(
     behaviours::spawn(state.clone());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
-    axum::serve(listener, router(state)).await?;
+    serve_until(listener, router(state), shutdown_signal(), DRAIN).await
+}
+
+/// How long a stop waits for the requests still open before it returns
+/// anyway. Every client holds a GET /mcp stream open for as long as its session
+/// lasts, so a stop that waited for them all would wait out the kubelet's
+/// grace period (thirty seconds, the default the deployment keeps) and end in
+/// SIGKILL, with the spans still queued for the collector lost. Ten seconds
+/// leaves the rest of that period to the flush.
+const DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Serve `app` on `listener` until `stop` resolves, then take no new
+/// connections and give the open ones `drain` to finish before returning
+/// anyway: a request that ends in time ends cleanly, and a stream that never
+/// ends does not hold the stop open.
+async fn serve_until(
+    listener: tokio::net::TcpListener,
+    app: Router,
+    stop: impl std::future::Future<Output = ()> + Send + 'static,
+    drain: std::time::Duration,
+) -> Result<()> {
+    let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = axum::serve(listener, app).with_graceful_shutdown(async move {
+        stop.await;
+        let _ = stopping.send(());
+    });
+    let drained = async move {
+        // Serving ended and dropped its end without a stop: nothing to drain.
+        if stopped.await.is_err() {
+            std::future::pending::<()>().await;
+        }
+        eprintln!(
+            "antumbra-mcp: stopping; open requests have {}s to finish",
+            drain.as_secs()
+        );
+        tokio::time::sleep(drain).await;
+    };
+    tokio::select! {
+        served = std::future::IntoFuture::into_future(serving) => served?,
+        () = drained => eprintln!("antumbra-mcp: stopped with requests still open"),
+    }
     Ok(())
+}
+
+/// Resolves on Ctrl-C, or on SIGTERM, which is how the kubelet stops the pod.
+/// The server is PID 1 in its container, where a signal without a handler is
+/// ignored, so a stop used to wait out the grace period and end in SIGKILL.
+/// A signal that cannot be listened for is waited on forever rather than
+/// taken as a stop.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
 }
 
 /// R-2 live propagation: watch the memory change feed and push each shared-memory

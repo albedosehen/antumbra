@@ -501,10 +501,15 @@ fn main() -> Result<()> {
     std::thread::Builder::new()
         .stack_size(256 * 1024 * 1024)
         .spawn(|| {
-            tokio::runtime::Builder::new_multi_thread()
+            let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
-                .build()?
-                .block_on(run())
+                .build()?;
+            let outcome = runtime.block_on(run());
+            // Whatever still runs on the blocking pool (an embed call, a
+            // train) gets a moment and is then left behind: waiting on a train
+            // would outlast the grace period, and the flush comes after this.
+            runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+            outcome
         })?
         .join()
         .map_err(|_| anyhow::anyhow!("antumbra-mcp worker thread panicked"))?

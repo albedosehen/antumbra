@@ -432,4 +432,5 @@ async fn live_notification_reaches_a_grantees_stream() {
     assert!(found, "grantee's SSE stream got the change; saw: {seen}");
 }
 
+mod shutdown;
 mod telemetry;
