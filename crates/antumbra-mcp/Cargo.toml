@@ -48,12 +48,25 @@ async-trait.workspace = true
 # The chunk index's keeper embeds a memory's pieces a few at a time; the tests
 # also read the SSE response body incrementally with it.
 futures = "0.3"
+# Telemetry: dependency logs on stderr beside the server's own lines, and, when
+# OTEL_EXPORTER_OTLP_ENDPOINT is set, a span per HTTP request and per tool call
+# over OTLP/HTTP to that collector. The endpoint is plain HTTP, so no TLS stack
+# comes with the exporter.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+tracing-opentelemetry = "0.34"
+axum-tracing-opentelemetry = "0.42"
 
 [dev-dependencies]
 # The canned GitHub transport and the throwaway App key the receiver's tests drive.
 antumbra-github = { path = "../antumbra-github", features = ["testing"] }
 # `oneshot` to drive the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
+# The in-memory span exporter the telemetry tests read the exported spans from.
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "testing"] }
 
 [features]
 default = []

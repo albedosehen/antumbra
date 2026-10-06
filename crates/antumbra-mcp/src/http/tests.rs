@@ -431,3 +431,5 @@ async fn live_notification_reaches_a_grantees_stream() {
     .unwrap_or(false);
     assert!(found, "grantee's SSE stream got the change; saw: {seen}");
 }
+
+mod telemetry;

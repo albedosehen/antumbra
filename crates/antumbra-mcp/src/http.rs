@@ -53,6 +53,7 @@ use axum::http::{header, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, post};
 use axum::{Json, Router};
+use axum_tracing_opentelemetry::middleware::OtelAxumLayer;
 use tokio::sync::Mutex;
 
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -335,6 +336,9 @@ async fn propagate(
 
 /// The `/mcp` router. Extracted so the auth boundary can be exercised with
 /// `oneshot` (no socket) in tests.
+///
+/// Every request it serves opens a span, exported when the trace export is on
+/// ([`crate::telemetry`]), except those [`traced`] leaves out.
 fn router(state: Arc<HttpState>) -> Router {
     Router::new()
         .route("/mcp", any(handle))
@@ -342,6 +346,16 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/github/webhook", post(github::handle))
         .merge(dashboard::routes())
         .with_state(state)
+        .layer(OtelAxumLayer::default().filter(traced))
+}
+
+/// Whether a request gets a span: everything but what sits under the
+/// dashboard's page, its script and style, which every page load fetches and
+/// which would bury the page view they belong to, and the redirect to the page,
+/// whose page view follows it. There is no health path to leave out: the
+/// probes are TCP.
+fn traced(path: &str) -> bool {
+    !path.starts_with("/dashboard/")
 }
 
 async fn handle(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Response {

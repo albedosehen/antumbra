@@ -8,6 +8,10 @@
 //! the networked, per-request multi-tenant surface: each request carries a
 //! signed JWT whose `tenant`/`user` claims become `$auth`, and the server keeps
 //! one signed-in session per identity (see [`http`]).
+//!
+//! Either way the server logs to stderr, and with `OTEL_EXPORTER_OTLP_ENDPOINT`
+//! set it also exports a span per HTTP request to that collector over
+//! OTLP/HTTP (see [`telemetry`]).
 
 use std::sync::Arc;
 
@@ -36,6 +40,7 @@ mod profile;
 mod secrets;
 mod server;
 mod session;
+mod telemetry;
 mod warmup;
 use server::McpServer;
 
@@ -486,6 +491,10 @@ fn default_host(explicit: Option<String>) -> String {
 }
 
 fn main() -> Result<()> {
+    // Before the runtime and held until it is gone, so the spans still queued
+    // are flushed on the way out, by an exporter whose blocking HTTP client
+    // must not be dropped inside the runtime.
+    let _telemetry = telemetry::init();
     // SurrealDB's engine-enforced ACL subqueries for tenant isolation and memory compartments recurse deep;
     // host the runtime on a large-stack thread so the 1 MB Windows main-thread
     // stack does not overflow (see the matching note in the CLI).
