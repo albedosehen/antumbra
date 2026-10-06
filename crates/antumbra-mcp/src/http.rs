@@ -291,6 +291,10 @@ async fn serve_until(
     let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
     let serving = axum::serve(listener, app).with_graceful_shutdown(async move {
         stop.await;
+        eprintln!(
+            "antumbra-mcp: stopping; open requests have {}s to finish",
+            drain.as_secs()
+        );
         let _ = stopping.send(());
     });
     let drained = async move {
@@ -298,10 +302,6 @@ async fn serve_until(
         if stopped.await.is_err() {
             std::future::pending::<()>().await;
         }
-        eprintln!(
-            "antumbra-mcp: stopping; open requests have {}s to finish",
-            drain.as_secs()
-        );
         tokio::time::sleep(drain).await;
     };
     tokio::select! {
