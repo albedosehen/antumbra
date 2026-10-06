@@ -10,6 +10,7 @@
 //! router from the block it is applied to; `tool_router` here joins them.
 
 use super::*;
+use tracing::Instrument as _;
 
 /// The learned router to route with. One the store holds but cannot decode,
 /// as after a rollback to a server older than the router's format, degrades
@@ -134,6 +135,17 @@ impl McpServer {
             .into_iter()
             .map(|t| t.name.to_string())
             .collect()
+    }
+
+    /// Whether `name` is one of this server's tools, profile or not: what
+    /// decides whether a call's span may carry the name it asked for. Read off
+    /// the router once.
+    fn is_tool(name: &str) -> bool {
+        static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> =
+            std::sync::OnceLock::new();
+        NAMES
+            .get_or_init(|| Self::all_tool_names().into_iter().collect())
+            .contains(name)
     }
 
     /// The tools this session advertises: everything, or the profile's subset.
@@ -357,7 +369,29 @@ impl McpServer {
     /// invoke one without an MCP session/handshake. The bound `(tenant, user)` and
     /// the engine ACL apply exactly as they do over `/mcp` -- this is a transport,
     /// not a second authority.
+    ///
+    /// Traced as one tool call ([`crate::telemetry::tool_span`]), inside the
+    /// span of the request that made it.
     pub async fn call_tool(
+        &self,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, ErrorData> {
+        let span =
+            crate::telemetry::tool_span(name, Self::is_tool(name), self.tenant.as_str(), None);
+        let result = self
+            .dispatch(name, arguments)
+            .instrument(span.clone())
+            .await;
+        crate::telemetry::record_outcome(
+            &span,
+            result.as_ref().err().map(crate::telemetry::error_kind),
+        );
+        result
+    }
+
+    /// [`Self::call_tool`]'s dispatch, inside its span.
+    async fn dispatch(
         &self,
         name: &str,
         arguments: serde_json::Value,
@@ -456,15 +490,45 @@ impl ServerHandler for McpServer {
 
     /// JSON-RPC `tools/call` under the session's profile: a tool outside it is
     /// refused before the router sees the request.
+    ///
+    /// Traced as one tool call ([`crate::telemetry::tool_span`]). rmcp runs it
+    /// on the session's task, away from the HTTP request that carried it, so
+    /// the span joins that request's trace through the request parts rmcp
+    /// hands over; over stdio there is no request, and the span stands alone.
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
-        self.check_profile(&request.name)?;
-        self.keep_session().await?;
-        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
-        Self::tool_router().call(tcc).await
+        let parent = context
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<crate::telemetry::RequestTrace>());
+        let span = crate::telemetry::tool_span(
+            &request.name,
+            Self::is_tool(&request.name),
+            self.tenant.as_str(),
+            parent,
+        );
+        let result = async {
+            self.check_profile(&request.name)?;
+            self.keep_session().await?;
+            let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+            Self::tool_router().call(tcc).await
+        }
+        .instrument(span.clone())
+        .await;
+        let failure = match &result {
+            Err(e) => Some(crate::telemetry::error_kind(e)),
+            // A tool that reports its failure in the result rather than as an
+            // error is still a failed call.
+            Ok(rmcp::model::CallToolResponse::Complete(done)) if done.is_error == Some(true) => {
+                Some("tool_error")
+            }
+            Ok(_) => None,
+        };
+        crate::telemetry::record_outcome(&span, failure);
+        result
     }
 
     /// On initialize, record this session's peer under its (tenant, user) identity

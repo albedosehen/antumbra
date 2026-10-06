@@ -48,12 +48,30 @@ async-trait.workspace = true
 # The chunk index's keeper embeds a memory's pieces a few at a time; the tests
 # also read the SSE response body incrementally with it.
 futures = "0.3"
+# Telemetry: dependency logs on stderr beside the server's own lines when
+# RUST_LOG asks for them, and, when OTEL_EXPORTER_OTLP_ENDPOINT is set, a span
+# per HTTP request and per tool call over OTLP/HTTP to that collector. The
+# endpoint is plain HTTP, so no TLS stack comes with the exporter.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"] }
+tracing-opentelemetry = "0.34"
+# Its request spans at INFO rather than its default TRACE: the store turns on
+# tracing's `release_max_level_debug`, which compiles TRACE out of every
+# release build, and with it every request span.
+axum-tracing-opentelemetry = { version = "0.42", features = ["tracing_level_info"] }
 
 [dev-dependencies]
 # The canned GitHub transport and the throwaway App key the receiver's tests drive.
 antumbra-github = { path = "../antumbra-github", features = ["testing"] }
 # `oneshot` to drive the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
+# The in-memory span exporter the telemetry tests read the exported spans from,
+# and the level the request spans are opened at.
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "testing"] }
+tracing-opentelemetry-instrumentation-sdk = "0.42"
 
 [features]
 default = []
