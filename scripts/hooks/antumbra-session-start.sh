@@ -78,6 +78,17 @@ handoffs=$(curl -sS --max-time 5 -X POST "$URL/mcp/call" "${auth[@]}" \
   -d "$(jq -nc --arg host "$HOST_ID" '{tool: "handoffs", arguments: {host: $host}}')" 2>/dev/null \
   | jq -r '.announcement // .result.announcement // empty' 2>/dev/null || true)
 
+# --- this machine, in the user's fabric (ADR-0017) ---------------------------
+# A server registers the machine it runs on, and a laptop talking to a hosted
+# hub runs none, so the session names it: that lists it among the user's devices
+# and marks when it was last seen. Skipped for `local`, the name of a machine
+# nobody named. The answer is not used, and no answer changes nothing.
+if [ "$(printf '%s' "$HOST_ID" | tr '[:upper:]' '[:lower:]')" != "local" ]; then
+  curl -sS --max-time 3 -X POST "$URL/mcp/call" "${auth[@]}" \
+    -d "$(jq -nc --arg host "$HOST_ID" '{tool: "register_device", arguments: {host: $host}}')" \
+    >/dev/null 2>&1 || true
+fi
+
 # --- recall, scoped to here when known --------------------------------------
 args=$(jq -nc --arg repo "$repo" --arg branch "$branch" '
   {query: "standing conventions, project context, and active tasks for this agent", top_k: 12}

@@ -684,6 +684,21 @@ fn finish(
     } else {
         connect_claude(home, antumbra, common, url, workspace, steps)?;
     }
+    // After the settings, so the name read is the one the hooks will report.
+    let settings: Value = std::fs::read_to_string(
+        common
+            .claude_dir
+            .clone()
+            .unwrap_or_else(|| home.join(".claude"))
+            .join("settings.json"),
+    )
+    .ok()
+    .and_then(|t| serde_json::from_str(&t).ok())
+    .unwrap_or(Value::Null);
+    let token = std::fs::read_to_string(antumbra.join("token.txt"))
+        .map(|t| t.trim().to_string())
+        .unwrap_or_default();
+    register_machine(url, &token, &session_host(&settings), steps);
     if !steps.dry_run {
         let mut state = state.clone();
         state["configured_at"] = Value::String(chrono::Utc::now().to_rfc3339());
@@ -905,13 +920,29 @@ fn describe(wired: &settings::Wired) -> String {
 /// One tool call that proves the server is there, takes the token, and can
 /// recall (which also proves its embedder answers).
 fn verify(url: &str, token: &str) -> anyhow::Result<()> {
+    call_tool(
+        url,
+        token,
+        "recall_memories",
+        json!({ "query": "antumbra setup", "top_k": 1 }),
+        "recall",
+    )
+    .map(|_| ())
+}
+
+/// One tool call through the server's REST shim, its answer on success. `what`
+/// names the call in the error the server's refusal becomes.
+fn call_tool(
+    url: &str,
+    token: &str,
+    tool: &str,
+    arguments: Value,
+    what: &str,
+) -> anyhow::Result<Value> {
     let mut response = agent(Duration::from_secs(30))
         .post(&format!("{url}/mcp/call"))
         .header("authorization", &format!("Bearer {token}"))
-        .send_json(json!({
-            "tool": "recall_memories",
-            "arguments": { "query": "antumbra setup", "top_k": 1 }
-        }))
+        .send_json(json!({ "tool": tool, "arguments": arguments }))
         .map_err(|e| anyhow::anyhow!("could not reach {url}: {e}"))?;
     let status = response.status();
     let body: Value = response.body_mut().read_json().unwrap_or(Value::Null);
@@ -922,7 +953,7 @@ fn verify(url: &str, token: &str) -> anyhow::Result<()> {
     }
     if let Some(said) = body.get("error") {
         anyhow::bail!(
-            "recall failed: {}",
+            "{what} failed: {}",
             said.as_str()
                 .map_or_else(|| said.to_string(), str::to_string)
         );
@@ -930,7 +961,56 @@ fn verify(url: &str, token: &str) -> anyhow::Result<()> {
     if !status.is_success() {
         anyhow::bail!("the server at {url} answered {status}");
     }
-    Ok(())
+    Ok(body)
+}
+
+/// The name this machine's sessions report, which the hooks read from
+/// `ANTUMBRA_HOST_ID`: the one Claude Code's settings give them, else this
+/// process's own, else the one setup writes when neither says.
+fn session_host(settings: &Value) -> String {
+    let named = |h: &str| Some(h.trim().to_string()).filter(|h| !h.is_empty());
+    settings
+        .pointer("/env/ANTUMBRA_HOST_ID")
+        .and_then(Value::as_str)
+        .and_then(named)
+        .or_else(|| {
+            std::env::var("ANTUMBRA_HOST_ID")
+                .ok()
+                .and_then(|h| named(&h))
+        })
+        .unwrap_or_else(host_id)
+}
+
+/// Name this machine in the user's fabric, as every session start does, so it
+/// is listed from now rather than from its first session. A server older than
+/// device registration does not know the tool; that is a warning, not a
+/// failed setup, because the machine's sessions work either way.
+fn register_machine(url: &str, token: &str, host: &str, steps: &Steps) {
+    if steps.dry_run {
+        steps.would(format!("list this machine among your devices as {host}"));
+        return;
+    }
+    match call_tool(
+        url,
+        token,
+        "register_device",
+        json!({ "host": host }),
+        "registering this machine",
+    ) {
+        Ok(said) if said["registered"] == true => steps.ok(format!(
+            "this machine is listed among your devices as {} (a {} node)",
+            said["host"].as_str().unwrap_or(host),
+            said["role"].as_str().unwrap_or("memory")
+        )),
+        Ok(said) => steps.info(format!(
+            "{}: {}",
+            said["host"].as_str().unwrap_or(host),
+            said["note"].as_str().unwrap_or("left as it is")
+        )),
+        Err(e) => steps.warn(format!(
+            "this machine is not listed among your devices yet ({e}); its sessions name it once the server can"
+        )),
+    }
 }
 
 // ---------------------------------------------------------------- check
@@ -963,6 +1043,7 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
     let token = std::fs::read_to_string(&token_path)
         .map(|t| t.trim().to_string())
         .unwrap_or_default();
+    let mut reachable = false;
     if token.is_empty() {
         fail(
             format!("no token in {}", token_path.display()),
@@ -971,7 +1052,10 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
     } else {
         ok(format!("token in {}", token_path.display()));
         match verify(&url, &token) {
-            Ok(()) => ok("the server accepts the token, and recall works".into()),
+            Ok(()) => {
+                reachable = true;
+                ok("the server accepts the token, and recall works".into())
+            }
             Err(e) => fail(
                 format!("{e}"),
                 if mode == "local" {
@@ -1092,6 +1176,39 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         None => println!(
             "  ! the claude command is not on your PATH, so the MCP registration was not checked"
         ),
+    }
+    if reachable {
+        let host = session_host(&settings).to_lowercase();
+        match call_tool(&url, &token, "devices", json!({}), "listing your devices") {
+            Ok(said) => {
+                let listed = said["devices"].as_array().and_then(|all| {
+                    all.iter().find(|d| {
+                        d["host"]
+                            .as_str()
+                            .is_some_and(|h| h.trim().to_lowercase() == host)
+                    })
+                });
+                match listed {
+                    Some(d) => ok(format!(
+                        "this machine is listed among your devices as {host} ({} node, last seen {})",
+                        d["role"].as_str().unwrap_or("?"),
+                        d["last_seen"].as_str().unwrap_or("?")
+                    )),
+                    None => fail(
+                        format!("this machine ({host}) is not listed among your devices"),
+                        "run setup again, or start a session: each one names it".into(),
+                    ),
+                }
+            }
+            // A server from before device registration: nothing to check yet.
+            Err(e)
+                if e.to_string().contains("unknown tool")
+                    || e.to_string().contains("not in this server's tool profile") =>
+            {
+                println!("  ! the server does not list devices yet (it is older than device registration)")
+            }
+            Err(e) => fail(format!("{e}"), "check the server".into()),
+        }
     }
 
     if problems == 0 {
@@ -1271,6 +1388,18 @@ mod tests {
             cmd.ends_with("\"/home/a b/.antumbra/hooks/antumbra-capture.sh\""),
             "{cmd}"
         );
+    }
+
+    #[test]
+    fn the_machine_is_registered_under_the_name_its_hooks_report() {
+        // A name pinned in the settings before setup is the one the hooks
+        // report, so it is the one registered.
+        let pinned = json!({ "env": { "ANTUMBRA_HOST_ID": " mac " } });
+        assert_eq!(session_host(&pinned), "mac");
+        // A blank one names nothing and falls through to a name that is there.
+        let blank = json!({ "env": { "ANTUMBRA_HOST_ID": "  " } });
+        assert!(!session_host(&blank).trim().is_empty());
+        assert!(!session_host(&Value::Null).trim().is_empty());
     }
 
     #[test]

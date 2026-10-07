@@ -103,6 +103,7 @@ Say this if they ask:
 - `~/.antumbra/`: `token.txt` (only they can read it), `hooks/` (the scripts Claude Code runs), `setup.json` (what was set up).
 - `~/.claude/settings.json`: hooks on SessionStart, UserPromptSubmit, Stop and PreCompact; `ANTUMBRA_URL`, `ANTUMBRA_WORKSPACE_ID` and (when absent) `ANTUMBRA_HOST_ID` under `env`; `autoMemoryEnabled: false` when the file did not say (pass `--keep-auto-memory` to skip). A backup sits beside it, `settings.json.antumbra-backup-<time>`.
 - Claude Code's MCP servers: `antumbra`, user scope, reading the token from its file on each connection.
+- The server: this machine is listed among their devices under its `ANTUMBRA_HOST_ID`, as a memory node. Each session start names it again, which keeps "last seen" current. If they want a particular name, set `ANTUMBRA_HOST_ID` in the settings' `env` before running setup, since setup keeps a name that is already there.
 - Local only: `docker/.env` in the clone, the containers `antumbra-surrealdb` and `antumbra-mcp` (they restart with Docker), and the database in `~/.antumbra/surrealdb`.
 
 ## Undo

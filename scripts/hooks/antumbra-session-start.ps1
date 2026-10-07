@@ -110,6 +110,18 @@ try {
     if ($said) { $handoffs = "$said`n`n" }
 } catch { $handoffs = '' }
 
+# --- this machine, in the user's fabric (ADR-0017) ---------------------------
+# A server registers the machine it runs on, and a laptop talking to a hosted
+# hub runs none, so the session names it: that lists it among the user's devices
+# and marks when it was last seen. Skipped for `local`, the name of a machine
+# nobody named. The answer is not used, and no answer changes nothing.
+if ($hostId.Trim() -ne 'local') {
+    try {
+        $payload = @{ tool = 'register_device'; arguments = @{ host = $hostId } } | ConvertTo-Json -Compress -Depth 5
+        Invoke-RestMethod -Method Post -Uri "$url/mcp/call" -Headers $headers -Body $payload -TimeoutSec 3 -ErrorAction Stop | Out-Null
+    } catch { }
+}
+
 # --- recall, scoped to here when known --------------------------------------
 $mems = @()
 try {

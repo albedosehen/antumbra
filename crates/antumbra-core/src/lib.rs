@@ -58,7 +58,7 @@ pub use compartment::{Capability, Compartment, Grant, Origin};
 pub use contribution::{BaselineRecord, ContributionRecord, RoutingOutcome};
 pub use device::{
     backend_can_train, genesis_placement, role_for, this_host, DeviceProfile, DeviceRole,
-    GenesisPlacement, GENESIS_MIN_VRAM_MIB,
+    GenesisPlacement, CLIENT_BACKEND, GENESIS_MIN_VRAM_MIB,
 };
 pub use document::{chunk_text, DocumentChunk};
 pub use evaluation::{EvalStatus, EvaluationRun, SubjectKind};

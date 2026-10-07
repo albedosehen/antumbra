@@ -16,8 +16,11 @@ check() { # description, then a command that must succeed
 }
 
 mkdir -p "$work/bin"
+# Every call answers with the response file, and its arguments go to CURL_LOG,
+# one line a call, so a test can say which tools the hook asked for.
 cat >"$work/bin/curl" <<'STUB'
 #!/usr/bin/env bash
+[ -n "${CURL_LOG:-}" ] && printf '%s\n' "$*" >>"$CURL_LOG"
 cat "$FAKE_RESPONSE"
 STUB
 # `claude reanchor` writes its arguments, and whether it was handed the token,
@@ -86,6 +89,17 @@ first_at=$(grep -n 'first small' <<<"$ctx" | head -1 | cut -d: -f1)
 check "puts it before any memory" test "${handoff_at:-999}" -lt "${first_at:-0}"
 ctx=$(run "$work/small.json" | context)
 check "says nothing of handoffs when none wait" bash -c '! grep -q "handoff" <<<"$1"' _ "$ctx"
+
+echo "naming this machine"
+calls="$work/calls.log"
+: >"$calls"
+ctx=$(run "$work/small.json" CURL_LOG="$calls" ANTUMBRA_HOST_ID=mac | context)
+check "registers it under its name" grep -qF '{"tool":"register_device","arguments":{"host":"mac"}}' "$calls"
+check "still answers" grep -q 'first small' <<<"$ctx"
+: >"$calls"
+run "$work/small.json" CURL_LOG="$calls" ANTUMBRA_HOST_ID= >/dev/null
+check "registers nothing when the machine has no name" bash -c '! grep -q register_device "$1"' _ "$calls"
+check "still asks for its handoffs" grep -qF '"tool":"handoffs"' "$calls"
 
 echo "no antumbra on the path"
 ctx=$(run "$work/small.json" ANTUMBRA_BIN=antumbra-is-not-installed | context)

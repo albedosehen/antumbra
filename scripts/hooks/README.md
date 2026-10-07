@@ -23,7 +23,7 @@ Hooks talk to a running Antumbra **MCP HTTP surface**, either a local one you st
 ANTUMBRA_URL=http://127.0.0.1:8081     # the antumbra-mcp engine
 ANTUMBRA_WORKSPACE_ID=<workspace>      # your tenant/workspace scope
 ANTUMBRA_TOKEN=<bearer-jwt>            # or leave unset: every hook reads ~/.antumbra/token.txt (ANTUMBRA_TOKEN_FILE)
-ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes
+ANTUMBRA_HOST_ID=<this-device>         # provenance stamped on what it writes, and the name the machine is listed under
 ANTUMBRA_PENALIZE_ORPHANS=0            # 1: bootstrap also penalizes memories whose branch is gone
 ANTUMBRA_TOOLS=agent                   # on the SERVER: advertise only the eight tools a coding agent needs
 ANTUMBRA_BIN=antumbra                  # the CLI the bootstrap asks for the sovereign-mode block and runs to report merges (optional)
@@ -141,6 +141,8 @@ Claude Code caps a hook's context at 10,000 characters. Past the cap the agent i
 `scripts/hooks/tests/session-start.sh` (bash, jq) and `scripts/hooks/tests/session-start.ps1` (pwsh) hold both siblings to this with no server and no `antumbra` installed.
 
 Handoffs (R-7) come right after the first line: the bootstrap asks `handoffs` for `ANTUMBRA_HOST_ID` and, when something waits for this machine, places the server's count-and-titles lines ahead of everything recalled, a few hundred characters of the budget. Nothing waiting, or no answer, adds nothing.
+
+The bootstrap then names the machine to the server with `register_device` (ADR-0017), so it is listed among the user's devices, and when it was last seen, even when no server runs on it. It is skipped when `ANTUMBRA_HOST_ID` is unset (the `local` fallback names no machine in particular). The answer is not used, and a server that does not know the tool changes nothing.
 
 ## Git provenance: stale memories are visible, not silently wrong
 
