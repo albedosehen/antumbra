@@ -21,6 +21,9 @@ thiserror.workspace = true
 tokio.workspace = true
 # Polls the surql-rs LiveQuery stream for the change-feed watcher (R-2).
 futures = "0.3"
+# Spans around recall's retrieval legs, exported by antumbra-mcp when it
+# traces (see its `telemetry::TRACE_FILTER`). No subscriber here.
+tracing = "0.1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

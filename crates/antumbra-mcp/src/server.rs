@@ -15,6 +15,7 @@ use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::schemars;
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::{Deserialize, Serialize};
+use tracing::Instrument as _;
 
 use antumbra_core::ports::{ActRequest, Embedder};
 use antumbra_core::{
@@ -389,7 +390,6 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<RecallParams>,
     ) -> Result<Json<MemoriesOut>, ErrorData> {
-        let q = self.embedder.embed(&p.query).await.map_err(err)?;
         let net = p.network.as_deref().map(parse_network);
         let k = p.top_k.unwrap_or(5) as usize;
         // Hybrid recall: dense (HNSW) + sparse (BM25 full-text) fused by RRF, so
@@ -414,11 +414,26 @@ impl McpServer {
         // as well as for the whole, since its blended embedding can land near
         // none of the memories each part is about. The reranker and the floor
         // still read the whole prompt.
-        let mut queries = vec![(p.query.clone(), q.clone())];
-        for part in antumbra_core::query::parts(&p.query) {
-            let vector = self.embedder.embed(&part).await.map_err(err)?;
-            queries.push((part, vector));
+        //
+        // Each stage from here runs in a span of its own under the tool call's
+        // (`telemetry::recall_stage`), so a slow recall says where its time
+        // went: embedding, the store's legs, the reranker or the floor.
+        let parts = antumbra_core::query::parts(&p.query);
+        let embedded = 1 + parts.len();
+        let queries = async {
+            let mut queries = vec![(
+                p.query.clone(),
+                self.embedder.embed(&p.query).await.map_err(err)?,
+            )];
+            for part in parts {
+                let vector = self.embedder.embed(&part).await.map_err(err)?;
+                queries.push((part, vector));
+            }
+            Ok::<_, ErrorData>(queries)
         }
+        .instrument(crate::telemetry::recall_stage("recall embed", embedded))
+        .await?;
+        let q = queries[0].1.clone();
         // The dense leg ranks by raw cosine, not calibrated against probes
         // (`antumbra_core::calibrate`). Measured on 2026-10-04 over 2,000 of the
         // user's memories with the chunk index, calibrating cost recall@10 on
@@ -426,16 +441,11 @@ impl McpServer {
         // from 0.820 to 0.605 for 400 fragments: it inflates the short pieces.
         // The stubs it was built to demote are 25 of this store's 6,422
         // memories.
-        let hits = memory::recall_hybrid_many(
-            &self.store,
-            &self.tenant,
-            &queries,
-            self.recall_pool(k, wide),
-            net,
-            &[],
-        )
-        .await
-        .map_err(err)?;
+        let pool = self.recall_pool(k, wide);
+        let hits = memory::recall_hybrid_many(&self.store, &self.tenant, &queries, pool, net, &[])
+            .instrument(crate::telemetry::recall_stage("recall retrieve", pool))
+            .await
+            .map_err(err)?;
         // Before the reranker, which then reads only what can be returned.
         let hits: Vec<Memory> = match &host {
             Some(h) => hits
@@ -453,6 +463,7 @@ impl McpServer {
         } else {
             k
         };
+        let candidates = hits.len();
         let hits = self
             .rerank_to_k(
                 &p.query,
@@ -461,6 +472,7 @@ impl McpServer {
                 |m| m.id.as_str().to_string(),
                 |m| m.content.clone(),
             )
+            .instrument(crate::telemetry::recall_stage("recall rerank", candidates))
             .await;
         // Scope each hit against where the caller is (repo + branch): a memory
         // learned on another branch or in another repo is demoted below the
@@ -510,7 +522,9 @@ impl McpServer {
         let memories = match &self.decider {
             Some(decider) => {
                 let floor = p.floor.unwrap_or(DEFAULT_RELEVANCE_FLOOR).clamp(0.0, 1.0);
+                let candidates = memories.len();
                 self.above_floor(decider.as_ref(), &p.query, memories, floor)
+                    .instrument(crate::telemetry::recall_stage("recall floor", candidates))
                     .await
             }
             None => memories,

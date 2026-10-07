@@ -10,7 +10,6 @@
 //! router from the block it is applied to; `tool_router` here joins them.
 
 use super::*;
-use tracing::Instrument as _;
 
 /// The learned router to route with. One the store holds but cannot decode,
 /// as after a rollback to a server older than the router's format, degrades

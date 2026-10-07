@@ -11,9 +11,10 @@
 //! the OpenTelemetry specification reads it.
 //!
 //! Two kinds of span are exported: one per HTTP request (see the router in
-//! [`crate::http`]) and one per tool call ([`tool_span`]). Neither carries
-//! what the request was about: no query, memory or document text, no token,
-//! no request body. A tool call's span says which tool ran, in which
+//! [`crate::http`]) and one per tool call ([`tool_span`]), and under a recall,
+//! one per stage ([`recall_stage`]) and per retrieval leg. None carries what
+//! the request was about: no query, memory or document text, no token, no
+//! request body. A tool call's span says which tool ran, in which
 //! workspace, and whether it failed and how, by kind and never by message,
 //! since a message can quote what the caller sent.
 
@@ -43,11 +44,13 @@ const LOG_FILTER: &str = "off";
 
 /// What reaches the exporter: the HTTP server spans, which
 /// axum-tracing-opentelemetry opens under the `otel::tracing` target (at
-/// INFO, see the manifest), and this crate's tool spans, and nothing else.
-/// Not even the dependencies' warnings: an event inside a span is exported
-/// with it, and what rmcp and the store say about a failed request can quote
-/// the request.
-pub(crate) const TRACE_FILTER: &str = "off,otel::tracing=info,antumbra_mcp=info";
+/// INFO, see the manifest), this crate's tool and recall-stage spans, and the
+/// store's spans around recall's retrieval legs (`antumbra_store::recall`,
+/// a leg name and a pool size each), and nothing else. Not even the
+/// dependencies' warnings: an event inside a span is exported with it, and
+/// what rmcp and the store say about a failed request can quote the request.
+pub(crate) const TRACE_FILTER: &str =
+    "off,otel::tracing=info,antumbra_mcp=info,antumbra_store::recall=info";
 
 /// The tracer provider, when spans are exported. Hold it for the life of the
 /// process: dropping it flushes the spans still queued and stops the exporter.
@@ -245,6 +248,20 @@ pub(crate) fn tool_span(
         let _ = span.set_parent(cx.clone());
     }
     span
+}
+
+/// The span one stage of a recall runs in, under its tool call's: `recall
+/// embed` (the prompt and its parts), `recall retrieve` (the pool drawn from
+/// the store, whose legs have spans of their own), `recall rerank` (the
+/// candidates the cross-encoder reads) or `recall floor` (the candidates the
+/// relevance floor judges). `items` is how many the stage handled: a count,
+/// never what they say.
+pub(crate) fn recall_stage(stage: &'static str, items: usize) -> tracing::Span {
+    tracing::info_span!(
+        "recall stage",
+        otel.name = stage,
+        antumbra.recall.items = items,
+    )
 }
 
 /// Records how a tool call ended on its span: `ok`, or `error` with the

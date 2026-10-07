@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::Instrument as _;
 
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
@@ -471,6 +472,11 @@ pub async fn recall(
         .collect()
 }
 
+/// The target of the spans around [`recall_hybrid`]'s legs. antumbra-mcp's
+/// trace filter lets it through and nothing else from this crate, so these
+/// spans are what it exports of the store.
+const RECALL_SPAN_TARGET: &str = "antumbra_store::recall";
+
 /// Hybrid recall for several queries at once, fused by rank: the whole of a
 /// prompt and each part of one that asks for more than one thing
 /// (`antumbra_core::query::parts`). Each query runs as [`recall_hybrid`] does,
@@ -535,13 +541,24 @@ pub async fn recall_hybrid(
     // room to reorder before truncating. The same sizing the dense leg uses
     // against its own residual filters, for the same reason.
     let pool = candidate_pool(k);
+    // Each read runs in a span of its own under the caller's, so a slow recall
+    // says which leg took the time. The leg and the pool size, never the query.
+    let leg = |name: &'static str| {
+        tracing::info_span!(
+            target: RECALL_SPAN_TARGET,
+            "recall leg",
+            otel.name = name,
+            antumbra.recall.pool = pool,
+        )
+    };
 
     // The three legs read independently of one another, so they run at once:
     // a recall costs its slowest leg rather than the sum of them.
     let (dense, chunk_leg, sparse) = futures::join!(
-        recall(store, tenant, query_vec, pool, network),
-        crate::repo::memory_chunk::nearest(store, tenant, query_vec, pool, network),
-        sparse_recall(store, tenant, query_text, pool, network),
+        recall(store, tenant, query_vec, pool, network).instrument(leg("recall dense")),
+        crate::repo::memory_chunk::nearest(store, tenant, query_vec, pool, network)
+            .instrument(leg("recall chunks")),
+        sparse_recall(store, tenant, query_text, pool, network).instrument(leg("recall lexical")),
     );
     let mut dense = dense?;
     // With probes, re-rank the pool the index returned by calibrated score, here
@@ -566,7 +583,9 @@ pub async fn recall_hybrid(
     let dense = match chunk_leg {
         Ok(pieces) if !pieces.is_empty() => {
             let score = |v: &[f32]| calibrated_score(query_vec, v, probes);
-            best_of(store, tenant, dense, pieces, score, pool).await?
+            best_of(store, tenant, dense, pieces, score, pool)
+                .instrument(leg("recall chunk fetch"))
+                .await?
         }
         Ok(_) => dense,
         Err(e) => {
