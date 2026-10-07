@@ -38,8 +38,16 @@ pub struct McpServer {
     tenant: TenantId,
     /// The user this session acts as (compartment owner / grantor).
     user: UserId,
-    /// The host/device, stamped as provenance on every memory written.
+    /// The machine this server runs on. It stands in for the caller's machine
+    /// only when a call does not name one (`device`); on a hosted server it is
+    /// the hub's name, which says nothing about the device a session runs on.
     host: String,
+    /// The machine the current call came from, as its client named it
+    /// (`X-Antumbra-Host`, #193): what that call writes is stamped as written
+    /// from there. Set on a per-call copy ([`McpServer::called_from`]), never on
+    /// the server cached per identity, because two machines can share an
+    /// identity and its token. `None` = the call named no machine.
+    device: Option<String>,
     /// The compartment new memories land in when none is named (the session's
     /// fresh space; engine-isolated to this user until shared).
     default_compartment: CompartmentId,
@@ -249,6 +257,7 @@ mod listing;
 mod params;
 mod provenance;
 mod rerank_cache;
+pub(crate) use self::device::machine_name;
 use self::params::*;
 use rerank_cache::RerankCache;
 
@@ -278,7 +287,7 @@ impl McpServer {
         )
         .with_embedding(embedding)
         .in_compartment(compartment)
-        .by(self.user.clone(), self.host.clone());
+        .by(self.user.clone(), self.device());
         let mut evidence = p.evidence.unwrap_or_default();
         if let Some(prov) = p.provenance {
             evidence.push(anchor_from(prov)?.to_evidence());
@@ -315,10 +324,11 @@ impl McpServer {
     }
 
     /// How many candidates to pull from hybrid recall before reranking: a wide
-    /// pool when the cross-encoder is configured (so it has room to reorder),
-    /// else just the caller's `k`.
-    fn recall_pool(&self, k: usize, scoped: bool) -> usize {
-        if self.reranker.is_some() || scoped {
+    /// pool when the cross-encoder is configured (so it has room to reorder) or
+    /// the caller narrowed the answer (by scope, or to one machine), else just
+    /// the caller's `k`.
+    fn recall_pool(&self, k: usize, wide: bool) -> usize {
+        if self.reranker.is_some() || wide {
             k.max(1).saturating_mul(10).clamp(20, RERANK_POOL_MAX)
         } else {
             k
@@ -395,6 +405,11 @@ impl McpServer {
         // never reached the pool. Retrieval has to give them a chance to compete
         // before the ordering can prefer them.
         let scoped = p.repo.is_some() || p.branch.is_some();
+        // One machine's memories are filtered out of the pool, so the pool is
+        // drawn wide for the same reason scoping draws it wide: what the filter
+        // drops would otherwise leave fewer than k.
+        let host = listing::host_filter(p.host.as_deref());
+        let wide = scoped || host.is_some();
         // A prompt that asks for more than one thing is retrieved for each part
         // as well as for the whole, since its blended embedding can land near
         // none of the memories each part is about. The reranker and the floor
@@ -415,12 +430,20 @@ impl McpServer {
             &self.store,
             &self.tenant,
             &queries,
-            self.recall_pool(k, scoped),
+            self.recall_pool(k, wide),
             net,
             &[],
         )
         .await
         .map_err(err)?;
+        // Before the reranker, which then reads only what can be returned.
+        let hits: Vec<Memory> = match &host {
+            Some(h) => hits
+                .into_iter()
+                .filter(|m| listing::written_from(m, h))
+                .collect(),
+            None => hits,
+        };
         // Truncate to k only once scope has had its say: when scoping is on, the
         // wide pool is carried through the rerank so `demote_out_of_scope` can
         // still promote an in-scope memory that dense+BM25 ranked low -- otherwise

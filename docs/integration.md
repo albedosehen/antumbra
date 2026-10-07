@@ -76,6 +76,8 @@ ANTUMBRA_API_KEY=<key>                 # for the hosted/networked surface
 ANTUMBRA_HOST_ID=<this-device>         # provenance stamp on what it writes
 ```
 
+The machine's name reaches the server as an `X-Antumbra-Host` header on every MCP call, which the `antumbra-mcp-headers` helper adds from `ANTUMBRA_HOST_ID`. The server stamps each write with it per request, so two machines sharing one token still stamp their own names. A client that sends no name gets the server's own name, which on a hosted server is the hub's. Reads return it as `author_host`, and `recall_memories` and `list_memories` filter by it with `host`.
+
 Start the server with `--tools agent` (or `ANTUMBRA_TOOLS=agent`) for a coding agent: it advertises and serves only `recall_memories`, `store_memory`, `reinforce_memory`, `penalize_memory`, `recall_documents`, `ingest_document`, `route`, and `answer`. The compartment, graph, and operator tools stay behind the CLI and console, and the agent's context carries eight tool descriptions instead of twenty. `--tools agent,population` extends the profile; `all` is the default; an unknown name refuses at startup.
 
 ---

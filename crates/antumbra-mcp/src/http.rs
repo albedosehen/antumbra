@@ -707,6 +707,29 @@ fn bad_request(msg: &str) -> Response {
         .into_response()
 }
 
+/// The header a client names its machine in (#193): its `ANTUMBRA_HOST_ID`,
+/// which the `antumbra-mcp-headers` helper sends on the agent's connection.
+/// Without it the server cannot tell two machines apart: they may share an
+/// identity and a token, and a hosted server's own name is the hub's.
+pub(crate) const DEVICE_HEADER: &str = "x-antumbra-host";
+
+/// The machine a request names, checked and normalized
+/// ([`crate::server::machine_name`]), or `None` when it names none. A value
+/// that is not a machine's name is said on stderr and stamps nothing: the
+/// header is provenance, so getting it wrong costs the stamp and never the
+/// call.
+pub(crate) fn caller_device(headers: &axum::http::HeaderMap) -> Option<String> {
+    let raw = headers.get(DEVICE_HEADER)?;
+    let named = raw.to_str().ok().and_then(crate::server::machine_name);
+    if named.is_none() {
+        eprintln!(
+            "antumbra-mcp: ignored {DEVICE_HEADER} {raw:?}: not one machine's name; \
+             the server's own name stamps this call"
+        );
+    }
+    named
+}
+
 /// The body of a `POST /mcp/call`: a tool name and its arguments.
 #[derive(serde::Deserialize)]
 struct RestCall {
@@ -752,6 +775,9 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
             return unauthorized();
         }
     };
+    // Read per request: the identity's server is shared by every machine that
+    // holds its token.
+    let device = caller_device(req.headers());
 
     let body = match axum::body::to_bytes(req.into_body(), 64 * 1024).await {
         Ok(b) => b,
@@ -774,6 +800,10 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
             );
             return internal_error();
         }
+    };
+    let mcp = match device {
+        Some(device) => mcp.called_from(device),
+        None => mcp,
     };
     // Bind the scoped connection, then dispatch. Embedded: lock + signin the
     // shared connection, held across the call. Remote: a no-op (the identity's

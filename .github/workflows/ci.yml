@@ -102,6 +102,10 @@ jobs:
         run: bash scripts/hooks/tests/prompt-recall.sh
       - name: prompt-recall recalls for a prompt, not for a task notification (.ps1)
         run: pwsh -NoProfile -File scripts/hooks/tests/prompt-recall.ps1
+      - name: mcp-headers sends the bearer and names this machine (.sh)
+        run: bash scripts/hooks/tests/mcp-headers.sh
+      - name: mcp-headers sends the bearer and names this machine (.ps1)
+        run: pwsh -NoProfile -File scripts/hooks/tests/mcp-headers.ps1
 
   audit:
     name: cargo audit (advisories)

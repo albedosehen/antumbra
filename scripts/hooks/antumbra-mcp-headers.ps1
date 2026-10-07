@@ -8,6 +8,11 @@
 # Claude Code runs the helper when it connects and sends whatever headers it
 # prints. A missing or empty token file exits non-zero, which Claude Code reports
 # as a failed connection, rather than sending a header that cannot work.
+#
+# With ANTUMBRA_HOST_ID set (setup writes it into the settings' env, which the
+# helper inherits), it also prints {"X-Antumbra-Host": "<name>"}, so what this
+# machine's agent writes is stamped as written from here rather than from the
+# server it reaches. Unset, the server stamps its own name.
 param()
 
 $file = if ($env:ANTUMBRA_TOKEN_FILE) { $env:ANTUMBRA_TOKEN_FILE }
@@ -18,4 +23,8 @@ if (-not $token) {
     [Console]::Error.WriteLine("antumbra-mcp-headers: no token in $file")
     exit 1
 }
-@{ Authorization = "Bearer $token" } | ConvertTo-Json -Compress
+$headers = [ordered]@{ Authorization = "Bearer $token" }
+# Not $host: PowerShell reserves it.
+$hostId = if ($env:ANTUMBRA_HOST_ID) { $env:ANTUMBRA_HOST_ID.Trim() } else { '' }
+if ($hostId) { $headers['X-Antumbra-Host'] = $hostId }
+$headers | ConvertTo-Json -Compress

@@ -24,6 +24,7 @@ async fn seeded() -> McpServer {
 
 async fn recall(s: &McpServer, query: &str, floor: Option<f32>) -> MemoriesOut {
     s.recall_memories(Parameters(RecallParams {
+        host: None,
         repo: None,
         branch: None,
         query: query.into(),

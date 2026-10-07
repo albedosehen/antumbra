@@ -313,6 +313,7 @@ mod tests {
     /// The scope the one memory recalled for "outbox" has, seen from `main`.
     async fn scope_from_main(s: &McpServer) -> Option<String> {
         s.recall_memories(Parameters(RecallParams {
+            host: None,
             repo: Some(REPO.into()),
             branch: Some("main".into()),
             query: "outbox".into(),

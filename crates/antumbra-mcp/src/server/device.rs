@@ -19,6 +19,27 @@ use antumbra_store::repo::device as store_device;
 /// machine says it, so a row for it would be one row standing for all of them.
 const UNNAMED: &str = "local";
 
+/// The longest name a client may give its machine. A host name is at most 253
+/// characters; this leaves room for one a person chose and refuses a header
+/// that is something else.
+const MAX_NAME_CHARS: usize = 128;
+
+/// `raw` as the name of one machine, normalized as handoffs compare names
+/// (trimmed, lowercased), or `None` when it names no machine in particular
+/// (blank, `any`, the unnamed `local`) or is not a name (too long, or holding a
+/// control character).
+///
+/// What a client sends in `X-Antumbra-Host` passes through this before
+/// anything is stamped with it (#193). The name is provenance, not
+/// authorization: a client can only say which of its own identity's machines
+/// it is, so a refused name costs the stamp, never the call.
+pub(crate) fn machine_name(raw: &str) -> Option<String> {
+    let name = handoff::normalize_host(raw);
+    let names_one = name != ANY && name != UNNAMED;
+    let is_name = name.chars().count() <= MAX_NAME_CHARS && !name.chars().any(char::is_control);
+    (names_one && is_name).then_some(name)
+}
+
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct RegisterDeviceParams {
     /// The machine this session runs on, by host name: the name its handoffs
@@ -65,6 +86,14 @@ pub(super) struct DevicesOut {
     /// The machine that trains for you, when one of them can.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) trainer: Option<String>,
+    /// The machine this call came from, as what this session writes is
+    /// stamped (`author_host` on a memory): the name its client sent in
+    /// `X-Antumbra-Host`, else this server's own.
+    pub(super) this_device: String,
+    /// Whether the client named it. False means the server's own name stands
+    /// in: right for a server on the session's own machine, and the hub's name
+    /// for every machine that reaches a hosted server without naming itself.
+    pub(super) named_by_client: bool,
 }
 
 #[tool_router(router = device_router, vis = "pub(super)")]
@@ -136,7 +165,7 @@ impl McpServer {
 
     /// The machines in your fabric.
     #[tool(
-        description = "List your machines: every one registered in your fabric, by host name, with its role (memory, or genesis for one that can train), what it reported, and when it was last seen, most recent first. These are the names handoffs are addressed to."
+        description = "List your machines: every one registered in your fabric, by host name, with its role (memory, or genesis for one that can train), what it reported, and when it was last seen, most recent first. These are the names handoffs are addressed to, and the names list_memories and recall_memories filter by `host`. Also says which machine this session's writes are stamped with (this_device) and whether its client named it."
     )]
     pub(super) async fn devices(&self) -> Result<Json<DevicesOut>, ErrorData> {
         let mine = store_device::list_for_user(&self.store, &self.tenant, &self.user)
@@ -155,6 +184,11 @@ impl McpServer {
                 last_seen: d.updated_at.to_rfc3339(),
             })
             .collect();
-        Ok(Json(DevicesOut { devices, trainer }))
+        Ok(Json(DevicesOut {
+            devices,
+            trainer,
+            this_device: self.device(),
+            named_by_client: self.device.is_some(),
+        }))
     }
 }

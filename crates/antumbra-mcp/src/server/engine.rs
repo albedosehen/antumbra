@@ -48,6 +48,7 @@ impl McpServer {
             tenant,
             user,
             host,
+            device: None,
             default_compartment,
             auto_propose: None,
             serve,
@@ -59,6 +60,25 @@ impl McpServer {
             session: None,
             decider: None,
         }
+    }
+
+    /// This server for one call from `device`, a machine name already checked
+    /// by [`super::machine_name`]: what the call writes is stamped as written
+    /// from there (#193). A copy, so the server cached per identity keeps no
+    /// device of its own: two machines can share an identity and its token,
+    /// and each call has to say which one it is. A copy is cheap; everything
+    /// heavy in the server is shared behind an `Arc` or a connection handle.
+    #[must_use]
+    pub fn called_from(&self, device: String) -> Self {
+        let mut call = self.clone();
+        call.device = Some(device);
+        call
+    }
+
+    /// The machine the current call came from, normalized as host names are
+    /// compared: the one its client named, else this server's own.
+    pub(super) fn device(&self) -> String {
+        antumbra_core::handoff::normalize_host(self.device.as_deref().unwrap_or(&self.host))
     }
 
     /// Give recall a relevance floor (ADR-0024 D-2, closing ADR-0023 B-2).
@@ -502,15 +522,22 @@ impl ServerHandler for McpServer {
     /// on the session's task, away from the HTTP request that carried it, so
     /// the span joins that request's trace through the request parts rmcp
     /// hands over; over stdio there is no request, and the span stands alone.
+    ///
+    /// The same parts carry the machine the request names
+    /// (`X-Antumbra-Host`), read here for each call rather than once for the
+    /// session, so the call runs on a copy of this server that stamps it.
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
-        let parent = context
-            .extensions
-            .get::<axum::http::request::Parts>()
-            .and_then(|parts| parts.extensions.get::<crate::telemetry::RequestTrace>());
+        let parts = context.extensions.get::<axum::http::request::Parts>();
+        let parent =
+            parts.and_then(|parts| parts.extensions.get::<crate::telemetry::RequestTrace>());
+        let called_from = parts
+            .and_then(|parts| crate::http::caller_device(&parts.headers))
+            .map(|device| self.called_from(device));
+        let server = called_from.as_ref().unwrap_or(self);
         let span = crate::telemetry::tool_span(
             &request.name,
             Self::is_tool(&request.name),
@@ -518,9 +545,9 @@ impl ServerHandler for McpServer {
             parent,
         );
         let result = async {
-            self.check_profile(&request.name)?;
-            self.keep_session().await?;
-            let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+            server.check_profile(&request.name)?;
+            server.keep_session().await?;
+            let tcc = rmcp::handler::server::tool::ToolCallContext::new(server, request, context);
             Self::tool_router().call(tcc).await
         }
         .instrument(span.clone())

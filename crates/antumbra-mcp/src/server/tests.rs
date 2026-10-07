@@ -57,6 +57,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
 
     let recalled = s
         .recall_memories(Parameters(RecallParams {
+            host: None,
             repo: None,
             branch: None,
             query: "how do I add a dependency in acme-api".into(),
@@ -81,6 +82,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
 
     let listed = s
         .list_memories(Parameters(ListParams {
+            host: None,
             network: None,
             limit: None,
             offset: None,
@@ -94,6 +96,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
         .unwrap();
     assert!(s
         .list_memories(Parameters(ListParams {
+            host: None,
             network: None,
             limit: None,
             offset: None
@@ -135,6 +138,7 @@ async fn a_view_says_when_a_memory_was_last_written_and_reinforcing_moves_it() -
     };
     let list = || {
         s.list_memories(Parameters(ListParams {
+            host: None,
             network: None,
             limit: None,
             offset: None,
@@ -198,6 +202,7 @@ async fn a_recall_scores_each_memory_and_the_score_follows_it_through_the_demoti
 
     let recalled = s
         .recall_memories(Parameters(RecallParams {
+            host: None,
             repo: Some("github.com/me/here".into()),
             branch: Some("main".into()),
             query: "how do I add a dependency".into(),
@@ -259,6 +264,7 @@ async fn seed_and_recall(s: &McpServer, query: &str) -> Vec<String> {
         .unwrap();
     }
     s.recall_memories(Parameters(RecallParams {
+        host: None,
         repo: None,
         branch: None,
         query: query.into(),
@@ -629,6 +635,7 @@ mod device;
 mod handoff;
 mod lifecycle;
 mod workspace;
+mod written_from;
 
 /// ADR-0023 B-1, validations 1 to 3: a recall is bounded, says when it cut, and
 /// hands over the whole text on request.

@@ -77,12 +77,23 @@ pub(super) struct RecallParams {
     /// context window cannot be followed by the work it was for. Ask for `true`
     /// once a row is known to be the one that matters.
     pub(super) full: Option<bool>,
+    /// Only memories written from this machine, by host name (as `devices`
+    /// lists them; either case). Drawn from a wider pool than `top_k`, but
+    /// still a filter on what recall found: a machine whose memories are few
+    /// can return fewer than `top_k`, and `list_memories` with `host` reads
+    /// them all.
+    pub(super) host: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct ListParams {
     /// Optional network filter (`world`/`bank`/`opinion`).
     pub(super) network: Option<String>,
+    /// Only memories written from this machine, by host name (as `devices`
+    /// lists them; either case): `{host: "windows", limit: 5}` is what that
+    /// machine wrote last. A memory written through a hosted server before it
+    /// read its client's name carries the server's name instead.
+    pub(super) host: Option<String>,
     /// Return one page of at most this many (up to 200), the most recently
     /// updated first. Omitted: every memory, in no set order.
     pub(super) limit: Option<u32>,
@@ -111,6 +122,13 @@ pub(super) struct MemoryView {
     pub(super) network: String,
     pub(super) confidence: f32,
     pub(super) reinforcement: u32,
+    /// The machine it was written from, by host name: the one its client
+    /// named, else the server's own. A memory written through a hosted server
+    /// before the server read its client's name carries the server's name,
+    /// which says which hub took it and not which device sent it. Absent on a
+    /// memory written before writes were stamped at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) author_host: Option<String>,
     /// The git anchor parsed from the memory's evidence, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) provenance: Option<ProvenanceView>,
@@ -183,6 +201,7 @@ impl From<&Memory> for MemoryView {
             network: m.network.as_str().to_string(),
             confidence: m.confidence,
             reinforcement: m.reinforcement,
+            author_host: m.author_host.clone(),
             provenance: GitProvenance::from_evidence(&m.evidence)
                 .as_ref()
                 .map(ProvenanceView::from),
@@ -611,9 +630,10 @@ pub(super) struct LeaveHandoffParams {
     /// The machine it is for, by host name, or `any` (the default) for
     /// whichever of your machines starts a session next.
     pub(super) for_host: Option<String>,
-    /// The machine leaving it, by host name. Defaults to the server's own
-    /// host; a client session should pass its own (the session-start block
-    /// names it).
+    /// The machine leaving it, by host name. Defaults to the machine this call
+    /// came from, as its client names it (`X-Antumbra-Host`), else the
+    /// server's own host; a client that sends no name should pass its own (the
+    /// session-start block names it).
     pub(super) from_host: Option<String>,
 }
 
@@ -632,8 +652,9 @@ pub(super) struct LeftHandoffOut {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct HandoffsParams {
-    /// The machine asking. Defaults to the server's own host; a client
-    /// session should pass its own.
+    /// The machine asking. Defaults to the machine this call came from, as
+    /// its client names it, else the server's own host; a client that sends
+    /// no name should pass its own.
     pub(super) host: Option<String>,
     /// Also list handoffs already marked done. Default false.
     pub(super) include_done: Option<bool>,
@@ -680,7 +701,8 @@ pub(super) struct HandoffsOut {
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct CompleteHandoffParams {
     pub(super) handoff_id: String,
-    /// The machine that dealt with it. Defaults to the server's own host.
+    /// The machine that dealt with it. Defaults to the machine this call came
+    /// from, as its client names it, else the server's own host.
     pub(super) host: Option<String>,
 }
 

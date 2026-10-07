@@ -939,9 +939,31 @@ fn call_tool(
     arguments: Value,
     what: &str,
 ) -> anyhow::Result<Value> {
-    let mut response = agent(Duration::from_secs(30))
+    call_tool_from(url, token, None, tool, arguments, what)
+}
+
+/// The header a client names its machine in, which the server stamps on what
+/// that machine writes (#193). The MCP headers helper sends it from
+/// `ANTUMBRA_HOST_ID`.
+const DEVICE_HEADER: &str = "X-Antumbra-Host";
+
+/// [`call_tool`] from the machine `device` names, as the agent's connection
+/// calls once the headers helper names it.
+fn call_tool_from(
+    url: &str,
+    token: &str,
+    device: Option<&str>,
+    tool: &str,
+    arguments: Value,
+    what: &str,
+) -> anyhow::Result<Value> {
+    let mut request = agent(Duration::from_secs(30))
         .post(&format!("{url}/mcp/call"))
-        .header("authorization", &format!("Bearer {token}"))
+        .header("authorization", &format!("Bearer {token}"));
+    if let Some(device) = device {
+        request = request.header(DEVICE_HEADER, device);
+    }
+    let mut response = request
         .send_json(json!({ "tool": tool, "arguments": arguments }))
         .map_err(|e| anyhow::anyhow!("could not reach {url}: {e}"))?;
     let status = response.status();
@@ -1014,6 +1036,58 @@ fn register_machine(url: &str, token: &str, host: &str, steps: &Steps) {
 }
 
 // ---------------------------------------------------------------- check
+
+/// What `check` finds in the MCP headers helper setup wrote, which the agent's
+/// connection runs to authenticate and to name this machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Helper {
+    /// Not there: the agent cannot connect.
+    Missing,
+    /// A copy from before writes were stamped per machine: it sends the token
+    /// and no name, so the server stamps this machine's writes with its own.
+    Unnamed,
+    /// It names the machine, and differs from this build's copy.
+    Edited,
+    /// This build's copy.
+    Same,
+}
+
+fn helper_state(text: Option<&str>) -> Helper {
+    let Some(text) = text else {
+        return Helper::Missing;
+    };
+    if !text.contains(DEVICE_HEADER) {
+        return Helper::Unnamed;
+    }
+    let bundled = hooks::bundled(headers_helper_name()).unwrap_or_default();
+    if text.replace("\r\n", "\n") == bundled.replace("\r\n", "\n") {
+        Helper::Same
+    } else {
+        Helper::Edited
+    }
+}
+
+/// Which machine the server stamps this one's writes with, from its answer to
+/// `devices` asked under `host`'s name (#193).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Stamp {
+    /// This machine's own name.
+    Named,
+    /// Another name, the one the server fell back to: its own, because it did
+    /// not take `host` as one machine's name (`local`, say).
+    Other(String),
+    /// The server does not say, being older than per-machine stamps: it stamps
+    /// every write with its own name.
+    Unsaid,
+}
+
+fn stamp_of(said: &Value, host: &str) -> Stamp {
+    match said.get("this_device").and_then(Value::as_str) {
+        Some(stamped) if stamped.trim().eq_ignore_ascii_case(host.trim()) => Stamp::Named,
+        Some(stamped) => Stamp::Other(stamped.to_string()),
+        None => Stamp::Unsaid,
+    }
+}
 
 fn check(args: &CheckArgs) -> anyhow::Result<()> {
     let home = home()?;
@@ -1141,6 +1215,32 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
             ),
         }
     }
+    // The agent's own connection runs this one, not the settings' hooks, so the
+    // comparison above never sees it.
+    let helper = antumbra.join("hooks").join(headers_helper_name());
+    match helper_state(std::fs::read_to_string(&helper).ok().as_deref()) {
+        Helper::Same => ok(format!(
+            "the MCP connection's headers helper names this machine to the server ({DEVICE_HEADER})"
+        )),
+        Helper::Edited => println!(
+            "  ! {} differs from this build's copy; setup writes this build's to ~/.antumbra/hooks",
+            helper.display()
+        ),
+        Helper::Unnamed => fail(
+            format!(
+                "{} does not name this machine, so the server stamps what the agent writes with its own name",
+                helper.display()
+            ),
+            "run setup again to write this build's".into(),
+        ),
+        Helper::Missing => fail(
+            format!(
+                "{} is missing, and the MCP connection runs it",
+                helper.display()
+            ),
+            "run setup again to write it".into(),
+        ),
+    }
     match settings
         .pointer("/env/ANTUMBRA_URL")
         .and_then(Value::as_str)
@@ -1179,8 +1279,31 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
     }
     if reachable {
         let host = session_host(&settings).to_lowercase();
-        match call_tool(&url, &token, "devices", json!({}), "listing your devices") {
+        // Asked under this machine's name, as the agent's connection asks once
+        // its headers helper names it, so the answer says what the server
+        // stamps that connection's writes with. Whether the helper names it is
+        // the helper line above; the two together are what the agent gets.
+        match call_tool_from(
+            &url,
+            &token,
+            Some(&host),
+            "devices",
+            json!({}),
+            "listing your devices",
+        ) {
             Ok(said) => {
+                match stamp_of(&said, &host) {
+                    Stamp::Named => ok(format!(
+                        "the server stamps writes that name this machine as {host}"
+                    )),
+                    Stamp::Other(stamped) => fail(
+                        format!("this machine's writes are stamped as {stamped}, not {host}"),
+                        "set ANTUMBRA_HOST_ID in the settings' env to this machine's own name (not local or any), then run setup again".into(),
+                    ),
+                    Stamp::Unsaid => println!(
+                        "  ! the server stamps every write with its own name (it is older than per-machine stamps)"
+                    ),
+                }
                 let listed = said["devices"].as_array().and_then(|all| {
                     all.iter().find(|d| {
                         d["host"]
@@ -1400,6 +1523,45 @@ mod tests {
         let blank = json!({ "env": { "ANTUMBRA_HOST_ID": "  " } });
         assert!(!session_host(&blank).trim().is_empty());
         assert!(!session_host(&Value::Null).trim().is_empty());
+    }
+
+    #[test]
+    fn the_check_tells_a_helper_that_names_the_machine_from_one_that_does_not() {
+        let bundled = hooks::bundled(headers_helper_name()).unwrap();
+        assert!(
+            bundled.contains(DEVICE_HEADER),
+            "this build's names the machine"
+        );
+        assert_eq!(helper_state(Some(bundled)), Helper::Same);
+        assert_eq!(
+            helper_state(Some(&bundled.replace('\n', "\r\n"))),
+            Helper::Same,
+            "line endings are not a difference"
+        );
+        assert_eq!(
+            helper_state(Some(&format!("{bundled}\n# edited here\n"))),
+            Helper::Edited
+        );
+        // What setup wrote before writes were stamped per machine.
+        let before = "@{ Authorization = \"Bearer $token\" } | ConvertTo-Json -Compress";
+        assert_eq!(helper_state(Some(before)), Helper::Unnamed);
+        assert_eq!(helper_state(None), Helper::Missing);
+    }
+
+    #[test]
+    fn the_check_reads_what_the_server_stamps_this_machines_writes_with() {
+        let said = |stamped: &str| json!({ "devices": [], "this_device": stamped });
+        assert_eq!(stamp_of(&said("windows"), "windows"), Stamp::Named);
+        assert_eq!(stamp_of(&said("windows"), " Windows "), Stamp::Named);
+        // `local` names no machine, so the server stamps its own name.
+        assert_eq!(
+            stamp_of(&said("kuskokwim"), "local"),
+            Stamp::Other("kuskokwim".into())
+        );
+        assert_eq!(
+            stamp_of(&json!({ "devices": [] }), "windows"),
+            Stamp::Unsaid
+        );
     }
 
     #[test]

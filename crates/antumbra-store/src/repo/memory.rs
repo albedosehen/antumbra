@@ -313,7 +313,8 @@ pub(crate) fn without_embedding() -> Vec<String> {
 }
 
 /// A page of `tenant`'s live memories, most recently updated first: `limit`
-/// of them after the first `offset`, in one network when one is given.
+/// of them after the first `offset`, in one network when one is given, and
+/// written from one machine when `host` names it.
 ///
 /// Ordered and cut by the engine, and read without the embeddings, so a page
 /// costs its own rows however large the store is. [`list`] reads every row,
@@ -322,6 +323,7 @@ pub async fn recent(
     store: &Store,
     tenant: &TenantId,
     network: Option<MemoryNetwork>,
+    host: Option<&str>,
     limit: u32,
     offset: u32,
 ) -> Result<Vec<Memory>> {
@@ -329,6 +331,10 @@ pub async fn recent(
     let filter = match network {
         Some(n) => and_(live, eq("network", n.as_str())),
         None => live,
+    };
+    let filter = match host {
+        Some(h) => and_(filter, written_from(h)),
+        None => filter,
     };
     let query = Query::new()
         .select(Some(without_embedding()))
@@ -343,6 +349,19 @@ pub async fn recent(
         .map_err(map)?;
     let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
     rows.into_iter().map(MemoryRow::into_domain).collect()
+}
+
+/// The memories written from `host`, compared as host names are everywhere
+/// else (`antumbra_core::handoff::normalize_host`): trimmed and lowercased on
+/// both sides. A server stamps its own name as the operating system gives it,
+/// `KUSKOKWIM` on Windows, so an exact match would miss the very rows a
+/// machine running its own server wrote. A row with no host is not written
+/// from anywhere, and `?? ''` keeps the function from failing on it.
+fn written_from(host: &str) -> surql::types::operators::Operator {
+    surql::types::operators::eq_expr(
+        "string::lowercase(string::trim(author_host ?? ''))",
+        value(host.trim().to_lowercase()),
+    )
 }
 
 /// `tenant`'s live memories carrying any of `entries` as an evidence entry,

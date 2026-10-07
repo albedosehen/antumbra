@@ -38,6 +38,30 @@ $r = Invoke-Helper (Join-Path $work 'missing.txt')
 Check 'exits non-zero' ($r.Code -ne 0)
 Check 'prints no header' ($r.Out -eq '')
 
+function Get-Machine([string]$Out) {
+    $said = ($Out | ConvertFrom-Json).'X-Antumbra-Host'
+    if ($said) { return $said } else { return '<none>' }
+}
+$hostBefore = $env:ANTUMBRA_HOST_ID
+Set-Content -Path $file -Value 'test-token' -NoNewline
+
+Write-Output 'a machine named in ANTUMBRA_HOST_ID'
+$env:ANTUMBRA_HOST_ID = 'mac'
+$r = Invoke-Helper $file
+Check 'sends its name beside the bearer' ((Get-Machine $r.Out) -eq 'mac')
+Check 'still sends the bearer' (($r.Out | ConvertFrom-Json).Authorization -eq 'Bearer test-token')
+
+Write-Output 'a name with spaces around it'
+$env:ANTUMBRA_HOST_ID = ' mac '
+Check 'sends it trimmed' ((Get-Machine (Invoke-Helper $file).Out) -eq 'mac')
+
+Write-Output 'no machine named'
+Remove-Item Env:ANTUMBRA_HOST_ID -ErrorAction SilentlyContinue
+Check 'sends no name when unset' ((Get-Machine (Invoke-Helper $file).Out) -eq '<none>')
+$env:ANTUMBRA_HOST_ID = '  '
+Check 'sends no name when blank' ((Get-Machine (Invoke-Helper $file).Out) -eq '<none>')
+$env:ANTUMBRA_HOST_ID = $hostBefore
+
 Remove-Item Env:ANTUMBRA_TOKEN_FILE
 Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 if ($script:failed -eq 0) { Write-Output 'all passed'; exit 0 } else { Write-Output 'FAILED'; exit 1 }

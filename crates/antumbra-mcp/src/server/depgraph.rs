@@ -91,7 +91,7 @@ impl McpServer {
             &self.store,
             self.embedder.as_ref(),
             &self.tenant,
-            (&self.user, &self.host),
+            (&self.user, &self.device()),
             &claim,
             anchor.as_ref(),
             Utc::now(),
