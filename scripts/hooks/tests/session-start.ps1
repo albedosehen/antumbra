@@ -52,8 +52,11 @@ New-Item -ItemType Directory -Path $clone | Out-Null
 & git -C $clone remote add origin https://github.com/acme/orders.git
 
 # --- a surface that answers every call with the current response file ------------
+# It also writes each request's body to the calls file, one line a call, so a
+# test can say which tools the hook asked for.
 $response = Join-Path $work 'response.json'
 Set-Content -Path $response -Value '{}'
+$calls = Join-Path $work 'calls.txt'
 $port = Get-Random -Minimum 20000 -Maximum 40000
 $url = "http://127.0.0.1:$port"
 # The listener is made here and handed to the thread, so this script can stop it:
@@ -61,11 +64,13 @@ $url = "http://127.0.0.1:$port"
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("$url/")
 $listener.Start()
-$null = Start-ThreadJob -ArgumentList $listener, $response -ScriptBlock {
-    param($listener, $responseFile)
+$null = Start-ThreadJob -ArgumentList $listener, $response, $calls -ScriptBlock {
+    param($listener, $responseFile, $callsFile)
     try {
         while ($listener.IsListening) {
             $call = $listener.GetContext()
+            $body = [System.IO.StreamReader]::new($call.Request.InputStream).ReadToEnd()
+            [System.IO.File]::AppendAllText($callsFile, ($body -replace '\s+', ' ') + "`n")
             $bytes = [System.IO.File]::ReadAllBytes($responseFile)
             $call.Response.ContentType = 'application/json'
             $call.Response.OutputStream.Write($bytes, 0, $bytes.Length)
@@ -122,6 +127,23 @@ Check 'announces it' $ctx.Contains('1 handoff waiting for this machine (windows)
 Check 'puts it before any memory' (($ctx.IndexOf('handoff waiting') -ge 0) -and ($ctx.IndexOf('handoff waiting') -lt $ctx.IndexOf('first small')))
 $ctx = Get-Context $small $stub
 Check 'says nothing of handoffs when none wait' (-not $ctx.Contains('handoff'))
+
+Write-Output 'naming this machine'
+$hostBefore = $env:ANTUMBRA_HOST_ID
+$env:ANTUMBRA_HOST_ID = 'mac'
+Set-Content -Path $calls -Value ''
+$ctx = Get-Context $small $stub
+$asked = @(Get-Content $calls | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
+$named = @($asked | Where-Object { $_.tool -eq 'register_device' })
+Check 'registers it under its name' (($named.Count -eq 1) -and ($named[0].arguments.host -eq 'mac'))
+Check 'still answers' $ctx.Contains('first small')
+$env:ANTUMBRA_HOST_ID = ''
+Set-Content -Path $calls -Value ''
+$ctx = Get-Context $small $stub
+$asked = @(Get-Content $calls | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
+Check 'registers nothing when the machine has no name' (@($asked | Where-Object { $_.tool -eq 'register_device' }).Count -eq 0)
+Check 'still asks for its handoffs' (@($asked | Where-Object { $_.tool -eq 'handoffs' }).Count -eq 1)
+$env:ANTUMBRA_HOST_ID = $hostBefore
 
 Write-Output 'no antumbra on the path'
 $ctx = Get-Context $small 'antumbra-is-not-installed'

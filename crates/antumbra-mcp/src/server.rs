@@ -240,6 +240,7 @@ mod answer;
 mod behaviour;
 mod compartments;
 mod depgraph;
+mod device;
 mod documents;
 mod engine;
 mod handoff;

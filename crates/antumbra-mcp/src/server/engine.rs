@@ -124,6 +124,7 @@ impl McpServer {
             + Self::document_router()
             + Self::listing_router()
             + Self::handoff_router()
+            + Self::device_router()
             + Self::behaviour_router()
             + Self::answer_router()
             + Self::depgraph_router()
@@ -440,6 +441,12 @@ impl McpServer {
             "leave_handoff" => dispatch!(LeaveHandoffParams, leave_handoff),
             "handoffs" => dispatch!(HandoffsParams, handoffs),
             "complete_handoff" => dispatch!(CompleteHandoffParams, complete_handoff),
+            "register_device" => dispatch!(device::RegisterDeviceParams, register_device),
+            "devices" => {
+                let Json(out) = self.devices().await?;
+                serde_json::to_value(out)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))
+            }
             "record_behaviour" => dispatch!(behaviour::RecordBehaviourParams, record_behaviour),
             "list_behaviours" => dispatch!(behaviour::ListBehavioursParams, list_behaviours),
             "accept_behaviour" => dispatch!(behaviour::BehaviourIdParams, accept_behaviour),

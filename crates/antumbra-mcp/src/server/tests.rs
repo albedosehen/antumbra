@@ -625,6 +625,7 @@ async fn call_tool_dispatches_a_named_tool() {
 
 mod behaviour;
 mod depgraph;
+mod device;
 mod handoff;
 mod lifecycle;
 mod workspace;

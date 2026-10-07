@@ -62,6 +62,11 @@ impl std::str::FromStr for DeviceRole {
 /// nodes, which is what they are.
 pub const GENESIS_MIN_VRAM_MIB: u64 = 16 * 1024;
 
+/// The backend a row says when a session named its machine to a server running
+/// somewhere else. Such a machine runs no server, so it serves nothing and
+/// trains nothing, and it cannot train, so [`role_for`] gives it `Memory`.
+pub const CLIENT_BACKEND: &str = "client";
+
 /// Whether a backend can train at all. This is the backend the *build* can
 /// drive, not merely the silicon present: a CUDA box running a binary compiled
 /// without the CUDA backend cannot train, and a node that says otherwise
@@ -190,6 +195,27 @@ impl DeviceProfile {
             vram_mib,
             ..Self::new(tenant, user, host, backend, role, now)
         }
+    }
+
+    /// A machine a session names to a server elsewhere: a laptop whose agent
+    /// talks to a hosted hub. The server cannot see its hardware and it runs
+    /// no trainer, so it is a memory node whatever it has in it. Letting it say
+    /// otherwise would let a laptop take the user's trainer role from the
+    /// machine that actually runs the keeper, since the store's
+    /// `genesis_for_user` picks the freshest genesis row.
+    pub fn client(
+        tenant: TenantId,
+        user: UserId,
+        host: impl Into<String>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        Self::new(tenant, user, host, CLIENT_BACKEND, DeviceRole::Memory, now)
+    }
+
+    /// Whether a session named this machine, rather than a server running on
+    /// it registering itself.
+    pub fn is_client(&self) -> bool {
+        self.backend == CLIENT_BACKEND
     }
 
     pub fn with_vram(mut self, mib: u64) -> Self {
@@ -357,6 +383,20 @@ mod tests {
             GenesisPlacement::Here
         );
         assert_eq!(genesis_placement("rig", true, None), GenesisPlacement::Here);
+    }
+
+    #[test]
+    fn a_machine_a_session_names_is_a_memory_node_and_keeps_one_row() {
+        let laptop =
+            DeviceProfile::client(TenantId::new("ws:t"), UserId::new("user:a"), "mac", at());
+        assert_eq!(laptop.role, DeviceRole::Memory);
+        assert!(laptop.is_client() && !laptop.is_genesis());
+        // The backend it records is one no role can be earned from.
+        assert_eq!(role_for(&laptop.backend, None), DeviceRole::Memory);
+        // The same machine, whoever names it, is the same row.
+        assert_eq!(laptop.id, profile("ws:t", "user:a", "mac").id);
+        // A server registering itself is not a client.
+        assert!(!profile("ws:t", "user:a", "rig").is_client());
     }
 
     #[test]
