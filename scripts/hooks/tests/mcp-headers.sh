@@ -38,4 +38,22 @@ out=$(ANTUMBRA_TOKEN_FILE="$work/missing.txt" bash "$helper" 2>/dev/null); code=
 check "exits non-zero" test "$code" -ne 0
 check "prints no header" test -z "$out"
 
+machine() { jq -r '."X-Antumbra-Host" // "<none>"'; }
+printf 'test-token' >"$file"
+
+echo "a machine named in ANTUMBRA_HOST_ID"
+out=$(ANTUMBRA_TOKEN_FILE="$file" ANTUMBRA_HOST_ID=mac bash "$helper" 2>/dev/null)
+check "sends its name beside the bearer" test "$(machine <<<"$out")" = "mac"
+check "still sends the bearer" test "$(bearer <<<"$out")" = "Bearer test-token"
+
+echo "a name with spaces around it"
+out=$(ANTUMBRA_TOKEN_FILE="$file" ANTUMBRA_HOST_ID=" mac " bash "$helper" 2>/dev/null)
+check "sends it trimmed" test "$(machine <<<"$out")" = "mac"
+
+echo "no machine named"
+out=$(env -u ANTUMBRA_HOST_ID ANTUMBRA_TOKEN_FILE="$file" bash "$helper" 2>/dev/null)
+check "sends no name when unset" test "$(machine <<<"$out")" = "<none>"
+out=$(ANTUMBRA_TOKEN_FILE="$file" ANTUMBRA_HOST_ID="  " bash "$helper" 2>/dev/null)
+check "sends no name when blank" test "$(machine <<<"$out")" = "<none>"
+
 [ "$failed" = 0 ] && echo "all passed" || { echo "FAILED"; exit 1; }

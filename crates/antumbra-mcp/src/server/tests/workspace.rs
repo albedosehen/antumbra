@@ -517,6 +517,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
     store.signin(&tb, &ub).await.unwrap();
     let b_view = server_b
         .list_memories(Parameters(ListParams {
+            host: None,
             network: None,
             limit: None,
             offset: None,
@@ -533,6 +534,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
     );
     let b_page = server_b
         .list_memories(Parameters(ListParams {
+            host: None,
             network: None,
             limit: Some(50),
             offset: None,
@@ -552,6 +554,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
     store.signin(&ta, &ua).await.unwrap();
     let a_view = server_a
         .list_memories(Parameters(ListParams {
+            host: None,
             network: None,
             limit: None,
             offset: None,
@@ -780,6 +783,7 @@ async fn provenance_is_stored_and_scopes_recall() {
     // No context: every hit comes back with its parsed provenance and no scope.
     let plain = s
         .recall_memories(Parameters(RecallParams {
+            host: None,
             repo: None,
             branch: None,
             query: "orders route".into(),
@@ -804,6 +808,7 @@ async fn provenance_is_stored_and_scopes_recall() {
     // and other-repo memories are demoted to the tail, in that relative order.
     let scoped = s
         .recall_memories(Parameters(RecallParams {
+            host: None,
             repo: Some("GitHub.com/o/r.git".into()),
             branch: Some("main".into()),
             query: "orders route".into(),

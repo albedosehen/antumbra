@@ -150,7 +150,7 @@ impl McpServer {
             &self.store,
             &self.tenant,
             &self.user,
-            &self.host,
+            &self.device(),
             MemoryId::new(next_id("memory")),
             &spec,
             status,

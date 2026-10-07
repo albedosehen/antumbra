@@ -680,18 +680,72 @@ async fn recent_pages_live_memories_newest_first() -> Result<()> {
             .map(|m| m.id.as_str().to_string())
             .collect::<Vec<_>>()
     };
-    let first = recent(&store, &tenant, None, 2, 0).await?;
+    let first = recent(&store, &tenant, None, None, 2, 0).await?;
     assert_eq!(ids(&first), ["memory:d", "memory:c"]);
     assert!(first.iter().all(|m| m.embedding.is_none()));
     assert_eq!(
-        ids(&recent(&store, &tenant, None, 2, 2).await?),
+        ids(&recent(&store, &tenant, None, None, 2, 2).await?),
         ["memory:b", "memory:a"]
     );
-    assert!(recent(&store, &tenant, None, 2, 4).await?.is_empty());
+    assert!(recent(&store, &tenant, None, None, 2, 4).await?.is_empty());
     assert_eq!(
-        ids(&recent(&store, &tenant, Some(MemoryNetwork::World), 5, 0).await?),
+        ids(&recent(&store, &tenant, Some(MemoryNetwork::World), None, 5, 0).await?),
         ["memory:d", "memory:c", "memory:a"]
     );
+    Ok(())
+}
+
+/// A page can be one machine's: the engine matches the host the way host names
+/// are compared everywhere (trimmed, either case), and a row stamped with no
+/// host, as every row was before stamps existed, is in no machine's page and
+/// does not fail the query.
+#[tokio::test]
+async fn recent_pages_one_machines_memories() -> Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("t");
+    let user = antumbra_core::UserId::new("u");
+    let start = chrono::Utc::now() - chrono::Duration::hours(1);
+    let put = |id: &str, host: Option<&str>, minutes: i64| {
+        let mut m = Memory::new(
+            id,
+            tenant.clone(),
+            MemoryNetwork::World,
+            id,
+            0.9,
+            start + chrono::Duration::minutes(minutes),
+        );
+        m.embedding = Some(vec![0.1; EMBED_DIM]);
+        match host {
+            Some(h) => m.by(user.clone(), h),
+            None => m,
+        }
+    };
+    for m in [
+        put("memory:mac-1", Some("mac"), 1),
+        put("memory:win", Some("windows"), 2),
+        put("memory:unstamped", None, 3),
+        put("memory:mac-2", Some("MAC "), 4),
+        put("memory:other-mac", Some("macbook"), 5),
+    ] {
+        upsert(&store, &m).await?;
+    }
+    let ids = |page: &[Memory]| {
+        page.iter()
+            .map(|m| m.id.as_str().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ids(&recent(&store, &tenant, None, Some("Mac"), 10, 0).await?),
+        ["memory:mac-2", "memory:mac-1"]
+    );
+    assert_eq!(
+        ids(&recent(&store, &tenant, None, Some("windows"), 10, 0).await?),
+        ["memory:win"]
+    );
+    assert!(recent(&store, &tenant, None, Some("linux"), 10, 0)
+        .await?
+        .is_empty());
+    assert_eq!(recent(&store, &tenant, None, None, 10, 0).await?.len(), 5);
     Ok(())
 }
 

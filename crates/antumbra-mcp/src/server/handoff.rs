@@ -33,7 +33,7 @@ impl McpServer {
             .from_host
             .as_deref()
             .map(handoff::normalize_host)
-            .unwrap_or_else(|| self.host.clone());
+            .unwrap_or_else(|| self.device());
         let compartment = self.handoff_compartment().await?;
         let embedding = self.embedder.embed(content).await.map_err(err)?;
         let id = next_id("memory");
@@ -87,7 +87,11 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<HandoffsParams>,
     ) -> Result<Json<HandoffsOut>, ErrorData> {
-        let host = handoff::normalize_host(p.host.as_deref().unwrap_or(&self.host));
+        let host = p
+            .host
+            .as_deref()
+            .map(handoff::normalize_host)
+            .unwrap_or_else(|| self.device());
         let compartment = handoff::compartment_id(&self.tenant, &self.user);
         let all = memory::list_by_compartment(&self.store, &self.tenant, &compartment)
             .await
@@ -164,7 +168,11 @@ impl McpServer {
                 already_done: true,
             }));
         }
-        let by = handoff::normalize_host(p.host.as_deref().unwrap_or(&self.host));
+        let by = p
+            .host
+            .as_deref()
+            .map(handoff::normalize_host)
+            .unwrap_or_else(|| self.device());
         let now = Utc::now();
         m.evidence.push(handoff::done_evidence(&by, now));
         m.updated_at = now;

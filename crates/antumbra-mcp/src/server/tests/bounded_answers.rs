@@ -20,6 +20,7 @@ async fn recall_long(s: &McpServer, n: usize, full: Option<bool>) -> Vec<MemoryV
         .unwrap();
     }
     s.recall_memories(Parameters(RecallParams {
+        host: None,
         repo: None,
         branch: None,
         query: "scheduling".into(),
