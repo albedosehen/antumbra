@@ -82,14 +82,14 @@ Pick the block for your OS. Both wire the same three touchpoints; they differ on
     "PreCompact": [{ "hooks": [{ "type": "command",
       "command": "bash ./scripts/hooks/antumbra-capture.sh", "timeout": 5 }]}],
     "PreToolUse": [{ "matcher": "Bash", "hooks": [
-      { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(git *)" },
-      { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(gh *)" }
+      { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(git *)", "timeout": 15 },
+      { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(gh *)", "timeout": 15 }
     ]}]
   }
 }
 ```
 
-The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubuntu).
+The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machines; otherwise `brew install jq` on macOS, `apt install jq` on Debian/Ubuntu); `strip-attribution.sh` needs neither.
 
 ### Windows (PowerShell) settings.json (claude code)
 
@@ -106,13 +106,21 @@ The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machi
       "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
     "PreCompact": [{ "hooks": [{ "type": "command",
       "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
-    "PreToolUse": [{ "matcher": "Bash", "hooks": [
-      { "type": "command", "command": "pwsh -File ./scripts/hooks/strip-attribution.ps1", "if": "Bash(git *)" },
-      { "type": "command", "command": "pwsh -File ./scripts/hooks/strip-attribution.ps1", "if": "Bash(gh *)" }
-    ]}]
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [
+        { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(git *)", "timeout": 15 },
+        { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(gh *)", "timeout": 15 }
+      ]},
+      { "matcher": "PowerShell", "hooks": [
+        { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "PowerShell(git *)", "timeout": 15 },
+        { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "PowerShell(gh *)", "timeout": 15 }
+      ]}
+    ]
   }
 }
 ```
+
+`strip-attribution` is the `.sh` on Windows too. Claude Code runs a hook's command through Git Bash there, so the `.sh` (bash builtins, no `jq`) costs one process, about 45 ms, while a PowerShell start per `git` or `gh` command took seconds on a busy machine and outran the timeout. A `PreToolUse` hook that times out blocks nothing: the command runs unchecked. The `PowerShell` matcher covers the PowerShell tool (`CLAUDE_CODE_USE_POWERSHELL_TOOL`), whose commands a `Bash` matcher never sees. `strip-attribution.ps1` is for a Windows without Git Bash.
 
 Note: (`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` form is cross-platform too; the `.sh` siblings are the native, dependency-light option.)
 

@@ -61,11 +61,20 @@ Two settings make the agent defer to Antumbra instead of its built-ins:
 "permissions": {
   "deny": ["Write(**/.agent/memory/**)", "Edit(**/.agent/memory/**)"]
 },
-"hooks": { "PreToolUse": [{ "matcher": "Bash", "hooks": [
-  { "type": "command", "command": "pwsh -File ./scripts/hooks/strip-attribution.ps1", "if": "Bash(git *)" },
-  { "type": "command", "command": "pwsh -File ./scripts/hooks/strip-attribution.ps1", "if": "Bash(gh *)" }
-]}]}
+"hooks": { "PreToolUse": [
+  { "matcher": "Bash", "hooks": [
+    { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(git *)", "timeout": 15 },
+    { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(gh *)", "timeout": 15 }
+  ]},
+  // Windows with the PowerShell tool: its commands never reach a Bash matcher
+  { "matcher": "PowerShell", "hooks": [
+    { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "PowerShell(git *)", "timeout": 15 },
+    { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "PowerShell(gh *)", "timeout": 15 }
+  ]}
+]}
 ```
+
+The attribution check is the `.sh` on every platform: Claude Code runs hook commands through Git Bash on Windows, and the script uses bash builtins only (no `jq`), so a check is one process of about 45 ms. A PowerShell start per `git`/`gh` command took seconds on a busy machine and timed out, and a timed-out `PreToolUse` hook blocks nothing.
 
 Template scripts for all of the above live under [`scripts/hooks/`](../scripts/hooks/) for **both platforms**: PowerShell (`.ps1`, Windows) and POSIX `bash` (`.sh`, macOS/Linux; needs `jq` + `curl`). Use the pair for your OS. They are thin: read stdin JSON, call Antumbra's `/mcp/call` (or the stdio server), emit the hook's JSON response. Point them at your endpoint with four env vars:
 

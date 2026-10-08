@@ -90,6 +90,12 @@ jobs:
           echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' > /dev/null
           clean=$(printf '%s' '{"tool_input":{"command":"git commit -m clean"}}' | bash scripts/hooks/strip-attribution.sh)
           test -z "$clean"
+          # Case-insensitive, the PowerShell tool's input too, escaped quotes kept whole.
+          deny=$(printf '%s' '{"tool_name":"PowerShell","tool_input":{"command":"gh pr create --body \"x\n\nco-authored-by: GPT-5\""}}' | bash scripts/hooks/strip-attribution.sh)
+          echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' > /dev/null
+          # Only the command counts, not the tool call's description.
+          clean=$(printf '%s' '{"tool_input":{"command":"git commit -m \"plain \\\"quoted\\\" message\"","description":"no Co-Authored-By: Claude here"}}' | bash scripts/hooks/strip-attribution.sh)
+          test -z "$clean"
       - name: session-start emits valid additionalContext (no server → cold bootstrap)
         run: |
           ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)

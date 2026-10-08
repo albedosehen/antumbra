@@ -77,6 +77,10 @@ job_hooks() {
     echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null || { echo "strip-attribution: no deny"; return 1; }
     clean=$(printf '%s' '{"tool_input":{"command":"git commit -m clean"}}' | bash scripts/hooks/strip-attribution.sh)
     test -z "$clean" || { echo "strip-attribution: blocked a clean command"; return 1; }
+    deny=$(printf '%s' '{"tool_name":"PowerShell","tool_input":{"command":"gh pr create --body \"x\n\nco-authored-by: GPT-5\""}}' | bash scripts/hooks/strip-attribution.sh)
+    echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null || { echo "strip-attribution: missed a lowercase trailer"; return 1; }
+    clean=$(printf '%s' '{"tool_input":{"command":"git commit -m \"plain \\\"quoted\\\" message\"","description":"no Co-Authored-By: Claude here"}}' | bash scripts/hooks/strip-attribution.sh)
+    test -z "$clean" || { echo "strip-attribution: judged the description, not the command"; return 1; }
     ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
     echo "$ctx" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null || { echo "session-start: no context"; return 1; }
     local part=0
