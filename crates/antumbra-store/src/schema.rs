@@ -121,20 +121,42 @@ const HIVE_VISIBLE_RULE: &str = "compartment IN (SELECT VALUE subject_id FROM hi
      AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) \
      AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true))";
 
+/// A row's own compartment record, by the id `compartment::create` gives it:
+/// the key with `:`, `/`, `\`, `|` and spaces made `_` (`compartment::sanitize`,
+/// which this mirrors and a test holds it to).
+pub(crate) const OWN_COMPARTMENT: &str =
+    r"type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_'))";
+
 /// What a session may read without the hive: the shared pool, its own
 /// compartments, and the ones granted to it.
-const MEMORY_SELECT_WITHOUT_HIVE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
-     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE)";
+///
+/// Its own compartment is read off the row's compartment record rather than
+/// asked as `compartment IN (SELECT VALUE key FROM compartment WHERE owner =
+/// $auth.user AND deleted_at IS NONE)`: the same compartment, owner and
+/// tombstone, seen through the same tenant-scoped compartment rule, for one
+/// key read instead of a query. The engine runs this rule on every row a read
+/// examines, and on the user's store 7,018 of 7,041 memories sit in a
+/// compartment, so nearly every row ran that query. Measured with
+/// `repo::memory::acl_cost` (7,000 memories in the user's compartment): the
+/// dense leg 353 to 114 ms and the lexical leg 731 to 326 ms, against 102 and
+/// 264 for a rule that checks the tenant alone, with the same rows seen.
+fn memory_select_without_hive() -> String {
+    format!(
+        "tenant_id = $auth.tenant AND (compartment = NONE \
+         OR ({OWN_COMPARTMENT}.owner = $auth.user AND {OWN_COMPARTMENT}.deleted_at IS NONE) \
+         OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE)"
+    )
+}
 
-/// The read rule the `memory` and `document_chunk` tables carry: the private
-/// rule above, with the active hive OR'd in and the group closed.
+/// The read rule the `memory`, `memory_chunk` and `document_chunk` tables
+/// carry: the private rule above, with the active hive OR'd in and the group
+/// closed.
 ///
 /// Composed rather than written out twice. Two copies of an ACL is how the copy
 /// that matters stops matching the one that is read, and this one is read on
 /// every recall in the system.
-fn memory_select_rule() -> String {
-    format!("{MEMORY_SELECT_WITHOUT_HIVE} OR {HIVE_VISIBLE_RULE})")
+pub(crate) fn memory_select_rule() -> String {
+    format!("{} OR {HIVE_VISIBLE_RULE})", memory_select_without_hive())
 }
 
 /// The write rule for `memory` (create/update). A session may write a memory only

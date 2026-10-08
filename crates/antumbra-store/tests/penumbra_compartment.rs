@@ -473,3 +473,79 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
         ["comp:ws:a:user:a:behaviour", "comp:ws:b:user:b:behaviour"]
     );
 }
+
+/// The read rule finds a memory's own compartment by its record id, the key
+/// with `:`, `/`, `\`, `|` and spaces mapped to `_`. A key holding every one of
+/// them still decides who sees the memory: its owner, a grantee until revoked,
+/// nobody else, and not the owner either once the compartment is deleted.
+#[tokio::test]
+async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
+    let store = Store::connect_memory(4).await.unwrap();
+    let t = TenantId::new("ws:org");
+    let owner = UserId::new("user:owner");
+    let other = UserId::new("user:other");
+    let key = CompartmentId::new(r"comp:a/b\c|d e");
+    let now = Utc::now();
+    principal::provision(&store, &t, &owner).await.unwrap();
+    principal::provision(&store, &t, &other).await.unwrap();
+    compartment::create(
+        &store,
+        &Compartment::new(key.clone(), t.clone(), owner.clone(), "odd key", now),
+    )
+    .await
+    .unwrap();
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:odd",
+            "ws:org",
+            "in the odd compartment",
+            Some(key.as_str()),
+        ),
+    )
+    .await
+    .unwrap();
+    let sees = |user: UserId| {
+        let (store, t) = (&store, &t);
+        async move {
+            store.invalidate().await.unwrap();
+            store.signin(t, &user).await.unwrap();
+            visible_ids(store).await.contains(&"memory:odd".to_string())
+        }
+    };
+
+    assert!(
+        sees(owner.clone()).await,
+        "the owner sees their own compartment"
+    );
+    assert!(!sees(other.clone()).await, "another user does not");
+
+    store.invalidate().await.unwrap();
+    compartment::grant(
+        &store,
+        &Grant::new(
+            t.clone(),
+            key.clone(),
+            other.clone(),
+            Capability::Reference,
+            owner.clone(),
+            now,
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(sees(other.clone()).await, "a grant shows it to the grantee");
+
+    store.invalidate().await.unwrap();
+    compartment::revoke(&store, &t, &key, &other, now)
+        .await
+        .unwrap();
+    assert!(!sees(other.clone()).await, "a revoke hides it again");
+
+    store.invalidate().await.unwrap();
+    compartment::delete(&store, &t, &key, now).await.unwrap();
+    assert!(
+        !sees(owner.clone()).await,
+        "a deleted compartment no longer shows its memories to its owner"
+    );
+}
