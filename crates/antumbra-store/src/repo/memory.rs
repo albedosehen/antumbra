@@ -1118,3 +1118,6 @@ fn announce(store: &Store, action: ChangeAction, memory: Option<&Memory>) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod acl_cost;

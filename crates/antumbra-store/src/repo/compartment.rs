@@ -75,7 +75,10 @@ impl CompartmentRow {
     }
 }
 
-fn sanitize(s: &str) -> String {
+/// The record id of the compartment keyed `s`. `memory`'s read rule finds a
+/// row's compartment record by applying the same mapping in SurrealQL
+/// (`schema::OWN_COMPARTMENT`), so the two change together.
+pub(crate) fn sanitize(s: &str) -> String {
     s.replace([':', '/', '\\', '|', ' '], "_")
 }
 
@@ -426,6 +429,30 @@ mod tests {
 
     async fn store() -> Store {
         Store::connect_memory(EMBED_DIM).await.unwrap()
+    }
+
+    /// `memory`'s read rule finds a row's compartment record with
+    /// `schema::OWN_COMPARTMENT`, the SurrealQL twin of [`sanitize`]; were they
+    /// to disagree, owners would lose sight of their own memories.
+    #[tokio::test]
+    async fn the_read_rule_maps_a_key_to_the_id_sanitize_gives_it() {
+        let s = store().await;
+        for key in [
+            "comp:ws:default:user:default:default",
+            "comp:a/b\\c|d e",
+            "comp:18d6cf592594c1d4-0",
+            "plain",
+        ] {
+            let surql = format!(
+                "LET $compartment = $key; RETURN [record::id({})];",
+                crate::schema::OWN_COMPARTMENT.replace("compartment,", "$compartment,")
+            );
+            let vars =
+                std::collections::BTreeMap::from([("key".to_string(), serde_json::json!(key))]);
+            let raw = s.client().query_with_vars(&surql, vars).await.unwrap();
+            let id = raw.as_array().and_then(|r| r.last()).cloned().unwrap();
+            assert_eq!(id, serde_json::json!([sanitize(key)]), "{key}");
+        }
     }
 
     #[tokio::test]
