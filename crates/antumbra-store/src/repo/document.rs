@@ -214,7 +214,7 @@ async fn sparse_recall(
     k: usize,
 ) -> Result<Vec<DocumentChunk>> {
     let rows: Vec<ChunkRow> =
-        crate::lexical::any_word(store, TABLE, tenant, query_text, k, None).await?;
+        crate::lexical::any_word(store, TABLE, "*", tenant, query_text, k, None).await?;
     rows.into_iter().map(ChunkRow::into_domain).collect()
 }
 

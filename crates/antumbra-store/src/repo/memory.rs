@@ -491,29 +491,23 @@ pub async fn recall_hybrid_many(
     network: Option<MemoryNetwork>,
     probes: &[Vec<f32>],
 ) -> Result<Vec<Memory>> {
-    if let [(text, vector)] = queries {
-        return recall_hybrid(store, tenant, text, vector, k, network, probes).await;
-    }
-    let mut rankings: Vec<Vec<String>> = Vec::with_capacity(queries.len());
-    let mut found: std::collections::HashMap<String, Memory> = std::collections::HashMap::new();
-    // Each query's recall runs at once with the others', as its legs do.
-    let lists = futures::future::try_join_all(
+    // Each query's recall runs at once with the others', as its legs do. They
+    // rank keys, so the rows read whole are the k kept, once for every query.
+    let mut rankings = futures::future::try_join_all(
         queries
             .iter()
-            .map(|(text, vector)| recall_hybrid(store, tenant, text, vector, k, network, probes)),
+            .map(|(text, vector)| hybrid_keys(store, tenant, text, vector, k, network, probes)),
     )
     .await?;
-    for hits in lists {
-        rankings.push(hits.iter().map(|m| m.id.as_str().to_string()).collect());
-        for m in hits {
-            found.entry(m.id.as_str().to_string()).or_insert(m);
-        }
-    }
-    Ok(rrf_fuse(&rankings, DEFAULT_RRF_K)
-        .into_iter()
-        .filter_map(|id| found.remove(&id))
-        .take(k)
-        .collect())
+    let keys = if rankings.len() == 1 {
+        rankings.swap_remove(0)
+    } else {
+        rrf_fuse(&rankings, DEFAULT_RRF_K)
+            .into_iter()
+            .take(k)
+            .collect()
+    };
+    rows_in_order(store, tenant, &keys).await
 }
 
 /// Hybrid recall: fuse the dense (HNSW vector) and sparse (BM25 full-text) legs
@@ -537,6 +531,25 @@ pub async fn recall_hybrid(
     network: Option<MemoryNetwork>,
     probes: &[Vec<f32>],
 ) -> Result<Vec<Memory>> {
+    let keys = hybrid_keys(store, tenant, query_text, query_vec, k, network, probes).await?;
+    rows_in_order(store, tenant, &keys).await
+}
+
+/// [`recall_hybrid`]'s ranking as memory keys, best first. Each leg ranks keys
+/// with their scores and leaves the rows in the engine, and only the `k` kept
+/// are read whole, by the caller. On kuskokwim a recall read about 6 MB of
+/// rows, mostly embeddings, to keep 3 to 12 memories, and decoding them, not
+/// the engine, was where its time went: the dense leg took 30 ms in the engine
+/// and 200 ms in the leg.
+async fn hybrid_keys(
+    store: &Store,
+    tenant: &TenantId,
+    query_text: &str,
+    query_vec: &[f32],
+    k: usize,
+    network: Option<MemoryNetwork>,
+    probes: &[Vec<f32>],
+) -> Result<Vec<String>> {
     // Pull a wider candidate pool from each leg than the final k, so fusion has
     // room to reorder before truncating. The same sizing the dense leg uses
     // against its own residual filters, for the same reason.
@@ -555,44 +568,30 @@ pub async fn recall_hybrid(
     // The three legs read independently of one another, so they run at once:
     // a recall costs its slowest leg rather than the sum of them.
     let (dense, chunk_leg, sparse) = futures::join!(
-        recall(store, tenant, query_vec, pool, network).instrument(leg("recall dense")),
-        crate::repo::memory_chunk::nearest(store, tenant, query_vec, pool, network)
+        dense_scored(store, tenant, query_vec, pool, network, probes)
+            .instrument(leg("recall dense")),
+        chunk_scored(store, tenant, query_vec, pool, network, probes)
             .instrument(leg("recall chunks")),
-        sparse_recall(store, tenant, query_text, pool, network).instrument(leg("recall lexical")),
+        sparse_keys(store, tenant, query_text, pool, network).instrument(leg("recall lexical")),
     );
-    let mut dense = dense?;
-    // With probes, re-rank the pool the index returned by calibrated score, here
-    // and before fusion: sorting the FUSED list by a dense score would throw away
-    // the lexical leg. The server passes none (ADR-0026: on the user's store the
-    // calibration cost more recall than it saved); the bench can.
-    if !probes.is_empty() {
-        dense.sort_by(|a, b| {
-            let score = |m: &Memory| {
-                m.embedding
-                    .as_deref()
-                    .map_or(f32::MIN, |e| calibrated_score(query_vec, e, probes))
-            };
-            score(b).total_cmp(&score(a))
-        });
-    }
+    let dense = dense?;
     // The chunk index (ADR-0025): each memory scores by its best vector, its
     // whole one or one of its pieces', through the same calibration. A memory
     // with no chunks yet scores by its whole vector as before, so the index can
     // be empty, partial or rebuilt; a failing chunk leg leaves the whole-memory
     // list as it was.
-    let dense = match chunk_leg {
+    let dense: Vec<String> = match chunk_leg {
         Ok(pieces) if !pieces.is_empty() => {
-            let score = |v: &[f32]| calibrated_score(query_vec, v, probes);
-            best_of(store, tenant, dense, pieces, score, pool)
-                .instrument(leg("recall chunk fetch"))
+            best_of(store, tenant, dense, pieces, query_vec, probes, pool)
+                .instrument(leg("recall chunk scores"))
                 .await?
         }
-        Ok(_) => dense,
+        Ok(_) => dense.into_iter().map(|s| s.key).collect(),
         Err(e) => {
             eprintln!(
                 "antumbra-store: chunk leg failed, the dense leg reads whole memories only: {e}"
             );
-            dense
+            dense.into_iter().map(|s| s.key).collect()
         }
     };
     // Best-effort, but never SILENTLY: a failing lexical leg degrades recall to
@@ -602,7 +601,7 @@ pub async fn recall_hybrid(
     // embedding is bad at this query". Say so, the way the rerank stage already
     // says so when it falls back to RRF order.
     let sparse = match sparse {
-        Ok(rows) => rows,
+        Ok(keys) => keys,
         Err(e) => {
             eprintln!("antumbra-store: lexical leg failed, recall is dense-only: {e}");
             Vec::new()
@@ -614,66 +613,257 @@ pub async fn recall_hybrid(
     if sparse.is_empty() {
         return Ok(dense.into_iter().take(k).collect());
     }
-
-    let dense_ids: Vec<String> = dense.iter().map(|m| m.id.as_str().to_string()).collect();
-    let sparse_ids: Vec<String> = sparse.iter().map(|m| m.id.as_str().to_string()).collect();
-    let fused = rrf_fuse(&[dense_ids, sparse_ids], DEFAULT_RRF_K);
-
-    // Map each fused id back to its Memory (either leg carries the full row).
-    let mut by_id: HashMap<String, Memory> = HashMap::new();
-    for m in dense.into_iter().chain(sparse) {
-        by_id.entry(m.id.as_str().to_string()).or_insert(m);
-    }
-    Ok(fused
+    Ok(rrf_fuse(&[dense, sparse], DEFAULT_RRF_K)
         .into_iter()
         .take(k)
-        .filter_map(|id| by_id.remove(&id))
         .collect())
 }
 
-/// Rank the whole-memory list and the memories the chunk leg found together,
-/// each memory by its best vector: its whole one or its nearest piece, under
-/// `score`. Scores, not ranks, so a piece that is not near the query cannot
-/// tie a whole memory that is. A memory forgotten since its chunks were cut is
-/// not fetched, so it drops out here.
+/// A memory a vector leg found, by key, and how near the query it is.
+struct Scored {
+    key: String,
+    score: f32,
+}
+
+/// The dense leg as keys with scores: the `k` live memories nearest
+/// `query_vec`, nearest first. It asks the index for the pool [`recall`] asks
+/// for, widened against tombstones, but reads for each row only its key, its
+/// tombstone and its cosine, which is one minus the distance the engine has
+/// from walking the COSINE index. With `probes` the score is calibrated
+/// instead (re-ranking the pool here, before fusion: sorting the FUSED list by
+/// a dense score would throw away the lexical leg), and that reads the vectors.
+/// The server passes none (ADR-0026: on the user's store the calibration cost
+/// more recall than it saved); the bench can.
+async fn dense_scored(
+    store: &Store,
+    tenant: &TenantId,
+    query_vec: &[f32],
+    k: usize,
+    network: Option<MemoryNetwork>,
+    probes: &[Vec<f32>],
+) -> Result<Vec<Scored>> {
+    let calibrating = !probes.is_empty();
+    let fields = if calibrating {
+        "key, deleted_at, embedding"
+    } else {
+        "key, deleted_at, vector::distance::knn() AS distance"
+    };
+    let pool = candidate_pool(k);
+    let surql = format!(
+        "SELECT {fields} FROM {TABLE} WHERE tenant_id = $tenant{} \
+         AND embedding <|{pool},{}|> $vector",
+        if network.is_some() {
+            " AND network = $network"
+        } else {
+            ""
+        },
+        search_effort(pool)
+    );
+    #[derive(Deserialize)]
+    struct Row {
+        key: String,
+        #[serde(default)]
+        deleted_at: Option<String>,
+        #[serde(default)]
+        distance: Option<f64>,
+        #[serde(default)]
+        embedding: Option<Vec<f32>>,
+    }
+    let rows: Vec<Row> = store
+        .query_rows(&surql, leg_vars(tenant, query_vec, network))
+        .await?;
+    let mut hits: Vec<Scored> = rows
+        .into_iter()
+        .filter(|r| r.deleted_at.is_none()) // hide tombstones (forgotten traces)
+        .take(k)
+        .map(|r| {
+            let score = match &r.embedding {
+                Some(e) => calibrated_score(query_vec, e, probes),
+                None => r.distance.map_or(f32::MIN, |d| (1.0 - d) as f32),
+            };
+            Scored { key: r.key, score }
+        })
+        .collect();
+    if calibrating {
+        hits.sort_by(|a, b| b.score.total_cmp(&a.score));
+    }
+    Ok(hits)
+}
+
+/// The chunk leg as `(memory key, score)` pieces, nearest first: the cosine the
+/// engine has from the index, or, with `probes`, the calibrated score, which
+/// reads each piece's vector.
+async fn chunk_scored(
+    store: &Store,
+    tenant: &TenantId,
+    query_vec: &[f32],
+    k: usize,
+    network: Option<MemoryNetwork>,
+    probes: &[Vec<f32>],
+) -> Result<Vec<(String, f32)>> {
+    if probes.is_empty() {
+        return crate::repo::memory_chunk::nearest_scored(store, tenant, query_vec, k, network)
+            .await;
+    }
+    let pieces = crate::repo::memory_chunk::nearest(store, tenant, query_vec, k, network).await?;
+    Ok(pieces
+        .into_iter()
+        .map(|(memory, v)| (memory, calibrated_score(query_vec, &v, probes)))
+        .collect())
+}
+
+/// The lexical leg as keys, best first: [`sparse_recall`]'s ranking, reading
+/// for each row only its key and its tombstone.
+async fn sparse_keys(
+    store: &Store,
+    tenant: &TenantId,
+    query_text: &str,
+    k: usize,
+    network: Option<MemoryNetwork>,
+) -> Result<Vec<String>> {
+    #[derive(Deserialize)]
+    struct Row {
+        key: String,
+        #[serde(default)]
+        deleted_at: Option<String>,
+    }
+    let network = network.map(|n| n.as_str());
+    let rows: Vec<Row> = crate::lexical::any_word(
+        store,
+        TABLE,
+        "key, deleted_at",
+        tenant,
+        query_text,
+        k,
+        network,
+    )
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(|r| r.key)
+        .collect())
+}
+
+/// The variables a vector leg binds: the tenant, the query vector and, when
+/// given, the network.
+fn leg_vars(
+    tenant: &TenantId,
+    query_vec: &[f32],
+    network: Option<MemoryNetwork>,
+) -> std::collections::BTreeMap<String, Value> {
+    let mut vars = std::collections::BTreeMap::from([
+        ("tenant".to_string(), serde_json::json!(tenant.as_str())),
+        ("vector".to_string(), serde_json::json!(query_vec)),
+    ]);
+    if let Some(net) = network {
+        vars.insert("network".to_string(), serde_json::json!(net.as_str()));
+    }
+    vars
+}
+
+/// Rank the dense leg's memories and the memories the chunk leg found together,
+/// each by its best score: its whole vector's or its nearest piece's. Scores,
+/// not ranks, so a piece that is not near the query cannot tie a whole memory
+/// that is. A memory only the chunk leg found gets its whole score from
+/// [`whole_scores`], which leaves out one forgotten since its chunks were cut,
+/// so it drops out here.
 async fn best_of(
     store: &Store,
     tenant: &TenantId,
-    dense: Vec<Memory>,
-    pieces: Vec<(String, Vec<f32>)>,
-    score: impl Fn(&[f32]) -> f32,
+    dense: Vec<Scored>,
+    pieces: Vec<(String, f32)>,
+    query_vec: &[f32],
+    probes: &[Vec<f32>],
     k: usize,
-) -> Result<Vec<Memory>> {
+) -> Result<Vec<String>> {
     let mut best_piece: HashMap<String, f32> = HashMap::new();
-    for (memory, vector) in &pieces {
-        let s = score(vector);
+    for (memory, s) in pieces {
         best_piece
-            .entry(memory.clone())
+            .entry(memory)
             .and_modify(|b| *b = b.max(s))
             .or_insert(s);
     }
-    let mut by_id: HashMap<String, Memory> = dense
-        .into_iter()
-        .map(|m| (m.id.as_str().to_string(), m))
-        .collect();
+    let mut whole: HashMap<String, f32> = dense.into_iter().map(|s| (s.key, s.score)).collect();
     let missing: Vec<String> = best_piece
         .keys()
-        .filter(|id| !by_id.contains_key(*id))
+        .filter(|key| !whole.contains_key(*key))
         .cloned()
         .collect();
-    for m in get_many(store, tenant, &missing).await? {
-        by_id.insert(m.id.as_str().to_string(), m);
-    }
-    let mut scored: Vec<(f32, Memory)> = by_id
+    whole.extend(whole_scores(store, tenant, &missing, query_vec, probes).await?);
+    let mut scored: Vec<(f32, String)> = whole
         .into_iter()
-        .map(|(id, m)| {
-            let whole = m.embedding.as_deref().map_or(f32::MIN, &score);
-            let best = best_piece.get(&id).map_or(whole, |p| p.max(whole));
-            (best, m)
+        .map(|(key, w)| {
+            let best = best_piece.get(&key).map_or(w, |p| p.max(w));
+            (best, key)
         })
         .collect();
     scored.sort_by(|a, b| b.0.total_cmp(&a.0));
-    Ok(scored.into_iter().take(k).map(|(_, m)| m).collect())
+    Ok(scored.into_iter().take(k).map(|(_, key)| key).collect())
+}
+
+/// The whole-vector score of each live memory among `keys`, by key: its cosine
+/// to `query_vec`, taken in the engine, or with `probes` its calibrated score,
+/// which reads the vectors. A forgotten memory is left out; one with no vector
+/// scores lowest, as it would unscored.
+async fn whole_scores(
+    store: &Store,
+    tenant: &TenantId,
+    keys: &[String],
+    query_vec: &[f32],
+    probes: &[Vec<f32>],
+) -> Result<HashMap<String, f32>> {
+    if keys.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let fields = if probes.is_empty() {
+        "key, IF embedding != NONE THEN vector::similarity::cosine(embedding, $vector) END AS score"
+    } else {
+        "key, embedding"
+    };
+    let surql = format!(
+        "SELECT {fields} FROM $keys.map(|$k| type::record('{TABLE}', $k)) \
+         WHERE tenant_id = $tenant AND deleted_at = NONE"
+    );
+    let mut vars = leg_vars(tenant, query_vec, None);
+    vars.insert("keys".to_string(), serde_json::json!(keys));
+    #[derive(Deserialize)]
+    struct Row {
+        key: String,
+        #[serde(default)]
+        score: Option<f64>,
+        #[serde(default)]
+        embedding: Option<Vec<f32>>,
+    }
+    let rows: Vec<Row> = store.query_rows(&surql, vars).await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let score = match &r.embedding {
+                Some(e) => calibrated_score(query_vec, e, probes),
+                None => r.score.map_or(f32::MIN, |s| s as f32),
+            };
+            (r.key, score)
+        })
+        .collect())
+}
+
+/// The live memories under `keys`, in that order, read whole: what recall
+/// returns, embeddings included, since its caller reports each one's
+/// similarity.
+async fn rows_in_order(store: &Store, tenant: &TenantId, keys: &[String]) -> Result<Vec<Memory>> {
+    let mut by_key: HashMap<String, Memory> = get_many(store, tenant, keys)
+        .instrument(tracing::info_span!(
+            target: RECALL_SPAN_TARGET,
+            "recall leg",
+            otel.name = "recall fetch",
+            antumbra.recall.pool = keys.len(),
+        ))
+        .await?
+        .into_iter()
+        .map(|m| (m.id.as_str().to_string(), m))
+        .collect();
+    Ok(keys.iter().filter_map(|key| by_key.remove(key)).collect())
 }
 
 /// The live memories of `tenant` among `ids`, in no particular order.
@@ -698,7 +888,7 @@ pub async fn sparse_recall(
 ) -> Result<Vec<Memory>> {
     let network = network.map(|n| n.as_str());
     let rows: Vec<MemoryRow> =
-        crate::lexical::any_word(store, TABLE, tenant, query_text, k, network).await?;
+        crate::lexical::any_word(store, TABLE, "*", tenant, query_text, k, network).await?;
     rows.into_iter()
         .filter(|r| r.deleted_at.is_none())
         .map(MemoryRow::into_domain)
