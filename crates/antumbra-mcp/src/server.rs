@@ -91,9 +91,10 @@ pub struct McpServer {
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
-/// truncates to the caller's k. ~100 candidates is the precision/latency knee for
-/// a cross-encoder (one batched POST).
-const RERANK_POOL_MAX: usize = 100;
+/// truncates to the caller's k. It was 100, the knee such stages are usually
+/// sized at; on kuskokwim reading 100 candidates took about 335 ms against
+/// about 100 for 30, and the session-start recall (k 12) paid it every session.
+const RERANK_POOL_MAX: usize = 50;
 
 /// The probability a memory must reach to be counted as answering the query
 /// (ADR-0023 B-2). A default the caller may move with `floor`, never the only
