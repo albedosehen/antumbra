@@ -1,10 +1,10 @@
 [package]
 name = "antumbra-control-server"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 license = "Elastic-2.0"
 rust-version = "1.95"
-repository = "https://github.com/Oneiriq/antumbra"
+repository = "https://github.com/albedosehen/antumbra"
 authors = ["Shon Thomas <shon@oneiriq.com>"]
 description = "Antumbra hosted control plane: an HTTP surface for invite-gated signup, magic-link login, and RS256 token issuance, run separately from the data-plane MCP server."
 

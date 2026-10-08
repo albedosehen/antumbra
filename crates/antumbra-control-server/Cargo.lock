@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-auth"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "jsonwebtoken 11.1.0",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-control"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "antumbra-auth",
  "antumbra-core",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-control-server"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "antumbra-control",
  "antumbra-core",
@@ -170,10 +170,11 @@ dependencies = [
 
 [[package]]
 name = "antumbra-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "fancy-regex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -182,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-store"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "antumbra-core",
  "async-trait",
@@ -194,6 +195,7 @@ dependencies = [
  "surrealdb",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -432,6 +434,21 @@ checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
 dependencies = [
  "virtue",
 ]
+
+[[package]]
+name = "bit-set"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
+dependencies = [
+ "bit-vec",
+]
+
+[[package]]
+name = "bit-vec"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitflags"
@@ -1301,6 +1318,17 @@ dependencies = [
  "rmp-serde",
  "serde",
  "tempfile",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72cf461f865c862bb7dc573f643dd6a2b6842f7c30b07882b56bd148cc2761b8"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]

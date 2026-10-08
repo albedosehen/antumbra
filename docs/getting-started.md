@@ -8,14 +8,27 @@ A SurrealDB v3 database and the Antumbra MCP server run in Docker (hardened, non
 
 ## The quick way
 
-With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.com) running, and [Rust](https://rustup.rs) to build the CLI until the first release ships installers:
+With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.com) running, install the CLI from the latest release (no Rust needed):
+
+```bash
+# macOS / Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
+```
+
+Then, from a clone of the repository (the local stack is built from it):
 
 ```bash
 git clone https://github.com/albedosehen/antumbra.git
 cd antumbra
-cargo install --path crates/antumbra-cli --locked
 antumbra setup local
 ```
+
+With [Rust](https://rustup.rs) you can build the CLI from the clone instead of using the installer: `cargo install --path crates/antumbra-cli --locked`.
 
 `antumbra setup local` does every step in the next section for you: it checks Docker and ollama, pulls the embedding model, generates the secrets into `docker/.env`, starts the stack, mints a token into `~/.antumbra/token.txt`, proves recall works with it, writes the hooks to `~/.antumbra/hooks`, wires them into Claude Code's `settings.json` (backed up, added to, never rewritten), and registers the MCP server. Run it again any time; it keeps what is already in place. `--dry-run` shows what it would change.
 
