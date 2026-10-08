@@ -106,11 +106,22 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 ## Install
 
-New here? With Docker and ollama running, one command sets everything up and connects Claude Code:
+New here? Install the CLI, then, with Docker and ollama running, one command sets everything up and connects Claude Code:
 
 ```bash
-cargo install --path crates/antumbra-cli --locked   # from a clone, until the first release
-antumbra setup local                                # or: antumbra setup hosted <url> --token-file <file>
+# macOS / Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
+```
+
+```bash
+git clone https://github.com/albedosehen/antumbra.git   # the local stack is built from the repository
+cd antumbra
+antumbra setup local     # or, against a hosted workspace (no clone needed): antumbra setup hosted <url> --token-file <file>
 antumbra setup check
 ```
 
@@ -118,21 +129,19 @@ antumbra setup check
 
 ### Prebuilt binaries (no Rust toolchain)
 
-> No release has been tagged yet, so the installers below resolve only once the first version tag is pushed (the `Release` workflow builds them). Until then, build from source.
-
-Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS, Linux, Windows) from the latest GitHub release. The operator console (`antumbra-tui`):
+Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on x86-64) from the latest GitHub release. The operator console (`antumbra-tui`):
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Oneiriq/antumbra/releases/latest/download/antumbra-tui-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-tui-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/Oneiriq/antumbra/releases/latest/download/antumbra-tui-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-tui-installer.ps1 | iex
 ```
 
-The CLI (`antumbra`) and the MCP server (`antumbra-mcp`) install the same way, swapping `antumbra-tui` for `antumbra-cli` or `antumbra-mcp` in the URL. Windows `.msi` packages, per-OS archives, and checksums are attached to every [release](https://github.com/Oneiriq/antumbra/releases).
+The CLI (`antumbra`) and the MCP server (`antumbra-mcp`) install the same way, swapping `antumbra-tui` for `antumbra-cli` or `antumbra-mcp` in the URL. Windows `.msi` packages, per-OS archives, and checksums are attached to every [release](https://github.com/albedosehen/antumbra/releases).
 
 ### From source (needs the Rust toolchain)
 

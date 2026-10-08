@@ -34,7 +34,7 @@ exclude = ["crates/antumbra-control-server"]
 edition = "2021"
 license = "Elastic-2.0"
 rust-version = "1.95"
-repository = "https://github.com/Oneiriq/antumbra"
+repository = "https://github.com/albedosehen/antumbra"
 authors = ["Shon Thomas <shon@oneiriq.com>"]
 
 [workspace.dependencies]

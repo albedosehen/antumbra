@@ -2,7 +2,7 @@
 
 You are setting up Antumbra for the person you are working with. Antumbra gives their coding agent a memory that carries across sessions: it recalls what matters at the start of each session and with each prompt, and stores what was learned at the end. Setup is one command, `antumbra setup`, which you run on their behalf. This guide tells you what to check, what to ask, and how to confirm it worked.
 
-The steps are subject to change while Antumbra is in private preview. If a command here fails in a way this guide does not describe, run `antumbra setup --help` and follow the CLI over this page.
+Antumbra is before 1.0, so the steps can change between releases. If a command here fails in a way this guide does not describe, run `antumbra setup --help` and follow the CLI over this page.
 
 ## Rules
 
@@ -27,15 +27,26 @@ Ask: **"Should Antumbra run on this machine, or connect to a hosted workspace yo
 antumbra --version
 ```
 
-If it is missing, build it from the repository (until the first release ships installers). This needs git and Rust through [rustup](https://rustup.rs); ask before installing either.
+If it is missing, install it from the latest release with the installer for their OS. It downloads a prebuilt `antumbra` (no Rust needed) into `~/.cargo/bin` and adds that to the PATH, so a new shell may be needed before the command is found. Ask before running it.
+
+```sh
+# macOS and Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
+```
+
+A setup on this machine also needs the repository, because the local stack is built from it (this needs git; ask before installing it):
 
 ```sh
 git clone https://github.com/albedosehen/antumbra.git
 cd antumbra
-cargo install --path crates/antumbra-cli --locked
 ```
 
-The first build takes several minutes. The repository is private during the preview, so the clone needs the person's GitHub access.
+To build the command from that clone instead of using the installer, they need Rust through [rustup](https://rustup.rs) (ask before installing it): `cargo install --path crates/antumbra-cli --locked`. The first build takes several minutes.
 
 ## 3a. On this machine
 
