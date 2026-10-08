@@ -90,6 +90,9 @@ pub(super) struct BehavioursOut {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct BehaviourIdParams {
+    /// The behaviour's `id`, as record_behaviour and list_behaviours return it
+    /// (`id` is accepted too).
+    #[serde(alias = "id")]
     pub(super) behaviour_id: String,
 }
 

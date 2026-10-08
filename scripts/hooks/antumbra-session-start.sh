@@ -19,8 +19,26 @@
 #
 # Deps: curl, jq; git is optional (no repository, no anchor). set -u but NOT
 # set -e (a curl or git failure must not crash the hook).
+#
+# One wall-clock budget, ANTUMBRA_SESSION_BUDGET_SEC (default 8), measured from
+# the hook's start, bounds its calls and must stay below the hook's "timeout"
+# in the agent's settings: past that the agent kills the hook and the session
+# starts cold. The calls go out together, each capped at what is left.
 set -u
 command -v jq >/dev/null 2>&1 || { printf '%s' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[Antumbra bootstrap: jq not installed]"}}'; exit 0; }
+
+STARTED=$(date +%s)
+BUDGET="${ANTUMBRA_SESSION_BUDGET_SEC:-8}"
+case "$BUDGET" in ''|*[!0-9]*) BUDGET=8 ;; esac
+# Whole seconds left for a call, keeping one back to judge anchors, render and
+# print; never less than one.
+remaining() {
+  local left=$(( BUDGET - 1 - ($(date +%s) - STARTED) ))
+  [ "$left" -lt 1 ] && left=1
+  printf '%s' "$left"
+}
+answers=$(mktemp -d 2>/dev/null || { mkdir -p "/tmp/antumbra-session-$$" && printf '%s' "/tmp/antumbra-session-$$"; })
+trap 'rm -rf "$answers"' EXIT
 
 URL="${ANTUMBRA_URL:-http://127.0.0.1:8081}"
 # The bearer, from the environment or from a file. The file is the better home
@@ -41,6 +59,32 @@ PENALIZE_ORPHANS="${ANTUMBRA_PENALIZE_ORPHANS:-0}"
 auth=(-H 'Content-Type: application/json')
 [ -n "$TOKEN" ] && auth+=(-H "Authorization: Bearer $TOKEN")
 
+# One call to the surface, its answer in a file (empty for no answer). Run in
+# the background, so the calls overlap one another and the git work below.
+call() { # tool, arguments (JSON), answer file
+  curl -sS --max-time "$(remaining)" -X POST "$URL/mcp/call" "${auth[@]}" \
+    -d "$(jq -nc --arg tool "$1" --argjson args "$2" '{tool: $tool, arguments: $args}')" \
+    >"$3" 2>/dev/null || : >"$3"
+}
+pending=""
+
+# --- handoffs waiting for this machine (R-7) ---------------------------------
+# What a session on another of the user's machines left for this one, announced
+# until a session marks it done. The server writes the lines; this only places
+# them. No answer, no line: it fails open like everything else here.
+call handoffs "$(jq -nc --arg host "$HOST_ID" '{host: $host}')" "$answers/handoffs.json" &
+pending="$pending $!"
+
+# --- this machine, in the user's fabric (ADR-0017) ---------------------------
+# A server registers the machine it runs on, and a laptop talking to a hosted
+# hub runs none, so the session names it: that lists it among the user's devices
+# and marks when it was last seen. Skipped for `local`, the name of a machine
+# nobody named. The answer is not used, and no answer changes nothing.
+if [ "$(printf '%s' "$HOST_ID" | tr '[:upper:]' '[:lower:]')" != "local" ]; then
+  call register_device "$(jq -nc --arg host "$HOST_ID" '{host: $host}')" "$answers/register.json" &
+  pending="$pending $!"
+fi
+
 # --- where the session is, in git terms (fail-open) -------------------------
 repo=""; commit=""; branch=""
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -54,6 +98,14 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
     | tr '[:upper:]' '[:lower:]')
   case "$repo" in *\\*|/*) repo="" ;; */*) ;; *) repo="" ;; esac
 fi
+
+# --- recall, scoped to here when known --------------------------------------
+args=$(jq -nc --arg repo "$repo" --arg branch "$branch" '
+  {query: "standing conventions, project context, and active tasks for this agent", top_k: 12}
+  + (if $repo != "" then {repo: $repo} else {} end)
+  + (if $branch != "" then {branch: $branch} else {} end)')
+call recall_memories "$args" "$answers/recall.json" &
+pending="$pending $!"
 
 # --- report this repository's recent merges (fail-open, detached) ------------
 # A server GitHub cannot reach never hears that a branch merged, so what was
@@ -70,78 +122,87 @@ if [ -n "$repo" ] && [ "${ANTUMBRA_REANCHOR:-1}" != "0" ] && command -v "$BIN" >
   ( ANTUMBRA_URL="$URL" ANTUMBRA_TOKEN="$TOKEN" nohup "$BIN" claude reanchor --days 3       </dev/null >"$log" 2>&1 & ) 2>/dev/null || true
 fi
 
-# --- handoffs waiting for this machine (R-7) ---------------------------------
-# What a session on another of the user's machines left for this one, announced
-# until a session marks it done. The server writes the lines; this only places
-# them. No answer, no line: it fails open like everything else here.
-handoffs=$(curl -sS --max-time 5 -X POST "$URL/mcp/call" "${auth[@]}" \
-  -d "$(jq -nc --arg host "$HOST_ID" '{tool: "handoffs", arguments: {host: $host}}')" 2>/dev/null \
-  | jq -r '.announcement // .result.announcement // empty' 2>/dev/null || true)
-
-# --- this machine, in the user's fabric (ADR-0017) ---------------------------
-# A server registers the machine it runs on, and a laptop talking to a hosted
-# hub runs none, so the session names it: that lists it among the user's devices
-# and marks when it was last seen. Skipped for `local`, the name of a machine
-# nobody named. The answer is not used, and no answer changes nothing.
-if [ "$(printf '%s' "$HOST_ID" | tr '[:upper:]' '[:lower:]')" != "local" ]; then
-  curl -sS --max-time 3 -X POST "$URL/mcp/call" "${auth[@]}" \
-    -d "$(jq -nc --arg host "$HOST_ID" '{tool: "register_device", arguments: {host: $host}}')" \
-    >/dev/null 2>&1 || true
+# --- what is different about this session (fail-open) ---------------------------
+# With its telemetry off the agent has also lost its feature flags, and the
+# features gated on them, and nothing tells it (ADR-0021). `antumbra claude brief`
+# prints a few lines when that is so and nothing when it is not. No antumbra on
+# the path, or any failure: no lines. It runs while the calls are in flight.
+brief=""
+if command -v "$BIN" >/dev/null 2>&1; then
+  brief=$("$BIN" claude brief 2>/dev/null || true)
 fi
 
-# --- recall, scoped to here when known --------------------------------------
-args=$(jq -nc --arg repo "$repo" --arg branch "$branch" '
-  {query: "standing conventions, project context, and active tasks for this agent", top_k: 12}
-  + (if $repo != "" then {repo: $repo} else {} end)
-  + (if $branch != "" then {branch: $branch} else {} end)')
-payload=$(jq -nc --argjson a "$args" '{tool: "recall_memories", arguments: $a}')
-resp=$(curl -sS --max-time 5 -X POST "$URL/mcp/call" "${auth[@]}" -d "$payload" 2>/dev/null || echo '{}')
+# --- the answers -------------------------------------------------------------------
+# shellcheck disable=SC2086 # one pid a word
+wait $pending 2>/dev/null
+handoffs=$(jq -r '.announcement // .result.announcement // empty' "$answers/handoffs.json" 2>/dev/null || true)
+resp=$(cat "$answers/recall.json" 2>/dev/null)
+[ -n "$resp" ] || resp='{}'
 
 # --- judge each hit's anchor with git in hand --------------------------------
 # One status per memory id: live | not-on-head | orphaned. Memories with no
 # anchor, or from another repository, get none (the server's `scope` still shows).
+# Three git processes and one jq judge every anchor at once, where asking per
+# memory took up to three git processes and a jq each.
 statuses='{}'
 if [ -n "$commit" ]; then
-  while IFS=$'\t' read -r id m_repo m_commit m_branch m_orphaned; do
-    [ -z "$id" ] && continue
-    st=""
-    if [ -n "$m_commit" ] && [ "$m_repo" = "$repo" ]; then
-      st="live"
-      git merge-base --is-ancestor "$m_commit" HEAD 2>/dev/null || st="not-on-head"
-      if [ -n "$m_branch" ] && [ "$m_branch" != "$branch" ] \
-         && ! git show-ref --verify --quiet "refs/heads/$m_branch" \
-         && ! git show-ref --verify --quiet "refs/remotes/origin/$m_branch"; then
-        st="orphaned"
-      fi
-    fi
-    # The server already knows when GitHub deleted the branch (the App's delete
-    # event marks the memory), even if this clone still has a stale local ref.
-    [ -n "$m_orphaned" ] && st="orphaned"
-    [ -n "$st" ] && statuses=$(printf '%s' "$statuses" | jq -c --arg id "$id" --arg st "$st" '. + {($id): $st}')
-  done < <(printf '%s' "$resp" | jq -r '
+  anchors=$(printf '%s' "$resp" | jq -r --arg repo "$repo" '
     (.memories // .result.memories // [])[]
-    | [.id, (.provenance.repo // ""), (.provenance.commit // ""), (.provenance.branch // ""), (.orphaned_at // "")]
-    | @tsv' 2>/dev/null)
+    | select((.provenance.commit // "") != "" and .provenance.repo == $repo)
+    | .provenance.commit' 2>/dev/null | tr -d '\r' | sort -u)
+  # Which anchors name a commit this clone has, by its full id: {anchor: full}.
+  known='{}'
+  if [ -n "$anchors" ]; then
+    known=$(paste -d ' ' <(printf '%s\n' "$anchors") <(printf '%s\n' "$anchors" | git cat-file --batch-check 2>/dev/null) \
+      | jq -Rn '[inputs | split(" ") | select(.[2] == "commit") | {(.[0]): .[1]}] | add // {}' 2>/dev/null) || known='{}'
+  fi
+  # Which of those HEAD does not contain: listing what they reach that HEAD
+  # does not names each one that is not an ancestor of HEAD.
+  off_head=""
+  fulls=$(printf '%s' "$known" | jq -r '.[]' 2>/dev/null | tr -d '\r' | sort -u)
+  if [ -n "$fulls" ]; then
+    # shellcheck disable=SC2086 # one commit id a word
+    if ! off_head=$(git rev-list $fulls --not HEAD 2>/dev/null); then
+      off_head=""
+      for c in $fulls; do git merge-base --is-ancestor "$c" HEAD 2>/dev/null || off_head="$off_head$c"$'\n'; done
+    fi
+  fi
+  # Every branch this clone knows, here and on origin.
+  refs=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes/origin 2>/dev/null)
+  statuses=$(printf '%s' "$resp" | jq -c --arg repo "$repo" --arg branch "$branch" --argjson known "$known" \
+    --arg off "$off_head" --arg refs "$refs" '
+    ($off | split("\n") | map(select(. != "") | {(.): true}) | add // {}) as $offset
+    | ($refs | split("\n") | map(select(. != "") | {(.): true}) | add // {}) as $refset
+    | [ (.memories // .result.memories // [])[]
+        | . as $m
+        | ( if (($m.provenance.commit // "") != "" and $m.provenance.repo == $repo) then
+              ( $known[$m.provenance.commit] as $full
+                | (if $full != null and ($offset[$full] | not) then "live" else "not-on-head" end) as $st
+                | ($m.provenance.branch // "") as $b
+                | if $b != "" and $b != $branch
+                     and ($refset["refs/heads/" + $b] | not)
+                     and ($refset["refs/remotes/origin/" + $b] | not)
+                  then "orphaned" else $st end )
+            else "" end ) as $st
+        # The server already knows when GitHub deleted the branch (the App delete
+        # event marks the memory), even if this clone still has a stale local ref.
+        | (if ($m.orphaned_at // "") != "" then "orphaned" else $st end) as $st
+        | select($st != "")
+        | {($m.id): $st} ]
+    | add // {}' 2>/dev/null) || statuses='{}'
+  [ -n "$statuses" ] || statuses='{}'
 fi
 
 # Optionally push the judgment back: an orphaned memory loses standing now,
 # instead of waiting for someone to notice it was about a branch that is gone.
 if [ "$PENALIZE_ORPHANS" = "1" ]; then
+  penalties=""
   for id in $(printf '%s' "$statuses" | jq -r 'to_entries[] | select(.value == "orphaned") | .key'); do
-    curl -sS --max-time 3 -X POST "$URL/mcp/call" "${auth[@]}" \
-      -d "$(jq -nc --arg id "$id" '{tool: "penalize_memory", arguments: {memory_id: $id}}')" \
-      >/dev/null 2>&1 || true
+    call penalize_memory "$(jq -nc --arg id "$id" '{memory_id: $id}')" /dev/null &
+    penalties="$penalties $!"
   done
-fi
-
-# --- what is different about this session (fail-open) ---------------------------
-# With its telemetry off the agent has also lost its feature flags, and the
-# features gated on them, and nothing tells it (ADR-0021). `antumbra claude brief`
-# prints a few lines when that is so and nothing when it is not. No antumbra on
-# the path, or any failure: no lines.
-brief=""
-if command -v "$BIN" >/dev/null 2>&1; then
-  brief=$("$BIN" claude brief 2>/dev/null || true)
+  # shellcheck disable=SC2086 # one pid a word
+  wait $penalties 2>/dev/null
 fi
 
 # --- render ---------------------------------------------------------------------

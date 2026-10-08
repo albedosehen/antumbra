@@ -104,6 +104,10 @@ pub(super) struct ListParams {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct IdParams {
+    /// The memory's `id`, as store_memory, recall_memories and list_memories
+    /// return it (`memory:...`). Passed as `id` it is accepted too: agents copy
+    /// the field name from the results, and refusing it cost a retry.
+    #[serde(alias = "id")]
     pub(super) memory_id: String,
 }
 
@@ -415,6 +419,8 @@ pub(super) struct RelateOut {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct NeighborsParams {
+    /// The memory's `id`, as recall_memories returns it (`id` is accepted too).
+    #[serde(alias = "id")]
     pub(super) memory_id: String,
     /// Optional edge-type filter.
     pub(super) edge_type: Option<String>,
@@ -700,6 +706,8 @@ pub(super) struct HandoffsOut {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct CompleteHandoffParams {
+    /// The handoff's `id`, as handoffs lists it (`id` is accepted too).
+    #[serde(alias = "id")]
     pub(super) handoff_id: String,
     /// The machine that dealt with it. Defaults to the machine this call came
     /// from, as its client names it, else the server's own host.

@@ -474,6 +474,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_indexes([
                 unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
                 index("memory_tenant_network_idx", ["tenant_id", "network"]),
+                // One compartment's memories (the handoffs a session start
+                // announces, a user's behaviours) without reading the whole
+                // workspace and running the read rule on every row of it.
+                index(
+                    "memory_tenant_compartment_idx",
+                    ["tenant_id", "compartment"],
+                ),
                 // Supports the collector's incremental watermark filter
                 // (`updated_at > since`) as a range scan (R-1).
                 index("memory_updated_at_idx", ["updated_at"]),

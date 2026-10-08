@@ -312,3 +312,92 @@ async fn read_rule_cost() -> Result<()> {
     );
     Ok(())
 }
+
+/// What listing one small compartment costs beside a large one, under the
+/// record session: the handoffs a session start announces, read from a
+/// compartment of six among 7,000 memories. Without an index on the
+/// compartment the read examines (and runs the read rule on) every memory of
+/// the workspace; production traced `tool handoffs` at 190-370 ms.
+/// `cargo test -p antumbra-store --release --lib compartment_list_cost -- --ignored --nocapture`
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "a timing harness; run by hand"]
+async fn compartment_list_cost() -> Result<()> {
+    let n: usize = std::env::var("ANTUMBRA_ACL_BENCH_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7000);
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("ws:bench");
+    let user = UserId::new("user:bench");
+    principal::provision(&store, &tenant, &user).await?;
+    let now = Utc::now();
+    let mine = CompartmentId::new("comp:ws:bench:user:bench:default");
+    let handoffs = CompartmentId::new("comp:ws:bench:user:bench:handoff");
+    for (id, name) in [(&mine, "default"), (&handoffs, "handoff")] {
+        compartment::create(
+            &store,
+            &Compartment::new(id.clone(), tenant.clone(), user.clone(), name, now),
+        )
+        .await?;
+    }
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    let ids: Vec<usize> = (0..n + 6).collect();
+    for batch in ids.chunks(200) {
+        let memories: Vec<Memory> = batch
+            .iter()
+            .map(|&i| {
+                let home = if i < n { &mine } else { &handoffs };
+                Memory::new(
+                    format!("memory:bench-{i}"),
+                    tenant.as_str(),
+                    MemoryNetwork::World,
+                    rng.text(60),
+                    0.8,
+                    now,
+                )
+                .in_compartment(home.as_str())
+                .with_embedding(rng.vector())
+            })
+            .collect();
+        futures::future::try_join_all(memories.iter().map(|m| upsert(&store, m))).await?;
+    }
+
+    async fn timed(
+        store: &Store,
+        tenant: &TenantId,
+        compartment: &CompartmentId,
+    ) -> Result<(f64, usize)> {
+        list_by_compartment(store, tenant, compartment).await?;
+        let mut ms = Vec::new();
+        let mut found = 0;
+        for _ in 0..15 {
+            let t = Instant::now();
+            found = list_by_compartment(store, tenant, compartment).await?.len();
+            ms.push(t.elapsed().as_secs_f64() * 1e3);
+        }
+        Ok((median(ms), found))
+    }
+
+    println!("{n} memories in one compartment, 6 in another; medians of 15 lists");
+    store.signin_root().await?;
+    store
+        .client()
+        .query_with_vars(
+            "REMOVE INDEX IF EXISTS memory_tenant_compartment_idx ON memory",
+            BTreeMap::new(),
+        )
+        .await
+        .map_err(map)?;
+    store.signin(&tenant, &user).await?;
+    let (without, found) = timed(&store, &tenant, &handoffs).await?;
+    assert_eq!(found, 6);
+    println!("{:<34} {without:>7.1} ms", "no compartment index (before)");
+
+    store.signin_root().await?;
+    store.ensure_schema().await?;
+    store.signin(&tenant, &user).await?;
+    let (with, found) = timed(&store, &tenant, &handoffs).await?;
+    assert_eq!(found, 6);
+    println!("{:<34} {with:>7.1} ms", "tenant+compartment index (now)");
+    Ok(())
+}
