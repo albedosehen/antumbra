@@ -87,6 +87,15 @@ services:
       # embeds at once while it cuts memories into the pieces recall searches.
       # 0 stops it; recall then reads whole memories for anything not cut.
       - ANTUMBRA_CHUNK_IN_FLIGHT=${ANTUMBRA_CHUNK_IN_FLIGHT:-4}
+      # The copal document of record: each ingested document's original is
+      # archived there before its chunks are stored. Unset = off, and ingest
+      # keeps only the chunks. With the `copal` profile started:
+      #   ANTUMBRA_COPAL_ADDR=http://copal:8080
+      # Tenancy defaults to one copal tenant per workspace (copal's header
+      # auth); TENANT or KEY land every workspace in one tenant instead.
+      - ANTUMBRA_COPAL_ADDR=${ANTUMBRA_COPAL_ADDR:-}
+      - ANTUMBRA_COPAL_TENANT=${ANTUMBRA_COPAL_TENANT:-}
+      - ANTUMBRA_COPAL_KEY=${ANTUMBRA_COPAL_KEY:-}
       # Trace export over OTLP/HTTP, all optional. Empty counts as unset, so the
       # export stays off unless docker/.env sets the endpoint, and the service
       # is named antumbra-mcp unless it names one. The headers can carry the
@@ -252,5 +261,99 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # copal, the document of record (github.com/Oneiriq/copal): antumbra-mcp
+  # archives each ingested document's original there before storing its
+  # chunks, and every chunk carries the copal file id and digest. OPT-IN, like
+  # the reranker: ingest works without it and keeps only the chunks. Start it
+  # with:
+  #   docker compose -f docker/docker-compose.yml --profile copal up -d copal
+  # then point ANTUMBRA_COPAL_ADDR at http://copal:8080 in docker/.env.
+  #
+  # copal keeps its own SurrealDB, so its lifecycle and blast radius stay
+  # apart from the memory store's. The database wants the `files`
+  # experimental capability and an existing, allowlisted bucket folder; the
+  # data directory must be writable by the image's nonroot user (uid 65532),
+  # like ANTUMBRA_SURREAL_DATA:
+  #   mkdir -p "$COPAL_SURREAL_DATA/db" "$COPAL_SURREAL_DATA/buckets"
+  copal-surrealdb:
+    image: surrealdb/surrealdb:v3.2.4
+    container_name: antumbra-copal-surrealdb
+    profiles: ["copal"]
+    user: "65532:65532"
+    command:
+      - start
+      - --user
+      - root
+      - --bind
+      - 0.0.0.0:8000
+      - --allow-experimental=files
+      - rocksdb:/data/db
+    environment:
+      - SURREAL_PASS=${COPAL_SURREAL_PASS:-}
+      - SURREAL_CAPS_ALLOW_EXPERIMENTAL=*
+      - SURREAL_BUCKET_FOLDER_ALLOWLIST=/data/buckets
+    volumes:
+      - ${COPAL_SURREAL_DATA:-./copal-surrealdb}:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/surreal", "isready", "--endpoint", "http://localhost:8000"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 8s
+
+  copal:
+    # Built from the copal repository; set COPAL_IMAGE to the tag you built or
+    # pulled.
+    image: ${COPAL_IMAGE:-copal:local}
+    container_name: antumbra-copal
+    profiles: ["copal"]
+    depends_on:
+      copal-surrealdb:
+        condition: service_healthy
+    environment:
+      - COPAL_BIND=0.0.0.0:8080
+      - COPAL_DB_URL=ws://copal-surrealdb:8000
+      - COPAL_DB_USER=root
+      - COPAL_DB_PASS=${COPAL_SURREAL_PASS:-}
+      - COPAL_BLOB_ROOT=/data/blobs
+      # 64 hex characters: originals are sealed at rest under it. Losing it
+      # loses every sealed object, so keep it wherever the other secrets live.
+      - COPAL_BLOB_ENCRYPTION_KEY=${COPAL_BLOB_ENCRYPTION_KEY:-}
+      - COPAL_ADMIN_TOKEN=${COPAL_ADMIN_TOKEN:-}
+      # copal's own semantic search: an OpenAI-compatible /v1/embeddings
+      # (bare host:port or a URL base) and that model's width.
+      - COPAL_EMBEDDING_ADDR=${COPAL_EMBEDDING_ADDR:-}
+      - COPAL_EMBEDDING_MODEL=${COPAL_EMBEDDING_MODEL:-}
+      - COPAL_EMBEDDING_DIMENSION=${COPAL_EMBEDDING_DIMENSION:-384}
+    volumes:
+      # The image owns /data/blobs as its copal user, and a fresh named volume
+      # takes that ownership over.
+      - antumbra-copal-blobs:/data/blobs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Loopback only. copal's default `header` auth trusts whoever can reach
+      # it to name their tenant, so it is for antumbra-mcp on the compose
+      # network (and probing by hand), never the LAN. NOT 8090 or 8091: the
+      # control server and the reranker already bind those.
+      - "127.0.0.1:8092:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
 volumes:
   antumbra-rerank-cache:
+  antumbra-copal-blobs:

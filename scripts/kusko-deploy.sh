@@ -56,6 +56,17 @@ else
     echo "== rerank not configured (ANTUMBRA_RERANK_URL unset), skipping"
 fi
 
+# The same for copal, the document of record, when this deployment archives to
+# it. Here a stopped service is louder than a lost precision stage: every
+# document ingest fails until it is back, since the original is archived before
+# any chunk is stored. `up -d copal` starts its database with it.
+if grep -q '^ANTUMBRA_COPAL_ADDR=.\+' .env 2>/dev/null; then
+    echo "== ensure copal (ANTUMBRA_COPAL_ADDR is set)"
+    docker compose "${COMPOSE[@]}" --profile copal up -d copal 2>&1 | tail -5
+else
+    echo "== copal not configured (ANTUMBRA_COPAL_ADDR unset), skipping"
+fi
+
 sleep 8
 docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep antumbra
 docker inspect antumbra-mcp --format 'after: {{.Config.Image}} created {{.Created}}'
