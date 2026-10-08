@@ -629,6 +629,52 @@ async fn call_tool_dispatches_a_named_tool() {
         .is_err());
 }
 
+#[tokio::test]
+async fn a_memory_is_named_by_the_id_its_results_carry() {
+    // Every result names a memory `id`, so an agent passes `id` back. Telemetry
+    // caught penalize_memory refusing that ("missing field `memory_id`") and
+    // the agent spending a retry on it.
+    let s = server().await;
+    let stored = s
+        .call_tool(
+            "store_memory",
+            serde_json::json!({ "content": "the deno runtime" }),
+        )
+        .await
+        .unwrap();
+    let id = stored["id"].as_str().unwrap().to_string();
+
+    let penalized = s
+        .call_tool(
+            "penalize_memory",
+            serde_json::json!({ "id": id, "reason": "an agent's extra field is ignored" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(penalized["found"], true);
+    let reinforced = s
+        .call_tool("reinforce_memory", serde_json::json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(reinforced["found"], true);
+    s.call_tool("get_neighbors", serde_json::json!({ "id": id }))
+        .await
+        .unwrap();
+    // The documented name still works, and naming nothing is still refused.
+    s.call_tool("reinforce_memory", serde_json::json!({ "memory_id": id }))
+        .await
+        .unwrap();
+    assert!(s
+        .call_tool("forget_memory", serde_json::json!({}))
+        .await
+        .is_err());
+    let forgotten = s
+        .call_tool("forget_memory", serde_json::json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(forgotten["forgotten"], true);
+}
+
 mod behaviour;
 mod depgraph;
 mod device;
