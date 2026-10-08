@@ -22,3 +22,7 @@ services:
     deploy: !reset null
     devices:
       - nvidia.com/gpu=all
+  gpu-exporter:
+    deploy: !reset null
+    devices:
+      - nvidia.com/gpu=all

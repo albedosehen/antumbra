@@ -1,0 +1,108 @@
+# OpenTelemetry Collector (contrib) for the compose stack: what antumbra-mcp's
+# own spans cannot say about the machine it runs on. Run by the `telemetry`
+# profile (docker-compose.yml) and sent where antumbra-mcp sends its traces.
+#
+#   what                                              from
+#   host CPU, memory, load, disk I/O, file systems,   host_metrics (the host's / at /hostfs, read-only)
+#   paging, process counts
+#   each container's CPU, memory, I/O, restarts,      docker_stats (the Docker socket, read-only)
+#   uptime
+#   SurrealDB process CPU, memory, uptime             prometheus/surrealdb (surrealdb:8000/metrics)
+#
+# docker-compose.gpu.yml layers otel-collector.gpu.yaml on top for the GPU
+# and the reranker. Every metric carries host.name from ANTUMBRA_HOST, the
+# name antumbra-mcp registers this machine under, so a dashboard can tell this
+# host's figures from another collector's. OpenObserve makes one metrics
+# stream per metric name. Component names are the snake_case ones contrib uses
+# from v0.16x.
+#
+# No network scraper: inside a container it would count the container's
+# interfaces, not the host's.
+
+receivers:
+  host_metrics:
+    collection_interval: 60s
+    root_path: /hostfs
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      load: {}
+      disk: {}
+      paging: {}
+      processes: {}
+      # Real file systems only: no pseudo file systems, no container layers,
+      # and not NixOS's read-only /nix/store bind of the root file system.
+      filesystem:
+        exclude_fs_types:
+          match_type: strict
+          fs_types:
+            [autofs, binfmt_misc, bpf, cgroup, cgroup2, configfs, debugfs,
+             devpts, devtmpfs, efivarfs, fuse.portal, fusectl, hugetlbfs,
+             mqueue, nsfs, overlay, proc, pstore, ramfs, rpc_pipefs,
+             securityfs, squashfs, sysfs, tmpfs, tracefs]
+        exclude_mount_points:
+          match_type: regexp
+          mount_points: ["^/nix/store$", "^/var/lib/docker/.+", "^/run/.+", "^/hostfs.*"]
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+
+  # Every container on the host, not only this stack's: one of them starving
+  # the rest is exactly what this is for.
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 60s
+    # Docker 29 refuses API versions below 1.44.
+    api_version: "1.44"
+    metrics:
+      container.restarts:
+        enabled: true
+      container.uptime:
+        enabled: true
+
+  # SurrealDB serves Prometheus text on /metrics without auth (process CPU,
+  # memory, uptime, build), as on shaman.
+  prometheus/surrealdb:
+    config:
+      scrape_configs:
+        - job_name: surrealdb
+          scrape_interval: 60s
+          static_configs:
+            - targets: ["surrealdb:8000"]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  resource/host:
+    attributes:
+      - key: host.name
+        value: ${env:ANTUMBRA_HOST}
+        action: upsert
+
+  batch:
+    send_batch_size: 1024
+    timeout: 10s
+
+exporters:
+  # The collector appends /v1/metrics to the endpoint, as antumbra-mcp appends
+  # /v1/traces; for OpenObserve that is the organization's base URL.
+  otlp_http/telemetry:
+    endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT}
+    headers:
+      Authorization: ${env:ANTUMBRA_TELEMETRY_AUTHORIZATION}
+
+service:
+  pipelines:
+    metrics:
+      receivers: [host_metrics, docker_stats, prometheus/surrealdb]
+      processors: [memory_limiter, resource/host, batch]
+      exporters: [otlp_http/telemetry]

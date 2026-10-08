@@ -63,6 +63,34 @@ services:
               count: all
               capabilities: [gpu]
 
+  # With the `telemetry` profile: the GPU's use, memory, temperature and power,
+  # read through nvidia-smi and served as Prometheus text on the compose
+  # network only, and the collector's second config, which scrapes it and the
+  # reranker. A GPU shared by serving, training and the reranker is the one
+  # resource none of their own figures show whole.
+  gpu-exporter:
+    image: ${ANTUMBRA_GPU_EXPORTER_IMAGE:-utkuozdemir/nvidia_gpu_exporter:1.15.1}
+    container_name: antumbra-gpu-exporter
+    profiles: ["telemetry"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    restart: unless-stopped
+
+  otel-collector:
+    command: ["--config=/etc/otelcol/config.yaml", "--config=/etc/otelcol/gpu.yaml"]
+    volumes:
+      - ./otel-collector.gpu.yaml:/etc/otelcol/gpu.yaml:ro
+
 volumes:
   antumbra-weights:
   antumbra-adapters:

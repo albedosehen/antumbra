@@ -354,6 +354,50 @@ services:
       - ALL
     restart: unless-stopped
 
+  # Host, container and database metrics for this stack, sent where
+  # antumbra-mcp sends its traces (OTEL_EXPORTER_OTLP_ENDPOINT). antumbra-mcp's
+  # spans say how each call went; they cannot say that the machine is short of
+  # memory, that a container keeps restarting or that the database sits at full
+  # CPU, and a stack that stops answering shows only as spans that stop coming.
+  # OPT-IN, behind the `telemetry` profile. Set ANTUMBRA_TELEMETRY_AUTHORIZATION
+  # in docker/.env to the Authorization header the endpoint expects (for
+  # OpenObserve `Basic <base64>`, the value OTEL_EXPORTER_OTLP_HEADERS carries),
+  # then:
+  #   docker compose -f docker/docker-compose.yml --profile telemetry up -d otel-collector
+  # docker-compose.gpu.yml adds the GPU and the reranker.
+  #
+  # It reads the host's / read-only, for file systems and process counts, and
+  # the Docker socket, for container figures. Whoever holds that socket is root
+  # on the host, read-only mount or not, which is why this is opt-in. It runs as
+  # root to read the socket, with every capability dropped, and keeps no ports.
+  otel-collector:
+    image: ${ANTUMBRA_OTELCOL_IMAGE:-ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.162.0}
+    container_name: antumbra-otel-collector
+    profiles: ["telemetry"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    user: "0:0"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - ANTUMBRA_TELEMETRY_AUTHORIZATION=${ANTUMBRA_TELEMETRY_AUTHORIZATION:-}
+      # The host name on every metric: the name antumbra-mcp registers this
+      # machine under.
+      - ANTUMBRA_HOST=${ANTUMBRA_HOST:-${HOSTNAME}}
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - type: bind
+        source: /
+        target: /hostfs
+        read_only: true
+        bind:
+          propagation: rslave
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    restart: unless-stopped
+
 volumes:
   antumbra-rerank-cache:
   antumbra-copal-blobs:

@@ -84,6 +84,33 @@ OTEL_RESOURCE_ATTRIBUTES=deployment.environment=<env>,host.name=<host>
 
 `<base64>` is the base64 of `user:password` for an OpenObserve user allowed to ingest. The headers carry that credential, so they ride the environment like the other secrets in `docker/.env`. Name the service with `OTEL_SERVICE_NAME`, not a `service.name` in the attributes. Spans carry no query, memory or document text, no token and no request body (see `crates/antumbra-mcp/src/telemetry.rs`). Recreate the container to pick up a change: `docker compose -f docker/docker-compose.yml up -d antumbra-mcp`.
 
+## Host, container and database metrics (optional)
+
+The spans say how each call went. They cannot say that the machine is short of memory, that a container keeps restarting, or that SurrealDB sits at full CPU, and a stack that stops answering shows only as spans that stop coming. The `telemetry` profile runs an OpenTelemetry Collector beside the stack that reports those, every minute, to the same endpoint:
+
+| what | from |
+|---|---|
+| host CPU, memory, load, disk I/O, file systems, paging, process counts | `host_metrics`, the host's `/` mounted read-only |
+| each container's CPU, memory, I/O, restarts, uptime | `docker_stats`, the Docker socket mounted read-only |
+| SurrealDB process CPU, memory, uptime | `surrealdb:8000/metrics` |
+| GPU use, memory, temperature, power; the reranker's queue and latency | `gpu-exporter` and `rerank:80/metrics`, with `docker-compose.gpu.yml` |
+
+```dotenv
+# in docker/.env, beside OTEL_EXPORTER_OTLP_ENDPOINT:
+ANTUMBRA_TELEMETRY_AUTHORIZATION=Basic <base64>   # the Authorization value OTEL_EXPORTER_OTLP_HEADERS carries
+```
+
+Write it decoded, with a space after `Basic`. `OTEL_EXPORTER_OTLP_HEADERS` percent-encodes its values (`Basic%20<base64>`) and the tracing SDK decodes them; the collector sends this one as written, and OpenObserve answers an encoded one with 401.
+
+```sh
+docker compose -f docker/docker-compose.yml --profile telemetry up -d otel-collector
+# on a GPU host, with the same files as the stack:
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml [-f docker/docker-compose.gpu-cdi.yml] \
+  --profile telemetry up -d gpu-exporter otel-collector
+```
+
+Every metric carries `host.name` from `ANTUMBRA_HOST`. Whoever holds the Docker socket is root on the host, read-only mount or not, which is why the collector is opt-in; it runs as root with every capability dropped, a read-only root file system and no ports. `scripts/kusko-deploy.sh` recreates it on each deploy when `ANTUMBRA_TELEMETRY_AUTHORIZATION` is set.
+
 ## Document of record: copal (optional)
 
 With `ANTUMBRA_COPAL_ADDR` set, `ingest_document` archives each document's original in [copal](https://github.com/Oneiriq/copal) before storing its chunks, and every chunk carries the copal file id and digest. Unset, ingest keeps only the chunks. The `copal` profile runs copal and its own SurrealDB beside the stack. Build the copal image from its repository (or pull the one you publish) and set `COPAL_IMAGE` to it, then:
