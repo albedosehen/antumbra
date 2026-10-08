@@ -515,8 +515,27 @@ fn main() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("antumbra-mcp worker thread panicked"))?
 }
 
+impl Cli {
+    /// The optional endpoints as the operator meant them. docker compose
+    /// passes an unset variable through as an empty one (`${VAR:-}`), and
+    /// clap reads an empty variable as a value, so a stack without a reranker
+    /// or copal configured one at the address "": every recall paid a failing
+    /// rerank call, and every document ingest would fail on the archive. An
+    /// empty setting is an unset one.
+    fn without_empty_settings(mut self) -> Self {
+        let set = |value: Option<String>| value.filter(|v| !v.trim().is_empty());
+        self.rerank_url = set(self.rerank_url);
+        self.rerank_key = set(self.rerank_key);
+        self.copal_addr = set(self.copal_addr);
+        self.copal_tenant = set(self.copal_tenant);
+        self.copal_key = set(self.copal_key);
+        self.copal_keys = self.copal_keys.filter(|p| !p.as_os_str().is_empty());
+        self
+    }
+}
+
 async fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::parse().without_empty_settings();
     // Secrets resolve once, from the inline flag or its file, and only the
     // resolved value is used from here on.
     let jwt_secret = secrets::resolve(
@@ -767,6 +786,38 @@ fn build_verifier(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What compose hands over for an unset endpoint is an empty string, and
+    /// clap keeps it; the server treats it as no endpoint at all.
+    #[test]
+    fn an_empty_endpoint_setting_is_an_unset_one() {
+        let cli = Cli::try_parse_from([
+            "antumbra-mcp",
+            "--rerank-url",
+            "",
+            "--copal-addr",
+            " ",
+            "--copal-tenant",
+            "",
+        ])
+        .expect("empty values parse")
+        .without_empty_settings();
+        assert_eq!(cli.rerank_url, None);
+        assert_eq!(cli.copal_addr, None);
+        assert_eq!(cli.copal_tenant, None);
+
+        let cli = Cli::try_parse_from([
+            "antumbra-mcp",
+            "--rerank-url",
+            "http://rerank/rerank",
+            "--copal-addr",
+            "http://copal:8080",
+        ])
+        .expect("set values parse")
+        .without_empty_settings();
+        assert_eq!(cli.rerank_url.as_deref(), Some("http://rerank/rerank"));
+        assert_eq!(cli.copal_addr.as_deref(), Some("http://copal:8080"));
+    }
 
     #[test]
     fn an_empty_population_still_names_a_base() {

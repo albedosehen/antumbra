@@ -84,6 +84,29 @@ OTEL_RESOURCE_ATTRIBUTES=deployment.environment=<env>,host.name=<host>
 
 `<base64>` is the base64 of `user:password` for an OpenObserve user allowed to ingest. The headers carry that credential, so they ride the environment like the other secrets in `docker/.env`. Name the service with `OTEL_SERVICE_NAME`, not a `service.name` in the attributes. Spans carry no query, memory or document text, no token and no request body (see `crates/antumbra-mcp/src/telemetry.rs`). Recreate the container to pick up a change: `docker compose -f docker/docker-compose.yml up -d antumbra-mcp`.
 
+## Document of record: copal (optional)
+
+With `ANTUMBRA_COPAL_ADDR` set, `ingest_document` archives each document's original in [copal](https://github.com/Oneiriq/copal) before storing its chunks, and every chunk carries the copal file id and digest. Unset, ingest keeps only the chunks. The `copal` profile runs copal and its own SurrealDB beside the stack. Build the copal image from its repository (or pull the one you publish) and set `COPAL_IMAGE` to it, then:
+
+```dotenv
+# in docker/.env:
+COPAL_IMAGE=<image>
+COPAL_SURREAL_DATA=/path/for/copal-surrealdb     # mkdir -p $COPAL_SURREAL_DATA/{db,buckets}, writable by uid 65532
+COPAL_SURREAL_PASS=<generated>
+COPAL_BLOB_ENCRYPTION_KEY=<64 hex>                # openssl rand -hex 32; losing it loses every sealed original
+COPAL_ADMIN_TOKEN=<generated>
+COPAL_EMBEDDING_ADDR=<host:port>                  # an OpenAI-compatible /v1/embeddings, for copal's own search
+COPAL_EMBEDDING_MODEL=all-MiniLM-L6-v2
+ANTUMBRA_COPAL_ADDR=http://copal:8080
+```
+
+```sh
+docker compose -f docker/docker-compose.yml --profile copal up -d copal
+docker compose -f docker/docker-compose.yml up -d antumbra-mcp
+```
+
+copal answers on the compose network and on `127.0.0.1:8092` only: its default `header` auth trusts the caller to name its tenant, which is how antumbra presents each workspace as its own tenant, and why it never belongs on the LAN. For copal's `keys` auth mode, set `ANTUMBRA_COPAL_KEY` (or pass `--copal-keys`) instead.
+
 ## Notes
 
 - `docker/.env` holds secrets and is gitignored. Move these to a secret manager (Doppler) for anything beyond local use. Compose passes them as environment, never as command-line arguments; a deployment that mounts secrets as files (Docker secrets, Kubernetes, a Key Vault CSI mount) passes `--db-pass-file` and `--jwt-secret-file` to `antumbra-mcp` instead, so they appear in neither the process arguments nor the environment.
