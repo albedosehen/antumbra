@@ -21,11 +21,14 @@ use antumbra_core::{Result, TenantId};
 use crate::store::Store;
 
 /// The `k` rows of `table` in `tenant` (and `network`, when given) whose
-/// `content` best matches any word of `query_text`, best first. A blank query
+/// `content` best matches any word of `query_text`, best first, each with its
+/// BM25 `score`. `fields` is the projection: `*` for whole rows, or only what
+/// the caller reads, since a whole memory carries its embedding. A blank query
 /// returns nothing.
 pub(crate) async fn any_word<T: DeserializeOwned>(
     store: &Store,
     table: &'static str,
+    fields: &'static str,
     tenant: &TenantId,
     query_text: &str,
     k: usize,
@@ -43,7 +46,7 @@ pub(crate) async fn any_word<T: DeserializeOwned>(
         ""
     };
     let surql = format!(
-        "SELECT *, search::score(1) AS score FROM {table} \
+        "SELECT {fields}, search::score(1) AS score FROM {table} \
          WHERE content @1,OR@ $terms AND tenant_id = $tenant{also} \
          ORDER BY score DESC LIMIT {k}"
     );

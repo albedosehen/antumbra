@@ -6,11 +6,11 @@
 //! table's select rule is the memory table's own and a chunk is visible exactly
 //! when its memory is. Only the server writes it, in owner mode.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use surql::query::builder::Query;
 use surql::query::crud::{delete_records, query_records, upsert_record};
@@ -248,6 +248,56 @@ pub async fn nearest(
         .collect();
     pieces.sort_by(|a, b| b.0.total_cmp(&a.0));
     Ok(pieces.into_iter().map(|(_, m, v)| (m, v)).collect())
+}
+
+/// [`nearest`] without the vectors: each piece's memory and its cosine to
+/// `vector`, nearest first. The engine has the distance from walking the index
+/// (`vector::distance::knn()`, one minus the cosine on this COSINE index), so a
+/// piece comes back as a key and a number rather than 384 numbers: on
+/// kuskokwim the leg's 150 pieces were 1.2 MB with their vectors and 6 KB
+/// without, for the same 30 ms in the engine.
+pub async fn nearest_scored(
+    store: &Store,
+    tenant: &TenantId,
+    vector: &[f32],
+    k: usize,
+    network: Option<MemoryNetwork>,
+) -> Result<Vec<(String, f32)>> {
+    if k == 0 || vector.iter().all(|x| *x == 0.0) {
+        return Ok(Vec::new());
+    }
+    let rows = k.saturating_mul(ROWS_PER_MEMORY).clamp(k, MAX_ROWS);
+    let also = if network.is_some() {
+        " AND network = $network"
+    } else {
+        ""
+    };
+    let surql = format!(
+        "SELECT memory, vector::distance::knn() AS distance FROM {TABLE} \
+         WHERE tenant_id = $tenant{also} AND embedding <|{rows},{}|> $vector",
+        search_effort(rows)
+    );
+    let mut vars = BTreeMap::from([
+        ("tenant".to_string(), json!(tenant.as_str())),
+        ("vector".to_string(), json!(vector)),
+    ]);
+    if let Some(net) = network {
+        vars.insert("network".to_string(), json!(net.as_str()));
+    }
+    #[derive(Deserialize)]
+    struct Hit {
+        memory: String,
+        #[serde(default)]
+        distance: Option<f64>,
+    }
+    let hits: Vec<Hit> = store.query_rows(&surql, vars).await?;
+    // Ordered here, as `nearest` orders, rather than by the engine.
+    let mut pieces: Vec<(String, f32)> = hits
+        .into_iter()
+        .filter_map(|h| Some((h.memory, (1.0 - h.distance?) as f32)))
+        .collect();
+    pieces.sort_by(|a, b| b.1.total_cmp(&a.1));
+    Ok(pieces)
 }
 
 /// A memory as the chunker reads it: no embedding, and its tombstone if it
