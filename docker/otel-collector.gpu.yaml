@@ -1,0 +1,29 @@
+# Layered on otel-collector.yaml by docker-compose.gpu.yml (the collector
+# merges its --config files in order): the GPU, through gpu-exporter, and the
+# reranker, which that override runs on the GPU.
+#
+#   what                                              from
+#   GPU use, memory, temperature, power, clocks       prometheus/gpu (gpu-exporter:9835)
+#   the reranker's queue, batches, request and        prometheus/gpu (rerank:80/metrics)
+#   inference latency
+#
+# A merged list replaces the one before it, so the metrics pipeline's
+# receivers are named in full here.
+
+receivers:
+  prometheus/gpu:
+    config:
+      scrape_configs:
+        - job_name: gpu
+          scrape_interval: 60s
+          static_configs:
+            - targets: ["gpu-exporter:9835"]
+        - job_name: rerank
+          scrape_interval: 60s
+          static_configs:
+            - targets: ["rerank:80"]
+
+service:
+  pipelines:
+    metrics:
+      receivers: [host_metrics, docker_stats, prometheus/surrealdb, prometheus/gpu]

@@ -67,6 +67,18 @@ else
     echo "== copal not configured (ANTUMBRA_COPAL_ADDR unset), skipping"
 fi
 
+# And the telemetry collector, when this deployment reports its host. It is
+# recreated, not only ensured: its config files are bind mounts from the
+# checkout this script just replaced, and a running collector would go on
+# reading the previous checkout's.
+if grep -q '^ANTUMBRA_TELEMETRY_AUTHORIZATION=.\+' .env 2>/dev/null; then
+    echo "== ensure telemetry (ANTUMBRA_TELEMETRY_AUTHORIZATION is set)"
+    docker compose "${COMPOSE[@]}" --profile telemetry up -d gpu-exporter 2>&1 | tail -5
+    docker compose "${COMPOSE[@]}" --profile telemetry up -d --force-recreate otel-collector 2>&1 | tail -5
+else
+    echo "== telemetry not configured (ANTUMBRA_TELEMETRY_AUTHORIZATION unset), skipping"
+fi
+
 sleep 8
 docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep antumbra
 docker inspect antumbra-mcp --format 'after: {{.Config.Image}} created {{.Created}}'
