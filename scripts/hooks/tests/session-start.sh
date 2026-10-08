@@ -18,9 +18,16 @@ check() { # description, then a command that must succeed
 mkdir -p "$work/bin"
 # Every call answers with the response file, and its arguments go to CURL_LOG,
 # one line a call, so a test can say which tools the hook asked for.
+# With CURL_HANG set it is a surface that never answers: it waits out the
+# call's own --max-time and fails the way curl does.
 cat >"$work/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 [ -n "${CURL_LOG:-}" ] && printf '%s\n' "$*" >>"$CURL_LOG"
+if [ -n "${CURL_HANG:-}" ]; then
+  limit=30; prev=""
+  for a in "$@"; do [ "$prev" = "--max-time" ] && limit="$a"; prev="$a"; done
+  sleep "$limit"; exit 28
+fi
 cat "$FAKE_RESPONSE"
 STUB
 # `claude reanchor` writes its arguments, and whether it was handed the token,
@@ -130,5 +137,44 @@ rm -f "$marker"
 ctx=$(run_in "$work/clone" "$work/small.json" ANTUMBRA_REANCHOR=0 | context)
 sleep 2
 check "reports no merges" test ! -e "$marker"
+
+echo "anchors judged against history"
+# `main` is a, then c; `feature` branched at a and holds b, unmerged.
+hist="$work/history"
+mkdir -p "$hist"
+git -C "$hist" init -q
+git -C "$hist" checkout -q -b main
+git -C "$hist" remote add origin https://github.com/acme/orders.git
+commit() { git -C "$hist" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m "$1"; git -C "$hist" rev-parse HEAD; }
+on_main=$(commit a)
+git -C "$hist" checkout -q -b feature
+on_feature=$(commit b)
+git -C "$hist" checkout -q main
+commit c >/dev/null
+jq -nc --arg a "$on_main" --arg b "$on_feature" '
+  def anchored($id; $content; $commit; $branch; $repo):
+    {id: $id, content: $content, provenance: {repo: $repo, commit: $commit, branch: $branch}};
+  {memories: [
+    anchored("memory:1"; "anchor-live"; $a; "main"; "github.com/acme/orders"),
+    anchored("memory:2"; "anchor-offhead"; $b; "feature"; "github.com/acme/orders"),
+    anchored("memory:3"; "anchor-orphaned"; $a; "gone"; "github.com/acme/orders"),
+    anchored("memory:4"; "anchor-unknown"; "0123456789abcdef0123456789abcdef01234567"; "main"; "github.com/acme/orders"),
+    anchored("memory:5"; "anchor-short"; $a[0:7]; "main"; "github.com/acme/orders"),
+    anchored("memory:6"; "anchor-elsewhere"; $a; "main"; "github.com/acme/other")
+  ]}' >"$work/anchors.json"
+ctx=$(run_in "$hist" "$work/anchors.json" ANTUMBRA_REANCHOR=0 | context)
+check "an anchor on HEAD is live" grep -qF '[live] anchor-live' <<<"$ctx"
+check "an unmerged commit is not on HEAD" grep -qF '[not-on-head] anchor-offhead' <<<"$ctx"
+check "a deleted branch is orphaned" grep -qF '[orphaned] anchor-orphaned' <<<"$ctx"
+check "a commit this clone lacks is not on HEAD" grep -qF '[not-on-head] anchor-unknown' <<<"$ctx"
+check "a short commit id is judged too" grep -qF '[live] anchor-short' <<<"$ctx"
+check "another repository gets no tag" bash -c '! grep -qF "] anchor-elsewhere" <<<"$1"' _ "$ctx"
+
+echo "a surface that never answers"
+started=$(date +%s)
+ctx=$(run "$work/small.json" CURL_HANG=1 ANTUMBRA_SESSION_BUDGET_SEC=3 | context)
+took=$(( $(date +%s) - started ))
+check "answers inside its budget (${took} s, budget 3)" test "$took" -le 4
+check "starts cold and says so" grep -q 'starting cold' <<<"$ctx"
 
 [ "$failed" = 0 ] && echo "all passed" || { echo "FAILED"; exit 1; }

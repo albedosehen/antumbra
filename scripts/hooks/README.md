@@ -30,6 +30,7 @@ ANTUMBRA_BIN=antumbra                  # the CLI the bootstrap asks for the sove
 ANTUMBRA_REANCHOR=1                    # 0: the bootstrap does not report recent merges
 ANTUMBRA_REANCHOR_LOG=~/.antumbra/reanchor.log  # where the last merge report's output goes
 ANTUMBRA_RECALL_BUDGET_SEC=10          # the per-prompt recall's whole wall-clock budget; keep it under the hook's timeout
+ANTUMBRA_SESSION_BUDGET_SEC=8          # the session bootstrap's whole wall-clock budget; keep it under the hook's timeout
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:

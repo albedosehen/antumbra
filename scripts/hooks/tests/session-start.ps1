@@ -1,8 +1,13 @@
 # Tests for antumbra-session-start.ps1. No Antumbra needed: the surface is a
 # listener in this process answering from a file, and `antumbra` is a stub.
+# On Windows every case runs twice: under pwsh, and under Windows PowerShell,
+# which is what the agent's settings run the hook with.
 #
 #   pwsh -NoProfile -File scripts/hooks/tests/session-start.ps1
 $ErrorActionPreference = 'Stop'
+# The hook writes UTF-8; read it as UTF-8, so what the agent would see is what
+# the checks see.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
 $hook = Join-Path $PSScriptRoot '..' 'antumbra-session-start.ps1'
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ("antumbra-hook-test-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
@@ -90,7 +95,7 @@ function Get-Context([string]$ResponseJson, [string]$Bin, [string]$Dir = $work) 
     $env:ANTUMBRA_URL = $url
     $env:ANTUMBRA_BIN = $Bin
     Push-Location $Dir
-    try { $out = & pwsh -NoProfile -NonInteractive -File $hook | Out-String } finally { Pop-Location }
+    try { $out = & $script:shell -NoProfile -NonInteractive -File $hook | Out-String } finally { Pop-Location }
     $answer = $out | ConvertFrom-Json
     if ($answer.hookSpecificOutput.hookEventName -ne 'SessionStart') { throw "not a SessionStart answer: $out" }
     return [string]$answer.hookSpecificOutput.additionalContext
@@ -99,7 +104,45 @@ function Get-Context([string]$ResponseJson, [string]$Bin, [string]$Dir = $work) 
 # Twelve memories of 1,500 characters: 18,000 in all, nearly twice the limit.
 $large = @{ memories = @(1..12 | ForEach-Object { @{ id = "memory:$_"; content = "M${_}:" + ('x' * 1500) } }) } | ConvertTo-Json -Depth 5 -Compress
 $small = @{ memories = @(@{ id = 'memory:a'; content = 'first small' }, @{ id = 'memory:b'; content = 'second small' }) } | ConvertTo-Json -Depth 5 -Compress
+# Text outside ASCII and Latin-1, as memories hold it. Built from code points so
+# this file's own encoding cannot decide the case.
+$wide = "em dash " + [char]0x2014 + " u-umlaut " + [char]0x00FC + " kanji " + [char]0x65E5 + [char]0x672C
+$unicode = @{ memories = @(@{ id = 'memory:u'; content = $wide }) } | ConvertTo-Json -Depth 5 -Compress
 
+# A repository with history, for judging anchors: `main` is a, then c; `feature`
+# branched at a and holds b, unmerged.
+$history = Join-Path $work 'history'
+New-Item -ItemType Directory -Path $history | Out-Null
+function Commit([string]$Message) {
+    & git -C $history -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m $Message
+    (& git -C $history rev-parse HEAD).Trim()
+}
+& git -C $history init -q
+& git -C $history checkout -q -b main
+& git -C $history remote add origin https://github.com/acme/orders.git
+$onMain = Commit 'a'
+& git -C $history checkout -q -b feature
+$onFeature = Commit 'b'
+& git -C $history checkout -q main
+$null = Commit 'c'
+function Anchored([string]$Id, [string]$Content, [string]$Commit, [string]$Branch, [string]$Repo = 'github.com/acme/orders') {
+    @{ id = $Id; content = $Content; provenance = @{ repo = $Repo; commit = $Commit; branch = $Branch } }
+}
+$anchors = @{ memories = @(
+    (Anchored 'memory:1' 'anchor-live' $onMain 'main'),
+    (Anchored 'memory:2' 'anchor-offhead' $onFeature 'feature'),
+    (Anchored 'memory:3' 'anchor-orphaned' $onMain 'gone'),
+    (Anchored 'memory:4' 'anchor-unknown' '0123456789abcdef0123456789abcdef01234567' 'main'),
+    (Anchored 'memory:5' 'anchor-short' $onMain.Substring(0, 7) 'main'),
+    (Anchored 'memory:6' 'anchor-elsewhere' $onMain 'main' 'github.com/acme/other')
+) } | ConvertTo-Json -Depth 6 -Compress
+
+# A surface that takes the connection and never answers.
+$silent = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+$silent.Start()
+$silentUrl = "http://127.0.0.1:$($silent.LocalEndpoint.Port)"
+
+function Invoke-Cases {
 Write-Output 'an oversized recall'
 $ctx = Get-Context $large $stub
 Check "stays under the agent's 10,000-character limit ($($ctx.Length))" ($ctx.Length -le 10000)
@@ -175,8 +218,43 @@ $env:ANTUMBRA_REANCHOR = '0'
 $ctx = Get-Context $small $stub $clone
 Start-Sleep -Seconds 2
 Check 'reports no merges' (-not (Test-Path $marker))
+
+Write-Output 'text outside ASCII'
+$ctx = Get-Context $unicode $stub
+Check 'arrives as it was stored' $ctx.Contains($wide)
+
+Write-Output 'anchors judged against history'
+$ctx = Get-Context $anchors $stub $history
+Check 'an anchor on HEAD is live' $ctx.Contains('[live] anchor-live')
+Check 'an unmerged commit is not on HEAD' $ctx.Contains('[not-on-head] anchor-offhead')
+Check 'a deleted branch is orphaned' $ctx.Contains('[orphaned] anchor-orphaned')
+Check 'a commit this clone lacks is not on HEAD' $ctx.Contains('[not-on-head] anchor-unknown')
+Check 'a short commit id is judged too' $ctx.Contains('[live] anchor-short')
+Check 'another repository gets no tag' (-not $ctx.Contains('] anchor-elsewhere'))
 Remove-Item Env:ANTUMBRA_REANCHOR
 
+Write-Output 'a surface that never answers'
+$env:ANTUMBRA_SESSION_BUDGET_SEC = '3'
+$env:ANTUMBRA_URL = $silentUrl
+$clock = [System.Diagnostics.Stopwatch]::StartNew()
+Push-Location $work
+try { $out = & $script:shell -NoProfile -NonInteractive -File $hook | Out-String } finally { Pop-Location }
+$took = $clock.Elapsed.TotalSeconds
+$ctx = [string]($out | ConvertFrom-Json).hookSpecificOutput.additionalContext
+Check "answers inside its budget ($([math]::Round($took, 1)) s, budget 3)" ($took -lt 4.5)
+Check 'starts cold and says so' $ctx.Contains('starting cold')
+Remove-Item Env:ANTUMBRA_SESSION_BUDGET_SEC
+}
+
+$shells = @('pwsh')
+if ($IsWindows -and (Get-Command powershell -ErrorAction SilentlyContinue)) { $shells += 'powershell' }
+foreach ($name in $shells) {
+    $script:shell = $name
+    Write-Output "== under $name"
+    Invoke-Cases
+}
+
+$silent.Stop()
 $listener.Stop()
 Get-Job | Remove-Job -Force
 Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
