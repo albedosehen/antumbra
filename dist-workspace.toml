@@ -17,6 +17,3 @@ install-path = "CARGO_HOME"
 hosting = "github"
 # Whether to install an updater program
 install-updater = false
-# Temporary, for the v0.1.0 release PR only: build every artifact on the PR
-# so the first tag is not the first full build. Revert before merging.
-pr-run-mode = "upload"
