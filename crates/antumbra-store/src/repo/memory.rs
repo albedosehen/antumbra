@@ -479,10 +479,11 @@ const RECALL_SPAN_TARGET: &str = "antumbra_store::recall";
 
 /// Hybrid recall for several queries at once, fused by rank: the whole of a
 /// prompt and each part of one that asks for more than one thing
-/// (`antumbra_core::query::parts`). Each query runs as [`recall_hybrid`] does,
-/// and the lists are fused by Reciprocal Rank Fusion, so each part's best
-/// matches stand beside the whole prompt's before the top `k` are kept. With
-/// one query it is [`recall_hybrid`].
+/// (`antumbra_core::query::parts`). The first query, the whole prompt, runs as
+/// [`recall_hybrid`] does, and each part runs its vector legs, and the lists
+/// are fused by Reciprocal Rank Fusion, so each part's best matches stand
+/// beside the whole prompt's before the top `k` are kept. With one query it is
+/// [`recall_hybrid`].
 pub async fn recall_hybrid_many(
     store: &Store,
     tenant: &TenantId,
@@ -493,12 +494,19 @@ pub async fn recall_hybrid_many(
 ) -> Result<Vec<Memory>> {
     // Each query's recall runs at once with the others', as its legs do. They
     // rank keys, so the rows read whole are the k kept, once for every query.
-    let mut rankings = futures::future::try_join_all(
-        queries
-            .iter()
-            .map(|(text, vector)| hybrid_keys(store, tenant, text, vector, k, network, probes)),
-    )
-    .await?;
+    //
+    // A part reads no lexical leg of its own. Parts are there for what the
+    // whole prompt's blended embedding misses, a semantic miss, so they keep
+    // the dense and chunk legs; the whole prompt's leg already matches any
+    // word of every part. And the lexical leg is the dearest read: on
+    // kuskokwim its BM25 matched every memory holding a common word, about
+    // 150 ms in the engine, once per part, all at the same time.
+    let mut rankings =
+        futures::future::try_join_all(queries.iter().enumerate().map(|(i, (text, vector))| {
+            let text = if i == 0 { text.as_str() } else { "" };
+            hybrid_keys(store, tenant, text, vector, k, network, probes)
+        }))
+        .await?;
     let keys = if rankings.len() == 1 {
         rankings.swap_remove(0)
     } else {
