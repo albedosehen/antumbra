@@ -131,17 +131,8 @@ jobs:
         with:
           components: rustfmt, clippy
       # The hosted control plane is its own cargo workspace (root Cargo.toml
-      # `exclude`) because its `contract` feature is the repo's one private
-      # dependency: oneiriq-kayak, reached over ssh locally. CI has no ssh key,
-      # so rewrite both spellings of the Oneiriq remote to https with a read
-      # token (ONEIRIQ_READ_TOKEN: a fine-grained token with read access to
-      # Oneiriq/kayak) and fetch through the git CLI. Only this job needs it;
-      # every other job builds from crates.io alone.
-      - name: authorize the private kayak fetch
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "ssh://git@github.com/Oneiriq/"
-          git config --global --add url."https://x-access-token:${{ secrets.ONEIRIQ_READ_TOKEN }}@github.com/Oneiriq/".insteadOf "https://github.com/Oneiriq/"
-          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+      # `exclude`). Its `contract` feature pulls oneiriq-kayak from crates.io
+      # like every other dependency, so this job needs no token either.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/antumbra-control-server

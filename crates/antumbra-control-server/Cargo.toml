@@ -47,9 +47,9 @@ lettre = { version = "0.11", default-features = false, features = [
 # wire contract in src/contract/ is validated against the store's real indexes
 # and generates the checked-in API artifacts (docs/openapi.json,
 # docs/schema.graphql). It declares the contract; nothing executes it yet.
-# Private repo: local fetches ride ssh, CI rewrites the URL to https with a
-# read token. Off by default so this crate builds from crates.io alone.
-oneiriq-kayak = { git = "ssh://git@github.com/Oneiriq/kayak.git", branch = "main", optional = true }
+# Published on crates.io; off by default all the same, since the four routes
+# this server serves do not need it.
+oneiriq-kayak = { version = "0.1", optional = true }
 # The schema vocabulary kayak resolves the contract against; the same version
 # the store builds its TableDefinitions with, so the two speak one type.
 oneiriq-surql = { version = "0.34.2", default-features = false, features = ["client-rustls"], optional = true }
@@ -63,6 +63,5 @@ default = []
 # Enable real SMTP magic-link delivery (configure via SMTP_HOST/PORT/USER/PASS/FROM).
 smtp = ["dep:lettre"]
 # The kayak wire contract, its drift gate (tests/contract.rs), and the artifact
-# generation. The one private dependency in the repo; the four routes this
-# server actually serves do not need it.
+# generation. The four routes this server actually serves do not need it.
 contract = ["dep:oneiriq-kayak", "dep:oneiriq-surql"]

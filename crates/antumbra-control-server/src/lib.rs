@@ -6,8 +6,7 @@
 //! store's real schema, and the checked-in artifacts (`docs/openapi.json`,
 //! `docs/schema.graphql`) are generated from it. Nothing here executes -- the
 //! contract is declared in this slice, not served -- and it sits behind the
-//! `contract` feature because kayak is the repo's one private dependency; the
-//! default build of this crate needs nothing outside crates.io.
+//! `contract` feature, since the server's routes do not need kayak.
 
 #[cfg(feature = "contract")]
 pub mod contract;
