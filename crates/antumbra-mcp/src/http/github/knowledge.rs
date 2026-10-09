@@ -1,4 +1,4 @@
-//! The knowledge diff on a pull request (ADR-0019): when one is opened, pushed
+//! The knowledge diff on a pull request: when one is opened, pushed
 //! to, reopened or marked ready, the memories and documents anchored to the
 //! paths it changes and to its branch are posted as a neutral check run. It
 //! runs after the response, like ingest, since it reads the pull request's

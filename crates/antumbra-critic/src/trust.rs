@@ -1,8 +1,8 @@
-//! Running the trust protocol (ADR-0022 S-4): every case a verifier applies to
+//! Running the trust protocol: every case a verifier applies to
 //! goes through it several times, and the runs are counted into a [`Tally`]
 //! and judged under the policy.
 //!
-//! [`challenge`] is the record's decisive test. A deliberately wrong artifact
+//! [`challenge`] is the protocol's decisive test. A deliberately wrong artifact
 //! that anchored truth fails must be failed by every trusted verifier that
 //! checks it, so in a challenge a known-bad case counts as one no artifact
 //! can satisfy, and one pass is a shortcut.

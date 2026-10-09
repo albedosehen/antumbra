@@ -1,4 +1,4 @@
-//! What a leave-one-out contribution is measured with (ADR-0022 S-5): the
+//! What a leave-one-out contribution is measured with: the
 //! live tasks, and scores for the base model under one adapter, or alone, on a
 //! named subset of them. The loop routes and does the arithmetic; the trainer
 //! only scores, through the same evaluation re-measurement uses.

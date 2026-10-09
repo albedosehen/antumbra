@@ -1,4 +1,4 @@
-//! Engine-enforced ownership of the device registry (ADR-0017): a node writes
+//! Engine-enforced ownership of the device registry: a node writes
 //! only the row of the user running it. The table used to be owner-only, under
 //! which no node could register at all; opening it for registration is what
 //! makes the write rule load-bearing, because genesis is dispatched to whatever

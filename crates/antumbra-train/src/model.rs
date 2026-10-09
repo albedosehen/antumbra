@@ -29,7 +29,7 @@ pub struct CorpusTask {
     /// correction to an actionable boundary of competence. `None` for a plain
     /// correction or a RAFT task.
     pub scope: Option<TaskScope>,
-    /// A task whose specification cannot be satisfied (ADR-0022). It is never
+    /// A task whose specification cannot be satisfied. It is never
     /// learned from and never counted in fitness; under a holdout it is
     /// measured, and a pass fails the whole generation, because a pass here is
     /// proof of a shortcut rather than a near miss.

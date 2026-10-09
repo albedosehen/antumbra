@@ -253,7 +253,7 @@ fn the_shuffle_is_a_permutation_fixed_by_its_seed() {
     assert_ne!(a, shuffled(50, 8));
 }
 
-/// ADR-0024 Validation 2 for D-2, with a pair encoder: does a fine-tuned
+/// The relevance head's validation, with a pair encoder: does a fine-tuned
 /// cross-attention model beat the control?
 ///
 /// The control is 0.785 F1, a threshold over the deployed cross-encoder, and

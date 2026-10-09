@@ -1,4 +1,4 @@
-//! Conservative, reversible merging (ADR-0022 S-5): two sibling experts become
+//! Conservative, reversible merging: two sibling experts become
 //! one, only when the merge costs nothing measurable.
 //!
 //! At most one merge a generation, of the most similar pair of active shared
@@ -19,7 +19,7 @@
 //! revivable, so the merge is undone by reviving them. Otherwise nothing
 //! changes and the merged file is removed.
 //!
-//! The record also asks for low cumulative training, because the most-trained
+//! Merging also wants low cumulative training, because the most-trained
 //! experts merge worst. Under recipe-only propagation every expert trains from
 //! the base on the same budget, so that condition holds for every pair here,
 //! and the measurement guards the rest.

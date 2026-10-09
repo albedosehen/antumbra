@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "The standing instruments of ADR-0022: the slice partition selection may not touch, the visible-minus-held-out gap, the impossible-task set, the audit-slice trend, and isomorphic re-verification. Measurement only; nothing here grants reward."
+description = "The standing instruments of the self-improving loop: the slice partition selection may not touch, the visible-minus-held-out gap, the impossible-task set, the audit-slice trend, and isomorphic re-verification. Measurement only; nothing here grants reward."
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }

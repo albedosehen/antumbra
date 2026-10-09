@@ -1,5 +1,5 @@
-//! What a repository's manifests declare (ADR-0019's declared source): the
-//! package names it publishes and the ones it depends on.
+//! What a repository's manifests declare (the evidence graph's declared
+//! source): the package names it publishes and the ones it depends on.
 //!
 //! A manifest is read, never run, and only for names: which packages a
 //! repository puts out, and which it pulls in. Versions, features and

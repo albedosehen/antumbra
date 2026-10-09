@@ -75,7 +75,7 @@ pending=""
 call handoffs "$(jq -nc --arg host "$HOST_ID" '{host: $host}')" "$answers/handoffs.json" &
 pending="$pending $!"
 
-# --- this machine, in the user's fabric (ADR-0017) ---------------------------
+# --- this machine, in the user's fabric --------------------------------------
 # A server registers the machine it runs on, and a laptop talking to a hosted
 # hub runs none, so the session names it: that lists it among the user's devices
 # and marks when it was last seen. Skipped for `local`, the name of a machine
@@ -124,7 +124,7 @@ fi
 
 # --- what is different about this session (fail-open) ---------------------------
 # With its telemetry off the agent has also lost its feature flags, and the
-# features gated on them, and nothing tells it (ADR-0021). `antumbra claude brief`
+# features gated on them, and nothing tells it. `antumbra claude brief`
 # prints a few lines when that is so and nothing when it is not. No antumbra on
 # the path, or any failure: no lines. It runs while the calls are in flight.
 brief=""

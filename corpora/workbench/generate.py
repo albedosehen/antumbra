@@ -5,7 +5,7 @@
 
 Every task is checked before anything is written, because a constructed
 benchmark has to be checked against a no-model baseline before any model is
-compared against it (ADR-0024): its reference must pass through the same judge
+compared against it: its reference must pass through the same judge
 the trainer will use, and a set of completions that solve nothing -- empty
 code, stubs, the example's answer returned for every input, and three ways of
 exiting 0 -- must all fail. One exception fails the whole run.

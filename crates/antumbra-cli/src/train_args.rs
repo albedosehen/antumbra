@@ -25,7 +25,7 @@ pub struct TrainArgs {
     #[arg(long, default_value = "raft")]
     pub algo: String,
     /// A critic adapter (`antumbra critic train`) to shape GRPO's advantages
-    /// inside the verifier's parts (ADR-0022 S-2). GRPO only; fitness still
+    /// inside the verifier's parts. GRPO only; fitness still
     /// reads the verifier alone.
     #[arg(long)]
     pub critic: Option<String>,
@@ -35,13 +35,13 @@ pub struct TrainArgs {
     pub critic_weight: f32,
     /// A second critic adapter, trained on another seed, that scores every
     /// answer the critic scores and shapes nothing. Each generation reports
-    /// how far the two agree (ADR-0022 S-2). Needs --critic.
+    /// how far the two agree. Needs --critic.
     #[arg(long)]
     pub critic_twin: Option<String>,
     /// A completions file of answers built to be wrong, as `verifier cases`
     /// reads (entries marked `deliberate`: mutants of a reference, forgeries).
     /// Every recheck of a synthesized verifier counts them as known-bad
-    /// evidence (ADR-0022 S-4).
+    /// evidence.
     #[arg(long)]
     pub recheck_artifacts: Option<String>,
     /// The generation seed: shifts every unseeded draw and training shuffle,
@@ -56,14 +56,14 @@ pub struct TrainArgs {
     /// instead of fresh factors. Monolithic arm.
     #[arg(long)]
     pub parent: Option<String>,
-    /// Withhold a held-out and an audit slice of the corpus from training
-    /// (ADR-0022), so each generation reports the visible-minus-held-out
-    /// gap. Changes what is learned: about three tasks in ten are measured
-    /// and never trained on. Refused when the corpus is too small to leave
-    /// any task visible, as several shipped demo corpora are.
+    /// Withhold a held-out and an audit slice of the corpus from training, so
+    /// each generation reports the visible-minus-held-out gap. Changes what is
+    /// learned: about three tasks in ten are measured and never trained on.
+    /// Refused when the corpus is too small to leave any task visible, as
+    /// several shipped demo corpora are.
     #[arg(long)]
     pub holdout: bool,
-    /// Search the training recipe (ADR-0022 S-1): each generation trains
+    /// Search the training recipe: each generation trains
     /// `--cohort` shadows under recipes the search proposes, each from the
     /// base, and carries the best forward. Learning rate and batch size
     /// are searched, and the KL weight too under `--algo grpo`. Multiplies
@@ -75,7 +75,7 @@ pub struct TrainArgs {
     pub cohort: usize,
     /// Members of the cohort in the slow cohort, whose recipes are held
     /// for `--slow-interval` generations and cannot be displaced by what
-    /// the fast members score (ADR-0022 S-1). Defaults to a third of the
+    /// the fast members score. Defaults to a third of the
     /// cohort, rounded down; 0 runs the fast cohort alone.
     #[arg(long)]
     pub slow: Option<usize>,
@@ -88,7 +88,7 @@ pub struct TrainArgs {
     #[arg(long)]
     pub anneal: Option<u32>,
     /// Measure every shared expert's leave-one-out contribution
-    /// (ADR-0022 S-5) in every N-th generation: each is masked, the live
+    /// in every N-th generation: each is masked, the live
     /// tasks are routed again, and both ways are scored under the same
     /// seeds. About two evaluations of the live tasks each time. 0 (the
     /// default) leaves it unmeasured.
@@ -100,26 +100,26 @@ pub struct TrainArgs {
     #[arg(long)]
     pub contribution_tasks: Option<usize>,
     /// Train the learned gate on each live task's clear winner as well as
-    /// the capability exemplars, whenever a measurement's winners change
-    /// (ADR-0024 D-1). Off by default: the outcome-trained router scored no
-    /// higher on the withheld tasks. Winners are recorded either way.
+    /// the capability exemplars, whenever a measurement's winners change.
+    /// Off by default: the outcome-trained router scored no higher on the
+    /// withheld tasks. Winners are recorded either way.
     #[arg(long)]
     pub route_on_outcomes: bool,
-    /// Gate admission (ADR-0022 S-5): a graduate whose capability vector
+    /// Gate admission: a graduate whose capability vector
     /// is at least this similar (cosine) to an active shared expert's is a
     /// twin. It joins only if it beats that expert head to head on the
     /// live tasks, and then replaces it, which is archived; otherwise it
     /// is not admitted. Above 1 admits every graduate.
     #[arg(long, default_value_t = 0.95)]
     pub duplicate_above: f32,
-    /// Retirement as the loop's job (ADR-0022 S-5): demote an expert to
+    /// Retirement as the loop's job: demote an expert to
     /// dormant once its contribution on the tasks routed to it has been
     /// at or below nothing in this many consecutive measurements, each on
     /// at least two tasks. It reads the contribution stream, so it acts
     /// only with --contribution-every. 0 leaves every move to a person.
     #[arg(long, default_value_t = 3)]
     pub retire_after: u32,
-    /// Merge sibling experts (ADR-0022 S-5): at each generation boundary,
+    /// Merge sibling experts: at each generation boundary,
     /// the most similar pair of active shared experts is merged at the
     /// population's rank when their adapters share enough of their
     /// subspace (--merge-retained) and the merge scores on the live tasks
@@ -131,7 +131,7 @@ pub struct TrainArgs {
     /// must keep for them to count as siblings.
     #[arg(long, default_value_t = 0.9)]
     pub merge_retained: f32,
-    /// The grow step (ADR-0022 S-3): each generation learns from the
+    /// The grow step: each generation learns from the
     /// region (skill) the latest census makes most learnable, plus a
     /// quarter sampled from the whole visible slice. It reads the census
     /// the contribution measurement takes, which it turns on every
@@ -139,7 +139,7 @@ pub struct TrainArgs {
     #[arg(long)]
     pub grow: bool,
     /// With --grow, how a region is chosen among those that pass the gate:
-    /// credit (the record's objective: expected realized improvement,
+    /// credit (the growth objective: expected realized improvement,
     /// learnability its prior), learnability (the most learnable,
     /// regardless of credit) or uniform (at random, the baseline).
     #[arg(long, default_value = "credit")]
@@ -152,7 +152,7 @@ pub struct TrainArgs {
     pub grow_from: String,
     /// Judge graduation on this many re-measurements of the carried-forward
     /// shadow, each under a fresh seed, on the held-out slice under
-    /// `--holdout` (ADR-0022 S-1). Defaults to 3 with `--search` and to off
+    /// `--holdout`. Defaults to 3 with `--search` and to off
     /// otherwise; 0 turns it off.
     #[arg(long)]
     pub remeasure: Option<u32>,

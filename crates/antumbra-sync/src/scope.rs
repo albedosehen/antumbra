@@ -1,5 +1,5 @@
-//! What a user's nodes carry (ADR-0017 A1), which is narrower than what the
-//! user may read.
+//! What a user's nodes carry (each user has their own fabric), which is
+//! narrower than what the user may read.
 //!
 //! The ACL and this are different statements and must not be collapsed into
 //! one. `MEMORY_SELECT_RULE` says what a session may **see**, live, through the

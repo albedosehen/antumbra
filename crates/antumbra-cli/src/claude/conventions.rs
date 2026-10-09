@@ -1,4 +1,4 @@
-//! The rules as memories (ADR-0021 section 4): each entry of the matrix becomes a
+//! The rules as memories: each entry of the sovereign-mode matrix becomes a
 //! `world` memory in a `claude-code` compartment, so an agent can recall why a
 //! feature is missing and what stands in for it.
 //!
@@ -48,7 +48,7 @@ fn evidence() -> Vec<String> {
         format!("claude-code:{VERIFIED_AGAINST}"),
         format!("verified:{VERIFIED_ON}"),
         SOURCE.to_string(),
-        "adr:0021".to_string(),
+        "sovereign-mode".to_string(),
     ]
 }
 

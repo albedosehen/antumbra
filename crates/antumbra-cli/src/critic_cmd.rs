@@ -1,4 +1,4 @@
-//! `antumbra critic` (ADR-0022 S-2): train a critic on the verifier's verdicts
+//! `antumbra critic`: train a critic on the verifier's verdicts
 //! and read it against them, sliced.
 
 use clap::Subcommand;

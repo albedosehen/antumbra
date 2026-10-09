@@ -103,17 +103,17 @@ pub struct TrainRequest {
     pub shadow: ShadowId,
     pub base_model: String,
     pub corpus_task_ids: Vec<String>,
-    /// What this run must withhold from learning (ADR-0022). `None` learns from
+    /// What this run must withhold from learning. `None` learns from
     /// every task and measures nothing apart, which is the right shape for a
     /// run with nothing held out: its generation carries no instruments.
     #[serde(default)]
     pub holdout: Option<Holdout>,
-    /// The recipe to train under (ADR-0022 S-1). `None` trains under the
+    /// The recipe to train under. `None` trains under the
     /// trainer's own configuration, which is what every run did before the
     /// recipe was searched.
     #[serde(default)]
     pub recipe: Option<TrainingRecipe>,
-    /// The grow step's choice of what to learn (ADR-0022 S-3). When not empty,
+    /// The grow step's choice of what to learn. When not empty,
     /// the shadow learns only from these tasks, among those its holdout lets
     /// it learn from. Withheld tasks are measured as always, so a focused run
     /// carries the same instruments as a full one. Empty learns from every
@@ -121,12 +121,12 @@ pub struct TrainRequest {
     #[serde(default)]
     pub focus: Vec<String>,
     /// The adapter the shadow starts from instead of fresh factors: the grow
-    /// step's warm start (ADR-0022 S-3), the expert that serves the region it
+    /// step's warm start, the expert that serves the region it
     /// chose. `None` starts from the trainer's own configuration.
     #[serde(default)]
     pub parent_adapter: Option<String>,
     /// Train on the verifier's reward alone, whatever critic the trainer
-    /// holds: the run has set its critic aside (ADR-0022 S-2's standing
+    /// holds: the run has set its critic aside (the critic's standing
     /// fallback).
     #[serde(default)]
     pub verifier_only: bool,
@@ -136,7 +136,7 @@ pub struct TrainRequest {
 ///
 /// The loop needs this to say anything true about a generation. Aggregate
 /// fitness cannot be sliced -- a visible-minus-held-out gap computed from one
-/// number is not a measurement of anything (ADR-0022) -- and the trainer knows
+/// number is not a measurement of anything -- and the trainer knows
 /// the per-task answer already, because it is what it averages to get fitness.
 /// It simply used to throw it away.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -187,27 +187,26 @@ pub struct TrainOutcome {
     /// so a row never names settings a run did not use.
     #[serde(default)]
     pub recipe: Option<TrainingRecipe>,
-    /// The named verifiers whose passes this run trained on, with how many
-    /// (ADR-0022 S-4). A verifier later quarantined can then be traced to
-    /// what it taught.
+    /// The named verifiers whose passes this run trained on, with how many. A
+    /// verifier later quarantined can then be traced to what it taught.
     #[serde(default)]
     pub granted_by: Vec<crate::verifier::VerifierGrant>,
     /// Every answer a named verifier judged on a task this run learned from,
     /// passed or not, so the loop can recheck the verdicts against anchored
-    /// truth (ADR-0022 S-4).
+    /// truth.
     #[serde(default)]
     pub judged: Vec<crate::verifier::JudgedSample>,
     /// How the critic that shaped this run read against the verifier, and
-    /// against its twin, on the answers it scored (ADR-0022 S-2). `None`
+    /// against its twin, on the answers it scored. `None`
     /// without a critic.
     #[serde(default)]
     pub critic_watch: Option<crate::critic::CriticWatch>,
 }
 
-/// Measure a trained shadow again for graduation (ADR-0022 S-1): the
+/// Measure a trained shadow again for graduation: the
 /// fitness a search ranked by is a noisy estimate chosen for being high, and
-/// the record's fourth constraint puts the graduation threshold on a fresh
-/// measurement instead: a fresh slice, a new seed, at least three repeats.
+/// so the graduation threshold is put on a fresh measurement instead: a
+/// fresh slice, a new seed, at least three repeats.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemeasureRequest {
     pub shadow: ShadowId,
@@ -251,13 +250,13 @@ pub struct TaskPrompt {
     pub id: String,
     pub prompt: String,
     /// The region the task belongs to: its skill, the unit the grow step
-    /// chooses among (ADR-0022 S-3).
+    /// chooses among.
     #[serde(default)]
     pub region: String,
 }
 
 /// Score the base model under one adapter, or alone, on named tasks: the
-/// measurement a leave-one-out contribution is made of (ADR-0022 S-5).
+/// measurement a leave-one-out contribution is made of.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EvaluateRequest {
     /// Names the evaluation, for the verifier's scratch space and the logs.
@@ -280,7 +279,7 @@ pub struct TaskScores {
     pub scores: std::collections::BTreeMap<String, f32>,
 }
 
-/// Merge two adapters into one of the same rank (ADR-0022 S-5). With `out` of
+/// Merge two adapters into one of the same rank. With `out` of
 /// `None` nothing is written, and the outcome alone is the test of whether the
 /// two are siblings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -347,8 +346,8 @@ pub trait Trainer: Send + Sync {
     /// The right answer a task's corpus carries for it, when it carries one.
     /// The loop's recheck takes it as a known-good case for a synthesized
     /// verifier, labeled by the task's anchor like any other answer, so a
-    /// verifier the policy has not yet answered right can still be judged
-    /// (ADR-0022 S-4). The default has none.
+    /// verifier the policy has not yet answered right can still be judged. The
+    /// default has none.
     async fn reference(&self, task_id: &str) -> Option<String> {
         let _ = task_id;
         None
@@ -378,7 +377,7 @@ pub trait Verifier: Send + Sync {
     async fn verify(&self, req: &VerifyRequest) -> Result<VerifierVerdict>;
 }
 
-/// The verifier namespace as the reward path sees it (ADR-0022 S-4): which
+/// The verifier namespace as the reward path sees it: which
 /// named verifiers may grant reward now. Read-only, so nothing that trains
 /// can write a verifier or change one's trust through it.
 #[async_trait]
@@ -448,9 +447,9 @@ pub trait Reranker: Send + Sync {
 /// The same signal a [`Reranker`] orders by, as NUMBERS rather than an order.
 ///
 /// Separate from `Reranker` on purpose. That port returns a permutation because
-/// ordering is all a precision stage needs, and ADR-0023 B-2 is emphatic that
-/// the score is trustworthy WITHIN a query and not across queries — so handing
-/// callers a raw magnitude invites exactly the mistake that record warns about.
+/// ordering is all a precision stage needs, and the score is trustworthy WITHIN
+/// a query and not across queries, so handing callers a raw magnitude invites
+/// exactly the mistake of comparing it across them.
 ///
 /// A relevance floor needs the magnitude anyway, because "is this good enough"
 /// is an across-query comparison by construction. The resolution is not to
@@ -468,7 +467,7 @@ pub trait RelevanceScorer: Send + Sync {
     async fn relevance(&self, query: &str, texts: &[String]) -> Result<Vec<f32>>;
 }
 
-/// A question with a known answer space, asked of a [`TypedDecider`] (ADR-0024).
+/// A question with a known answer space, asked of a [`TypedDecider`].
 ///
 /// The point of naming the answer space is that the answer comes back as a
 /// calibrated probability rather than as a distance the caller has to interpret.
@@ -480,27 +479,27 @@ pub enum Question {
     /// Pick one option, with a distribution over all of them.
     ///
     /// The answer space is bounded deliberately: accuracy collapses on large
-    /// label spaces, so ADR-0024 requires every `Choice` in the system to offer
-    /// fewer than twenty options and asserts it with a test.
+    /// label spaces, so every `Choice` in the system must offer fewer than
+    /// twenty options, and a test asserts it.
     Choice { options: Vec<String> },
     /// An expectation on an ordinal scale, for "how much" rather than "which".
     Score { low: f32, high: f32 },
     /// Is this statement true, as a calibrated probability. The primitive the
-    /// relevance floor needs (ADR-0023 B-2): "does this memory answer this
+    /// relevance floor needs: "does this memory answer this
     /// query" is a `Noul`, and the floor reads its probability.
     Noul,
 }
 
 /// The most options a [`Question::Choice`] may offer.
 ///
-/// ADR-0024 Validation 6 caps this at twenty, on two grounds that agree:
+/// The ceiling is twenty, on two grounds that agree:
 /// options share a fixed token budget, and accuracy on typed decisions degrades
 /// sharply past roughly twenty labels — the model card this design follows
 /// scores 0.425 on a 77-label benchmark against 0.870 for a system without that
 /// weakness. Sixteen leaves headroom under the ceiling rather than sitting on it.
 pub const MAX_CHOICE_OPTIONS: usize = 16;
 
-// The record's ceiling, checked at compile time rather than by a test: raising
+// The ceiling of twenty, checked at compile time rather than by a test: raising
 // the constant past twenty should fail the build, not a test run.
 const _: () = assert!(MAX_CHOICE_OPTIONS < 20);
 
@@ -527,7 +526,7 @@ impl Question {
 ///
 /// Every variant carries a probability rather than a score, because the caller's
 /// next move is a threshold and a threshold on an uncalibrated number is the
-/// defect ADR-0024 exists to remove.
+/// defect typed decisions exist to remove.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Answer {
     /// The chosen index into the question's options, and the full distribution.
@@ -541,15 +540,15 @@ pub enum Answer {
     Noul { probability: f32 },
 }
 
-/// Answers questions with known answer spaces, as calibrated probabilities
-/// (ADR-0024).
+/// Answers questions with known answer spaces, as calibrated probabilities.
 ///
 /// The contract that makes this worth having is the training objective rather
 /// than the interface: an implementation must be trained against a strictly
 /// proper scoring rule over outcomes a VERIFIER produced, so that reporting the
 /// true probability is the only way to score well. A head trained on its own
-/// past answers, or on a critic's, violates ADR-0022's anchor invariant and is
-/// not an admissible implementation of this port however well it performs.
+/// past answers, or on a critic's, learns from a signal never checked against
+/// anything outside the loop, which the anchor invariant forbids, and is not an
+/// admissible implementation of this port however well it performs.
 ///
 /// Answering a batch in one call is deliberate: the questions about one state
 /// share an encoding, so asking them together is what makes this cheap enough to
@@ -597,9 +596,9 @@ pub trait AcceptabilityProbe: Send + Sync {
 mod typed_decisions {
     use super::*;
 
-    /// ADR-0024 Validation 6: every `Choice` in the system offers fewer than
-    /// twenty options, because accuracy collapses on large label spaces and the
-    /// options share a fixed token budget.
+    /// Every `Choice` in the system offers fewer than twenty options, because
+    /// accuracy collapses on large label spaces and the options share a fixed
+    /// token budget.
     ///
     /// The bound is asserted here, on the type, rather than left to each caller
     /// to remember. A question that cannot be answered well is not worth asking

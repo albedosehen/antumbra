@@ -1,5 +1,5 @@
-//! A genesis run that the node holding the work could not do itself (ADR-0017
-//! A2: "a memory-only node escalates instead of failing").
+//! A genesis run that the node holding the work could not do itself: a
+//! memory-only node escalates instead of failing.
 //!
 //! Escalation has to leave something behind. A node that only logged "this
 //! belongs on the rig" would have failed quietly in a way that looks, from the

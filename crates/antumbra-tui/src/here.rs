@@ -1,6 +1,6 @@
 //! Where the console was started, as git sees it, so the Memory page can say
 //! how each memory's anchor relates to it: the same scope recall tags a hit
-//! with (ADR-0018). Outside a repository, or without git, every memory's scope
+//! with. Outside a repository, or without git, every memory's scope
 //! is unknown, as it is for a recall that names no context.
 
 use std::path::Path;

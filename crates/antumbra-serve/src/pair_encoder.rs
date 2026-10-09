@@ -1,6 +1,5 @@
-//! A pair encoder for ADR-0024's D-2 relevance floor: one transformer that
-//! reads the query and the memory together, fine-tuned on the constructed
-//! labels.
+//! A pair encoder for the relevance floor: one transformer that reads the
+//! query and the memory together, fine-tuned on the constructed labels.
 //!
 //! **Why this and not another head.** The frozen-encoder heads in
 //! [`decision_probe`](crate::decision_probe) all read the two texts through
@@ -42,7 +41,7 @@ use antumbra_core::{AntumbraError, Result};
 
 use crate::decision_probe::{score_at_half, LabeledPair, Scored};
 
-/// The encoder ADR-0024 names, at the size that fits a training pass on one
+/// The intended encoder, at the size that fits a training pass on one
 /// 24GB card alongside nothing else.
 pub const DEFAULT_MODEL: &str = "answerdotai/ModernBERT-base";
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compare the grow step with its baselines on the GPU host (ADR-0022 S-3's
+# Compare the grow step with its baselines on the GPU host (the step's own
 # validation): the empty status quo, where every generation learns from every
 # visible task; uniform sampling of regions; and credit, the grow step proper.
 # Each arm runs the same corpus for the same number of generations, one after

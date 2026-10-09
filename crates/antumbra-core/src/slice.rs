@@ -2,7 +2,7 @@
 //! which are frozen away from it, which exist only to be logged, and which
 //! cannot be passed at all.
 //!
-//! ADR-0022's anchor invariant is about where reward comes from. These slices
+//! The anchor invariant is about where reward comes from. These slices
 //! are how that invariant becomes checkable: an instrument that reads a slice
 //! selection can reach is measuring the loop's own estimate, not the loop.
 //!
@@ -31,11 +31,11 @@ pub enum Slice {
     /// other half of the visible-minus-held-out gap.
     HeldOut,
     /// Touched by no decision at all, evaluated every k generations and only
-    /// logged. Distinct from `HeldOut`: the held-out suite is the one S-1 may
-    /// come to graduate against once its search score and graduation score are
-    /// separated, and a candidate selected repeatedly against a suite is
-    /// selected against it in the end. The audit slice is read by nothing that
-    /// chooses.
+    /// logged. Distinct from `HeldOut`: the held-out suite is the one the
+    /// recipe search may come to graduate against once its search score and
+    /// graduation score are separated, and a candidate selected repeatedly
+    /// against a suite is selected against it in the end. The audit slice is
+    /// read by nothing that chooses.
     Audit,
     /// Tasks whose specification cannot be satisfied. The target is zero passes
     /// forever, and a pass is proof of a shortcut rather than a near miss.
@@ -159,7 +159,7 @@ impl Partition {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Holdout {
     pub partition: Partition,
-    /// Measure the audit slice in this run. ADR-0022 reads it every k
+    /// Measure the audit slice in this run. The audit slice is read every k
     /// generations rather than every one; the loop keeps the schedule.
     pub audit: bool,
 }

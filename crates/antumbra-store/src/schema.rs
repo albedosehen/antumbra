@@ -100,21 +100,21 @@ const GRANT_PERMS: [(&str, &str); 4] = [
 /// engine per row via subqueries over the (tenant-readable) compartment/grant
 /// tables, so a forgotten app filter cannot leak and a revoke takes effect at
 /// once.
-/// The active-hive read branch (ADR-0017 B), one more OR in the same shape as
+/// The active-hive read branch, one more OR in the same shape as
 /// the owner and grant subqueries beside it. A memory is hive-visible when its
 /// compartment has an **accepted** offer, from a member who **opted in**, in a
 /// tenant whose hive the owner **enabled**.
 ///
 /// All three conditions, every time. Dropping any one of them would make the
-/// hive something other than what ADR-0017 B decided: without `accepted` a
+/// hive something other than what was designed: without `accepted` a
 /// member publishes unilaterally, without `opted_in` an owner conscripts a
 /// member's memory by accepting an offer they have since withdrawn consent for,
 /// and without `enabled` a member publishes into an org that never opened one.
 ///
 /// Read only. The write rule is deliberately untouched: the hive is a shared
 /// read layer, so a member seeing another's offered compartment cannot write
-/// into it. That asymmetry is intentional here, unlike the ones ADR-0017
-/// increment 5 had to remove -- and the replication scope already handles it,
+/// into it. That asymmetry is intentional here, unlike the ones an earlier
+/// increment had to remove -- and the replication scope already handles it,
 /// because a user's nodes carry what they own rather than what they can read.
 const HIVE_VISIBLE_RULE: &str = "compartment IN (SELECT VALUE subject_id FROM hive_offer \
      WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' \
@@ -188,9 +188,9 @@ fn document_perms() -> [(&'static str, String); 4] {
     ]
 }
 
-/// A device profile is a machine describing itself into its owner's fabric
-/// (ADR-0017). Read is tenant-wide, because dispatch has to be able to find the
-/// user's genesis node from whichever node is asking. Write is the user's own:
+/// A device profile is a machine describing itself into its owner's fabric.
+/// Read is tenant-wide, because dispatch has to be able to find the user's
+/// genesis node from whichever node is asking. Write is the user's own:
 /// a node registers only the row keyed to the session running on it, so one
 /// tenant member cannot re-declare another's laptop a trainer and have work
 /// routed to it. The table was previously owner-only, under which a node could
@@ -203,7 +203,7 @@ const DEVICE_PERMS: [(&str, &str); 4] = [
 ];
 
 /// A genesis request is one node in a user's fabric asking another to run what
-/// it cannot (ADR-0017 A2). Same shape as [`DEVICE_PERMS`], and for the same
+/// it cannot. Same shape as [`DEVICE_PERMS`], and for the same
 /// reason: the asking node and the node that takes the work are two machines of
 /// one user, so `user = $auth.user` lets the trainer claim a request its own
 /// laptop wrote while barring another tenant member from touching it.
@@ -214,7 +214,7 @@ const GENESIS_REQUEST_PERMS: [(&str, &str); 4] = [
     ("delete", "tenant_id = $auth.tenant AND user = $auth.user"),
 ];
 
-/// The tenant's hive gate (ADR-0017 B). Any member reads whether the hive is
+/// The tenant's hive gate. Any member reads whether the hive is
 /// open, because the read rule they are subject to depends on it; nobody with a
 /// record session writes it. `false` on all three writes is what makes the
 /// owner's decision the owner's: a record session is denied outright, and the
@@ -349,7 +349,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // rows self-expire out at the next sweep. Owner-only, like the rest of
         // the control-plane tables.
         table_schema("magic_link_use").with_mode(TableMode::Schemaless),
-        // Expert lifecycle (ADR-0022 S-5): every status change, appended and
+        // Expert lifecycle: every status change, appended and
         // numbered per expert. Readable where its expert is, through the same
         // owner rule, so no session sees an expert without its moves.
         table_schema("expert_transition")
@@ -357,27 +357,27 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_permissions(EXPERT_PERMS)
             .with_indexes([unique_index("xtrans_seq_uq", ["expert", "seq"])]),
         // Each shared expert's leave-one-out contribution per measured
-        // generation (ADR-0022 S-5), the history retirement reads. Readable
+        // generation, the history retirement reads. Readable
         // like the shared population it measures.
         table_schema("contribution")
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("contribution_expert_idx", ["expert", "generation"])]),
         // The population against its single best expert, per measured
-        // generation of a run (ADR-0022 S-5): the rolling comparison that is
+        // generation of a run: the rolling comparison that is
         // reported whether or not it flatters the architecture.
         table_schema("population_baseline")
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("baseline_run_idx", ["run_id", "generation"])]),
         // Each live task's clear winner among the experts, from the latest
-        // contribution measurement that scored them all (ADR-0024 D-1): what
+        // contribution measurement that scored them all: what
         // the learned router trains on beside the capability exemplars.
         table_schema("routing_outcome")
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("routing_outcome_winner_idx", ["winner"])]),
-        // The grow step (ADR-0022 S-3): the region census each contribution
+        // The grow step: the region census each contribution
         // measurement takes, and the decision each generation made from it.
         table_schema("region_census")
             .with_mode(TableMode::Schemaless)
@@ -385,7 +385,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("grow")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("grow_run_idx", ["run_id", "generation"])]),
-        // The verifier namespace (ADR-0022 S-4): verifiers keyed by content
+        // The verifier namespace: verifiers keyed by content
         // address, and the append-only measurements and state changes that
         // decide whether each may grant reward. No permissions clause: owner
         // only, so no tenant session and nothing that trains can write one.
@@ -402,13 +402,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("evaluation_run")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("eval_subject_idx", ["subject_kind", "subject_id"])]),
-        // The recipe search (ADR-0022 S-1): one row per shadow's training
+        // The recipe search: one row per shadow's training
         // recipe, read back by run in generation order.
         table_schema("recipe")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("recipe_run_idx", ["run_id", "generation"])]),
         // A user's fabric: which of their machines an agent is running on, and
-        // which one of them can train (ADR-0017). Keyed per (tenant, user, host),
+        // which one of them can train. Keyed per (tenant, user, host),
         // so the user index is what dispatch looks their genesis node up by.
         table_schema("device_profile")
             .with_mode(TableMode::Schemaless)
@@ -417,7 +417,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("device_host_idx", ["host", "backend"]),
                 index("device_user_idx", ["user", "role"]),
             ]),
-        // The tenant hive (ADR-0017 B): two gates and an offer ledger. One hive
+        // The tenant hive: two gates and an offer ledger. One hive
         // row per tenant, so the gate cannot be ambiguous.
         table_schema("hive")
             .with_mode(TableMode::Schemaless)
@@ -435,7 +435,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ["tenant_id", "subject_kind", "subject_id"],
             )]),
         // What a node could not run itself, left where the machine that can will
-        // find it (ADR-0017 A2). Indexed by the pair a trainer looks it up on.
+        // find it. Indexed by the pair a trainer looks it up on.
         table_schema("genesis_request")
             .with_mode(TableMode::Schemaless)
             .with_permissions(GENESIS_REQUEST_PERMS)
@@ -443,7 +443,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // Each repository's manifests as last read through the GitHub App, one
         // row per (tenant, repository), so the declared edges into and out of
         // one repository can be worked out again from every other's last
-        // reading (ADR-0019).
+        // reading.
         table_schema("manifest_set")
             .with_mode(TableMode::Schemaless)
             .with_permissions(MANIFEST_SET_PERMS)
@@ -501,7 +501,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 // fused with the HNSW dense leg by Reciprocal Rank Fusion.
                 bm25_index("memory_content_fts", ["content"], CONTENT_ANALYZER),
             ]),
-        // The chunk index (ADR-0025): each memory's text in overlapping pieces,
+        // The chunk index: each memory's text in overlapping pieces,
         // each with its own vector, so a passage from the middle of a long
         // memory can find it. It carries the memory's workspace and
         // compartment, so its select rule is the memory's own and a chunk is

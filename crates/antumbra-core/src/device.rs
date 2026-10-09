@@ -1,14 +1,14 @@
-//! A node in a user's fabric (ADR-0017): which machine an agent is running on,
+//! A node in a user's fabric: which machine an agent is running on,
 //! what it can do, and therefore where training goes.
 //!
-//! ADR-0013 says a user's agents share one memory. ADR-0017 says those agents
-//! run on several machines, and that the machines are not interchangeable: a
-//! laptop can recall and store, and cannot train. A node registers itself here
-//! so the fabric knows which of the user's machines is the one that can.
+//! A user's agents share one memory, and those agents run on several machines
+//! that are not interchangeable: a laptop can recall and store, and cannot
+//! train. A node registers itself here so the fabric knows which of the user's
+//! machines is the one that can.
 //!
-//! The row is the user's, not the host's. Memory follows the user (ADR-0017
-//! section A), so two people on one machine have two profiles, and one person
-//! on three machines has three.
+//! The row is the user's, not the host's. Memory follows the user, so two
+//! people on one machine have two profiles, and one person on three machines
+//! has three.
 
 use serde::{Deserialize, Serialize};
 
@@ -20,10 +20,10 @@ use crate::ids::{TenantId, UserId};
 #[serde(rename_all = "lowercase")]
 pub enum DeviceRole {
     /// Recall, store and route, locally. Training is dispatched elsewhere, and
-    /// a node in this role escalates rather than failing (ADR-0017 section A).
+    /// a node in this role escalates rather than failing.
     Memory,
     /// Can train. Genesis is dispatched here: a compartment that clears the
-    /// consolidation gate (ADR-0012), or an explicit `train`.
+    /// consolidation gate, or an explicit `train`.
     Genesis,
 }
 
@@ -54,12 +54,12 @@ impl std::str::FromStr for DeviceRole {
     }
 }
 
-/// The video memory a node needs before genesis is dispatched to it. ADR-0006
-/// names the fleet: the 3090 Ti 24 GB is the v0 training target, the M4 Pro has
-/// 48 GB, and the 8 GB cards (a Pascal 1080, a Jetson Orin Nano) are called out
-/// there as weak at low-bit. 16 GiB is the line that admits the first two and
-/// the 16 GB variant of the 3080 mobile, and leaves the 8 GB machines as memory
-/// nodes, which is what they are.
+/// The video memory a node needs before genesis is dispatched to it. In the
+/// reference fleet the 3090 Ti 24 GB is the v0 training target, the M4 Pro has
+/// 48 GB, and the 8 GB cards (a Pascal 1080, a Jetson Orin Nano) are weak at
+/// low-bit. 16 GiB is the line that admits the first two and the 16 GB variant
+/// of the 3080 mobile, and leaves the 8 GB machines as memory nodes, which is
+/// what they are.
 pub const GENESIS_MIN_VRAM_MIB: u64 = 16 * 1024;
 
 /// The backend a row says when a session named its machine to a server running
@@ -78,8 +78,8 @@ pub fn backend_can_train(backend: &str) -> bool {
     )
 }
 
-/// The role a node's own hardware earns it (ADR-0017 A2: "derived from backend
-/// and VRAM").
+/// The role a node's own hardware earns it, derived from its backend and its
+/// VRAM.
 ///
 /// Unknown VRAM does not demote a training backend. `None` means the node could
 /// not tell, and treating "did not know" as "has none" would make every machine
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn a_role_is_earned_by_a_backend_that_can_train_and_memory_enough_to_do_it() {
-        // ADR-0006's fleet, as each machine would report itself.
+        // The reference fleet, as each machine would report itself.
         assert_eq!(role_for("cuda", Some(24_576)), DeviceRole::Genesis); // 3090 Ti
         assert_eq!(role_for("metal", Some(49_152)), DeviceRole::Genesis); // M4 Pro
         assert_eq!(role_for("cuda", Some(16_384)), DeviceRole::Genesis); // 3080 mobile 16

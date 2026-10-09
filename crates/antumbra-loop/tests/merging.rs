@@ -1,4 +1,4 @@
-//! Conservative merging through the loop (ADR-0022 S-5): the most similar pair
+//! Conservative merging through the loop: the most similar pair
 //! of active shared experts is merged only when their adapters are siblings and
 //! the merge scores at least as well as the better of them; both are then
 //! archived as redundant with the merged expert, so the merge is undoable.

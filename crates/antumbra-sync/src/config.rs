@@ -68,8 +68,8 @@ impl Endpoint {
     }
 }
 
-/// Whose fabric a collector replicates (ADR-0017 A1: "A tenant has many users,
-/// and each user has their own fabric").
+/// Whose fabric a collector replicates: a tenant has many users, and each user
+/// has their own fabric.
 ///
 /// Set it and the collector signs both connections in as that user, so the
 /// engine scopes what it can read and, more to the point, what it can write.

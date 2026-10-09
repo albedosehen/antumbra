@@ -35,8 +35,7 @@ async fn recall_long(s: &McpServer, n: usize, full: Option<bool>) -> Vec<MemoryV
     .memories
 }
 
-/// Validation 1: the payload has a stated ceiling, and this test is what
-/// holds it there.
+/// The payload has a stated ceiling, and this test is what holds it there.
 #[tokio::test]
 async fn a_default_recall_of_long_memories_stays_under_a_stated_size() {
     let s = server().await;
@@ -58,8 +57,8 @@ async fn a_default_recall_of_long_memories_stays_under_a_stated_size() {
     );
 }
 
-/// Validation 2: the marker is present exactly when the cut happened, and
-/// `content_chars` still reports the STORED length either way.
+/// The marker is present exactly when the cut happened, and `content_chars`
+/// still reports the STORED length either way.
 #[tokio::test]
 async fn the_marker_is_present_exactly_when_the_content_was_cut() {
     let s = server().await;
@@ -106,7 +105,7 @@ async fn the_marker_is_present_exactly_when_the_content_was_cut() {
     }
 }
 
-/// Validation 3: `full: true` returns the untruncated text with no marker.
+/// `full: true` returns the untruncated text with no marker.
 #[tokio::test]
 async fn full_returns_everything_and_says_nothing_was_cut() {
     let s = server().await;

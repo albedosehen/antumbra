@@ -14,8 +14,7 @@ use super::*;
 /// The learned router to route with. One the store holds but cannot decode,
 /// as after a rollback to a server older than the router's format, degrades
 /// to none, as one never trained does: the task escalates to the agent rather
-/// than failing the call (ADR-0024 Validation 7). Anything else the store
-/// reports still fails it.
+/// than failing the call. Anything else the store reports still fails it.
 fn readable(
     loaded: antumbra_core::Result<Option<antumbra_core::LearnedRouter>>,
 ) -> antumbra_core::Result<Option<antumbra_core::LearnedRouter>> {
@@ -98,7 +97,8 @@ impl McpServer {
         antumbra_core::handoff::normalize_host(self.device.as_deref().unwrap_or(&self.host))
     }
 
-    /// Give recall a relevance floor (ADR-0024 D-2, closing ADR-0023 B-2).
+    /// Give recall a relevance floor, judged by a typed decider (the relevance
+    /// head), so a recall where nothing is relevant says so.
     ///
     /// Off by default, and off is not a degraded mode: without a decider recall
     /// returns every row it found, which is what it did before this existed.

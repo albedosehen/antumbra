@@ -1,4 +1,4 @@
-//! Recipe repository (ADR-0022 S-1): one row per run of a training recipe,
+//! Recipe repository: one row per run of a training recipe,
 //! keyed by the shadow that ran it, so re-running a generation after a crash
 //! replaces its row rather than adding a second.
 //!

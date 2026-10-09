@@ -126,7 +126,7 @@ Note: (`pwsh` also runs on macOS/Linux if you install PowerShell, so the `.ps1` 
 
 ## Sovereign mode: what the bootstrap says first
 
-Turning Claude Code's telemetry off also turns off its feature flags, and the features gated on them, without saying so (ADR-0021). When `antumbra` is on the path (or `ANTUMBRA_BIN` names it), the bootstrap opens with what `antumbra claude brief` prints: whether the project's `AGENTS.md` reached the agent, which shell is the host's, and what the agent must not offer because it is gone. Outside that state it prints nothing, and so does a missing or failing `antumbra`.
+Turning Claude Code's telemetry off also turns off its feature flags, and the features gated on them, without saying so. When `antumbra` is on the path (or `ANTUMBRA_BIN` names it), the bootstrap opens with what `antumbra claude brief` prints: whether the project's `AGENTS.md` reached the agent, which shell is the host's, and what the agent must not offer because it is gone. Outside that state it prints nothing, and so does a missing or failing `antumbra`.
 
 If `AGENTS.md` was not loaded, the block tells the agent to read it before anything else. Measured on a 31,026-character file whose last line sets a rule for every reply: without the block the agent answered in one turn and never saw the rule; with it, the agent read the file, followed the rule, and told the user about `antumbra claude bridge`. The block is a fallback for the session in front of you. The bridge is the fix, because a hook reaches neither subagents nor the session after compaction.
 
@@ -153,7 +153,7 @@ Claude Code caps a hook's context at 10,000 characters. Past the cap the agent i
 
 Handoffs (R-7) come right after the first line: the bootstrap asks `handoffs` for `ANTUMBRA_HOST_ID` and, when something waits for this machine, places the server's count-and-titles lines ahead of everything recalled, a few hundred characters of the budget. Nothing waiting, or no answer, adds nothing.
 
-The bootstrap then names the machine to the server with `register_device` (ADR-0017), so it is listed among the user's devices, and when it was last seen, even when no server runs on it. It is skipped when `ANTUMBRA_HOST_ID` is unset (the `local` fallback names no machine in particular). The answer is not used, and a server that does not know the tool changes nothing.
+The bootstrap then names the machine to the server with `register_device`, so it is listed among the user's devices, and when it was last seen, even when no server runs on it. It is skipped when `ANTUMBRA_HOST_ID` is unset (the `local` fallback names no machine in particular). The answer is not used, and a server that does not know the tool changes nothing.
 
 ## Git provenance: stale memories are visible, not silently wrong
 

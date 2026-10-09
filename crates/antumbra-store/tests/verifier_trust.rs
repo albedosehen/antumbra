@@ -1,4 +1,4 @@
-//! The verifier namespace (ADR-0022 S-4) against a real in-memory store: a
+//! The verifier namespace against a real in-memory store: a
 //! synthesized verifier grants reward only once a sound measurement has
 //! trusted it, only for what it checks, and stops the moment it is
 //! quarantined or its trust lapses.

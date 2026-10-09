@@ -1,4 +1,4 @@
-//! The bridge: how an `AGENTS.md` gets read again in sovereign mode (ADR-0021).
+//! The bridge: how an `AGENTS.md` gets read again in sovereign mode.
 //!
 //! The first plan was to supply the file through the session-start hook. A
 //! hook's context is capped at 10,000 characters, and past the cap the agent is
@@ -24,7 +24,11 @@ use std::path::{Path, PathBuf};
 
 /// Marks a `CLAUDE.local.md` as ours: written by this command, safe to delete,
 /// and transparent when deciding what the agent would natively have read.
-pub const MARKER: &str =
+pub const MARKER: &str = "<!-- antumbra: bridge to AGENTS.md. Untracked; safe to delete. -->";
+
+/// The marker bridges were written with before, still read so those already
+/// on disk stay ours; nothing is written with it.
+const LEGACY_MARKER: &str =
     "<!-- antumbra: bridge to AGENTS.md (ADR-0021). Untracked; safe to delete. -->";
 
 /// The file a bridge is written to, beside the `AGENTS.md` it imports.
@@ -44,7 +48,7 @@ pub fn bridge_text(import: &str) -> String {
 
 /// Whether `text` is a bridge this command wrote.
 pub fn is_bridge(text: &str) -> bool {
-    text.contains(MARKER)
+    text.contains(MARKER) || text.contains(LEGACY_MARKER)
 }
 
 /// What to do about one directory's `AGENTS.md`.
@@ -226,7 +230,7 @@ pub fn with_exclude_line(exclude: &str) -> String {
         "\n"
     };
     format!(
-        "{exclude}{separator}# antumbra: bridges to AGENTS.md are local, never committed (ADR-0021)\n{EXCLUDE_LINE}\n"
+        "{exclude}{separator}# antumbra: bridges to AGENTS.md are local, never committed\n{EXCLUDE_LINE}\n"
     )
 }
 
@@ -235,10 +239,9 @@ pub fn with_exclude_line(exclude: &str) -> String {
 /// is theirs now, and is left alone.
 pub fn is_only_a_bridge(text: &str) -> bool {
     is_bridge(text)
-        && text
-            .lines()
-            .map(str::trim)
-            .all(|line| line.is_empty() || line == MARKER || line.starts_with('@'))
+        && text.lines().map(str::trim).all(|line| {
+            line.is_empty() || line == MARKER || line == LEGACY_MARKER || line.starts_with('@')
+        })
 }
 
 fn git(project: &Path, args: &[&str]) -> Option<String> {
@@ -556,6 +559,22 @@ mod tests {
         let extended = format!("{}- and my own note\n", bridge_text("AGENTS.md"));
         assert!(is_bridge(&extended) && !is_only_a_bridge(&extended));
         assert!(!is_only_a_bridge("my own notes\n@AGENTS.md\n"));
+    }
+
+    #[test]
+    fn a_bridge_written_with_the_earlier_marker_is_still_ours() {
+        assert_ne!(
+            LEGACY_MARKER, MARKER,
+            "the earlier marker is a different text"
+        );
+        // Exactly as earlier builds wrote it to disk.
+        let earlier = concat!(
+            "<!-- antumbra: bridge to AGENTS.md (ADR-",
+            "0021). Untracked; safe to delete. -->\n@AGENTS.md\n"
+        );
+        assert!(is_bridge(earlier));
+        assert!(is_only_a_bridge(earlier));
+        assert!(!bridge_text("AGENTS.md").contains("ADR"));
     }
 
     #[test]

@@ -95,7 +95,7 @@ pub fn aggregate(signals: &[RewardSignal], critic_weight: f32) -> Critique {
         })
         .collect();
     // The weakest step, not the mean or the sum: a sum pays for verbose
-    // vacuous steps (ADR-0022 S-2).
+    // vacuous steps.
     let total = steps
         .iter()
         .map(|s| s.folded)

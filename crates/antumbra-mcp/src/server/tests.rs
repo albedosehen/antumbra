@@ -110,7 +110,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
 
 /// A memory's view says when it was last written, and reinforcing it moves that
 /// on. With `reinforcement`, that makes a memory a counter which also says when
-/// it last counted (ADR-0021, skill usage).
+/// it last counted, which is how skill usage is kept.
 #[tokio::test]
 async fn a_view_says_when_a_memory_was_last_written_and_reinforcing_moves_it() -> anyhow::Result<()>
 {
@@ -683,8 +683,8 @@ mod lifecycle;
 mod workspace;
 mod written_from;
 
-/// ADR-0023 B-1, validations 1 to 3: a recall is bounded, says when it cut, and
-/// hands over the whole text on request.
+/// A recall is bounded, says when it cut, and hands over the whole text on
+/// request.
 ///
 /// The bound exists because recall returns `top_k` rows of unbounded prose into
 /// a context window the caller still has to do work in. These assert the three
@@ -692,16 +692,15 @@ mod written_from;
 /// exact rather than advisory, and there is a documented way to get the rest.
 mod bounded_answers;
 
-/// ADR-0023 B-2 / ADR-0024 D-2: recall says nothing as nothing.
+/// The relevance floor: recall says nothing as nothing.
 ///
-/// Validation 4 asks that a recall where nothing cleared the floor be
-/// distinguishable BY A FIELD rather than by inference from one where weak rows
-/// did. These drive that through the typed-decision port with a scripted
+/// A recall where nothing cleared the floor must be distinguishable BY A FIELD
+/// rather than by inference from one where weak rows did. These drive that through the typed-decision port with a scripted
 /// decider, so the behavior is pinned before any trained head exists.
 mod relevance_floor;
 mod standing;
 
-/// Takes the `tools/list` capture ADR-0023 B-3's lint is pointed at, without
+/// Takes the `tools/list` capture the MCP schema lint is pointed at, without
 /// standing a server up.
 ///
 /// The lint lives in `antumbra-cli` and this surface lives here, and neither

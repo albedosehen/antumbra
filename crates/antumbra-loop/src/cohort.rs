@@ -1,4 +1,4 @@
-//! What a generation trains (ADR-0022 S-1). Without a search, one shadow under
+//! What a generation trains. Without a search, one shadow under
 //! the configured recipe, as every generation always has. With one, a cohort:
 //! the search proposes a recipe per member, every member trains from the base
 //! under its own, and the best of them is the one the generation carries
@@ -51,8 +51,8 @@ struct Planned {
 /// How graduation is re-measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Remeasure {
-    /// Evaluations, each under its own fresh seed. The record asks for at
-    /// least three.
+    /// Evaluations, each under its own fresh seed. Graduation wants at least
+    /// three.
     pub repeats: u32,
 }
 

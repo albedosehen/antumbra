@@ -1,6 +1,6 @@
-//! Leave-one-in admission (ADR-0022 S-5, found on the GPU in S-3): a graduate
-//! joins only if the population does better on the live tasks with it than
-//! without it.
+//! Leave-one-in admission (part of the population's curation, found missing by
+//! GPU runs of the grow step): a graduate joins only if the population does
+//! better on the live tasks with it than without it.
 //!
 //! The twin check catches a candidate that duplicates an expert. Two GPU runs
 //! of the grow step found what it misses:

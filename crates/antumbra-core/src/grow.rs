@@ -1,4 +1,4 @@
-//! What the grow step decides on and what it decided (ADR-0022 S-3): which
+//! What the grow step decides on and what it decided: which
 //! region of the corpus the next generation learns from.
 //!
 //! A region is a skill. Its evidence is a census taken with each contribution

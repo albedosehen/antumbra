@@ -132,7 +132,7 @@ impl Default for RaftConfig {
 }
 
 impl RaftConfig {
-    /// The searched part of this configuration (ADR-0022 S-1): what a run
+    /// The searched part of this configuration: what a run
     /// trains under when its request names no recipe.
     pub fn recipe(&self) -> TrainingRecipe {
         TrainingRecipe {

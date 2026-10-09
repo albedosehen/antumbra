@@ -71,7 +71,7 @@ services:
     environment:
       - ANTUMBRA_JWT_SECRET=${ANTUMBRA_JWT_SECRET:?set ANTUMBRA_JWT_SECRET in docker/.env}
       - ANTUMBRA_DB_PASS=${SURREAL_PASS}
-      # The node name in its users' fabrics (ADR-0017). Without it the
+      # The node name in its users' fabrics. Without it the
       # container ID is the name, and every recreate registers this machine
       # as a brand new node while the old rows go on claiming to be trainers.
       - ANTUMBRA_HOST=${ANTUMBRA_HOST:-${HOSTNAME}}
@@ -83,7 +83,7 @@ services:
       # The same model name the rerank service loads, so the relevance floor
       # picks that model's calibration even before the endpoint answers.
       - ANTUMBRA_RERANK_MODEL=${ANTUMBRA_RERANK_MODEL:-}
-      # The chunk index (ADR-0025): how many pieces of a memory the server
+      # The chunk index: how many pieces of a memory the server
       # embeds at once while it cuts memories into the pieces recall searches.
       # 0 stops it; recall then reads whole memories for anything not cut.
       - ANTUMBRA_CHUNK_IN_FLIGHT=${ANTUMBRA_CHUNK_IN_FLIGHT:-4}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fine-tune the D-2 pair encoder on the GPU host and score it against the
-# control (ADR-0024 D-2): `pair_encoder::tests::d2_pair_encoder_against_the_control`
+# Fine-tune the relevance floor's pair encoder on the GPU host and score it
+# against the control: `pair_encoder::tests::d2_pair_encoder_against_the_control`
 # in the d2-probe image, over the label file scripts/d2-labels.sh built.
 # Detached; logs to $LOG (/tmp/d2-pair.log by default).
 #

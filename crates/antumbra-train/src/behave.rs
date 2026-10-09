@@ -1,9 +1,9 @@
-//! Training the user's behaviors into a standing expert (ADR-0027): the part
+//! Training the user's behaviors into a standing expert: the part
 //! that needs no model. Tasks from each behavior's worked examples, a quarter
 //! of them held out; the shipped replay prompts and controls; and the rule an
 //! expert is admitted by.
 //!
-//! The configuration is validation 2's. On kuskokwim, ten examples per
+//! The configuration is the validated one. On kuskokwim, ten examples per
 //! behavior with the base model's own answers to 214 everyday prompts as
 //! replay taught four of the user's behaviors (0% to 89-100% on held-out
 //! phrasings) and kept unrelated tasks at the base model's level (32/40
@@ -24,7 +24,7 @@ pub const MIN_RATE: f32 = 0.6;
 /// And at least this much more often than the base model's.
 pub const MIN_GAIN: f32 = 0.3;
 /// The controls may fall this far below the base model's rate, and no further:
-/// four of the forty, the noise validation 2 saw between runs.
+/// four of the forty, the noise validation saw between runs.
 pub const CONTROL_SLACK: f32 = 0.1;
 /// Every this-many-th example is held out to admit the expert by.
 const HOLD_EVERY: usize = 4;

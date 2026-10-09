@@ -153,7 +153,7 @@ fn group<'a>(t: &Theme, label: String) -> Line<'a> {
 }
 
 /// Where a memory was learned, and how that relates to where the console was
-/// started: the scope recall would tag it with (ADR-0018). `None` for a memory
+/// started: the scope recall would tag it with. `None` for a memory
 /// with no git anchor.
 fn anchor_lines<'a>(t: &Theme, evidence: &[String], app: &App, w: usize) -> Option<Vec<Line<'a>>> {
     let anchor = GitProvenance::from_evidence(evidence)?;

@@ -1,4 +1,4 @@
-//! `POST /github/webhook`: the GitHub App's deliveries (ADR-0019). The route
+//! `POST /github/webhook`: the GitHub App's deliveries. The route
 //! is the I/O half of `antumbra-github`: verify the HMAC signature, parse the
 //! event, find the repository's workspace, load that workspace's memories,
 //! apply the pure handler, write back what changed, and, when the App can

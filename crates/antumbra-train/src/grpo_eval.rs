@@ -1,5 +1,5 @@
 //! A GRPO model seen as a [`CausalLm`] for evaluation, so a GRPO-trained
-//! adapter is re-measured (ADR-0022 S-1) by the same code as a RAFT one rather
+//! adapter is re-measured by the same code as a RAFT one rather
 //! than by a copy of it. Generation is the group sampler's completions; seeding
 //! passes straight through, so a model that cannot seed still refuses. The
 //! view evaluates and never trains.

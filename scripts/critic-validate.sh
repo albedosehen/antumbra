@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Train a critic on the verifier's verdicts and read it (ADR-0022 S-2), on the
+# Train a critic on the verifier's verdicts and read it, on the
 # GPU host, over one workbench skill. Detached; logs to $LOG
 # (/tmp/critic-validate.log by default).
 #

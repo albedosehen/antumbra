@@ -1,4 +1,4 @@
-//! What this node is, as far as the node can tell (ADR-0017 A2).
+//! What this node is, as far as the node can tell.
 //!
 //! Two questions, answered separately because they fail separately: which
 //! backend this build can drive, and how much video memory the device it would

@@ -1,8 +1,8 @@
 //! The audit slice across generations: whether the loop's own score is
 //! carrying any real competence with it.
 //!
-//! ADR-0022 states the signal exactly: "search fitness rising while audit
-//! fitness stays flat is the definition of measured overtuning". This is the
+//! The signal is exact: search fitness rising while audit fitness stays flat
+//! is the definition of measured overtuning. This is the
 //! only instrument that can catch a loop tuning itself against its own
 //! estimate, because it is the only number no decision in the loop can reach.
 
@@ -30,7 +30,8 @@ pub enum Trend {
     /// this instrument can tell.
     Carrying,
     /// The search score climbed and the audit slice did not follow. The loop
-    /// has measured its own overtuning. This is S-1's kill criterion.
+    /// has measured its own overtuning. This is the recipe search's kill
+    /// criterion.
     Overtuning,
     /// The search score did not climb, so there is no gain to ask about.
     Flat,
@@ -51,9 +52,10 @@ impl Trend {
     }
 }
 
-/// How the window is read. The generation count is ADR-0022's ("ten
-/// generations"); `carry` is an operator's dial with a stated default rather
-/// than a measured constant, and it is named here so nobody mistakes it for one.
+/// How the window is read. The generation count (ten) is the one the kill
+/// criterion is stated in; `carry` is an operator's dial with a stated default
+/// rather than a measured constant, and it is named here so nobody mistakes it
+/// for one.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Watch {
     /// How many generations must be in hand before the question is asked.

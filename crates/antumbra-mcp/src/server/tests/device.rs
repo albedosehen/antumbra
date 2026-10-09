@@ -1,4 +1,4 @@
-//! Devices (ADR-0017): a session names the machine it runs on, the fabric
+//! Devices: a session names the machine it runs on, the fabric
 //! lists it, and a row a server wrote about its own machine is never
 //! overwritten by a session that cannot see that machine's hardware.
 

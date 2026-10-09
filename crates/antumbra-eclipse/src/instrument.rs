@@ -208,9 +208,9 @@ impl GenerationReport {
     }
 
     /// The widest gap measured, and the band it was in. This is the number to
-    /// watch across generations; the ADR is explicit that it is tracked against
-    /// task size rather than in aggregate, because the gap is known to grow
-    /// with size, and an average over sizes hides exactly that.
+    /// watch across generations. It is tracked against task size rather than
+    /// in aggregate on purpose, because the gap is known to grow with size,
+    /// and an average over sizes hides exactly that.
     pub fn widest_gap(&self) -> Option<(SizeBand, f32)> {
         self.gaps
             .iter()
@@ -244,7 +244,7 @@ mod tests {
     fn the_gap_is_reported_against_task_size_and_not_averaged_over_it() {
         // Even on the small tasks, widening on the large ones: the aggregate
         // gap here is mild and the large-task gap is not, which is the whole
-        // reason the ADR tracks it banded.
+        // reason the gap is tracked banded.
         let report = GenerationReport::of(&run(&[
             (Slice::Visible, true, 1),
             (Slice::Visible, true, 1),

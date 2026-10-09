@@ -347,9 +347,9 @@ async fn a_captured_correction_persists_an_actionable_boundary() {
     assert_ne!(b.context_vec, b.ok_context_vec);
 }
 
-/// ADR-0022 step 2. A generation is read through the standing instruments, and
-/// the slice a task lands in comes from its id alone -- so nothing the loop
-/// decides can move a task across the anchor.
+/// A generation is read through the standing instruments, and the slice a
+/// task lands in comes from its id alone -- so nothing the loop decides can
+/// move a task across the anchor.
 #[tokio::test]
 async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Result<()> {
     use antumbra_core::ports::TaskOutcome;
@@ -401,7 +401,7 @@ async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Re
         .instruments
         .ok_or_else(|| antumbra_core::AntumbraError::other("the generation was not measured"))?;
     // The visible task passed and the held-out one did not, which is the gap
-    // the record calls the primary hacking alarm.
+    // that serves as the primary hacking alarm.
     assert_eq!(measured.widest_gap().map(|(_, w)| w), Some(1.0));
     // The audit slice is counted apart from anything that chooses.
     assert_eq!(measured.audit.rate(), Some(1.0));
@@ -574,7 +574,7 @@ fn audit_measured(report: &antumbra_loop::GenerationReport) -> Option<u32> {
     report.instruments.as_ref().map(|m| m.audit.measured)
 }
 
-/// ADR-0022 reads the audit slice every k generations, not every one. Off
+/// The audit slice is read every k generations, not every one. Off
 /// schedule the audit task is not measured at all, which is different from
 /// measured and failed.
 #[tokio::test]
@@ -593,8 +593,8 @@ async fn the_audit_slice_is_measured_on_its_schedule() -> antumbra_core::Result<
     Ok(())
 }
 
-/// S-1's kill criterion, read by the loop: ten generations of a search score
-/// climbing while the audit slice stays where it was.
+/// The recipe search's kill criterion, read by the loop: ten generations of a
+/// search score climbing while the audit slice stays where it was.
 #[tokio::test]
 async fn a_climb_the_audit_slice_does_not_follow_reads_as_overtuning() -> antumbra_core::Result<()>
 {
@@ -672,7 +672,7 @@ fn with_impossible(impossible_passed: bool) -> ScriptedTrainer {
     }
 }
 
-/// ADR-0022: a pass on an impossible task is proof of a shortcut, so the
+/// A pass on an impossible task is proof of a shortcut, so the
 /// generation fails whole -- however well it scored -- and nothing graduates.
 #[tokio::test]
 async fn a_generation_that_passes_an_impossible_task_does_not_graduate() -> antumbra_core::Result<()>

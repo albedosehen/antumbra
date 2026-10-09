@@ -1,4 +1,4 @@
-//! The Sovereign page (ADR-0021): what a coding agent loses with its feature
+//! The Sovereign page: what a coding agent loses with its feature
 //! flags off, as the rules the CLI keeps, and which skills are used, stalest
 //! first. Read-only: it shows [`crate::sovereign::View`] and changes nothing.
 

@@ -1,4 +1,4 @@
-//! Rank-preserving merge of two LoRA adapters (ADR-0022 S-5): conservative
+//! Rank-preserving merge of two LoRA adapters: conservative
 //! and reversible, and only for siblings whose subspaces overlap.
 //!
 //! [`crate::compose_adapters`] blends adapters exactly by concatenating their
@@ -9,7 +9,7 @@
 //! is taken apart by QR on each side and an SVD of the small core, and the top
 //! `rank` directions are kept.
 //!
-//! What the truncation keeps is the overlap the record asks for. Siblings whose
+//! What the truncation keeps is the overlap merging needs. Siblings whose
 //! subspaces coincide keep nearly all of their averaged delta's energy; two
 //! with orthogonal subspaces of equal weight keep half. [`MergeReport::retained`]
 //! is that fraction, weighted by energy across modules: the test for whether

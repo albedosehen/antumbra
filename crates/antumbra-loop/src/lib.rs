@@ -87,7 +87,7 @@ pub struct LoopConfig {
     pub graduate_threshold: f32,
     /// The shared base every adapter rides on (the frozen-expert population).
     pub base_model: String,
-    /// How the corpus is split for the standing instruments (ADR-0022): which
+    /// How the corpus is split for the standing instruments: which
     /// tasks selection may see, which are held out, which are audited. Carried
     /// in the config rather than derived, because the seed decides what every
     /// measurement means and a generation has to record which one it ran under.
@@ -101,25 +101,25 @@ pub struct LoopConfig {
     /// entirely into the withheld slices.
     pub partition: Option<Partition>,
     /// The audit slice is measured every `audit_every` generations, counting
-    /// from generation 0, and skipped in between (ADR-0022: "evaluated every k
-    /// generations and only logged"). The record names no k. The default is
+    /// from generation 0, and skipped in between: it is evaluated every k
+    /// generations and only logged, and no k is prescribed. The default is
     /// the largest one the default [`Watch`] can always read: it asks for 4
     /// audited generations in a window of 10, and 10 consecutive generations
     /// hold at least 5 multiples of 2 but only 3 of 3. A test holds the two
     /// dials together. Zero is read as one.
     pub audit_every: u32,
-    /// The recipe each generation's shadow trains under (ADR-0022 S-1).
+    /// The recipe each generation's shadow trains under.
     /// `None` (the default) trains under the trainer's own settings, as every
     /// run did before the recipe was searched. Either way the trainer reports
     /// the recipe it used, and that is what the generation's recipe row holds.
     /// A searched run starts from it.
     pub recipe: Option<TrainingRecipe>,
-    /// Search the recipe (ADR-0022 S-1): each generation trains a cohort under
+    /// Search the recipe: each generation trains a cohort under
     /// recipes the search proposes, every member from the base, and carries the
     /// best forward. `None` (the default) trains one shadow under `recipe`.
     pub search: Option<search::SearchPolicy>,
-    /// Judge graduation on a re-measurement (ADR-0022 S-1's fourth
-    /// constraint): the carried-forward shadow is evaluated again, on the
+    /// Judge graduation on a re-measurement, a constraint of the recipe
+    /// search: the carried-forward shadow is evaluated again, on the
     /// held-out slice when there is one, once per fresh seed, and the threshold
     /// applies to the mean. `None` (the default) judges on training fitness, or
     /// on its shrunk form under a search.
@@ -129,37 +129,37 @@ pub struct LoopConfig {
     /// audit slice must show for the gain to count as carried.
     pub watch: Watch,
     /// Measure every shared expert's leave-one-out contribution on the live
-    /// tasks (ADR-0022 S-5), at the generation boundary, on this schedule.
+    /// tasks, at the generation boundary, on this schedule.
     /// `None` (the default) leaves it unmeasured: it costs about two
     /// evaluations of the live tasks each time it runs.
     pub contribution: Option<ContributionPolicy>,
-    /// Gate admission (ADR-0022 S-5): a graduate whose capability vector
+    /// Gate admission: a graduate whose capability vector
     /// duplicates an active shared expert's joins only if it beats that
     /// expert head to head, and then replaces it. `None` (the default) admits
     /// every graduate, as the loop always has.
     pub admission: Option<AdmissionPolicy>,
-    /// Retirement as the loop's job (ADR-0022 S-5): after each contribution
+    /// Retirement as the loop's job: after each contribution
     /// measurement, the early warnings are reported and confirmation demotes
     /// an expert whose contribution stayed at or below the floor. It reads the
     /// contribution stream, so it acts only when `contribution` is measured.
     /// `None` (the default) leaves every move to a person.
     pub retirement: Option<RetirementPolicy>,
-    /// Merge sibling experts (ADR-0022 S-5): at the generation boundary, the
+    /// Merge sibling experts: at the generation boundary, the
     /// most similar pair of active shared experts is merged at the
     /// population's rank when their adapters share their subspace and the
     /// merge scores at least as well as the better of them; both are then
     /// archived. `None` (the default) never merges.
     pub merge: Option<MergePolicy>,
-    /// The grow step (ADR-0022 S-3): each generation learns from the region
+    /// The grow step: each generation learns from the region
     /// the policy chooses from the latest census, plus an unfiltered share of
     /// the whole visible slice. The census comes from the contribution
     /// measurement, so it chooses only once one has been taken. `None` (the
     /// default) learns from every visible task, as always.
     pub grow: Option<GrowPolicy>,
     /// Train the learned gate on each live task's clear winner as well as
-    /// the capability exemplars (ADR-0024 D-1). Off by default: on the
-    /// comparison the record set for it, the outcome-trained router scored no
-    /// higher on the withheld tasks. Winners are recorded either way.
+    /// the capability exemplars. Off by default: in the comparison it was
+    /// judged by, the outcome-trained router scored no higher on the withheld
+    /// tasks. Winners are recorded either way.
     pub route_on_outcomes: bool,
 }
 
@@ -198,7 +198,7 @@ pub struct GenerationReport {
     /// no-forgetting kill criterion firing. Empty when the freeze held
     /// (the expected case); a non-empty list is a serious integrity alarm.
     pub regressions: Vec<ExpertId>,
-    /// What the standing instruments made of this generation (ADR-0022): the
+    /// What the standing instruments made of this generation: the
     /// visible-minus-held-out gap banded by task size, the audit slice, and the
     /// impossible set. `None` when nothing was held out, when the trainer did
     /// not confirm it withheld what was asked, or when it reported no per-task
@@ -223,7 +223,7 @@ pub struct GenerationReport {
     /// The re-measurement graduation was judged on, when the loop took one.
     pub remeasured: Option<antumbra_core::ports::Remeasurement>,
     /// Each shared expert's leave-one-out contribution, when this generation
-    /// measured it (ADR-0022 S-5). Empty when it was not due.
+    /// measured it. Empty when it was not due.
     pub contribution: Vec<antumbra_core::ContributionRecord>,
     /// What admission decided for a shadow that cleared graduation, when a
     /// policy is set. A rejected one did not graduate.
@@ -243,7 +243,7 @@ pub struct GenerationReport {
     /// The region census this generation's contribution measurement took.
     pub census: Vec<antumbra_core::RegionCensus>,
     /// What rechecking the verifiers that judged this generation's training
-    /// against their anchors found (ADR-0022 S-4). Empty when the loop has no
+    /// against their anchors found. Empty when the loop has no
     /// verifier to recheck with, or no named verifier judged anything.
     pub rechecks: Vec<Recheck>,
     /// The named verifiers the shadow trained under that no longer grant
@@ -253,14 +253,13 @@ pub struct GenerationReport {
     /// of them the run had already paid for.
     pub contribution_scores: Evaluations,
     /// How the critic that shaped this generation read against the verifier
-    /// and its twin (ADR-0022 S-2). `None` without a critic.
+    /// and its twin. `None` without a critic.
     pub critic: Option<antumbra_core::critic::CriticWatch>,
     /// Why the run set its critic aside, in the generation it did: from the
-    /// next one on, its shadows train on the verifier's reward alone
-    /// (ADR-0022 S-2).
+    /// next one on, its shadows train on the verifier's reward alone.
     pub critic_fallback: Option<antumbra_core::critic::Fallback>,
     /// Live tasks the contribution measurement found a clear winner for,
-    /// which the gate was retrained on (ADR-0024 D-1).
+    /// which the gate was retrained on.
     pub routing_outcomes: usize,
 }
 
@@ -323,16 +322,16 @@ impl<'a> GenerationLoop<'a> {
     }
 
     /// Recheck, with `verifier`, every trusted synthesized verifier that
-    /// judged a generation's training against the tasks' authored anchors
-    /// (ADR-0022 S-4). Without it, trust lapses after its time to live.
+    /// judged a generation's training against the tasks' authored anchors.
+    /// Without it, trust lapses after its time to live.
     pub fn rechecking(mut self, verifier: &'a dyn Verifier) -> Self {
         self.rechecker = Some(verifier);
         self
     }
 
     /// Recheck against these answers too, each `(task, completion)` built to
-    /// be wrong: a mutant of the task's reference or a forgery (ADR-0022
-    /// S-4). Each is labeled by the task's anchor once a run. One the anchor
+    /// be wrong: a mutant of the task's reference or a forgery. Each is
+    /// labeled by the task's anchor once a run. One the anchor
     /// fails is adversarial: known-bad evidence for the bound, and a shortcut
     /// if the verifier passes it. One the anchor passes is an equivalent
     /// answer and counts as right.
@@ -397,7 +396,7 @@ impl<'a> GenerationLoop<'a> {
 
         // score -> decide: graduate the winner or prune + log a boundary.
         self.advance(head, LoopState::Decide).await?;
-        // ADR-0022: a pass on an impossible task is proof of a shortcut, and a
+        // A pass on an impossible task is proof of a shortcut, and a
         // shortcut makes every other number in the generation unreadable, so
         // the generation fails whole rather than scoring a little lower.
         let shortcut = measured.instruments.as_ref().filter(|m| m.failed());
@@ -412,8 +411,9 @@ impl<'a> GenerationLoop<'a> {
             .judge(&run_id, generation, &shadow_id, &outcome, &cohort, shortcut)
             .await?;
         measured.remeasured = remeasured.clone();
-        // ADR-0022 S-4: what a withdrawn verifier taught is kept out of the
-        // population, so a shadow that learned from one does not graduate.
+        // Under the verifier trust protocol, what a withdrawn verifier taught
+        // is kept out of the population, so a shadow that learned from one
+        // does not graduate.
         if !withdrawn.is_empty() {
             eprintln!(
                 "recheck: generation {} trained under {withdrawn:?}, which no longer grant reward; it does not graduate",
@@ -569,7 +569,7 @@ impl<'a> GenerationLoop<'a> {
     }
 
     /// Persist the training reward curve as source-tagged signals for the
-    /// critic, and what each named verifier granted the run (ADR-0022 S-4),
+    /// critic, and what each named verifier granted the run,
     /// so every unit of reward it trained on has a named source.
     async fn record_rewards(&self, run_id: &RunId, outcome: &TrainOutcome) -> Result<()> {
         let now = Utc::now();
@@ -611,7 +611,7 @@ impl<'a> GenerationLoop<'a> {
             },
             // The instruments ride with the fitness they qualify, so a reader
             // of this row cannot get the score without the measurement of
-            // whether the score means anything (ADR-0022). The partition seed
+            // whether the score means anything. The partition seed
             // goes with them: a reseed repartitions the corpus and invalidates
             // every gap measured before it, so a generation has to say which
             // split it was read under.
@@ -658,7 +658,7 @@ impl<'a> GenerationLoop<'a> {
                 "generation": generation.0,
                 "exemplars": outcome.capability_exemplars,
                 // The named verifiers it trained under: quarantining one
-                // archives it (ADR-0022 S-4).
+                // archives it.
                 "verifiers": outcome
                     .granted_by
                     .iter()
@@ -672,7 +672,7 @@ impl<'a> GenerationLoop<'a> {
             owner: None,
             compartment: None,
             // The weights land on this machine's disk and stay there
-            // (ADR-0017 keeps adapters out of sync scope), so the row says
+            // (adapters are kept out of sync scope), so the row says
             // which machine that was.
             placed_on: Some(antumbra_core::this_host()),
             created_at: now,

@@ -42,17 +42,17 @@ pub fn causal_lm_loss(
     masked.sum_all()?.affine(1.0 / denom, 0.0)
 }
 
-/// The Brier score: the training objective for a typed decision head
-/// (ADR-0024), and a **strictly proper scoring rule**.
+/// The Brier score: the training objective for a typed decision head, and a
+/// **strictly proper scoring rule**.
 ///
 /// That property is the whole reason this objective exists rather than any
 /// other. Under a strictly proper rule the expected loss is minimized *only* by
 /// reporting the true probability, so a head trained against it has no way to
 /// score better by being confident than by being right. An accuracy objective,
 /// or a cross-entropy over a hard label, buys a confident answer at the same
-/// price as a calibrated one; this does not, and ADR-0024 turns on the
-/// difference, since the decisions it governs are thresholded and a
-/// miscalibrated probability is worse than no probability at all.
+/// price as a calibrated one; this does not, and typed decisions turn on the
+/// difference, since every one of them is thresholded and a miscalibrated
+/// probability is worse than no probability at all.
 ///
 /// Brier rather than the log score for one practical reason: it is BOUNDED.
 /// A log score is unbounded below and hands a single confidently-wrong sample an
@@ -156,10 +156,10 @@ mod tests {
     }
 }
 
-/// ADR-0024's calibration objective, and the property that makes it the right
-/// one. These are the tests the record's argument rests on: it claims a head can
-/// be trained to report true probabilities, and that claim is only as good as
-/// the objective being strictly proper.
+/// The calibration objective for typed decisions, and the property that makes
+/// it the right one. These are the tests the design rests on: it claims a head
+/// can be trained to report true probabilities, and that claim is only as good
+/// as the objective being strictly proper.
 #[cfg(test)]
 mod proper_scoring {
     use super::*;
@@ -191,8 +191,8 @@ mod proper_scoring {
     /// **Strict properness**: the true report is the unique minimum. Sweep every report
     /// from 0 to 1 against a world that says 0.7, and the best report is 0.7.
     ///
-    /// This is the property ADR-0024 needs and the reason the objective is not
-    /// simply accuracy: there is no report that scores better than the truth, so
+    /// This is the property typed decisions need and the reason the objective is
+    /// not simply accuracy: there is no report that scores better than the truth, so
     /// a head cannot buy a lower loss with confidence it has not earned.
     #[test]
     fn the_true_report_is_the_unique_minimum() {

@@ -1,4 +1,4 @@
-//! Graduation on a re-measurement (ADR-0022 S-1's fourth constraint): the
+//! Graduation on a re-measurement, a constraint of the recipe search: the
 //! carried-forward shadow is evaluated again under fresh seeds, on the
 //! held-out slice its trainer confirmed withholding, and the threshold applies
 //! to the mean rather than to the training fitness a search ranked by.

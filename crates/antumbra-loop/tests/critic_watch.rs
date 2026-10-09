@@ -1,8 +1,8 @@
-//! The critic's per-generation reading reaches the generation's report
-//! (ADR-0022 S-2): what the trainer saw of its critic against the verifier and
-//! the twin, every generation, rather than once at training time. Once the
-//! reading says the critic no longer tracks the verifier, the run sets it
-//! aside and trains on the verifier's reward alone.
+//! The critic's per-generation reading reaches the generation's report: what
+//! the trainer saw of its critic against the verifier and the twin, every
+//! generation, rather than once at training time. Once the reading says the
+//! critic no longer tracks the verifier, the run sets it aside and trains on
+//! the verifier's reward alone.
 
 use std::sync::Mutex;
 

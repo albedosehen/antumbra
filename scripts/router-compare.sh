@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Judge the outcome-trained learned router against the exemplar-only one on
-# held-out tasks (ADR-0024 D-1) on the GPU host. Detached; logs to $LOG
+# held-out tasks on the GPU host. Detached; logs to $LOG
 # (/tmp/router-compare.log by default).
 #
 # $2 is a run directory a training run left behind (grow-compare.sh writes

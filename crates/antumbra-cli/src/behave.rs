@@ -1,5 +1,5 @@
 //! `antumbra behave`: train a user's accepted behaviors into their private
-//! standing expert (ADR-0027). The work is `antumbra_serve::behave`; this
+//! standing expert. The work is `antumbra_serve::behave`; this
 //! prints what it did and why. `--import` records behaviors from a file
 //! instead, as the `record_behavior` tool would: accepted, or with
 //! `--propose` proposed, for the user to accept.
@@ -33,8 +33,8 @@ pub struct BehaveArgs {
     /// behavior drawn from older memories is, rather than one they stated.
     #[arg(long, default_value_t = false)]
     pub propose: bool,
-    /// Epochs over the examples and the replay: three taught validation 2's
-    /// behaviors.
+    /// Epochs over the examples and the replay: three taught four behaviors
+    /// when this procedure was first run by hand.
     #[arg(long, default_value_t = 3)]
     pub rounds: usize,
     /// The longest answer generated: the base model's replay answers among

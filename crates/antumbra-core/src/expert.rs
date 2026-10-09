@@ -39,23 +39,23 @@ pub struct Expert {
     /// The source compartment a private expert was consolidated from.
     #[serde(default)]
     pub compartment: Option<CompartmentId>,
-    /// The node whose disk holds `artifact_uri` (ADR-0017 A2). `None` for an
-    /// expert minted before placement was recorded, which is read as "here",
-    /// because until a user's nodes shared a store there was only ever one
-    /// machine it could have been on.
+    /// The node whose disk holds `artifact_uri`. `None` for an expert minted
+    /// before placement was recorded, which is read as "here", because until a
+    /// user's nodes shared a store there was only ever one machine it could
+    /// have been on.
     ///
-    /// This matters because the row travels and the weights do not. ADR-0017
-    /// keeps adapters out of sync scope deliberately, so once a user's fabric
+    /// This matters because the row travels and the weights do not. Adapters
+    /// are kept out of sync scope deliberately, so once a user's fabric
     /// reconciles, every node learns about every expert while exactly one of
     /// them can actually open the file. A node that registered them all would
     /// route to an adapter it does not have and fail at serve time, on a path
     /// that looks perfectly valid in the row.
     ///
-    /// A field rather than the `placed_on` graph edge ADR-0007 sketched:
-    /// placement is one-to-one in v1, because ADR-0017 defers shipping
-    /// adapters to every genesis node, and an edge earns its keep when a
-    /// relation is many-to-many or traversed. It is neither yet. Shipping an
-    /// adapter to a second node is what would turn this back into an edge.
+    /// A field rather than a `placed_on` graph edge: placement is one-to-one
+    /// in v1, because shipping adapters to every genesis node is deferred,
+    /// and an edge earns its keep when a relation is many-to-many or
+    /// traversed. It is neither yet. Shipping an adapter to a second node is
+    /// what would turn this back into an edge.
     #[serde(default)]
     pub placed_on: Option<String>,
     pub created_at: DateTime<Utc>,

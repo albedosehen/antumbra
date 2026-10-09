@@ -188,8 +188,8 @@ async fn the_floor_judges_the_whole_memory_not_the_prefix_it_returns() {
 }
 
 /// A floor that cannot be computed must not be enforced: the rows come back
-/// unfiltered, and nothing claims they were judged. ADR-0024 requires a head
-/// that fails to degrade to the path it replaced rather than to nothing.
+/// unfiltered, and nothing claims they were judged. Every typed head is held to
+/// this: one that fails degrades to the path it replaced rather than to nothing.
 #[tokio::test]
 async fn a_failing_decider_returns_rows_rather_than_swallowing_them() {
     let s = seeded()

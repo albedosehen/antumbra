@@ -1,4 +1,4 @@
-//! Writing the dependency graph (ADR-0019): a claim recorded as a memory in
+//! Writing the dependency graph: a claim recorded as a memory in
 //! the workspace's shared pool, reinforced when it is already there, and
 //! retracted when its source stops making it. Shared by `record_dependency`
 //! and the GitHub App's manifest reading, so an edge recorded either way is

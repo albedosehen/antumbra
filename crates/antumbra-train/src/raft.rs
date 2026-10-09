@@ -19,7 +19,7 @@ use crate::model::{CausalLm, CorpusTask, SftExample};
 /// `withheld` are measured in the final round, against the same adapter the
 /// learned tasks' final results describe, and never learned from: no winner
 /// of theirs reaches an SFT step and no pass of theirs reaches the reward
-/// curve. Pass an empty slice when nothing is held out (ADR-0022).
+/// curve. Pass an empty slice when nothing is held out.
 pub async fn raft_train(
     model: &mut (dyn CausalLm + Send),
     verifier: &dyn Verifier,
@@ -32,12 +32,12 @@ pub async fn raft_train(
     // The prompts solved in the final round become the expert's capability
     // exemplars: what it provably does, learned from evaluated behavior.
     let mut capability_exemplars: Vec<String> = Vec::new();
-    // Per-task results from the final round, kept for the standing instruments
-    // (ADR-0022): a generation cannot be sliced into visible, held-out and
+    // Per-task results from the final round, kept for the standing instruments:
+    // a generation cannot be sliced into visible, held-out and
     // audit from one aggregate number, and this is where the per-task answer
     // exists. It was already being computed and discarded.
     let mut per_task: Vec<TaskOutcome> = Vec::new();
-    // Every winner a named verifier passed is reward it granted (ADR-0022 S-4).
+    // Every winner a named verifier passed is reward it granted.
     let mut granted_by: Vec<VerifierGrant> = Vec::new();
     // Every verdict a named verifier gave on a learned task, for the loop's
     // recheck against anchored truth.
@@ -329,7 +329,7 @@ mod tests {
         }
     }
 
-    /// ADR-0022: a withheld task is measured and never learned from. Its
+    /// A withheld task is measured and never learned from. Its
     /// winners reach no SFT step, its passes reach no fitness, and it costs
     /// samples only in the round whose results are kept.
     #[tokio::test]

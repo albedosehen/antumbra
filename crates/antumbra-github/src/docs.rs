@@ -1,8 +1,8 @@
 //! Which files in a repository are knowledge documents worth ingesting: the
 //! prose a developer reads (READMEs, docs, ADRs, changelogs) and the API
 //! descriptions a service publishes (OpenAPI, AsyncAPI). Source code is not
-//! ingested: what a service exposes comes from running its own lister
-//! (ADR-0018), never from reading its source.
+//! ingested: what a service exposes comes from running its own lister, never
+//! from reading its source.
 
 /// Files larger than this are skipped: a generated changelog or a vendored
 /// spec that big is noise in recall.

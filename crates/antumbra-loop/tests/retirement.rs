@@ -1,4 +1,4 @@
-//! Retirement as the loop's job, through the loop (ADR-0022 S-5): an expert
+//! Retirement as the loop's job, through the loop: an expert
 //! whose leave-one-out contribution stays at nothing is demoted once that
 //! persists, with its measurements as the evidence; one that contributes is
 //! not; and a revive starts its stream afresh.

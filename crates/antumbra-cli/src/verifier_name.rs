@@ -1,4 +1,4 @@
-//! `antumbra verifier name` (ADR-0022 S-4): a corpus whose tasks take their
+//! `antumbra verifier name`: a corpus whose tasks take their
 //! reward from the namespace. A task that has a synthesized verifier able to
 //! grant reward for it now names that verifier instead of carrying its own
 //! spec. Every other task keeps its spec, and so does the namespace: a task's

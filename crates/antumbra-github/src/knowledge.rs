@@ -1,4 +1,4 @@
-//! The knowledge diff (ADR-0019): what a pull request touches among the
+//! The knowledge diff: what a pull request touches among the
 //! memories and documents anchored to its repository, posted as a check run so
 //! the knowledge is in front of the reviewer at review time.
 //!

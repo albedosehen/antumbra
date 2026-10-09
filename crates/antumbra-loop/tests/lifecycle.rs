@@ -1,4 +1,4 @@
-//! The byte-identity tripwire through retirement (ADR-0022 S-5): a demoted or
+//! The byte-identity tripwire through retirement: a demoted or
 //! archived expert keeps its weights, and they are still held to their
 //! freeze; only a deleted expert, whose weights may be gone, is not checked.
 

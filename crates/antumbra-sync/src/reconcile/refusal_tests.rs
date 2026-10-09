@@ -30,7 +30,7 @@ async fn org() -> Result<(Store, Store, UserId, UserId)> {
     Ok((local, remote, lily, oslo))
 }
 
-/// The test ADR-0017 increment 5 asks for, and the reason the record-session
+/// The test a per-user collector needs, and the reason the record-session
 /// design is not sufficient on its own.
 ///
 /// `device_profile` is tenant-readable and own-write. Under lily's session

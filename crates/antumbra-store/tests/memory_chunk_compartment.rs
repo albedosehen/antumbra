@@ -1,4 +1,4 @@
-//! The chunk index keeps its memory's privacy (ADR-0025): a piece of a memory
+//! The chunk index keeps its memory's privacy: a piece of a memory
 //! in a private compartment is invisible to another member of the workspace,
 //! by the chunk search and by the recall it feeds, until the memory moves to
 //! the shared pool and its chunks are refiled. No member can write a chunk.

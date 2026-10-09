@@ -1,4 +1,4 @@
-//! The native GitHub integration (ADR-0019): the events that make a memory's
+//! The native GitHub integration: the events that make a memory's
 //! git anchor stale (a merge, a branch deletion) originate in the hosting
 //! platform, so the platform tells Antumbra directly instead of a session hook
 //! happening to notice later.

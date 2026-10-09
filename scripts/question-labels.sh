@@ -2,11 +2,11 @@
 # Emit a question-shaped recall benchmark over the store, as the JSON
 # antumbra-bench reads (ANTUMBRA_BENCH_LABELS).
 #
-# D-2's label file (scripts/d2-labels.sh) asks with a fragment: twelve of the
-# memory's own words, cut from inside it. A person asks with a question in
-# their own words, and the prompt hook recalls with whatever they typed. A
-# fragment measures how well recall finds a memory by a piece of it; this
-# measures how well it finds one by a question it answers.
+# The relevance head's label file (scripts/d2-labels.sh) asks with a fragment:
+# twelve of the memory's own words, cut from inside it. A person asks with a
+# question in their own words, and the prompt hook recalls with whatever they
+# typed. A fragment measures how well recall finds a memory by a piece of it;
+# this measures how well it finds one by a question it answers.
 #
 # Each sampled memory gets one question from a chat model, through an
 # OpenAI-compatible /v1/chat/completions (the Orin's qwen2.5-1.5b by default),
@@ -15,12 +15,12 @@
 # through the head, the middle and the tail, because a question about a detail
 # deep inside a long memory is the case a single vector reads worst.
 #
-# THE LABEL IS THE GENERATOR'S CLAIM, NOT A VERIFIER'S. Unlike D-2's, these
-# labels are not checkable by construction: they say which memory the question
-# was written from. Another memory that also answers it counts as a miss, for
-# every system measured alike, so the set compares retrieval systems and does
-# not grade any of them absolutely. Use it to compare, never to train a head
-# ADR-0024's rule would refuse.
+# THE LABEL IS THE GENERATOR'S CLAIM, NOT A VERIFIER'S. Unlike the relevance
+# head's, these labels are not checkable by construction: they say which memory
+# the question was written from. Another memory that also answers it counts as
+# a miss, for every system measured alike, so the set compares retrieval
+# systems and does not grade any of them absolutely. Use it to compare, never
+# to train a head on: a typed decider trains only on labels a verifier made.
 #
 # Distractors: further memories with no question, so the corpus is closer in
 # size to the store than the sample alone would make it.

@@ -1,5 +1,5 @@
-//! What the loop records of the recipe each shadow trained under (ADR-0022
-//! S-1): the ledger the recipe search reads, one row per shadow.
+//! What the loop records of the recipe each shadow trained under: the ledger
+//! the recipe search reads, one row per shadow.
 //!
 //! Only the trainer's echo is recorded. A row naming the recipe the loop asked
 //! for, when the trainer used another or would not say, would describe a run

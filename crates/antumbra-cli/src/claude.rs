@@ -1,4 +1,4 @@
-//! Sovereign mode for Claude Code (ADR-0021): what the agent loses when its
+//! Sovereign mode for Claude Code: what the agent loses when its
 //! telemetry is turned off, and what is done about each loss.
 //!
 //! `DISABLE_TELEMETRY` and its siblings also turn off feature-flag fetching, and
@@ -64,7 +64,7 @@ pub struct Variable {
 }
 
 /// The operating system, as far as the rules care: the PowerShell tool is a
-/// Windows concern (the host's dominant shell decides, ADR-0021 principle 7).
+/// Windows concern (the host's dominant shell decides whether it is required).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
     Windows,
@@ -207,7 +207,7 @@ pub struct Rule {
     pub until: Option<&'static str>,
 }
 
-/// The matrix of ADR-0021, in the order the report prints it.
+/// The matrix of what sovereign mode loses, in the order the report prints it.
 pub fn rules() -> Vec<Rule> {
     use Class::{AcceptedLoss, Restored, Setting};
     vec![
@@ -323,7 +323,7 @@ pub fn rules() -> Vec<Rule> {
             id: "artifact-comments",
             lost: "reading and replying to comments on hosted artifacts",
             class: AcceptedLoss,
-            response: "read them in the browser; ADR-0020 makes a comment a memory",
+            response: "read them in the browser; one worth keeping can be stored as a memory",
             unavailable: Some("comments on hosted artifacts (the user reads them in the browser)"),
             env: None,
             until: None,

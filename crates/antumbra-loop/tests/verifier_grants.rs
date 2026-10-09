@@ -1,4 +1,4 @@
-//! Reward attribution through the loop (ADR-0022 S-4): what a named verifier
+//! Reward attribution through the loop: what a named verifier
 //! granted a run lands on the reward rows and on the expert it graduates,
 //! and quarantining the verifier archives that expert.
 

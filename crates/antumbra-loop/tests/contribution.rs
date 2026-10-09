@@ -1,4 +1,4 @@
-//! Leave-one-out contribution through the loop (ADR-0022 S-5): mask each shared
+//! Leave-one-out contribution through the loop: mask each shared
 //! expert, route the live tasks again, score both ways, record the difference.
 
 use std::sync::Mutex;

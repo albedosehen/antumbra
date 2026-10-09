@@ -48,7 +48,7 @@
 //! embedder reads. Each config is scored twice, hybrid as recall runs and dense
 //! alone, so what the embedder itself contributes shows.
 //!
-//! ## Chunks (ADR-0025)
+//! ## Chunks
 //!
 //! `ANTUMBRA_BENCH_CHUNK_CHARS=<n>` stores each document as pieces of about
 //! `n` characters, each a memory of its own, and scores a document at the rank
@@ -139,7 +139,7 @@ impl Corpus {
             .map_err(|e| antumbra_core::AntumbraError::other(format!("bad bench corpus: {e}")))
     }
 
-    /// A corpus from a D-2 label file: every distinct memory is a document,
+    /// A corpus from a relevance label file: every distinct memory is a document,
     /// and every positive pair a query whose answer is its memory.
     fn from_labels(text: &str) -> Result<Self> {
         #[derive(Deserialize)]

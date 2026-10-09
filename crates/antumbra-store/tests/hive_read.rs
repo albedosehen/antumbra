@@ -1,7 +1,7 @@
-//! The active hive as a read layer (ADR-0017 B3), and the three conditions that
-//! have to hold together for it.
+//! The active hive as a read layer, and the three conditions that have to
+//! hold together for it.
 //!
-//! This is the ADR's own validation criterion: "With the owner's tenant toggle
+//! This is the hive's own validation criterion: "With the owner's tenant toggle
 //! on and lily opted in, a compartment lily offers and the owner accepts is
 //! readable by oslo's agent. One the owner has not accepted is not."
 //!

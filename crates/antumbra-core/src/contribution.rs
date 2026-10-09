@@ -1,4 +1,4 @@
-//! What one expert adds to the population it routes in (ADR-0022 S-5): its
+//! What one expert adds to the population it routes in: its
 //! leave-one-out contribution, measured in one generation.
 //!
 //! Mask the expert, route the live tasks again, and score both ways: the
@@ -58,7 +58,7 @@ impl ContributionRecord {
 }
 
 /// The whole population against its single best expert, on the same live
-/// tasks under the same seeds (ADR-0022 S-5): the population's score with
+/// tasks under the same seeds: the population's score with
 /// every task routed as the gate routes it, against the best any one of its
 /// experts scores with every task sent to it alone. Kept whether or not it
 /// flatters the architecture. If the gap collapses, the right answer is
@@ -84,7 +84,7 @@ pub struct BaselineRecord {
     pub oracle: Option<f32>,
     /// Whether `oracle` is cross-fitted: each task's best chosen on one half
     /// of the seeds and scored on the other, so its own noise does not read
-    /// as headroom (ADR-0024 D-1). Otherwise it is the highest of noisy
+    /// as headroom. Otherwise it is the highest of noisy
     /// scores, biased up: identical experts read +0.05 to +0.08 on eight
     /// samples a score.
     #[serde(default)]
@@ -107,7 +107,7 @@ impl BaselineRecord {
 }
 
 /// Which of the population's experts clearly won a live task, when a
-/// contribution measurement scored every one of them on it (ADR-0024 D-1).
+/// contribution measurement scored every one of them on it.
 /// The learned router trains on these beside the capability exemplars, so
 /// where a task goes is learned from verified outcomes as well as from the
 /// text of what each expert solved. Only a clear win is kept: the winner

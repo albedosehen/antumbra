@@ -1,12 +1,12 @@
-//! The relevance floor ADR-0023 B-2 asked for, built from the signal ADR-0023
-//! B-2 ruled out.
+//! A relevance floor for recall, built from the signal the first study of the
+//! cross-encoder ruled out.
 //!
-//! B-2 concluded that no fixed threshold over the cross-encoder can carry a
-//! floor, because the score is trustworthy within a query and not across them.
-//! That was measured on ten memories against a handful of varied nonsense
-//! queries, and it is true of a THRESHOLD.
+//! That study concluded that no fixed threshold over the cross-encoder can
+//! carry a floor, because the score is trustworthy within a query and not
+//! across them. That was measured on ten memories against a handful of varied
+//! nonsense queries, and it is true of a THRESHOLD.
 //!
-//! It is not true of a CALIBRATION, which the record never tried. Fitting a
+//! It is not true of a CALIBRATION, which the study never tried. Fitting a
 //! logistic over `log10(score)` against verifier-produced labels — 800 balanced
 //! pairs from 400 distinct queries, fit on half and measured on the other half —
 //! gives accuracy 0.803, F1 0.797 and an expected calibration error of 0.033 at
@@ -20,12 +20,12 @@
 //! over outcomes a verifier produced. The labels come from
 //! `scripts/d2-labels.sh`, whose verifier is span provenance with the span
 //! excised, derived from no model; the fit minimizes log loss, which is strictly
-//! proper. A head fitted on a model's own answers would violate ADR-0022's
-//! anchor invariant. This is not that.
+//! proper. A head fitted on a model's own answers would violate the anchor
+//! invariant. This is not that.
 //!
 //! What it is NOT: a general typed decider. It answers `Noul` and nothing else,
 //! because a cross-encoder scores pair relevance and has no opinion about a
-//! `Choice` or a `Score`. ADR-0024's D-1 still needs the real head.
+//! `Choice` or a `Score`. The routing decision still needs the real head.
 
 use antumbra_core::platt::Platt;
 use antumbra_core::ports::{Answer, Question, RelevanceScorer, RelevanceState, TypedDecider};
@@ -45,7 +45,7 @@ use std::sync::Arc;
 pub const FITTED: Platt = Platt { a: 1.630, b: 5.362 };
 
 /// The same fit against `Alibaba-NLP/gte-reranker-modernbert-base`, served by
-/// text-embeddings-inference, on the same 800 pairs (ADR-0024 D-2): on the
+/// text-embeddings-inference, on the same 800 pairs: on the
 /// held-out half, accuracy 0.882 and F1 0.885 at the 0.5 floor, with an
 /// expected calibration error of 0.043, where the `bge-reranker-base` fit
 /// reaches 0.803, 0.797 and 0.033. It reads up to 8,192 tokens where that one
@@ -280,8 +280,8 @@ mod tests {
     #[tokio::test]
     async fn the_shipped_calibration_separates_the_measured_bands() {
         // 7.8e-4 is the threshold the same data supports; 3.7e-5 is the score a
-        // memory got against a query about nothing, both from the measurements
-        // in ADR-0023 B-2 and ADR-0024 D-2.
+        // memory got against a query about nothing, both from earlier
+        // measurements: the threshold study and the relevance labels.
         let scorer = Arc::new(FixedScorer(vec![5e-3, 3.7e-5]));
         let floor = CalibratedFloor::new(scorer);
         let answers = floor

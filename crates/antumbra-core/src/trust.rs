@@ -1,4 +1,4 @@
-//! The trust protocol (ADR-0022 S-4): what a verifier must show before it may
+//! The trust protocol: what a verifier must show before it may
 //! grant reward, and keep showing afterwards.
 //!
 //! A verifier is measured on **cases**: artifacts whose outcome is known from

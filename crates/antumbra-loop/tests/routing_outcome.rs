@@ -1,4 +1,4 @@
-//! The gate learns where each live task should have gone (ADR-0024 D-1): a
+//! The gate learns where each live task should have gone: a
 //! contribution measurement that scores every expert on every live task keeps
 //! each task's clear winner, and the learned router is retrained with the won
 //! tasks as exemplars of their winners.
@@ -197,9 +197,9 @@ async fn the_gate_is_retrained_on_each_tasks_clear_winner() -> Result<()> {
     Ok(())
 }
 
-/// By default the winners are recorded and the gate does not learn them: on
-/// the comparison the record set (ADR-0024 D-1), the outcome-trained router
-/// scored no higher on the withheld tasks.
+/// By default the winners are recorded and the gate does not learn them: in
+/// the comparison it was judged by, the outcome-trained router scored no
+/// higher on the withheld tasks.
 #[tokio::test]
 async fn by_default_the_winners_are_recorded_and_not_routed_on() -> Result<()> {
     let store = Store::connect_memory(DIM).await?;

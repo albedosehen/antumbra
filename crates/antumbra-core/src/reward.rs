@@ -27,7 +27,7 @@ pub struct RewardSignal {
     pub dimension: String,
     pub value: f32,
     pub source: RewardSource,
-    /// The named verifier that granted it, when one did (ADR-0022 S-4).
+    /// The named verifier that granted it, when one did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verifier: Option<VerifierId>,
     pub created_at: DateTime<Utc>,

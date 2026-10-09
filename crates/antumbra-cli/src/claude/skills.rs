@@ -1,4 +1,4 @@
-//! Skill usage (ADR-0021): which skills are used, how often, and when last, so
+//! Skill usage: which skills are used, how often, and when last, so
 //! that the ones nobody reaches for can be found. The agent's own `/skill-doctor`
 //! goes with the feature flags.
 //!
@@ -89,7 +89,7 @@ pub fn record(call: Call<'_>, name: &str) -> anyhow::Result<Recorded> {
             "content": wanted,
             "network": "world",
             "confidence": 0.9,
-            "evidence": ["adr:0021", "skill-use"],
+            "evidence": ["sovereign-mode", "skill-use"],
             "volatile": true,
             "compartment": compartment,
         }),

@@ -1,4 +1,4 @@
-//! Admission gating through the loop (ADR-0022 S-5): a graduate that
+//! Admission gating through the loop: a graduate that
 //! duplicates an active shared expert joins only by beating it head to head,
 //! and then replaces it; one that cannot is not admitted.
 

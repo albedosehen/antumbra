@@ -1,4 +1,4 @@
-//! The grow step learns where to probe (ADR-0022 S-3): which region of the
+//! The grow step learns where to probe: which region of the
 //! corpus the next generation learns from, decided as gate, then score, then
 //! regularize. Credit is recorded for the policy to learn from.
 //!
@@ -40,7 +40,7 @@ use crate::GenerationLoop;
 /// How the grow step chooses among the regions that pass the gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Choosing {
-    /// The highest expected credit: the record's objective. Learnability is
+    /// The highest expected credit: the grow step's objective. Learnability is
     /// the prior, and the credit a region's past choices realized updates it
     /// (see [`by_credit`]).
     Credit,
@@ -48,7 +48,7 @@ pub enum Choosing {
     /// credit.
     Learnability,
     /// One at random, seeded by the run and generation: the uniform-sampling
-    /// baseline the record measures the grow step against. Same gate, same
+    /// baseline the grow step is measured against. Same gate, same
     /// focus, same unfiltered share; only the choice differs.
     Uniform,
 }
@@ -185,8 +185,8 @@ pub fn choose(
     (candidates, chosen)
 }
 
-/// The diversity instruments over a run's decisions (ADR-0022 S-3's
-/// validation): the entropy of the regions chosen, normalized to 1 when every
+/// The diversity instruments over a run's decisions, which is how the grow
+/// step is validated: the entropy of the regions chosen, normalized to 1 when every
 /// region is chosen equally; the share of the census's regions ever chosen;
 /// and the regions once gated out that later passed the gate.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -262,7 +262,7 @@ pub fn plurality(counts: &BTreeMap<Option<String>, u32>) -> Option<String> {
         .and_then(|(who, _)| who.clone())
 }
 
-/// Credit as the objective (ADR-0022 S-3): the admitted region with the
+/// Credit as the objective: the admitted region with the
 /// highest expected credit, and that expectation.
 ///
 /// A region's expected credit starts from its learnability, scaled so a

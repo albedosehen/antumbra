@@ -1,6 +1,6 @@
 //! The learned gate, kept current by the commands that change the population:
 //! trained over the experts the gate may route to, and re-frozen while they
-//! hold still (ADR-0022 S-5).
+//! hold still.
 
 use antumbra_core::ports::Embedder;
 use antumbra_loop::gate_exemplars;
@@ -18,8 +18,8 @@ pub(crate) enum RouterRefresh {
     Cleared,
 }
 
-/// Keep the learned gate current without letting it drift (ADR-0022 S-5: the
-/// gate re-opens for training when the population changes, then closes).
+/// Keep the learned gate current without letting it drift (the gate re-opens
+/// for training when the population changes, then closes).
 /// Retrains only when the experts the gate may route to, those with
 /// exemplars, are not the ones the stored router was trained over. This is the
 /// self-maintaining gate: `train`/`teach` call it so routing stays current
@@ -46,9 +46,9 @@ pub(crate) async fn refresh_router(
 }
 
 /// Train the learned router over the exemplars of the experts the gate may
-/// route to (the active ones, ADR-0022 S-5) and persist it (the learned gate).
+/// route to (the active ones) and persist it (the learned gate).
 /// With `wins`, the live tasks each of them clearly won are exemplars of it
-/// too (ADR-0024 D-1). Returns the router, or `None` when too few are
+/// too. Returns the router, or `None` when too few are
 /// routable to need one (<2 experts/exemplars), in which case any router left
 /// from before is cleared, so routing falls back to the heuristic gate over
 /// the population as it now is.
