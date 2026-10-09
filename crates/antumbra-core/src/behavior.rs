@@ -14,6 +14,7 @@
 
 use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::ids::{CompartmentId, TenantId, UserId};
 use crate::{Expert, Memory};
@@ -36,6 +37,7 @@ const STATUS: &str = "behavior-status:";
 const SCOPE: &str = "behavior-scope:";
 const SUPERSEDES: &str = "behavior-supersedes:";
 const EXPERT: &str = "behavior-expert:";
+const REFUSED: &str = "behavior-refused:";
 const FENCE: &str = "```behavior";
 
 // What behaviors were written with before the US spelling, still read so
@@ -253,8 +255,98 @@ pub fn set_status(evidence: &mut Vec<String>, status: Status) {
 /// trained into before, if any.
 pub fn mark_trained(evidence: &mut Vec<String>, expert: &str) {
     set_status(evidence, Status::Trained);
-    evidence.retain(|e| value_of(e, EXPERT, LEGACY_EXPERT).is_none());
+    evidence.retain(|e| value_of(e, EXPERT, LEGACY_EXPERT).is_none() && !e.starts_with(REFUSED));
     evidence.push(format!("{EXPERT}{expert}"));
+}
+
+/// A set of behaviors as taught: each id with its content, so one recorded
+/// again with a changed rule or check makes a different set. It is stored
+/// with a refusal, so it is the same in every build.
+pub fn fingerprint(taught: &[(Memory, Spec)]) -> String {
+    let mut parts: Vec<(&str, &str)> = taught
+        .iter()
+        .map(|(m, _)| (m.id.as_str(), m.content.as_str()))
+        .collect();
+    parts.sort();
+    let mut h = Sha256::new();
+    for (id, content) in parts {
+        for part in [id, content] {
+            h.update((part.len() as u64).to_le_bytes());
+            h.update(part.as_bytes());
+        }
+    }
+    h.finalize()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The last training of a behavior's scope that minted no expert: the set it
+/// was taught in, and how this behavior's held-out tasks went.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refusal {
+    /// The [`fingerprint`] of the set taught.
+    pub set: String,
+    /// The base model's held-out pass rate.
+    pub base: f32,
+    /// The trained expert's.
+    pub expert: f32,
+    /// Whether this behavior met the bar itself, so the expert was refused
+    /// for another behavior in its scope or for the controls.
+    pub learned: bool,
+}
+
+impl Refusal {
+    /// How it went, for the user.
+    pub fn describe(&self) -> String {
+        let rates = format!(
+            "held-out {:.2} against the base model's {:.2}",
+            self.expert, self.base
+        );
+        if self.learned {
+            format!("learned ({rates}), but its scope's expert was refused for another behavior or the controls")
+        } else {
+            format!("not learned ({rates}), so its scope's expert was refused; more examples in varied phrasing may teach it")
+        }
+    }
+}
+
+/// Note that `set` was trained and refused, replacing any earlier refusal.
+/// The keeper does not train the same set again, even after a restart.
+pub fn mark_refused(evidence: &mut Vec<String>, refusal: &Refusal) {
+    evidence.retain(|e| !e.starts_with(REFUSED));
+    evidence.push(format!(
+        "{REFUSED}{} base={:.2} expert={:.2} learned={}",
+        refusal.set, refusal.base, refusal.expert, refusal.learned
+    ));
+}
+
+/// The last refusal noted in a behavior's evidence.
+pub fn refusal(evidence: &[String]) -> Option<Refusal> {
+    let entry = evidence
+        .iter()
+        .rev()
+        .find_map(|e| e.strip_prefix(REFUSED))?;
+    let mut words = entry.split_whitespace();
+    let set = words.next()?.to_string();
+    let mut field = |name: &str| words.next()?.strip_prefix(name).map(str::to_string);
+    Some(Refusal {
+        set,
+        base: field("base=")?.parse().ok()?,
+        expert: field("expert=")?.parse().ok()?,
+        learned: field("learned=")?.parse().ok()?,
+    })
+}
+
+/// Whether this exact set was trained and refused: every behavior in it
+/// carries a refusal under its [`fingerprint`]. The same set would fail the
+/// same way.
+pub fn refused(taught: &[(Memory, Spec)]) -> bool {
+    let print = fingerprint(taught);
+    !taught.is_empty()
+        && taught
+            .iter()
+            .all(|(m, _)| refusal(&m.evidence).is_some_and(|r| r.set == print))
 }
 
 /// A behavior's state, read back from its evidence.
