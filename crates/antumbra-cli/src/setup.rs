@@ -445,35 +445,88 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
     }
     steps.ok(format!("{MODEL} embeds ({EMBED_DIM} dimensions)"));
 
-    // On Linux the server's container reaches the host through the Docker
-    // bridge, and an ollama bound to 127.0.0.1 is not there.
-    if cfg!(target_os = "linux") {
-        if let Ok(gateway) = output(
-            "docker",
-            &[
-                "network",
-                "inspect",
-                "bridge",
-                "--format",
-                "{{(index .IPAM.Config 0).Gateway}}",
-            ],
-        ) {
-            let port = base.rsplit(':').next().unwrap_or("11434");
-            let through = format!("http://{}:{port}/api/tags", gateway.trim());
-            let reached = agent
-                .get(&through)
-                .call()
-                .map(|r| r.status().is_success())
-                .unwrap_or(false);
-            if !reached {
-                anyhow::bail!(
-                    "ollama only listens on 127.0.0.1, so the server's container cannot reach it.\n  sudo systemctl edit ollama, add these two lines, save:\n    [Service]\n    Environment=OLLAMA_HOST=0.0.0.0\n  then: sudo systemctl restart ollama, and run this again."
-                );
-            }
-            steps.ok("the server's container can reach ollama");
-        }
+    // Whether the server's container can reach ollama is asked from inside a
+    // container, with the host.docker.internal mapping compose gives the
+    // server. Asking from this machine (the bridge gateway) is the
+    // container's view only under a native Docker Engine; under Docker
+    // Desktop the bridge lives in Desktop's VM, which a WSL distro cannot
+    // see, so that check failed even when the server would have worked.
+    let port = base.rsplit(':').next().unwrap_or("11434");
+    match container_reaches(port) {
+        Reach::Yes => steps.ok("the server's container can reach ollama"),
+        Reach::Unknown(why) => steps.info(format!(
+            "could not ask from a container whether the server can reach ollama ({why}); recall is checked once the server is up"
+        )),
+        Reach::No => anyhow::bail!("{}", unreachable_from_container(port)),
     }
     Ok(())
+}
+
+enum Reach {
+    Yes,
+    No,
+    Unknown(String),
+}
+
+/// A throwaway container fetches ollama's tag list at host.docker.internal,
+/// as the server's container will.
+fn container_reaches(port: &str) -> Reach {
+    let Some(docker) = find_program("docker") else {
+        return Reach::Unknown("docker is not on the PATH".into());
+    };
+    let url = format!("http://host.docker.internal:{port}/api/tags");
+    let out = Command::new(docker)
+        .args([
+            "run",
+            "--rm",
+            "--add-host",
+            "host.docker.internal:host-gateway",
+            "busybox:1.37",
+            "wget",
+            "-q",
+            "-T",
+            "5",
+            "-O",
+            "/dev/null",
+            &url,
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    match out {
+        Err(e) => Reach::Unknown(e.to_string()),
+        Ok(o) if o.status.success() => Reach::Yes,
+        // 125-127 are docker's own failures (no daemon, no image), not the
+        // fetch's.
+        Ok(o) if matches!(o.status.code(), Some(125..=127) | None) => {
+            Reach::Unknown(String::from_utf8_lossy(&o.stderr).trim().to_string())
+        }
+        Ok(_) => Reach::No,
+    }
+}
+
+/// What to do when a container cannot reach ollama, for the Docker this is.
+fn unreachable_from_container(port: &str) -> String {
+    let desktop = output("docker", &["info", "--format", "{{.OperatingSystem}}"])
+        .is_ok_and(|os| os.contains("Docker Desktop"));
+    let wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists();
+    let head =
+        format!("the server's container cannot reach ollama at host.docker.internal:{port}.");
+    let elsewhere = "(Running ollama somewhere the container can reach? Set ANTUMBRA_EMBEDDER_URL in docker/.env.)";
+    if desktop && wsl {
+        format!(
+            "{head}\n  Docker Desktop runs containers in its own VM, where host.docker.internal is the Windows host, not this WSL distro.\n  Either:\n    - run ollama on Windows instead (https://ollama.com) and stop the copy in WSL, so only one owns port {port}; or\n    - let this distro share Windows' network: in %UserProfile%\\.wslconfig put\n        [wsl2]\n        networkingMode=mirrored\n      run `wsl --shutdown` from Windows, start ollama here with OLLAMA_HOST=0.0.0.0, and run this again.\n  {elsewhere}"
+        )
+    } else if cfg!(target_os = "linux") && !desktop {
+        format!(
+            "{head}\n  ollama only listens on 127.0.0.1, and the container comes in through the Docker bridge.\n  sudo systemctl edit ollama, add these two lines, save:\n    [Service]\n    Environment=OLLAMA_HOST=0.0.0.0\n  then: sudo systemctl restart ollama, and run this again."
+        )
+    } else {
+        format!(
+            "{head}\n  Make sure ollama runs on this machine itself (not inside another VM) and answers on port {port}, then run this again.\n  {elsewhere}"
+        )
+    }
 }
 
 /// On Linux the container runs as uid 65532 and needs to own its data
