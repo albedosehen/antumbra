@@ -88,10 +88,10 @@ pub(super) struct BehaviorView {
     /// one, to fix it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) problems: Vec<String>,
-    /// How the last training of its scope went, when it minted no expert:
-    /// whether this behavior was learned, by its held-out pass rate against
-    /// the base model's. One behavior not learned keeps its whole scope's
-    /// expert out.
+    /// How the last training of its scope went for it: whether it was
+    /// learned, by its held-out pass rate against the base model's, and
+    /// whether the scope's expert was admitted. An admitted expert serves
+    /// the behaviors it learned, without the ones it did not.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) last_training: Option<String>,
 }
@@ -222,7 +222,7 @@ impl McpServer {
             .map(|(m, state, spec)| BehaviorView {
                 id: m.id.as_str().to_string(),
                 problems: spec.problems(),
-                last_training: behavior::refusal(&m.evidence).map(|r| r.describe()),
+                last_training: behavior::training(&m.evidence).map(|t| t.describe()),
                 rule: spec.rule,
                 scope: state.scope,
                 status: state.status.as_str().to_string(),

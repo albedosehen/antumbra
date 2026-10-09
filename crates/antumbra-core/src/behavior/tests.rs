@@ -292,7 +292,8 @@ fn a_set_is_known_by_its_behaviors_and_their_content_in_any_order() {
     let ab = learnable(&[a.clone(), b.clone()], EVERYWHERE);
     let ba = learnable(&[b.clone(), a.clone()], EVERYWHERE);
     assert_eq!(fingerprint(&ab), fingerprint(&ba));
-    // Stored with a refusal, so it must not move between builds.
+    // Stored with each training and on the expert, so it must not move
+    // between builds.
     assert_eq!(fingerprint(&ab), "d87da319b008f6da");
     let mut spec = ssh();
     spec.rule = "Reach a host by its alias.".into();
@@ -305,70 +306,109 @@ fn a_set_is_known_by_its_behaviors_and_their_content_in_any_order() {
     );
 }
 
+fn trained_in(set: &str, expert: f32, learned: bool, admitted: bool) -> Training {
+    Training {
+        set: set.into(),
+        base: 0.0,
+        expert,
+        learned,
+        admitted,
+    }
+}
+
 #[test]
-fn a_refusal_is_noted_on_each_behavior_and_read_back() {
+fn a_training_is_noted_on_each_behavior_and_read_back() {
     let mut m = recorded("memory:a", Status::Accepted, EVERYWHERE);
-    let first = Refusal {
-        set: "00112233aabbccdd".into(),
-        base: 0.0,
-        expert: 0.5,
-        learned: false,
-    };
-    mark_refused(&mut m.evidence, &first);
-    assert_eq!(refusal(&m.evidence), Some(first));
-    let second = Refusal {
-        set: "ffeeddcc00112233".into(),
-        base: 0.0,
-        expert: 1.0,
-        learned: true,
-    };
-    mark_refused(&mut m.evidence, &second);
+    // A refusal noted under the earlier rule goes with the next note.
+    m.evidence
+        .push("behavior-refused:00112233aabbccdd base=0.00 expert=0.00 learned=false".into());
+    let first = trained_in("00112233aabbccdd", 0.5, false, false);
+    mark_training(&mut m.evidence, &first);
+    assert_eq!(training(&m.evidence), Some(first));
+    assert!(!m.evidence.iter().any(|e| e.starts_with(REFUSED)));
+    let second = trained_in("ffeeddcc00112233", 1.0, true, true);
+    mark_training(&mut m.evidence, &second);
     assert_eq!(
-        refusal(&m.evidence),
+        training(&m.evidence),
         Some(second.clone()),
         "the later one replaces it"
     );
     assert_eq!(
-        m.evidence.iter().filter(|e| e.starts_with(REFUSED)).count(),
+        m.evidence
+            .iter()
+            .filter(|e| e.starts_with(TRAINING))
+            .count(),
         1
     );
-    assert!(second
-        .describe()
-        .starts_with("learned (held-out 1.00 against the base model's 0.00)"));
+    assert_eq!(
+        second.describe(),
+        "learned (held-out 1.00 against the base model's 0.00); its scope's expert serves it"
+    );
     assert_eq!(
         State::of(&m.evidence).unwrap().status,
         Status::Accepted,
-        "a refusal leaves the status as it was"
+        "a note leaves the status as it was"
     );
 
     mark_trained(&mut m.evidence, "expert:user:a:behavior:everywhere");
-    assert_eq!(refusal(&m.evidence), None, "training it clears the refusal");
+    assert_eq!(
+        training(&m.evidence),
+        Some(second),
+        "and so does training it"
+    );
+    mark_untrained(&mut m.evidence);
+    let state = State::of(&m.evidence).unwrap();
+    assert_eq!((state.status, state.expert), (Status::Accepted, None));
 }
 
 #[test]
-fn a_set_is_refused_only_when_every_behavior_in_it_carries_its_refusal() {
+fn a_set_is_refused_only_when_every_behavior_in_it_notes_its_expert_refused() {
     let mut a = recorded("memory:a", Status::Accepted, EVERYWHERE);
     let mut b = recorded("memory:b", Status::Accepted, EVERYWHERE);
     let set = fingerprint(&learnable(&[a.clone(), b.clone()], EVERYWHERE));
-    let refused_in = |set: &str| Refusal {
-        set: set.into(),
-        base: 0.0,
-        expert: 0.0,
-        learned: false,
-    };
     assert!(!refused(&learnable(&[a.clone(), b.clone()], EVERYWHERE)));
-    mark_refused(&mut a.evidence, &refused_in(&set));
+    mark_training(&mut a.evidence, &trained_in(&set, 0.0, false, false));
     assert!(
         !refused(&learnable(&[a.clone(), b.clone()], EVERYWHERE)),
         "b was not in that training"
     );
-    mark_refused(&mut b.evidence, &refused_in(&set));
+    mark_training(&mut b.evidence, &trained_in(&set, 1.0, true, false));
     assert!(refused(&learnable(&[a.clone(), b.clone()], EVERYWHERE)));
 
     let c = recorded("memory:c", Status::Accepted, EVERYWHERE);
     assert!(
-        !refused(&learnable(&[a, b, c], EVERYWHERE)),
+        !refused(&learnable(&[a.clone(), b.clone(), c], EVERYWHERE)),
         "a behavior added since makes a new set"
     );
     assert!(!refused(&[]));
+
+    mark_training(&mut a.evidence, &trained_in(&set, 0.0, false, true));
+    mark_training(&mut b.evidence, &trained_in(&set, 1.0, true, true));
+    assert!(
+        !refused(&learnable(&[a, b], EVERYWHERE)),
+        "an admitted expert is no refusal"
+    );
+}
+
+#[test]
+fn an_expert_that_records_its_set_is_in_step_until_the_set_changes() {
+    let memories = vec![
+        recorded("memory:l", Status::Trained, EVERYWHERE),
+        recorded("memory:m", Status::Accepted, EVERYWHERE),
+    ];
+    let taught = learnable(&memories, EVERYWHERE);
+    let mut expert = standing_expert(EVERYWHERE, &["memory:l"]);
+    expert.capability_card["set"] = serde_json::json!(fingerprint(&taught));
+    assert_eq!(trained_set(&expert), Some(fingerprint(&taught).as_str()));
+    assert!(
+        !stale(&taught, Some(&expert)),
+        "memory:m is accepted and not held, but it was in the set trained"
+    );
+
+    let retired = vec![
+        recorded("memory:l", Status::Trained, EVERYWHERE),
+        recorded("memory:m", Status::Retired, EVERYWHERE),
+    ];
+    assert!(stale(&learnable(&retired, EVERYWHERE), Some(&expert)));
+    assert!(stale(&[], Some(&expert)), "nothing left to hold");
 }

@@ -37,6 +37,10 @@ const STATUS: &str = "behavior-status:";
 const SCOPE: &str = "behavior-scope:";
 const SUPERSEDES: &str = "behavior-supersedes:";
 const EXPERT: &str = "behavior-expert:";
+const TRAINING: &str = "behavior-training:";
+/// Refusals noted while one behavior not learned refused its whole scope.
+/// Dropped when a behavior is next trained, and never read: under today's
+/// rule such a set may be admitted.
 const REFUSED: &str = "behavior-refused:";
 const FENCE: &str = "```behavior";
 
@@ -255,13 +259,20 @@ pub fn set_status(evidence: &mut Vec<String>, status: Status) {
 /// trained into before, if any.
 pub fn mark_trained(evidence: &mut Vec<String>, expert: &str) {
     set_status(evidence, Status::Trained);
-    evidence.retain(|e| value_of(e, EXPERT, LEGACY_EXPERT).is_none() && !e.starts_with(REFUSED));
+    evidence.retain(|e| value_of(e, EXPERT, LEGACY_EXPERT).is_none());
     evidence.push(format!("{EXPERT}{expert}"));
+}
+
+/// Mark a behavior its scope's new expert did not learn: accepted, and in no
+/// expert, even if an earlier one held it.
+pub fn mark_untrained(evidence: &mut Vec<String>) {
+    set_status(evidence, Status::Accepted);
+    evidence.retain(|e| value_of(e, EXPERT, LEGACY_EXPERT).is_none());
 }
 
 /// A set of behaviors as taught: each id with its content, so one recorded
 /// again with a changed rule or check makes a different set. It is stored
-/// with a refusal, so it is the same in every build.
+/// with each training and on the expert, so it is the same in every build.
 pub fn fingerprint(taught: &[(Memory, Spec)]) -> String {
     let mut parts: Vec<(&str, &str)> = taught
         .iter()
@@ -281,72 +292,88 @@ pub fn fingerprint(taught: &[(Memory, Spec)]) -> String {
         .collect()
 }
 
-/// The last training of a behavior's scope that minted no expert: the set it
-/// was taught in, and how this behavior's held-out tasks went.
+/// How the last training of a behavior's scope went for it: the set it was
+/// taught in, its held-out tasks, and whether the scope's expert was admitted.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Refusal {
+pub struct Training {
     /// The [`fingerprint`] of the set taught.
     pub set: String,
     /// The base model's held-out pass rate.
     pub base: f32,
     /// The trained expert's.
     pub expert: f32,
-    /// Whether this behavior met the bar itself, so the expert was refused
-    /// for another behavior in its scope or for the controls.
+    /// Whether this behavior met the bar, and so is in the expert when one
+    /// was admitted.
     pub learned: bool,
+    /// Whether the scope's expert was admitted. It is refused when its
+    /// controls fell or no behavior rose above the base model, never for a
+    /// behavior it did not learn.
+    pub admitted: bool,
 }
 
-impl Refusal {
+impl Training {
     /// How it went, for the user.
     pub fn describe(&self) -> String {
         let rates = format!(
             "held-out {:.2} against the base model's {:.2}",
             self.expert, self.base
         );
-        if self.learned {
-            format!("learned ({rates}), but its scope's expert was refused for another behavior or the controls")
-        } else {
-            format!("not learned ({rates}), so its scope's expert was refused; more examples in varied phrasing may teach it")
+        const MORE: &str = "more examples in varied phrasing may teach it";
+        match (self.learned, self.admitted) {
+            (true, true) => format!("learned ({rates}); its scope's expert serves it"),
+            (true, false) => format!(
+                "learned ({rates}), but its scope's expert was refused: its controls fell, or no behavior rose above the base model"
+            ),
+            (false, true) => format!(
+                "not learned ({rates}); its scope's expert serves the others without it, and {MORE}"
+            ),
+            (false, false) => {
+                format!("not learned ({rates}), and its scope's expert was refused; {MORE}")
+            }
         }
     }
 }
 
-/// Note that `set` was trained and refused, replacing any earlier refusal.
-/// The keeper does not train the same set again, even after a restart.
-pub fn mark_refused(evidence: &mut Vec<String>, refusal: &Refusal) {
-    evidence.retain(|e| !e.starts_with(REFUSED));
+/// Note how the last training of its scope went, replacing the note before.
+/// A set whose expert was refused is not trained again, even after a
+/// restart, until it changes.
+pub fn mark_training(evidence: &mut Vec<String>, training: &Training) {
+    // Refusals noted while one behavior not learned refused its whole scope
+    // go too: under today's rule such a set may be admitted.
+    evidence.retain(|e| !e.starts_with(TRAINING) && !e.starts_with(REFUSED));
     evidence.push(format!(
-        "{REFUSED}{} base={:.2} expert={:.2} learned={}",
-        refusal.set, refusal.base, refusal.expert, refusal.learned
+        "{TRAINING}{} base={:.2} expert={:.2} learned={} admitted={}",
+        training.set, training.base, training.expert, training.learned, training.admitted
     ));
 }
 
-/// The last refusal noted in a behavior's evidence.
-pub fn refusal(evidence: &[String]) -> Option<Refusal> {
+/// The last training noted in a behavior's evidence.
+pub fn training(evidence: &[String]) -> Option<Training> {
     let entry = evidence
         .iter()
         .rev()
-        .find_map(|e| e.strip_prefix(REFUSED))?;
+        .find_map(|e| e.strip_prefix(TRAINING))?;
     let mut words = entry.split_whitespace();
     let set = words.next()?.to_string();
     let mut field = |name: &str| words.next()?.strip_prefix(name).map(str::to_string);
-    Some(Refusal {
+    Some(Training {
         set,
         base: field("base=")?.parse().ok()?,
         expert: field("expert=")?.parse().ok()?,
         learned: field("learned=")?.parse().ok()?,
+        admitted: field("admitted=")?.parse().ok()?,
     })
 }
 
-/// Whether this exact set was trained and refused: every behavior in it
-/// carries a refusal under its [`fingerprint`]. The same set would fail the
-/// same way.
+/// Whether this exact set was trained and its expert refused: every behavior
+/// in it notes that training under its [`fingerprint`]. The same set would be
+/// refused the same way.
 pub fn refused(taught: &[(Memory, Spec)]) -> bool {
     let print = fingerprint(taught);
     !taught.is_empty()
         && taught
             .iter()
-            .all(|(m, _)| refusal(&m.evidence).is_some_and(|r| r.set == print))
+            .all(|(m, _)| training(&m.evidence).is_some_and(|t| t.set == print && !t.admitted))
 }
 
 /// A behavior's state, read back from its evidence.
@@ -432,14 +459,27 @@ pub fn taught_by(expert: &Expert) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The [`fingerprint`] of the set a standing expert was trained on, when its
+/// card records one. It may hold fewer: only those it learned.
+pub fn trained_set(expert: &Expert) -> Option<&str> {
+    expert.capability_card.get("set").and_then(|v| v.as_str())
+}
+
 /// Whether a scope's standing expert is behind its behaviors: missing while
-/// there is something to teach, holding any while nothing is left, holding a
-/// different set, or with a behavior accepted since (a new one, or one
-/// recorded again with a changed rule or check).
+/// there is something to teach, or trained on a set other than the one in
+/// force (a behavior added, retired, or recorded again). An expert that did
+/// not learn every behavior of its set is in step with that set: the ones it
+/// missed are accepted, not trained, and wait for the set to change.
+///
+/// An expert whose card records no set is judged by what it holds: behind
+/// when it holds a different set, or a behavior was accepted since.
 pub fn stale(taught: &[(Memory, Spec)], expert: Option<&Expert>) -> bool {
     let Some(expert) = expert else {
         return !taught.is_empty();
     };
+    if let Some(set) = trained_set(expert) {
+        return taught.is_empty() || set != fingerprint(taught);
+    }
     let accepted_since = taught
         .iter()
         .any(|(m, _)| State::of(&m.evidence).is_some_and(|s| s.status == Status::Accepted));

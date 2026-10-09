@@ -13,8 +13,10 @@
 //! A user whose fabric names another node as their trainer is left to it. A
 //! set of behaviors that failed admission is not tried again until it
 //! changes: the same set would fail the same way. The refusal is noted on
-//! each behavior in the set (`behavior::mark_refused`), so a restart does not
-//! spend the GPU on it again either.
+//! each behavior in the set (`behavior::mark_training`), so a restart does not
+//! spend the GPU on it again either. An expert admitted without some of its
+//! behaviors, the ones it did not learn, records the set it was trained on,
+//! and is in step until that set changes.
 //!
 //! Database work runs in owner mode under the auth lock, a step at a time;
 //! training runs outside it.
@@ -264,10 +266,17 @@ mod keeper {
                             }
                             failed.remove(&key);
                             tally.trained += 1;
+                            let missed = report.verdict.missed();
                             eprintln!(
-                                "antumbra-mcp: standing experts, {} trained on {} behavior(s), now served",
+                                "antumbra-mcp: standing experts, {} learned {} of {} behavior(s), now served{}",
                                 id.as_str(),
-                                report.behaviors.len()
+                                report.verdict.learned().len(),
+                                report.behaviors.len(),
+                                if missed.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("; not learned: {}", missed.join("; "))
+                                }
                             );
                         }
                         None => {

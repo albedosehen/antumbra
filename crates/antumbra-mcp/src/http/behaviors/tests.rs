@@ -126,13 +126,14 @@ fn a_set_refused_before_a_restart_is_not_trained_again() {
     ];
     let set = fingerprint(&behavior::learnable(&accepted, "everywhere"));
     for m in &mut accepted {
-        behavior::mark_refused(
+        behavior::mark_training(
             &mut m.evidence,
-            &behavior::Refusal {
+            &behavior::Training {
                 set: set.clone(),
                 base: 0.0,
                 expert: 0.0,
                 learned: false,
+                admitted: false,
             },
         );
     }
@@ -151,6 +152,53 @@ fn a_set_refused_before_a_restart_is_not_trained_again() {
         matches!(planned[0].need, Need::Train(_)),
         "a behavior added since is a new set, trained"
     );
+}
+
+#[test]
+fn an_expert_admitted_without_a_behavior_it_missed_is_left_be() {
+    let memories = vec![
+        recorded("memory:l", "Rule l.", Status::Trained, "everywhere"),
+        recorded("memory:m", "Rule m.", Status::Accepted, "everywhere"),
+    ];
+    let taught = behavior::learnable(&memories, "everywhere");
+    let mut expert = standing("everywhere", &["memory:l"]);
+    expert.capability_card["set"] = serde_json::json!(fingerprint(&taught));
+    assert_eq!(
+        need(&taught, Some(&expert), None),
+        Need::Nothing,
+        "the one it missed is accepted, but the set is the one it was trained on"
+    );
+
+    let mut more = memories.clone();
+    more.push(recorded(
+        "memory:n",
+        "Rule n.",
+        Status::Accepted,
+        "everywhere",
+    ));
+    let taught = behavior::learnable(&more, "everywhere");
+    assert!(
+        matches!(need(&taught, Some(&expert), None), Need::Train(_)),
+        "a behavior added since is a new set"
+    );
+}
+
+#[test]
+fn a_set_refused_while_one_missed_behavior_refused_all_is_trained_again() {
+    // Noted under the earlier rule, when one behavior not learned kept the
+    // rest out: today the same set may be admitted.
+    let mut accepted = vec![recorded(
+        "memory:a",
+        "Rule a.",
+        Status::Accepted,
+        "everywhere",
+    )];
+    let set = fingerprint(&behavior::learnable(&accepted, "everywhere"));
+    accepted[0].evidence.push(format!(
+        "behavior-refused:{set} base=0.00 expert=0.00 learned=false"
+    ));
+    let taught = behavior::learnable(&accepted, "everywhere");
+    assert!(matches!(need(&taught, None, None), Need::Train(_)));
 }
 
 #[test]

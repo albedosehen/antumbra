@@ -178,7 +178,7 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
             b.id,
             b.base,
             b.expert,
-            if b.admitted { "ok" } else { "short" }
+            if b.admitted { "learned" } else { "missed" }
         );
     }
     for c in &r.verdict.controls {
@@ -188,7 +188,12 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
         );
     }
     match &r.expert {
-        Some((id, uri)) => println!("admitted: private expert {} ({uri})", id.as_str()),
+        Some((id, uri)) => println!(
+            "admitted: private expert {} ({uri}), holding the {} of {} behavior(s) it learned",
+            id.as_str(),
+            r.verdict.learned().len(),
+            r.behaviors.len()
+        ),
         None => {
             println!("not admitted, nothing minted:");
             for reason in &r.verdict.reasons {
