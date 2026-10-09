@@ -7,12 +7,29 @@ fn spec(rule: &str) -> Spec {
         rule: rule.into(),
         must: vec!["x".into()],
         must_not: vec![],
-        examples: vec![Example {
-            task: "t".into(),
-            answer: "x".into(),
-        }],
+        examples: (0..4)
+            .map(|i| Example {
+                task: format!("t{i}"),
+                answer: "x".into(),
+            })
+            .collect(),
         violations: vec!["y".into()],
     }
+}
+
+#[test]
+fn a_behaviour_that_could_never_be_admitted_starts_no_training() {
+    // Recorded with three examples, before four were required: training holds
+    // none of them out, so the expert would be refused after a GPU pass.
+    let mut three = recorded("memory:3", "Rule 3.", Status::Accepted, "everywhere");
+    let mut short = spec("Rule 3.");
+    short.examples.truncate(3);
+    three.content = content(&short);
+    let taught = behaviour::learnable(&[three.clone()], "everywhere");
+    assert!(taught.is_empty(), "nothing it could be admitted by");
+    assert_eq!(need(&taught, None, None), Need::Nothing);
+    let planned = plan_user(&[three], &[], &Failed::new(), "ws:a", "user:a");
+    assert!(planned.iter().all(|p| p.need == Need::Nothing));
 }
 
 fn recorded(id: &str, rule: &str, status: Status, scope: &str) -> Memory {

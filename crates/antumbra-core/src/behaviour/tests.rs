@@ -22,6 +22,10 @@ fn ssh() -> Spec {
                 task: "List containers on aur0.".into(),
                 answer: "ssh aur0 'docker ps'".into(),
             },
+            Example {
+                task: "Check the GPU on em0.".into(),
+                answer: "ssh em0 nvidia-smi".into(),
+            },
         ],
         violations: vec![
             "ssh nyx@10.0.0.132 'df -h'".into(),
@@ -75,8 +79,14 @@ fn too_few_examples_no_violations_and_bad_patterns_are_named() {
     spec.violations.clear();
     let problems = spec.problems();
     assert!(
-        problems.iter().any(|p| p.contains("at least 3")),
+        problems.iter().any(|p| p.contains("at least 4")),
         "{problems:?}"
+    );
+    spec = ssh();
+    spec.examples.truncate(3);
+    assert!(
+        spec.problems().iter().any(|p| p.contains("one in four")),
+        "three examples hold none out"
     );
     assert!(
         problems.iter().any(|p| p.contains("no violating answer")),
@@ -203,6 +213,13 @@ fn a_standing_expert_learns_the_accepted_and_trained_behaviours_of_its_scope() {
         .map(|(m, _)| m.id.as_str().to_string())
         .collect();
     assert_eq!(ids, ["memory:accepted", "memory:trained"]);
+    // One recorded before four examples were required is left out: it could
+    // never be admitted.
+    let mut short = ssh();
+    short.examples.truncate(3);
+    let mut legacy = recorded("memory:three", Status::Accepted, EVERYWHERE);
+    legacy.content = content(&short);
+    assert!(learnable(&[legacy], EVERYWHERE).is_empty());
     let experts = [standing_expert("github.com/c/d", &[])];
     assert_eq!(
         scopes(&all, &experts),

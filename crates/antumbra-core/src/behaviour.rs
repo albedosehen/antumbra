@@ -20,8 +20,12 @@ use crate::{Expert, Memory};
 
 /// The scope of a behaviour that applies in every repository.
 pub const EVERYWHERE: &str = "everywhere";
-/// The fewest worked examples a behaviour is recorded with.
-pub const MIN_EXAMPLES: usize = 3;
+/// The fewest worked examples a behaviour is recorded with. Four, because
+/// training holds one example in four out to admit the expert by
+/// (`antumbra_train::behave::split`): with three, nothing is held out, the
+/// expert can never be admitted, and every training of it is spent for
+/// nothing.
+pub const MIN_EXAMPLES: usize = 4;
 
 const STATUS: &str = "behaviour-status:";
 const SCOPE: &str = "behaviour-scope:";
@@ -138,7 +142,7 @@ impl Spec {
         let must_not = compile(&self.must_not, &mut problems);
         if self.examples.len() < MIN_EXAMPLES {
             problems.push(format!(
-                "{} example(s); a behaviour needs at least {MIN_EXAMPLES}",
+                "{} example(s); a behaviour needs at least {MIN_EXAMPLES}, since training holds one in four out to admit its expert by",
                 self.examples.len()
             ));
         }
@@ -258,7 +262,10 @@ impl State {
 
 /// What the standing expert for `scope` is taught: the behaviours accepted,
 /// or trained before and still in force, each with its spec. Retired and
-/// proposed ones are left out.
+/// proposed ones are left out, and so is one that could not be recorded
+/// today ([`Spec::problems`]), such as one recorded with three examples before
+/// four were required: teaching it ends in refusal every time, after the GPU
+/// time is spent. `list_behaviours` names what each one lacks.
 pub fn learnable(memories: &[Memory], scope: &str) -> Vec<(Memory, Spec)> {
     memories
         .iter()
@@ -269,6 +276,7 @@ pub fn learnable(memories: &[Memory], scope: &str) -> Vec<(Memory, Spec)> {
                 .then(|| Some((m.clone(), spec_of(&m.content)?)))
                 .flatten()
         })
+        .filter(|(_, spec)| spec.problems().is_empty())
         .collect()
 }
 

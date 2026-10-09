@@ -35,6 +35,15 @@ fn every_fourth_example_is_held_out() {
 }
 
 #[test]
+fn the_fewest_examples_a_behaviour_is_recorded_with_hold_one_out() {
+    // A behaviour recorded with fewer could never be admitted, and the keeper
+    // spent ten minutes of GPU on each one before refusing it.
+    let fewest = spec(antumbra_core::behaviour::MIN_EXAMPLES);
+    let (_, held) = split(&fewest.examples);
+    assert!(!held.is_empty(), "nothing held out to admit the expert by");
+}
+
+#[test]
 fn tasks_carry_the_check_the_answer_and_the_behaviour() {
     let t = tasks("memory:b1", &spec(8));
     assert_eq!((t.train.len(), t.held.len()), (6, 2));

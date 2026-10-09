@@ -295,10 +295,12 @@ mod tests {
             rule: "A rule.".into(),
             must: vec!["x".into()],
             must_not: vec![],
-            examples: vec![Example {
-                task: "t".into(),
-                answer: "x".into(),
-            }],
+            examples: (0..4)
+                .map(|i| Example {
+                    task: format!("t{i}"),
+                    answer: "x".into(),
+                })
+                .collect(),
             violations: vec!["y".into()],
         };
         let comp = behaviour::compartment_id(&tenant, &user);

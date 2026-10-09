@@ -31,8 +31,9 @@ pub(super) struct RecordBehaviourParams {
     /// Regular expressions no answer that follows the rule matches.
     #[serde(default)]
     pub(super) must_not: Vec<String>,
-    /// At least three tasks the rule governs, each with an answer that follows
-    /// it. Vary the phrasing and the case.
+    /// At least four tasks the rule governs, each with an answer that follows
+    /// it: training holds one in four out to admit the expert by. Vary the
+    /// phrasing and the case.
     pub(super) examples: Vec<ExampleParams>,
     /// Answers that break the rule, as an agent that did not know it would
     /// write them. The check must refuse each.
@@ -81,6 +82,12 @@ pub(super) struct BehaviourView {
     pub(super) violations: usize,
     pub(super) supersedes: Option<String>,
     pub(super) updated_at: String,
+    /// What keeps it from being taught to the expert, when anything does: one
+    /// recorded before today's rules (three examples, where four are needed
+    /// now) is listed but never trained. Record it again, superseding this
+    /// one, to fix it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(super) problems: Vec<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -108,7 +115,7 @@ pub(super) struct BehaviourStatusOut {
 impl McpServer {
     /// Record how the user wants an agent to act, with a check.
     #[tool(
-        description = "Record a behaviour: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least three example tasks with answers that follow it; and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
+        description = "Record a behaviour: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least four example tasks with answers that follow it (training holds one in four out to admit the expert by); and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
     )]
     pub(super) async fn record_behaviour(
         &self,
@@ -174,7 +181,7 @@ impl McpServer {
 
     /// The user's behaviours.
     #[tool(
-        description = "List your behaviours, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, and how many examples and violations back it. Filter by `status` or `scope`."
+        description = "List your behaviours, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, how many examples and violations back it, and `problems` when something keeps it from being taught. Filter by `status` or `scope`."
     )]
     pub(super) async fn list_behaviours(
         &self,
@@ -208,6 +215,7 @@ impl McpServer {
             .take(MAX_LISTED)
             .map(|(m, state, spec)| BehaviourView {
                 id: m.id.as_str().to_string(),
+                problems: spec.problems(),
                 rule: spec.rule,
                 scope: state.scope,
                 status: state.status.as_str().to_string(),

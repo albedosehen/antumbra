@@ -44,6 +44,10 @@ fn branch_rule(supersedes: Option<String>, accepted: bool) -> RecordBehaviourPar
                 "New branch for ticket #128 dark mode.",
                 "git checkout -b feat/128-dark-mode",
             ),
+            example(
+                "Make a branch for issue 3, rename the CLI.",
+                "git switch -c feat/3-rename-the-cli",
+            ),
         ],
         violations: vec![
             "git checkout -b feature/add-login-page".into(),
@@ -159,6 +163,66 @@ async fn behaviours_are_accepted_retired_and_superseded() -> anyhow::Result<()> 
         }))
         .await
         .is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not_taught(
+) -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let s = server_for(&store, "user:lily");
+    let mut three = branch_rule(None, true);
+    three.examples.truncate(3);
+    let refused = s.record_behaviour(Parameters(three)).await.unwrap().0;
+    assert!(!refused.recorded);
+    assert!(
+        refused.problems.iter().any(|p| p.contains("at least 4")),
+        "{:?}",
+        refused.problems
+    );
+
+    // One stored with three, before four were required, is listed with the
+    // reason it never trains.
+    let legacy = antumbra_core::behaviour::Spec {
+        rule: "Name a branch for an issue feat/{issue}-{slug}.".into(),
+        must: vec![r"feat/\d+-[a-z0-9-]+".into()],
+        must_not: vec![],
+        examples: (1..=3)
+            .map(|i| antumbra_core::behaviour::Example {
+                task: format!("Issue {i}."),
+                answer: format!("git switch -c feat/{i}-x"),
+            })
+            .collect(),
+        violations: vec!["git switch -c issue-1".into()],
+    };
+    antumbra_store::repo::behaviour::record(
+        &store,
+        &TenantId::new("ws:test"),
+        &UserId::new("user:lily"),
+        "windows",
+        MemoryId::new("memory:legacy"),
+        &legacy,
+        antumbra_core::behaviour::Status::Accepted,
+        "everywhere",
+        None,
+        vec![0.1; EMBED_DIM],
+    )
+    .await?;
+    let listed = s
+        .list_behaviours(Parameters(ListBehavioursParams {
+            status: Some("accepted".into()),
+            scope: None,
+        }))
+        .await
+        .unwrap()
+        .0
+        .behaviours;
+    assert_eq!(listed.len(), 1);
+    assert!(
+        listed[0].problems.iter().any(|p| p.contains("one in four")),
+        "{:?}",
+        listed[0].problems
+    );
     Ok(())
 }
 
