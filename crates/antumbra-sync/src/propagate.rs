@@ -1,4 +1,4 @@
-//! Live propagation (R-2): turn a change to a *shared* memory into a
+//! Live propagation: turn a change to a *shared* memory into a
 //! [`MemoryChange`] addressed to everyone who may see it, so a grantee's agent
 //! learns of new/planned memories without polling.
 //!
@@ -44,9 +44,10 @@ pub struct MemoryChange {
 
 /// Watch the `memory` table and emit a [`MemoryChange`] for every change to a
 /// *compartmentalized* memory, resolved to its audience. Tenant-wide
-/// (un-compartmentalized) writes are skipped -- R-2 is shared-compartment
-/// awareness. Deletes carry no compartment in the notification payload, so they
-/// are not routed in this cut (a known gap, like delete sync in R-1).
+/// (un-compartmentalized) writes are skipped -- live propagation is
+/// shared-compartment awareness. Deletes carry no compartment in the
+/// notification payload, so they are not routed in this cut (a known gap, as
+/// delete sync once was for the cadence-based sync).
 ///
 /// A background task owns the subscription and exits when the feed ends or the
 /// returned receiver is dropped.

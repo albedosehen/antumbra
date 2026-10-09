@@ -59,10 +59,10 @@ pub struct McpServer {
     /// expert's adapter). `None` = serving not configured (route-only surface).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
     /// Where this session registers its peer on initialize, so live propagation
-    /// (R-2) can push shared-memory changes to it. `None` = no live delivery
+    /// can push shared-memory changes to it. `None` = no live delivery
     /// (stdio, route-only, or tests).
     registry: Option<crate::notify::PeerRegistry>,
-    /// Optional cross-encoder precision stage (P-2) applied after hybrid recall:
+    /// Optional cross-encoder precision stage applied after hybrid recall:
     /// re-scores the wide RRF candidate pool over (query, content) and reorders.
     /// `None` = RRF order is returned as-is (rerank endpoint not configured).
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
@@ -701,7 +701,7 @@ impl McpServer {
     }
 
     /// The expert population visible to this session (read-only observability for
-    /// a dashboard / status view, P-2). The expert ACL already scopes the list to
+    /// a dashboard / status view). The expert ACL already scopes the list to
     /// shared experts plus this user's own private ones.
     #[tool(
         description = "List the expert population visible to you (shared experts plus your own private ones), each with its generation, fitness, and status (active experts are routed to; dormant ones are served only when named; archived ones are kept but not served)."
@@ -819,7 +819,7 @@ impl McpServer {
         Parameters(p): Parameters<IdParams>,
     ) -> Result<Json<ForgetOut>, ErrorData> {
         // Soft-delete (tombstone): hidden from reads here, and the deletion
-        // propagates across the fleet (R-1) and routes to grantees (R-2) instead
+        // propagates across the fleet and routes to grantees instead
         // of resurfacing from another replica.
         let forgotten = memory::soft_delete(
             &self.store,

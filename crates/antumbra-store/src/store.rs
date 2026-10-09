@@ -63,8 +63,8 @@ impl Store {
     /// *serving* connection to an authenticated remote whose schema a root
     /// connection has already applied: an anonymous session cannot run `DEFINE`,
     /// and only needs to sign in per request as a record (which then scopes the
-    /// engine ACL correctly, unlike a root connection, which bypasses it). See
-    /// the R-6 fix in the MCP HTTP layer.
+    /// engine ACL correctly, unlike a root connection, which bypasses it). The
+    /// MCP HTTP layer serves requests over such a connection for that reason.
     pub async fn connect_without_schema(
         config: ConnectionConfig,
         embed_dim: usize,

@@ -11,7 +11,7 @@
 # any daemon without a named nvidia runtime). Needs the NVIDIA Container
 # Toolkit on the host (Linux, or Windows via WSL2).
 #
-# Validated on a Linux GPU host (NixOS, CDI, RTX 3090 Ti; EXP-022): the image
+# Validated on a Linux GPU host (NixOS, CDI, RTX 3090 Ti): the image
 # builds, downloads the base on first use, trains, and serves. It is still not
 # built in CI, which has no GPU; the `gpu-test` target below is what runs the
 # GPU-gated tests (`just test-gpu`). On Linux nvcc uses gcc as its host compiler,

@@ -126,7 +126,7 @@ fn call_request(tok: Option<&str>, body: &str) -> Request<Body> {
     b.body(Body::from(body.to_owned())).unwrap()
 }
 
-// The REST shim (P-1b): a single POST dispatches a tool under the caller's JWT
+// The REST shim: a single POST dispatches a tool under the caller's JWT
 // identity -- no initialize handshake -- with the same auth + engine ACL.
 #[tokio::test]
 async fn rest_call_dispatches_a_tool_then_reads_it_back() {
@@ -259,7 +259,7 @@ async fn valid_token_reaches_the_service() {
     );
 }
 
-// The R-2 last mile, over the wire: a grantee (B) holds an open MCP SSE
+// Live propagation's last mile, over the wire: a grantee (B) holds an open MCP SSE
 // stream; when A writes into the shared compartment, B's stream receives the
 // `antumbra/memory_changed` notification. Drives the real `/mcp` router
 // through the full stateful handshake (initialize -> initialized -> GET SSE),

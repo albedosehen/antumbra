@@ -1024,8 +1024,8 @@ pub async fn mark_consolidated(
 }
 
 /// Forget a trace as a **tombstone** (the deletion that propagates and routes):
-/// mark it `deleted_at = now` and persist, so read paths hide it while sync (R-1)
-/// and live propagation (R-2) carry the deletion to other replicas/grantees
+/// mark it `deleted_at = now` and persist, so read paths hide it while sync
+/// and live propagation carry the deletion to other replicas/grantees
 /// instead of it resurfacing. Tenant-checked via `get`; a no-op (returns `None`)
 /// if the trace is absent or already a tombstone. Use [`purge`] to hard-remove
 /// tombstones once the propagation grace window has passed.

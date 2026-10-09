@@ -482,7 +482,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                     ["tenant_id", "compartment"],
                 ),
                 // Supports the collector's incremental watermark filter
-                // (`updated_at > since`) as a range scan (R-1).
+                // (`updated_at > since`) as a range scan.
                 index("memory_updated_at_idx", ["updated_at"]),
                 // Bounds the GC purge to a range scan over actual tombstones
                 // (`deleted_at IS NOT NONE AND deleted_at < cutoff`) instead of a
@@ -544,7 +544,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("memory_edge_to_idx", ["tenant_id", "to_id"]),
                 index("memory_edge_created_at_idx", ["created_at"]),
             ]),
-        // Knowledge documents (P-3): a document's embedded chunks, a distinct type
+        // Knowledge documents: a document's embedded chunks, a distinct type
         // from episodic `memory` but isolated the same way (the compartment rule
         // in the engine + the repo's tenant filter). HNSW-indexed for semantic
         // recall over reference material.

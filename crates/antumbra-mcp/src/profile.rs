@@ -11,7 +11,7 @@
 //!
 //! `agent` is the developer-agent profile ([`AGENT_PROFILE`]): the memory loop
 //! with its feedback signal, anchored documents in and out, route/answer, and
-//! the handoffs a session leaves for another of the user's machines (R-7), the
+//! the handoffs a session leaves for another of the user's machines, the
 //! machines themselves, and the behaviors the user's own expert
 //! learns.
 //! A spec can also be an explicit comma-separated list, and `agent,population`

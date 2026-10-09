@@ -1,4 +1,4 @@
-//! Handoffs (R-7): work a session leaves for a session on another of the
+//! Handoffs: work a session leaves for a session on another of the
 //! user's machines.
 //!
 //! A handoff is a memory in the user's own `handoff` compartment. Two evidence

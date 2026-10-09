@@ -1,5 +1,5 @@
 //! Live, over-`ws://` validation that incremental cursors preserve convergence
-//! against a real SurrealDB v3 engine (R-1). The unknown the embedded tests can't
+//! against a real SurrealDB v3 engine. The unknown the embedded tests can't
 //! cover is the engine's own string `>` comparison on the RFC3339 version field
 //! (the watermark filter) plus the version-field index -- so this drives the real
 //! collector path against a networked authoritative store.

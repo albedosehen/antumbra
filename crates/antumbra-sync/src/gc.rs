@@ -1,4 +1,4 @@
-//! Tombstone garbage collection (R-1). Soft-deletes (forgotten memories, deleted
+//! Tombstone garbage collection. Soft-deletes (forgotten memories, deleted
 //! compartments, revoked grants) leave a tombstone row so the deletion propagates
 //! under last-write-wins instead of resurrecting from a replica. Those tombstones
 //! must eventually be hard-removed or they accumulate forever -- but only once

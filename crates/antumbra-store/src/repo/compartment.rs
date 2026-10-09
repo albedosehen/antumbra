@@ -400,7 +400,7 @@ pub async fn can_write(
 
 /// Every **live** grant on a compartment (its grantees) -- the other half, with
 /// the owner, of who may see the compartment's memories. Used to fan a live
-/// change out to its audience (R-2). Revoked grants are excluded.
+/// change out to its audience. Revoked grants are excluded.
 pub async fn list_grants(
     store: &Store,
     tenant: &TenantId,

@@ -17,7 +17,7 @@
 //! is serialization of the authenticated section: fine for an edge device; a
 //! high-concurrency deployment points `--url` at a real `ws://` server.
 //!
-//! ## Stateful (SSE) mode for live propagation (R-2)
+//! ## Stateful (SSE) mode for live propagation
 //!
 //! The transport runs in rmcp's stateful mode so a client can hold an open
 //! GET/SSE stream that carries **server-initiated** notifications: the only
@@ -30,7 +30,7 @@
 //! resolved under the auth lock in owner mode, and the change is pushed to each
 //! recipient's captured peer ([`crate::notify`]).
 //!
-//! ## The dashboard (P-2)
+//! ## The dashboard
 //!
 //! `GET /dashboard` serves a read-only page that calls the same tools through
 //! `POST /mcp/call` with a token its user pastes in. The page and its assets
@@ -120,7 +120,7 @@ impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
 }
 
 /// How a request reaches a scoped (record-signed) connection so the engine ACL is
-/// enforced -- never the root `store`, which bypasses it (R-6). Chosen at startup
+/// enforced -- never the root `store`, which bypasses it. Chosen at startup
 /// by deployment.
 enum Serving {
     /// Embedded (no DB credentials): the single connection, the same as `store`.
@@ -142,7 +142,8 @@ enum Serving {
 
 struct HttpState {
     /// The **root/owner** connection: schema, per-identity provisioning, and the
-    /// owner-view R-2 watcher run here. On a remote it is root-authenticated.
+    /// owner-view live-propagation watcher run here. On a remote it is
+    /// root-authenticated.
     store: Store,
     /// The scoped serving strategy (per-identity connections on a remote, the
     /// shared connection on embedded).
@@ -152,7 +153,7 @@ struct HttpState {
     /// The server default embedder (the `--embedder-url` / built-in), used for
     /// any workspace without its own configured endpoint.
     embedder: Arc<dyn Embedder>,
-    /// Per-tenant resolved embedders (hosted P-1c): a workspace's own configured
+    /// Per-tenant resolved embedders: a workspace's own configured
     /// endpoint when set, else `embedder`. Resolved once per tenant and cached.
     embedders: Mutex<Bounded<String, Arc<dyn Embedder>>>,
     /// Serializes the brief owner-side work on the shared connections: the
@@ -166,7 +167,7 @@ struct HttpState {
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
-    /// The optional cross-encoder rerank stage (P-2), applied to every
+    /// The optional cross-encoder rerank stage, applied to every
     /// per-identity server after hybrid recall. Server-level (one endpoint), not
     /// per-tenant.
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
@@ -191,7 +192,7 @@ struct HttpState {
     /// signed in as root, provisioned the identity and re-registered this node
     /// under `auth`, queueing every other request behind it.
     servers: Mutex<Bounded<Identity, McpServer>>,
-    /// Live-propagation (R-2) delivery: each session registers its peer here on
+    /// Live-propagation delivery: each session registers its peer here on
     /// initialize; the change watcher pushes shared-memory changes to recipients.
     registry: crate::notify::PeerRegistry,
 }
@@ -219,7 +220,7 @@ pub async fn serve(
 ) -> Result<()> {
     let mut store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
-    // on NON-root connections or the engine ACL is bypassed (R-6): give each
+    // on NON-root connections or the engine ACL is bypassed: give each
     // identity its own credential-less connection (schema already applied by
     // `store`), reused across its requests so the hot path needs no global lock.
     // On embedded there are no credentials and only one connection is possible, so
@@ -339,7 +340,7 @@ async fn shutdown_signal() {
     }
 }
 
-/// R-2 live propagation: watch the memory change feed and push each shared-memory
+/// Live propagation: watch the memory change feed and push each shared-memory
 /// change to its recipients' open sessions. The feed and audience resolution run
 /// over the one shared connection, so the resolution is serialized under the auth
 /// lock in **owner** mode (it must see across tenants); the notification fan-out
@@ -478,7 +479,7 @@ impl HttpState {
         if let Some(s) = self.sessions.lock().await.get(identity) {
             return Ok(s.clone());
         }
-        // The SSE service registers each session's peer for live propagation (R-2).
+        // The SSE service registers each session's peer for live propagation.
         let mcp = self
             .mcp_for(identity)
             .await?
@@ -516,7 +517,7 @@ impl HttpState {
     /// the JSON-RPC SSE service wraps, and the one the REST `/mcp/call` shim drives
     /// directly. Its tools run on the SCOPED serving connection so the engine ACL
     /// is enforced per request (not the root `store`, which would bypass it on a
-    /// remote; R-6).
+    /// remote).
     async fn mcp_for(&self, identity: &Identity) -> Result<McpServer> {
         let tenant = TenantId::new(&identity.tenant);
         let user = UserId::new(&identity.user);
@@ -539,7 +540,7 @@ impl HttpState {
             // member's machine, and the owner provisioning on behalf of the
             // identity it just created is the same act as the two around it.
             crate::register_node(&self.store, &tenant, &user, &self.host).await;
-            // Resolve the workspace's embedder under the owner connection (P-1c).
+            // Resolve the workspace's embedder under the owner connection.
             let emb = self.embedder_for(&tenant).await;
             (dc, emb)
         };
@@ -636,7 +637,7 @@ impl HttpState {
         }
     }
 
-    /// Resolve a workspace's embedder (hosted P-1c): its own configured endpoint
+    /// Resolve a workspace's embedder: its own configured endpoint
     /// when set, else the server default. Cached per tenant after the first
     /// resolution; a config read error falls back to the default rather than
     /// failing the session. The caller holds the auth lock in owner mode, so the
@@ -669,7 +670,7 @@ impl HttpState {
 fn server_config() -> StreamableHttpServerConfig {
     StreamableHttpServerConfig::default()
         // Stateful (SSE) mode: required for the client's GET stream that carries
-        // server-initiated notifications (live propagation, R-2). The auth lock is
+        // server-initiated notifications (live propagation). The auth lock is
         // still only held while `handle` builds each response -- the GET stream
         // does no DB work and streams *after* the handler returns -- so the lock
         // never spans the stream (the runtime-surface concern does not apply: an SSE
@@ -677,7 +678,8 @@ fn server_config() -> StreamableHttpServerConfig {
         // rmcp 3 renamed stateful mode: sessions are "legacy" per SEP-2567
         // (protocol 2026-07-28 drops them), but the GET/SSE push this server's
         // live propagation rides exists only under session mode, so legacy
-        // session mode stays on until R-2 moves to the new protocol's push.
+        // session mode stays on until live propagation moves to the new
+        // protocol's push.
         .with_legacy_session_mode(true)
         .with_json_response(false)
         // The JWT is the access guard, so we do not restrict by `Host` (the
@@ -758,7 +760,7 @@ fn is_cold_auth_race_msg(msg: &str) -> bool {
     msg.contains("Anonymous access") || msg.contains("Not enough permissions")
 }
 
-/// REST convenience surface (P-1b): `POST /mcp/call {tool, arguments}` returns the
+/// REST convenience surface: `POST /mcp/call {tool, arguments}` returns the
 /// tool's JSON result, so a one-shot client (a lifecycle hook fetching bootstrap
 /// context) can call a tool without the JSON-RPC initialize -> tools/call
 /// handshake. Same JWT auth and scoped-connection engine ACL as `/mcp` -- a thin

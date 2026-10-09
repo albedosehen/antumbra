@@ -210,7 +210,7 @@ impl McpServer {
         }
     }
 
-    /// Enable the cross-encoder precision stage (P-2): after hybrid recall, the
+    /// Enable the cross-encoder precision stage: after hybrid recall, the
     /// wide RRF candidate pool is re-scored over (query, content) by `reranker`
     /// and reordered before truncating to the caller's `top_k`. Off by default;
     /// a reranker fault degrades to the RRF order, never failing recall.
@@ -221,7 +221,7 @@ impl McpServer {
     }
 
     /// Register this session's peer into `registry` on initialize, so live
-    /// shared-memory changes (R-2) are pushed to it over its SSE stream.
+    /// shared-memory changes are pushed to it over its SSE stream.
     #[must_use]
     pub fn with_registry(mut self, registry: crate::notify::PeerRegistry) -> Self {
         self.registry = Some(registry);
@@ -403,7 +403,7 @@ const UNCOVERED_OUT_OF_DISTRIBUTION: &str =
 impl McpServer {
     /// Dispatch a tool by name with raw JSON `arguments`, returning its result as
     /// JSON. This is the same set of tools `#[tool_router]` exposes over JSON-RPC,
-    /// reached directly so a one-shot caller (the REST `/mcp/call` shim, P-1b) can
+    /// reached directly so a one-shot caller (the REST `/mcp/call` shim) can
     /// invoke one without an MCP session/handshake. The bound `(tenant, user)` and
     /// the engine ACL apply exactly as they do over `/mcp` -- this is a transport,
     /// not a second authority.
@@ -584,7 +584,7 @@ impl ServerHandler for McpServer {
     }
 
     /// On initialize, record this session's peer under its (tenant, user) identity
-    /// so the live-propagation watcher can push shared-memory changes to it (R-2).
+    /// so the live-propagation watcher can push shared-memory changes to it.
     /// A no-op when no registry is wired (stdio / route-only / tests).
     async fn on_initialized(
         &self,
@@ -594,7 +594,7 @@ impl ServerHandler for McpServer {
         // (and, on a remote, one DB connection) per session, so the binding must
         // happen here -- the HTTP layer's signin runs on a different handle and a
         // cloned remote connection does not share it. Signing in as the record
-        // scopes the engine ACL for every tool call in this session (R-6).
+        // scopes the engine ACL for every tool call in this session.
         if let Err(e) = self.store.signin(&self.tenant, &self.user).await {
             eprintln!(
                 "antumbra-mcp: session signin failed for {}/{}: {e}",

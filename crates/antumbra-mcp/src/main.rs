@@ -264,8 +264,8 @@ async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Res
 
 /// A credential-less **serving** connection to an already-provisioned remote: it
 /// connects without applying the schema and only ever holds a per-request record
-/// session, so the engine ACL is enforced (a root connection would bypass it,
-/// R-6). Used by the networked HTTP surface for the actual request work.
+/// session, so the engine ACL is enforced (a root connection would bypass
+/// it). Used by the networked HTTP surface for the actual request work.
 pub(crate) async fn connect_serving(url: &str) -> Result<Store> {
     let config = ConnectionConfig::builder()
         .url(url)
@@ -418,9 +418,9 @@ async fn build_session(
 /// An empty population still gets an engine. It used to get `None`, so a fresh
 /// node had nothing for the consolidation trigger to hot-register its first
 /// expert into: the train succeeded, the log said "now servable", and `answer`
-/// reported that serving was not configured until someone restarted the server
-/// (EXP-022). The engine is lazy, so an empty one costs no VRAM: the base loads on
-/// the first `answer` that has an adapter to serve.
+/// reported that serving was not configured until someone restarted the
+/// server. The engine is lazy, so an empty one costs no VRAM: the base loads
+/// on the first `answer` that has an adapter to serve.
 #[cfg(feature = "models")]
 pub(crate) async fn build_serve(
     store: &Store,
@@ -573,7 +573,7 @@ async fn run() -> Result<()> {
         );
     }
     let host = default_host(cli.host);
-    // A configured endpoint embeds on the tenant's side (P-1c); otherwise the
+    // A configured endpoint embeds on the tenant's side; otherwise the
     // built-in embedder (candle BERT under `models`; the byte-histogram stand-in
     // only when asked for explicitly). Either way the vectors are EMBED_DIM-wide.
     let embedder: Arc<dyn Embedder> = match cli.embedder_url {
@@ -585,7 +585,7 @@ async fn run() -> Result<()> {
         None => Arc::from(make_embedder(cli.fake_embedder)?),
     };
 
-    // Optional cross-encoder rerank stage (P-2). Operator-configured endpoint; the
+    // Optional cross-encoder rerank stage. Operator-configured endpoint; the
     // precision stage runs after hybrid recall and degrades to RRF order on error.
     // Built once as the concrete type and then viewed two ways. The same
     // endpoint answers both questions, and calling it twice to get an order and

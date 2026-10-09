@@ -430,7 +430,7 @@ pub enum Command {
         #[arg(long, default_value_t = 0.0)]
         temperature: f64,
     },
-    /// Collector/sync (R-1): bidirectionally reconcile this local store (the
+    /// Collector/sync: bidirectionally reconcile this local store (the
     /// global `--url`, an embedded penumbra) with a remote authoritative
     /// SurrealDB, last-write-wins by each row's version timestamp. Runs on a
     /// cadence until ctrl-c, or `--once` for a single pass. Replicates the
