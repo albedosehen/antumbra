@@ -69,6 +69,7 @@ ollama pull all-minilm
 
 - **Windows:** `ollama` is a Windows app; run `ollama pull all-minilm` in PowerShell or CMD (it is often not on a Git-Bash PATH).
 - **Linux:** so the Dockerized server can reach ollama, start it listening on all interfaces: `OLLAMA_HOST=0.0.0.0 ollama serve` (or set `OLLAMA_HOST=0.0.0.0` in its service unit). On macOS/Windows Docker Desktop this is automatic.
+- **WSL with Docker Desktop:** containers run in Docker Desktop's VM, where `host.docker.internal` is the Windows host, not your WSL distro. If setup reports that the container cannot reach ollama, either run ollama on Windows (and stop the copy in WSL), or set `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, run `wsl --shutdown`, and start ollama in WSL with `OLLAMA_HOST=0.0.0.0`.
 
 ### 2. Install the console and CLI
 
