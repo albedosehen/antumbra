@@ -32,8 +32,8 @@ pub(super) struct RecordBehaviorParams {
     #[serde(default)]
     pub(super) must_not: Vec<String>,
     /// At least four tasks the rule governs, each with an answer that follows
-    /// it: training holds one in four out to admit the expert by. Vary the
-    /// phrasing and the case.
+    /// it: training holds one in four out to admit the expert by. Eight to
+    /// ten teach it more reliably. Vary the phrasing and the case.
     pub(super) examples: Vec<ExampleParams>,
     /// Answers that break the rule, as an agent that did not know it would
     /// write them. The check must refuse each.
@@ -88,6 +88,12 @@ pub(super) struct BehaviorView {
     /// one, to fix it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(super) problems: Vec<String>,
+    /// How the last training of its scope went, when it minted no expert:
+    /// whether this behavior was learned, by its held-out pass rate against
+    /// the base model's. One behavior not learned keeps its whole scope's
+    /// expert out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) last_training: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -115,7 +121,7 @@ pub(super) struct BehaviorStatusOut {
 impl McpServer {
     /// Record how the user wants an agent to act, with a check.
     #[tool(
-        description = "Record a behavior: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least four example tasks with answers that follow it (training holds one in four out to admit the expert by); and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
+        description = "Record a behavior: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least four example tasks with answers that follow it (training holds one in four out to admit the expert by; eight to ten, varied in phrasing, teach it more reliably); and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
     )]
     pub(super) async fn record_behavior(
         &self,
@@ -216,6 +222,7 @@ impl McpServer {
             .map(|(m, state, spec)| BehaviorView {
                 id: m.id.as_str().to_string(),
                 problems: spec.problems(),
+                last_training: behavior::refusal(&m.evidence).map(|r| r.describe()),
                 rule: spec.rule,
                 scope: state.scope,
                 status: state.status.as_str().to_string(),

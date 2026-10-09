@@ -12,7 +12,9 @@
 //! one by sync, so the keeper reads the store rather than waiting on a write.
 //! A user whose fabric names another node as their trainer is left to it. A
 //! set of behaviors that failed admission is not tried again until it
-//! changes: the same set would fail the same way.
+//! changes: the same set would fail the same way. The refusal is noted on
+//! each behavior in the set (`behavior::mark_refused`), so a restart does not
+//! spend the GPU on it again either.
 //!
 //! Database work runs in owner mode under the auth lock, a step at a time;
 //! training runs outside it.
@@ -21,9 +23,8 @@
 #![cfg_attr(not(feature = "models"), allow(dead_code))]
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 
-use antumbra_core::behavior::{self, stale, Spec};
+use antumbra_core::behavior::{self, fingerprint, stale, Spec};
 use antumbra_core::{Expert, Memory};
 
 /// What one scope's standing expert needs.
@@ -36,21 +37,9 @@ pub(super) enum Need {
     Drop,
 }
 
-/// A set of behaviors as taught: each id with its content, so a behavior
-/// recorded again with a changed rule or check makes a different set.
-pub(super) fn fingerprint(taught: &[(Memory, Spec)]) -> String {
-    let mut parts: Vec<(&str, &str)> = taught
-        .iter()
-        .map(|(m, _)| (m.id.as_str(), m.content.as_str()))
-        .collect();
-    parts.sort();
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    parts.hash(&mut h);
-    format!("{:x}", h.finish())
-}
-
 /// What a scope needs, given what it should teach, its expert, and the set
-/// that last failed admission there.
+/// that last failed admission there in this process. A set refused before a
+/// restart is known by the refusal its behaviors carry.
 pub(super) fn need(
     taught: &[(Memory, Spec)],
     expert: Option<&Expert>,
@@ -63,7 +52,7 @@ pub(super) fn need(
         return Need::Drop;
     }
     let print = fingerprint(taught);
-    if failed == Some(&print) {
+    if failed == Some(&print) || behavior::refused(taught) {
         return Need::Nothing;
     }
     Need::Train(print)

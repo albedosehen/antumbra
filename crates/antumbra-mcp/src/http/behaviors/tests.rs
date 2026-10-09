@@ -119,6 +119,41 @@ fn a_set_that_failed_is_not_tried_again_until_it_changes() {
 }
 
 #[test]
+fn a_set_refused_before_a_restart_is_not_trained_again() {
+    let mut accepted = vec![
+        recorded("memory:a", "Rule a.", Status::Accepted, "everywhere"),
+        recorded("memory:b", "Rule b.", Status::Accepted, "everywhere"),
+    ];
+    let set = fingerprint(&behavior::learnable(&accepted, "everywhere"));
+    for m in &mut accepted {
+        behavior::mark_refused(
+            &mut m.evidence,
+            &behavior::Refusal {
+                set: set.clone(),
+                base: 0.0,
+                expert: 0.0,
+                learned: false,
+            },
+        );
+    }
+    // A new process: nothing failed in it yet, but the store remembers.
+    let planned = plan_user(&accepted, &[], &Failed::new(), "ws:a", "user:a");
+    assert_eq!(planned[0].need, Need::Nothing);
+
+    accepted.push(recorded(
+        "memory:c",
+        "Rule c.",
+        Status::Accepted,
+        "everywhere",
+    ));
+    let planned = plan_user(&accepted, &[], &Failed::new(), "ws:a", "user:a");
+    assert!(
+        matches!(planned[0].need, Need::Train(_)),
+        "a behavior added since is a new set, trained"
+    );
+}
+
+#[test]
 fn an_expert_with_nothing_left_to_teach_is_dropped() {
     let retired = vec![recorded(
         "memory:t",

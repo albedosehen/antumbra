@@ -228,6 +228,48 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
 }
 
 #[tokio::test]
+async fn a_behavior_lists_how_its_last_refused_training_went() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let s = server_for(&store, "user:lily");
+    let id = s
+        .record_behavior(Parameters(branch_rule(None, true)))
+        .await
+        .unwrap()
+        .0
+        .id
+        .unwrap();
+    let tenant = TenantId::new("ws:test");
+    let mut m = memory::get(&store, &tenant, &MemoryId::new(id.clone()))
+        .await?
+        .expect("stored");
+    antumbra_core::behavior::mark_refused(
+        &mut m.evidence,
+        &antumbra_core::behavior::Refusal {
+            set: "00112233aabbccdd".into(),
+            base: 0.0,
+            expert: 0.5,
+            learned: false,
+        },
+    );
+    memory::upsert(&store, &m).await?;
+    let listed = s
+        .list_behaviors(Parameters(ListBehaviorsParams {
+            status: None,
+            scope: None,
+        }))
+        .await
+        .unwrap()
+        .0
+        .behaviors;
+    let said = listed[0].last_training.as_deref().unwrap_or_default();
+    assert!(
+        said.starts_with("not learned (held-out 0.50 against the base model's 0.00)"),
+        "{said}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn the_tools_answer_to_the_names_they_had_before_the_us_spelling() -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let s = server_for(&store, "user:lily");
