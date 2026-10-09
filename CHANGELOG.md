@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.1.1 - 2026-10-09
+
+Fixes. The main one lets `antumbra setup local` finish on Docker Desktop, including a WSL distro that uses Docker Desktop's WSL integration.
+
+### Setup
+
+- **The ollama check passes on any Docker setup the server can reach ollama from.** On Linux, setup probed the Docker bridge gateway from the host. That is right for a native Docker Engine, but under Docker Desktop the bridge lives in Desktop's VM, so the check always failed from WSL and no flag skipped it. The bridge probe still runs first; when it does not answer, a throwaway container asks for ollama at `host.docker.internal`, the address the server uses. When ollama really is out of reach, the message says what to change for native Linux, Docker Desktop under WSL, or Docker Desktop elsewhere ([#209](https://github.com/albedosehen/antumbra/pull/209)).
+
+### Hooks
+
+- **Session start stays within its time budget** (`ANTUMBRA_SESSION_BUDGET_SEC`, default 8 seconds, below the hook's timeout). On Windows PowerShell it no longer garbles non-ASCII text in recalled memories, and no longer reports a single recalled memory as "starting cold" ([#201](https://github.com/albedosehen/antumbra/pull/201)).
+- **The attribution check is one bash process on every platform**, using only bash builtins. On a loaded Windows machine it no longer outruns its timeout and lets commands through unchecked, and it checks the PowerShell tool's git and gh commands as well as the Bash tool's ([#203](https://github.com/albedosehen/antumbra/pull/203)).
+
+### Server
+
+- **Tools that take a memory, behavior or handoff back accept `id`**, the field name their results use, as well as `memory_id`, `behaviour_id` and `handoff_id` ([#201](https://github.com/albedosehen/antumbra/pull/201)).
+- **Listing a compartment reads an index** instead of the whole workspace: 739 ms to 2.5 ms for 6 rows beside 7,000. A running store gains the index at its next start ([#201](https://github.com/albedosehen/antumbra/pull/201)).
+- **An empty endpoint setting counts as unset.** A Compose stack without a reranker no longer builds one at the address `""` and pays a failing rerank call on every recall ([#199](https://github.com/albedosehen/antumbra/pull/199)).
+
+### Behaviors and experts (experimental)
+
+- Behaviors are recorded with at least four examples, so training can hold one in four out and admit a standing expert by it. A scope's standing expert is admitted for the behaviors it learned, instead of being refused when any one is missed. A refused set stays refused across restarts and says why ([#204](https://github.com/albedosehen/antumbra/pull/204), [#205](https://github.com/albedosehen/antumbra/pull/205), [#206](https://github.com/albedosehen/antumbra/pull/206)).
+
+### Docker
+
+- Two opt-in Compose profiles: `copal`, which keeps each ingested document's original, and `telemetry`, an OpenTelemetry Collector that reports the host, containers, SurrealDB, GPU and reranker to the same endpoint as the server's traces ([#199](https://github.com/albedosehen/antumbra/pull/199), [#202](https://github.com/albedosehen/antumbra/pull/202)).
+- The control server's `contract` feature takes `oneiriq-kayak` from crates.io, so building it needs no access to a private repository ([#200](https://github.com/albedosehen/antumbra/pull/200)).
+
 ## 0.1.0 - 2026-10-07
 
 The first public release. Antumbra plugs into the coding agent you already use and gives it a memory that carries across sessions and machines, along with where each memory came from. Claude Code is the agent it is tested with; any MCP client can use its tools over stdio or HTTP.

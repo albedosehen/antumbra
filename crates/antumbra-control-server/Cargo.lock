@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "jsonwebtoken 11.1.0",
@@ -137,7 +137,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-control"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "antumbra-auth",
  "antumbra-core",
@@ -150,7 +150,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-control-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "antumbra-control",
  "antumbra-core",
@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "antumbra-core",
  "async-trait",
