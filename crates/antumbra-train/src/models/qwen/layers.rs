@@ -184,7 +184,7 @@ impl RotaryEmbedding {
         // Positions and angles are computed in f32 whatever the model computes
         // in, and only the finished sin/cos tables take the model's dtype. bf16
         // carries 8 bits of mantissa: position 257 is 256 in it, and past 512
-        // positions come in steps of four, so neighbouring tokens were rotated
+        // positions come in steps of four, so neighboring tokens were rotated
         // as if they sat at the same place -- and an angle of a few hundred
         // radians keeps almost none of its fraction, so the fast-rotating
         // dimensions got sin and cos of the wrong angle. On the GPU that showed
@@ -559,10 +559,10 @@ mod tests {
         Ok(())
     }
 
-    /// Neighbouring positions past 256 are distinct in the bf16 table. bf16
+    /// Neighboring positions past 256 are distinct in the bf16 table. bf16
     /// cannot hold 257, so positions computed in it collapsed pairwise.
     #[test]
-    fn neighbouring_long_positions_stay_distinct_in_bf16() -> CResult<()> {
+    fn neighboring_long_positions_stay_distinct_in_bf16() -> CResult<()> {
         let half = RotaryEmbedding::new(DType::BF16, &config(), &Device::Cpu)?;
         let a = half.sin.get(300)?.to_dtype(DType::F32)?;
         let b = half.sin.get(301)?.to_dtype(DType::F32)?;

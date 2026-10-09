@@ -8,7 +8,7 @@
 //! Each realization is also where a request's holdout is enforced (ADR-0022):
 //! the corpus is split into what the run learns from and what it only
 //! measures before the model is loaded, and the outcome echoes the holdout so
-//! the loop can tell a measured generation from one that was merely labelled.
+//! the loop can tell a measured generation from one that was merely labeled.
 //! The same goes for the recipe (S-1): the run trains under the one requested,
 //! or under the trainer's own when none is, and echoes whichever it used.
 

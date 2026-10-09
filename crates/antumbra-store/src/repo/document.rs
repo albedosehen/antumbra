@@ -141,7 +141,7 @@ pub async fn delete_title(
 /// The tenant filter is ANDed onto the KNN clause so the candidate set never
 /// crosses a tenant boundary (and the engine ACL scopes it again) — but against
 /// an index-backed KNN that filter is a RESIDUAL: the graph walk returns its
-/// nearest neighbours across the whole table and the equality thins them
+/// nearest neighbors across the whole table and the equality thins them
 /// afterwards. So the walk is asked for a wider pool and the answer is
 /// truncated to `k` once the thinning is done; asking for `k` directly would
 /// hand a tenant with a small share of the chunks a short answer.

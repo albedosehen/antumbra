@@ -184,11 +184,11 @@ mod tests {
         assert_eq!(stats.total(), 0);
     }
 
-    // A pre-signalled shutdown returns immediately without attempting to connect.
+    // A pre-signaled shutdown returns immediately without attempting to connect.
     #[tokio::test]
     async fn run_returns_on_shutdown() {
         let (tx, rx) = watch::channel(true);
-        let _ = tx; // already signalled
+        let _ = tx; // already signaled
         run(mem_cfg(), rx).await.unwrap();
     }
 
@@ -213,7 +213,7 @@ mod tests {
     // `gc_every == 0` disables it entirely. The default `gc_every` (240) is why the
     // cadence tests above never reach this path.
     #[tokio::test]
-    async fn collect_garbage_honours_the_gc_cadence() {
+    async fn collect_garbage_honors_the_gc_cadence() {
         let local = Endpoint::embedded("mem://").connect().await.unwrap();
         let remote = Endpoint::embedded("mem://").connect().await.unwrap();
 

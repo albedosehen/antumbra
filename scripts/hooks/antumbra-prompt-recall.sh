@@ -2,7 +2,7 @@
 # UserPromptSubmit: recall the memories most relevant to what the user just
 # typed and inject them as additionalContext, so recall happens on every message
 # rather than only at session start. POSIX sibling of
-# antumbra-prompt-recall.ps1; identical behaviour. Needs `jq` and `curl`.
+# antumbra-prompt-recall.ps1; identical behavior. Needs `jq` and `curl`.
 #
 # The bootstrap (antumbra-session-start) runs once and cannot know what the
 # session will turn out to be about. This runs per prompt and does, which is why

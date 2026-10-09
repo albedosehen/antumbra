@@ -46,7 +46,7 @@ pub fn causal_lm_loss(
 /// (ADR-0024), and a **strictly proper scoring rule**.
 ///
 /// That property is the whole reason this objective exists rather than any
-/// other. Under a strictly proper rule the expected loss is minimised *only* by
+/// other. Under a strictly proper rule the expected loss is minimized *only* by
 /// reporting the true probability, so a head trained against it has no way to
 /// score better by being confident than by being right. An accuracy objective,
 /// or a cross-entropy over a hard label, buys a confident answer at the same
@@ -56,7 +56,7 @@ pub fn causal_lm_loss(
 ///
 /// Brier rather than the log score for one practical reason: it is BOUNDED.
 /// A log score is unbounded below and hands a single confidently-wrong sample an
-/// arbitrarily large gradient, which is how a rare mislabelled outcome comes to
+/// arbitrarily large gradient, which is how a rare mislabeled outcome comes to
 /// dominate a batch. Both are strictly proper, so the bounded one is the safer
 /// default under a verifier that is right nearly always rather than always.
 ///
@@ -172,7 +172,7 @@ mod proper_scoring {
     /// The expected Brier loss of *reporting* `q` when the world is `p`, which
     /// is what a truthful-reporting argument is actually about. A decision head
     /// does not see one outcome; it sees many draws from `p` and is scored on
-    /// all of them, so the question is which `q` minimises the average.
+    /// all of them, so the question is which `q` minimizes the average.
     fn expected_loss(q: f32, p: f32, dev: &Device) -> f32 {
         let reported = row(&[q, 1.0 - q], dev);
         // outcome A, with probability p

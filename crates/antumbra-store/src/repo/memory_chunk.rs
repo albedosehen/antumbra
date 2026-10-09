@@ -27,7 +27,7 @@ use crate::store::Store;
 const TABLE: &str = "memory_chunk";
 const MEMORY: &str = "memory";
 
-/// How many chunk rows to read per memory wanted: a memory's neighbouring
+/// How many chunk rows to read per memory wanted: a memory's neighboring
 /// pieces crowd the nearest rows, so the search reads wider than it returns.
 const ROWS_PER_MEMORY: usize = 4;
 /// The most chunk rows one search reads.

@@ -1,7 +1,7 @@
 //! The reward landscape: a density heatmap of the whole penumbra's trajectories
 //! at a glance. Each shadow is a row, training steps run left→right, and the
-//! reward at each step maps to a shade glyph + the fitness colour ramp. Drawn
-//! with shade characters (not just background colour) so it reads in a text
+//! reward at each step maps to a shade glyph + the fitness color ramp. Drawn
+//! with shade characters (not just background color) so it reads in a text
 //! snapshot and in a monochrome terminal, then tints by the same fitness ramp as
 //! the rest of the console, the universal path. (Raster fidelity, where a
 //! terminal supports it, is the `raster`-feature enhancement; see `render.rs`.)

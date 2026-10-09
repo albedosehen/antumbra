@@ -28,6 +28,24 @@ fn readable(
     }
 }
 
+/// Tools renamed to US spelling, by the name they had. `/mcp/call` takes the
+/// old name too, so a hook or client written against it keeps working; the
+/// JSON-RPC surface lists, and answers to, the new names only.
+const RENAMED: &[(&str, &str)] = &[
+    ("record_behaviour", "record_behavior"),
+    ("list_behaviours", "list_behaviors"),
+    ("accept_behaviour", "accept_behavior"),
+    ("retire_behaviour", "retire_behavior"),
+];
+
+/// A tool's name today, given the one a caller used.
+fn current_name(name: &str) -> &str {
+    RENAMED
+        .iter()
+        .find(|(old, _)| *old == name)
+        .map_or(name, |(_, new)| new)
+}
+
 impl McpServer {
     /// `serve` is the engine the `answer` tool drives (a real `MultiAdapterServe`
     /// under `--features models`, a fake in tests, or `None` for a route-only
@@ -144,7 +162,7 @@ impl McpServer {
             + Self::listing_router()
             + Self::handoff_router()
             + Self::device_router()
-            + Self::behaviour_router()
+            + Self::behavior_router()
             + Self::answer_router()
             + Self::depgraph_router()
     }
@@ -334,7 +352,7 @@ impl McpServer {
         for e in lifecycle::routable(&self.store).await? {
             // A standing expert is composed into the answers of its scope
             // (`answer`), never routed: its centroid would otherwise carry one
-            // repository's behaviours into another's tasks.
+            // repository's behaviors into another's tasks.
             if e.owner.as_ref() == Some(&self.user) && e.standing_scope().is_none() {
                 if let Some(sim) = e.capability_similarity(v) {
                     if sim >= PRIVATE_ROUTE_FLOOR {
@@ -397,6 +415,7 @@ impl McpServer {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, ErrorData> {
+        let name = current_name(name);
         let span =
             crate::telemetry::tool_span(name, Self::is_tool(name), self.tenant.as_str(), None);
         let result = self
@@ -466,10 +485,10 @@ impl McpServer {
                 serde_json::to_value(out)
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))
             }
-            "record_behaviour" => dispatch!(behaviour::RecordBehaviourParams, record_behaviour),
-            "list_behaviours" => dispatch!(behaviour::ListBehavioursParams, list_behaviours),
-            "accept_behaviour" => dispatch!(behaviour::BehaviourIdParams, accept_behaviour),
-            "retire_behaviour" => dispatch!(behaviour::BehaviourIdParams, retire_behaviour),
+            "record_behavior" => dispatch!(behavior::RecordBehaviorParams, record_behavior),
+            "list_behaviors" => dispatch!(behavior::ListBehaviorsParams, list_behaviors),
+            "accept_behavior" => dispatch!(behavior::BehaviorIdParams, accept_behavior),
+            "retire_behavior" => dispatch!(behavior::BehaviorIdParams, retire_behavior),
             "list_documents" => {
                 let Json(out) = self.list_documents().await?;
                 serde_json::to_value(out)

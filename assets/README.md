@@ -54,5 +54,5 @@ open the repository's Settings, and under General > Social preview, upload
 
 The artwork is drawn in Penpot, in the Brands project, file "Repository
 Brands". The mark is the "antumbra mark" component with Concept "A1
-Annulus" and Ink "Colour". The banner is the antumbra README banner board on
+Annulus" and Ink "Color". The banner is the antumbra README banner board on
 the Family page. Export from there if you need another size or format.

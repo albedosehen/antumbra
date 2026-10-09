@@ -270,7 +270,7 @@ async fn the_sparse_leg_finds_identifiers_that_carry_punctuation() -> Result<()>
 /// Un-ignore it once the embedded/server difference is understood -- it is the
 /// only test that distinguishes "returned the best k" from "returned some k".
 #[tokio::test]
-#[ignore = "embedded engine does not honour ORDER BY on the score alias; verified against the 3.2.4 server instead"]
+#[ignore = "embedded engine does not honor ORDER BY on the score alias; verified against the 3.2.4 server instead"]
 async fn the_sparse_leg_returns_the_best_matches_not_the_first_ones() -> Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let tenant = TenantId::new("t");

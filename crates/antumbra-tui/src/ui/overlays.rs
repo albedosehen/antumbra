@@ -281,7 +281,7 @@ pub(super) fn section<'a>(t: &Theme, label: &str) -> Line<'a> {
     ))
 }
 
-/// A JSON value pretty-printed into indented, value-coloured lines.
+/// A JSON value pretty-printed into indented, value-colored lines.
 pub(super) fn json_lines<'a>(t: &Theme, value: &serde_json::Value) -> Vec<Line<'a>> {
     serde_json::to_string_pretty(value)
         .unwrap_or_else(|_| value.to_string())
@@ -446,7 +446,7 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
     );
 }
 
-/// The theme colour an event renders in, by kind.
+/// The theme color an event renders in, by kind.
 fn event_color(t: &Theme, kind: EventKind) -> Color {
     match kind {
         EventKind::Spawn => t.accent,
@@ -500,7 +500,7 @@ pub(super) fn events_overlay(f: &mut Frame, app: &App) {
     );
 }
 
-/// The keybinding reference, a centred modal over the live view (`?` toggles).
+/// The keybinding reference, a centered modal over the live view (`?` toggles).
 pub(super) fn help_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
     let Some(area) = overlay_area(app, f.area()) else {

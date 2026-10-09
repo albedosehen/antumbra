@@ -26,7 +26,7 @@ use crate::ids::VerifierId;
 use crate::trust::TrustVerdict;
 
 /// What decides a verifier's verdict. There is no tier for oracles derived
-/// from the implementation: generated tests that assert observed behaviour
+/// from the implementation: generated tests that assert observed behavior
 /// are refused outright, since a check that learns what the code does cannot
 /// say what it should do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

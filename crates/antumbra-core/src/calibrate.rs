@@ -203,7 +203,7 @@ mod tests {
         );
     }
 
-    /// A text that scores the same against every probe has no spread to normalise
+    /// A text that scores the same against every probe has no spread to normalize
     /// by. That must not divide by zero, and must not rank as infinitely relevant.
     #[test]
     fn a_text_with_no_spread_is_finite() {

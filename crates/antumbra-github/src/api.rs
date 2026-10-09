@@ -42,8 +42,8 @@ pub enum ApiError {
     Shape(String),
     #[error(transparent)]
     App(#[from] AppError),
-    #[error("the GitHub API worker was cancelled")]
-    Cancelled,
+    #[error("the GitHub API worker was canceled")]
+    Canceled,
 }
 
 /// A raw response: status and body, before any interpretation.
@@ -363,7 +363,7 @@ impl GithubApi {
         let transport = self.transport.clone();
         tokio::task::spawn_blocking(move || f(transport.as_ref()))
             .await
-            .map_err(|_| ApiError::Cancelled)?
+            .map_err(|_| ApiError::Canceled)?
     }
 }
 

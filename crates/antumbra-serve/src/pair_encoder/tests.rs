@@ -204,8 +204,8 @@ fn tiny_tokenizer() -> Tokenizer {
     tokenizer
 }
 
-fn pair(query: &str, memory: &str, relevant: bool) -> LabelledPair {
-    LabelledPair {
+fn pair(query: &str, memory: &str, relevant: bool) -> LabeledPair {
+    LabeledPair {
         query: query.into(),
         memory: memory.into(),
         relevant,
@@ -276,7 +276,7 @@ fn d2_pair_encoder_against_the_control() {
         return;
     };
     let raw = std::fs::read_to_string(&path).expect("read labels");
-    let pairs: Vec<LabelledPair> = serde_json::from_str(&raw).expect("parse labels");
+    let pairs: Vec<LabeledPair> = serde_json::from_str(&raw).expect("parse labels");
     assert!(pairs.len() >= 20, "need a real set, got {}", pairs.len());
     let (train, test) = split_by_memory(&pairs);
 

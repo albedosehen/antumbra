@@ -1,7 +1,7 @@
-//! `antumbra behave`: train a user's accepted behaviours into their private
+//! `antumbra behave`: train a user's accepted behaviors into their private
 //! standing expert (ADR-0027). The work is `antumbra_serve::behave`; this
-//! prints what it did and why. `--import` records behaviours from a file
-//! instead, as the `record_behaviour` tool would: accepted, or with
+//! prints what it did and why. `--import` records behaviors from a file
+//! instead, as the `record_behavior` tool would: accepted, or with
 //! `--propose` proposed, for the user to accept.
 
 use std::hash::{Hash, Hasher};
@@ -9,9 +9,9 @@ use std::hash::{Hash, Hasher};
 use clap::Args;
 use serde_json::Value;
 
-use antumbra_core::behaviour::{normalize_scope, Spec, Status};
+use antumbra_core::behavior::{normalize_scope, Spec, Status};
 use antumbra_core::{MemoryId, TenantId, UserId};
-use antumbra_store::repo::behaviour as store_behaviour;
+use antumbra_store::repo::behavior as store_behavior;
 
 #[derive(Args, Debug)]
 pub struct BehaveArgs {
@@ -19,22 +19,22 @@ pub struct BehaveArgs {
     pub tenant: String,
     #[arg(long)]
     pub user: String,
-    /// A repository (`host/org/name`); omit for the behaviours that apply
+    /// A repository (`host/org/name`); omit for the behaviors that apply
     /// everywhere.
     #[arg(long)]
     pub scope: Option<String>,
-    /// Record the behaviours in this JSON file, accepted, and stop: an array
+    /// Record the behaviors in this JSON file, accepted, and stop: an array
     /// of `{rule, must, must_not, examples: [{task, answer}], violations,
-    /// scope}`. Each is checked as `record_behaviour` checks it. Importing the
+    /// scope}`. Each is checked as `record_behavior` checks it. Importing the
     /// same rule again replaces it.
     #[arg(long)]
     pub import: Option<String>,
     /// With `--import`, record them proposed: for the user to accept, as a
-    /// behaviour drawn from older memories is, rather than one they stated.
+    /// behavior drawn from older memories is, rather than one they stated.
     #[arg(long, default_value_t = false)]
     pub propose: bool,
     /// Epochs over the examples and the replay: three taught validation 2's
-    /// behaviours.
+    /// behaviors.
     #[arg(long, default_value_t = 3)]
     pub rounds: usize,
     /// The longest answer generated: the base model's replay answers among
@@ -42,13 +42,13 @@ pub struct BehaveArgs {
     /// training ends every answer it is given.
     #[arg(long, default_value_t = 256)]
     pub max_new_tokens: usize,
-    /// The learning rate. Above 1.5e-4, a set of more than a few behaviours
+    /// The learning rate. Above 1.5e-4, a set of more than a few behaviors
     /// pulls the expert off the base model's answers everywhere else.
     #[arg(long, default_value_t = 1.5e-4)]
     pub lr: f64,
 }
 
-/// One behaviour in an `--import` file.
+/// One behavior in an `--import` file.
 struct Imported {
     spec: Spec,
     scope: Option<String>,
@@ -69,8 +69,10 @@ fn rows(text: &str) -> anyhow::Result<Vec<Imported>> {
         .collect()
 }
 
-/// The id an imported behaviour is stored under: the same user, scope and
-/// rule land on the same record, so importing a file again replaces it.
+/// The id an imported behavior is stored under: the same user, scope and
+/// rule land on the same record, so importing a file again replaces it. The
+/// prefix keeps the spelling the records already stored were written with,
+/// or an import would add a second copy of each instead of replacing it.
 fn import_id(user: &str, scope: &str, rule: &str) -> MemoryId {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (user, scope, rule.trim()).hash(&mut h);
@@ -106,9 +108,9 @@ async fn import(url: &str, a: &BehaveArgs, path: &str) -> anyhow::Result<()> {
         let scope = normalize_scope(row.scope.as_deref().or(a.scope.as_deref()));
         let id = import_id(user.as_str(), &scope, &row.spec.rule);
         let embedding = embedder
-            .embed(&antumbra_core::behaviour::content(&row.spec))
+            .embed(&antumbra_core::behavior::content(&row.spec))
             .await?;
-        store_behaviour::record(
+        store_behavior::record(
             &store,
             &tenant,
             &user,
@@ -129,7 +131,7 @@ async fn import(url: &str, a: &BehaveArgs, path: &str) -> anyhow::Result<()> {
         );
     }
     if refused > 0 {
-        anyhow::bail!("{refused} behaviour(s) refused; nothing was written for them");
+        anyhow::bail!("{refused} behavior(s) refused; nothing was written for them");
     }
     Ok(())
 }
@@ -152,7 +154,7 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
         learning_rate: a.lr,
         ..antumbra_serve::RaftConfig::default()
     };
-    let report = antumbra_serve::behave::train_behaviours(
+    let report = antumbra_serve::behave::train_behaviors(
         &store,
         embedder.as_ref(),
         &TenantId::new(a.tenant.as_str()),
@@ -162,15 +164,15 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
     )
     .await?;
     let Some(r) = report else {
-        println!("no accepted behaviours in scope {scope}: nothing to teach");
+        println!("no accepted behaviors in scope {scope}: nothing to teach");
         return Ok(());
     };
     println!(
-        "{} behaviour(s) in scope {scope}, with {} base answers replayed",
-        r.behaviours.len(),
+        "{} behavior(s) in scope {scope}, with {} base answers replayed",
+        r.behaviors.len(),
         r.replay
     );
-    for b in &r.verdict.behaviours {
+    for b in &r.verdict.behaviors {
         println!(
             "  {:<40} held out: base {:.2} -> expert {:.2} {}",
             b.id,
@@ -199,7 +201,7 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
 
 #[cfg(not(feature = "models"))]
 async fn train(_url: &str, _a: BehaveArgs) -> anyhow::Result<()> {
-    anyhow::bail!("training behaviours requires building with --features models (candle + a GPU)")
+    anyhow::bail!("training behaviors requires building with --features models (candle + a GPU)")
 }
 
 #[cfg(test)]

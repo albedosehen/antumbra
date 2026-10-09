@@ -26,7 +26,7 @@
 //! contract demands an implementation trained against a strictly proper scoring
 //! rule over outcomes a VERIFIER produced. Both halves hold here: the labels
 //! come from `scripts/d2-labels.sh`, whose verifier is span provenance with the
-//! span excised, derived from no model; and the fit minimises log loss, which is
+//! span excised, derived from no model; and the fit minimizes log loss, which is
 //! strictly proper, so reporting the true probability is the only way to score
 //! well. Fitting on a model's own past answers would violate ADR-0022's anchor
 //! invariant — fitting on a deterministic verifier's does not.
@@ -66,7 +66,7 @@ impl Platt {
         sigmoid(self.a * log10_score(score) + self.b)
     }
 
-    /// Fit `(a, b)` on `(score, relevant)` pairs by minimising LOG LOSS, the
+    /// Fit `(a, b)` on `(score, relevant)` pairs by minimizing LOG LOSS, the
     /// strictly proper rule [`TypedDecider`](crate::ports::TypedDecider)
     /// requires.
     ///
@@ -77,7 +77,7 @@ impl Platt {
     pub fn fit(samples: &[(f32, bool)], steps: usize, lr: f32) -> Self {
         // Start from a slope that is positive (a higher score means more likely
         // relevant, which is the one thing known about this signal in advance)
-        // and an intercept centred on the mean log-score, so the initial
+        // and an intercept centered on the mean log-score, so the initial
         // probabilities sit near 0.5 rather than saturated.
         let mean_x = if samples.is_empty() {
             0.0

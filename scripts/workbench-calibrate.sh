@@ -4,7 +4,7 @@
 #
 # The corpus leaves the loop nothing to learn from on tasks the base model always
 # passes or never passes, so before it is trained on, it is measured. The
-# reports this writes are what corpora/workbench/calibrate.py summarises.
+# reports this writes are what corpora/workbench/calibrate.py summarizes.
 #
 # Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as kusko-deploy.sh does:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD

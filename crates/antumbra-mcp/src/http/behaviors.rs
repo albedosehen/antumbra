@@ -1,17 +1,17 @@
-//! The behaviour keeper (ADR-0027): keeps each user's standing experts in step
-//! with the behaviours they accepted.
+//! The behavior keeper (ADR-0027): keeps each user's standing experts in step
+//! with the behaviors they accepted.
 //!
-//! On a node that can train, a pass reads every user's behaviour compartment
+//! On a node that can train, a pass reads every user's behavior compartment
 //! and, for each scope, compares what the user has accepted with what the
-//! scope's standing expert holds (`antumbra_core::behaviour::stale`). A scope
-//! behind its behaviours is trained again (`antumbra_serve::behave`) and the
+//! scope's standing expert holds (`antumbra_core::behavior::stale`). A scope
+//! behind its behaviors is trained again (`antumbra_serve::behave`) and the
 //! new expert served at once. A scope with nothing left to teach loses its
 //! expert.
 //!
-//! Behaviours are recorded on whichever node the agent talks to and reach this
+//! Behaviors are recorded on whichever node the agent talks to and reach this
 //! one by sync, so the keeper reads the store rather than waiting on a write.
 //! A user whose fabric names another node as their trainer is left to it. A
-//! set of behaviours that failed admission is not tried again until it
+//! set of behaviors that failed admission is not tried again until it
 //! changes: the same set would fail the same way.
 //!
 //! Database work runs in owner mode under the auth lock, a step at a time;
@@ -23,20 +23,20 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use antumbra_core::behaviour::{self, stale, Spec};
+use antumbra_core::behavior::{self, stale, Spec};
 use antumbra_core::{Expert, Memory};
 
 /// What one scope's standing expert needs.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Need {
     Nothing,
-    /// Train it on the behaviours with this fingerprint.
+    /// Train it on the behaviors with this fingerprint.
     Train(String),
     /// Nothing is left to teach: the expert goes.
     Drop,
 }
 
-/// A set of behaviours as taught: each id with its content, so a behaviour
+/// A set of behaviors as taught: each id with its content, so a behavior
 /// recorded again with a changed rule or check makes a different set.
 pub(super) fn fingerprint(taught: &[(Memory, Spec)]) -> String {
     let mut parts: Vec<(&str, &str)> = taught
@@ -89,10 +89,10 @@ pub(super) fn plan_user(
     tenant: &str,
     user: &str,
 ) -> Vec<ScopePlan> {
-    behaviour::scopes(memories, experts)
+    behavior::scopes(memories, experts)
         .into_iter()
         .map(|scope| {
-            let taught = behaviour::learnable(memories, &scope);
+            let taught = behavior::learnable(memories, &scope);
             let expert = experts
                 .iter()
                 .find(|e| e.standing_scope() == Some(scope.as_str()))
@@ -182,7 +182,7 @@ mod keeper {
         let compartments = {
             let _guard = state.auth.lock().await;
             state.store.signin_root().await?;
-            compartment::list_named(&state.store, "behaviour").await?
+            compartment::list_named(&state.store, antumbra_core::behavior::COMPARTMENT_NAME).await?
         };
         let mut tally = Tally::default();
         for c in compartments {
@@ -276,9 +276,9 @@ mod keeper {
                             failed.remove(&key);
                             tally.trained += 1;
                             eprintln!(
-                                "antumbra-mcp: standing experts, {} trained on {} behaviour(s), now served",
+                                "antumbra-mcp: standing experts, {} trained on {} behavior(s), now served",
                                 id.as_str(),
-                                report.behaviours.len()
+                                report.behaviors.len()
                             );
                         }
                         None => {

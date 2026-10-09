@@ -2,7 +2,7 @@
 //!
 //! Ids are strings (SurrealDB record ids serialize cleanly as such); this also
 //! sidesteps the documented u64 round-trip loss in the SurrealDB serde codec by
-//! never modelling an identity as a large native integer.
+//! never modeling an identity as a large native integer.
 
 use serde::{Deserialize, Serialize};
 

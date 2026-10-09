@@ -162,9 +162,9 @@ The HTTP server also serves a read-only dashboard at `/dashboard` (for example `
 
 A session can leave a note for a session on another of your machines: "rerun this on the GPU box", "check the dashboard after the deploy". The agent calls `leave_handoff` with the text (its first line is the title) and `for_host`, the machine's host name, or nothing for whichever of your machines starts a session next. A session that starts there opens with the count and a line for each handoff waiting for it, ahead of recalled memories, and keeps hearing about one until a session calls `complete_handoff`; after that it is no longer announced but `handoffs` with `include_done` still shows it. The machine's name is `ANTUMBRA_HOST_ID`, the same one the bootstrap prints in its first line, so set it on each machine. Each session start also names the machine to the server (`register_device`), so `devices` lists every one of your machines with when it was last seen. That includes a laptop whose agent talks to a hosted server and runs no server of its own. A machine named that way is a memory node: the server cannot see its hardware, and a machine that trains runs `antumbra-mcp` itself, which registers it with what it can do. Handoffs are yours alone: they live in your own `handoff` compartment, and no other user's session sees them. It is a note, not remote control: nothing runs on the other machine until a session there decides to.
 
-## Behaviours: what your own expert learns
+## Behaviors: what your own expert learns
 
-A memory is something to look up. A behaviour is how you want an agent to act on a class of tasks: "reach a host by its SSH alias", "name an issue branch `feat/{issue}-{slug}`", "open pull requests against main". When you state or correct one, the agent records it with `record_behaviour`:
+A memory is something to look up. A behavior is how you want an agent to act on a class of tasks: "reach a host by its SSH alias", "name an issue branch `feat/{issue}-{slug}`", "open pull requests against main". When you state or correct one, the agent records it with `record_behavior`:
 - the rule in one sentence;
 - `must` and `must_not` regular expressions that decide whether an answer follows it;
 - at least three example tasks with answers that follow it;
@@ -172,9 +172,9 @@ A memory is something to look up. A behaviour is how you want an agent to act on
 
 The check is tested against the examples and the violations before anything is stored, and `problems` says what to fix when it fails.
 
-A behaviour is proposed until you accept it (`accept_behaviour`), unless you stated it yourself. `retire_behaviour` drops one, and recording a new one with `supersedes` replaces an old one. `list_behaviours` shows them by status. They live in your own `behaviour` compartment, private to you, and recall finds them like any memory.
+A behavior is proposed until you accept it (`accept_behavior`), unless you stated it yourself. `retire_behavior` drops one, and recording a new one with `supersedes` replaces an old one. `list_behaviors` shows them by status. They live in your own `behavior` compartment, private to you, and recall finds them like any memory.
 
-Accepted behaviours are what your own expert is trained on. It learns each one from tasks the behaviour governs and its check, never from the memory's text (ADR-0027 in antumbra-meta).
+Accepted behaviors are what your own expert is trained on. It learns each one from tasks the behavior governs and its check, never from the memory's text (ADR-0027 in antumbra-meta).
 
 ## Claude Code with its telemetry off
 

@@ -27,7 +27,8 @@ const BARE_NAMES: &[&str] = &[
     "architecture",
     "codeowners",
 ];
-const LEGAL_PREFIXES: &[&str] = &["license", "licence", "notice", "copying", "patents"];
+// Both spellings: these match other people's file names, LICENCE as well as LICENSE.
+const LEGAL_PREFIXES: &[&str] = &["licence", "license", "notice", "copying", "patents"];
 
 /// Whether `path` (repository-relative, `/`-separated) is a knowledge
 /// document.

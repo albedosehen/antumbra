@@ -187,7 +187,7 @@ async fn bad_input_is_refused_with_the_choices() {
                 .map(|e| e.message.to_string())
         }
     };
-    assert!(refuse("a", "b", "rumour")
+    assert!(refuse("a", "b", "rumor")
         .await
         .unwrap()
         .contains("declared, observed, learned, claimed"));

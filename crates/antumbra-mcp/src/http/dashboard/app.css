@@ -121,7 +121,7 @@ code,
   white-space: nowrap;
 }
 
-/* The mark: the ring in the text colour, the dot in the accent. */
+/* The mark: the ring in the text color, the dot in the accent. */
 .mark {
   width: 24px;
   height: 24px;
@@ -478,7 +478,7 @@ td .id {
 }
 
 /* A status reads from its label; the marker repeats it in shape, so no state
-   is told by colour alone. */
+   is told by color alone. */
 .status {
   display: inline-flex;
   align-items: center;

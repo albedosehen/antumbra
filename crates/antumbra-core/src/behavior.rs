@@ -1,16 +1,16 @@
-//! Behaviours (ADR-0027): how the user wants an agent to act on a class of
+//! Behaviors (ADR-0027): how the user wants an agent to act on a class of
 //! tasks, stated as a rule with a check a program can apply.
 //!
-//! Experts learn behaviour, never facts. A behaviour trains from tasks it
+//! Experts learn behavior, never facts. A behavior trains from tasks it
 //! governs and a check that decides each answer, so it is recorded with both,
 //! by the agent that learned it, rather than dug out of free text afterwards.
 //!
-//! A behaviour is a memory in the user's own `behaviour` compartment, as a
+//! A behavior is a memory in the user's own `behavior` compartment, as a
 //! handoff is in its own. Its content leads with the rule in prose, which is
-//! what recall and the agent read, followed by a fenced `behaviour` block with
+//! what recall and the agent read, followed by a fenced `behavior` block with
 //! what training reads: the patterns an answer must and must not match, worked
 //! examples, and violating answers. Evidence entries carry its status, its
-//! scope, and the behaviour it supersedes.
+//! scope, and the behavior it supersedes.
 
 use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -18,23 +18,48 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{CompartmentId, TenantId, UserId};
 use crate::{Expert, Memory};
 
-/// The scope of a behaviour that applies in every repository.
+/// The scope of a behavior that applies in every repository.
 pub const EVERYWHERE: &str = "everywhere";
-/// The fewest worked examples a behaviour is recorded with.
-pub const MIN_EXAMPLES: usize = 3;
+/// The fewest worked examples a behavior is recorded with. Four, because
+/// training holds one example in four out to admit the expert by
+/// (`antumbra_train::behave::split`): with three, nothing is held out, the
+/// expert can never be admitted, and every training of it is spent for
+/// nothing.
+pub const MIN_EXAMPLES: usize = 4;
 
-const STATUS: &str = "behaviour-status:";
-const SCOPE: &str = "behaviour-scope:";
-const SUPERSEDES: &str = "behaviour-supersedes:";
-const EXPERT: &str = "behaviour-expert:";
-const FENCE: &str = "```behaviour";
+/// The name of a user's behavior compartment, and the last part of its id.
+/// It keeps the spelling it was first stored with: the compartments already
+/// in a store are found by it.
+pub const COMPARTMENT_NAME: &str = "behaviour";
 
-/// A task the behaviour governs and an answer that follows it.
+const STATUS: &str = "behavior-status:";
+const SCOPE: &str = "behavior-scope:";
+const SUPERSEDES: &str = "behavior-supersedes:";
+const EXPERT: &str = "behavior-expert:";
+const FENCE: &str = "```behavior";
+
+// What behaviors were written with before the US spelling, still read so
+// those already stored keep their state; nothing is written with them.
+const LEGACY_STATUS: &str = "behaviour-status:";
+const LEGACY_SCOPE: &str = "behaviour-scope:";
+const LEGACY_SUPERSEDES: &str = "behaviour-supersedes:";
+const LEGACY_EXPERT: &str = "behaviour-expert:";
+const LEGACY_FENCE: &str = "```behaviour";
+const LEGACY_CARD_KEY: &str = "behaviours";
+
+/// An evidence entry's value under `prefix`, or under its earlier spelling.
+fn value_of<'a>(entry: &'a str, prefix: &str, legacy: &str) -> Option<&'a str> {
+    entry
+        .strip_prefix(prefix)
+        .or_else(|| entry.strip_prefix(legacy))
+}
+
+/// A task the behavior governs and an answer that follows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Example {
     /// The task, as a person would ask it.
     pub task: String,
-    /// An answer that follows the behaviour.
+    /// An answer that follows the behavior.
     pub answer: String,
 }
 
@@ -49,15 +74,15 @@ pub struct Spec {
     /// Patterns no following answer matches.
     #[serde(default)]
     pub must_not: Vec<String>,
-    /// Tasks with answers that follow the behaviour.
+    /// Tasks with answers that follow the behavior.
     pub examples: Vec<Example>,
-    /// Answers that break the behaviour; the check must refuse each.
+    /// Answers that break the behavior; the check must refuse each.
     #[serde(default)]
     pub violations: Vec<String>,
 }
 
-/// Where a behaviour stands. The system proposes and the user accepts; a
-/// trained behaviour is in an expert; a retired one trains nothing.
+/// Where a behavior stands. The system proposes and the user accepts; a
+/// trained behavior is in an expert; a retired one trains nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Proposed,
@@ -106,7 +131,7 @@ fn follows(must: &[Regex], must_not: &[Regex], answer: &str) -> bool {
 }
 
 impl Spec {
-    /// Whether `answer` follows the behaviour: every `must` pattern matches and
+    /// Whether `answer` follows the behavior: every `must` pattern matches and
     /// no `must_not` pattern does. `None` when a pattern does not compile.
     pub fn follows(&self, answer: &str) -> Option<bool> {
         let mut problems = Vec::new();
@@ -117,7 +142,7 @@ impl Spec {
             .then(|| follows(&must, &must_not, answer))
     }
 
-    /// Everything that keeps this behaviour from training; empty when it can.
+    /// Everything that keeps this behavior from training; empty when it can.
     ///
     /// A check needs a `must` pattern, not only `must_not` ones: a check that
     /// only refuses passes an empty or evasive answer, and training would then
@@ -138,7 +163,7 @@ impl Spec {
         let must_not = compile(&self.must_not, &mut problems);
         if self.examples.len() < MIN_EXAMPLES {
             problems.push(format!(
-                "{} example(s); a behaviour needs at least {MIN_EXAMPLES}",
+                "{} example(s); a behavior needs at least {MIN_EXAMPLES}, since training holds one in four out to admit its expert by",
                 self.examples.len()
             ));
         }
@@ -170,31 +195,35 @@ impl Spec {
     }
 }
 
-/// The user's behaviour compartment, one per `(tenant, user)`.
+/// The user's behavior compartment, one per `(tenant, user)`.
 pub fn compartment_id(tenant: &TenantId, user: &UserId) -> CompartmentId {
     CompartmentId::new(format!(
-        "comp:{}:{}:behaviour",
+        "comp:{}:{}:{COMPARTMENT_NAME}",
         tenant.as_str(),
         user.as_str()
     ))
 }
 
-/// A behaviour as a memory's content: the rule first, for recall and the
+/// A behavior as a memory's content: the rule first, for recall and the
 /// agent, then the fenced block training reads.
 pub fn content(spec: &Spec) -> String {
     let json = serde_json::to_string_pretty(spec).unwrap_or_default();
     format!("{}\n\n{FENCE}\n{json}\n```\n", spec.rule.trim())
 }
 
-/// The spec in a behaviour memory's content, if it holds one.
+/// The spec in a behavior memory's content, if it holds one: in a
+/// `behavior` block, or a `behaviour` block written before the US spelling.
 pub fn spec_of(content: &str) -> Option<Spec> {
-    let start = content.find(FENCE)? + FENCE.len();
+    let start = content
+        .find(FENCE)
+        .map(|i| i + FENCE.len())
+        .or_else(|| content.find(LEGACY_FENCE).map(|i| i + LEGACY_FENCE.len()))?;
     let rest = &content[start..];
     let end = rest.find("```")?;
     serde_json::from_str(rest[..end].trim()).ok()
 }
 
-/// A scope as behaviours compare them: a repository slug, or [`EVERYWHERE`].
+/// A scope as behaviors compare them: a repository slug, or [`EVERYWHERE`].
 pub fn normalize_scope(scope: Option<&str>) -> String {
     match scope.map(str::trim) {
         None | Some("") => EVERYWHERE.to_string(),
@@ -214,21 +243,21 @@ pub fn supersedes_evidence(id: &str) -> String {
     format!("{SUPERSEDES}{id}")
 }
 
-/// Set a behaviour's status in its evidence, replacing the one it had.
+/// Set a behavior's status in its evidence, replacing the one it had.
 pub fn set_status(evidence: &mut Vec<String>, status: Status) {
-    evidence.retain(|e| !e.starts_with(STATUS));
+    evidence.retain(|e| value_of(e, STATUS, LEGACY_STATUS).is_none());
     evidence.push(status_evidence(status));
 }
 
-/// Mark a behaviour trained into `expert`, replacing the expert it was
+/// Mark a behavior trained into `expert`, replacing the expert it was
 /// trained into before, if any.
 pub fn mark_trained(evidence: &mut Vec<String>, expert: &str) {
     set_status(evidence, Status::Trained);
-    evidence.retain(|e| !e.starts_with(EXPERT));
+    evidence.retain(|e| value_of(e, EXPERT, LEGACY_EXPERT).is_none());
     evidence.push(format!("{EXPERT}{expert}"));
 }
 
-/// A behaviour's state, read back from its evidence.
+/// A behavior's state, read back from its evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {
     pub status: Status,
@@ -239,26 +268,29 @@ pub struct State {
 }
 
 impl State {
-    /// `None` when the evidence carries no behaviour status: not a behaviour.
+    /// `None` when the evidence carries no behavior status: not a behavior.
     pub fn of(evidence: &[String]) -> Option<State> {
-        let field = |prefix: &str| {
+        let field = |prefix: &str, legacy: &str| {
             evidence
                 .iter()
                 .rev()
-                .find_map(|e| e.strip_prefix(prefix).map(str::to_string))
+                .find_map(|e| value_of(e, prefix, legacy).map(str::to_string))
         };
         Some(State {
-            status: Status::parse(&field(STATUS)?)?,
-            scope: field(SCOPE).unwrap_or_else(|| EVERYWHERE.to_string()),
-            supersedes: field(SUPERSEDES),
-            expert: field(EXPERT),
+            status: Status::parse(&field(STATUS, LEGACY_STATUS)?)?,
+            scope: field(SCOPE, LEGACY_SCOPE).unwrap_or_else(|| EVERYWHERE.to_string()),
+            supersedes: field(SUPERSEDES, LEGACY_SUPERSEDES),
+            expert: field(EXPERT, LEGACY_EXPERT),
         })
     }
 }
 
-/// What the standing expert for `scope` is taught: the behaviours accepted,
+/// What the standing expert for `scope` is taught: the behaviors accepted,
 /// or trained before and still in force, each with its spec. Retired and
-/// proposed ones are left out.
+/// proposed ones are left out, and so is one that could not be recorded
+/// today ([`Spec::problems`]), such as one recorded with three examples before
+/// four were required: teaching it ends in refusal every time, after the GPU
+/// time is spent. `list_behaviors` names what each one lacks.
 pub fn learnable(memories: &[Memory], scope: &str) -> Vec<(Memory, Spec)> {
     memories
         .iter()
@@ -269,10 +301,11 @@ pub fn learnable(memories: &[Memory], scope: &str) -> Vec<(Memory, Spec)> {
                 .then(|| Some((m.clone(), spec_of(&m.content)?)))
                 .flatten()
         })
+        .filter(|(_, spec)| spec.problems().is_empty())
         .collect()
 }
 
-/// The scopes a user's behaviours or standing experts are in, everywhere
+/// The scopes a user's behaviors or standing experts are in, everywhere
 /// first: each one an expert may have to be trained, retrained, or dropped
 /// for.
 pub fn scopes(memories: &[Memory], experts: &[Expert]) -> Vec<String> {
@@ -293,11 +326,11 @@ pub fn scopes(memories: &[Memory], experts: &[Expert]) -> Vec<String> {
     scopes
 }
 
-/// The behaviours a standing expert was taught, from its card.
+/// The behaviors a standing expert was taught, from its card.
 pub fn taught_by(expert: &Expert) -> Vec<String> {
-    expert
-        .capability_card
-        .get("behaviours")
+    let card = &expert.capability_card;
+    card.get("behaviors")
+        .or_else(|| card.get(LEGACY_CARD_KEY))
         .and_then(|v| v.as_array())
         .map(|xs| {
             xs.iter()
@@ -307,9 +340,9 @@ pub fn taught_by(expert: &Expert) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Whether a scope's standing expert is behind its behaviours: missing while
+/// Whether a scope's standing expert is behind its behaviors: missing while
 /// there is something to teach, holding any while nothing is left, holding a
-/// different set, or with a behaviour accepted since (a new one, or one
+/// different set, or with a behavior accepted since (a new one, or one
 /// recorded again with a changed rule or check).
 pub fn stale(taught: &[(Memory, Spec)], expert: Option<&Expert>) -> bool {
     let Some(expert) = expert else {

@@ -433,7 +433,7 @@ async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
     app.request_action();
     assert!(app.pending.is_none());
 
-    // Cancelling clears the control back to Run.
+    // Canceling clears the control back to Run.
     app.cancel_halt(&store).await.unwrap();
     assert!(!app.loop_halt_pending);
     assert_eq!(

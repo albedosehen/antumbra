@@ -11,7 +11,7 @@ use crate::theme::{rgb, Theme};
 
 use super::{gauge_spans, panel, pulse};
 
-/// The KPI strip: a row of labelled mini-gauges for the substrate's quality
+/// The KPI strip: a row of labeled mini-gauges for the substrate's quality
 /// ratios (fitness / frozen / graduated / gating / memory), shown on every page.
 pub(super) fn metrics(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();

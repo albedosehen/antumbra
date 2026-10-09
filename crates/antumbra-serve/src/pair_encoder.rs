@@ -40,7 +40,7 @@ use tokenizers::{
 
 use antumbra_core::{AntumbraError, Result};
 
-use crate::decision_probe::{score_at_half, LabelledPair, Scored};
+use crate::decision_probe::{score_at_half, LabeledPair, Scored};
 
 /// The encoder ADR-0024 names, at the size that fits a training pass on one
 /// 24GB card alongside nothing else.
@@ -224,7 +224,7 @@ impl PairModel {
 /// batch. Returns the ids and the attention mask.
 pub fn encode_pairs(
     tokenizer: &Tokenizer,
-    pairs: &[&LabelledPair],
+    pairs: &[&LabeledPair],
     device: &Device,
 ) -> Result<(Tensor, Tensor)> {
     let inputs: Vec<(&str, &str)> = pairs
@@ -328,8 +328,8 @@ fn fetch(model: &str) -> Result<(PathBuf, PathBuf, PathBuf)> {
 /// same cut and with the same arithmetic as the frozen-encoder heads, so the
 /// numbers compare. `progress` receives a line per epoch.
 pub fn fine_tune_and_score(
-    train: &[LabelledPair],
-    test: &[LabelledPair],
+    train: &[LabeledPair],
+    test: &[LabeledPair],
     cfg: &FineTune,
     progress: &mut dyn FnMut(String),
 ) -> Result<Scored> {
@@ -386,7 +386,7 @@ pub fn fine_tune_and_score(
         let mut loss_sum = 0f64;
         let mut batches = 0usize;
         for chunk in order.chunks(batch) {
-            let pairs: Vec<&LabelledPair> = chunk.iter().map(|&i| &train[i]).collect();
+            let pairs: Vec<&LabeledPair> = chunk.iter().map(|&i| &train[i]).collect();
             let (ids, mask) = encode_pairs(&tokenizer, &pairs, &device)?;
             let labels: Vec<u32> = pairs.iter().map(|p| u32::from(p.relevant)).collect();
             let labels = Tensor::new(labels.as_slice(), &device).map_err(|e| err("labels", e))?;
@@ -408,7 +408,7 @@ pub fn fine_tune_and_score(
 
     let mut probs = Vec::with_capacity(test.len());
     for chunk in test.chunks(batch) {
-        let pairs: Vec<&LabelledPair> = chunk.iter().collect();
+        let pairs: Vec<&LabeledPair> = chunk.iter().collect();
         let (ids, mask) = encode_pairs(&tokenizer, &pairs, &device)?;
         let p = candle_nn::ops::softmax(
             &pair

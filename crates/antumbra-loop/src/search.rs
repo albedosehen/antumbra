@@ -11,7 +11,7 @@
 //! instead of piling onto one point.
 //!
 //! Ranking follows the record's fourth constraint. The argmax of noisy
-//! estimates is enriched for favourable noise (the optimizer's curse, Smith and
+//! estimates is enriched for favorable noise (the optimizer's curse, Smith and
 //! Winkler 2006), so a recipe's score is shrunk toward its generation's mean
 //! in proportion to how few evaluations it rests on, and one lucky evaluation
 //! cannot carry a recipe past a well-measured one. A recipe run in several
@@ -373,10 +373,10 @@ pub fn propose(
         let mut candidates: Vec<Vec<f64>> = (0..256)
             .map(|_| (0..space.dims()).map(|_| rng.unit()).collect())
             .collect();
-        let centre = space.to_unit(&lead);
+        let center = space.to_unit(&lead);
         for _ in 0..64 {
             candidates.push(
-                centre
+                center
                     .iter()
                     .map(|c| (c + 0.1 * rng.normal()).clamp(0.0, 1.0))
                     .collect(),

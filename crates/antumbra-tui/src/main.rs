@@ -95,7 +95,7 @@ struct Args {
 enum Command {
     /// Headless: render one frame to an in-memory buffer (no terminal) and write
     /// `<out>.txt` (a Unicode grid, for e2e + plain inspection) and `<out>.png`
-    /// (a colour screenshot). Use `--demo` to render a seeded population.
+    /// (a color screenshot). Use `--demo` to render a seeded population.
     Snapshot {
         /// Output path stem; `.txt` and `.png` are appended.
         #[arg(long, default_value = "antumbra-tui-snapshot")]
@@ -696,7 +696,7 @@ async fn run(
     store: &Store,
     embedder: &dyn Embedder,
 ) -> Result<()> {
-    // Honour sub-16ms frame budgets on Windows (restored on drop).
+    // Honor sub-16ms frame budgets on Windows (restored on drop).
     let _timer = pacing::TimerResolution::acquire();
     // Live store watchers: an external write (a captured memory, a graduated
     // expert) triggers an immediate reload instead of waiting for the periodic

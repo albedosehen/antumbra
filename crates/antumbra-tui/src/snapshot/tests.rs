@@ -1,8 +1,8 @@
 //! The console's fixtures and its golden frames.
 //!
 //! A golden is a whole rendered frame compared byte for byte, so these are
-//! what says the console still looks like itself. The behaviour half sits in
-//! `behaviour`, a child of this module, so it reaches these fixtures the same
+//! what says the console still looks like itself. The behavior half sits in
+//! `behavior`, a child of this module, so it reaches these fixtures the same
 //! way it always did.
 
 use super::*;
@@ -280,7 +280,7 @@ fn golden_command_palette() {
 }
 
 // Golden the Memory page: the penumbra edge graph (memories clustered by
-// network, type-coloured edges) beside the selected trace's detail. The graph
+// network, type-colored edges) beside the selected trace's detail. The graph
 // is statically laid out (no animation clock), so the full frame is stable.
 #[test]
 fn golden_memory_page() {
@@ -312,7 +312,7 @@ fn the_memory_detail_names_its_anchor_and_scope() -> anyhow::Result<()> {
 
 // Golden the Sovereign page: the rules on the left, skill use on the right,
 // stalest first. Fixed dates, so the frame does not depend on the clock (the
-// clock only decides a colour, which the text golden does not see).
+// clock only decides a color, which the text golden does not see).
 #[test]
 fn golden_sovereign_page() -> anyhow::Result<()> {
     use chrono::TimeZone;
@@ -602,4 +602,4 @@ fn golden_focused_boundaries_panel() {
     golden_detail_column("focused_boundaries", &mut app, 120, 36);
 }
 
-mod behaviour;
+mod behavior;

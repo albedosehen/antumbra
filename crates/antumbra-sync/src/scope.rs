@@ -4,7 +4,7 @@
 //! The ACL and this are different statements and must not be collapsed into
 //! one. `MEMORY_SELECT_RULE` says what a session may **see**, live, through the
 //! engine. This says what that user's other machines get a **copy** of. A grant
-//! is a live read, not a licence to take another member's private compartment
+//! is a live read, not a license to take another member's private compartment
 //! home on a laptop.
 //!
 //! The narrower policy is also the implementable one: on five of the six
@@ -174,7 +174,7 @@ mod tests {
     /// the privacy answer and, not by coincidence, exactly what the session can
     /// write back.
     #[tokio::test]
-    async fn a_grant_is_a_live_read_not_a_licence_to_copy() -> Result<()> {
+    async fn a_grant_is_a_live_read_not_a_license_to_copy() -> Result<()> {
         let scope = lilys_scope().await?;
         assert!(
             !scope.holds_memory(&json!({ "compartment": "comp:his" })),

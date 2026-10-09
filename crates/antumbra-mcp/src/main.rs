@@ -107,7 +107,7 @@ struct Cli {
     auto_propose: Option<usize>,
     /// Retired (ADR-0027): a reinforced memory no longer trains its compartment
     /// into an expert, which taught experts to echo memories. Standing experts
-    /// are trained from accepted behaviours by the keeper, on any node that can
+    /// are trained from accepted behaviors by the keeper, on any node that can
     /// train. Still accepted, so a deployment that passes it keeps starting.
     #[arg(long, default_value_t = false, hide = true)]
     auto_consolidate: bool,
@@ -569,7 +569,7 @@ async fn run() -> Result<()> {
     if cli.auto_consolidate {
         eprintln!(
             "antumbra-mcp: --auto-consolidate is retired and does nothing; standing experts \
-             are trained from accepted behaviours (ADR-0027)"
+             are trained from accepted behaviors (ADR-0027)"
         );
     }
     let host = default_host(cli.host);

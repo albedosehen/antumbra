@@ -66,7 +66,7 @@ use antumbra_store::Store;
 use crate::auth::{Identity, JwtVerifier};
 use crate::server::McpServer;
 
-mod behaviours;
+mod behaviors;
 mod chunker;
 mod dashboard;
 mod github;
@@ -264,7 +264,7 @@ pub async fn serve(
     });
     spawn_live_propagation(state.clone(), announced);
     chunker::spawn(state.clone(), chunk_in_flight);
-    behaviours::spawn(state.clone());
+    behaviors::spawn(state.clone());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
     serve_until(listener, router(state), shutdown_signal(), DRAIN).await

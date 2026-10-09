@@ -22,7 +22,7 @@ Connecting to a hosted workspace needs no clone: `antumbra setup hosted <url> --
 - **Hooks for Claude Code.** Recall at the start of each session and with each prompt, and a nudge to write back what was verified when a session stops.
 - **Memory with provenance.** A memory about code carries the repository, commit and branch it was learned at. Recall scopes to where you are and marks each memory as live, not on HEAD, or orphaned, and a merged branch's memories move to its merge commit.
 - **Recall** that fuses dense and full-text search by rank, with an optional cross-encoder rerank whose calibrated floor lets it answer "nothing relevant". Its legs rank keys instead of reading rows, and memory's read rule reads the owner's compartment record directly, one key read per row instead of a subquery ([#196](https://github.com/albedosehen/antumbra/pull/196), [#198](https://github.com/albedosehen/antumbra/pull/198)).
-- **Handoffs** between your machines, a **dependency graph** with `blast_radius`, **compartments** you share on purpose, **documents** recalled separately from memory, and **behaviours**: rules you record with a check that has to tell examples from violations.
+- **Handoffs** between your machines, a **dependency graph** with `blast_radius`, **compartments** you share on purpose, **documents** recalled separately from memory, and **behaviors**: rules you record with a check that has to tell examples from violations.
 - **The operator console** (`antumbra-tui`) and a read-only web dashboard at `/dashboard`.
 - **Experts (experimental).** Training and serving small LoRA experts needs an NVIDIA GPU and a source build with the `models` feature. The prebuilt binaries are the light, no-GPU build.
 

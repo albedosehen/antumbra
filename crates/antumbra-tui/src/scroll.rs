@@ -1,5 +1,5 @@
 //! Scrolling for the one-row-per-item lists (shadows, boundaries): a
-//! selection-following viewport (the selected row stays centred once a list
+//! selection-following viewport (the selected row stays centered once a list
 //! outgrows its panel), plus a slim scrollbar for a sense of position.
 //! Hand-rolled on ratatui core.
 
@@ -14,7 +14,7 @@ use ratatui::Frame;
 use crate::theme::Theme;
 
 /// The first visible row index for `total` rows in `height` rows, keeping the
-/// `selected` row visible (centred once the list overflows).
+/// `selected` row visible (centered once the list overflows).
 pub fn first_visible(total: usize, height: usize, selected: usize) -> usize {
     if height == 0 || total <= height {
         return 0;

@@ -89,7 +89,7 @@ fn each_source_has_its_own_identity_so_they_reinforce_separately() {
         "two workspaces never share an edge's row"
     );
     assert_eq!(Source::parse("observed"), Some(Source::Observed));
-    assert_eq!(Source::parse("rumour"), None);
+    assert_eq!(Source::parse("rumor"), None);
 }
 
 #[test]

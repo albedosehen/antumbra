@@ -21,7 +21,7 @@ pub struct Expert {
     /// Structured "what I do" card.
     #[serde(default)]
     pub capability_card: serde_json::Value,
-    /// Learned routing vector; co-learned from evaluated behaviour.
+    /// Learned routing vector; co-learned from evaluated behavior.
     #[serde(default)]
     pub capability_vec: Option<Vec<f32>>,
     #[serde(default)]
@@ -79,7 +79,7 @@ impl Expert {
     /// keeps every expert minted before placement existed working: there was
     /// one machine then, so "unknown" and "here" were the same answer. The cost
     /// of that choice is that an old expert stays registered on a node that
-    /// cannot open it, which is the behaviour those nodes have today anyway.
+    /// cannot open it, which is the behavior those nodes have today anyway.
     pub fn is_placed_on(&self, host: &str) -> bool {
         match &self.placed_on {
             Some(node) => node == host,

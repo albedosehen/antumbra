@@ -85,8 +85,8 @@ pub struct McpServer {
     /// The typed decider that answers "does this memory answer this query" as a
     /// calibrated probability (ADR-0024 D-2), which is what lets recall say
     /// nothing rather than return the best of a bad lot. `None` = no floor runs
-    /// and every recalled row is returned, which is the behaviour before this
-    /// existed and the behaviour a deployment without a head keeps.
+    /// and every recalled row is returned, which is the behavior before this
+    /// existed and the behavior a deployment without a head keeps.
     decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
 }
 
@@ -246,7 +246,7 @@ fn default_capability() -> String {
 }
 
 mod answer;
-mod behaviour;
+mod behavior;
 mod compartments;
 mod depgraph;
 mod device;
@@ -569,7 +569,7 @@ impl McpServer {
             return memories;
         }
         // One question per candidate, in order, against a state that names both
-        // sides of the judgement.
+        // sides of the judgment.
         let questions = vec![Question::Noul; memories.len()];
         let state = antumbra_core::ports::RelevanceState {
             query: query.to_string(),

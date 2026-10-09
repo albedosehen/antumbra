@@ -3,7 +3,7 @@
 //!
 //! - [`to_text`] preserves every cell's glyph (braille graph, box-drawing,
 //!   symbols), so it reads back exactly, for assertions and plain inspection.
-//! - [`save_png`] adds the RGB colours for true visual fidelity, rasterizing the
+//! - [`save_png`] adds the RGB colors for true visual fidelity, rasterizing the
 //!   embedded Cascadia Mono (OFL; see `assets/CascadiaMono.LICENSE`).
 
 use ab_glyph::{point, Font, FontRef, PxScale, ScaleFont};
@@ -139,7 +139,7 @@ fn blend(under: u8, over: u8, c: f32) -> u8 {
         .clamp(0.0, 255.0) as u8
 }
 
-/// Map a ratatui colour to RGB, falling back to `default` for `Reset`/unknown.
+/// Map a ratatui color to RGB, falling back to `default` for `Reset`/unknown.
 fn color_rgb(color: Color, default: [u8; 3]) -> [u8; 3] {
     match color {
         Color::Rgb(r, g, b) => [r, g, b],
