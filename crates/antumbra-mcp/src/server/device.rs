@@ -1,4 +1,4 @@
-//! Devices (ADR-0017): the machines a user's sessions run on, listed in the
+//! Devices: the machines a user's sessions run on, listed in the
 //! user's fabric whether or not a server runs on them.
 //!
 //! Its own router, joined to the others in `engine.rs`. A server registers its

@@ -70,7 +70,7 @@ pub(super) struct RecallParams {
     ///
     /// The floor is a default rather than a rule, because "the best of a bad
     /// lot" is occasionally what a caller wants. What it may not be is the only
-    /// option (ADR-0023 B-2).
+    /// option.
     pub(super) floor: Option<f32>,
     /// Return each memory's whole `content` instead of the bounded prefix.
     /// Default `false`: a recall is a survey, and a survey that spends the
@@ -156,8 +156,8 @@ pub(super) struct MemoryView {
     /// carries the lowest number here. Worse, it tracks a memory's LENGTH more
     /// than its topic -- a 66-character row scores 0.774 against a query about
     /// banana bread, while a 1058-character row scores 0.224 against a query
-    /// about its own contents. Measured on a 5,538-memory store; see ADR-0023
-    /// B-2, which corrects an earlier plan to build a relevance floor on exactly
+    /// about its own contents. Measured on a 5,538-memory store, which is why
+    /// recall's relevance floor is judged by a trained head and not built on
     /// this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) similarity: Option<f32>,
@@ -171,7 +171,7 @@ pub(super) struct MemoryView {
     pub(super) truncated: bool,
     /// When the memory was last written: stored, reinforced, or penalized. With
     /// `reinforcement`, this is what lets a memory serve as a counter that also
-    /// says when it last counted (ADR-0021, skill usage).
+    /// says when it last counted, which is how skill usage is kept.
     pub(super) updated_at: String,
 }
 
@@ -263,8 +263,8 @@ pub(super) struct MemoriesOut {
     /// At most `top_k` for a recall, at most `limit` (up to 200) for a paged
     /// list, and every memory for a list that was not paged.
     pub(super) memories: Vec<MemoryView>,
-    /// Present, and `true`, when a relevance floor ran and NOTHING cleared it
-    /// (ADR-0023 B-2). Absent otherwise, including when no floor ran at all.
+    /// Present, and `true`, when a relevance floor ran and NOTHING cleared it.
+    /// Absent otherwise, including when no floor ran at all.
     ///
     /// This is the difference between "nothing here answers you" and "here are
     /// five weak rows, you decide", which an empty list alone cannot express and
@@ -367,7 +367,7 @@ pub(super) struct ExpertView {
     pub(super) fitness: f32,
     /// True if this is the caller's own private expert (else a shared one).
     pub(super) private: bool,
-    /// Where it stands (ADR-0022 S-5): `active` (routed to), `dormant` (served
+    /// Where it stands: `active` (routed to), `dormant` (served
     /// only when named), `archived` (kept, not served) or `deleted`.
     pub(super) status: String,
 }

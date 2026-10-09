@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Sweep the margin gate's threshold over a trained population (ADR-0024 D-1,
-# Validation 1) on the GPU host. Detached; logs to $LOG (/tmp/gate-sweep.log
-# by default).
+# Sweep the margin gate's threshold over a trained population, the control a
+# learned router is measured against, on the GPU host. Detached; logs to $LOG
+# (/tmp/gate-sweep.log by default).
 #
 # $2 is a run directory a training run left behind (search-validate.sh writes
 # them under ~/antumbra-search-runs), holding its store and its adapters. Every

@@ -46,7 +46,7 @@ async fn a_handoff_waits_where_it_is_addressed_until_it_is_done() {
     let s = server_for(&store, "user:a", "kuskokwim");
     let for_gpu = leave(
         &s,
-        "Rerun the D-2 probe\nwith 2048 tokens",
+        "Rerun the relevance probe\nwith 2048 tokens",
         Some(" Kuskokwim "),
     )
     .await;
@@ -62,7 +62,7 @@ async fn a_handoff_waits_where_it_is_addressed_until_it_is_done() {
         [for_any.id.as_str(), for_gpu.id.as_str()],
         "newest first"
     );
-    assert_eq!(here.handoffs[1].title, "Rerun the D-2 probe");
+    assert_eq!(here.handoffs[1].title, "Rerun the relevance probe");
     assert_eq!(here.handoffs[1].from_host.as_deref(), Some("windows"));
     let said = here.announcement.expect("announced");
     assert!(

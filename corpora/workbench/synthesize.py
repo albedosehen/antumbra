@@ -1,5 +1,5 @@
-"""Turn the inputs a model proposed for each task into a verifier (ADR-0022 S-4,
-the reducible tier), and write the known-bad artifacts it is measured against.
+"""Turn the inputs a model proposed for each task into a verifier (the reducible
+tier), and write the known-bad artifacts it is measured against.
 
     python corpora/workbench/synthesize.py --corpus corpora/workbench/strings.json \\
         --proposals proposals.json --specs specs.json --artifacts artifacts.json

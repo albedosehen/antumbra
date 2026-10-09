@@ -1,11 +1,11 @@
-//! How the loop reads its own generations through the standing instruments
-//! (ADR-0022): what a generation is asked to withhold, what its results say,
-//! and what the audit slice says across the generations before it.
+//! How the loop reads its own generations through the standing instruments:
+//! what a generation is asked to withhold, what its results say, and what the
+//! audit slice says across the generations before it.
 //!
 //! Nothing here decides anything. The loop records these readings beside the
 //! fitness they qualify and says so when the trend reads as overtuning. One
-//! rule reaches a decision, and the record states it rather than this module
-//! choosing it: a generation that passed an impossible task fails whole, so it
+//! rule reaches a decision, and it is fixed by design rather than chosen by
+//! this module: a generation that passed an impossible task fails whole, so it
 //! does not graduate. No number measured here reaches training or reward.
 
 use antumbra_core::ports::{Remeasurement, TaskOutcome, TrainOutcome};
@@ -38,7 +38,7 @@ impl GenerationLoop<'_> {
         })
     }
 
-    /// Read this generation through the standing instruments (ADR-0022).
+    /// Read this generation through the standing instruments.
     ///
     /// `None` unless three things hold, and each `None` is the true answer
     /// rather than a degraded one. Something was held out: with no partition
@@ -116,8 +116,8 @@ impl GenerationLoop<'_> {
         if trend == Trend::Overtuning {
             eprintln!(
                 "instruments: over the last {} measured generations the search score climbed \
-                 and the audit slice did not follow -- measured overtuning, ADR-0022's S-1 kill \
-                 criterion",
+                 and the audit slice did not follow -- measured overtuning, the recipe search's \
+                 kill criterion",
                 self.cfg.watch.window
             );
         }

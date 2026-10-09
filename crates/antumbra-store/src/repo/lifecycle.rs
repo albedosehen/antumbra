@@ -1,4 +1,4 @@
-//! Expert lifecycle repository (ADR-0022 S-5): the append-only history of every
+//! Expert lifecycle repository: the append-only history of every
 //! expert's status changes, and the population as the gate may see it.
 //!
 //! A move is one row, never rewritten, numbered per expert. The number orders
@@ -176,7 +176,7 @@ pub fn trained_under(expert: &Expert, verifier: &VerifierId) -> bool {
 }
 
 /// Archive every expert that trained under `verifier` and is still active or
-/// dormant (ADR-0022 S-4), and return them. Archived keeps the weights and
+/// dormant, and return them. Archived keeps the weights and
 /// the tripwire, and a person can revive one; nothing here deletes.
 pub async fn archive_trained_under(store: &Store, verifier: &VerifierId) -> Result<Vec<ExpertId>> {
     let mut archived = Vec::new();

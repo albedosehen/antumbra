@@ -1,4 +1,4 @@
-//! The chunk index (ADR-0025): each memory's text in overlapping pieces, each
+//! The chunk index: each memory's text in overlapping pieces, each
 //! with its own vector, so a passage from the middle of a long memory can find
 //! it. Derived from the memory and kept by the server's chunker; never synced.
 //!

@@ -1,4 +1,4 @@
-//! `antumbra verifier` (ADR-0022 S-4): proposing verifiers, building the
+//! `antumbra verifier`: proposing verifiers, building the
 //! cases they are measured on, measuring them, and moving them.
 
 use std::collections::{BTreeMap, BTreeSet};

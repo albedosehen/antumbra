@@ -49,7 +49,7 @@ fn verify_request(
 ///
 /// `withheld` corrections are never internalized: they are measured after
 /// training, beside the learned ones, and reported per task without counting
-/// toward fitness (ADR-0022). Pass an empty slice to learn every correction,
+/// toward fitness. Pass an empty slice to learn every correction,
 /// which is what an intake of a user's own corrections should do.
 pub async fn capture_corrections(
     model: &mut (dyn CausalLm + Send),
@@ -302,7 +302,7 @@ mod tests {
         }
     }
 
-    /// ADR-0022: a withheld correction is measured after training and never
+    /// A withheld correction is measured after training and never
     /// internalized, and its result is not fitness.
     #[tokio::test]
     async fn a_withheld_correction_is_measured_and_never_internalized() -> Result<()> {

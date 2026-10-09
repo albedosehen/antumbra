@@ -384,7 +384,7 @@ mod tests {
 
 /// A [`TypedDecider`](crate::ports::TypedDecider) whose answers are decided by a
 /// substring rule, so a caller's use of the port can be tested before any head
-/// exists (ADR-0024).
+/// exists.
 ///
 /// It is deliberately candid about its own confidence: the probability it
 /// reports is the one it was configured with, not 1.0, because a caller that
@@ -412,8 +412,8 @@ impl ScriptedDecider {
     }
 
     /// A decider that always returns `Err`, so a caller's degrade path can be
-    /// tested. ADR-0024 requires a head that fails to load to fall back to the
-    /// path it replaced rather than to nothing.
+    /// tested. A head that fails to load must fall back to the path it
+    /// replaced rather than to nothing.
     pub fn failing() -> Self {
         Self {
             token: String::new(),
@@ -478,7 +478,7 @@ mod scripted_decider {
     use crate::ports::{Answer, Question, TypedDecider};
 
     /// The seam works before any head exists, which is the point of defining the
-    /// port first: a caller of ADR-0024's D-2 floor can be written and tested
+    /// port first: a caller of the relevance floor can be written and tested
     /// against this, and the trained head drops in as the only changed piece.
     #[tokio::test]
     async fn a_noul_answers_both_sides_of_a_threshold() {
@@ -554,8 +554,8 @@ mod scripted_decider {
         assert!(matches!(out[2], Answer::Choice { index: 1, .. }));
     }
 
-    /// ADR-0024 requires a head that fails to load to degrade to the path it
-    /// replaced rather than to nothing, so the failure has to be visible.
+    /// A head that fails to load must degrade to the path it replaced rather
+    /// than to nothing, so the failure has to be visible.
     #[tokio::test]
     async fn a_failing_decider_reports_the_failure() {
         let d = ScriptedDecider::failing();

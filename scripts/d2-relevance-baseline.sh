@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The control measurement behind ADR-0024's D-2 bar: how well a threshold on the
-# deployed cross-encoder decides "does this memory answer this query".
+# The control measurement behind the relevance floor's bar: how well a threshold
+# on the deployed cross-encoder decides "does this memory answer this query".
 #
 # It exists because the bar it produces is a number a typed head has to beat, and
 # a number nobody can reproduce is not a bar. Run it again before trusting that
@@ -88,7 +88,7 @@ done
 # The raw scores, for calibration rather than thresholding. A threshold asks
 # "which side", and a floor that means the same thing for every query needs
 # "how likely" -- which is a monotone map from this score, fitted against these
-# same verifier labels. ADR-0024's TypedDecider contract requires that fit to
+# same verifier labels. The TypedDecider contract requires that fit to
 # minimize a strictly proper scoring rule, so the fitting lives in Rust beside
 # the Brier implementation rather than in awk here.
 if [ -n "${ANTUMBRA_D2_SCORES_OUT:-}" ]; then

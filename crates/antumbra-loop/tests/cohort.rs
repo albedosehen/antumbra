@@ -1,6 +1,6 @@
-//! A searched generation (ADR-0022 S-1, option 1): the search proposes a
-//! recipe per cohort member, every member trains from the base under its own,
-//! the best is carried forward, and only its recipe propagates.
+//! A searched generation (the recipe search, run as a cohort): the search
+//! proposes a recipe per cohort member, every member trains from the base
+//! under its own, the best is carried forward, and only its recipe propagates.
 
 use std::sync::Mutex;
 

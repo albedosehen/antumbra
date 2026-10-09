@@ -93,7 +93,7 @@ Start the server with `--tools agent` (or `ANTUMBRA_TOOLS=agent`) for a coding a
 
 ## Memories about code carry their anchor (provenance over extraction)
 
-A memory about code is only as good as its anchor. Static extraction keeps a symbol table fresh by re-extracting and pruning; with many concurrent branches that snapshot goes stale silently. Antumbra keeps the anchor **on the memory** and judges it at recall, where git is ([ADR-0018](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0018-provenance-over-extraction.md)):
+A memory about code is only as good as its anchor. Static extraction keeps a symbol table fresh by re-extracting and pruning; with many concurrent branches that snapshot goes stale silently. Antumbra keeps the anchor **on the memory** and judges it at recall, where git is:
 
 - **Capture** stamps memories about code with `provenance {repo, commit, branch[, path]}` (the capture hook computes it; `store_memory` stores it as one `git:` evidence entry).
 - **Recall** takes the caller's `repo` and `branch` and returns every hit with a `scope` (`in_scope`, `other_branch`, `other_repo`), demoting out-of-scope hits below in-scope ones without hiding them: the branch is a governing feature, exactly as a repo-scoped convention is.
@@ -112,7 +112,7 @@ antumbra git-facts --tenant ws:me --user user:me --compartment comp:repo --days 
 
 ## The GitHub App tells Antumbra when an anchor goes stale
 
-The events that make an anchor stale, a merge and a branch deletion, happen on the hosting platform, so the platform reports them directly instead of a session hook noticing later ([ADR-0019](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0019-github-integration-and-evidence-graph.md)). The networked server serves `POST /github/webhook` when given the App's webhook secret and a repository-to-workspace map:
+The events that make an anchor stale, a merge and a branch deletion, happen on the hosting platform, so the platform reports them directly instead of a session hook noticing later. The networked server serves `POST /github/webhook` when given the App's webhook secret and a repository-to-workspace map:
 
 ```bash
 antumbra-mcp --http 0.0.0.0:8081 --jwt-secret-file /run/secrets/jwt \
@@ -174,11 +174,11 @@ The check is tested against the examples and the violations before anything is s
 
 A behavior is proposed until you accept it (`accept_behavior`), unless you stated it yourself. `retire_behavior` drops one, and recording a new one with `supersedes` replaces an old one. `list_behaviors` shows them by status. They live in your own `behavior` compartment, private to you, and recall finds them like any memory.
 
-Accepted behaviors are what your own expert is trained on. It learns each one from tasks the behavior governs and its check, never from the memory's text (ADR-0027 in antumbra-meta). A scope's expert is admitted holding the behaviors it learned. A behavior it did not learn stays accepted and is not served, and it does not keep the rest out. The expert is refused when it answers any taught behavior worse than the base model, when unrelated tasks (the controls) fall, or when nothing it learned rose above the base model. `list_behaviors` shows each behavior's `last_training`: whether it was learned, by its held-out pass rate against the base model's, and whether its scope's expert was admitted. An expert is left as it is until a behavior in its scope is added, retired or recorded again. A refused set is not trained again, even after a restart, until it changes. To teach a behavior that was missed, record it again with more examples, superseding it.
+Accepted behaviors are what your own expert is trained on. It learns each one from tasks the behavior governs and its check, never from the memory's text. A scope's expert is admitted holding the behaviors it learned. A behavior it did not learn stays accepted and is not served, and it does not keep the rest out. The expert is refused when it answers any taught behavior worse than the base model, when unrelated tasks (the controls) fall, or when nothing it learned rose above the base model. `list_behaviors` shows each behavior's `last_training`: whether it was learned, by its held-out pass rate against the base model's, and whether its scope's expert was admitted. An expert is left as it is until a behavior in its scope is added, retired or recorded again. A refused set is not trained again, even after a restart, until it changes. To teach a behavior that was missed, record it again with more examples, superseding it.
 
 ## Claude Code with its telemetry off
 
-Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. [ADR-0021](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0021-sovereign-mode.md) calls the state sovereign mode and treats it as the normal case.
+Turning off Claude Code's telemetry (`DISABLE_TELEMETRY`, `DO_NOT_TRACK`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) also turns off its feature-flag fetching, and so does running it on a third-party provider. A list of features that have nothing to do with telemetry goes with the flags, and nothing announces it: a repository whose only instruction file is `AGENTS.md` silently stops instructing the agent. Antumbra calls this state sovereign mode and treats it as the normal case.
 
 ```sh
 antumbra claude doctor            # judge the current project
@@ -268,7 +268,7 @@ The contract:
 
 ## What a change to a service reaches
 
-Which services depend on which is kept as claims with evidence, never as a parse (ADR-0019). Record one with `record_dependency`: the two services as repository slugs, and the source, `declared` (a manifest or config names it), `observed` (telemetry saw the calls), `learned` (they change or deploy together) or `claimed` (read from the code). `list_dependencies` lists every pair with its evidence, weak ones included. Ask `blast_radius` what depends on a service, or what it depends on, and each service comes back by its strongest path with every hop's evidence, source and current weight, so the answer can be checked rather than trusted. A claim alone counts for little until a declaration or an observation backs it, and an edge nobody records again fades. The edges are the workspace's, readable by every member.
+Which services depend on which is kept as claims with evidence, never as a parse. Record one with `record_dependency`: the two services as repository slugs, and the source, `declared` (a manifest or config names it), `observed` (telemetry saw the calls), `learned` (they change or deploy together) or `claimed` (read from the code). `list_dependencies` lists every pair with its evidence, weak ones included. Ask `blast_radius` what depends on a service, or what it depends on, and each service comes back by its strongest path with every hop's evidence, source and current weight, so the answer can be checked rather than trusted. A claim alone counts for little until a declaration or an observation backs it, and an edge nobody records again fades. The edges are the workspace's, readable by every member.
 
 The declared edges can be read from your checkouts instead of recorded by hand:
 
@@ -290,4 +290,4 @@ Retrieval-memory tools (give the agent a vector store to recall from) make the a
 
 Next session, step 1 includes a skill that did not exist before, and the work it covers is now served locally for free. The scaffolding (loops, prompts, lookups) shrinks into weights. A memory layer is static; Antumbra compounds.
 
-See **[Architecture](architecture.md)** for the engine, **[Roadmap](https://github.com/albedosehen/antumbra-meta/blob/main/roadmap.md)** for what is built vs queued, and **[Product surface](https://github.com/albedosehen/antumbra-meta/blob/main/product.md)** for the control plane (dashboard, knowledge documents, onboarding) and how Antumbra supersedes a separate agent-memory engine.
+See **[Architecture](architecture.md)** for the engine.

@@ -77,7 +77,7 @@ USER 65532
 # trains at once would contend for the card and the weight download.
 ENTRYPOINT ["/usr/local/bin/antumbra-mcp-tests", "--include-ignored", "--test-threads=1"]
 
-# --- d2-probe stage: ADR-0024's D-2 measurement on the card -----------------
+# --- d2-probe stage: the relevance floor's measurement on the card ----------
 # The head itself is small; the ENCODER passes in front of it are not, and the
 # chunked pairing multiplies them, because MiniLM pads a batch to a fixed shape
 # and a 300-character chunk costs nearly what a 4000-character memory costs. An

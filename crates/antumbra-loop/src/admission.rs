@@ -1,4 +1,4 @@
-//! Admission gating (ADR-0022 S-5): before a shadow graduates, it is checked
+//! Admission gating: before a shadow graduates, it is checked
 //! against the population it would join, so the population does not fill with
 //! twins.
 //!

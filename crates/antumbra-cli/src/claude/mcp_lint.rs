@@ -1,4 +1,4 @@
-//! The MCP schema lint (ADR-0021): which of a server's tools will break a
+//! The MCP schema lint: which of a server's tools will break a
 //! session in sovereign mode, or go missing from it.
 //!
 //! The Claude API checks every tool's input schema and rejects the WHOLE request
@@ -50,20 +50,21 @@ pub enum Problem {
     /// meta-schema and neither can this. The API may still refuse it.
     OtherDialect(String),
     /// A string field inside a collection row, with neither a `maxLength` nor a
-    /// description that says what bounds it (ADR-0023 B-3). One field of prose a
+    /// description that says what bounds it. One field of prose a
     /// caller sized earlier, times however many rows come back, is the shape
     /// that empties a context window. The string names the path to the field.
     UnboundedText(String),
     /// An array with no `maxItems` and nothing in its description about how many
-    /// it returns (ADR-0023 B-3). A caller cannot budget for a collection whose
+    /// it returns. A caller cannot budget for a collection whose
     /// size is stated nowhere.
     UnboundedCollection(String),
     /// A collection that can come back empty, with nothing beside it to say why
-    /// (ADR-0023 B-3, generalizing B-2). An empty array answers "no rows" and
-    /// not "no rows BECAUSE", so the agent cannot tell a query that matched
-    /// nothing from one whose matches a filter or a threshold removed. The two
-    /// want opposite responses — rephrase, or widen — and guessing wrong costs a
-    /// round trip each time. The string names the path to the collection.
+    /// (the rule recall follows for an empty answer, applied to any tool). An
+    /// empty array answers "no rows" and not "no rows BECAUSE", so the agent
+    /// cannot tell a query that matched nothing from one whose matches a filter
+    /// or a threshold removed. The two want opposite responses — rephrase, or
+    /// widen — and guessing wrong costs a round trip each time. The string names
+    /// the path to the collection.
     IndistinguishableEmpty(String),
 }
 
@@ -235,9 +236,9 @@ pub struct Finding {
     pub problems: Vec<Problem>,
 }
 
-/// What a tool's declared OUTPUT shape will cost a context window (ADR-0023
-/// B-3): unbounded prose inside a collection row, and collections that never
-/// say how many rows they return.
+/// What a tool's declared OUTPUT shape will cost a context window: unbounded
+/// prose inside a collection row, and collections that never say how many rows
+/// they return.
 ///
 /// Walks the schema rather than looking only at the root, because the shape that
 /// matters is a string nested inside an array's items, and `$defs` indirection
@@ -246,10 +247,11 @@ pub struct Finding {
 /// that refers to itself cannot spin.
 ///
 /// A field counts as bounded by a `maxLength`, or by a description that says
-/// what bounds it. The second is not a loophole: ADR-0023's rule is that a bound
-/// may be lifted by one documented call, and a schema cannot express "900 unless
-/// you asked for `full`". Saying so in the description is the accurate form, so
-/// the lint accepts it and the operator reads it.
+/// what bounds it. The second is not a loophole: Antumbra's rule for its own
+/// tools is that a bound may be lifted by one documented call, and a schema
+/// cannot express "900 unless you asked for `full`". Saying so in the
+/// description is the accurate form, so the lint accepts it and the operator
+/// reads it.
 pub fn shape_problems(schema: &Value) -> Vec<Problem> {
     fn described(node: &Value) -> bool {
         node.get("description")
@@ -347,8 +349,9 @@ pub fn shape_problems(schema: &Value) -> Vec<Problem> {
             // An empty collection explains itself only if something BESIDE it
             // varies with the reason it is empty. A boolean, an enumerated
             // status and a count all can — `nothing_cleared_the_floor` is the
-            // shape B-2 landed, and a `total` that disagrees with the rows
-            // carries the same news. A second collection cannot.
+            // shape recall's relevance floor landed in, and a `total` that
+            // disagrees with the rows carries the same news. A second
+            // collection cannot.
             let explained_by_sibling = props.values().any(|p| {
                 let p = resolve(p, root);
                 matches!(
@@ -433,7 +436,7 @@ pub fn failures(findings: &[Finding]) -> usize {
         .count()
 }
 
-/// The tools whose OUTPUT shape will cost a context window (ADR-0023 B-3).
+/// The tools whose OUTPUT shape will cost a context window.
 ///
 /// Counted apart from [`failures`] on purpose: a shape problem is a bill, not a
 /// break. The command's exit status stays tied to what stops a session working,
@@ -503,8 +506,8 @@ pub fn render(server: &str, checked: usize, findings: &[Finding]) -> String {
 #[cfg(test)]
 mod tests;
 
-/// ADR-0023 B-3, validation 6: the lint flags a server whose collection rows
-/// carry an unbounded text field, demonstrated against a fixture.
+/// The output-shape lint flags a server whose collection rows carry an
+/// unbounded text field, demonstrated against a fixture.
 #[cfg(test)]
 mod output_shape;
 
@@ -513,9 +516,9 @@ mod shape_counting;
 
 /// The lint pointed at a real server's `tools/list`, when one is on disk.
 ///
-/// ADR-0023 B-3 argues these checks are worth more pointed OUTWARD than inward,
-/// at servers Antumbra did not write. This is the inward half of that claim, and
-/// it is the one that can regress: it runs against a captured `tools/list` from
+/// These checks are worth more pointed OUTWARD than inward, at servers Antumbra
+/// did not write. This is the inward half, and it is the one that can regress:
+/// it runs against a captured `tools/list` from
 /// a live antumbra-mcp and reports what the rules find, so a change to the
 /// surface that starts spending a caller's context shows up here.
 ///

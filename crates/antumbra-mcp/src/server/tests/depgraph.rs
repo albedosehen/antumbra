@@ -1,4 +1,4 @@
-//! The evidence graph's tools (ADR-0019): recording a dependency claim, seeing
+//! The evidence graph's tools: recording a dependency claim, seeing
 //! it again, and walking the blast radius with the evidence attached.
 
 use super::*;

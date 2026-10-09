@@ -1,4 +1,4 @@
-//! The tenant hive's two gates and its offer ledger (ADR-0017 B).
+//! The tenant hive's two gates and its offer ledger.
 //!
 //! The interesting half of this module is what it does *not* offer. There is no
 //! `accept` a member can call: `HIVE_OFFER_PERMS` denies update to every record

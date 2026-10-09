@@ -115,8 +115,8 @@ pub async fn eval_pass_rate(
     })
 }
 
-/// Re-measure a trained adapter (ADR-0022 S-1's fourth constraint): one full
-/// evaluation per seed, each drawing from its own, so graduation is judged on
+/// Re-measure a trained adapter for graduation: one full evaluation per seed,
+/// each drawing from its own, so graduation is judged on
 /// independent measurements rather than the one noisy number a search ranked
 /// by. Returns the pass rate per seed, in seed order. Fails if the model cannot
 /// seed its draws, rather than returning repeats of one stream.

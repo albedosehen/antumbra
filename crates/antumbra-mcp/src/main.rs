@@ -64,7 +64,7 @@ struct Cli {
     #[arg(long, default_value = "user:default")]
     user: String,
     /// The host/device this session runs on: stamped as memory provenance, and
-    /// the name this machine registers under in its user's fabric (ADR-0017).
+    /// the name this machine registers under in its user's fabric.
     /// Defaults to the machine name, which inside a container is the container
     /// ID -- ephemeral, so a recreate would register the same machine as a new
     /// node every time. Set it to the real host there.
@@ -105,13 +105,13 @@ struct Cli {
     /// compartments (reversible; the user curates). Off when unset.
     #[arg(long)]
     auto_propose: Option<usize>,
-    /// Retired (ADR-0027): a reinforced memory no longer trains its compartment
+    /// Retired: a reinforced memory no longer trains its compartment
     /// into an expert, which taught experts to echo memories. Standing experts
     /// are trained from accepted behaviors by the keeper, on any node that can
     /// train. Still accepted, so a deployment that passes it keeps starting.
     #[arg(long, default_value_t = false, hide = true)]
     auto_consolidate: bool,
-    /// The chunk index (ADR-0025), on the networked surface: how many pieces
+    /// The chunk index, on the networked surface: how many pieces
     /// of a memory to embed at once while cutting memories into the pieces
     /// recall searches. Zero leaves the index as it is; recall then reads whole
     /// memories for anything not in it.
@@ -340,9 +340,9 @@ pub(crate) async fn provision_identity(
     Ok(default_compartment)
 }
 
-/// Register this machine in the user's fabric (ADR-0017 A2): what backend the
-/// build can drive, how much video memory the device it would train on has, and
-/// the role that follows. Re-registering on every start is the point -- the
+/// Register this machine in the user's fabric: what backend the build can
+/// drive, how much video memory the device it would train on has, and the
+/// role that follows. Re-registering on every start is the point -- the
 /// answer changes when the binary is rebuilt with a GPU backend, or the card is
 /// pulled -- and the row is keyed per (tenant, user, host), so it updates.
 ///
@@ -429,7 +429,7 @@ pub(crate) async fn build_serve(
     use antumbra_serve::{MultiAdapterServe, RaftConfig};
 
     // Dormant experts stay registered, since they are served when named;
-    // archived ones are not (ADR-0022 S-5).
+    // archived ones are not.
     let experts = antumbra_store::repo::lifecycle::servable(store).await?;
     // With no expert to name a base, use the one consolidation trains on, so the
     // first minted adapter fits the resident model.
@@ -441,11 +441,11 @@ pub(crate) async fn build_serve(
     // nucleus), not the training-time exploration draw.
     let cfg = RaftConfig::for_serving(RaftConfig::default().max_new_tokens, 0.0);
     let mut engine = MultiAdapterServe::new(base, cfg);
-    // Only the adapters this machine can actually open (ADR-0017 A2). The row
-    // travels and the weights do not, so once a user's nodes reconcile, every
-    // node learns about every expert while exactly one holds each file.
-    // Registering them all would route to an adapter that is not here and fail
-    // at serve time, on a path that looks perfectly valid in the row.
+    // Only the adapters this machine can actually open. The row travels and
+    // the weights do not, so once a user's nodes reconcile, every node learns
+    // about every expert while exactly one holds each file. Registering them
+    // all would route to an adapter that is not here and fail at serve time,
+    // on a path that looks perfectly valid in the row.
     let (mine, elsewhere): (Vec<_>, Vec<_>) = experts.iter().partition(|e| e.is_placed_on(host));
     for e in &mine {
         engine.register(e.id.clone(), e.artifact_uri.clone());
@@ -569,7 +569,7 @@ async fn run() -> Result<()> {
     if cli.auto_consolidate {
         eprintln!(
             "antumbra-mcp: --auto-consolidate is retired and does nothing; standing experts \
-             are trained from accepted behaviors (ADR-0027)"
+             are trained from accepted behaviors"
         );
     }
     let host = default_host(cli.host);
@@ -624,7 +624,7 @@ async fn run() -> Result<()> {
         .map(|r| r as Arc<dyn antumbra_core::ports::Reranker>);
     let scorer: Option<Arc<dyn antumbra_core::ports::RelevanceScorer>> =
         http_reranker.map(|r| r as Arc<dyn antumbra_core::ports::RelevanceScorer>);
-    // The relevance floor (ADR-0023 B-2). The same cross-encoder that orders the
+    // The relevance floor. The same cross-encoder that orders the
     // pool also answers "does this answer the query" once its score is mapped
     // through the fitted calibration, so the floor costs no extra model and
     // appears exactly when a reranker is configured.
@@ -829,7 +829,7 @@ mod tests {
     }
 
     /// A node puts itself in the user's fabric on start, under its own record
-    /// session -- which is the whole point of ADR-0017's write rule: the row a
+    /// session -- which is the whole point of the fabric's write rule: the row a
     /// node writes is its own user's, and it writes it as that user rather than
     /// as the owner.
     #[tokio::test]

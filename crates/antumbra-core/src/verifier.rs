@@ -1,4 +1,4 @@
-//! Verifiers as governed records (ADR-0022 S-4): the system may propose a
+//! Verifiers as governed records: the system may propose a
 //! check, and only measurement against ground truth it did not produce makes
 //! it trusted.
 //!
@@ -58,7 +58,7 @@ impl std::str::FromStr for VerifierTier {
             "reducible" => Ok(VerifierTier::Reducible),
             "partial" => Ok(VerifierTier::Partial),
             "derived" => Err(AntumbraError::rejected(
-                "oracles derived from the implementation are refused (ADR-0022 S-4): \
+                "oracles derived from the implementation are refused: \
                  a check that learns what the code does cannot say what it should do",
             )),
             other => Err(AntumbraError::rejected(format!(
@@ -259,7 +259,7 @@ impl TrustState {
         );
         if to == TrustState::Trusted && !sound {
             return Err(AntumbraError::rejected(
-                "only a sound measurement trusts a verifier (ADR-0022 S-4)",
+                "only a sound measurement trusts a verifier",
             ));
         }
         Ok(to)

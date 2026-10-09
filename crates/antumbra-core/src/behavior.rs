@@ -1,4 +1,4 @@
-//! Behaviors (ADR-0027): how the user wants an agent to act on a class of
+//! Behaviors: how the user wants an agent to act on a class of
 //! tasks, stated as a rule with a check a program can apply.
 //!
 //! Experts learn behavior, never facts. A behavior trains from tasks it

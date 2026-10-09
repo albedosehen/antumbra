@@ -1,4 +1,4 @@
-//! The critic's influence, bounded by arithmetic (ADR-0022 S-2).
+//! The critic's influence, bounded by arithmetic.
 //!
 //! The verifier partitions a group of samples into passed and failed, and the
 //! critic may only reorder samples inside a part. [`shaped_advantages`]
@@ -13,8 +13,9 @@
 //! verifier advantages, so no critic score, however extreme, lifts a failed
 //! sample over a passed one. No threshold fires and no operator has to notice.
 //!
-//! The rest of the module is instruments the record asks for: calibration and
-//! agreement sliced so that a broken slice is not averaged away, and the
+//! The rest of the module is the instruments a critic is watched by:
+//! calibration and agreement sliced so that a broken slice is not averaged
+//! away, and the
 //! exogenous floor, the share of a critic's training labels that must come
 //! fresh from the verifier.
 
@@ -202,12 +203,12 @@ pub fn calibration_by_slice(scored: &[Scored], bins: usize) -> Vec<SliceCalibrat
 }
 
 /// A monotone map from a critic's score to the pass rate it stands for,
-/// refitted each generation on fresh verdicts (ADR-0022 S-2).
+/// refitted each generation on fresh verdicts.
 ///
-/// The record asks for quantile regression rather than temperature scaling.
+/// The design called for quantile regression rather than temperature scaling.
 /// For a verdict that is 0 or 1 every conditional quantile is 0 or 1, so the
-/// map is fitted by isotonic regression instead, which keeps what the record
-/// wanted from quantile regression: no parametric form, so a critic
+/// map is fitted by isotonic regression instead, which keeps what quantile
+/// regression was wanted for: no parametric form, so a critic
 /// overconfident in one range and not another is corrected where it is wrong,
 /// not scaled uniformly.
 #[derive(Debug, Clone, PartialEq)]
@@ -256,19 +257,19 @@ impl Isotonic {
 }
 
 /// How far two critics agree: the rank correlation of their scores on the
-/// same completions. The record keeps a twin, trained on another seed and
+/// same completions. A critic has a twin, trained on another seed and
 /// slice, purely as this instrument, because agreement falls under
 /// optimization pressure before headline fitness turns over.
 pub fn agreement(a: &[f32], b: &[f32]) -> Option<f32> {
     spearman(a, b)
 }
 
-/// How a critic read during one generation's training (ADR-0022 S-2): on the
+/// How a critic read during one generation's training: on the
 /// answers it scored to shape advantage, against the verifier's verdicts on
-/// the same answers, and against its twin. The record asks for calibration to
-/// be re-earned every generation, because the policy the critic judges changes
-/// every generation, and for the twin's agreement to be watched, because it
-/// falls under optimization pressure before fitness turns over. Shaping reads
+/// the same answers, and against its twin. Calibration has to be re-earned
+/// every generation, because the policy the critic judges changes every
+/// generation, and the twin's agreement has to be watched, because it falls
+/// under optimization pressure before fitness turns over. Shaping reads
 /// the critic by rank, which a monotone recalibration does not change, so the
 /// recalibration here is an instrument, not a correction.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -353,8 +354,8 @@ pub fn watch(scores: &[f32], passed: &[bool], twin: Option<&[f32]>) -> CriticWat
 /// noise and only a sustained one counts.
 pub const TWIN_DECLINE: f32 = 0.05;
 
-/// Why a run stops letting its critic shape advantage (ADR-0022 S-2's kill):
-/// verifier-only reward resumes for the rest of the run.
+/// Why a run stops letting its critic shape advantage (the critic's kill
+/// criterion): verifier-only reward resumes for the rest of the run.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Fallback {
     /// The rank correlation that scales its influence was not positive.

@@ -37,7 +37,7 @@
 //! carry no data and need no token; what it shows is what the token's identity
 //! may see ([`dashboard`]).
 //!
-//! ## The chunk index (ADR-0025)
+//! ## The chunk index
 //!
 //! One background task keeps every memory cut into the pieces recall's dense
 //! leg searches, in owner mode under the auth lock, a memory at a time
@@ -170,7 +170,7 @@ struct HttpState {
     /// per-identity server after hybrid recall. Server-level (one endpoint), not
     /// per-tenant.
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
-    /// The relevance floor applied to every per-identity server (ADR-0023 B-2).
+    /// The relevance floor applied to every per-identity server.
     decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
     /// The optional copal document-of-record archive, applied to every
     /// per-identity server's ingest. One server-level instance (one endpoint);
@@ -210,7 +210,7 @@ pub async fn serve(
     auto_propose: Option<usize>,
     chunk_in_flight: usize,
     reranker: Option<Arc<dyn antumbra_core::ports::Reranker>>,
-    // The relevance floor (ADR-0023 B-2), built where the flags are so this
+    // The relevance floor, built where the flags are so this
     // module stays free of any calibration choice.
     decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
@@ -526,12 +526,12 @@ impl HttpState {
             let _guard = self.auth.lock().await;
             self.store.signin_root().await?;
             let dc = crate::provision_identity(&self.store, &tenant, &user).await?;
-            // This machine is a node in that user's fabric (ADR-0017 A2). A
-            // hosted server is not "nobody's machine": the agent's recall and
-            // store really are happening here, and if this box can train then
-            // it is where that user's genesis belongs. Registered once per
-            // identity, because both callers of `mcp_for` cache what it builds
-            // per identity (`service_for`, `rest_server_for`).
+            // This machine is a node in that user's fabric. A hosted server is
+            // not "nobody's machine": the agent's recall and store really are
+            // happening here, and if this box can train then it is where that
+            // user's genesis belongs. Registered once per identity, because
+            // both callers of `mcp_for` cache what it builds per identity
+            // (`service_for`, `rest_server_for`).
             //
             // Written as owner rather than under the user's record session,
             // like the principal and the default compartment either side of

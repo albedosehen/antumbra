@@ -1,4 +1,4 @@
-//! Standing experts (ADR-0027): the user's accepted behaviors for a scope,
+//! Standing experts: the user's accepted behaviors for a scope,
 //! composed into every answer in that scope and never routed.
 
 use super::*;

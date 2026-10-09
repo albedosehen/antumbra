@@ -82,7 +82,7 @@ string_id!(
     CompartmentId
 );
 string_id!(
-    /// A verifier, addressed by the hash of what it checks with (ADR-0022 S-4).
+    /// A verifier, addressed by the hash of what it checks with.
     VerifierId
 );
 

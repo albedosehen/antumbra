@@ -1,4 +1,4 @@
-//! Retirement as the loop's job (ADR-0022 S-5): two detectors in series,
+//! Retirement as the loop's job: two detectors in series,
 //! never one.
 //!
 //! The first is an early warning, label-free and advisory only. It reads what
@@ -16,7 +16,7 @@
 //! only when its contribution on the tasks routed to it was at or below the
 //! floor in each of its last `persist` measurements, each resting on at least
 //! `min_routed` tasks. Every such measurement is kept with the move as its
-//! evidence. The record's validation holds by construction: no expert whose
+//! evidence. Retirement's validation holds by construction: no expert whose
 //! latest measurement shows it contributing is demoted. An unused expert is
 //! never demoted either: unused is not useless, and the cure for a twin is
 //! admission, not retirement.

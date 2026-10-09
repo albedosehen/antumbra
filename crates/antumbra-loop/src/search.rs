@@ -1,8 +1,8 @@
-//! The recipe search (ADR-0022 S-1): which recipes the next generation's cohort
+//! The recipe search: which recipes the next generation's cohort
 //! trains under, chosen from what earlier generations' recipes scored.
 //!
 //! It follows Population Based Bandits (Parker-Holder et al., NeurIPS 2020),
-//! which the record picks over Population Based Training because PBT is
+//! chosen over Population Based Training because PBT is
 //! reported to lose to random search at the four-to-eight members a single
 //! 24 GB card supports. A Gaussian process ([`gp`]) models fitness over the
 //! recipe and the generation, and each proposal maximizes an upper confidence
@@ -10,14 +10,14 @@
 //! the model as if it had scored its predicted mean, so the members spread out
 //! instead of piling onto one point.
 //!
-//! Ranking follows the record's fourth constraint. The argmax of noisy
+//! Ranking discounts luck. The argmax of noisy
 //! estimates is enriched for favorable noise (the optimizer's curse, Smith and
 //! Winkler 2006), so a recipe's score is shrunk toward its generation's mean
 //! in proportion to how few evaluations it rests on, and one lucky evaluation
 //! cannot carry a recipe past a well-measured one. A recipe run in several
 //! generations is ranked on all its runs together.
 //!
-//! Greed is blunted by two frequencies, as the record asks. Each cohort member
+//! Greed is blunted by two frequencies. Each cohort member
 //! is a slot that keeps its recipe until its ready interval has passed. The
 //! fast members' interval starts at one generation, so they are proposed afresh
 //! every generation, and lengthens over the run ([`SearchPolicy::anneal`]). The
@@ -40,8 +40,8 @@ use gp::{Kernel, Sample};
 /// at that value and not searched.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecipeSpace {
-    /// Learning-rate bounds, searched on a log scale: the record's
-    /// "log-uniform learning rate".
+    /// Learning-rate bounds, searched on a log scale, so the learning rate is
+    /// drawn log-uniform.
     pub learning_rate: (f64, f64),
     /// The batch sizes to choose among, smallest first. The trainer
     /// accumulates a batch's gradients one example at a time, so the size

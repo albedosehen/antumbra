@@ -1,6 +1,5 @@
-//! `antumbra gate-sweep` (ADR-0024 D-1, Validation 1): the bar a typed gate
-//! must clear is the margin gate at its best threshold, not at the one it
-//! ships with.
+//! `antumbra gate-sweep`: the bar a typed gate must clear is the margin gate
+//! at its best threshold, not at the one it ships with.
 //!
 //! Every task the default partition withholds is routed with the threshold
 //! out of the way, so each has the expert the margin gate would pick and the

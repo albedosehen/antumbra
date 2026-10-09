@@ -1,4 +1,4 @@
-//! The population's leave-one-out contribution (ADR-0022 S-5): for each shared
+//! The population's leave-one-out contribution: for each shared
 //! expert, mask it, route the live tasks again, score both ways, and record
 //! the difference. It is the telemetry retirement is decided on: routing share
 //! alone cannot tell an expert that is unused from one that is useless.
@@ -77,9 +77,9 @@ pub struct ContributionPolicy {
     /// At most this many live tasks, chosen by a stable hash of their ids, so
     /// successive generations measure the same tasks.
     pub max_tasks: usize,
-    /// Also compare the routed population against its best single expert
-    /// (ADR-0022 S-5). It scores every expert on every live task, one more
-    /// evaluation of them per expert.
+    /// Also compare the routed population against its best single expert.
+    /// It scores every expert on every live task, one more evaluation of them
+    /// per expert.
     pub baseline: bool,
 }
 
@@ -311,7 +311,7 @@ impl GenerationLoop<'_> {
             Vec::new()
         };
         // With every expert scored on every live task, the measurement knows
-        // where each should have gone: the gate learns it (ADR-0024 D-1).
+        // where each should have gone: the gate learns it.
         let routing_outcomes = if policy.baseline {
             let recorded =
                 outcome::record_winners(self.store, &tasks, &ids, score, run_id, generation)

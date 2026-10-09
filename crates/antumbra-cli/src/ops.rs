@@ -332,9 +332,9 @@ pub async fn propose_compartments(url: &str, a: ProposeCompartmentsArgs) -> anyh
     Ok(())
 }
 
-/// Move an expert, named by name or id, to `to` as an operator's decision
-/// (ADR-0022 S-5): `retire` demotes it (dormant, or archived) and `revive`
-/// brings it back. Population-level forgetting: wire a store's
+/// Move an expert, named by name or id, to `to` as an operator's decision:
+/// `retire` demotes it (dormant, or archived) and `revive` brings it back.
+/// Population-level forgetting: wire a store's
 /// `report_contradiction` against a *consolidated* memory to this, and the
 /// expert that memory produced leaves the gate (retire-on-correction at the
 /// population scale, since a frozen LoRA cannot be edited per-fact). Nothing

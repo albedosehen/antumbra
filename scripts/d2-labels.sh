@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Emit the labeled relevance set ADR-0024's D-2 head trains on, as JSON.
+# Emit the labeled set the relevance head trains on, as JSON.
 #
 # Same construction as scripts/d2-relevance-baseline.sh, which measures the
 # CONTROL over this data; this one writes the pairs out so a head can be trained
@@ -10,9 +10,9 @@
 # THE LABELS ARE CONSTRUCTED BY A DETERMINISTIC VERIFIER, not logged. A query cut
 # from inside a memory has that memory as its answer and does not have any other
 # memory as its answer. Substring provenance is checkable, reproducible and
-# derived from no model, which is what ADR-0024's typed-decision rule demands of
-# a label. This is why D-2 is measurable on a deployment whose generational loop
-# has never produced an evaluation run.
+# derived from no model, which is what the TypedDecider contract demands of a
+# label. This is why the relevance head is measurable on a deployment whose
+# generational loop has never produced an evaluation run.
 #
 # *** THE SPAN IS EXCISED FROM THE MEMORY, AND THAT IS NOT OPTIONAL. ***
 #
@@ -26,9 +26,10 @@
 #
 # So the twelve words are REMOVED from the memory they were cut from. The pair is
 # then "this passage is about what this query asks about", which is the question
-# D-2 actually needs answered, and no lexical shortcut survives it. The verifier
-# stays deterministic, reproducible and model-free -- the properties that let D-2
-# be measured at all -- while no longer being answerable by grep.
+# the relevance head actually needs answered, and no lexical shortcut survives
+# it. The verifier stays deterministic, reproducible and model-free -- the
+# properties that let the head be measured at all -- while no longer being
+# answerable by grep.
 #
 # Both sides are flattened to single-spaced text so the excision cannot be
 # defeated by a line break, and so positives and negatives are shaped alike.

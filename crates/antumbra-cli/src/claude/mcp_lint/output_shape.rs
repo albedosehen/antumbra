@@ -1,9 +1,8 @@
 use super::*;
 use serde_json::json;
 
-/// The shape the record is about: rows of prose nobody bounded. This is the
-/// fixture validation 6 asks for, and it is the shape `recall_memories`
-/// itself had before ADR-0023 B-1.
+/// The shape this lint is about: rows of prose nobody bounded. It is the
+/// shape `recall_memories` itself had before its answers were bounded.
 #[test]
 fn rows_of_unbounded_prose_are_flagged_with_the_path() {
     let schema = json!({
@@ -40,7 +39,7 @@ fn rows_of_unbounded_prose_are_flagged_with_the_path() {
     );
 }
 
-/// A description counts as a bound, because ADR-0023's rule is that a bound
+/// A description counts as a bound, because Antumbra's rule is that a bound
 /// may be lifted by one documented call and no schema can express "900
 /// unless you asked for full". This is how `MemoryView::content` passes.
 #[test]
@@ -115,9 +114,10 @@ fn a_row_behind_a_ref_is_still_walked() {
     );
 }
 
-/// ADR-0023 B-3's third rule, which generalizes B-2. A bare collection
-/// answers "no rows" and never "no rows BECAUSE", so the agent cannot tell
-/// a query that matched nothing from one whose matches a floor removed.
+/// The lint's third rule, recall's rule for an empty answer applied to any
+/// tool. A bare collection answers "no rows" and never "no rows BECAUSE", so
+/// the agent cannot tell a query that matched nothing from one whose matches a
+/// floor removed.
 #[test]
 fn a_collection_with_nothing_to_explain_an_empty_one_is_flagged() {
     let schema = json!({
@@ -136,9 +136,9 @@ fn a_collection_with_nothing_to_explain_an_empty_one_is_flagged() {
     );
 }
 
-/// The shape B-2 actually landed in `antumbra-mcp`: a boolean beside the
-/// rows that is true exactly when something was retrieved and then floored.
-/// This is the fixture that says what the rule is asking for.
+/// The shape recall's relevance floor actually landed in `antumbra-mcp` as: a
+/// boolean beside the rows that is true exactly when something was retrieved
+/// and then floored. This is the fixture that says what the rule is asking for.
 #[test]
 fn a_boolean_beside_the_rows_passes() {
     let schema = json!({

@@ -1,4 +1,4 @@
-//! The learned gate as the loop keeps it (ADR-0022 S-5): retrained by the
+//! The learned gate as the loop keeps it: retrained by the
 //! trainer whenever the population it routes over changes, so a graduate is
 //! judged under the gate that would serve it, and serves under that gate once
 //! it is admitted.
@@ -18,7 +18,7 @@ use crate::GenerationLoop;
 
 /// What the learned router trains on, embedded and labeled with an expert:
 /// each expert's capability exemplars, and each live task an expert clearly
-/// won (ADR-0024 D-1), labeled with its winner. A win whose winner is not
+/// won, labeled with its winner. A win whose winner is not
 /// among `experts` is left out. `None` when fewer than two experts are given
 /// or fewer than two exemplars between them: too few to need a router, so the
 /// heuristic gate routes.

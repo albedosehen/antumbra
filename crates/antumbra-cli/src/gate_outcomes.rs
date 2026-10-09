@@ -1,4 +1,4 @@
-//! `antumbra gate-outcomes` (ADR-0024 D-1): the routing outcomes a population
+//! `antumbra gate-outcomes`: the routing outcomes a population
 //! holds without a loop run to record them. Every routable expert answers the
 //! live tasks the contribution measurement samples, under the same seeds, and
 //! each task's clear winner is recorded as the measurement records it, so

@@ -1,4 +1,4 @@
-//! Behaviors (ADR-0027): how the user wants an agent to act, recorded with a
+//! Behaviors: how the user wants an agent to act, recorded with a
 //! check so the user's own expert can learn it from tasks it governs.
 //!
 //! Its own router, joined to the others in `engine.rs`. A behavior is a memory

@@ -1,5 +1,5 @@
 //! What a caller can tell the server about the history memories are anchored
-//! to. `record_merges` is the GitHub webhook's merge handler (ADR-0019) for a
+//! to. `record_merges` is the GitHub webhook's merge handler for a
 //! deployment GitHub cannot reach: the caller, who can ask GitHub, says which
 //! branches merged where, and the memories anchored to each move to its merge
 //! commit on the base branch. Without it, everything learned on a feature

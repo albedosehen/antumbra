@@ -1,4 +1,4 @@
-//! The reward gate over the verifier namespace (ADR-0022 S-4).
+//! The reward gate over the verifier namespace.
 //!
 //! A task's `verify` is either a spec written into the task, which is authored
 //! and runs as it is, or a reference to a verifier in the namespace,

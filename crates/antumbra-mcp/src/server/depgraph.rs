@@ -1,5 +1,5 @@
-//! The evidence graph (ADR-0019 section 2): dependency claims recorded as
-//! memories with evidence, and blast radius as a weighted walk over them.
+//! The evidence graph: dependency claims recorded as memories with evidence,
+//! and blast radius as a weighted walk over them.
 //!
 //! Its own router, joined to the others in `engine.rs`, because `server.rs`
 //! is at the size rule. The model and the walk live in

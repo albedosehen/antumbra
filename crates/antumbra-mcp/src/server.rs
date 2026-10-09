@@ -83,7 +83,7 @@ pub struct McpServer {
     /// transport signs in per request (the embedded networked surface).
     session: Option<Arc<crate::session::SessionKeeper>>,
     /// The typed decider that answers "does this memory answer this query" as a
-    /// calibrated probability (ADR-0024 D-2), which is what lets recall say
+    /// calibrated probability, which is what lets recall say
     /// nothing rather than return the best of a bad lot. `None` = no floor runs
     /// and every recalled row is returned, which is the behavior before this
     /// existed and the behavior a deployment without a head keeps.
@@ -95,9 +95,9 @@ pub struct McpServer {
 /// a cross-encoder (one batched POST).
 const RERANK_POOL_MAX: usize = 100;
 
-/// The probability a memory must reach to be counted as answering the query
-/// (ADR-0023 B-2). A default the caller may move with `floor`, never the only
-/// option, because "the best of a bad lot" is occasionally what is wanted.
+/// The probability a memory must reach to be counted as answering the query.
+/// A default the caller may move with `floor`, never the only option, because
+/// "the best of a bad lot" is occasionally what is wanted.
 ///
 /// Half was the neutral starting point while no decider existed and the floor was
 /// inert: it is where a calibrated probability says "more likely than not".
@@ -515,9 +515,9 @@ impl McpServer {
                 .collect()
         };
 
-        // The relevance floor (ADR-0023 B-2, answered by ADR-0024 D-2). Asked as
-        // one batch because the questions share a state: the query is encoded
-        // once whatever the candidate count.
+        // The relevance floor, judged by the typed relevance head. Asked as one
+        // batch because the questions share a state: the query is encoded once
+        // whatever the candidate count.
         let had_rows = !memories.is_empty();
         let memories = match &self.decider {
             Some(decider) => {
@@ -529,7 +529,7 @@ impl McpServer {
             }
             None => memories,
         };
-        // Bound the prose unless the caller asked for all of it (ADR-0023 B-1),
+        // Bound the prose unless the caller asked for all of it,
         // once the floor has judged the whole memory, as the reranker read it:
         // judged on the bounded prefix, a long memory whose answer sits past the
         // cut was dropped though it ranked first, which on the user's own
@@ -555,7 +555,7 @@ impl McpServer {
     /// A decider that fails takes nothing with it: the rows are returned
     /// unfiltered and the failure is said on stderr, because a floor that cannot
     /// be computed must not be enforced. That is the same posture the rerank
-    /// stage takes, and ADR-0024 asks for it explicitly — a head that fails to
+    /// stage takes, and every typed head is held to it: a head that fails to
     /// load degrades to the path it replaced rather than to nothing.
     async fn above_floor(
         &self,

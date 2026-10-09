@@ -1,11 +1,11 @@
-//! Training and scoring the typed decision head against ADR-0024's D-2 bar.
+//! Training and scoring the typed relevance head against the bar it must beat.
 //!
 //! This is where the two halves meet: [`BertEmbedder`](crate::BertEmbedder)
 //! encodes a `(query, memory)` pair into one pooled vector, and
 //! [`DecisionHead`](antumbra_train::decision::DecisionHead) turns that into a
 //! calibrated probability that the memory answers the query.
 //!
-//! **The encoder is frozen and small on purpose.** ADR-0024 names ModernBERT-
+//! **The encoder is frozen and small on purpose.** The intended one is ModernBERT-
 //! large, 400M parameters, referenced from elsewhere rather than vendored. Before
 //! paying for that, the question worth answering is whether the encoder already
 //! in this stack — all-MiniLM-L6-v2, 22M, already loaded, already tested —
@@ -41,8 +41,9 @@ use antumbra_train::decision::DecisionHead;
 pub struct LabeledPair {
     pub query: String,
     pub memory: String,
-    /// True when the query was cut from inside this memory — the deterministic
-    /// verifier ADR-0024's rule requires, rather than a human or model judgment.
+    /// True when the query was cut from inside this memory: the deterministic
+    /// verifier a typed decision must be trained against, rather than a human
+    /// or model judgment.
     pub relevant: bool,
 }
 
@@ -346,8 +347,8 @@ mod tests {
     use super::*;
     use crate::BertEmbedder;
 
-    /// ADR-0024 Validation 2 for D-2: does a head trained on constructed labels
-    /// beat the control?
+    /// The relevance head's validation: does a head trained on constructed
+    /// labels beat the control?
     ///
     /// The control is 0.785 F1, a threshold over the deployed cross-encoder,
     /// measured by `scripts/d2-relevance-baseline.sh` over the same label file

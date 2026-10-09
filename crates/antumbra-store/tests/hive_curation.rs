@@ -1,4 +1,4 @@
-//! Engine-enforced curation (ADR-0017 B): contribution is the member's and
+//! Engine-enforced curation: contribution is the member's and
 //! curation is the owner's, and neither is a convention the app remembers.
 //!
 //! The three denials that matter are all written as permission predicates, so

@@ -1,17 +1,17 @@
-//! Turning a ranking score into a calibrated probability (ADR-0023 B-2, ADR-0024 D-2).
+//! Turning a ranking score into a calibrated probability.
 //!
 //! **This exists because the record had ruled it out, and the ruling was based
 //! on a weaker measurement than the one that later contradicted it.**
 //!
-//! ADR-0023 B-2 says the deployed cross-encoder is reliable for ORDERING
+//! A first study held that the deployed cross-encoder is reliable for ORDERING
 //! candidates within one query and unreliable as an absolute magnitude ACROSS
-//! queries, and concludes that no fixed threshold over it can carry a relevance
-//! floor. That conclusion came from ten memories against a handful of varied
-//! nonsense queries, where the same memory scored 3.7e-5 against one and 7.9e-4
-//! against another — a spread of twenty-one times, with a genuine match sitting
-//! inside it.
+//! queries, and concluded that no fixed threshold over it could carry a
+//! relevance floor. That conclusion came from ten memories against a handful
+//! of varied nonsense queries, where the same memory scored 3.7e-5 against one
+//! and 7.9e-4 against another, a spread of twenty-one times, with a genuine
+//! match sitting inside it.
 //!
-//! The D-2 control then measured the same signal over 800 balanced pairs drawn
+//! A later control then measured the same signal over 800 balanced pairs drawn
 //! from 400 DISTINCT queries and found one fixed threshold reaching 0.802
 //! accuracy and 0.785 F1. Both measurements are real; the second is far larger,
 //! and it says the across-query spread costs accuracy rather than destroying
@@ -28,8 +28,9 @@
 //! come from `scripts/d2-labels.sh`, whose verifier is span provenance with the
 //! span excised, derived from no model; and the fit minimizes log loss, which is
 //! strictly proper, so reporting the true probability is the only way to score
-//! well. Fitting on a model's own past answers would violate ADR-0022's anchor
-//! invariant — fitting on a deterministic verifier's does not.
+//! well. Fitting on a model's own past answers would violate the anchor
+//! invariant, that reward never originates from a signal unchecked against
+//! anything outside the loop; fitting on a deterministic verifier's does not.
 //!
 //! The fit is on `log10(score)` rather than the score. Reranker scores span
 //! orders of magnitude (3.7e-5 to 7.9e-4 in the measurement above), so a
@@ -105,9 +106,9 @@ impl Platt {
 /// How far a set of probabilities is from meaning what it says, as expected
 /// calibration error over `bins` equal-width buckets.
 ///
-/// ADR-0024 Validation 4 asks for this **sliced**, not as a global average,
-/// following ADR-0022's insistence that a global number hides a broken slice.
-/// The slicing is the caller's job — pass one slice at a time.
+/// This is meant to be read **sliced**, not as a global average, because a
+/// global number hides a broken slice. The slicing is the caller's job: pass
+/// one slice at a time.
 pub fn expected_calibration_error(samples: &[(f32, bool)], bins: usize) -> f32 {
     if samples.is_empty() || bins == 0 {
         return 0.0;
@@ -206,8 +207,8 @@ mod tests {
         );
     }
 
-    /// ADR-0023 B-2's open question, answered against the real signal: can the
-    /// deployed cross-encoder carry a relevance floor once it is CALIBRATED
+    /// The question the first study left open, answered against the real signal: can
+    /// the deployed cross-encoder carry a relevance floor once it is CALIBRATED
     /// rather than thresholded?
     ///
     /// Needs no GPU and no model — it reads the scores
@@ -221,8 +222,8 @@ mod tests {
     /// **The fit is on one half and every number is reported on the other.** The
     /// rows come in pairs, a positive and its hard negative from the same memory,
     /// so the split is taken at a pair boundary — splitting mid-pair would put
-    /// one memory's two rows on both sides, which is the leak the D-2 head test
-    /// avoids by splitting on memories.
+    /// one memory's two rows on both sides, which is the leak the typed decision
+    /// head's test avoids by splitting on memories.
     #[test]
     #[ignore = "needs ANTUMBRA_D2_SCORES, the output of d2-relevance-baseline.sh"]
     fn calibrating_the_reranker() {
@@ -329,7 +330,7 @@ mod tests {
             );
         }
 
-        // Validation 4 wants ECE SLICED, because a global average hides a broken
+        // ECE is read SLICED, because a global average hides a broken
         // slice. Every question here is a `Noul`, so the slice that can differ is
         // the confidence band itself: a floor is read near the middle, and a
         // model well calibrated only where it is certain is useless there.

@@ -1,7 +1,6 @@
-//! Train a user's accepted behaviors into a private standing expert
-//! (ADR-0027), on the GPU.
+//! Train a user's accepted behaviors into a private standing expert, on the GPU.
 //!
-//! Validation 2's procedure:
+//! The procedure:
 //! 1. Score the base model on each behavior's held-out examples and on
 //!    controls no behavior governs.
 //! 2. Collect its own answers to everyday prompts as replay.
@@ -51,7 +50,7 @@ pub fn expert_id(user: &UserId, scope: &str) -> ExpertId {
 
 /// The training a standing expert gets when nobody chose one: three epochs at
 /// 1.5e-4, with answers up to 256 tokens so no replay answer is cut short.
-/// `antumbra behave` defaults to the same. Validation 2 trained four behaviors
+/// `antumbra behave` defaults to the same. Validation trained four behaviors
 /// at 3e-4; at that rate nine taught together broke the expert (command
 /// controls 34/40 to 20/40), and at 1.5e-4 the same nine were all learned with
 /// every control held, as were the four.
@@ -297,8 +296,8 @@ pub async fn mint(
         generation: Generation::ZERO,
         owner: Some(plan.user.clone()),
         compartment: Some(behavior::compartment_id(&plan.tenant, &plan.user)),
-        // The adapter is on `host`'s disk, and adapters stay out of sync
-        // (ADR-0017), so the row says which machine can open it.
+        // The adapter is on `host`'s disk, and adapters stay out of sync, so
+        // the row says which machine can open it.
         placed_on: Some(host.to_string()),
         created_at: now,
     };

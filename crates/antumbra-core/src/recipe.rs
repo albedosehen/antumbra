@@ -1,4 +1,4 @@
-//! The training recipe (ADR-0022 S-1): the settings a shadow trains under that
+//! The training recipe: the settings a shadow trains under that
 //! are worth varying between shadows, and the row each run of one leaves.
 //!
 //! The record splits `LoopConfig` into a searched recipe and the unsearched
@@ -76,7 +76,7 @@ pub struct RecipeRecord {
     /// generation before. `None` for a run's first.
     #[serde(default)]
     pub parent: Option<ShadowId>,
-    /// The partition the fitness was measured under (ADR-0022), so a fitness
+    /// The partition the fitness was measured under, so a fitness
     /// read under one split is never ranked against one read under another.
     /// `None` when nothing was held out.
     #[serde(default)]

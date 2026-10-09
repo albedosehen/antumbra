@@ -1,4 +1,4 @@
-//! The declared source through the App (ADR-0019): a repository's manifests
+//! The declared source through the App: a repository's manifests
 //! read at a commit, kept as its latest reading, and the declared edges into
 //! and out of it brought in line with every repository's latest reading.
 //!

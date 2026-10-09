@@ -1,4 +1,4 @@
-//! The grow step through the loop (ADR-0022 S-3): each generation learns from
+//! The grow step through the loop: each generation learns from
 //! the region the latest census makes most learnable, gated, discounted for
 //! redundancy with recent choices, with an unfiltered share of the whole
 //! visible slice; and the census is taken even before there is an expert.

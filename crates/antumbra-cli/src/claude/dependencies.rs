@@ -1,6 +1,6 @@
 //! `antumbra claude dependencies`: which of your repositories depend on which,
 //! read from their manifests and recorded in the workspace's dependency graph
-//! as `declared` edges (ADR-0019).
+//! as `declared` edges.
 //!
 //! A repository depends on another when one of its manifests names a package
 //! the other publishes, in the same ecosystem. Only the repositories read

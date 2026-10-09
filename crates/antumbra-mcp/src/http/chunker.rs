@@ -1,4 +1,4 @@
-//! The chunk index's keeper (ADR-0025): one background task that cuts every
+//! The chunk index's keeper: one background task that cuts every
 //! memory into the pieces `memory_chunk` holds, embeds them, and keeps them
 //! current.
 //!

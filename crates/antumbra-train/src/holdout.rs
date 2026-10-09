@@ -1,5 +1,5 @@
 //! Where the partition becomes real: which of a corpus's tasks a run learns
-//! from, and which it only measures (ADR-0022).
+//! from, and which it only measures.
 //!
 //! The instruments read a generation through a partition of its tasks. That
 //! reading means something only if the run respected the partition: a held-out

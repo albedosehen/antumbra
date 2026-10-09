@@ -1,4 +1,4 @@
-//! Behaviors (ADR-0027): recorded only with a check shown to discriminate,
+//! Behaviors: recorded only with a check shown to discriminate,
 //! listed by status, accepted and retired by their owner, superseded by a
 //! later one, and private to the user who recorded them.
 

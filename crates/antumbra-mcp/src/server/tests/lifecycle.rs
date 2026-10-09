@@ -1,4 +1,4 @@
-//! Retirement through the MCP surface (ADR-0022 S-5): a dormant expert is not
+//! Retirement through the MCP surface: a dormant expert is not
 //! routed to, even by a router trained while it was active, and `population`
 //! says where each expert stands.
 

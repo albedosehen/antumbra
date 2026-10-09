@@ -1,5 +1,5 @@
 //! Genesis requests: the work one node in a user's fabric could not run, left
-//! where the machine that can will find it (ADR-0017 A2).
+//! where the machine that can will find it.
 //!
 //! Keyed per (tenant, user, compartment), so a compartment that goes on being
 //! reinforced on a memory node asks once. Asking again while the request is

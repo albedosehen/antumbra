@@ -1,4 +1,4 @@
-//! The behavior keeper (ADR-0027): keeps each user's standing experts in step
+//! The behavior keeper: keeps each user's standing experts in step
 //! with the behaviors they accepted.
 //!
 //! On a node that can train, a pass reads every user's behavior compartment

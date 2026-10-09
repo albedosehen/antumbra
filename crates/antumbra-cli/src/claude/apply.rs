@@ -1,4 +1,4 @@
-//! `antumbra claude apply` (ADR-0021): write the settings lines the doctor
+//! `antumbra claude apply`: write the settings lines the doctor
 //! prints, and nothing else.
 //!
 //! The doctor deliberately does not edit the agent's settings, and this keeps

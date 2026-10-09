@@ -1,14 +1,14 @@
-//! Eclipse: the standing instruments of ADR-0022.
+//! Eclipse: the standing instruments of the self-improving loop.
 //!
-//! The record opens every recursive seam except one and holds a single thing
+//! The loop opens every recursive seam except one and holds a single thing
 //! fixed while doing it:
 //!
 //! > **The anchor invariant.** Reward may never originate from a signal that
 //! > has never been checked against something outside the loop.
 //!
-//! ADR-0022 is equally clear about the order: "the standing instruments in
-//! Validation land first, before any seam, because they are how a seam is
-//! judged." This crate is those instruments and, for now, only those.
+//! The order is just as fixed: the standing instruments land first, before
+//! any seam, because they are how a seam is judged. This crate is those
+//! instruments and, for now, only those.
 //!
 //! - [`slice`] is the partition everything else is built on: which tasks the
 //!   loop may see, which are frozen away from it, which are touched by no
@@ -25,15 +25,14 @@
 //! **Nothing here grants reward, and nothing here is a training target.** That
 //! is a property of the crate, not a convention: it depends on no reward type
 //! and returns no reward, so there is no signature through which a number
-//! measured here could reach the optimizer. ADR-0022 requires this of trace
-//! monitors in particular -- "optimizing against a detector has been shown to
-//! produce obfuscated hacking rather than less hacking" -- and the same holds
+//! measured here could reach the optimizer. Trace monitors need this in
+//! particular, because optimizing against a detector has been shown to
+//! produce obfuscated hacking rather than less hacking, and the same holds
 //! for every instrument in this crate. A measurement that becomes something to
 //! improve stops measuring.
 //!
-//! The instruments are worth having even with every seam shut. The consequences
-//! section of the record says so directly: they measure whether today's loop is
-//! sound, which is a question that predates the seams.
+//! The instruments are worth having even with every seam shut: they measure
+//! whether today's loop is sound, which is a question that predates the seams.
 
 pub mod instrument;
 pub mod isomorphic;

@@ -10,7 +10,7 @@
 //!
 //! Asynchronous and one direction: a session leaves a note, a later session
 //! reads it. No session drives another, which is what separates this from the
-//! remote control that sovereign mode gives up (ADR-0021).
+//! remote control that sovereign mode gives up.
 
 use chrono::{DateTime, Utc};
 

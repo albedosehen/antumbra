@@ -146,7 +146,7 @@ pub trait GrpoModelLoader: Send + Sync {
     }
 }
 
-/// A critic and how far it may shape advantage (ADR-0022 S-2). It reorders
+/// A critic and how far it may shape advantage. It reorders
 /// samples only inside the parts the verifier made, scaled by how well it
 /// tracks the verifier; see [`shaped_advantages`]. Fitness, and so
 /// graduation, still reads verifier bits alone.
@@ -156,7 +156,7 @@ pub struct CriticShaping {
     pub weight: f32,
     /// A second critic, trained on another seed, that scores the same
     /// answers and shapes nothing: its agreement with the critic is the
-    /// instrument the record keeps it for.
+    /// instrument it is kept for.
     pub twin: Option<Arc<dyn Critic>>,
 }
 
@@ -212,11 +212,11 @@ pub async fn grpo_train(
 ) -> Result<TrainOutcome> {
     let mut reward_curve = Vec::with_capacity(cfg.rounds);
     let mut capability_exemplars: Vec<String> = Vec::new();
-    // Per-task results from the final round, for the standing instruments
-    // (ADR-0022). The same reading RAFT takes: a task passed when any sample
-    // of it verified.
+    // Per-task results from the final round, for the standing instruments.
+    // The same reading RAFT takes: a task passed when any sample of it
+    // verified.
     let mut per_task: Vec<TaskOutcome> = Vec::new();
-    // Every pass in a group that steps is reward granted (ADR-0022 S-4).
+    // Every pass in a group that steps is reward granted.
     let mut granted_by: Vec<VerifierGrant> = Vec::new();
     // Every verdict a named verifier gave on a learned task, for the loop's
     // recheck against anchored truth.

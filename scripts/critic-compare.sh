@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The critic's own test (ADR-0022 S-2's validation): GRPO with a critic
+# The critic's own validation test: GRPO with a critic
 # shaping its advantages against GRPO on verifier-only reward, same corpus,
 # same generations, one arm after the other on the GPU host. Detached; the
 # summary logs to $LOG (/tmp/critic-compare.log by default), each arm to
@@ -7,7 +7,7 @@
 #
 # $2 is a critic adapter (critic-validate.sh leaves one in its run directory).
 # Both arms run with --holdout, so each generation reports its held-out pass
-# rate beside the fitness it trained for; the record's test is whether the
+# rate beside the fitness it trained for; the test is whether the
 # critic reaches graduation on fewer samples, and graduation reads verifier
 # bits in both arms.
 #

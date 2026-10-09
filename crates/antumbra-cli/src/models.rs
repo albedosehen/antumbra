@@ -538,7 +538,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
         };
         let corpus = JsonCorpus::from_file(&corpus)?;
         // A task may name a verifier in the namespace instead of carrying its
-        // spec; the gate runs it only while it may grant reward (ADR-0022 S-4).
+        // spec; the gate runs it only while it may grant reward.
         let verifier = std::sync::Arc::new(antumbra_critic::Governed::new(
             antumbra_critic::CommandVerifier,
             std::sync::Arc::new(antumbra_store::repo::verifier::Registry::new(store.clone())),
@@ -603,7 +603,7 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
             ..LoopConfig::default()
         };
         // Every generation, the synthesized verifiers that judged its training
-        // are measured again against the tasks' authored anchors (ADR-0022 S-4).
+        // are measured again against the tasks' authored anchors.
         let rechecker = antumbra_critic::CommandVerifier;
         let deliberate = match &recheck_artifacts {
             Some(path) => crate::verifiers::deliberate_answers(path)?,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Measure a finished verifier run's synthesized checks again, under this
-# commit's trust protocol, without the GPU (ADR-0022 S-4). Detached; logs to
+# commit's trust protocol, without the GPU. Detached; logs to
 # $LOG (/tmp/verifier-remeasure.log by default). It trains and samples nothing,
 # so it can run beside a GPU job.
 #

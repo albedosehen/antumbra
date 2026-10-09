@@ -1,12 +1,11 @@
-//! What an agent is told, at session start, about the session it is in
-//! (ADR-0021 section 4).
+//! What an agent is told, at session start, about the session it is in.
 //!
 //! The doctor's report is for the user. This is for the agent, and says only
 //! what changes what it should do: whether the project's instructions reached
 //! it, which shell is the host's, and what it must not offer because it is gone.
 //!
 //! It is rendered from the compiled rules and never recalled, so it is the same
-//! words every time (principle 2). It is short because it has to be: a hook's
+//! words every time, never a paraphrase. It is short because it has to be: a hook's
 //! context is capped at 10,000 characters for everything the hook says, and this
 //! shares that room with the memories the hook recalls.
 
@@ -74,7 +73,7 @@ fn unavailable_line(report: &Report) -> Option<String> {
 }
 
 /// The block, or `None` outside sovereign mode: nothing is lost there, and
-/// nothing is supplied twice (principle 1).
+/// nothing the agent already has is supplied twice.
 pub fn brief(report: &Report, instructions: &Instructions, os: Os) -> Option<String> {
     let because = report
         .triggers

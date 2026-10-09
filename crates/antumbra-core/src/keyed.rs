@@ -3,7 +3,7 @@
 //! The tool surface gives every write a fresh id and shows neither a memory's
 //! evidence nor its compartment, so a writer that has to find its own memory
 //! again can only go by the text. A key at the front of it is that handle. Two
-//! families exist (ADR-0021), and everything that writes or reads them agrees on
+//! families exist, and everything that writes or reads them agrees on
 //! the spelling here: the CLI that writes them and the console that shows them.
 
 /// A rule about Claude Code with its feature flags off: `[claude-code:<rule>]`.

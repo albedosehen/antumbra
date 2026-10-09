@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Train under synthesized verifiers on the GPU host, with the loop rechecking
-# them against their anchors every generation (ADR-0022 S-4). Detached; logs to
+# them against their anchors every generation. Detached; logs to
 # $LOG (/tmp/verifier-train.log by default).
 #
 # $2 is a directory whose store.skv holds a measured namespace: the one

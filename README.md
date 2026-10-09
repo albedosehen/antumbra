@@ -92,8 +92,8 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 **Validated (toward 2026-06):**
 
-- **Provenance over extraction ([ADR-0018](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0018-provenance-over-extraction.md)).** Memories about code carry a git anchor (repo, commit, branch) that recall scopes to where the caller is and the session hook judges against HEAD (`[live]`, `[not-on-head]`, `[orphaned]`); inventory answers come from ingesting what the framework itself prints (`antumbra ingest -- <lister>`) and from `git log` (`antumbra git-facts`), never from a parser Antumbra would have to maintain.
-- **Native GitHub integration ([ADR-0019](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0019-github-integration-and-evidence-graph.md)).** A GitHub App webhook (`--github-webhook-secret`) keeps those anchors accurate from the platform's own events: a merged pull request re-anchors the merged branch's memories to the merge commit, becomes a memory of its own, and (with the App's key) has its changed documents ingested at that commit; a deleted branch marks its memories orphaned server-side; installing the App cold-starts a repository from its default branch. The knowledge diff check run and the evidence-based dependency graph are the next increments.
+- **Provenance over extraction.** Memories about code carry a git anchor (repo, commit, branch) that recall scopes to where the caller is and the session hook judges against HEAD (`[live]`, `[not-on-head]`, `[orphaned]`); inventory answers come from ingesting what the framework itself prints (`antumbra ingest -- <lister>`) and from `git log` (`antumbra git-facts`), never from a parser Antumbra would have to maintain.
+- **Native GitHub integration.** A GitHub App webhook (`--github-webhook-secret`) keeps those anchors accurate from the platform's own events: a merged pull request re-anchors the merged branch's memories to the merge commit, becomes a memory of its own, and (with the App's key) has its changed documents ingested at that commit; a deleted branch marks its memories orphaned server-side; installing the App cold-starts a repository from its default branch. The knowledge diff check run and the evidence-based dependency graph are the next increments.
 - **Training works on a real GPU.** RAFT lifts pass-rate to 1.0 under both a convention reward and a verifier that _executes_ generated code; the generation-quality recipe is dialed in, and a small corpus trains an expert that generalizes to held-out inputs.
 - **Consolidation closes the loop:** memories score through the gate and graduate into a specialist; a private compartment consolidates into a private expert.
 - **Routing + boundary:** a real embedder drives a gate that routes to the right specialist and escalates out-of-scope queries by _relative coverage_, not an absolute floor; the counterfactual boundary composes end-to-end.
@@ -210,8 +210,6 @@ memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUD
 - **[Architecture](docs/architecture.md)**: system, substrate, decision chain, training and data flow, schema.
 - **[Security posture](docs/security.md)**: the trust model, engine-enforced isolation, and the threat-model conclusions of the security review.
 - **[Running the trainer](docs/running-the-trainer.md)**: the CUDA GPU recipe.
-
-The design records (the ADRs the code names by number, such as `ADR-0025`), the roadmap and the experiment ledger are kept in a private companion repository, [antumbra-meta](https://github.com/albedosehen/antumbra-meta).
 
 ### Crates
 

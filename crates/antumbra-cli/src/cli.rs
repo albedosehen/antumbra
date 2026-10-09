@@ -318,31 +318,29 @@ pub enum Command {
         #[command(subcommand)]
         mode: Option<crate::setup::SetupMode>,
     },
-    /// Claude Code with its telemetry off (ADR-0021): what that silently costs,
+    /// Claude Code with its telemetry off: what that silently costs,
     /// and what is done about it.
     Claude {
         #[command(subcommand)]
         action: ClaudeAction,
     },
-    /// The verifier namespace (ADR-0022 S-4): propose a check, measure it
+    /// The verifier namespace: propose a check, measure it
     /// against ground truth the loop did not produce, and move it. Only a
     /// sound measurement lets a synthesized verifier grant reward.
     Verifier {
         #[command(subcommand)]
         action: crate::verifier_args::VerifierAction,
     },
-    /// The margin gate's risk-coverage curve over a store's population
-    /// (ADR-0024 D-1): every held-out task routed with the threshold out of
-    /// the way, its expert and the base both scored, and the threshold swept
-    /// offline. The best point is the bar a typed gate must clear. Needs
-    /// --features models and a GPU.
+    /// The margin gate's risk-coverage curve over a store's population: every
+    /// held-out task routed with the threshold out of the way, its expert and
+    /// the base both scored, and the threshold swept offline. The best point
+    /// is the bar a typed gate must clear. Needs --features models and a GPU.
     GateSweep(crate::gate_sweep::SweepArgs),
-    /// Record each live task's clear winner over a store's population
-    /// (ADR-0024 D-1), for `gate-train` to learn where tasks should go: every
-    /// routable expert scored on every live task. Needs --features models and
-    /// a GPU.
+    /// Record each live task's clear winner over a store's population, for
+    /// `gate-train` to learn where tasks should go: every routable expert
+    /// scored on every live task. Needs --features models and a GPU.
     GateOutcomes(crate::gate_outcomes::OutcomeArgs),
-    /// A critic trained on the verifier's verdicts (ADR-0022 S-2): train one
+    /// A critic trained on the verifier's verdicts: train one
     /// and read it against them, per skill.
     Critic {
         #[command(subcommand)]
@@ -524,7 +522,7 @@ pub enum Command {
         #[arg(long, default_value_t = 400)]
         epochs: usize,
         /// Train on the live tasks each expert clearly won as well as the
-        /// capability exemplars (ADR-0024 D-1; `gate-outcomes` records them).
+        /// capability exemplars (`gate-outcomes` records them).
         /// Off by default: the outcome-trained router scored no higher on the
         /// withheld tasks.
         #[arg(long)]
@@ -663,7 +661,7 @@ pub enum Command {
         batch_size: usize,
     },
     /// Retire an expert: population-level forgetting that demotes rather than
-    /// deletes (ADR-0022 S-5). The expert goes dormant, masked from the gate
+    /// deletes. The expert goes dormant, masked from the gate
     /// but kept, and still served when named; `--archive` takes it out of
     /// serving too. Its adapter stays on disk and `revive` brings it back.
     /// Wire a store's contradiction report against a consolidated memory to
@@ -770,10 +768,10 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
-    /// Train a user's accepted behaviors into their private standing expert
-    /// (ADR-0027). Each behavior's worked examples are the tasks, a quarter
-    /// held out. The base model's own answers to everyday prompts are replayed
-    /// beside them, so the expert keeps what the base does elsewhere. The
+    /// Train a user's accepted behaviors into their private standing expert.
+    /// Each behavior's worked examples are the tasks, a quarter held out. The
+    /// base model's own answers to everyday prompts are replayed beside them,
+    /// so the expert keeps what the base does elsewhere. The
     /// expert is minted only if every behavior clearly rose on its held-out
     /// tasks and the controls held. Needs --features models + a GPU.
     Behave(crate::behave::BehaveArgs),

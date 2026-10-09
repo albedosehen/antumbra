@@ -1,4 +1,4 @@
-//! The tenant hive (ADR-0017 B): a third brain the org shares, assembled from
+//! The tenant hive: a third brain the org shares, assembled from
 //! what members choose to offer and the owner chooses to accept.
 //!
 //! Two gates, and neither alone opens it. The owner enables the hive for the
@@ -12,7 +12,7 @@
 //! exactly what the owner has accepted -- never what was merely offered.
 //!
 //! What the hive is not: authority. It pools knowledge and confers no power over
-//! another user's agents. ADR-0013's owner-reads-across-users exists for
+//! another user's agents. The owner's right to read across users exists for
 //! curation and training; curating a hive is not directing anyone's agents.
 
 use chrono::{DateTime, Utc};
@@ -24,9 +24,9 @@ use crate::ids::{TenantId, UserId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OfferedKind {
-    /// A compartment, and so the memories in it (ADR-0014).
+    /// A compartment, and so the memories in it.
     Compartment,
-    /// A knowledge document (ADR-0016).
+    /// A knowledge document.
     Document,
     /// A consolidated expert, which joins the shared umbra.
     Expert,

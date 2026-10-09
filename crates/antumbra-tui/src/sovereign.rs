@@ -1,4 +1,4 @@
-//! What the Sovereign page shows (ADR-0021): the rules about a coding agent
+//! What the Sovereign page shows: the rules about a coding agent
 //! running with its feature flags off, and which skills are used.
 //!
 //! Nothing is queried for it. Both are keyed memories (see

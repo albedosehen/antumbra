@@ -5,11 +5,11 @@
 //! fresh adapter, resolves the request's tasks, and runs `raft_train`. Only the
 //! model loader touches the GPU, so this orchestration is tested with fakes.
 //!
-//! Each realization is also where a request's holdout is enforced (ADR-0022):
+//! Each realization is also where a request's holdout is enforced:
 //! the corpus is split into what the run learns from and what it only
 //! measures before the model is loaded, and the outcome echoes the holdout so
 //! the loop can tell a measured generation from one that was merely labeled.
-//! The same goes for the recipe (S-1): the run trains under the one requested,
+//! The same goes for the recipe: the run trains under the one requested,
 //! or under the trainer's own when none is, and echoes whichever it used.
 
 use std::sync::Arc;
@@ -46,7 +46,7 @@ fn recipe_for(req: &TrainRequest, config: &RaftConfig) -> Result<TrainingRecipe>
 /// trained on. Never the audit slice, which no decision may read, and never an
 /// impossible task, which is its own alarm. The flag says which it was.
 /// What a run learns from, narrowed to the grow step's focus when it named
-/// one (ADR-0022 S-3). Withheld tasks are not touched, so a focused run is
+/// one. Withheld tasks are not touched, so a focused run is
 /// measured as a full one is. A focus that names none of the tasks the run may
 /// learn from is refused: it would train on nothing.
 fn focused(learn: Vec<CorpusTask>, focus: &[String]) -> Result<Vec<CorpusTask>> {
@@ -245,8 +245,8 @@ impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
         }
     }
 
-    /// Let `critic` shape advantage inside the verifier's parts, at `weight`
-    /// (ADR-0022 S-2). Without it, reward is the verifier's alone.
+    /// Let `critic` shape advantage inside the verifier's parts, at `weight`.
+    /// Without it, reward is the verifier's alone.
     pub fn with_critic(
         mut self,
         critic: Arc<dyn antumbra_core::ports::Critic>,
@@ -261,7 +261,7 @@ impl<L: GrpoModelLoader, C: Corpus> GrpoTrainer<L, C> {
     }
 
     /// Have `twin` score every answer the critic scores, shaping nothing, so
-    /// each generation reports how far the two agree (ADR-0022 S-2). Without
+    /// each generation reports how far the two agree. Without
     /// a critic it does nothing.
     pub fn with_critic_twin(mut self, twin: Arc<dyn antumbra_core::ports::Critic>) -> Self {
         if let Some(shaping) = &mut self.shaping {

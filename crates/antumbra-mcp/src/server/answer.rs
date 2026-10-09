@@ -1,5 +1,5 @@
 //! The `answer` tool: route a task, then serve it through the covering expert
-//! with the user's standing experts composed in (ADR-0027).
+//! with the user's standing experts composed in.
 //!
 //! Its own router, joined to the others in `engine.rs`. A standing expert holds
 //! the behaviors a user accepted for a scope: everywhere, or one repository.

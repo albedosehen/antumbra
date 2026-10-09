@@ -1,4 +1,4 @@
-//! A memory cut into the pieces the chunk index embeds (ADR-0025).
+//! A memory cut into the pieces the chunk index embeds.
 //!
 //! One vector for a long memory is a blur of all of it, and a passage from its
 //! middle is a small part of the blur. Measured on 400 of the user's memories,

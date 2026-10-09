@@ -1,4 +1,4 @@
-//! The evidence graph (ADR-0019 section 2): which services depend on which,
+//! The evidence graph: which services depend on which,
 //! held as claims with evidence rather than as facts a parser extracted.
 //!
 //! An edge is an ordinary memory. Its evidence says what depends on what and
@@ -15,7 +15,7 @@
 //! checked rather than taken on faith. Several sources for one edge combine as
 //! independent evidence, so a model's claim alone stays under the default
 //! floor and rises above it only when a declaration or an observation
-//! corroborates it, as the ADR asks.
+//! corroborates it.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 

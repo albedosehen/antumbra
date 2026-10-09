@@ -52,7 +52,7 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
         Replicate::Owned(|scope: &Scope, row| scope.holds_memory(row)),
     ),
     TableSpec::new("memory_edge", "created_at", Replicate::EngineDecides),
-    // The fabric itself (ADR-0017 A2). These two are what make a user's nodes
+    // The fabric itself. These two are what make a user's nodes
     // more than a set of machines that happen to share a database.
     //
     // `device_profile` so a node can see the rest of the user's fabric at all:

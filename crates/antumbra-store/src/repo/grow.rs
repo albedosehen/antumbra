@@ -1,4 +1,4 @@
-//! Grow repository (ADR-0022 S-3): the region census each contribution
+//! Grow repository: the region census each contribution
 //! measurement leaves, and the grow step's decisions. Both are keyed by run
 //! and generation, so a generation measured or decided again after a crash
 //! replaces its rows rather than adding second ones.

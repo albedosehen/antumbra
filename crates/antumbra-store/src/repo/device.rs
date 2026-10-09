@@ -1,5 +1,4 @@
-//! The device registry: a user's machines, as they describe themselves
-//! (ADR-0017).
+//! The device registry: a user's machines, as they describe themselves.
 //!
 //! A node registers itself here at startup and re-registers whenever what it
 //! can do changes. The row is keyed per (tenant, user, host), so re-registering

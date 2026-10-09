@@ -1,6 +1,6 @@
 # The workbench corpus
 
-A corpus built for the loop to be measured on: 349 Python function-writing tasks across eight skills and three spec sizes, each checked by a judge that cannot be passed without computing the right answers. The corpora beside it are one to three tasks each, which is enough to see training happen and too few to hold anything out ([ADR-0022](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0022-governed-self-improvement.md)).
+A corpus built for the loop to be measured on: 349 Python function-writing tasks across eight skills and three spec sizes, each checked by a judge that cannot be passed without computing the right answers. The corpora beside it are one to three tasks each, which is enough to see training happen and too few to hold anything out.
 
 | file            | what it is                                                                      |
 | --------------- | ------------------------------------------------------------------------------- |
@@ -24,7 +24,7 @@ What it does not stop is a candidate that finds a reference solution on disk. Th
 
 ## Tasks
 
-Each skill has six templates, two at each spec size. A template's parameters change the behaviour asked for, not just the inputs: a shift of 7 rather than 3, keeping the first duplicate rather than the last. So every task is new text, and none is copied from a public benchmark the base model will have seen. Some tasks carry `also` for the other skill they draw on (`group_words` is strings as much as mappings), which gives the gate cases that more than one expert could serve (ADR-0024 D-1).
+Each skill has six templates, two at each spec size. A template's parameters change the behaviour asked for, not just the inputs: a shift of 7 rather than 3, keeping the first duplicate rather than the last. So every task is new text, and none is copied from a public benchmark the base model will have seen. Some tasks carry `also` for the other skill they draw on (`group_words` is strings as much as mappings), which gives the gate cases that more than one expert could serve.
 
 | skill     | small | medium | large | impossible | total |
 | --------- | ----: | -----: | ----: | ---------: | ----: |
@@ -57,7 +57,7 @@ antumbra train --corpus corpora/workbench/dates.json --run dates
 ```
 
 ```bash
-# synthesized verifiers (ADR-0022 S-4): the model picks inputs, the reference
+# synthesized verifiers: the model picks inputs, the reference
 # supplies outputs, and the trust protocol measures the result
 antumbra verifier synthesize --corpus corpora/workbench/strings.json --out proposals.json
 python corpora/workbench/synthesize.py --corpus corpora/workbench/strings.json \
@@ -78,7 +78,7 @@ uv run --python 3.12 python -m unittest discover -s corpora/workbench
 ANTUMBRA_PYTHON=<python> cargo test -p antumbra-critic --test corpora -- --ignored
 ```
 
-Before writing anything, the generator runs every reference through the judge exactly as `CommandVerifier` would, and runs eight completions that solve nothing: empty code, a stub returning `None`, one returning its first argument, one returning the first case's answer every time, three ways of exiting 0, and a forged result line. Every reference must pass and every one of those must fail. A single exception stops the run. This is the no-model baseline [ADR-0024](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0024-typed-decisions.md) asks every constructed benchmark to be checked against. The unit tests show that these checks do fail when they should. The Rust tests repeat them through the real verifier and fail as soon as any Python verifier under `corpora/` can be passed by exiting.
+Before writing anything, the generator runs every reference through the judge exactly as `CommandVerifier` would, and runs eight completions that solve nothing: empty code, a stub returning `None`, one returning its first argument, one returning the first case's answer every time, three ways of exiting 0, and a forged result line. Every reference must pass and every one of those must fail. A single exception stops the run. This is the no-model baseline every constructed benchmark must be checked against. The unit tests show that these checks do fail when they should. The Rust tests repeat them through the real verifier and fail as soon as any Python verifier under `corpora/` can be passed by exiting.
 
 Generation is deterministic: two runs under different hash seeds produce the same files. Lint and types come from `uvx ruff check`, `uvx ruff format --check` and `uvx mypy --strict`, all run from this directory.
 

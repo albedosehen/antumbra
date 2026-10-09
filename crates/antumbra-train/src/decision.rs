@@ -1,4 +1,4 @@
-//! The typed decision head (ADR-0024): two layers over a frozen encoder,
+//! The typed decision head: two layers over a frozen encoder,
 //! trained against a strictly proper scoring rule on verifier outcomes.
 //!
 //! This is the half of a [`TypedDecider`](antumbra_core::ports::TypedDecider)
@@ -59,7 +59,7 @@ impl DecisionHead {
     ///
     /// Probabilities rather than logits at the boundary, because every consumer
     /// of this head thresholds the result, and a threshold on an unnormalized
-    /// score is the defect ADR-0024 exists to remove.
+    /// score is the defect typed decisions exist to remove.
     pub fn probs(&self, pooled: &Tensor) -> Result<Tensor> {
         softmax(&self.logits(pooled)?, 1)
     }

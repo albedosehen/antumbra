@@ -1,4 +1,4 @@
-//! Trust entries for auto mode (ADR-0021): a draft of `autoMode.environment`,
+//! Trust entries for auto mode: a draft of `autoMode.environment`,
 //! the prose that tells the agent's classifier what is inside the user's
 //! boundary, so that pushing to their own repository or reaching their own
 //! service is not mistaken for exfiltration.

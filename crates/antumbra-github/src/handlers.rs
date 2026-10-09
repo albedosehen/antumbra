@@ -3,10 +3,9 @@
 //!
 //! - A **merge** re-anchors every memory whose current anchor sits on the
 //!   merged branch to the merge commit on the base branch (path kept, the old
-//!   anchor kept behind it as history). This is the squash-merge gap of
-//!   ADR-0018 closed at its source event: the merged commits are not ancestors
-//!   of the base branch, so without this the memories would read not-on-head
-//!   forever.
+//!   anchor kept behind it as history). This closes the squash-merge gap at
+//!   its source event: the merged commits are not ancestors of the base
+//!   branch, so without this the memories would read not-on-head forever.
 //! - A **branch deletion** marks every memory whose current anchor sits on that
 //!   branch orphaned. A memory re-anchored by an earlier merge sits on the base
 //!   branch and is untouched, which is why GitHub's delete-after-merge is safe.

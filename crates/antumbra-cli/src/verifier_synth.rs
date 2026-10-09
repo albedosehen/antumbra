@@ -1,4 +1,4 @@
-//! `antumbra verifier synthesize` (ADR-0022 S-4): the model proposes the inputs
+//! `antumbra verifier synthesize`: the model proposes the inputs
 //! of a differential check, the reducible tier.
 //!
 //! For each task the model is asked for inputs that would tell a correct

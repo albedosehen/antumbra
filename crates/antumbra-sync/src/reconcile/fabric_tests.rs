@@ -20,7 +20,7 @@ fn user() -> UserId {
     UserId::new("user:a")
 }
 
-/// ADR-0017 A2's delivery. The laptop cannot train and leaves a request; the
+/// Delivery across the fabric. The laptop cannot train and leaves a request; the
 /// rig takes it. Without the fabric tables replicating, both halves work
 /// perfectly and no run ever crosses between the two machines.
 #[tokio::test]

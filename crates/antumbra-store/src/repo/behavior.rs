@@ -1,4 +1,4 @@
-//! Behaviors (ADR-0027) in the store: a memory in the user's own `behavior`
+//! Behaviors in the store: a memory in the user's own `behavior`
 //! compartment, its spec in the content and its state in the evidence. One
 //! writer for the MCP tool and the CLI's import, so both store a behavior the
 //! same way. Validation (`Spec::problems`) and embedding are the caller's.

@@ -1,7 +1,7 @@
-//! The critic's standing fallback (ADR-0022 S-2's kill). Once the critic's
-//! rank correlation with the verifier is no longer positive, or its agreement
-//! with its twin has declined across generations, the run trains on the
-//! verifier's reward alone from the next generation on, and stays there.
+//! The critic's standing fallback (the learned critic's kill criterion). Once
+//! the critic's rank correlation with the verifier is no longer positive, or
+//! its agreement with its twin has declined across generations, the run trains
+//! on the verifier's reward alone from the next generation on, and stays there.
 //!
 //! The watches are the run's as this process has seen them, so a resumed run
 //! reads its critic afresh.

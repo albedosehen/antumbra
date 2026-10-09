@@ -1,4 +1,4 @@
-//! An expert's moves are visible exactly where the expert is (ADR-0022 S-5).
+//! An expert's moves are visible exactly where the expert is.
 //! A tenant session reads shared experts and its own private ones; if it could
 //! read those experts but not their moves, a demoted expert would look active
 //! to it and be routed to.

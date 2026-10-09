@@ -207,7 +207,7 @@ async fn the_sparse_leg_finds_identifiers_that_carry_punctuation() -> Result<()>
         &store,
         &tenant,
         "22222222-0000-0000-0000-000000000002",
-        "ADR-0017 covers the device registry and genesis placement",
+        "DP-1017 covers the device registry and genesis placement",
     )
     .await?;
     seed(
@@ -227,10 +227,7 @@ async fn the_sparse_leg_finds_identifiers_that_carry_punctuation() -> Result<()>
         "the lexical leg matches ordinary words"
     );
 
-    for (query, expect) in [
-        ("RUST_MIN_STACK", "RUST_MIN_STACK"),
-        ("ADR-0017", "ADR-0017"),
-    ] {
+    for (query, expect) in [("RUST_MIN_STACK", "RUST_MIN_STACK"), ("DP-1017", "DP-1017")] {
         let hits = sparse_recall(&store, &tenant, query, 10, None).await?;
         assert!(
             hits.iter().any(|m| m.content.contains(expect)),

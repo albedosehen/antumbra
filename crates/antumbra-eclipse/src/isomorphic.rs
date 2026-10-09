@@ -71,8 +71,8 @@ impl Reverification {
     /// Whether the candidate may graduate on this evidence.
     ///
     /// A candidate that diverged on any pair may not. Nor may one that was
-    /// never re-verified: ADR-0022 puts this on *every* graduation candidate,
-    /// so an empty run is a re-verification that did not happen rather than one
+    /// never re-verified: *every* graduation candidate owes this check, so
+    /// an empty run is a re-verification that did not happen rather than one
     /// that found nothing, and reading it as a pass would make the instrument
     /// disappear the moment the caller forgot to run it.
     pub fn clears(&self) -> bool {

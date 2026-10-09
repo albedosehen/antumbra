@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the recipe search (ADR-0022 S-1) end to end on the GPU host: a searched,
+# Run the recipe search end to end on the GPU host: a searched,
 # held-out training run over a workbench corpus, cohort per generation,
 # graduation on fresh-seed re-measurement. Detached; logs to $LOG
 # (/tmp/search-validate.log by default).

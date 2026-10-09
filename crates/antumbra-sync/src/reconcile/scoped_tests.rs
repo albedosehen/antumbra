@@ -41,7 +41,7 @@ async fn org() -> Result<(Store, Store, UserId, UserId)> {
     Ok((local, remote, lily, oslo))
 }
 
-/// The whole point of increment 5. A collector scoped to lily carries her
+/// The whole point of a per-user scope. A collector scoped to lily carries her
 /// compartment and her machine, leaves oslo's behind, and refuses nothing --
 /// `refused` is the number that must be zero, because a refusal on a table
 /// the policy already narrowed means the policy and the ACL disagree.

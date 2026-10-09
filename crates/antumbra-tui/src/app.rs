@@ -121,7 +121,7 @@ pub enum Page {
     /// Evaluation runs and the regression tripwire.
     Evals,
     /// A coding agent with its feature flags off: the rules, and which skills
-    /// are used (ADR-0021). Read-only.
+    /// are used. Read-only.
     Sovereign,
 }
 

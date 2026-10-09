@@ -1,4 +1,4 @@
-//! The recipe ledger (ADR-0022 S-1): every generation records the recipe its
+//! The recipe ledger: every generation records the recipe its
 //! shadow trained under, as the trainer reported it, descending from the one
 //! before, and measured under the partition the trainer confirmed.
 

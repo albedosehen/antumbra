@@ -1,5 +1,5 @@
-//! The population against its single best expert (ADR-0022 S-5): the rolling
-//! comparison the record asks to be reported whether or not it flatters the
+//! The population against its single best expert: the rolling
+//! comparison that is reported whether or not it flatters the
 //! architecture. Routing across many experts has to beat sending everything to
 //! the best one; if it stops doing so, the right answer is fewer and broader
 //! experts.
@@ -13,7 +13,7 @@
 //!
 //! Taken as the highest of each task's noisy scores, that oracle reads high
 //! even when the experts are identical: on eight samples a score, by 0.05 to
-//! 0.08 (ADR-0024 D-1). So where the scores come in two halves of the seeds,
+//! 0.08. So where the scores come in two halves of the seeds,
 //! the oracle is cross-fitted ([`cross_fitted_oracle`]): each task's best is
 //! chosen on one half and scored on the other.
 

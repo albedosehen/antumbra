@@ -1,5 +1,4 @@
-//! `antumbra verifier`: the verifier namespace and its trust protocol
-//! (ADR-0022 S-4).
+//! `antumbra verifier`: the verifier namespace and its trust protocol.
 
 use clap::Subcommand;
 

@@ -1,7 +1,7 @@
-//! The loop's recheck of the verifiers that judged its training (ADR-0022
-//! S-4): a trusted synthesized verifier is measured again on the policy's own
-//! answers, each labeled by the task's authored anchor, and quarantined when
-//! it passes wrong ones past its bound.
+//! The loop's recheck of the verifiers that judged its training, the verifier
+//! trust protocol run by the loop: a trusted synthesized verifier is measured
+//! again on the policy's own answers, each labeled by the task's authored
+//! anchor, and quarantined when it passes wrong ones past its bound.
 
 use async_trait::async_trait;
 use chrono::Utc;

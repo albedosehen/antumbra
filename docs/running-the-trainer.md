@@ -34,13 +34,13 @@ cargo run -p antumbra-cli -- --url surrealkv://./data/antumbra.skv experts
 
 ### Measuring a run: `--holdout`
 
-`train --holdout` withholds part of the corpus from training so each generation can be measured against tasks it never learned from ([ADR-0022](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0022-governed-self-improvement.md)'s standing instruments). The split is a pure function of each task id and a seed: about a fifth of the tasks are held out and a tenth audited, and the rest stay visible. Only visible tasks are trained on and counted in the fitness that decides graduation. Held-out tasks are measured in the final round of every generation. Audited tasks are measured every second generation (`LoopConfig::audit_every`). Each generation then prints its widest visible-minus-held-out gap by task size, the audit pass rate when the audit was due, and the audit trend over the run so far, and stores all three beside its fitness. The trend reads `inconclusive` until ten generations have been measured. After that it reads `carrying` when the audit slice rose with the fitness, `overtuning` when fitness climbed and the audit slice did not follow, and `flat` when fitness did not climb.
+`train --holdout` withholds part of the corpus from training so each generation can be measured against tasks it never learned from. The split is a pure function of each task id and a seed: about a fifth of the tasks are held out and a tenth audited, and the rest stay visible. Only visible tasks are trained on and counted in the fitness that decides graduation. Held-out tasks are measured in the final round of every generation. Audited tasks are measured every second generation (`LoopConfig::audit_every`). Each generation then prints its widest visible-minus-held-out gap by task size, the audit pass rate when the audit was due, and the audit trend over the run so far, and stores all three beside its fitness. The trend reads `inconclusive` until ten generations have been measured. After that it reads `carrying` when the audit slice rose with the fitness, `overtuning` when fitness climbed and the audit slice did not follow, and `flat` when fitness did not climb.
 
 It is off by default because it changes what is learned, and because the demo corpora here are too small to split: both tasks in `corpora/arith.json` hash into the held-out slice, so `train --holdout` refuses that corpus rather than training on nothing. Use it on a corpus of real size, such as [`corpora/workbench/all.json`](../corpora/workbench/README.md): 349 tasks across eight skills and three spec sizes, including the impossible tasks the instruments need. Without it, generations carry no instruments rather than a gap computed over tasks that were all trained on.
 
 ### Measuring what each expert adds: `--contribution-every`
 
-`train --contribution-every N` measures every shared expert's leave-one-out contribution in every N-th generation (ADR-0022 S-5). Each expert is masked in turn, and the tasks it served are routed again, to the next expert or to the base model. Both sides are then scored under the same seeds.
+`train --contribution-every N` measures every shared expert's leave-one-out contribution in every N-th generation. Each expert is masked in turn, and the tasks it served are routed again, to the next expert or to the base model. Both sides are then scored under the same seeds.
 - **Output:** each generation prints, per expert, how many live tasks were routed to it, its score with and without, and the difference. An expert nothing was routed to prints as unused.
 - **The record:** rows go to the `contribution` table, the history retirement reads.
 - **Baseline:** each measurement also compares the routed population with its best single expert on the same tasks, and prints what routing adds. It is kept in `population_baseline` whether or not the answer flatters the population.
@@ -50,7 +50,7 @@ It is off by default because it changes what is learned, and because the demo co
 
 ### Admission: `--duplicate-above`
 
-A graduate whose capability vector is at least `--duplicate-above` (0.95 by default) similar to an active shared expert's is a twin (ADR-0022 S-5). It joins only if it beats that expert head to head on the live tasks, under the same seeds, and it then takes that expert's place. The other is archived, not deleted, and `antumbra revive` brings it back.
+A graduate whose capability vector is at least `--duplicate-above` (0.95 by default) similar to an active shared expert's is a twin. It joins only if it beats that expert head to head on the live tasks, under the same seeds, and it then takes that expert's place. The other is archived, not deleted, and `antumbra revive` brings it back.
 - **A twin that loses** is not admitted, and its shadow is pruned.
 - **Any graduate** must also leave the population better off. Every live task in a 64-task sample is routed with and without it, and the tasks it reroutes are scored both ways under the same seeds. That includes tasks it would make the gate escalate. One that does not improve them is not admitted.
 - **The gate it is judged under:** with it in, tasks are routed by a learned router retrained over the population and it, the gate that would serve it. Once it is admitted, that router is stored, and the rest of the run and serving route under it. With too few experts to train one, it joins the heuristic gate's pool.
@@ -60,7 +60,7 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 
 ### Choosing what to learn: `--grow`
 
-`train --grow` lets each generation learn from one region (a skill) instead of every visible task (ADR-0022 S-3). It picks the region where the population, measured on the latest census, succeeds about half the time: learnability `p(1-p)`.
+`train --grow` lets each generation learn from one region (a skill) instead of every visible task. It picks the region where the population, measured on the latest census, succeeds about half the time: learnability `p(1-p)`.
 - **The gate:** regions where it never succeeds are gated out.
 - **Redundancy:** a region like the ones chosen recently is discounted.
 - **The unfiltered share:** a quarter of what is learned is drawn from the whole visible slice.
@@ -68,7 +68,7 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 - **The first generation:** it has no census yet, so it learns from everything.
 - **Output:** each generation prints the chosen region, its learnability, the last choice's realized credit, and the diversity instruments.
 - **`--grow-by`:** how the region is chosen.
-  - `credit` (the default, the record's objective) chooses the highest expected realized improvement. Learnability is the prior, and the credit that region's past choices realized updates it.
+  - `credit` (the default) chooses the highest expected realized improvement. Learnability is the prior, and the credit that region's past choices realized updates it.
   - `learnability` ignores credit.
   - `uniform` picks at random among the regions that pass the gate. It is the baseline the grow step is measured against.
 - **`--grow-from`:** where the region's shadow starts.
@@ -78,14 +78,14 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 
 ### Merging siblings: `--merge`
 
-`train --merge` considers the most similar pair of active shared experts at each generation boundary (ADR-0022 S-5).
+`train --merge` considers the most similar pair of active shared experts at each generation boundary.
 - **The test:** the pair is merged at the population's rank when their adapters share enough of their subspace (`--merge-retained`, 0.9 of the averaged delta's energy), and when the merged adapter scores on the live tasks at least as well as the better of the two.
 - **On a merge:** both originals are archived, not deleted, and `antumbra revive` undoes it.
 - **Output:** each generation prints the decision with the overlap and the scores. The merge's scoring costs three evaluations of the live tasks.
 
 ### Searching the recipe: `--search`
 
-`train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes (ADR-0022 S-1).
+`train --search` trains a cohort each generation instead of one shadow (`--cohort`, 4 by default), each member under a recipe the search proposes.
 - **What is searched:** learning rate and batch size, plus the KL weight under `--algo grpo`.
 - **Every member trains from the base.** Only the best member's recipe is carried forward, and it leads the next generation's cohort. No member starts from another's weights, so each graduate is a skill of its own.
 - **Two frequencies:**
@@ -101,7 +101,7 @@ A graduate whose capability vector is at least `--duplicate-above` (0.95 by defa
 
 ### Verifiers the loop did not write: `antumbra verifier`
 
-A proposed check grants reward only after a measurement against ground truth the loop did not produce ([ADR-0022](https://github.com/albedosehen/antumbra-meta/blob/main/adr/0022-governed-self-improvement.md) S-4).
+A proposed check grants reward only after a measurement against ground truth the loop did not produce.
 
 ```bash
 # label completions for a skill's tasks with each task's own authored verifier

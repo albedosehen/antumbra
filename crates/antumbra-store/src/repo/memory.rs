@@ -368,7 +368,7 @@ fn written_from(host: &str) -> surql::types::operators::Operator {
 /// `tenant`'s live memories carrying any of `entries` as an evidence entry,
 /// matched whole and filtered by the engine, read without the embeddings.
 ///
-/// The evidence graph (ADR-0019) finds its edges this way: every edge carries
+/// The evidence graph finds its edges this way: every edge carries
 /// exactly one `dep-source:<source>` entry, so asking for the four of them
 /// returns the edges and nothing else, without reading every memory of a
 /// large store to find the few that are edges.
@@ -575,7 +575,7 @@ async fn hybrid_keys(
         sparse_keys(store, tenant, query_text, pool, network).instrument(leg("recall lexical")),
     );
     let dense = dense?;
-    // The chunk index (ADR-0025): each memory scores by its best vector, its
+    // The chunk index: each memory scores by its best vector, its
     // whole one or one of its pieces', through the same calibration. A memory
     // with no chunks yet scores by its whole vector as before, so the index can
     // be empty, partial or rebuilt; a failing chunk leg leaves the whole-memory
@@ -632,7 +632,7 @@ struct Scored {
 /// from walking the COSINE index. With `probes` the score is calibrated
 /// instead (re-ranking the pool here, before fusion: sorting the FUSED list by
 /// a dense score would throw away the lexical leg), and that reads the vectors.
-/// The server passes none (ADR-0026: on the user's store the calibration cost
+/// The server passes none (measured on the user's store, the calibration cost
 /// more recall than it saved); the bench can.
 async fn dense_scored(
     store: &Store,

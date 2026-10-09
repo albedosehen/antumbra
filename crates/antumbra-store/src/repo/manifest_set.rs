@@ -1,5 +1,5 @@
-//! What each repository's manifests declared, as last read (ADR-0019's
-//! declared source, through the GitHub App): one row per (workspace,
+//! What each repository's manifests declared, as last read (the evidence
+//! graph's declared source, through the GitHub App): one row per (workspace,
 //! repository), replaced on every reading, so the edges into and out of a
 //! repository can be worked out again from every repository's last reading
 //! without fetching them all.

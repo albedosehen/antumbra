@@ -1,4 +1,4 @@
-//! Verifier repository (ADR-0022 S-4): the verifier namespace, every
+//! Verifier repository: the verifier namespace, every
 //! measurement of trust, and every change of a verifier's state.
 //!
 //! A verifier is keyed by its content address and its spec is stored as

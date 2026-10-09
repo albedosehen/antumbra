@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run verifier synthesis and the trust protocol (ADR-0022 S-4) end to end on
+# Run verifier synthesis and the trust protocol end to end on
 # the GPU host, over one workbench skill. Detached; logs to $LOG
 # (/tmp/verifier-validate.log by default).
 #

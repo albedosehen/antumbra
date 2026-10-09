@@ -1,4 +1,4 @@
-//! Leave-one-in admission through the loop (ADR-0022 S-5): a candidate that
+//! Leave-one-in admission through the loop: a candidate that
 //! beats the generalist on its own tasks is still turned away when adding it
 //! makes the gate escalate others, because the population does worse on the
 //! live tasks with it than without it. A trainer that can retrain the learned

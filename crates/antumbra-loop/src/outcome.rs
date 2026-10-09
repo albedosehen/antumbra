@@ -1,4 +1,4 @@
-//! Which expert clearly won each live task (ADR-0024 D-1). A contribution
+//! Which expert clearly won each live task. A contribution
 //! measurement with the baseline on scores every expert on every live task,
 //! so it knows where each task should have gone, not only where the gate sent
 //! it. Those wins are kept, and the learned router trains on them beside the

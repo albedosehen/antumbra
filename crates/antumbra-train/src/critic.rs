@@ -1,10 +1,10 @@
-//! A critic as a shadow (ADR-0022 S-2): the base model with an adapter of its
+//! A critic as a shadow: the base model with an adapter of its
 //! own, taught to read a task and a completion and answer whether the
 //! completion does what the task asks.
 //!
 //! Every label it learns from here is a fresh verifier outcome, so the
-//! exogenous floor holds with room to spare. It is read the way the record
-//! asks it to be measured: calibration and agreement per slice, and its rank
+//! exogenous floor holds with room to spare. It is read the way a critic is
+//! meant to be measured: calibration and agreement per slice, and its rank
 //! correlation with the verifier. It reaches training only through
 //! [`crate::grpo::CriticShaping`], whose arithmetic bounds what it can do
 //! there, and it never enters graduation.

@@ -170,7 +170,7 @@ fn git_facts_dry_run_reads_this_repository() {
     assert!(out.contains("dry run"), "{out}");
 }
 
-/// Retiring demotes and reviving restores (ADR-0022 S-5), through a store that
+/// Retiring demotes and reviving restores, through a store that
 /// outlives each command. Nothing is deleted along the way.
 #[test]
 fn retire_demotes_and_revive_restores() {

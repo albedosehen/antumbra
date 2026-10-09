@@ -1,4 +1,4 @@
-//! Contribution repository (ADR-0022 S-5): each expert's leave-one-out
+//! Contribution repository: each expert's leave-one-out
 //! contribution, one row per expert per measured generation of a run, keyed so
 //! a generation measured again after a crash replaces its rows rather than
 //! adding second ones. The history the loop's detectors read.
@@ -102,7 +102,7 @@ pub async fn upsert_baseline(store: &Store, record: &BaselineRecord) -> Result<(
 }
 
 /// Every comparison one run recorded, oldest generation first: the rolling
-/// comparison the record asks to be reported.
+/// comparison a run reports.
 pub async fn baselines_for_run(store: &Store, run_id: &RunId) -> Result<Vec<BaselineRecord>> {
     let query = Query::new()
         .select(None)

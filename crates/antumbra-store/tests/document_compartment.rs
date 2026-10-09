@@ -1,4 +1,4 @@
-//! Engine-enforced document privacy (ADR-0020): a document kept in a private
+//! Engine-enforced document privacy: a document kept in a private
 //! compartment is invisible to another member of the same tenant until the
 //! compartment is granted, and hidden again on revoke, on reads that carry no
 //! compartment filter of their own. Before this, `document_chunk` carried the

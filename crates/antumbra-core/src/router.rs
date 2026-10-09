@@ -101,8 +101,8 @@ impl LearnedRouter {
     }
 
     /// Whether this router was trained over exactly these experts: the test
-    /// for whether the population it routes over has changed since (ADR-0022
-    /// S-5, the gate re-frozen while the population holds still).
+    /// for whether the population it routes over has changed since (the
+    /// learned gate stays frozen while the population holds still).
     pub fn trained_over<'a>(&self, experts: impl IntoIterator<Item = &'a ExpertId>) -> bool {
         let mine: std::collections::BTreeSet<&str> =
             self.experts.iter().map(|e| e.id.as_str()).collect();
@@ -114,8 +114,8 @@ impl LearnedRouter {
     /// The router with every expert `keep` refuses masked out of the gate:
     /// its centroid is gone, so it is neither routed to nor counted toward
     /// coverage. The learned metric is shared and stays, so the experts kept
-    /// are scored exactly as before (ADR-0022 S-5, a dormant expert's gate
-    /// masked).
+    /// are scored exactly as before. This is how a dormant expert's gate is
+    /// masked.
     pub fn masked(mut self, keep: impl Fn(&ExpertId) -> bool) -> Self {
         self.experts.retain(|e| keep(&e.id));
         self

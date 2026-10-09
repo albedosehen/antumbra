@@ -1,6 +1,6 @@
-//! The loop's recheck of the verifiers that judged its training (ADR-0022
-//! S-4): trust re-measured on the loop's own schedule, on the answers of the
-//! policy a verifier is rewarding.
+//! The loop's recheck of the verifiers that judged its training, the verifier
+//! trust protocol run by the loop: trust re-measured on the loop's own
+//! schedule, on the answers of the policy a verifier is rewarding.
 //!
 //! A trusted synthesized verifier was promoted on cases, and a check that was
 //! sound against one population is not thereby sound against the next. So in
@@ -11,7 +11,7 @@
 //!   a case. An answer the anchor disagrees with itself on is left out, as the
 //!   cases builder leaves it out.
 //! - **The two rates:** the verifier's verdicts and the anchor's on the same
-//!   answers are the visible and held-out pass rates the record names.
+//!   answers are its visible and held-out pass rates.
 //!   Training saw the first and never the second.
 //! - **The measurement:** it goes through the trust protocol and is recorded
 //!   like any other. A verifier passing the policy's wrong answers past its

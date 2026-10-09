@@ -1,5 +1,5 @@
-//! An expert's place in the population (ADR-0022 S-5): active, dormant,
-//! archived, deleted. Experts stay frozen forever (ADR-0001); what moves is
+//! An expert's place in the population: active, dormant,
+//! archived, deleted. Experts stay frozen forever; what moves is
 //! whether the gate may route to one, and whether its weights are kept.
 //!
 //! The governing rule is **staleness demotes, only redundancy deletes.** A
@@ -111,7 +111,7 @@ pub enum TransitionCause {
         generations: Vec<Generation>,
         contributions: Vec<f32>,
     },
-    /// A verifier it trained under was quarantined or revoked (ADR-0022 S-4):
+    /// A verifier it trained under was quarantined or revoked:
     /// what that verifier taught is kept out of routing, serving and any
     /// training downstream, not merely scored low.
     Quarantined { verifier: VerifierId },
