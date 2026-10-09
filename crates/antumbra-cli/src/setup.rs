@@ -445,13 +445,17 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
     }
     steps.ok(format!("{MODEL} embeds ({EMBED_DIM} dimensions)"));
 
-    // Whether the server's container can reach ollama is asked from inside a
-    // container, with the host.docker.internal mapping compose gives the
-    // server. Asking from this machine (the bridge gateway) is the
-    // container's view only under a native Docker Engine; under Docker
-    // Desktop the bridge lives in Desktop's VM, which a WSL distro cannot
-    // see, so that check failed even when the server would have worked.
+    // Can the server's container reach ollama? Under a native Docker Engine
+    // on Linux the container comes in through the bridge gateway, which this
+    // machine can probe directly. Anywhere that answer is no (or there is no
+    // bridge to see: Docker Desktop keeps it in its own VM, out of a WSL
+    // distro's sight), ask from inside a container instead, with the
+    // host.docker.internal mapping compose gives the server.
     let port = base.rsplit(':').next().unwrap_or("11434");
+    if cfg!(target_os = "linux") && bridge_reaches(port) {
+        steps.ok("the server's container can reach ollama");
+        return Ok(());
+    }
     match container_reaches(port) {
         Reach::Yes => steps.ok("the server's container can reach ollama"),
         Reach::Unknown(why) => steps.info(format!(
@@ -460,6 +464,26 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
         Reach::No => anyhow::bail!("{}", unreachable_from_container(port)),
     }
     Ok(())
+}
+
+/// ollama's tag list through the Docker bridge gateway, from this machine.
+fn bridge_reaches(port: &str) -> bool {
+    let Ok(gateway) = output(
+        "docker",
+        &[
+            "network",
+            "inspect",
+            "bridge",
+            "--format",
+            "{{(index .IPAM.Config 0).Gateway}}",
+        ],
+    ) else {
+        return false;
+    };
+    agent(Duration::from_secs(3))
+        .get(&format!("http://{}:{port}/api/tags", gateway.trim()))
+        .call()
+        .is_ok_and(|r| r.status().is_success())
 }
 
 enum Reach {
