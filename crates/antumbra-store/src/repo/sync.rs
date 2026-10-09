@@ -1,4 +1,4 @@
-//! Generic, table-agnostic row access for the collector/sync (R-1). The
+//! Generic, table-agnostic row access for the collector/sync. The
 //! collector replicates whole penumbra tables between a local embedded store and
 //! a remote authoritative one, so it works on raw JSON rows rather than typed
 //! DTOs -- one code path covers `memory`, `memory_edge`, `compartment`, `grant`.
@@ -167,7 +167,7 @@ pub struct ChangeEvent {
 /// killed, or the receiver is dropped (which also drops the subscription,
 /// sending `KILL` to the engine).
 ///
-/// This is the R-2 change-feed primitive; routing a change to the right grantees
+/// This is live propagation's change-feed primitive; routing a change to the right grantees
 /// (by tenant/compartment) is layered on top by the caller. Requires a live-query
 /// capable connection (`ws://` or embedded; not `http`).
 pub async fn watch_table(store: &Store, table: &str) -> Result<mpsc::Receiver<ChangeEvent>> {
@@ -326,8 +326,8 @@ mod tests {
     }
 
     // The change-feed watcher delivers a write made after the subscription is
-    // registered -- proving LIVE SELECT works on the embedded engine (the R-2
-    // foundation), and that the event carries the row.
+    // registered -- proving LIVE SELECT works on the embedded engine (live
+    // propagation's foundation), and that the event carries the row.
     #[tokio::test]
     async fn watch_table_delivers_a_create() {
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();

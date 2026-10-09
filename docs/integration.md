@@ -38,7 +38,7 @@ A **SessionStart** hook calls Antumbra and injects the result as the session's o
 }
 ```
 
-The script fetches the bootstrap memory and returns it as `additionalContext`. (See the [`scripts/hooks/`](../scripts/hooks/) templates.) _Today:_ the capture + attribution hooks work as-is (they emit hook decisions, no Antumbra call), the long-lived **hook token** is mintable with `antumbra-mcp --mint-token` (P-1a), and the bootstrap fetch's transport (`POST /mcp/call {tool, arguments}`) is now live (P-1b), so the SessionStart script works end-to-end. (Alternatively, have the agent run `recall_memories` at the top of its first turn with no SessionStart script at all.)
+The script fetches the bootstrap memory and returns it as `additionalContext`. (See the [`scripts/hooks/`](../scripts/hooks/) templates.) _Today:_ the capture + attribution hooks work as-is (they emit hook decisions, no Antumbra call), the long-lived **hook token** is mintable with `antumbra-mcp --mint-token`, and the bootstrap fetch's transport (`POST /mcp/call {tool, arguments}`) is now live, so the SessionStart script works end-to-end. (Alternatively, have the agent run `recall_memories` at the top of its first turn with no SessionStart script at all.)
 
 ### 2. Capture on stop / before compaction (nothing learned is lost)
 

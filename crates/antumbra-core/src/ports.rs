@@ -429,7 +429,7 @@ pub trait Embedder: Send + Sync {
 
 /// Re-scores wide hybrid-recall candidates with a general-purpose cross-encoder
 /// over (query, candidate-content) pairs — the precision stage downstream of the
-/// wide RRF recall (P-2 rerank). A single-vector dense retriever has a
+/// wide RRF recall. A single-vector dense retriever has a
 /// dimension-bounded recall ceiling; a cross-encoder reads the query and each
 /// candidate *jointly*, so it reorders the recalled pool far more precisely than
 /// the bi-encoder scores can.

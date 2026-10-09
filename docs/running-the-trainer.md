@@ -224,7 +224,7 @@ The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds th
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 ```
 
-The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). On a CDI host (NixOS, or any daemon without a named nvidia runtime) add `-f docker/docker-compose.gpu-cdi.yml` last. _The image is validated on a Linux GPU host (EXP-022) and still not built in CI, which has no GPU._
+The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). On a CDI host (NixOS, or any daemon without a named nvidia runtime) add `-f docker/docker-compose.gpu-cdi.yml` last. _The image is validated on a Linux GPU host and still not built in CI, which has no GPU._
 
 **Native (e.g. a Windows GPU box):** build `antumbra-mcp` per the CUDA section above (`--features models,cuda`), then run it with the runtime `PATH` set:
 

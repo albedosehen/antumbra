@@ -1,4 +1,4 @@
-//! Knowledge documents (P-3): a *document* is ingested as chunked, embedded,
+//! Knowledge documents: a *document* is ingested as chunked, embedded,
 //! recallable text: a first-class type **distinct** from an episodic
 //! [`crate::memory::Memory`]. Episodic memory is what an agent learned by doing;
 //! a document is reference material it was given. Both are embedded and recalled

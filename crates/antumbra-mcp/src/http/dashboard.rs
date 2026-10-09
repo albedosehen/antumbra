@@ -1,4 +1,4 @@
-//! The read-only web dashboard (P-2): a browser surface over the same tools an
+//! The read-only web dashboard: a browser surface over the same tools an
 //! agent calls.
 //!
 //! The server hands out the page, its script and its style, and nothing else.

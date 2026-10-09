@@ -1,4 +1,4 @@
-//! Live-propagation delivery (R-2): a registry of each identity's open MCP
+//! Live-propagation delivery: a registry of each identity's open MCP
 //! sessions, and the fan-out that pushes a shared-memory change to them as a
 //! server-initiated notification over the SSE stream.
 //!

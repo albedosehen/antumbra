@@ -1,7 +1,7 @@
 //! The one rule about where a train or a generation may run.
 //!
 //! It exists because of what the deployed loop did the first time it trained
-//! on the GPU node (EXP-022). The train ran inside `tokio::spawn`, and a train
+//! on the GPU node. The train ran inside `tokio::spawn`, and a train
 //! is minutes of synchronous compute wrapped in an `async fn`: it pinned a
 //! runtime worker, the store's connection driver queued behind it, and every
 //! tool call that touches the store hung until the train ended. A

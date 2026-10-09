@@ -1,4 +1,4 @@
-// The read-only dashboard (P-2). Everything on the page comes from
+// The read-only dashboard. Everything on the page comes from
 // `POST mcp/call` with the token its user pasted in, so the page sees what that
 // token's (tenant, user) sees and no more. Stored text is written as text,
 // never parsed as markup.

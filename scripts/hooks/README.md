@@ -151,7 +151,7 @@ Claude Code caps a hook's context at 10,000 characters. Past the cap the agent i
 
 `scripts/hooks/tests/session-start.sh` (bash, jq) and `scripts/hooks/tests/session-start.ps1` (pwsh) hold both siblings to this with no server and no `antumbra` installed.
 
-Handoffs (R-7) come right after the first line: the bootstrap asks `handoffs` for `ANTUMBRA_HOST_ID` and, when something waits for this machine, places the server's count-and-titles lines ahead of everything recalled, a few hundred characters of the budget. Nothing waiting, or no answer, adds nothing.
+Handoffs come right after the first line: the bootstrap asks `handoffs` for `ANTUMBRA_HOST_ID` and, when something waits for this machine, places the server's count-and-titles lines ahead of everything recalled, a few hundred characters of the budget. Nothing waiting, or no answer, adds nothing.
 
 The bootstrap then names the machine to the server with `register_device`, so it is listed among the user's devices, and when it was last seen, even when no server runs on it. It is skipped when `ANTUMBRA_HOST_ID` is unset (the `local` fallback names no machine in particular). The answer is not used, and a server that does not know the tool changes nothing.
 

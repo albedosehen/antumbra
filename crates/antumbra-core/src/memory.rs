@@ -153,8 +153,8 @@ pub struct Memory {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// When set, this trace is a **tombstone**: forgotten, but retained so the
-    /// deletion propagates (last-write-wins sync, R-1) and is routed to grantees
-    /// (R-2) instead of silently resurfacing from another replica. Read paths
+    /// deletion propagates (last-write-wins sync) and is routed to grantees
+    /// instead of silently resurfacing from another replica. Read paths
     /// hide tombstones; a grace-windowed purge removes them for good. `None` for a
     /// live trace.
     pub deleted_at: Option<DateTime<Utc>>,

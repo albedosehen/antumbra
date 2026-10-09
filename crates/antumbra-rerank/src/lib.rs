@@ -1,4 +1,4 @@
-//! A runtime-configured **HTTP reranker** (P-2): the cross-encoder precision
+//! A runtime-configured **HTTP reranker**: the cross-encoder precision
 //! stage that re-scores the wide hybrid-recall pool. Rather than baking a
 //! reranker model into each binary, point at a TEI/Cohere-style `/rerank`
 //! endpoint the operator runs (text-embeddings-inference, Jina, Cohere, …). A

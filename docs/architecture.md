@@ -167,7 +167,7 @@ antumbra/
     antumbra-serve/        # embedder (candle BERT) + multi-adapter serving seam
     antumbra-cli/          # operator CLI
     antumbra-mcp/          # the MCP runtime surface: MCP server (memory + graph + compartments + route)
-    antumbra-sync/         # R-1: last-write-wins penumbra replication (local <-> remote)
+    antumbra-sync/         # last-write-wins penumbra replication (local <-> remote)
     antumbra-tui/          # interactive operator console (ratatui): route-ask, event stream, drill-downs, actions
     antumbra-auth/         # the JWT token contract (HS256/RS256 verification, hook-token minting)
     antumbra-rerank/       # cross-encoder /rerank client behind the Reranker port

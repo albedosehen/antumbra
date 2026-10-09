@@ -94,7 +94,7 @@ function Receive-Call($Pending) {
     } catch { return $null }
 }
 
-# --- handoffs waiting for this machine (R-7) ---------------------------------
+# --- handoffs waiting for this machine ---------------------------------
 # What a session on another of the user's machines left for this one, announced
 # until a session marks it done. The server writes the lines; this only places
 # them. No answer, no line: it fails open like everything else here.

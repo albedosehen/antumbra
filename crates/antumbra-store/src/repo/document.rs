@@ -1,4 +1,4 @@
-//! Knowledge-document chunk repository (P-3). Isolated exactly like `memory`:
+//! Knowledge-document chunk repository. Isolated exactly like `memory`:
 //! the engine's compartment rule scopes every row (tenant, then the shared pool
 //! or a compartment the session owns or was granted), and the repo also filters
 //! by tenant explicitly (defense-in-depth). HNSW

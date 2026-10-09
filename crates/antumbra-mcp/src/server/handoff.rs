@@ -1,4 +1,4 @@
-//! Handoffs (R-7): work a session leaves for a session on another of the
+//! Handoffs: work a session leaves for a session on another of the
 //! user's machines, announced at session start until it is marked done.
 //!
 //! Its own router, joined to the others in `engine.rs`, because `server.rs`

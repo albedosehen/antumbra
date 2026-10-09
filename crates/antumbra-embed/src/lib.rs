@@ -1,4 +1,4 @@
-//! A runtime-configured **HTTP embedder** (P-1c): rather than baking an embedding
+//! A runtime-configured **HTTP embedder**: rather than baking an embedding
 //! model into each binary, point at an OpenAI-compatible `/embeddings` endpoint
 //! the operator runs (Ollama, llama.cpp, text-embeddings-inference, …). Shared by
 //! the MCP server and the operator console so a route/ask uses the *same*

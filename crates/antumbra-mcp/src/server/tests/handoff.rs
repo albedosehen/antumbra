@@ -1,4 +1,4 @@
-//! Handoffs (R-7): left for a machine, announced there until done, readable
+//! Handoffs: left for a machine, announced there until done, readable
 //! after, and private to the user who left them.
 
 use super::*;
