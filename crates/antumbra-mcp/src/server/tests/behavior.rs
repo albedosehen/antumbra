@@ -228,7 +228,7 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
 }
 
 #[tokio::test]
-async fn a_behavior_lists_how_its_last_refused_training_went() -> anyhow::Result<()> {
+async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let s = server_for(&store, "user:lily");
     let id = s
@@ -242,13 +242,14 @@ async fn a_behavior_lists_how_its_last_refused_training_went() -> anyhow::Result
     let mut m = memory::get(&store, &tenant, &MemoryId::new(id.clone()))
         .await?
         .expect("stored");
-    antumbra_core::behavior::mark_refused(
+    antumbra_core::behavior::mark_training(
         &mut m.evidence,
-        &antumbra_core::behavior::Refusal {
+        &antumbra_core::behavior::Training {
             set: "00112233aabbccdd".into(),
             base: 0.0,
             expert: 0.5,
             learned: false,
+            admitted: true,
         },
     );
     memory::upsert(&store, &m).await?;
@@ -263,7 +264,7 @@ async fn a_behavior_lists_how_its_last_refused_training_went() -> anyhow::Result
         .behaviors;
     let said = listed[0].last_training.as_deref().unwrap_or_default();
     assert!(
-        said.starts_with("not learned (held-out 0.50 against the base model's 0.00)"),
+        said.starts_with("not learned (held-out 0.50 against the base model's 0.00); its scope's expert serves the others without it"),
         "{said}"
     );
     Ok(())

@@ -6,8 +6,9 @@
 //!    controls no behavior governs.
 //! 2. Collect its own answers to everyday prompts as replay.
 //! 3. Train on the behaviors' examples beside that replay.
-//! 4. Score again, and mint the expert only when every behavior clearly
-//!    rose and the controls held (`antumbra_train::behave::admit`).
+//! 4. Score again, and mint the expert, holding the behaviors it learned,
+//!    when at least one clearly rose, none it missed got worse, and the
+//!    controls held (`antumbra_train::behave::admit`).
 //!
 //! The expert is the user's own, private, and one per scope: a repository,
 //! or everywhere. A re-run replaces it.
@@ -130,7 +131,11 @@ pub async fn train(plan: &Plan, embedder: &dyn Embedder, cfg: &RaftConfig) -> Re
         held.extend(t.held);
     }
     held.extend(course::controls());
-    let taught_prompts: Vec<String> = tasks.iter().map(|t| t.prompt.clone()).collect();
+    // Each training prompt with the behavior it teaches.
+    let taught_prompts: Vec<(Option<String>, String)> = tasks
+        .iter()
+        .map(|t| (t.skill.clone(), t.prompt.clone()))
+        .collect();
 
     let cfg = RaftConfig {
         temperature: 0.0,
@@ -158,15 +163,22 @@ pub async fn train(plan: &Plan, embedder: &dyn Embedder, cfg: &RaftConfig) -> Re
     let scores = eval_pass_rate(&mut model, &verifier, &held, &run, 1).await?;
     let verdict = course::admit(&plan.behaviors(), &base.per_task, &scores.per_task);
 
+    // The expert routes by the tasks of the behaviors it learned.
+    let learned = verdict.learned();
+    let routed: Vec<&str> = taught_prompts
+        .iter()
+        .filter(|(skill, _)| skill.as_deref().is_some_and(|s| learned.contains(&s)))
+        .map(|(_, p)| p.as_str())
+        .collect();
     let mut acc = vec![0.0f32; EMBED_DIM];
     if verdict.admitted {
-        for p in &taught_prompts {
+        for p in &routed {
             for (x, b) in acc.iter_mut().zip(embedder.embed(p).await?) {
                 *x += b;
             }
         }
     }
-    let n = taught_prompts.len().max(1) as f32;
+    let n = routed.len().max(1) as f32;
     Ok(Trained {
         verdict,
         replay: replayed,
@@ -197,14 +209,44 @@ async fn still_as_taught(store: &Store, plan: &Plan) -> Result<Vec<Memory>> {
     Ok(kept)
 }
 
+/// Note on each behavior still as it was taught how this training went for
+/// it, and, when the expert was admitted, mark the ones it learned trained
+/// into `expert` and the ones it missed untrained.
+async fn note(store: &Store, plan: &Plan, verdict: &Verdict, expert: Option<&str>) -> Result<()> {
+    let set = behavior::fingerprint(&plan.taught);
+    let now = Utc::now();
+    for mut m in still_as_taught(store, plan).await? {
+        let score = verdict.behaviors.iter().find(|s| s.id == m.id.as_str());
+        let learned = score.is_some_and(|s| s.admitted);
+        let training = behavior::Training {
+            set: set.clone(),
+            base: score.map_or(0.0, |s| s.base),
+            expert: score.map_or(0.0, |s| s.expert),
+            learned,
+            admitted: expert.is_some(),
+        };
+        behavior::mark_training(&mut m.evidence, &training);
+        match expert {
+            Some(e) if learned => behavior::mark_trained(&mut m.evidence, e),
+            Some(_) => behavior::mark_untrained(&mut m.evidence),
+            None => {}
+        }
+        m.updated_at = now;
+        memory::upsert(store, &m).await?;
+    }
+    Ok(())
+}
+
 /// Mint the standing expert when `trained` was admitted, replacing the one
-/// before, and mark its behaviors trained. It is placed on `host`, the
-/// machine whose disk holds its adapter. A behavior retired or recorded
-/// again while it trained is left as it now is: the next run sees it.
+/// before. It holds the behaviors it learned, and its card records the set it
+/// was trained on, so the keeper leaves it be until that set changes. It is
+/// placed on `host`, the machine whose disk holds its adapter.
 ///
-/// When it was refused, each behavior notes the refusal and its own held-out
-/// rates, so the set is not trained again until it changes, and the user can
-/// see which behaviors the expert did not learn.
+/// Either way each behavior notes how the training went for it: its held-out
+/// rates, whether it was learned, and whether the expert was admitted. A set
+/// whose expert was refused is not trained again until it changes. A
+/// behavior retired or recorded again while it trained is left as it now is:
+/// the next run sees it.
 pub async fn mint(
     store: &Store,
     plan: &Plan,
@@ -213,24 +255,7 @@ pub async fn mint(
 ) -> Result<BehaveReport> {
     let ids = plan.behaviors();
     if !trained.verdict.admitted {
-        let set = behavior::fingerprint(&plan.taught);
-        let now = Utc::now();
-        for mut m in still_as_taught(store, plan).await? {
-            let score = trained
-                .verdict
-                .behaviors
-                .iter()
-                .find(|s| s.id == m.id.as_str());
-            let refusal = behavior::Refusal {
-                set: set.clone(),
-                base: score.map_or(0.0, |s| s.base),
-                expert: score.map_or(0.0, |s| s.expert),
-                learned: score.is_some_and(|s| s.admitted),
-            };
-            behavior::mark_refused(&mut m.evidence, &refusal);
-            m.updated_at = now;
-            memory::upsert(store, &m).await?;
-        }
+        note(store, plan, &trained.verdict, None).await?;
         return Ok(BehaveReport {
             behaviors: ids,
             replay: trained.replay,
@@ -239,8 +264,19 @@ pub async fn mint(
         });
     }
     let id = expert_id(&plan.user, &plan.scope);
-    let rules: Vec<&str> = plan.taught.iter().map(|(_, s)| s.rule.as_str()).collect();
     let verdict = trained.verdict;
+    let learned = verdict.learned();
+    let rules: Vec<&str> = plan
+        .taught
+        .iter()
+        .filter(|(m, _)| learned.contains(&m.id.as_str()))
+        .map(|(_, s)| s.rule.as_str())
+        .collect();
+    let missed: Vec<&str> = ids
+        .iter()
+        .map(String::as_str)
+        .filter(|i| !learned.contains(i))
+        .collect();
     let now = Utc::now();
     let e = Expert {
         id: id.clone(),
@@ -248,7 +284,8 @@ pub async fn mint(
         base_model: trained.base_model,
         artifact_uri: trained.adapter_uri.clone(),
         capability_card: serde_json::json!({
-            "behaviors": ids, "rules": rules, "scope": plan.scope,
+            "behaviors": learned, "rules": rules, "missed": missed,
+            "set": behavior::fingerprint(&plan.taught), "scope": plan.scope,
             "private": true, "standing": true,
             "controls": verdict.controls.iter().map(|c| serde_json::json!({
                 "family": c.family, "base": c.base, "expert": c.expert,
@@ -267,11 +304,7 @@ pub async fn mint(
     };
     expert::delete(store, &e.id).await?;
     expert::insert(store, &e).await?;
-    for mut m in still_as_taught(store, plan).await? {
-        behavior::mark_trained(&mut m.evidence, id.as_str());
-        m.updated_at = now;
-        memory::upsert(store, &m).await?;
-    }
+    note(store, plan, &verdict, Some(id.as_str())).await?;
     Ok(BehaveReport {
         behaviors: ids,
         replay: trained.replay,
@@ -366,10 +399,16 @@ mod tests {
             .await
             .unwrap();
 
+        let learned = |id: &str| antumbra_train::behave::BehaviorScore {
+            id: id.into(),
+            base: 0.0,
+            expert: 1.0,
+            admitted: true,
+        };
         let trained = Trained {
             verdict: Verdict {
                 admitted: true,
-                behaviors: Vec::new(),
+                behaviors: vec![learned("memory:kept"), learned("memory:gone")],
                 controls: Vec::new(),
                 reasons: Vec::new(),
             },
@@ -404,8 +443,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_refused_expert_leaves_each_behavior_its_own_rates() {
+    /// A store holding two accepted behaviors everywhere, `memory:learned`
+    /// and `memory:missed`, planned; and a training of them where the first
+    /// was learned and the second scored 0.50 against the base's 0.00.
+    async fn learned_and_missed(admitted: bool) -> (Store, Plan, Trained) {
         use antumbra_core::behavior::{content, scope_evidence, status_evidence, Example};
         use antumbra_train::behave::BehaviorScore;
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();
@@ -454,13 +495,17 @@ mod tests {
         };
         let trained = Trained {
             verdict: Verdict {
-                admitted: false,
+                admitted,
                 behaviors: vec![
                     score("memory:learned", 1.0, true),
                     score("memory:missed", 0.5, false),
                 ],
                 controls: Vec::new(),
-                reasons: vec!["memory:missed: held out 0.50".into()],
+                reasons: if admitted {
+                    Vec::new()
+                } else {
+                    vec!["control-cmd fell from 1.00 to 0.50".into()]
+                },
             },
             replay: 0,
             adapter_uri: "adapters/x.safetensors".into(),
@@ -468,36 +513,82 @@ mod tests {
             fitness: 0.5,
             capability_vec: vec![0.0; EMBED_DIM],
         };
+        (store, plan, trained)
+    }
+
+    /// A behavior as stored now: its status, and how its last training went.
+    async fn stored(store: &Store, id: &str) -> (Status, behavior::Training) {
+        let m = memory::get(store, &TenantId::new("ws:a"), &MemoryId::new(id))
+            .await
+            .unwrap()
+            .unwrap();
+        (
+            State::of(&m.evidence).unwrap().status,
+            behavior::training(&m.evidence).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn an_expert_is_minted_with_what_it_learned_and_left_be_until_its_set_changes() {
+        let (store, plan, trained) = learned_and_missed(true).await;
+        let report = mint(&store, &plan, trained, "rig").await.unwrap();
+        let (id, _) = report.expert.expect("minted");
+        let e = expert::get(&store, &id).await.unwrap().unwrap();
+        assert_eq!(behavior::taught_by(&e), ["memory:learned"]);
+        assert_eq!(
+            e.capability_card["missed"],
+            serde_json::json!(["memory:missed"])
+        );
+        let set = behavior::fingerprint(&plan.taught);
+        assert_eq!(behavior::trained_set(&e), Some(set.as_str()));
+
+        let (status, t) = stored(&store, "memory:learned").await;
+        assert_eq!(status, Status::Trained);
+        assert_eq!(
+            (t.set.as_str(), t.learned, t.admitted),
+            (set.as_str(), true, true)
+        );
+        let (status, t) = stored(&store, "memory:missed").await;
+        assert_eq!(status, Status::Accepted, "not in the expert");
+        assert_eq!((t.expert, t.learned, t.admitted), (0.5, false, true));
+        assert!(t.describe().contains("serves the others without it"));
+
+        // Read again, the expert is in step with the set, the one it missed
+        // still accepted: nothing to train until a behavior changes.
+        let again = plan_again(&store).await;
+        assert!(!behavior::stale(&again.taught, Some(&e)));
+        assert!(!behavior::refused(&again.taught));
+    }
+
+    #[tokio::test]
+    async fn a_refused_expert_leaves_each_behavior_its_own_rates() {
+        let (store, plan, trained) = learned_and_missed(false).await;
         let report = mint(&store, &plan, trained, "rig").await.unwrap();
         assert!(report.expert.is_none(), "nothing minted");
 
         let set = behavior::fingerprint(&plan.taught);
-        let refusal = |id: &str| {
-            let store = store.clone();
-            let tenant = tenant.clone();
-            let id = id.to_string();
-            async move {
-                let m = memory::get(&store, &tenant, &MemoryId::new(id))
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(State::of(&m.evidence).unwrap().status, Status::Accepted);
-                behavior::refusal(&m.evidence).unwrap()
-            }
-        };
-        let learned = refusal("memory:learned").await;
+        let (status, t) = stored(&store, "memory:learned").await;
+        assert_eq!(status, Status::Accepted);
         assert_eq!(
-            (learned.set.as_str(), learned.expert, learned.learned),
-            (set.as_str(), 1.0, true)
+            (t.set.as_str(), t.expert, t.learned, t.admitted),
+            (set.as_str(), 1.0, true, false)
         );
-        let missed = refusal("memory:missed").await;
-        assert_eq!((missed.expert, missed.learned), (0.5, false));
+        let (_, t) = stored(&store, "memory:missed").await;
+        assert_eq!((t.expert, t.learned, t.admitted), (0.5, false, false));
 
         // Read again, the same set is refused as it stands.
-        let again = super::plan(&store, &tenant, &user, "everywhere")
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(behavior::refused(&again.taught));
+        assert!(behavior::refused(&plan_again(&store).await.taught));
+    }
+
+    async fn plan_again(store: &Store) -> Plan {
+        plan(
+            store,
+            &TenantId::new("ws:a"),
+            &UserId::new("user:a"),
+            "everywhere",
+        )
+        .await
+        .unwrap()
+        .unwrap()
     }
 }

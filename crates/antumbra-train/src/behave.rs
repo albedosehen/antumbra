@@ -173,10 +173,38 @@ pub struct ControlScore {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Verdict {
     pub admitted: bool,
+    /// Each behavior taught; `admitted` on one says it was learned, and so is
+    /// in the expert when the expert is admitted.
     pub behaviors: Vec<BehaviorScore>,
     /// Each family of controls, in the order the corpus lists them.
     pub controls: Vec<ControlScore>,
+    /// Why the expert was refused. Empty when it was admitted.
     pub reasons: Vec<String>,
+}
+
+impl Verdict {
+    /// The behaviors learned, by id: what an admitted expert holds.
+    pub fn learned(&self) -> Vec<&str> {
+        self.behaviors
+            .iter()
+            .filter(|s| s.admitted)
+            .map(|s| s.id.as_str())
+            .collect()
+    }
+
+    /// Each behavior not learned, with its rates and the bar it missed.
+    pub fn missed(&self) -> Vec<String> {
+        self.behaviors
+            .iter()
+            .filter(|s| !s.admitted)
+            .map(|s| {
+                format!(
+                    "{}: held out {:.2} against the base's {:.2}; needs {MIN_RATE}, and {MIN_GAIN} more unless the base had it",
+                    s.id, s.expert, s.base
+                )
+            })
+            .collect()
+    }
 }
 
 /// A control's family: its id up to the last `-`, so `control-code-3` is in
@@ -195,37 +223,50 @@ fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
     (total > 0).then(|| passed as f32 / total as f32)
 }
 
-/// Admit an expert when every behavior it was taught passes its held-out
-/// tasks at least [`MIN_RATE`], each at least [`MIN_GAIN`] above the base model
-/// unless the base already passed it that often, at least one clearly rose, and
-/// each family of controls falls no more than [`CONTROL_SLACK`] below the
-/// base's. Each family is held on its own, so a fall in code answers cannot
-/// hide inside a larger pool of commands.
+/// Judge an expert behavior by behavior. One is learned when it passes its
+/// held-out tasks at least [`MIN_RATE`], and at least [`MIN_GAIN`] above the
+/// base model unless the base already passed it that often.
+///
+/// The expert is admitted, holding the behaviors it learned, when at least one
+/// of them clearly rose, no behavior it missed fell more than
+/// [`CONTROL_SLACK`] below the base model, and each family of controls falls
+/// no more than that below the base's either. So a behavior it did not learn
+/// does not keep the rest out, but one it made worse does: the expert must
+/// answer every task it was taught at least as well as the base model would.
+/// Each family is held on its own, so a fall in code answers cannot hide
+/// inside a larger pool of commands.
 pub fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
     let mut reasons = Vec::new();
     let scores: Vec<BehaviorScore> = behaviors
         .iter()
         .map(|id| {
-            let prefix = format!("{id}#h");
-            match (rate(base, &prefix), rate(expert, &prefix)) {
-                (Some(b), Some(e)) => {
-                    // A behavior the base already follows needs holding, not
-                    // raising: requiring a gain would let it block the rest.
-                    let admitted = e >= MIN_RATE && (e - b >= MIN_GAIN || b >= MIN_RATE);
-                    if !admitted {
-                        reasons.push(format!(
-                            "{id}: held out {e:.2} against the base's {b:.2}; needs {MIN_RATE}, and {MIN_GAIN} more unless the base had it"
-                        ));
-                    }
-                    BehaviorScore { id: id.clone(), base: b, expert: e, admitted }
-                }
-                _ => {
-                    reasons.push(format!("{id}: no held-out tasks to admit it by"));
-                    BehaviorScore { id: id.clone(), base: 0.0, expert: 0.0, admitted: false }
-                }
+            match (
+                rate(base, &format!("{id}#h")),
+                rate(expert, &format!("{id}#h")),
+            ) {
+                // A behavior the base already follows needs holding, not raising.
+                (Some(b), Some(e)) => BehaviorScore {
+                    id: id.clone(),
+                    base: b,
+                    expert: e,
+                    admitted: e >= MIN_RATE && (e - b >= MIN_GAIN || b >= MIN_RATE),
+                },
+                // No held-out tasks: nothing to say it was learned.
+                _ => BehaviorScore {
+                    id: id.clone(),
+                    base: 0.0,
+                    expert: 0.0,
+                    admitted: false,
+                },
             }
         })
         .collect();
+    for s in scores.iter().filter(|s| s.expert < s.base - CONTROL_SLACK) {
+        reasons.push(format!(
+            "{} fell from {:.2} to {:.2} held out: the expert answers it worse than the base model",
+            s.id, s.base, s.expert
+        ));
+    }
     let mut families: Vec<&str> = Vec::new();
     for f in base.iter().filter_map(|r| family(&r.id)) {
         if !families.contains(&f) {
@@ -251,8 +292,12 @@ pub fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -
             ));
         }
     }
-    if !scores.is_empty() && !scores.iter().any(|s| s.expert - s.base >= MIN_GAIN) {
-        reasons.push("no behavior rose: the base model already follows them all".to_string());
+    if !scores.is_empty()
+        && !scores
+            .iter()
+            .any(|s| s.admitted && s.expert - s.base >= MIN_GAIN)
+    {
+        reasons.push("no behavior was learned beyond what the base model already does".to_string());
     }
     Verdict {
         admitted: reasons.is_empty() && !scores.is_empty(),
