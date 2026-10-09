@@ -89,7 +89,7 @@ done
 # "which side", and a floor that means the same thing for every query needs
 # "how likely" -- which is a monotone map from this score, fitted against these
 # same verifier labels. ADR-0024's TypedDecider contract requires that fit to
-# minimise a strictly proper scoring rule, so the fitting lives in Rust beside
+# minimize a strictly proper scoring rule, so the fitting lives in Rust beside
 # the Brier implementation rather than in awk here.
 if [ -n "${ANTUMBRA_D2_SCORES_OUT:-}" ]; then
     cp "$work/all" "$ANTUMBRA_D2_SCORES_OUT"

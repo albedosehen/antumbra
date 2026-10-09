@@ -35,16 +35,16 @@ fn every_fourth_example_is_held_out() {
 }
 
 #[test]
-fn the_fewest_examples_a_behaviour_is_recorded_with_hold_one_out() {
-    // A behaviour recorded with fewer could never be admitted, and the keeper
+fn the_fewest_examples_a_behavior_is_recorded_with_hold_one_out() {
+    // A behavior recorded with fewer could never be admitted, and the keeper
     // spent ten minutes of GPU on each one before refusing it.
-    let fewest = spec(antumbra_core::behaviour::MIN_EXAMPLES);
+    let fewest = spec(antumbra_core::behavior::MIN_EXAMPLES);
     let (_, held) = split(&fewest.examples);
     assert!(!held.is_empty(), "nothing held out to admit the expert by");
 }
 
 #[test]
-fn tasks_carry_the_check_the_answer_and_the_behaviour() {
+fn tasks_carry_the_check_the_answer_and_the_behavior() {
     let t = tasks("memory:b1", &spec(8));
     assert_eq!((t.train.len(), t.held.len()), (6, 2));
     let first = &t.train[0];
@@ -122,7 +122,7 @@ fn an_expert_that_learned_and_kept_the_rest_is_admitted() {
             expert: 1.0
         }]
     );
-    assert!(v.behaviours.iter().all(|b| b.admitted));
+    assert!(v.behaviors.iter().all(|b| b.admitted));
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn each_family_of_controls_is_held_on_its_own() {
 }
 
 #[test]
-fn a_behaviour_the_base_already_follows_holds_rather_than_rises() {
+fn a_behavior_the_base_already_follows_holds_rather_than_rises() {
     let ids = vec!["memory:new".to_string(), "memory:known".to_string()];
     let base = vec![
         result("memory:new#h0", 0, 2),
@@ -207,7 +207,7 @@ fn a_behaviour_the_base_already_follows_holds_rather_than_rises() {
     let v = admit(&known, &base, &expert);
     assert!(!v.admitted);
     assert!(
-        v.reasons.iter().any(|r| r.starts_with("no behaviour rose")),
+        v.reasons.iter().any(|r| r.starts_with("no behavior rose")),
         "{:?}",
         v.reasons
     );

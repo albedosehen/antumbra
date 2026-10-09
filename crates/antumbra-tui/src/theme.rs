@@ -1,6 +1,6 @@
 //! The console's switchable semantic palette. Every panel (chrome, status, and
 //! the animated population graph) tints from a [`Theme`], so cycling a theme
-//! recolours the whole console while the umbra/penumbra/antumbra identity holds.
+//! recolors the whole console while the umbra/penumbra/antumbra identity holds.
 //! Hand-rolled (no theme crate) to keep the bespoke look and a tiny dep tree.
 
 use ratatui::style::Color;
@@ -9,7 +9,7 @@ use ratatui::style::Color;
 /// factor before quantizing to a [`Color`].
 pub type Rgb = (f64, f64, f64);
 
-/// Quantize a glow-scaled [`Rgb`] to a terminal colour.
+/// Quantize a glow-scaled [`Rgb`] to a terminal color.
 pub fn rgb(c: Rgb, glow: f64) -> Color {
     Color::Rgb(
         (c.0 * glow).clamp(0.0, 255.0) as u8,
@@ -19,7 +19,7 @@ pub fn rgb(c: Rgb, glow: f64) -> Color {
 }
 
 /// A complete palette. Semantic fields drive the chrome and status; the `*_rgb`
-/// fields are bases the animation scales (so a theme recolours the live graph).
+/// fields are bases the animation scales (so a theme recolors the live graph).
 #[derive(Clone, Copy)]
 pub struct Theme {
     pub name: &'static str,
@@ -83,7 +83,7 @@ pub const EMBER: Theme = Theme {
     core: (255.0, 180.0, 90.0),
 };
 
-/// High-contrast greyscale with a single cool accent (low-colour terminals).
+/// High-contrast grayscale with a single cool accent (low-color terminals).
 pub const MONO: Theme = Theme {
     name: "mono",
     text: Color::Rgb(235, 235, 240),

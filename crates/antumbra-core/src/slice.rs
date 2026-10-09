@@ -13,7 +13,7 @@
 //! fall out of step with one.
 //!
 //! It lives in the domain core rather than beside the instruments that read it
-//! because a partition is only real where training happens. Labelling outcomes
+//! because a partition is only real where training happens. Labeling outcomes
 //! after a run trained on every task measures nothing: the held-out tasks were
 //! learned from and the audit tasks were scored for graduation. The trainer
 //! enforces it through [`Holdout`], and the instruments read it back.

@@ -435,10 +435,10 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
     let store = Store::connect_memory(4).await.unwrap();
     let now = Utc::now();
     for (id, tenant, owner, name) in [
-        ("comp:ws:a:user:a:behaviour", "ws:a", "user:a", "behaviour"),
-        ("comp:ws:b:user:b:behaviour", "ws:b", "user:b", "behaviour"),
+        ("comp:ws:a:user:a:behavior", "ws:a", "user:a", "behavior"),
+        ("comp:ws:b:user:b:behavior", "ws:b", "user:b", "behavior"),
         ("comp:ws:a:user:a:notes", "ws:a", "user:a", "notes"),
-        ("comp:ws:c:user:c:behaviour", "ws:c", "user:c", "behaviour"),
+        ("comp:ws:c:user:c:behavior", "ws:c", "user:c", "behavior"),
     ] {
         compartment::create(
             &store,
@@ -456,12 +456,12 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
     compartment::delete(
         &store,
         &TenantId::new("ws:c"),
-        &CompartmentId::new("comp:ws:c:user:c:behaviour"),
+        &CompartmentId::new("comp:ws:c:user:c:behavior"),
         now,
     )
     .await
     .unwrap();
-    let mut ids: Vec<String> = compartment::list_named(&store, "behaviour")
+    let mut ids: Vec<String> = compartment::list_named(&store, "behavior")
         .await
         .unwrap()
         .into_iter()
@@ -470,7 +470,7 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
     ids.sort();
     assert_eq!(
         ids,
-        ["comp:ws:a:user:a:behaviour", "comp:ws:b:user:b:behaviour"]
+        ["comp:ws:a:user:a:behavior", "comp:ws:b:user:b:behavior"]
     );
 }
 

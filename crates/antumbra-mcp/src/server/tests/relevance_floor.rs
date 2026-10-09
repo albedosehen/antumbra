@@ -39,7 +39,7 @@ async fn recall(s: &McpServer, query: &str, floor: Option<f32>) -> MemoriesOut {
 }
 
 /// With no decider there is no floor, and the field must stay absent. A
-/// deployment without a head keeps exactly the behaviour it had.
+/// deployment without a head keeps exactly the behavior it had.
 #[tokio::test]
 async fn without_a_decider_nothing_is_filtered_and_nothing_is_claimed() {
     let s = seeded().await;

@@ -1,6 +1,6 @@
 # Security posture
 
-The trust model and the boundaries that enforce it. Summarises a 2026-06 audit: no remotely-exploitable issues were found; tenant isolation is engine-enforced; the only code-execution path is operator-supplied config.
+The trust model and the boundaries that enforce it. Summarizes a 2026-06 audit: no remotely-exploitable issues were found; tenant isolation is engine-enforced; the only code-execution path is operator-supplied config.
 
 ## Threat model
 
@@ -10,7 +10,7 @@ The trust model and the boundaries that enforce it. Summarises a 2026-06 audit: 
 
 ## Tenant isolation (the core guarantee)
 
-Isolation is **engine-enforced**, defence-in-depth:
+Isolation is **engine-enforced**, defense-in-depth:
 
 - Every tenant-scoped table carries row-level `PERMISSIONS WHERE tenant_id =
   $auth.tenant` (`antumbra-store/src/schema.rs`), bound at signin via SurrealDB record-access. This holds even for an app query with no `WHERE`, verified by `crates/antumbra-store/tests/penumbra_auth.rs` (a record session sees only its tenant).
@@ -23,7 +23,7 @@ Isolation is **engine-enforced**, defence-in-depth:
 
 - Per-request **JWT** verification before any DB access; `exp` is **mandatory** (a non-expiring token is a standing key). HS256 (shared secret, self-hosted) or RS256 (against an auth service). Audience is required so a token minted for another verifier is rejected.
 - The verified token **is** the identity; there is no token→identity table, so a leaked token grants exactly its claimed `(tenant, user)` scope and nothing more.
-- Each request signs the shared connection in as its identity, serialised by an auth lock: no session reuse or confused-deputy across tenants.
+- Each request signs the shared connection in as its identity, serialized by an auth lock: no session reuse or confused-deputy across tenants.
 
 ## Trust boundaries / operator-supplied inputs
 

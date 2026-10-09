@@ -436,11 +436,11 @@ pub async fn list_by_network(
 /// The tenant filter is ANDed onto the KNN clause so the candidate set never
 /// crosses a tenant boundary — but against an index-backed KNN both that filter
 /// and the tombstone check below it are RESIDUAL: the graph walk returns its
-/// nearest neighbours across the whole table and everything else thins them
+/// nearest neighbors across the whole table and everything else thins them
 /// afterwards. So the walk is asked for a wider pool and the answer is
 /// truncated to `k` once the thinning is done. Asking for `k` directly would
 /// hand a tenant with a small share of the table a short answer, and a tenant
-/// whose nearest neighbours are all tombstones an empty one.
+/// whose nearest neighbors are all tombstones an empty one.
 pub async fn recall(
     store: &Store,
     tenant: &TenantId,

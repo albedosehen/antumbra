@@ -4,7 +4,7 @@
 //! frame, with a periodic reload every couple of seconds as the fallback, so the
 //! stream fills as the population is trained from another process.
 
-/// What kind of change an [`Event`] records; drives its glyph and colour.
+/// What kind of change an [`Event`] records; drives its glyph and color.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EventKind {
     /// A new expert or shadow appeared.

@@ -17,7 +17,7 @@ It is also a deliberate offramp from renting frontier models. Early on a big rem
 Two design commitments are the heart of Antumbra:
 
 - **Frozen experts.** A graduated specialist is immutable. Immutability is the only hard guarantee that a learned skill is never silently forgotten when the system trains something new.
-- **Scope, not just skill.** Most systems accumulate what _works_. The neglected, more valuable half is the **boundary** of a rule: learning that a behavior is right in one context and wrong in a neighbouring one, and _which contextual feature governs the switch_. Constraints are scoped, not absolute: "use `deno install`, not `npm install`" is true **in this repo**, not everywhere. By defining context boundaries, the system learns when to answer locally and when to escalate, which results in more accurate responses and prevents it from [interfering when it's out of its depth](https://cloud.google.com/discover/what-are-ai-hallucinations).
+- **Scope, not just skill.** Most systems accumulate what _works_. The neglected, more valuable half is the **boundary** of a rule: learning that a behavior is right in one context and wrong in a neighboring one, and _which contextual feature governs the switch_. Constraints are scoped, not absolute: "use `deno install`, not `npm install`" is true **in this repo**, not everywhere. By defining context boundaries, the system learns when to answer locally and when to escalate, which results in more accurate responses and prevents it from [interfering when it's out of its depth](https://cloud.google.com/discover/what-are-ai-hallucinations).
 
 ---
 

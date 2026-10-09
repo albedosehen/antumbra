@@ -387,7 +387,7 @@ fn ask_overlay_shows_routing_distribution() {
 }
 
 // `x` on a focused boundary stages a delete behind a confirm prompt; on a
-// shadow it stages a prune. Cancelling clears it.
+// shadow it stages a prune. Canceling clears it.
 #[test]
 fn operator_action_stages_a_confirm_prompt() {
     let mut app = demo_app();

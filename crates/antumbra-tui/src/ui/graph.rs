@@ -56,7 +56,7 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
                 let front = 0.5 + 0.5 * ang.sin();
 
                 // Link from the core (fainter to the back) and an energy mote
-                // travelling out along it.
+                // traveling out along it.
                 ctx.draw(&CanvasLine {
                     x1: 0.0,
                     y1: 0.0,

@@ -1,8 +1,8 @@
 //! Rendering: the living population graph (umbra orbiting the tri-node core of
 //! umbra/penumbra/antumbra, three linked minds), with detail and gate panels.
 //! Orbit, pulse, and link-energy are hand-rolled from the animation clock so the
-//! motion is fully under control. Every colour tints from the active [`Theme`],
-//! so cycling a theme (`t`) recolours the whole console.
+//! motion is fully under control. Every color tints from the active [`Theme`],
+//! so cycling a theme (`t`) recolors the whole console.
 //!
 //! Split across submodules: [`graph`] (the canvas), [`chrome`] (header/footer),
 //! [`panels`] (the region detail panels), and [`overlays`] (help / palette /
@@ -155,7 +155,7 @@ fn panel_focused<'a>(t: &Theme, title: &str, focused: bool) -> Block<'a> {
         .title(Line::from(format!(" {marker}{title} ")).style(Style::default().fg(border)))
 }
 
-/// A bold, accent-coloured panel heading (selected item's name).
+/// A bold, accent-colored panel heading (selected item's name).
 fn heading<'a>(t: &Theme, text: String) -> Line<'a> {
     Line::from(Span::styled(
         text,
@@ -193,7 +193,7 @@ fn gauge_spans<'a>(t: &Theme, value: f32, width: u16, color: Color) -> Vec<Span<
     ]
 }
 
-/// A `key  ▆▆▆▍──  0.62` row: a labelled gauge with its numeric value.
+/// A `key  ▆▆▆▍──  0.62` row: a labeled gauge with its numeric value.
 fn gauge_row<'a>(t: &Theme, k: &'a str, value: f32, color: Color) -> Line<'a> {
     let mut spans = vec![Span::styled(format!("{k:<11}"), Style::default().fg(t.dim))];
     spans.extend(gauge_spans(t, value, 12, color));
@@ -204,7 +204,7 @@ fn gauge_row<'a>(t: &Theme, k: &'a str, value: f32, color: Color) -> Line<'a> {
     Line::from(spans)
 }
 
-/// A reward curve as block bars, each bar coloured along the fitness gradient by
+/// A reward curve as block bars, each bar colored along the fitness gradient by
 /// its own value, so a rising (or collapsing) trajectory reads at a glance.
 fn sparkline_row<'a>(t: &Theme, k: &'a str, curve: &[f32]) -> Line<'a> {
     const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -219,7 +219,7 @@ fn sparkline_row<'a>(t: &Theme, k: &'a str, curve: &[f32]) -> Line<'a> {
     Line::from(spans)
 }
 
-/// Status colour: graduated = success, pruned = dim, in-flight = warning.
+/// Status color: graduated = success, pruned = dim, in-flight = warning.
 fn shadow_color(t: &Theme, status: &str) -> Color {
     match status {
         "graduated" => t.success,

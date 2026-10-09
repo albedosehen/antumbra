@@ -681,7 +681,7 @@ impl App {
     pub async fn cancel_halt(&mut self, store: &Store) -> anyhow::Result<()> {
         if let Some(run) = self.loop_heads.first().map(|h| h.run_id.clone()) {
             loop_control::clear(store, &run).await?;
-            self.operator_event(format!("halt cancelled · loop {}", run.as_str()));
+            self.operator_event(format!("halt canceled · loop {}", run.as_str()));
             self.reload(store).await?;
         }
         Ok(())

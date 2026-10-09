@@ -35,7 +35,7 @@ fn ssh() -> Spec {
 }
 
 #[test]
-fn a_behaviour_with_a_discriminating_check_has_no_problems() {
+fn a_behavior_with_a_discriminating_check_has_no_problems() {
     assert_eq!(ssh().problems(), Vec::<String>::new());
     assert_eq!(ssh().follows("ssh em0 nvidia-smi"), Some(true));
     assert_eq!(ssh().follows("ssh nano@10.0.0.51 nvidia-smi"), Some(false));
@@ -116,7 +116,7 @@ fn the_content_leads_with_the_rule_and_round_trips() {
     let text = content(&spec);
     assert!(text.starts_with("Reach a host by its SSH alias"));
     assert_eq!(spec_of(&text), Some(spec));
-    assert_eq!(spec_of("a memory with no behaviour block"), None);
+    assert_eq!(spec_of("a memory with no behavior block"), None);
 }
 
 #[test]
@@ -128,14 +128,14 @@ fn status_scope_and_supersession_ride_in_evidence() {
     ];
     set_status(&mut evidence, Status::Accepted);
     evidence.push(supersedes_evidence("memory:old"));
-    let state = State::of(&evidence).expect("a behaviour");
+    let state = State::of(&evidence).expect("a behavior");
     assert_eq!(state.status, Status::Accepted);
     assert_eq!(state.scope, "github.com/a/b");
     assert_eq!(state.supersedes.as_deref(), Some("memory:old"));
     assert_eq!(
         evidence
             .iter()
-            .filter(|e| e.starts_with("behaviour-status:"))
+            .filter(|e| e.starts_with("behavior-status:"))
             .count(),
         1,
         "one status at a time"
@@ -144,25 +144,54 @@ fn status_scope_and_supersession_ride_in_evidence() {
     assert_eq!(
         State::of(&["git:x@abc1234".to_string()]),
         None,
-        "not a behaviour"
+        "not a behavior"
     );
     assert_eq!(Status::parse("Retired"), Some(Status::Retired));
 
-    mark_trained(&mut evidence, "expert:user:a:behaviour:everywhere");
-    mark_trained(&mut evidence, "expert:user:a:behaviour:everywhere");
-    let trained = State::of(&evidence).expect("a behaviour");
+    mark_trained(&mut evidence, "expert:user:a:behavior:everywhere");
+    mark_trained(&mut evidence, "expert:user:a:behavior:everywhere");
+    let trained = State::of(&evidence).expect("a behavior");
     assert_eq!(trained.status, Status::Trained);
     assert_eq!(
         trained.expert.as_deref(),
-        Some("expert:user:a:behaviour:everywhere")
+        Some("expert:user:a:behavior:everywhere")
     );
     assert_eq!(
         evidence
             .iter()
-            .filter(|e| e.starts_with("behaviour-expert:"))
+            .filter(|e| e.starts_with("behavior-expert:"))
             .count(),
         1,
         "one expert at a time"
+    );
+}
+
+#[test]
+fn behaviors_stored_before_the_us_spelling_are_still_read() {
+    // Content, evidence and expert cards written with `behaviour`.
+    let legacy_content = content(&ssh()).replace("```behavior", "```behaviour");
+    assert_eq!(spec_of(&legacy_content), Some(ssh()));
+    let mut evidence = vec![
+        "behaviour-status:accepted".to_string(),
+        "behaviour-scope:github.com/a/b".to_string(),
+        "behaviour-supersedes:memory:old".to_string(),
+    ];
+    let state = State::of(&evidence).expect("a behavior");
+    assert_eq!(state.status, Status::Accepted);
+    assert_eq!(state.scope, "github.com/a/b");
+    assert_eq!(state.supersedes.as_deref(), Some("memory:old"));
+    // A status set now replaces the old-spelled one rather than sitting beside it.
+    set_status(&mut evidence, Status::Retired);
+    assert!(evidence.iter().all(|e| !e.starts_with("behaviour-status:")));
+    assert_eq!(State::of(&evidence).unwrap().status, Status::Retired);
+
+    let mut card = standing_expert(EVERYWHERE, &[]);
+    card.capability_card = serde_json::json!({ "behaviours": ["memory:t"], "standing": true });
+    assert_eq!(taught_by(&card), ["memory:t"]);
+    assert_eq!(
+        compartment_id(&TenantId::new("ws:a"), &UserId::new("user:a")).as_str(),
+        "comp:ws:a:user:a:behaviour",
+        "the compartment keeps the id it is stored under"
     );
 }
 
@@ -178,15 +207,15 @@ fn recorded(id: &str, status: Status, scope: &str) -> Memory {
     .with_evidence(vec![status_evidence(status), scope_evidence(scope)])
 }
 
-fn standing_expert(scope: &str, behaviours: &[&str]) -> Expert {
+fn standing_expert(scope: &str, behaviors: &[&str]) -> Expert {
     let now = chrono::Utc::now();
     Expert {
-        id: crate::ExpertId::new(format!("expert:user:a:behaviour:{scope}")),
+        id: crate::ExpertId::new(format!("expert:user:a:behavior:{scope}")),
         name: "e".into(),
         base_model: "base".into(),
         artifact_uri: "adapters/e.safetensors".into(),
         capability_card: serde_json::json!({
-            "behaviours": behaviours, "scope": scope, "standing": true,
+            "behaviors": behaviors, "scope": scope, "standing": true,
         }),
         capability_vec: None,
         fitness: 1.0,
@@ -200,7 +229,7 @@ fn standing_expert(scope: &str, behaviours: &[&str]) -> Expert {
 }
 
 #[test]
-fn a_standing_expert_learns_the_accepted_and_trained_behaviours_of_its_scope() {
+fn a_standing_expert_learns_the_accepted_and_trained_behaviors_of_its_scope() {
     let all = vec![
         recorded("memory:accepted", Status::Accepted, EVERYWHERE),
         recorded("memory:trained", Status::Trained, EVERYWHERE),
@@ -228,7 +257,7 @@ fn a_standing_expert_learns_the_accepted_and_trained_behaviours_of_its_scope() {
 }
 
 #[test]
-fn an_expert_is_stale_when_its_behaviours_moved_on() {
+fn an_expert_is_stale_when_its_behaviors_moved_on() {
     let trained = vec![recorded("memory:t", Status::Trained, EVERYWHERE)];
     let both = standing_expert(EVERYWHERE, &["memory:t"]);
     let t = learnable(&trained, EVERYWHERE);

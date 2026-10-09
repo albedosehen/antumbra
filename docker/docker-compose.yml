@@ -247,7 +247,7 @@ services:
       - "127.0.0.1:8091:80"
     # The image ships curl and a shell, so it can probe itself. Worth having:
     # when this endpoint is unreachable, recall quietly loses its precision stage
-    # and falls back to the fused RRF order -- correct behaviour, but the only
+    # and falls back to the fused RRF order -- correct behavior, but the only
     # other signal is a line on antumbra-mcp's stderr. An unhealthy container is
     # visible in `docker ps` without reading logs. The model takes ~2 minutes to
     # download and load on a cold volume, hence the long start_period.

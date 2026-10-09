@@ -475,7 +475,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
                 index("memory_tenant_network_idx", ["tenant_id", "network"]),
                 // One compartment's memories (the handoffs a session start
-                // announces, a user's behaviours) without reading the whole
+                // announces, a user's behaviors) without reading the whole
                 // workspace and running the read rule on every row of it.
                 index(
                     "memory_tenant_compartment_idx",

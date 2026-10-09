@@ -1,6 +1,6 @@
-//! Modal overlays drawn on top of the console: the centred, cleared box the
+//! Modal overlays drawn on top of the console: the centered, cleared box the
 //! help screen and command palette render into. Hand-rolled on ratatui core
-//! (`Clear` + a centred `Rect`) to keep the dependency tree small.
+//! (`Clear` + a centered `Rect`) to keep the dependency tree small.
 
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Style};
@@ -10,10 +10,10 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 
-/// The dark terminal background dimmed colours settle toward.
+/// The dark terminal background dimmed colors settle toward.
 const BG: (f32, f32, f32) = (12.0, 14.0, 18.0);
 
-/// Pull a colour most of the way toward the background, so dimmed chrome recedes.
+/// Pull a color most of the way toward the background, so dimmed chrome recedes.
 fn dimmed(c: Color) -> Color {
     match c {
         Color::Rgb(r, g, b) => {
@@ -38,7 +38,7 @@ pub fn dim_backdrop(f: &mut Frame, area: Rect) {
     }
 }
 
-/// A centred rectangle `width` x `height`, clamped to `area`.
+/// A centered rectangle `width` x `height`, clamped to `area`.
 pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let [row] = Layout::vertical([Constraint::Length(height.min(area.height))])
         .flex(Flex::Center)

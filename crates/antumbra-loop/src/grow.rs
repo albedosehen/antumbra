@@ -12,7 +12,7 @@
 //! - **Regularize.** A region's score is discounted by how alike it is to the
 //!   regions chosen recently, so the curriculum does not settle on one band.
 //!   A share of every generation is sampled unfiltered from the whole visible
-//!   slice, the cheapest defence against a curriculum quietly reweighting what
+//!   slice, the cheapest defense against a curriculum quietly reweighting what
 //!   the population is good at.
 //! - **Credit.** Each decision records what the previous one realized: its
 //!   region's acceptability now, less what it was when chosen.

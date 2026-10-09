@@ -26,7 +26,7 @@ pub(super) const STAGES: [LoopState; 5] = [
     LoopState::Consolidate,
 ];
 
-/// How many run rows the selectable list shows before it windows + summarises.
+/// How many run rows the selectable list shows before it windows + summarizes.
 const MAX_RUN_ROWS: usize = 8;
 
 pub(super) fn stage_label(s: LoopState) -> &'static str {

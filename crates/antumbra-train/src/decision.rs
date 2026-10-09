@@ -50,7 +50,7 @@ impl DecisionHead {
         })
     }
 
-    /// Unnormalised scores over the answer space, `(batch, answers)`.
+    /// Unnormalized scores over the answer space, `(batch, answers)`.
     pub fn logits(&self, pooled: &Tensor) -> Result<Tensor> {
         self.out.forward(&self.hidden.forward(pooled)?.gelu()?)
     }
@@ -58,13 +58,13 @@ impl DecisionHead {
     /// The distribution the caller actually reads.
     ///
     /// Probabilities rather than logits at the boundary, because every consumer
-    /// of this head thresholds the result, and a threshold on an unnormalised
+    /// of this head thresholds the result, and a threshold on an unnormalized
     /// score is the defect ADR-0024 exists to remove.
     pub fn probs(&self, pooled: &Tensor) -> Result<Tensor> {
         softmax(&self.logits(pooled)?, 1)
     }
 
-    /// The loss to minimise: [`brier_loss`] between this head's distribution and
+    /// The loss to minimize: [`brier_loss`] between this head's distribution and
     /// what a verifier said happened.
     ///
     /// `targets` is `(batch, answers)`, one-hot from a verifier's verdict or soft
@@ -173,7 +173,7 @@ mod tests {
     }
 
     /// Trained on a soft label, the head reports the RATE rather than collapsing
-    /// to the majority answer. This is the behaviour the proper scoring rule is
+    /// to the majority answer. This is the behavior the proper scoring rule is
     /// chosen for, and the reason the head can be thresholded at all: a verifier
     /// that says "right about 70% of the time" should produce ~0.7, not 1.0.
     #[test]

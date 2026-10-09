@@ -113,7 +113,7 @@ pub fn schema() -> Vec<TableDefinition> {
     tables
 }
 
-/// Finalise a field builder. The names in this module are static and valid,
+/// Finalize a field builder. The names in this module are static and valid,
 /// so a refusal is a typo in a sibling file, worth stopping the build over;
 /// reserved-word warnings are the schema layer's concern, not the wire's.
 fn built(field: FieldBuilder) -> FieldDefinition {

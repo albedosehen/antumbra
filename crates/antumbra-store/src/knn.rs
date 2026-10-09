@@ -1,4 +1,4 @@
-//! How a nearest-neighbour recall asks for its neighbours.
+//! How a nearest-neighbor recall asks for its neighbors.
 //!
 //! Two numbers, and both of them exist because the index-backed KNN
 //! operator behaves differently from the exhaustive one it replaced.
@@ -31,13 +31,13 @@ pub fn candidate_pool(k: usize) -> usize {
 /// The search effort (`ef`) an index-backed KNN asks for.
 ///
 /// `ef` bounds the candidate list the graph walk keeps. Below `k` the
-/// search cannot return `k` neighbours at all; well above it, recall
+/// search cannot return `k` neighbors at all; well above it, recall
 /// approaches exhaustive at a cost roughly linear in `ef`. Antumbra's
 /// vector tables are working sets rather than corpora — a workspace's
 /// memories, one population of experts — so the generous end of the
 /// usual range is cheap here and the floor matters more than the
 /// ceiling: a small `k` is the common case and is exactly where too
-/// small an `ef` quietly loses neighbours.
+/// small an `ef` quietly loses neighbors.
 pub fn search_effort(k: usize) -> i64 {
     let effort = k
         .saturating_mul(EFFORT_MULTIPLIER)
@@ -73,7 +73,7 @@ mod tests {
         assert_eq!(candidate_pool(10_000), MAX_POOL);
     }
 
-    /// An `ef` below `k` cannot return `k` neighbours, so the floor has
+    /// An `ef` below `k` cannot return `k` neighbors, so the floor has
     /// to hold for every `k` the ceiling still covers.
     #[test]
     fn the_effort_is_never_below_k() {

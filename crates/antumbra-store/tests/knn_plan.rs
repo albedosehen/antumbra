@@ -5,7 +5,7 @@
 //! exhaustive form these paths used to render compared every row, so a
 //! `WHERE` beside it narrowed the population first and `k` meant k
 //! matching rows. The graph walk knows nothing about tenants: it hands
-//! back its nearest neighbours across the whole table and every other
+//! back its nearest neighbors across the whole table and every other
 //! predicate applies afterwards. Over-fetching and truncating is what
 //! keeps the change from being a correctness regression dressed as a
 //! speed-up.
@@ -49,7 +49,7 @@ fn trace(id: &str, tenant: &TenantId, embedding: Vec<f32>) -> Memory {
 }
 
 /// One tenant holds a single memory among many, and its own trace is
-/// nobody's nearest neighbour until every closer row has been filtered
+/// nobody's nearest neighbor until every closer row has been filtered
 /// away. Asking the index for `k = 1` directly would find nothing.
 #[tokio::test]
 async fn a_tenant_with_a_thin_share_still_recalls() {

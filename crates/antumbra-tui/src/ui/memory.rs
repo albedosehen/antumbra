@@ -1,6 +1,6 @@
 //! The Memory page (the penumbra): the world/bank/opinion networks as a typed
 //! edge graph beside the selected trace's detail. Memories cluster by network on
-//! a hand-rolled Canvas; edges colour by kind (contradiction/supersession are the
+//! a hand-rolled Canvas; edges color by kind (contradiction/supersession are the
 //! consolidation→retire signal). This is the soft store the population graduates
 //! from: the hippocampus to the umbra's neocortex.
 
@@ -46,7 +46,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     detail(f, app, cols[1]);
 }
 
-/// Colour an edge by its kind: contradiction/supersession (the retire signal)
+/// Color an edge by its kind: contradiction/supersession (the retire signal)
 /// stand out; reference/follows/caused are quieter.
 fn edge_color(t: &Theme, e: EdgeType) -> Color {
     match e {

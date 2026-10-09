@@ -416,7 +416,7 @@ mod tests {
     /// render did not.
     ///
     /// Every vector table here has carried an HNSW index since it was
-    /// defined, and every recall path asked for neighbours with
+    /// defined, and every recall path asked for neighbors with
     /// `<|k,COSINE|>` — the metric form, which makes the engine compare
     /// every row and ignore the index entirely. It answers correctly,
     /// so nothing ever failed; it just paid for four indexes and used

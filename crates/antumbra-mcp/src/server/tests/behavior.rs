@@ -1,10 +1,10 @@
-//! Behaviours (ADR-0027): recorded only with a check shown to discriminate,
+//! Behaviors (ADR-0027): recorded only with a check shown to discriminate,
 //! listed by status, accepted and retired by their owner, superseded by a
 //! later one, and private to the user who recorded them.
 
 use super::*;
-use crate::server::behaviour::{
-    BehaviourIdParams, ExampleParams, ListBehavioursParams, RecordBehaviourParams,
+use crate::server::behavior::{
+    BehaviorIdParams, ExampleParams, ListBehaviorsParams, RecordBehaviorParams,
 };
 
 fn server_for(store: &Store, user: &str) -> McpServer {
@@ -26,8 +26,8 @@ fn example(task: &str, answer: &str) -> ExampleParams {
     }
 }
 
-fn branch_rule(supersedes: Option<String>, accepted: bool) -> RecordBehaviourParams {
-    RecordBehaviourParams {
+fn branch_rule(supersedes: Option<String>, accepted: bool) -> RecordBehaviorParams {
+    RecordBehaviorParams {
         rule: "Name a branch for an issue feat/{issue}-{slug}.".into(),
         must: vec![r"feat/\d+-[a-z0-9-]+".into()],
         must_not: vec![r"feature/".into()],
@@ -60,28 +60,28 @@ fn branch_rule(supersedes: Option<String>, accepted: bool) -> RecordBehaviourPar
 }
 
 async fn list(s: &McpServer, status: Option<&str>) -> Vec<(String, String, String)> {
-    s.list_behaviours(Parameters(ListBehavioursParams {
+    s.list_behaviors(Parameters(ListBehaviorsParams {
         status: status.map(str::to_string),
         scope: None,
     }))
     .await
     .unwrap()
     .0
-    .behaviours
+    .behaviors
     .into_iter()
     .map(|b| (b.id, b.status, b.rule))
     .collect()
 }
 
 #[tokio::test]
-async fn a_behaviour_is_recorded_only_with_a_check_that_discriminates() -> anyhow::Result<()> {
+async fn a_behavior_is_recorded_only_with_a_check_that_discriminates() -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let s = server_for(&store, "user:lily");
 
     let mut weak = branch_rule(None, false);
     weak.violations
         .push("git checkout -b feat/9-anything".into());
-    let refused = s.record_behaviour(Parameters(weak)).await.unwrap().0;
+    let refused = s.record_behavior(Parameters(weak)).await.unwrap().0;
     assert!(!refused.recorded);
     assert!(
         refused
@@ -94,7 +94,7 @@ async fn a_behaviour_is_recorded_only_with_a_check_that_discriminates() -> anyho
     assert!(list(&s, None).await.is_empty(), "nothing written");
 
     let kept = s
-        .record_behaviour(Parameters(branch_rule(None, false)))
+        .record_behavior(Parameters(branch_rule(None, false)))
         .await
         .unwrap()
         .0;
@@ -105,7 +105,7 @@ async fn a_behaviour_is_recorded_only_with_a_check_that_discriminates() -> anyho
     assert_eq!(listed[0].1, "proposed");
     assert!(listed[0].2.starts_with("Name a branch"));
 
-    // A behaviour is a memory in the user's behaviour compartment, kept off
+    // A behavior is a memory in the user's behavior compartment, kept off
     // the write-time consolidation that would teach it to echo itself.
     let m = memory::get(
         &store,
@@ -117,17 +117,18 @@ async fn a_behaviour_is_recorded_only_with_a_check_that_discriminates() -> anyho
     assert!(m.volatile);
     assert_eq!(
         m.compartment.as_ref().map(|c| c.as_str().to_string()),
-        Some("comp:ws:test:user:lily:behaviour".to_string())
+        Some("comp:ws:test:user:lily:behaviour".to_string()),
+        "the compartment keeps the name it is already stored under"
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn behaviours_are_accepted_retired_and_superseded() -> anyhow::Result<()> {
+async fn behaviors_are_accepted_retired_and_superseded() -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let s = server_for(&store, "user:lily");
     let first = s
-        .record_behaviour(Parameters(branch_rule(None, false)))
+        .record_behavior(Parameters(branch_rule(None, false)))
         .await
         .unwrap()
         .0
@@ -135,8 +136,8 @@ async fn behaviours_are_accepted_retired_and_superseded() -> anyhow::Result<()> 
         .unwrap();
 
     let accepted = s
-        .accept_behaviour(Parameters(BehaviourIdParams {
-            behaviour_id: first.clone(),
+        .accept_behavior(Parameters(BehaviorIdParams {
+            behavior_id: first.clone(),
         }))
         .await
         .unwrap()
@@ -147,7 +148,7 @@ async fn behaviours_are_accepted_retired_and_superseded() -> anyhow::Result<()> 
 
     // The user restates it: the new one is accepted, the old one retired.
     let second = s
-        .record_behaviour(Parameters(branch_rule(Some(first.clone()), true)))
+        .record_behavior(Parameters(branch_rule(Some(first.clone()), true)))
         .await
         .unwrap()
         .0;
@@ -157,7 +158,7 @@ async fn behaviours_are_accepted_retired_and_superseded() -> anyhow::Result<()> 
     assert_eq!(retired.len(), 1);
     assert_eq!(retired[0].0, first);
     assert!(s
-        .list_behaviours(Parameters(ListBehavioursParams {
+        .list_behaviors(Parameters(ListBehaviorsParams {
             status: Some("bogus".into()),
             scope: None,
         }))
@@ -173,7 +174,7 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
     let s = server_for(&store, "user:lily");
     let mut three = branch_rule(None, true);
     three.examples.truncate(3);
-    let refused = s.record_behaviour(Parameters(three)).await.unwrap().0;
+    let refused = s.record_behavior(Parameters(three)).await.unwrap().0;
     assert!(!refused.recorded);
     assert!(
         refused.problems.iter().any(|p| p.contains("at least 4")),
@@ -183,40 +184,40 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
 
     // One stored with three, before four were required, is listed with the
     // reason it never trains.
-    let legacy = antumbra_core::behaviour::Spec {
+    let legacy = antumbra_core::behavior::Spec {
         rule: "Name a branch for an issue feat/{issue}-{slug}.".into(),
         must: vec![r"feat/\d+-[a-z0-9-]+".into()],
         must_not: vec![],
         examples: (1..=3)
-            .map(|i| antumbra_core::behaviour::Example {
+            .map(|i| antumbra_core::behavior::Example {
                 task: format!("Issue {i}."),
                 answer: format!("git switch -c feat/{i}-x"),
             })
             .collect(),
         violations: vec!["git switch -c issue-1".into()],
     };
-    antumbra_store::repo::behaviour::record(
+    antumbra_store::repo::behavior::record(
         &store,
         &TenantId::new("ws:test"),
         &UserId::new("user:lily"),
         "windows",
         MemoryId::new("memory:legacy"),
         &legacy,
-        antumbra_core::behaviour::Status::Accepted,
+        antumbra_core::behavior::Status::Accepted,
         "everywhere",
         None,
         vec![0.1; EMBED_DIM],
     )
     .await?;
     let listed = s
-        .list_behaviours(Parameters(ListBehavioursParams {
+        .list_behaviors(Parameters(ListBehaviorsParams {
             status: Some("accepted".into()),
             scope: None,
         }))
         .await
         .unwrap()
         .0
-        .behaviours;
+        .behaviors;
     assert_eq!(listed.len(), 1);
     assert!(
         listed[0].problems.iter().any(|p| p.contains("one in four")),
@@ -227,12 +228,44 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
 }
 
 #[tokio::test]
-async fn behaviours_are_private_to_the_user_who_recorded_them() -> anyhow::Result<()> {
+async fn the_tools_answer_to_the_names_they_had_before_the_us_spelling() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let s = server_for(&store, "user:lily");
+    let p = branch_rule(None, false);
+    let args = serde_json::json!({
+        "rule": p.rule, "must": p.must, "must_not": p.must_not,
+        "examples": p.examples.iter().map(|e| serde_json::json!({"task": e.task, "answer": e.answer})).collect::<Vec<_>>(),
+        "violations": p.violations,
+    });
+    let recorded = s.call_tool("record_behaviour", args).await.unwrap();
+    let id = recorded["id"].as_str().unwrap().to_string();
+    let accepted = s
+        .call_tool(
+            "accept_behaviour",
+            serde_json::json!({ "behaviour_id": id }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(accepted["status"], "accepted");
+    let listed = s
+        .call_tool("list_behaviours", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed["behaviors"].as_array().map(Vec::len), Some(1));
+    assert!(s
+        .call_tool("retire_behavior", serde_json::json!({ "behavior_id": id }))
+        .await
+        .is_ok());
+    Ok(())
+}
+
+#[tokio::test]
+async fn behaviors_are_private_to_the_user_who_recorded_them() -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let lily = server_for(&store, "user:lily");
     let oslo = server_for(&store, "user:oslo");
     let id = lily
-        .record_behaviour(Parameters(branch_rule(None, false)))
+        .record_behavior(Parameters(branch_rule(None, false)))
         .await
         .unwrap()
         .0
@@ -240,7 +273,7 @@ async fn behaviours_are_private_to_the_user_who_recorded_them() -> anyhow::Resul
         .unwrap();
     assert!(list(&oslo, None).await.is_empty());
     let attempt = oslo
-        .retire_behaviour(Parameters(BehaviourIdParams { behaviour_id: id }))
+        .retire_behavior(Parameters(BehaviorIdParams { behavior_id: id }))
         .await
         .unwrap()
         .0;

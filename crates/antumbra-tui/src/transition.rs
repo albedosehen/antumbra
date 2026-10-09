@@ -1,6 +1,6 @@
 //! View-switch transitions (tachyonfx): a short effect played over the console
 //! when the focused region changes (the detail panel re-assembles), the theme
-//! cycles (a colour wash settles into the new palette), or the layout switches
+//! cycles (a color wash settles into the new palette), or the layout switches
 //! (the whole body re-assembles). Each effect carries the [`Scope`] it plays
 //! over; effects are processed inside the draw pass against the live frame
 //! buffer, then idle to `None` when done, so the loop only spends the extra
@@ -11,7 +11,7 @@ use tachyonfx::{fx, Effect, EffectTimer, Interpolation};
 
 use crate::theme::Theme;
 
-/// The dark terminal background the console is designed against (the colour a
+/// The dark terminal background the console is designed against (the color a
 /// wash settles out of).
 const BG: ratatui::style::Color = ratatui::style::Color::Rgb(12, 14, 18);
 

@@ -115,7 +115,7 @@ fn a_row_behind_a_ref_is_still_walked() {
     );
 }
 
-/// ADR-0023 B-3's third rule, which generalises B-2. A bare collection
+/// ADR-0023 B-3's third rule, which generalizes B-2. A bare collection
 /// answers "no rows" and never "no rows BECAUSE", so the agent cannot tell
 /// a query that matched nothing from one whose matches a floor removed.
 #[test]

@@ -19,7 +19,7 @@
 //! requires an implementation trained against a strictly proper scoring rule
 //! over outcomes a verifier produced. The labels come from
 //! `scripts/d2-labels.sh`, whose verifier is span provenance with the span
-//! excised, derived from no model; the fit minimises log loss, which is strictly
+//! excised, derived from no model; the fit minimizes log loss, which is strictly
 //! proper. A head fitted on a model's own answers would violate ADR-0022's
 //! anchor invariant. This is not that.
 //!
@@ -34,7 +34,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Fitted on 800 balanced pairs drawn from 400 distinct queries against
-/// `ws:default`, by `antumbra_core::platt::Platt::fit` minimising log loss, and
+/// `ws:default`, by `antumbra_core::platt::Platt::fit` minimizing log loss, and
 /// reported on the held-out half (`calibrating_the_reranker`).
 ///
 /// These are defaults rather than constants of nature. They were fitted against

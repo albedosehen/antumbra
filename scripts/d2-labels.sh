@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Emit the labelled relevance set ADR-0024's D-2 head trains on, as JSON.
+# Emit the labeled relevance set ADR-0024's D-2 head trains on, as JSON.
 #
 # Same construction as scripts/d2-relevance-baseline.sh, which measures the
 # CONTROL over this data; this one writes the pairs out so a head can be trained
@@ -98,7 +98,7 @@ for i in $(seq 0 $((N - 1))); do
     [ "${#BODY[$i]}" -lt 100 ] && continue
     jq -nc --arg q "$q" --arg m "${BODY[$i]}" '{query:$q, memory:$m, relevant:true}' >> "$work/pairs.jsonl"
     # 37 is coprime with most sample sizes, so the pairing cannot degenerate into
-    # pairing neighbours.
+    # pairing neighbors.
     jq -nc --arg q "$q" --arg m "${BODY[$(((i + 37) % N))]}" \
         '{query:$q, memory:$m, relevant:false}' >> "$work/pairs.jsonl"
 done

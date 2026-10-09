@@ -1,6 +1,6 @@
 //! Frame pacing for high-refresh terminals. The console paces to a target FPS
 //! (adjustable live with `+`/`-`), and on Windows raises the multimedia timer
-//! resolution to 1ms so short frame budgets are actually honoured; the default
+//! resolution to 1ms so short frame budgets are actually honored; the default
 //! ~15.6ms scheduler tick would otherwise cap the loop near 64fps however short
 //! the budget, so 144/165/244Hz monitors would never be fed.
 
@@ -72,7 +72,7 @@ extern "system" {
 }
 
 /// Raises (and on drop restores) the OS timer resolution so short frame budgets
-/// are honoured. A no-op off Windows, where sleeps are already fine-grained.
+/// are honored. A no-op off Windows, where sleeps are already fine-grained.
 pub struct TimerResolution {
     #[cfg(windows)]
     period_ms: u32,
@@ -367,7 +367,7 @@ mod tests {
         // The ends clamp rather than wrap.
         assert_eq!(next_preset(360), 360);
         assert_eq!(prev_preset(30), 30);
-        // An arbitrary `--fps` value snaps to a neighbouring preset.
+        // An arbitrary `--fps` value snaps to a neighboring preset.
         assert_eq!(next_preset(100), 120);
         assert_eq!(prev_preset(200), 165);
     }

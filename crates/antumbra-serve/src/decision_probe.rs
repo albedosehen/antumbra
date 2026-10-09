@@ -36,13 +36,13 @@ use antumbra_core::ports::Embedder;
 use antumbra_core::Result;
 use antumbra_train::decision::DecisionHead;
 
-/// One labelled pair, as `scripts/d2-labels.sh` writes it.
+/// One labeled pair, as `scripts/d2-labels.sh` writes it.
 #[derive(Debug, Clone, Deserialize)]
-pub struct LabelledPair {
+pub struct LabeledPair {
     pub query: String,
     pub memory: String,
     /// True when the query was cut from inside this memory — the deterministic
-    /// verifier ADR-0024's rule requires, rather than a human or model judgement.
+    /// verifier ADR-0024's rule requires, rather than a human or model judgment.
     pub relevant: bool,
 }
 
@@ -139,7 +139,7 @@ fn pair_text(query: &str, memory: &str) -> String {
 /// floor compares against — the same column the relevance floor reads.
 async fn encode(
     embedder: &dyn Embedder,
-    pairs: &[LabelledPair],
+    pairs: &[LabeledPair],
     dim: usize,
     how: Pairing,
 ) -> Result<(Vec<f32>, Vec<f32>)> {
@@ -213,12 +213,12 @@ fn feature_dim(dim: usize, how: Pairing) -> usize {
 ///
 /// The split is the caller's, so a caller can hold out by memory rather than by
 /// pair if it wants to — pairs built from the same memory share its text, and
-/// splitting them across the boundary would let the head recognise the passage
+/// splitting them across the boundary would let the head recognize the passage
 /// rather than judge the match.
 pub async fn train_and_score(
     embedder: &dyn Embedder,
-    train: &[LabelledPair],
-    test: &[LabelledPair],
+    train: &[LabeledPair],
+    test: &[LabeledPair],
     epochs: usize,
     how: Pairing,
 ) -> Result<Scored> {
@@ -303,10 +303,10 @@ pub fn score_at_half(relevant: &[f32], labels: impl Iterator<Item = bool>) -> Sc
 ///
 /// Each memory contributes a positive and a negative built from the same text,
 /// so splitting by pair would put the same passage on both sides and let a
-/// model recognise it rather than judge the match: the result would be a
+/// model recognize it rather than judge the match: the result would be a
 /// measurement of leakage. The first half of the memories, in first-seen order,
 /// trains; the rest is held out. Returns `(train, test)`.
-pub fn split_by_memory(pairs: &[LabelledPair]) -> (Vec<LabelledPair>, Vec<LabelledPair>) {
+pub fn split_by_memory(pairs: &[LabeledPair]) -> (Vec<LabeledPair>, Vec<LabeledPair>) {
     let mut seen: Vec<&str> = Vec::new();
     for p in pairs {
         if !seen.contains(&p.memory.as_str()) {
@@ -325,12 +325,12 @@ pub fn split_by_memory(pairs: &[LabelledPair]) -> (Vec<LabelledPair>, Vec<Labell
 /// one `contains` call, no model, no training, no GPU.
 ///
 /// `scripts/d2-labels.sh` builds a query by taking twelve words from ~60%
-/// through a memory. If this scores near 1.000, the labelled task is substring
+/// through a memory. If this scores near 1.000, the labeled task is substring
 /// provenance rather than relevance, and a method scores well on it exactly
 /// insofar as it detects near-exact overlap. The span is now excised, so it
 /// should score near zero; every run prints it so a degenerate label file
 /// cannot come back quietly.
-pub fn verbatim_containment(test: &[LabelledPair]) -> Scored {
+pub fn verbatim_containment(test: &[LabeledPair]) -> Scored {
     fn flat(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
     }
@@ -379,7 +379,7 @@ mod tests {
             return;
         };
         let raw = std::fs::read_to_string(&path).expect("read labels");
-        let pairs: Vec<LabelledPair> = serde_json::from_str(&raw).expect("parse labels");
+        let pairs: Vec<LabeledPair> = serde_json::from_str(&raw).expect("parse labels");
         assert!(pairs.len() >= 20, "need a real set, got {}", pairs.len());
 
         let (train, test) = split_by_memory(&pairs);

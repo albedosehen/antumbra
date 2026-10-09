@@ -1,25 +1,25 @@
-//! Training the user's behaviours into a standing expert (ADR-0027): the part
-//! that needs no model. Tasks from each behaviour's worked examples, a quarter
+//! Training the user's behaviors into a standing expert (ADR-0027): the part
+//! that needs no model. Tasks from each behavior's worked examples, a quarter
 //! of them held out; the shipped replay prompts and controls; and the rule an
 //! expert is admitted by.
 //!
 //! The configuration is validation 2's. On kuskokwim, ten examples per
-//! behaviour with the base model's own answers to 214 everyday prompts as
-//! replay taught four of the user's behaviours (0% to 89-100% on held-out
+//! behavior with the base model's own answers to 214 everyday prompts as
+//! replay taught four of the user's behaviors (0% to 89-100% on held-out
 //! phrasings) and kept unrelated tasks at the base model's level (32/40
-//! against 34/40). Without the replay the expert applied its behaviours where
+//! against 34/40). Without the replay the expert applied its behaviors where
 //! they do not belong. Command prompts alone as replay still let it turn code
 //! and prose asks into commands (16/20 against the base's 19/20), so the
 //! replay and the controls also carry code, prose and config.
 
 use serde_json::{json, Value};
 
-use antumbra_core::behaviour::{Example, Spec};
+use antumbra_core::behavior::{Example, Spec};
 
 use crate::eval::TaskResult;
 use crate::model::CorpusTask;
 
-/// Each behaviour's held-out tasks must pass at least this often.
+/// Each behavior's held-out tasks must pass at least this often.
 pub const MIN_RATE: f32 = 0.6;
 /// And at least this much more often than the base model's.
 pub const MIN_GAIN: f32 = 0.3;
@@ -61,8 +61,8 @@ pub fn always() -> Value {
 }
 
 /// The examples to train on and the ones held out: every fourth, so a
-/// behaviour with ten examples is admitted on two it never saw. Below four
-/// examples nothing is held out, and the behaviour cannot be admitted.
+/// behavior with ten examples is admitted on two it never saw. Below four
+/// examples nothing is held out, and the behavior cannot be admitted.
 pub fn split(examples: &[Example]) -> (Vec<&Example>, Vec<&Example>) {
     let mut train = Vec::new();
     let mut held = Vec::new();
@@ -76,14 +76,14 @@ pub fn split(examples: &[Example]) -> (Vec<&Example>, Vec<&Example>) {
     (train, held)
 }
 
-/// A behaviour's training and held-out tasks. Ids are `{id}#t{i}` and
-/// `{id}#h{i}`; every task's skill is the behaviour's id.
-pub struct BehaviourTasks {
+/// A behavior's training and held-out tasks. Ids are `{id}#t{i}` and
+/// `{id}#h{i}`; every task's skill is the behavior's id.
+pub struct BehaviorTasks {
     pub train: Vec<CorpusTask>,
     pub held: Vec<CorpusTask>,
 }
 
-pub fn tasks(id: &str, spec: &Spec) -> BehaviourTasks {
+pub fn tasks(id: &str, spec: &Spec) -> BehaviorTasks {
     let check = verify(spec);
     let task = |tag: &str, i: usize, e: &Example| {
         let mut t = CorpusTask::new(format!("{id}#{tag}{i}"), e.task.clone())
@@ -93,7 +93,7 @@ pub fn tasks(id: &str, spec: &Spec) -> BehaviourTasks {
         t
     };
     let (train, held) = split(&spec.examples);
-    BehaviourTasks {
+    BehaviorTasks {
         train: train
             .iter()
             .enumerate()
@@ -121,7 +121,7 @@ fn rows(text: &str) -> Vec<(String, String, Option<Value>)> {
 }
 
 /// The everyday prompts the base model answers for replay, none of them
-/// governed by a behaviour: local git, gh, shell, docker and package commands,
+/// governed by a behavior: local git, gh, shell, docker and package commands,
 /// and code, prose and config in several languages.
 pub fn replay_prompts() -> Vec<CorpusTask> {
     rows(REPLAY)
@@ -142,7 +142,7 @@ pub fn replay(prompts: &[CorpusTask], answers: &[(String, String)]) -> Vec<Corpu
         .collect()
 }
 
-/// Tasks no behaviour governs, each with its own check, to measure what an
+/// Tasks no behavior governs, each with its own check, to measure what an
 /// expert costs elsewhere, in families: `control-cmd-` and `control-code-`.
 pub fn controls() -> Vec<CorpusTask> {
     rows(CONTROLS)
@@ -151,9 +151,9 @@ pub fn controls() -> Vec<CorpusTask> {
         .collect()
 }
 
-/// One behaviour's held-out pass rates, base and expert.
+/// One behavior's held-out pass rates, base and expert.
 #[derive(Debug, Clone, PartialEq)]
-pub struct BehaviourScore {
+pub struct BehaviorScore {
     pub id: String,
     pub base: f32,
     pub expert: f32,
@@ -173,7 +173,7 @@ pub struct ControlScore {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Verdict {
     pub admitted: bool,
-    pub behaviours: Vec<BehaviourScore>,
+    pub behaviors: Vec<BehaviorScore>,
     /// Each family of controls, in the order the corpus lists them.
     pub controls: Vec<ControlScore>,
     pub reasons: Vec<String>,
@@ -195,21 +195,21 @@ fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
     (total > 0).then(|| passed as f32 / total as f32)
 }
 
-/// Admit an expert when every behaviour it was taught passes its held-out
+/// Admit an expert when every behavior it was taught passes its held-out
 /// tasks at least [`MIN_RATE`], each at least [`MIN_GAIN`] above the base model
 /// unless the base already passed it that often, at least one clearly rose, and
 /// each family of controls falls no more than [`CONTROL_SLACK`] below the
 /// base's. Each family is held on its own, so a fall in code answers cannot
 /// hide inside a larger pool of commands.
-pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
+pub fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
     let mut reasons = Vec::new();
-    let scores: Vec<BehaviourScore> = behaviours
+    let scores: Vec<BehaviorScore> = behaviors
         .iter()
         .map(|id| {
             let prefix = format!("{id}#h");
             match (rate(base, &prefix), rate(expert, &prefix)) {
                 (Some(b), Some(e)) => {
-                    // A behaviour the base already follows needs holding, not
+                    // A behavior the base already follows needs holding, not
                     // raising: requiring a gain would let it block the rest.
                     let admitted = e >= MIN_RATE && (e - b >= MIN_GAIN || b >= MIN_RATE);
                     if !admitted {
@@ -217,11 +217,11 @@ pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) 
                             "{id}: held out {e:.2} against the base's {b:.2}; needs {MIN_RATE}, and {MIN_GAIN} more unless the base had it"
                         ));
                     }
-                    BehaviourScore { id: id.clone(), base: b, expert: e, admitted }
+                    BehaviorScore { id: id.clone(), base: b, expert: e, admitted }
                 }
                 _ => {
                     reasons.push(format!("{id}: no held-out tasks to admit it by"));
-                    BehaviourScore { id: id.clone(), base: 0.0, expert: 0.0, admitted: false }
+                    BehaviorScore { id: id.clone(), base: 0.0, expert: 0.0, admitted: false }
                 }
             }
         })
@@ -246,17 +246,17 @@ pub fn admit(behaviours: &[String], base: &[TaskResult], expert: &[TaskResult]) 
     for c in &controls {
         if c.expert < c.base - CONTROL_SLACK {
             reasons.push(format!(
-                "{} fell from {:.2} to {:.2}: the expert applies its behaviours where they do not belong",
+                "{} fell from {:.2} to {:.2}: the expert applies its behaviors where they do not belong",
                 c.family, c.base, c.expert
             ));
         }
     }
     if !scores.is_empty() && !scores.iter().any(|s| s.expert - s.base >= MIN_GAIN) {
-        reasons.push("no behaviour rose: the base model already follows them all".to_string());
+        reasons.push("no behavior rose: the base model already follows them all".to_string());
     }
     Verdict {
         admitted: reasons.is_empty() && !scores.is_empty(),
-        behaviours: scores,
+        behaviors: scores,
         controls,
         reasons,
     }

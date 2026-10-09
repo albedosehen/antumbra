@@ -675,7 +675,7 @@ async fn a_memory_is_named_by_the_id_its_results_carry() {
     assert_eq!(forgotten["forgotten"], true);
 }
 
-mod behaviour;
+mod behavior;
 mod depgraph;
 mod device;
 mod handoff;
@@ -697,7 +697,7 @@ mod bounded_answers;
 /// Validation 4 asks that a recall where nothing cleared the floor be
 /// distinguishable BY A FIELD rather than by inference from one where weak rows
 /// did. These drive that through the typed-decision port with a scripted
-/// decider, so the behaviour is pinned before any trained head exists.
+/// decider, so the behavior is pinned before any trained head exists.
 mod relevance_floor;
 mod standing;
 

@@ -59,7 +59,7 @@ pub enum Problem {
     /// size is stated nowhere.
     UnboundedCollection(String),
     /// A collection that can come back empty, with nothing beside it to say why
-    /// (ADR-0023 B-3, generalising B-2). An empty array answers "no rows" and
+    /// (ADR-0023 B-3, generalizing B-2). An empty array answers "no rows" and
     /// not "no rows BECAUSE", so the agent cannot tell a query that matched
     /// nothing from one whose matches a filter or a threshold removed. The two
     /// want opposite responses — rephrase, or widen — and guessing wrong costs a

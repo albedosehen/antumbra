@@ -6,7 +6,7 @@
 //! task that was trained on is not held out, and an audit task that fed the
 //! fitness graduation reads has been touched by a decision. So the split happens
 //! here, before the first sample, and each training path receives the two sets
-//! separately rather than one list to be labelled afterwards.
+//! separately rather than one list to be labeled afterwards.
 
 use antumbra_core::slice::Holdout;
 use antumbra_core::{AntumbraError, Result};

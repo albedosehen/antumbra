@@ -2,13 +2,13 @@
 //! with the user's standing experts composed in (ADR-0027).
 //!
 //! Its own router, joined to the others in `engine.rs`. A standing expert holds
-//! the behaviours a user accepted for a scope: everywhere, or one repository.
+//! the behaviors a user accepted for a scope: everywhere, or one repository.
 //! It is never the routed expert. It joins every answer in its scope, and
 //! answers alone a task like the ones it was taught when nothing else covers
 //! it.
 
 use super::*;
-use antumbra_core::behaviour::{normalize_scope, EVERYWHERE};
+use antumbra_core::behavior::{normalize_scope, EVERYWHERE};
 use antumbra_core::ports::Serve;
 use antumbra_core::Expert;
 
@@ -18,7 +18,7 @@ impl McpServer {
     /// (the full recall→route→serve surface). Escalates when nothing covers it
     /// or when no serving engine is configured.
     #[tool(
-        description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter, with your standing behaviours (for everywhere and for `repo`) composed in. Escalates if nothing covers it."
+        description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter, with your standing behaviors (for everywhere and for `repo`) composed in. Escalates if nothing covers it."
     )]
     pub(super) async fn answer(
         &self,

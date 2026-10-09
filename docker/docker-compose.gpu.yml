@@ -1,6 +1,6 @@
 # GPU override: swap the light antumbra-mcp for the `models,cuda` build, which
 # adds real expert serving (the `answer` tool) and the keeper that trains each
-# user's standing experts from the behaviours they accepted. Use alongside the
+# user's standing experts from the behaviors they accepted. Use alongside the
 # base compose:
 #
 #   docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d

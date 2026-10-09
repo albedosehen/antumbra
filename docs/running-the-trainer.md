@@ -1,6 +1,6 @@
 # Running the trainer (MT-3)
 
-The candle RAFT trainer is built and compiles; this is how to run it on a CUDA GPU (the 3090 Ti). Everything below the actual run is CPU-tested; the first real run is where model-specific behaviour gets tuned.
+The candle RAFT trainer is built and compiles; this is how to run it on a CUDA GPU (the 3090 Ti). Everything below the actual run is CPU-tested; the first real run is where model-specific behavior gets tuned.
 
 ## Prerequisites
 
@@ -216,7 +216,7 @@ Release builds also need the `surrealdb` / `surrealdb-core` `opt-level = 1` over
 
 ## The GPU server (serving + standing experts)
 
-The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds the **light** server: it does memory (store / recall / route / compartments / sync), but `answer` reports _serving not configured_, because serving needs the candle/GPU half. Run the `models,cuda` server where the GPU is to get real expert serving, and the keeper that trains each user's **standing experts** from the behaviours they accepted.
+The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds the **light** server: it does memory (store / recall / route / compartments / sync), but `answer` reports _serving not configured_, because serving needs the candle/GPU half. Run the `models,cuda` server where the GPU is to get real expert serving, and the keeper that trains each user's **standing experts** from the behaviors they accepted.
 
 **Docker (Linux, or Windows via WSL2; needs the NVIDIA Container Toolkit):**
 
@@ -234,9 +234,9 @@ target\release\antumbra-mcp.exe --http 127.0.0.1:8081 --url ws://127.0.0.1:8000/
   --embedder-url http://127.0.0.1:11434/v1/embeddings --embedder-model all-minilm
 ```
 
-**Standing experts.** A behaviour is a rule for how an agent should act, recorded with a check (`record_behaviour`) and accepted by the user. On a node that serves and can train, the keeper reads every user's behaviours every ten minutes. A scope (everywhere, or one repository) whose accepted behaviours differ from what its standing expert holds is trained again: each behaviour's examples beside the base model's own answers to everyday prompts. The expert is admitted only when every behaviour rose on examples it never saw and the command and code controls held. `answer` then composes it into every answer in its scope. `antumbra behave` runs the same training by hand and prints the scores.
+**Standing experts.** A behavior is a rule for how an agent should act, recorded with a check (`record_behavior`) and accepted by the user. On a node that serves and can train, the keeper reads every user's behaviors every ten minutes. A scope (everywhere, or one repository) whose accepted behaviors differ from what its standing expert holds is trained again: each behavior's examples beside the base model's own answers to everyday prompts. The expert is admitted only when every behavior rose on examples it never saw and the command and code controls held. `answer` then composes it into every answer in its scope. `antumbra behave` runs the same training by hand and prints the scores.
 
-**What the server log tells you.** `standing experts kept here` at start; then, per pass that did anything, how many were trained, refused and dropped, with one line per expert: `trained on N behaviour(s), now served`, or `not admitted:` and the reason. A set of behaviours that was refused is not tried again until it changes.
+**What the server log tells you.** `standing experts kept here` at start; then, per pass that did anything, how many were trained, refused and dropped, with one line per expert: `trained on N behavior(s), now served`, or `not admitted:` and the reason. A set of behaviors that was refused is not tried again until it changes.
 
 The write-time trigger that trained a compartment's memories into an expert, `--auto-consolidate`, is retired: it taught experts to echo memories. The flag is still accepted and does nothing.
 
