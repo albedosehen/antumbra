@@ -52,18 +52,32 @@ pub struct BehaveArgs {
 struct Imported {
     spec: Spec,
     scope: Option<String>,
+    /// The memories it was drawn from, when it came from the store.
+    sources: Vec<String>,
 }
 
-/// An `--import` file's rows: each a spec, with the scope beside it.
+/// An `--import` file's rows: each a spec, with the scope and the sources
+/// beside it.
 fn rows(text: &str) -> anyhow::Result<Vec<Imported>> {
     let parsed: Vec<Value> = serde_json::from_str(text)?;
     parsed
         .into_iter()
         .map(|v| {
             let scope = v.get("scope").and_then(Value::as_str).map(str::to_string);
+            let sources = v
+                .get("sources")
+                .and_then(Value::as_array)
+                .map(|xs| {
+                    xs.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
             Ok(Imported {
                 spec: serde_json::from_value(v)?,
                 scope,
+                sources,
             })
         })
         .collect()
@@ -120,6 +134,7 @@ async fn import(url: &str, a: &BehaveArgs, path: &str) -> anyhow::Result<()> {
             status,
             &scope,
             None,
+            &row.sources,
             embedding,
         )
         .await?;
@@ -226,15 +241,17 @@ mod tests {
     }
 
     #[test]
-    fn an_import_row_carries_a_spec_and_an_optional_scope() {
+    fn an_import_row_carries_a_spec_an_optional_scope_and_its_sources() {
         let rows = rows(
-            r#"[{"rule":"r","must":["x"],"examples":[{"task":"t","answer":"x"}],"violations":["y"],"scope":"github.com/a/b"},
+            r#"[{"rule":"r","must":["x"],"examples":[{"task":"t","answer":"x"}],"violations":["y"],"scope":"github.com/a/b","sources":["memory:1","memory:2"]},
                 {"rule":"s","must":["x"],"examples":[],"violations":[]}]"#,
         )
         .unwrap();
         assert_eq!(rows[0].scope.as_deref(), Some("github.com/a/b"));
         assert_eq!(rows[0].spec.examples.len(), 1);
+        assert_eq!(rows[0].sources, ["memory:1", "memory:2"]);
         assert!(rows[1].scope.is_none());
+        assert!(rows[1].sources.is_empty());
         assert!(!rows[1].spec.problems().is_empty());
     }
 }

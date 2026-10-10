@@ -247,6 +247,7 @@ fn default_capability() -> String {
 
 mod answer;
 mod behavior;
+mod candidates;
 mod compartments;
 mod depgraph;
 mod device;

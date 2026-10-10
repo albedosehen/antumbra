@@ -41,6 +41,7 @@ pub const AGENT_PROFILE: &[&str] = &[
     "list_behaviors",
     "accept_behavior",
     "retire_behavior",
+    "behavior_candidates",
 ];
 
 /// The tools a session advertises and serves.
@@ -155,6 +156,7 @@ mod tests {
             "list_behaviors",
             "accept_behavior",
             "retire_behavior",
+            "behavior_candidates",
             "population",
             "share_compartment",
         ]
