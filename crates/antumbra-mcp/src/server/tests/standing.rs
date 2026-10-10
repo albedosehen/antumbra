@@ -224,3 +224,18 @@ async fn a_standing_expert_is_never_routed() {
     let ids: Vec<&str> = r.0.routes.iter().map(|h| h.expert_id.as_str()).collect();
     assert_eq!(ids, ["expert:mine"]);
 }
+
+/// An answer with no standing experts, which is every answer for a user
+/// who has accepted no behaviors, has to carry every key its output schema
+/// requires, or a client that checks results refuses the answer.
+#[test]
+fn an_answer_without_standing_experts_matches_the_output_schema() {
+    let out = crate::server::params::AnswerOut {
+        answer: "bun add react".into(),
+        expert_id: None,
+        escalate: false,
+        note: None,
+        standing: Vec::new(),
+    };
+    assert_required_keys_present(&out);
+}

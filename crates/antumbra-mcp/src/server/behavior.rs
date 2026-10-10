@@ -86,7 +86,7 @@ pub(super) struct BehaviorView {
     /// recorded before today's rules (three examples, where four are needed
     /// now) is listed but never trained. Record it again, superseding this
     /// one, to fix it.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) problems: Vec<String>,
     /// How the last training of its scope went for it: whether it was
     /// learned, by its held-out pass rate against the base model's, and
