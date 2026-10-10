@@ -544,6 +544,26 @@ td .id {
   border-bottom: 0;
 }
 
+/* Behaviors */
+
+.behaviors > li {
+  display: block;
+}
+
+.behavior .rule {
+  max-width: 76ch;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.behavior .meta {
+  margin-top: 8px;
+}
+
+.behavior .failed {
+  padding: 8px 0 0;
+}
+
 /* Memory */
 
 .recall {
