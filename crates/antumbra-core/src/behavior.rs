@@ -223,13 +223,19 @@ pub fn content(spec: &Spec) -> String {
 
 /// The spec in a behavior memory's content, if it holds one: in a
 /// `behavior` block, or a `behaviour` block written before the US spelling.
+///
+/// The block is the last thing in the content ([`content`] writes it after
+/// the rule), so the fence that closes it is the last one: an example answer
+/// that is itself a fenced code block (a Mermaid diagram, a Rust snippet)
+/// carries fences of its own inside the JSON, and the first of those is not
+/// the end of the spec.
 pub fn spec_of(content: &str) -> Option<Spec> {
     let start = content
         .find(FENCE)
         .map(|i| i + FENCE.len())
         .or_else(|| content.find(LEGACY_FENCE).map(|i| i + LEGACY_FENCE.len()))?;
     let rest = &content[start..];
-    let end = rest.find("```")?;
+    let end = rest.rfind("```")?;
     serde_json::from_str(rest[..end].trim()).ok()
 }
 

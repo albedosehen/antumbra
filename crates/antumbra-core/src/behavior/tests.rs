@@ -432,3 +432,24 @@ fn a_behavior_cites_the_memories_it_was_drawn_from_in_its_evidence() {
         "one the user stated cites nothing"
     );
 }
+
+/// An example answer may be a fenced code block of its own: a Mermaid
+/// diagram, a Rust snippet. Its fences sit inside the spec's JSON, and the
+/// spec still reads back whole. Three behaviors recorded on a live store were
+/// stored and never listed or trained before this held.
+#[test]
+fn a_spec_whose_examples_hold_code_fences_reads_back_whole() {
+    let mut spec = ssh();
+    spec.examples.push(Example {
+        task: "Draw the load, pose and render flow.".into(),
+        answer: "```mermaid\nflowchart LR\n  load --> pose --> render\n```".into(),
+    });
+    spec.examples.push(Example {
+        task: "Read the token file.".into(),
+        answer: "```rust\nlet token = std::fs::read_to_string(&path)?;\n```".into(),
+    });
+    spec.violations
+        .push("```\nload -> pose -> render\n```".into());
+    let text = content(&spec);
+    assert_eq!(spec_of(&text), Some(spec));
+}
