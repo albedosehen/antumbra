@@ -324,3 +324,26 @@ async fn behaviors_are_private_to_the_user_who_recorded_them() -> anyhow::Result
     assert_eq!(list(&lily, Some("proposed")).await.len(), 1);
     Ok(())
 }
+
+/// A listed behavior with nothing wrong and no training yet is what most
+/// of a store holds, and a client that checks results against the tool's
+/// `outputSchema` refuses the whole list if the schema requires a field the
+/// server left out. Every key the schema requires has to be in the result.
+#[test]
+fn a_behavior_with_nothing_wrong_and_no_training_matches_the_output_schema() {
+    let view = crate::server::behavior::BehaviorView {
+        id: "memory:b1".into(),
+        rule: "Name a branch for an issue feat/{issue}-{slug}.".into(),
+        scope: "everywhere".into(),
+        status: "proposed".into(),
+        must: vec![r"feat/\d+".into()],
+        must_not: Vec::new(),
+        examples: 4,
+        violations: 2,
+        supersedes: None,
+        updated_at: "2026-10-09T00:00:00+00:00".into(),
+        problems: Vec::new(),
+        last_training: None,
+    };
+    assert_required_keys_present(&view);
+}
