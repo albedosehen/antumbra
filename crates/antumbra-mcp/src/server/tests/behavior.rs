@@ -56,6 +56,7 @@ fn branch_rule(supersedes: Option<String>, accepted: bool) -> RecordBehaviorPara
         scope: None,
         supersedes,
         accepted: Some(accepted),
+        sources: Vec::new(),
     }
 }
 
@@ -206,6 +207,7 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
         antumbra_core::behavior::Status::Accepted,
         "everywhere",
         None,
+        &[],
         vec![0.1; EMBED_DIM],
     )
     .await?;
@@ -322,5 +324,236 @@ async fn behaviors_are_private_to_the_user_who_recorded_them() -> anyhow::Result
         .0;
     assert!(!attempt.found, "another user cannot retire it");
     assert_eq!(list(&lily, Some("proposed")).await.len(), 1);
+    Ok(())
+}
+
+/// A listed behavior with nothing wrong and no training yet is what most
+/// of a store holds, and a client that checks results against the tool's
+/// `outputSchema` refuses the whole list if the schema requires a field the
+/// server left out. Every key the schema requires has to be in the result.
+#[test]
+fn a_behavior_with_nothing_wrong_and_no_training_matches_the_output_schema() {
+    let view = crate::server::behavior::BehaviorView {
+        id: "memory:b1".into(),
+        rule: "Name a branch for an issue feat/{issue}-{slug}.".into(),
+        scope: "everywhere".into(),
+        status: "proposed".into(),
+        must: vec![r"feat/\d+".into()],
+        must_not: Vec::new(),
+        examples: 4,
+        violations: 2,
+        supersedes: None,
+        updated_at: "2026-10-09T00:00:00+00:00".into(),
+        sources: Vec::new(),
+        problems: Vec::new(),
+        last_training: None,
+    };
+    assert_required_keys_present(&view);
+}
+
+#[tokio::test]
+async fn candidates_are_what_may_state_a_rule_oldest_first_and_page_by_creation(
+) -> anyhow::Result<()> {
+    use crate::server::candidates::CandidatesParams;
+    use antumbra_core::MemoryNetwork::{Bank, Opinion, World};
+
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let s = server_for(&store, "user:lily");
+    let tenant = TenantId::new("ws:test");
+    let t0 = Utc::now() - chrono::Duration::minutes(10);
+    let at = |i: i64| t0 + chrono::Duration::seconds(i);
+    let mem = |id: &str, net: antumbra_core::MemoryNetwork, content: &str, i: i64| {
+        antumbra_core::Memory::new(id, tenant.clone(), net, content, 0.8, at(i))
+            .with_embedding(vec![0.1; EMBED_DIM])
+    };
+    memory::upsert(
+        &store,
+        &mem("memory:fact", World, "surql-rs 0.28 shipped on Tuesday.", 1),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:rule",
+            World,
+            "Never stack a pull request on an unmerged branch.",
+            2,
+        ),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:taste",
+            Opinion,
+            "Short pull requests read better.",
+            3,
+        ),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem("memory:counter", Bank, "[skill-use:x] always 3", 4).volatile(true),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:note",
+            Bank,
+            "Session note: the fix landed. Deploy it yourself; do not leave it to the user.",
+            5,
+        ),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:state",
+            Bank,
+            "The gate must never fire twice, and the dispatcher never reads the claim.",
+            6,
+        ),
+    )
+    .await?;
+
+    let page = s
+        .behavior_candidates(Parameters(CandidatesParams {
+            after: None,
+            scan: Some(2),
+        }))
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(page.scanned, 2);
+    assert!(page.more);
+    let ids: Vec<&str> = page.candidates.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["memory:rule"],
+        "a fact without a rule's shape is passed over"
+    );
+    assert_eq!(page.candidates[0].reasons, ["opens:never"]);
+    assert_eq!(
+        page.candidates[0].hits,
+        ["Never stack a pull request on an unmerged branch"]
+    );
+    assert_eq!(page.candidates[0].network, "world");
+    let cursor = page.scanned_through.clone().expect("a cursor");
+    assert_eq!(cursor, at(2).to_rfc3339());
+
+    let rest = s
+        .behavior_candidates(Parameters(CandidatesParams {
+            after: Some(cursor),
+            scan: None,
+        }))
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(rest.scanned, 4);
+    assert!(!rest.more);
+    let ids: Vec<&str> = rest.candidates.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["memory:taste", "memory:note"],
+        "an opinion is picked whatever it says; a volatile counter and a note \
+         whose negations sit mid-sentence are not"
+    );
+    assert_eq!(rest.candidates[0].reasons, ["opinion"]);
+    assert_eq!(
+        rest.candidates[1].reasons,
+        ["opens:deploy", "opens:do not"],
+        "`yourself` is the condition that makes `Deploy it yourself` a rule"
+    );
+    assert_eq!(
+        rest.candidates[1].hits,
+        ["Deploy it yourself", "do not leave it to the user"]
+    );
+
+    let end = s
+        .behavior_candidates(Parameters(CandidatesParams {
+            after: rest.scanned_through.clone(),
+            scan: None,
+        }))
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(end.scanned, 0);
+    assert!(
+        end.scanned_through.is_none(),
+        "nothing read: the end of the store"
+    );
+    assert!(!end.more);
+
+    assert!(
+        s.behavior_candidates(Parameters(CandidatesParams {
+            after: Some("yesterday".into()),
+            scan: None,
+        }))
+        .await
+        .is_err(),
+        "a cursor that is not a time is refused"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_behavior_cites_the_memories_it_came_from_and_they_are_no_longer_candidates(
+) -> anyhow::Result<()> {
+    use crate::server::candidates::{CandidatesOut, CandidatesParams};
+
+    async fn fresh(s: &McpServer) -> CandidatesOut {
+        s.behavior_candidates(Parameters(CandidatesParams {
+            after: None,
+            scan: None,
+        }))
+        .await
+        .unwrap()
+        .0
+    }
+
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let s = server_for(&store, "user:lily");
+    let said = antumbra_core::Memory::new(
+        "memory:said",
+        TenantId::new("ws:test"),
+        antumbra_core::MemoryNetwork::Opinion,
+        "Name branches feat/{issue}-{slug}, never feature/.",
+        0.9,
+        Utc::now(),
+    )
+    .with_embedding(vec![0.1; EMBED_DIM]);
+    memory::upsert(&store, &said).await?;
+    assert_eq!(fresh(&s).await.candidates.len(), 1);
+
+    let mut p = branch_rule(None, false);
+    p.sources = vec!["memory:said".into(), " ".into(), "memory:said".into()];
+    let recorded = s.record_behavior(Parameters(p)).await.unwrap().0;
+    assert!(recorded.recorded, "{:?}", recorded.problems);
+    let listed = s
+        .list_behaviors(Parameters(ListBehaviorsParams {
+            status: None,
+            scope: None,
+        }))
+        .await
+        .unwrap()
+        .0
+        .behaviors;
+    assert_eq!(
+        listed[0].sources,
+        ["memory:said"],
+        "cited once, blanks dropped"
+    );
+
+    let after = fresh(&s).await;
+    assert!(
+        after.candidates.is_empty(),
+        "{:?}",
+        after.candidates.iter().map(|c| &c.id).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        after.scanned, 2,
+        "the memory and the behavior itself were read, and neither is offered"
+    );
     Ok(())
 }

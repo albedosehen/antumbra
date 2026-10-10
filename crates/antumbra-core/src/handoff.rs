@@ -26,14 +26,24 @@ const DONE: &str = "handoff-done:";
 /// The longest title a handoff is announced under.
 const TITLE_CHARS: usize = 80;
 
+/// The name of a user's handoff compartment, and the last part of its id.
+pub const COMPARTMENT_NAME: &str = "handoff";
+
 /// The user's handoff compartment, one per `(tenant, user)`, named the way the
 /// default compartment is.
 pub fn compartment_id(tenant: &TenantId, user: &UserId) -> CompartmentId {
     CompartmentId::new(format!(
-        "comp:{}:{}:handoff",
+        "comp:{}:{}:{COMPARTMENT_NAME}",
         tenant.as_str(),
         user.as_str()
     ))
+}
+
+/// Whether `compartment` is a user's handoff compartment, whichever user's.
+pub fn is_compartment(compartment: &CompartmentId) -> bool {
+    compartment
+        .as_str()
+        .ends_with(&format!(":{COMPARTMENT_NAME}"))
 }
 
 /// A host name as handoffs compare them: trimmed and lowercased, so `Kuskokwim`

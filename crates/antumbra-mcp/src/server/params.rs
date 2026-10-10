@@ -515,7 +515,7 @@ pub(super) struct AnswerOut {
     pub(super) note: Option<String>,
     /// Your standing experts composed into the answer: the behaviors you
     /// accepted, for everywhere and for the repository.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) standing: Vec<String>,
 }
 

@@ -45,6 +45,11 @@ pub(super) struct RecordBehaviorParams {
     /// `true` only when the user stated this rule themselves in this session.
     /// Otherwise it is proposed, for the user to accept.
     pub(super) accepted: Option<bool>,
+    /// The ids of the memories it was drawn from, when it comes from what the
+    /// store already holds (`behavior_candidates`) rather than from the user.
+    /// They are not offered as candidates again.
+    #[serde(default)]
+    pub(super) sources: Vec<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -82,11 +87,15 @@ pub(super) struct BehaviorView {
     pub(super) violations: usize,
     pub(super) supersedes: Option<String>,
     pub(super) updated_at: String,
+    /// The memories it was drawn from, when it came from the store. At most
+    /// as many as were cited when it was recorded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) sources: Vec<String>,
     /// What keeps it from being taught to the expert, when anything does: one
     /// recorded before today's rules (three examples, where four are needed
     /// now) is listed but never trained. Record it again, superseding this
     /// one, to fix it.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) problems: Vec<String>,
     /// How the last training of its scope went for it: whether it was
     /// learned, by its held-out pass rate against the base model's, and
@@ -172,6 +181,7 @@ impl McpServer {
             status,
             &scope,
             p.supersedes.as_deref(),
+            &p.sources,
             embedding,
         )
         .await
@@ -232,6 +242,7 @@ impl McpServer {
                 violations: spec.violations.len(),
                 supersedes: state.supersedes,
                 updated_at: m.updated_at.to_rfc3339(),
+                sources: state.sources,
             })
             .collect();
         Ok(Json(BehaviorsOut { behaviors }))

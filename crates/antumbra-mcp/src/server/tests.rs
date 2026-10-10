@@ -700,6 +700,29 @@ mod bounded_answers;
 mod relevance_floor;
 mod standing;
 
+/// Serializes `value` and checks that every property its JSON schema lists as
+/// `required` is present. A field skipped when empty has to carry
+/// `#[serde(default)]` as well, or the schema requires what the server omits
+/// and a client that validates results refuses them.
+fn assert_required_keys_present<T: serde::Serialize + schemars::JsonSchema>(value: &T) {
+    let schema = schemars::schema_for!(T);
+    let required = schema.as_value()["required"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let json = serde_json::to_value(value).expect("serialize");
+    let object = json.as_object().expect("an object");
+    let missing: Vec<&str> = required
+        .iter()
+        .filter_map(|k| k.as_str())
+        .filter(|k| !object.contains_key(*k))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the schema requires {missing:?}, which the result leaves out: {json}"
+    );
+}
+
 /// Takes the `tools/list` capture the MCP schema lint is pointed at, without
 /// standing a server up.
 ///

@@ -412,3 +412,23 @@ fn an_expert_that_records_its_set_is_in_step_until_the_set_changes() {
     assert!(stale(&learnable(&retired, EVERYWHERE), Some(&expert)));
     assert!(stale(&[], Some(&expert)), "nothing left to hold");
 }
+
+#[test]
+fn a_behavior_cites_the_memories_it_was_drawn_from_in_its_evidence() {
+    let evidence = vec![
+        status_evidence(Status::Proposed),
+        scope_evidence(EVERYWHERE),
+        source_evidence("memory:a"),
+        source_evidence("memory:b"),
+    ];
+    let state = State::of(&evidence).expect("a behavior");
+    assert_eq!(state.sources, ["memory:a", "memory:b"]);
+    assert_eq!(sources(&evidence), ["memory:a", "memory:b"]);
+    assert!(
+        State::of(&[status_evidence(Status::Accepted)])
+            .unwrap()
+            .sources
+            .is_empty(),
+        "one the user stated cites nothing"
+    );
+}

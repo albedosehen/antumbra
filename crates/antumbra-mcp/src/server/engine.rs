@@ -163,6 +163,7 @@ impl McpServer {
             + Self::handoff_router()
             + Self::device_router()
             + Self::behavior_router()
+            + Self::candidates_router()
             + Self::answer_router()
             + Self::depgraph_router()
     }
@@ -489,6 +490,9 @@ impl McpServer {
             "list_behaviors" => dispatch!(behavior::ListBehaviorsParams, list_behaviors),
             "accept_behavior" => dispatch!(behavior::BehaviorIdParams, accept_behavior),
             "retire_behavior" => dispatch!(behavior::BehaviorIdParams, retire_behavior),
+            "behavior_candidates" => {
+                dispatch!(candidates::CandidatesParams, behavior_candidates)
+            }
             "list_documents" => {
                 let Json(out) = self.list_documents().await?;
                 serde_json::to_value(out)
