@@ -157,10 +157,10 @@ function signOut(message) {
 /** Empty every section, so nothing one token loaded is left in the page for
  *  the next sign-in to show. */
 function clearSections() {
-  for (const id of ["stats", "population-rows", "compartments", "documents", "memories", "dependencies", "services", "routed"]) {
+  for (const id of ["stats", "population-rows", "compartments", "documents", "behaviors", "memories", "dependencies", "services", "routed"]) {
     byId(id).replaceChildren();
   }
-  for (const id of ["who", "expires", "updated", "population-summary", "documents-summary", "dependencies-summary", "memory-summary", "memory-note"]) {
+  for (const id of ["who", "expires", "updated", "population-summary", "documents-summary", "behaviors-summary", "dependencies-summary", "memory-summary", "memory-note"]) {
     byId(id).textContent = "";
   }
   state.radius += 1;
@@ -215,6 +215,7 @@ async function refresh() {
       section(byId("population-rows"), loadPopulation),
       section(byId("compartments"), loadCompartments),
       section(byId("documents"), loadDocuments),
+      section(byId("behaviors"), loadBehaviors),
       section(byId("dependencies"), () => {
         const view = state.dependencies;
         return view ? loadRadius(view.service, view.direction) : loadPairs();
@@ -923,4 +924,6 @@ function start() {
   else showGate("");
 }
 
-start();
+// After every deferred script has run: the sections in their own files
+// (behaviors.js) define loaders the first refresh calls.
+document.addEventListener("DOMContentLoaded", start);

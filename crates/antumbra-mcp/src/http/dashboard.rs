@@ -1,5 +1,6 @@
-//! The read-only web dashboard: a browser surface over the same tools an
-//! agent calls.
+//! The web dashboard: a browser surface over the same tools an agent calls.
+//! It reads, but for the two decisions a user makes on a behavior drawn
+//! from their memories: accept it, so their expert learns it, or retire it.
 //!
 //! The server hands out the page, its script and its style, and nothing else.
 //! None of them carries data, so they need no token. Everything the page shows
@@ -17,6 +18,9 @@ use axum::Router;
 
 const PAGE: &str = include_str!("dashboard/index.html");
 const SCRIPT: &str = include_str!("dashboard/app.js");
+/// The Behaviors section, in its own file so the main script stays readable;
+/// loaded after it and sharing its helpers.
+const BEHAVIORS: &str = include_str!("dashboard/behaviors.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 
 /// The page's own script and style, and requests back to this server: nothing
@@ -38,6 +42,7 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
             get(|| async { Redirect::temporary("../dashboard") }),
         )
         .route("/dashboard/app.js", get(script))
+        .route("/dashboard/behaviors.js", get(behaviors))
         .route("/dashboard/app.css", get(style))
 }
 
@@ -47,6 +52,10 @@ async fn page() -> Response {
 
 async fn script() -> Response {
     asset("text/javascript; charset=utf-8", SCRIPT)
+}
+
+async fn behaviors() -> Response {
+    asset("text/javascript; charset=utf-8", BEHAVIORS)
 }
 
 async fn style() -> Response {
@@ -86,6 +95,7 @@ mod tests {
         for (path, kind) in [
             ("/dashboard", "text/html"),
             ("/dashboard/app.js", "text/javascript"),
+            ("/dashboard/behaviors.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
         ] {
             let res = get_path(path).await;
@@ -118,21 +128,28 @@ mod tests {
         assert!(!PAGE.contains("style=\""), "style attribute");
         assert!(!PAGE.contains("onclick") && !PAGE.contains("onload"));
         assert!(PAGE.contains(r#"src="dashboard/app.js""#));
+        assert!(PAGE.contains(r#"src="dashboard/behaviors.js""#));
         assert!(PAGE.contains(r#"href="dashboard/app.css""#));
+        // The main script starts the page only once every deferred script has
+        // run, since the sections in their own files define what it loads.
+        assert!(SCRIPT.contains(r#"addEventListener("DOMContentLoaded", start)"#));
+        assert!(BEHAVIORS.contains("function loadBehaviors"));
     }
 
     /// The script writes stored text with `textContent`, never as markup, so a
     /// memory that holds markup is shown, not run.
     #[test]
-    fn the_script_never_writes_markup() {
-        for sink in [
-            "innerHTML",
-            "outerHTML",
-            "insertAdjacentHTML",
-            "document.write",
-        ] {
-            assert!(!SCRIPT.contains(sink), "{sink}");
+    fn the_scripts_never_write_markup() {
+        for (name, script) in [("app.js", SCRIPT), ("behaviors.js", BEHAVIORS)] {
+            for sink in [
+                "innerHTML",
+                "outerHTML",
+                "insertAdjacentHTML",
+                "document.write",
+            ] {
+                assert!(!script.contains(sink), "{name}: {sink}");
+            }
+            assert!(!script.contains("eval("), "{name}: eval");
         }
-        assert!(!SCRIPT.contains("eval("), "eval");
     }
 }

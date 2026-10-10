@@ -9,6 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='84 84 344 344'%3E%3Cpath fill='%238A84CC' fill-rule='evenodd' d='M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z'/%3E%3Ccircle fill='%238A84CC' cx='148.5' cy='148.5' r='24'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="dashboard/app.css">
 <script src="dashboard/app.js" defer></script>
+<script src="dashboard/behaviors.js" defer></script>
 </head>
 <body>
 
@@ -124,6 +125,26 @@
       </form>
       <div id="dependencies" class="panel"></div>
       <button id="pairs-more" type="button" class="link more" hidden></button>
+    </section>
+
+    <section aria-labelledby="h-behaviors">
+      <div class="section-head">
+        <h2 id="h-behaviors">Behaviors</h2>
+        <p id="behaviors-summary" class="muted small" aria-live="polite"></p>
+      </div>
+      <form id="behaviors-filter" class="recall" role="search">
+        <fieldset class="segmented">
+          <legend class="visually-hidden">Status</legend>
+          <input id="beh-proposed" type="radio" name="status" value="proposed" checked><label for="beh-proposed">Proposed</label>
+          <input id="beh-accepted" type="radio" name="status" value="accepted"><label for="beh-accepted">Accepted</label>
+          <input id="beh-trained" type="radio" name="status" value="trained"><label for="beh-trained">Trained</label>
+          <input id="beh-retired" type="radio" name="status" value="retired"><label for="beh-retired">Retired</label>
+          <input id="beh-all" type="radio" name="status" value=""><label for="beh-all">All</label>
+        </fieldset>
+      </form>
+      <div class="panel">
+        <ul id="behaviors" class="list behaviors"></ul>
+      </div>
     </section>
 
     <section aria-labelledby="h-memory">
