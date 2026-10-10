@@ -401,8 +401,18 @@ async fn candidates_are_what_may_state_a_rule_oldest_first_and_page_by_creation(
         &mem(
             "memory:note",
             Bank,
-            "Fixed the build; it should pass now.",
+            "Session note: the fix landed. Deploy it yourself; do not leave it to the user.",
             5,
+        ),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:state",
+            Bank,
+            "The gate must never fire twice, and the dispatcher never reads the claim.",
+            6,
         ),
     )
     .await?;
@@ -421,9 +431,13 @@ async fn candidates_are_what_may_state_a_rule_oldest_first_and_page_by_creation(
     assert_eq!(
         ids,
         ["memory:rule"],
-        "a fact without a rule's wording is passed over"
+        "a fact without a rule's shape is passed over"
     );
-    assert_eq!(page.candidates[0].reasons, ["never"]);
+    assert_eq!(page.candidates[0].reasons, ["opens:never"]);
+    assert_eq!(
+        page.candidates[0].hits,
+        ["Never stack a pull request on an unmerged branch"]
+    );
     assert_eq!(page.candidates[0].network, "world");
     let cursor = page.scanned_through.clone().expect("a cursor");
     assert_eq!(cursor, at(2).to_rfc3339());
@@ -436,16 +450,25 @@ async fn candidates_are_what_may_state_a_rule_oldest_first_and_page_by_creation(
         .await
         .unwrap()
         .0;
-    assert_eq!(rest.scanned, 3);
+    assert_eq!(rest.scanned, 4);
     assert!(!rest.more);
     let ids: Vec<&str> = rest.candidates.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(
         ids,
         ["memory:taste", "memory:note"],
-        "an opinion is picked whatever it says, a volatile counter never is"
+        "an opinion is picked whatever it says; a volatile counter and a note \
+         whose negations sit mid-sentence are not"
     );
     assert_eq!(rest.candidates[0].reasons, ["opinion"]);
-    assert_eq!(rest.candidates[1].reasons, ["should"]);
+    assert_eq!(
+        rest.candidates[1].reasons,
+        ["opens:deploy", "opens:do not"],
+        "`yourself` is the condition that makes `Deploy it yourself` a rule"
+    );
+    assert_eq!(
+        rest.candidates[1].hits,
+        ["Deploy it yourself", "do not leave it to the user"]
+    );
 
     let end = s
         .behavior_candidates(Parameters(CandidatesParams {

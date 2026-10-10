@@ -46,8 +46,15 @@ pub(super) struct CandidateView {
     pub(super) repo: Option<String>,
     /// The first 400 characters of its content.
     pub(super) excerpt: String,
-    /// Why it was picked: `opinion`, and each rule's word or phrase found
-    /// (`never`, `always`, `instead of`, ...). At most 15.
+    /// Its sentences that open like a rule, with a negation or an imperative
+    /// verb: up to three, each at most 160 characters. The rule is often an
+    /// aside deep inside a long note, past the excerpt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) hits: Vec<String>,
+    /// Why it was picked, up to eight: `opinion`; `tag:<word>` for a leading
+    /// `[feedback]`-style tag; `says:<phrase>` for a phrase that records a
+    /// correction or a preference; `opens:<word>` for each word its rule-shaped
+    /// sentences open with.
     pub(super) reasons: Vec<String>,
 }
 
@@ -71,7 +78,7 @@ pub(super) struct CandidatesOut {
 impl McpServer {
     /// Memories that may state a behavior, for the agent to judge.
     #[tool(
-        description = "Memories already stored that may state a behavior, oldest first: every opinion memory, and any memory with a rule's wording, leaving out behaviors, handoffs, volatile memories and memories a behavior already cites. Read each excerpt. When it states how an agent should act on a class of tasks, and a program could check an answer, call record_behavior with the rule, a check, examples and violations, citing the memory's id in `sources` (with any memories that restate it, found with recall_memories), so it is not picked again; otherwise pass it over. Pass `scanned_through` back as `after` to continue; `more` false is the end of the store."
+        description = "Memories already stored that may state a behavior, oldest first: every opinion memory, any memory opening with a tag such as [feedback] or [convention], any memory with a phrase that records a correction or a preference, and any memory with a short sentence that opens like a rule (never, always, do not, use, ...), which comes back in `hits`. Behaviors, handoffs, volatile memories and memories a behavior already cites are left out. Read each one. When it states how an agent should act on a class of tasks, and a program could check an answer, call record_behavior with the rule, a check, examples and violations, citing the memory's id in `sources` (with any memories that restate it, found with recall_memories), so it is not picked again; otherwise pass it over. Pass `scanned_through` back as `after` to continue; `more` false is the end of the store."
     )]
     pub(super) async fn behavior_candidates(
         &self,
@@ -115,7 +122,8 @@ impl McpServer {
                 network: c.network.as_str().to_string(),
                 repo: c.repo,
                 excerpt: c.excerpt,
-                reasons: c.reasons.iter().map(|r| (*r).to_string()).collect(),
+                hits: c.hits,
+                reasons: c.reasons,
             })
             .collect();
         Ok(Json(CandidatesOut {
