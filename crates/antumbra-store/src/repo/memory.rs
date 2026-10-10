@@ -313,6 +313,40 @@ pub(crate) fn without_embedding() -> Vec<String> {
     .collect()
 }
 
+/// A page of `tenant`'s live memories in the order they were written: up to
+/// `limit` of them created after `after`, oldest first, without embeddings.
+///
+/// A pass over the whole store reads it a page at a time, passing the last
+/// row's `created_at` back as `after`; a later pass starts where the last one
+/// stopped. A memory's creation time never moves, where [`recent`]'s order by
+/// `updated_at` is rearranged by every reinforcement.
+pub async fn since(
+    store: &Store,
+    tenant: &TenantId,
+    after: Option<DateTime<Utc>>,
+    limit: u32,
+) -> Result<Vec<Memory>> {
+    let live = and_(eq("tenant_id", tenant.as_str()), is_none("deleted_at"));
+    let filter = match after {
+        Some(t) => and_(
+            live,
+            surql::types::operators::gt("created_at", t.to_rfc3339()),
+        ),
+        None => live,
+    };
+    let query = Query::new()
+        .select(Some(without_embedding()))
+        .from_table(TABLE)
+        .map_err(map)?
+        .where_(filter)
+        .order_by("created_at", "ASC")
+        .map_err(map)?
+        .limit(i64::from(limit))
+        .map_err(map)?;
+    let rows: Vec<MemoryRow> = query_records(store.client(), &query).await.map_err(map)?;
+    rows.into_iter().map(MemoryRow::into_domain).collect()
+}
+
 /// A page of `tenant`'s live memories, most recently updated first: `limit`
 /// of them after the first `offset`, in one network when one is given, and
 /// written from one machine when `host` names it.

@@ -38,6 +38,10 @@ const SCOPE: &str = "behavior-scope:";
 const SUPERSEDES: &str = "behavior-supersedes:";
 const EXPERT: &str = "behavior-expert:";
 const TRAINING: &str = "behavior-training:";
+/// A memory the behavior was drawn from, one entry each. Read by the
+/// candidate pass, which leaves cited memories out; not part of the set a
+/// training is fingerprinted by, since the fingerprint hashes the content.
+const SOURCE: &str = "behavior-source:";
 /// Refusals noted while one behavior not learned refused its whole scope.
 /// Dropped when a behavior is next trained, and never read: under today's
 /// rule such a set may be admitted.
@@ -384,6 +388,8 @@ pub struct State {
     pub supersedes: Option<String>,
     /// The expert it was last trained into.
     pub expert: Option<String>,
+    /// The memories it was drawn from, when it came from the store.
+    pub sources: Vec<String>,
 }
 
 impl State {
@@ -400,8 +406,24 @@ impl State {
             scope: field(SCOPE, LEGACY_SCOPE).unwrap_or_else(|| EVERYWHERE.to_string()),
             supersedes: field(SUPERSEDES, LEGACY_SUPERSEDES),
             expert: field(EXPERT, LEGACY_EXPERT),
+            sources: sources(evidence),
         })
     }
+}
+
+/// The evidence entry citing `memory_id` as a memory a behavior was drawn from.
+pub fn source_evidence(memory_id: &str) -> String {
+    format!("{SOURCE}{memory_id}")
+}
+
+/// The memories a behavior cites as what it was drawn from, in the order
+/// they were written.
+pub fn sources(evidence: &[String]) -> Vec<String> {
+    evidence
+        .iter()
+        .filter_map(|e| e.strip_prefix(SOURCE))
+        .map(str::to_string)
+        .collect()
 }
 
 /// What the standing expert for `scope` is taught: the behaviors accepted,
@@ -492,6 +514,8 @@ pub fn stale(taught: &[(Memory, Spec)], expert: Option<&Expert>) -> bool {
     wanted.sort();
     accepted_since || held != wanted
 }
+
+pub mod candidate;
 
 #[cfg(test)]
 mod tests;

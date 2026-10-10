@@ -52,7 +52,9 @@ pub async fn compartment_of(
 /// `embedding`. A behavior is volatile: it trains through its tasks and check
 /// (`antumbra behave`), never through write-time consolidation, which would
 /// teach it to echo itself. When `supersedes` names one of the user's
-/// behaviors, that one is retired.
+/// behaviors, that one is retired. `sources` are the memories it was drawn
+/// from, when it came from the store rather than from the user; each is kept
+/// in the evidence, and no longer offered as a candidate.
 #[allow(clippy::too_many_arguments)]
 pub async fn record(
     store: &Store,
@@ -64,6 +66,7 @@ pub async fn record(
     status: Status,
     scope: &str,
     supersedes: Option<&str>,
+    sources: &[String],
     embedding: Vec<f32>,
 ) -> Result<Recorded> {
     let mut evidence = vec![
@@ -73,6 +76,14 @@ pub async fn record(
     if let Some(old) = supersedes {
         evidence.push(behavior::supersedes_evidence(old));
     }
+    let mut cited: Vec<&str> = sources
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    cited.sort_unstable();
+    cited.dedup();
+    evidence.extend(cited.into_iter().map(behavior::source_evidence));
     let compartment = compartment_of(store, tenant, user).await?;
     let m = Memory::new(
         id.as_str(),
