@@ -167,7 +167,7 @@ A session can leave a note for a session on another of your machines: "rerun thi
 A memory is something to look up. A behavior is how you want an agent to act on a class of tasks: "reach a host by its SSH alias", "name an issue branch `feat/{issue}-{slug}`", "open pull requests against main". When you state or correct one, the agent records it with `record_behavior`:
 - the rule in one sentence;
 - `must` and `must_not` regular expressions that decide whether an answer follows it;
-- at least four example tasks with answers that follow it, since training holds one in four out to admit your expert by (eight to ten, varied in phrasing, teach it more reliably);
+- at least four example tasks with answers that follow it, since training holds one in three out to admit your expert by (eight to ten, varied in phrasing, teach it more reliably);
 - answers that break it.
 
 The check is tested against the examples and the violations before anything is stored, and `problems` says what to fix when it fails.

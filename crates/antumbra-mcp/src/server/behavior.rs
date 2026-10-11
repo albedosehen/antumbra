@@ -32,7 +32,7 @@ pub(super) struct RecordBehaviorParams {
     #[serde(default)]
     pub(super) must_not: Vec<String>,
     /// At least four tasks the rule governs, each with an answer that follows
-    /// it: training holds one in four out to admit the expert by. Eight to
+    /// it: training holds one in three out to admit the expert by. Eight to
     /// ten teach it more reliably. Vary the phrasing and the case.
     pub(super) examples: Vec<ExampleParams>,
     /// Answers that break the rule, as an agent that did not know it would
@@ -130,7 +130,7 @@ pub(super) struct BehaviorStatusOut {
 impl McpServer {
     /// Record how the user wants an agent to act, with a check.
     #[tool(
-        description = "Record a behavior: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least four example tasks with answers that follow it (training holds one in four out to admit the expert by; eight to ten, varied in phrasing, teach it more reliably); and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
+        description = "Record a behavior: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least four example tasks with answers that follow it (training holds one in three out to admit the expert by; eight to ten, varied in phrasing, teach it more reliably); and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
     )]
     pub(super) async fn record_behavior(
         &self,

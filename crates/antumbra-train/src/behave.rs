@@ -26,8 +26,12 @@ pub const MIN_GAIN: f32 = 0.3;
 /// The controls may fall this far below the base model's rate, and no further:
 /// four of the forty, the noise validation saw between runs.
 pub const CONTROL_SLACK: f32 = 0.1;
-/// Every this-many-th example is held out to admit the expert by.
-const HOLD_EVERY: usize = 4;
+/// Every this-many-th example is held out to admit the expert by: one in
+/// three, so ten examples hold three out and one miss reads 0.67, which
+/// clears [`MIN_RATE`]. One in four held two or three out of ten, and a
+/// behavior had to pass every one to count as learned: measured on 32
+/// behaviors, half of them sat at 0.50 and read as missed.
+const HOLD_EVERY: usize = 3;
 
 /// The check, in the language the trainer's verifier runs. The patterns ride
 /// as arguments, so no pattern is ever spliced into code.

@@ -222,7 +222,10 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
         .behaviors;
     assert_eq!(listed.len(), 1);
     assert!(
-        listed[0].problems.iter().any(|p| p.contains("one in four")),
+        listed[0]
+            .problems
+            .iter()
+            .any(|p| p.contains("one in three")),
         "{:?}",
         listed[0].problems
     );
