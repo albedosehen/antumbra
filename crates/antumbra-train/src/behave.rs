@@ -162,6 +162,11 @@ pub struct BehaviorScore {
     pub base: f32,
     pub expert: f32,
     pub admitted: bool,
+    /// How many held-out tasks the rates are over.
+    pub held: usize,
+    /// How likely it is, from the held-out counts, that the expert's true
+    /// pass rate on this behavior is below the base model's.
+    pub worse: f32,
 }
 
 /// One family of controls' pass rates, base and expert: `control-cmd` for
@@ -220,11 +225,62 @@ fn family(id: &str) -> Option<&str> {
 }
 
 fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
-    let (passed, total) = results
+    let (passed, total) = counts(results, prefix);
+    (total > 0).then(|| passed as f32 / total as f32)
+}
+
+/// How many answers under `prefix` passed, and how many there were.
+fn counts(results: &[TaskResult], prefix: &str) -> (usize, usize) {
+    results
         .iter()
         .filter(|r| r.id.starts_with(prefix))
-        .fold((0, 0), |(p, t), r| (p + r.passed, t + r.total));
-    (total > 0).then(|| passed as f32 / total as f32)
+        .fold((0, 0), |(p, t), r| (p + r.passed, t + r.total))
+}
+
+fn ln_factorial(n: usize) -> f64 {
+    (1..=n).map(|k| (k as f64).ln()).sum()
+}
+
+/// `ln B(a, b)` for positive integer parameters.
+fn ln_beta(a: usize, b: usize) -> f64 {
+    ln_factorial(a - 1) + ln_factorial(b - 1) - ln_factorial(a + b - 1)
+}
+
+/// `P(X > Y)` for `X ~ Beta(a1, b1)` and `Y ~ Beta(a2, b2)` with positive
+/// integer parameters, in closed form: the sum over the first shape of the
+/// ratio of beta functions (Cook, 2005).
+pub fn prob_beta_greater(a1: usize, b1: usize, a2: usize, b2: usize) -> f64 {
+    (0..a1)
+        .map(|i| {
+            (ln_beta(a2 + i, b1 + b2)
+                - ((b1 + i) as f64).ln()
+                - ln_beta(1 + i, b1)
+                - ln_beta(a2, b2))
+            .exp()
+        })
+        .sum::<f64>()
+        .clamp(0.0, 1.0)
+}
+
+/// How likely it is that the expert's true pass rate on a behavior is below
+/// the base model's, given `base_passed` and `expert_passed` of `held` tasks
+/// each. Each rate is a `Beta(1 + passed, 1 + failed)` from a flat prior, so
+/// the answer carries the evidence: 3 of 3 against 2 of 3 is about 0.74, one
+/// task lost of a few; 3 of 3 against 0 of 3 is above 0.98; 18 of 18 against
+/// 15 of 18 is above 0.9. With no held-out task there is nothing to say,
+/// and the answer is 0.5.
+pub fn prob_worse(base_passed: usize, expert_passed: usize, held: usize) -> f64 {
+    if held == 0 {
+        return 0.5;
+    }
+    let base_passed = base_passed.min(held);
+    let expert_passed = expert_passed.min(held);
+    prob_beta_greater(
+        1 + base_passed,
+        1 + held - base_passed,
+        1 + expert_passed,
+        1 + held - expert_passed,
+    )
 }
 
 /// Judge an expert behavior by behavior. One is learned when it passes its
@@ -232,28 +288,45 @@ fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
 /// base model unless the base already passed it that often.
 ///
 /// The expert is admitted, holding the behaviors it learned, when at least one
-/// of them clearly rose, no behavior it missed fell more than
-/// [`CONTROL_SLACK`] below the base model, and each family of controls falls
-/// no more than that below the base's either. So a behavior it did not learn
-/// does not keep the rest out, but one it made worse does: the expert must
-/// answer every task it was taught at least as well as the base model would.
-/// Each family is held on its own, so a fall in code answers cannot hide
-/// inside a larger pool of commands.
-pub fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
+/// of them clearly rose, no behavior it missed was made worse, and each family
+/// of controls falls no more than [`CONTROL_SLACK`] below the base's. So a
+/// behavior it did not learn does not keep the rest out, but one it made
+/// worse does.
+///
+/// "Made worse" is a probability, not a distance: from the held-out counts,
+/// how likely it is that the expert's true pass rate on the behavior is below
+/// the base model's ([`prob_worse`]), against `confidence`, the recipe's
+/// setting. A behavior is judged on two or three held-out tasks, where a rate
+/// says little: one lost task of three is about three in four odds of being
+/// worse, and stays below 0.9; three lost of three is near certain. A fixed
+/// slack of 0.1 on those rates, sized for the forty-task control families,
+/// refused a set that had learned twice what the run before it did over one
+/// lost task on a behavior the base got one of three right. The controls keep
+/// the slack, since forty tasks make a rate mean something, and each family is
+/// held on its own, so a fall in code answers cannot hide inside a larger pool
+/// of commands.
+pub fn admit(
+    behaviors: &[String],
+    base: &[TaskResult],
+    expert: &[TaskResult],
+    confidence: f64,
+) -> Verdict {
     let mut reasons = Vec::new();
     let scores: Vec<BehaviorScore> = behaviors
         .iter()
         .map(|id| {
-            match (
-                rate(base, &format!("{id}#h")),
-                rate(expert, &format!("{id}#h")),
-            ) {
+            let prefix = format!("{id}#h");
+            let (base_passed, held) = counts(base, &prefix);
+            let (expert_passed, _) = counts(expert, &prefix);
+            match (rate(base, &prefix), rate(expert, &prefix)) {
                 // A behavior the base already follows needs holding, not raising.
                 (Some(b), Some(e)) => BehaviorScore {
                     id: id.clone(),
                     base: b,
                     expert: e,
                     admitted: e >= MIN_RATE && (e - b >= MIN_GAIN || b >= MIN_RATE),
+                    held,
+                    worse: prob_worse(base_passed, expert_passed, held) as f32,
                 },
                 // No held-out tasks: nothing to say it was learned.
                 _ => BehaviorScore {
@@ -261,14 +334,20 @@ pub fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -
                     base: 0.0,
                     expert: 0.0,
                     admitted: false,
+                    held: 0,
+                    worse: 0.5,
                 },
             }
         })
         .collect();
-    for s in scores.iter().filter(|s| s.expert < s.base - CONTROL_SLACK) {
+    for s in scores.iter().filter(|s| f64::from(s.worse) > confidence) {
         reasons.push(format!(
-            "{} fell from {:.2} to {:.2} held out: the expert answers it worse than the base model",
-            s.id, s.base, s.expert
+            "{} fell from {:.2} to {:.2} held out: {:.0}% likely worse than the base model over {} tasks",
+            s.id,
+            s.base,
+            s.expert,
+            s.worse * 100.0,
+            s.held
         ));
     }
     let mut families: Vec<&str> = Vec::new();

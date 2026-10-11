@@ -130,7 +130,12 @@ pub struct Trained {
 /// Score the base, train beside its own replay, and score again. Touches no
 /// store. `cfg` sets the base model, epochs and learning rate; scoring is
 /// greedy, one answer per task.
-pub async fn train(plan: &Plan, embedder: &dyn Embedder, cfg: &RaftConfig) -> Result<Trained> {
+pub async fn train(
+    plan: &Plan,
+    embedder: &dyn Embedder,
+    cfg: &RaftConfig,
+    confidence: f64,
+) -> Result<Trained> {
     let (mut tasks, mut held): (Vec<CorpusTask>, Vec<CorpusTask>) = (Vec::new(), Vec::new());
     for (m, spec) in &plan.taught {
         let t = course::tasks(m.id.as_str(), spec);
@@ -168,7 +173,12 @@ pub async fn train(plan: &Plan, embedder: &dyn Embedder, cfg: &RaftConfig) -> Re
 
     let out = capture_corrections(&mut model, &verifier, &tasks, &[], &run, &cfg, &[]).await?;
     let scores = eval_pass_rate(&mut model, &verifier, &held, &run, 1).await?;
-    let verdict = course::admit(&plan.behaviors(), &base.per_task, &scores.per_task);
+    let verdict = course::admit(
+        &plan.behaviors(),
+        &base.per_task,
+        &scores.per_task,
+        confidence,
+    );
 
     // The expert routes by the tasks of the behaviors it learned.
     let learned = verdict.learned();
@@ -197,6 +207,7 @@ pub async fn train(plan: &Plan, embedder: &dyn Embedder, cfg: &RaftConfig) -> Re
             rank: cfg.lora_rank,
             rounds: cfg.rounds,
             learning_rate: cfg.learning_rate,
+            regression_confidence: confidence,
         },
     })
 }
@@ -302,6 +313,7 @@ pub async fn mint(
             "recipe": {
                 "rank": trained.recipe.rank, "rounds": trained.recipe.rounds,
                 "learning_rate": trained.recipe.learning_rate,
+                "regression_confidence": trained.recipe.regression_confidence,
             },
             "controls": verdict.controls.iter().map(|c| serde_json::json!({
                 "family": c.family, "base": c.base, "expert": c.expert,
@@ -338,11 +350,12 @@ pub async fn train_behaviors(
     user: &UserId,
     scope: &str,
     cfg: &RaftConfig,
+    confidence: f64,
 ) -> Result<Option<BehaveReport>> {
     let Some(plan) = plan(store, tenant, user, scope).await? else {
         return Ok(None);
     };
-    let trained = train(&plan, embedder, cfg).await?;
+    let trained = train(&plan, embedder, cfg, confidence).await?;
     Ok(Some(
         mint(store, &plan, trained, &antumbra_core::this_host()).await?,
     ))
@@ -364,7 +377,7 @@ mod tests {
     /// served at: alpha moves with the rank.
     #[test]
     fn a_recipe_moves_alpha_with_the_rank_and_keeps_the_scale() {
-        let recipe = behavior::Recipe::new(32, 5, 1e-4).unwrap();
+        let recipe = behavior::Recipe::new(32, 5, 1e-4, 0.9).unwrap();
         let cfg = standing_config(&recipe);
         assert_eq!((cfg.lora_rank, cfg.rounds), (32, 5));
         assert!((cfg.learning_rate - 1e-4).abs() < 1e-12);
@@ -433,6 +446,8 @@ mod tests {
             base: 0.0,
             expert: 1.0,
             admitted: true,
+            held: 3,
+            worse: 0.02,
         };
         let trained = Trained {
             verdict: Verdict {
@@ -522,6 +537,8 @@ mod tests {
             base: 0.0,
             expert,
             admitted,
+            held: 3,
+            worse: 0.5,
         };
         let trained = Trained {
             verdict: Verdict {

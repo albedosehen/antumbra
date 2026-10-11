@@ -401,6 +401,13 @@ pub struct Recipe {
     /// Epochs over the examples and the replay.
     pub rounds: usize,
     pub learning_rate: f64,
+    /// How sure admission has to be that the expert answers a behavior it
+    /// missed worse than the base model before that refuses the set: the
+    /// probability, from the held-out counts, above which a behavior counts
+    /// as made worse. Two or three held-out tasks carry little evidence, so
+    /// one lost task stays below it; many tasks lost, or many held out,
+    /// cross it. The knob the loop tunes as outcomes come in.
+    pub regression_confidence: f64,
 }
 
 impl Default for Recipe {
@@ -409,6 +416,7 @@ impl Default for Recipe {
             rank: 16,
             rounds: 3,
             learning_rate: 1.5e-4,
+            regression_confidence: 0.9,
         }
     }
 }
@@ -416,7 +424,12 @@ impl Default for Recipe {
 impl Recipe {
     /// A recipe as a server's flags give it, refused with the reason when a
     /// value could train nothing or everything into noise.
-    pub fn new(rank: usize, rounds: usize, learning_rate: f64) -> Result<Self, String> {
+    pub fn new(
+        rank: usize,
+        rounds: usize,
+        learning_rate: f64,
+        regression_confidence: f64,
+    ) -> Result<Self, String> {
         if !(1..=256).contains(&rank) {
             return Err(format!("the rank is {rank}; it is between 1 and 256"));
         }
@@ -428,21 +441,28 @@ impl Recipe {
                 "the learning rate is {learning_rate}; it is above 0 and at most 1e-2"
             ));
         }
+        if !(regression_confidence > 0.5 && regression_confidence < 1.0) {
+            return Err(format!(
+                "the regression confidence is {regression_confidence}; it is above 0.5 and below 1, since at 0.5 a coin toss refuses and at 1 nothing does"
+            ));
+        }
         Ok(Self {
             rank,
             rounds,
             learning_rate,
+            regression_confidence,
         })
     }
 
-    /// `rank 16, 3 rounds, 1.5e-4`.
+    /// `rank 16, 3 rounds, 1.5e-4, refusing at 0.90`.
     pub fn describe(&self) -> String {
         format!(
-            "rank {}, {} round{}, {:e}",
+            "rank {}, {} round{}, {:e}, refusing at {:.2}",
             self.rank,
             self.rounds,
             if self.rounds == 1 { "" } else { "s" },
-            self.learning_rate
+            self.learning_rate,
+            self.regression_confidence
         )
     }
 }

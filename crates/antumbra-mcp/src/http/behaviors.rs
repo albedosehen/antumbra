@@ -252,8 +252,9 @@ mod keeper {
                     };
                     let job = plan.clone();
                     let cfg = behave::standing_config(&state.recipe);
+                    let confidence = state.recipe.regression_confidence;
                     let trained = crate::server::heavy::spawn_heavy(async move {
-                        behave::train(&job, embedder.as_ref(), &cfg).await
+                        behave::train(&job, embedder.as_ref(), &cfg, confidence).await
                     })
                     .await??;
                     let report = {
