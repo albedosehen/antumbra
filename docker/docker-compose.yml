@@ -87,6 +87,15 @@ services:
       # embeds at once while it cuts memories into the pieces recall searches.
       # 0 stops it; recall then reads whole memories for anything not cut.
       - ANTUMBRA_CHUNK_IN_FLIGHT=${ANTUMBRA_CHUNK_IN_FLIGHT:-4}
+      # The training every standing expert on this node gets: the adapter's
+      # rank, the epochs over the examples and the replay, and the learning
+      # rate. The defaults are what nine behaviors were all learned with; 32
+      # taught together at them were not, so these are the knobs for measuring
+      # where capacity stops. The serving engine is built at the rank, so
+      # lowering it below an expert already minted here means retraining it.
+      - ANTUMBRA_BEHAVE_RANK=${ANTUMBRA_BEHAVE_RANK:-16}
+      - ANTUMBRA_BEHAVE_ROUNDS=${ANTUMBRA_BEHAVE_ROUNDS:-3}
+      - ANTUMBRA_BEHAVE_LR=${ANTUMBRA_BEHAVE_LR:-1.5e-4}
       # The copal document of record: each ingested document's original is
       # archived there before its chunks are stored. Unset = off, and ingest
       # keeps only the chunks. With the `copal` profile started:

@@ -453,3 +453,23 @@ fn a_spec_whose_examples_hold_code_fences_reads_back_whole() {
     let text = content(&spec);
     assert_eq!(spec_of(&text), Some(spec));
 }
+
+#[test]
+fn a_recipe_defaults_to_what_nine_behaviors_were_learned_with_and_refuses_nonsense() {
+    let d = Recipe::default();
+    assert_eq!((d.rank, d.rounds), (16, 3));
+    assert!((d.learning_rate - 1.5e-4).abs() < 1e-12);
+    assert_eq!(d.describe(), "rank 16, 3 rounds, 1.5e-4");
+    assert_eq!(
+        Recipe::new(32, 1, 1e-4).unwrap().describe(),
+        "rank 32, 1 round, 1e-4"
+    );
+    assert!(Recipe::new(0, 3, 1.5e-4).is_err(), "rank 0 trains nothing");
+    assert!(Recipe::new(512, 3, 1.5e-4).is_err());
+    assert!(Recipe::new(16, 0, 1.5e-4).is_err(), "no rounds");
+    assert!(Recipe::new(16, 3, 0.0).is_err(), "no learning");
+    assert!(
+        Recipe::new(16, 3, 0.5).is_err(),
+        "far past where 3e-4 broke nine"
+    );
+}

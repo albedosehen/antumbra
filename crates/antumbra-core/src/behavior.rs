@@ -386,6 +386,67 @@ pub fn refused(taught: &[(Memory, Spec)]) -> bool {
             .all(|(m, _)| training(&m.evidence).is_some_and(|t| t.set == print && !t.admitted))
 }
 
+/// The training every standing expert on a node gets: the adapter's rank, the
+/// epochs over the examples and the replay, and the learning rate. One per
+/// server, read from its flags; the keeper trains every scope with it and the
+/// serving engine is built at its rank. The default is what nine behaviors
+/// were all learned with; 32 taught together at it were not (five learned,
+/// two regressed), so these are the knobs for measuring where capacity stops.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Recipe {
+    /// The LoRA rank. The engine serves a blend of three adapters, each
+    /// padded to this rank, so lowering it below an expert already minted on
+    /// the node means retraining that expert.
+    pub rank: usize,
+    /// Epochs over the examples and the replay.
+    pub rounds: usize,
+    pub learning_rate: f64,
+}
+
+impl Default for Recipe {
+    fn default() -> Self {
+        Self {
+            rank: 16,
+            rounds: 3,
+            learning_rate: 1.5e-4,
+        }
+    }
+}
+
+impl Recipe {
+    /// A recipe as a server's flags give it, refused with the reason when a
+    /// value could train nothing or everything into noise.
+    pub fn new(rank: usize, rounds: usize, learning_rate: f64) -> Result<Self, String> {
+        if !(1..=256).contains(&rank) {
+            return Err(format!("the rank is {rank}; it is between 1 and 256"));
+        }
+        if !(1..=50).contains(&rounds) {
+            return Err(format!("{rounds} rounds; between 1 and 50"));
+        }
+        if !(learning_rate > 0.0 && learning_rate <= 1e-2) {
+            return Err(format!(
+                "the learning rate is {learning_rate}; it is above 0 and at most 1e-2"
+            ));
+        }
+        Ok(Self {
+            rank,
+            rounds,
+            learning_rate,
+        })
+    }
+
+    /// `rank 16, 3 rounds, 1.5e-4`.
+    pub fn describe(&self) -> String {
+        format!(
+            "rank {}, {} round{}, {:e}",
+            self.rank,
+            self.rounds,
+            if self.rounds == 1 { "" } else { "s" },
+            self.learning_rate
+        )
+    }
+}
+
 /// A behavior's state, read back from its evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct State {

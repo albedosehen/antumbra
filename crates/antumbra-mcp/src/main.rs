@@ -117,6 +117,19 @@ struct Cli {
     /// memories for anything not in it.
     #[arg(long, env = "ANTUMBRA_CHUNK_IN_FLIGHT", default_value_t = 4)]
     chunk_in_flight: usize,
+    /// The training every standing expert on this node gets: the adapter's
+    /// LoRA rank. The serving engine is built at it, so lowering it below an
+    /// expert already minted here means retraining that expert. Nine behaviors
+    /// were all learned at the default; 32 in one expert were not.
+    #[arg(long, env = "ANTUMBRA_BEHAVE_RANK", default_value_t = 16)]
+    behave_rank: usize,
+    /// Epochs over each behavior's examples and the base model's replay.
+    #[arg(long, env = "ANTUMBRA_BEHAVE_ROUNDS", default_value_t = 3)]
+    behave_rounds: usize,
+    /// The learning rate. Above 1.5e-4, nine behaviors taught together pulled
+    /// the expert off the base model's answers everywhere else.
+    #[arg(long, env = "ANTUMBRA_BEHAVE_LR", default_value_t = 1.5e-4)]
+    behave_lr: f64,
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -378,6 +391,7 @@ pub(crate) async fn register_node(store: &Store, tenant: &TenantId, user: &UserI
 /// `(tenant, user)` for the life of the process. (The HTTP transport instead
 /// shares one connection across identities (see [`http`]) because an embedded
 /// engine is single-writer.)
+#[allow(clippy::too_many_arguments)]
 async fn build_session(
     url: &str,
     db_user: Option<&str>,
@@ -386,6 +400,7 @@ async fn build_session(
     user: UserId,
     host: String,
     embedder: Arc<dyn Embedder>,
+    recipe: antumbra_core::behavior::Recipe,
 ) -> Result<McpServer> {
     let store = connect(url, db_user, db_pass).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
@@ -393,7 +408,7 @@ async fn build_session(
     register_node(&store, &tenant, &user, &host).await;
     // The `answer` tool serves through the routed expert. Build the engine from
     // the session's visible population (one connection; embedded is single-writer).
-    let serve = build_serve(&store, &host).await?;
+    let serve = build_serve(&store, &host, &recipe).await?;
     // The process outlives the record session, so a keeper re-signs the
     // connection in before it expires (checked at every tool call).
     let keeper = session::SessionKeeper::new(store.clone(), tenant.clone(), user.clone());
@@ -425,6 +440,7 @@ async fn build_session(
 pub(crate) async fn build_serve(
     store: &Store,
     host: &str,
+    recipe: &antumbra_core::behavior::Recipe,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     use antumbra_serve::{MultiAdapterServe, RaftConfig};
 
@@ -438,8 +454,14 @@ pub(crate) async fn build_serve(
         &RaftConfig::default().base_model,
     );
     // Serve the learned mode (greedy + repetition penalty + n-gram block +
-    // nucleus), not the training-time exploration draw.
-    let cfg = RaftConfig::for_serving(RaftConfig::default().max_new_tokens, 0.0);
+    // nucleus), not the training-time exploration draw, at the rank the
+    // keeper trains standing experts at, so a freshly minted adapter fits.
+    let trained = antumbra_serve::behave::standing_config(recipe);
+    let cfg = RaftConfig {
+        lora_rank: trained.lora_rank,
+        lora_alpha: trained.lora_alpha,
+        ..RaftConfig::for_serving(RaftConfig::default().max_new_tokens, 0.0)
+    };
     let mut engine = MultiAdapterServe::new(base, cfg);
     // Only the adapters this machine can actually open. The row travels and
     // the weights do not, so once a user's nodes reconcile, every node learns
@@ -464,6 +486,7 @@ pub(crate) async fn build_serve(
 pub(crate) async fn build_serve(
     _store: &Store,
     _host: &str,
+    _recipe: &antumbra_core::behavior::Recipe,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     Ok(None)
 }
@@ -705,6 +728,10 @@ async fn run() -> Result<()> {
         anyhow::bail!("the GitHub webhook receiver needs --http: deliveries arrive over the networked surface");
     }
 
+    let recipe =
+        antumbra_core::behavior::Recipe::new(cli.behave_rank, cli.behave_rounds, cli.behave_lr)
+            .map_err(|e| anyhow::anyhow!("--behave-rank/--behave-rounds/--behave-lr: {e}"))?;
+
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
@@ -723,6 +750,7 @@ async fn run() -> Result<()> {
             copal,
             profile,
             github,
+            recipe,
         )
         .await;
     }
@@ -736,6 +764,7 @@ async fn run() -> Result<()> {
         UserId::new(cli.user),
         host,
         embedder,
+        recipe,
     )
     .await?;
     if let Some(threshold) = cli.auto_propose {
@@ -873,7 +902,13 @@ mod tests {
     #[tokio::test]
     async fn a_fresh_node_gets_a_serving_engine() -> Result<()> {
         let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
-        let Some(serve) = build_serve(&store, "test-host").await? else {
+        let Some(serve) = build_serve(
+            &store,
+            "test-host",
+            &antumbra_core::behavior::Recipe::default(),
+        )
+        .await?
+        else {
             anyhow::bail!("an empty population must still get a serving engine");
         };
         let minted = antumbra_core::ExpertId::new("expert:user:test:comp:fresh");
