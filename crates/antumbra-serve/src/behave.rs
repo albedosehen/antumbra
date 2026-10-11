@@ -356,10 +356,13 @@ pub async fn audit(plan: &Plan, current: &Expert, cfg: &RaftConfig) -> Result<Op
 
 /// Note `audited` on each behavior it measured that is still as taught, and
 /// on the expert's card the examples now audited, so a later audit measures
-/// only what is newer still. The audit changes nothing else: not the expert,
-/// not the behaviors' status, not the training to come.
+/// only what is newer still. A behavior recorded again takes over the card's
+/// entry for the one it supersedes, so a further recording is still followed.
+/// The audit changes nothing else: not the expert, not the behaviors'
+/// status, not the training to come.
 pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result<()> {
     let now = Utc::now();
+    let mut lineage: Vec<(String, String)> = Vec::new();
     for mut m in still_as_taught(store, plan).await? {
         let Some((_, audit, _)) = audited
             .behaviors
@@ -368,13 +371,26 @@ pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result
         else {
             continue;
         };
+        if let Some(earlier) = State::of(&m.evidence).and_then(|s| s.supersedes) {
+            lineage.push((m.id.as_str().to_string(), earlier));
+        }
         behavior::mark_audit(&mut m.evidence, audit);
         m.updated_at = now;
         memory::upsert(store, &m).await?;
     }
     if let Some(mut e) = expert::get(store, &audited.expert).await? {
+        let card = &mut e.capability_card;
+        for (id, earlier) in &lineage {
+            for key in [behavior::CARD_EXAMPLES, behavior::CARD_AUDITED] {
+                if card[key].get(id.as_str()).is_none() {
+                    if let Some(known) = card[key].get(earlier.as_str()).cloned() {
+                        card[key][id.as_str()] = known;
+                    }
+                }
+            }
+        }
         for (id, _, prints) in &audited.behaviors {
-            let slot = &mut e.capability_card[behavior::CARD_AUDITED][id.as_str()];
+            let slot = &mut card[behavior::CARD_AUDITED][id.as_str()];
             let mut list = slot.as_array().cloned().unwrap_or_default();
             list.extend(prints.iter().map(|p| serde_json::Value::String(p.clone())));
             *slot = serde_json::Value::Array(list);
@@ -876,5 +892,98 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(behavior::audits(&m.evidence).is_empty());
+    }
+
+    /// Recording a behavior again with more examples retires it under a new
+    /// id: the audit follows it there, and the card learns the new id.
+    #[tokio::test]
+    async fn an_audit_follows_a_behavior_recorded_again() {
+        use antumbra_core::behavior::{
+            content, scope_evidence, status_evidence, supersedes_evidence, Example,
+        };
+        let (store, plan, trained) = learned_and_missed(true).await;
+        let report = mint(&store, &plan, trained, "rig").await.unwrap();
+        let (id, _) = report.expert.expect("minted");
+        let e = expert::get(&store, &id).await.unwrap().unwrap();
+        let tenant = TenantId::new("ws:a");
+
+        // Recorded again with one more example, superseding the old.
+        let mut old = memory::get(&store, &tenant, &MemoryId::new("memory:missed"))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut spec = behavior::spec_of(&old.content).unwrap();
+        spec.examples.push(Example {
+            task: "t4".into(),
+            answer: "x".into(),
+        });
+        let again = Memory::new(
+            "memory:missed2",
+            tenant.clone(),
+            antumbra_core::MemoryNetwork::Opinion,
+            content(&spec),
+            1.0,
+            Utc::now(),
+        )
+        .in_compartment(behavior::compartment_id(&tenant, &UserId::new("user:a")))
+        .with_evidence(vec![
+            status_evidence(Status::Accepted),
+            scope_evidence("everywhere"),
+            supersedes_evidence("memory:missed"),
+        ]);
+        memory::upsert(&store, &again).await.unwrap();
+        old.evidence.push(status_evidence(Status::Retired));
+        memory::upsert(&store, &old).await.unwrap();
+
+        let plan = plan_again(&store).await;
+        let mut ids = plan.behaviors();
+        ids.sort();
+        assert_eq!(ids, ["memory:learned", "memory:missed2"]);
+        let fresh = behavior::fresh_examples(&plan.taught, &e.capability_card);
+        assert_eq!(fresh.len(), 1, "{fresh:?}");
+        assert_eq!(fresh[0].0, "memory:missed2");
+        assert_eq!(fresh[0].1, [spec.examples[4].clone()]);
+
+        let print = behavior::example_print(&spec.examples[4]);
+        let set = behavior::trained_set(&e).unwrap().to_string();
+        let audited = Audited {
+            expert: id.clone(),
+            set: set.clone(),
+            behaviors: vec![(
+                "memory:missed2".into(),
+                behavior::Audit {
+                    set,
+                    fresh: 1,
+                    base: 1,
+                    expert: 1,
+                },
+                vec![print.clone()],
+            )],
+        };
+        note_audit(&store, &plan, &audited).await.unwrap();
+        let m = memory::get(&store, &tenant, &MemoryId::new("memory:missed2"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            behavior::audits(&m.evidence).len(),
+            1,
+            "noted on the new one"
+        );
+        let e = expert::get(&store, &id).await.unwrap().unwrap();
+        let card = &e.capability_card;
+        assert_eq!(
+            card[behavior::CARD_EXAMPLES]["memory:missed2"],
+            card[behavior::CARD_EXAMPLES]["memory:missed"],
+            "the card learns the new id"
+        );
+        assert_eq!(
+            card[behavior::CARD_AUDITED]["memory:missed2"],
+            serde_json::json!([print])
+        );
+        assert!(
+            behavior::fresh_examples(&plan.taught, &e.capability_card).is_empty(),
+            "audited once, not again"
+        );
     }
 }
