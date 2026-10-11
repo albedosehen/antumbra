@@ -130,6 +130,16 @@ struct Cli {
     /// the expert off the base model's answers everywhere else.
     #[arg(long, env = "ANTUMBRA_BEHAVE_LR", default_value_t = 1.5e-4)]
     behave_lr: f64,
+    /// How sure admission has to be, from a behavior's held-out counts, that
+    /// the expert answers it worse than the base model before that refuses
+    /// the set: a probability above 0.5 and below 1. One lost task of three
+    /// is about 0.74; three lost of three is near certain.
+    #[arg(
+        long,
+        env = "ANTUMBRA_BEHAVE_REGRESSION_CONFIDENCE",
+        default_value_t = 0.9
+    )]
+    behave_regression_confidence: f64,
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -728,9 +738,17 @@ async fn run() -> Result<()> {
         anyhow::bail!("the GitHub webhook receiver needs --http: deliveries arrive over the networked surface");
     }
 
-    let recipe =
-        antumbra_core::behavior::Recipe::new(cli.behave_rank, cli.behave_rounds, cli.behave_lr)
-            .map_err(|e| anyhow::anyhow!("--behave-rank/--behave-rounds/--behave-lr: {e}"))?;
+    let recipe = antumbra_core::behavior::Recipe::new(
+        cli.behave_rank,
+        cli.behave_rounds,
+        cli.behave_lr,
+        cli.behave_regression_confidence,
+    )
+    .map_err(|e| {
+        anyhow::anyhow!(
+            "--behave-rank/--behave-rounds/--behave-lr/--behave-regression-confidence: {e}"
+        )
+    })?;
 
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.

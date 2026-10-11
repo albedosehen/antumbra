@@ -459,17 +459,29 @@ fn a_recipe_defaults_to_what_nine_behaviors_were_learned_with_and_refuses_nonsen
     let d = Recipe::default();
     assert_eq!((d.rank, d.rounds), (16, 3));
     assert!((d.learning_rate - 1.5e-4).abs() < 1e-12);
-    assert_eq!(d.describe(), "rank 16, 3 rounds, 1.5e-4");
+    assert!((d.regression_confidence - 0.9).abs() < 1e-12);
+    assert_eq!(d.describe(), "rank 16, 3 rounds, 1.5e-4, refusing at 0.90");
     assert_eq!(
-        Recipe::new(32, 1, 1e-4).unwrap().describe(),
-        "rank 32, 1 round, 1e-4"
+        Recipe::new(32, 1, 1e-4, 0.95).unwrap().describe(),
+        "rank 32, 1 round, 1e-4, refusing at 0.95"
     );
-    assert!(Recipe::new(0, 3, 1.5e-4).is_err(), "rank 0 trains nothing");
-    assert!(Recipe::new(512, 3, 1.5e-4).is_err());
-    assert!(Recipe::new(16, 0, 1.5e-4).is_err(), "no rounds");
-    assert!(Recipe::new(16, 3, 0.0).is_err(), "no learning");
     assert!(
-        Recipe::new(16, 3, 0.5).is_err(),
+        Recipe::new(0, 3, 1.5e-4, 0.9).is_err(),
+        "rank 0 trains nothing"
+    );
+    assert!(Recipe::new(512, 3, 1.5e-4, 0.9).is_err());
+    assert!(Recipe::new(16, 0, 1.5e-4, 0.9).is_err(), "no rounds");
+    assert!(Recipe::new(16, 3, 0.0, 0.9).is_err(), "no learning");
+    assert!(
+        Recipe::new(16, 3, 0.5, 0.9).is_err(),
         "far past where 3e-4 broke nine"
+    );
+    assert!(
+        Recipe::new(16, 3, 1.5e-4, 0.5).is_err(),
+        "a coin toss would refuse"
+    );
+    assert!(
+        Recipe::new(16, 3, 1.5e-4, 1.0).is_err(),
+        "nothing would ever refuse"
     );
 }

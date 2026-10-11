@@ -15,6 +15,11 @@ fn spec(n: usize) -> Spec {
     }
 }
 
+/// Admission at the recipe's default regression confidence, 0.9.
+fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
+    super::admit(behaviors, base, expert, 0.9)
+}
+
 fn result(id: &str, passed: usize, total: usize) -> TaskResult {
     TaskResult {
         id: id.into(),
@@ -39,6 +44,44 @@ fn every_third_example_is_held_out() {
     let two = spec(2);
     let (train, held) = split(&two.examples);
     assert_eq!((train.len(), held.len()), (2, 0), "too few to hold any out");
+}
+
+/// The closed form against what can be checked by hand, and the evidence it
+/// carries: the same lost fraction says more over more tasks.
+#[test]
+fn how_likely_the_expert_is_worse_follows_the_evidence() {
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    assert!(close(prob_beta_greater(1, 1, 1, 1), 0.5), "two flat priors");
+    assert!(
+        close(prob_beta_greater(2, 1, 1, 2), 5.0 / 6.0),
+        "one pass against one fail"
+    );
+    assert!(
+        close(prob_beta_greater(4, 1, 4, 1), 0.5),
+        "the same evidence twice"
+    );
+    assert!(
+        close(prob_worse(2, 2, 2) + 0.0, 0.5),
+        "nothing lost, nothing gained"
+    );
+    // One task lost of a few is not much evidence; all of them is.
+    let one_of_three = prob_worse(3, 2, 3);
+    assert!((0.7..0.8).contains(&one_of_three), "{one_of_three}");
+    assert!(prob_worse(3, 0, 3) > 0.98);
+    assert!(
+        prob_worse(1, 0, 3) < 0.9,
+        "the base had one of three itself: losing it is not a refusal at the default"
+    );
+    // The same fraction lost over more tasks is more evidence.
+    let fifteen_of_eighteen = prob_worse(18, 15, 18);
+    assert!(fifteen_of_eighteen > 0.9, "{fifteen_of_eighteen}");
+    assert!(fifteen_of_eighteen > prob_worse(3, 2, 3));
+    assert!(
+        close(prob_worse(0, 0, 0), 0.5),
+        "no held-out task says nothing"
+    );
+    // Gaining is the mirror of losing.
+    assert!(close(prob_worse(2, 3, 3) + prob_worse(3, 2, 3), 1.0));
 }
 
 #[test]
@@ -208,20 +251,37 @@ fn a_behavior_the_base_already_follows_holds_rather_than_rises() {
     let v = admit(&ids, &base, &expert);
     assert!(v.admitted, "{:?}", v.reasons);
 
-    let forgot = vec![
+    // One task lost of two is four in five odds of being worse, below the
+    // recipe's 0.9, so the set is admitted; both lost is near certain and
+    // refuses it.
+    let slipped = vec![
         result("memory:new#h0", 2, 2),
         result("memory:known#h0", 1, 2),
         result("control-cmd-0", 1, 1),
     ];
-    let v = admit(&ids, &base, &forgot);
+    let v = super::admit(&ids, &base, &slipped, 0.9);
+    assert!(v.admitted, "{:?}", v.reasons);
+    let known = v.behaviors.iter().find(|s| s.id == "memory:known").unwrap();
+    assert_eq!(known.held, 2);
+    assert!((0.75..0.85).contains(&known.worse), "{}", known.worse);
+    let forgot = vec![
+        result("memory:new#h0", 2, 2),
+        result("memory:known#h0", 0, 2),
+        result("control-cmd-0", 1, 1),
+    ];
+    let v = super::admit(&ids, &base, &forgot, 0.9);
     assert!(!v.admitted, "one the base followed must still be held");
     assert!(
-        v.reasons
-            .iter()
-            .any(|r| r.starts_with("memory:known fell from 1.00 to 0.50")),
+        v.reasons.iter().any(
+            |r| r.starts_with("memory:known fell from 1.00 to 0.00 held out: 9")
+                && r.contains("% likely worse than the base model over 2 tasks")
+        ),
         "{:?}",
         v.reasons
     );
+    // The same evidence is read more strictly by a stricter recipe.
+    let v = super::admit(&ids, &base, &slipped, 0.7);
+    assert!(!v.admitted, "at 0.7, one task lost of two refuses");
 
     let known = vec!["memory:known".to_string()];
     let v = admit(&known, &base, &expert);

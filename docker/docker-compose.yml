@@ -96,6 +96,10 @@ services:
       - ANTUMBRA_BEHAVE_RANK=${ANTUMBRA_BEHAVE_RANK:-16}
       - ANTUMBRA_BEHAVE_ROUNDS=${ANTUMBRA_BEHAVE_ROUNDS:-3}
       - ANTUMBRA_BEHAVE_LR=${ANTUMBRA_BEHAVE_LR:-1.5e-4}
+      # How sure admission has to be, from a behavior's held-out counts, that
+      # the expert answers it worse than the base model before that refuses
+      # the set (a probability above 0.5 and below 1).
+      - ANTUMBRA_BEHAVE_REGRESSION_CONFIDENCE=${ANTUMBRA_BEHAVE_REGRESSION_CONFIDENCE:-0.9}
       # The copal document of record: each ingested document's original is
       # archived there before its chunks are stored. Unset = off, and ingest
       # keeps only the chunks. With the `copal` profile started:

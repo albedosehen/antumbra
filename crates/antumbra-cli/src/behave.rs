@@ -50,6 +50,11 @@ pub struct BehaveArgs {
     /// pulls the expert off the base model's answers everywhere else.
     #[arg(long, default_value_t = 1.5e-4)]
     pub lr: f64,
+    /// How sure admission has to be, from a behavior's held-out counts, that
+    /// the expert answers it worse than the base model before that refuses
+    /// the set (above 0.5, below 1).
+    #[arg(long, default_value_t = 0.9)]
+    pub regression_confidence: f64,
 }
 
 /// One behavior in an `--import` file.
@@ -167,8 +172,9 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
     let store = crate::connect(url).await?;
     let embedder = crate::make_embedder()?;
     let scope = normalize_scope(a.scope.as_deref());
-    let recipe = antumbra_core::behavior::Recipe::new(a.rank, a.rounds, a.lr)
-        .map_err(|e| anyhow::anyhow!("--rank/--rounds/--lr: {e}"))?;
+    let recipe =
+        antumbra_core::behavior::Recipe::new(a.rank, a.rounds, a.lr, a.regression_confidence)
+            .map_err(|e| anyhow::anyhow!("--rank/--rounds/--lr/--regression-confidence: {e}"))?;
     let cfg = antumbra_serve::RaftConfig {
         max_new_tokens: a.max_new_tokens,
         ..antumbra_serve::behave::standing_config(&recipe)
@@ -180,6 +186,7 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
         &UserId::new(a.user.as_str()),
         &scope,
         &cfg,
+        recipe.regression_confidence,
     )
     .await?;
     let Some(r) = report else {
