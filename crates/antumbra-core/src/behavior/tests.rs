@@ -449,6 +449,63 @@ fn the_fresh_examples_are_the_ones_a_card_was_neither_trained_nor_audited_on() {
     assert!(fresh_examples(&taught, &card).is_empty());
 }
 
+/// Recording a behavior again is how it gains examples: the new one carries
+/// the old one's id, and the card is read under both.
+#[test]
+fn a_behavior_recorded_again_is_audited_as_the_one_it_supersedes() {
+    let mut more = ssh();
+    more.examples.push(Example {
+        task: "Tail the journal on aur0.".into(),
+        answer: "ssh aur0 'journalctl -f'".into(),
+    });
+    let again = Memory::new(
+        "memory:a2",
+        TenantId::new("ws:a"),
+        crate::MemoryNetwork::Opinion,
+        content(&more),
+        1.0,
+        chrono::Utc::now(),
+    )
+    .with_evidence(vec![
+        status_evidence(Status::Accepted),
+        scope_evidence(EVERYWHERE),
+        supersedes_evidence("memory:a"),
+    ]);
+    let mut retired = recorded("memory:a", Status::Trained, EVERYWHERE);
+    retired.evidence.push(status_evidence(Status::Retired));
+    let taught = learnable(&[retired, again], EVERYWHERE);
+    assert_eq!(taught.len(), 1, "the retired one teaches nothing");
+    let prints: Vec<String> = ssh().examples.iter().map(example_print).collect();
+
+    // The card taught the earlier one; the later one's new example is fresh.
+    let card = serde_json::json!({
+        "standing": true, "scope": EVERYWHERE, "set": "x",
+        CARD_EXAMPLES: { "memory:a": prints },
+    });
+    let fresh = fresh_examples(&taught, &card);
+    assert_eq!(fresh.len(), 1, "{fresh:?}");
+    assert_eq!(fresh[0].0, "memory:a2", "noted on the one now taught");
+    assert_eq!(fresh[0].1, [more.examples[4].clone()]);
+
+    // Audited under either id, it is not fresh again.
+    let print = example_print(&more.examples[4]);
+    for id in ["memory:a", "memory:a2"] {
+        let card = serde_json::json!({
+            "standing": true, "scope": EVERYWHERE, "set": "x",
+            CARD_EXAMPLES: { "memory:a": prints },
+            CARD_AUDITED: { id: [print] },
+        });
+        assert!(fresh_examples(&taught, &card).is_empty(), "{id}");
+    }
+
+    // A card that taught neither says nothing about it.
+    let card = serde_json::json!({
+        "standing": true, "scope": EVERYWHERE, "set": "x",
+        CARD_EXAMPLES: { "memory:other": prints },
+    });
+    assert!(fresh_examples(&taught, &card).is_empty());
+}
+
 #[test]
 fn a_training_is_noted_on_each_behavior_and_read_back() {
     let mut m = recorded("memory:a", Status::Accepted, EVERYWHERE);

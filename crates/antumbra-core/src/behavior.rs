@@ -484,8 +484,11 @@ pub fn example_print(e: &Example) -> String {
 
 /// The examples `taught` has that the expert whose `card` this is was neither
 /// trained on nor audited on, by behavior: the fresh slice an audit measures.
-/// A behavior the card never taught is left out, since the expert made no
-/// decision about it; one with nothing new is left out too.
+/// A behavior recorded again is the one it supersedes, continued: its
+/// examples are read against what the card knows under either id, since
+/// recording again is how a behavior gains examples. A behavior the card never
+/// taught, under its own id or the one it supersedes, is left out, since the
+/// expert made no decision about it; one with nothing new is left out too.
 pub fn fresh_examples(
     taught: &[(Memory, Spec)],
     card: &serde_json::Value,
@@ -504,8 +507,14 @@ pub fn fresh_examples(
         .iter()
         .filter_map(|(m, spec)| {
             let id = m.id.as_str();
-            let trained_on = known(CARD_EXAMPLES, id)?;
-            let audited = known(CARD_AUDITED, id).unwrap_or_default();
+            let earlier = State::of(&m.evidence).and_then(|s| s.supersedes);
+            let ids: Vec<&str> = std::iter::once(id).chain(earlier.as_deref()).collect();
+            let trained_on = ids.iter().find_map(|i| known(CARD_EXAMPLES, i))?;
+            let audited: Vec<&str> = ids
+                .iter()
+                .filter_map(|i| known(CARD_AUDITED, i))
+                .flatten()
+                .collect();
             let fresh: Vec<Example> = spec
                 .examples
                 .iter()
