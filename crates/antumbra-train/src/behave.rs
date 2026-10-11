@@ -162,6 +162,8 @@ pub struct BehaviorScore {
     pub base: f32,
     pub expert: f32,
     pub admitted: bool,
+    /// How many held-out tasks the rates are over: what one task is worth.
+    pub held: usize,
 }
 
 /// One family of controls' pass rates, base and expert: `control-cmd` for
@@ -227,33 +229,64 @@ fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
     (total > 0).then(|| passed as f32 / total as f32)
 }
 
+/// How many task answers the results under `prefix` hold.
+fn total(results: &[TaskResult], prefix: &str) -> usize {
+    results
+        .iter()
+        .filter(|r| r.id.starts_with(prefix))
+        .map(|r| r.total)
+        .sum()
+}
+
+impl BehaviorScore {
+    /// How many held-out tasks the expert lost against the base model, as
+    /// a count: the rates are over [`held`](Self::held) tasks.
+    pub fn lost(&self) -> usize {
+        let lost = (self.base - self.expert) * self.held as f32;
+        if lost <= 0.0 {
+            0
+        } else {
+            lost.round() as usize
+        }
+    }
+
+    /// Whether the expert answers this behavior worse than the base model:
+    /// it lost more than one of its held-out tasks, or the only one it had.
+    pub fn regressed(&self) -> bool {
+        let lost = self.lost();
+        lost > 1 || (self.held == 1 && lost == 1)
+    }
+}
+
 /// Judge an expert behavior by behavior. One is learned when it passes its
 /// held-out tasks at least [`MIN_RATE`], and at least [`MIN_GAIN`] above the
 /// base model unless the base already passed it that often.
 ///
 /// The expert is admitted, holding the behaviors it learned, when at least one
-/// of them clearly rose, no behavior it missed fell more than
-/// [`CONTROL_SLACK`] below the base model, and each family of controls falls
-/// no more than that below the base's either. So a behavior it did not learn
-/// does not keep the rest out, but one it made worse does: the expert must
-/// answer every task it was taught at least as well as the base model would.
-/// Each family is held on its own, so a fall in code answers cannot hide
-/// inside a larger pool of commands.
+/// of them clearly rose, no behavior it missed lost more than one of its
+/// held-out tasks against the base model (or the only one it had), and each
+/// family of controls falls no more than [`CONTROL_SLACK`] below the base's.
+/// So a behavior it did not learn does not keep the rest out, but one it made
+/// worse does. A behavior is judged on two or three held-out tasks, where one
+/// lost is noise at the base's own level: measured on sixteen behaviors, a
+/// single lost task on one the base got one of three right refused a set that
+/// had learned twice what the run before it did. The controls are forty tasks
+/// a family, so a rate holds there, and each family is held on its own, so a
+/// fall in code answers cannot hide inside a larger pool of commands.
 pub fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -> Verdict {
     let mut reasons = Vec::new();
     let scores: Vec<BehaviorScore> = behaviors
         .iter()
         .map(|id| {
-            match (
-                rate(base, &format!("{id}#h")),
-                rate(expert, &format!("{id}#h")),
-            ) {
+            let prefix = format!("{id}#h");
+            match (rate(base, &prefix), rate(expert, &prefix)) {
                 // A behavior the base already follows needs holding, not raising.
                 (Some(b), Some(e)) => BehaviorScore {
                     id: id.clone(),
                     base: b,
                     expert: e,
                     admitted: e >= MIN_RATE && (e - b >= MIN_GAIN || b >= MIN_RATE),
+                    held: total(base, &prefix),
                 },
                 // No held-out tasks: nothing to say it was learned.
                 _ => BehaviorScore {
@@ -261,14 +294,23 @@ pub fn admit(behaviors: &[String], base: &[TaskResult], expert: &[TaskResult]) -
                     base: 0.0,
                     expert: 0.0,
                     admitted: false,
+                    held: 0,
                 },
             }
         })
         .collect();
-    for s in scores.iter().filter(|s| s.expert < s.base - CONTROL_SLACK) {
+    // A behavior is judged on two or three held-out tasks, so one lost is
+    // noise at the base's own level; two lost, or the only one, is the expert
+    // answering it worse. The controls keep the rate-based slack, since they
+    // are forty tasks a family.
+    for s in scores.iter().filter(|s| s.regressed()) {
         reasons.push(format!(
-            "{} fell from {:.2} to {:.2} held out: the expert answers it worse than the base model",
-            s.id, s.base, s.expert
+            "{} fell from {:.2} to {:.2} held out, losing {} of {} tasks: the expert answers it worse than the base model",
+            s.id,
+            s.base,
+            s.expert,
+            s.lost(),
+            s.held
         ));
     }
     let mut families: Vec<&str> = Vec::new();

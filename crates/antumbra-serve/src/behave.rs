@@ -433,6 +433,7 @@ mod tests {
             base: 0.0,
             expert: 1.0,
             admitted: true,
+            held: 3,
         };
         let trained = Trained {
             verdict: Verdict {
@@ -522,6 +523,7 @@ mod tests {
             base: 0.0,
             expert,
             admitted,
+            held: 3,
         };
         let trained = Trained {
             verdict: Verdict {

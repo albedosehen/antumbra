@@ -208,9 +208,22 @@ fn a_behavior_the_base_already_follows_holds_rather_than_rises() {
     let v = admit(&ids, &base, &expert);
     assert!(v.admitted, "{:?}", v.reasons);
 
-    let forgot = vec![
+    // One held-out task lost is noise at the base's own level; two lost is
+    // the expert answering it worse, and refuses the set.
+    let slipped = vec![
         result("memory:new#h0", 2, 2),
         result("memory:known#h0", 1, 2),
+        result("control-cmd-0", 1, 1),
+    ];
+    let v = admit(&ids, &base, &slipped);
+    assert!(
+        v.admitted,
+        "one task lost of two is not a regression: {:?}",
+        v.reasons
+    );
+    let forgot = vec![
+        result("memory:new#h0", 2, 2),
+        result("memory:known#h0", 0, 2),
         result("control-cmd-0", 1, 1),
     ];
     let v = admit(&ids, &base, &forgot);
@@ -218,10 +231,28 @@ fn a_behavior_the_base_already_follows_holds_rather_than_rises() {
     assert!(
         v.reasons
             .iter()
-            .any(|r| r.starts_with("memory:known fell from 1.00 to 0.50")),
+            .any(|r| r
+                .starts_with("memory:known fell from 1.00 to 0.00 held out, losing 2 of 2 tasks")),
         "{:?}",
         v.reasons
     );
+    // Judged on a single held-out task, losing it is losing everything.
+    let one_base = vec![
+        result("memory:new#h0", 0, 2),
+        result("memory:known#h0", 1, 1),
+        result("control-cmd-0", 1, 1),
+    ];
+    let one_lost = vec![
+        result("memory:new#h0", 2, 2),
+        result("memory:known#h0", 0, 1),
+        result("control-cmd-0", 1, 1),
+    ];
+    let v = admit(&ids, &one_base, &one_lost);
+    assert!(!v.admitted, "{:?}", v.reasons);
+    assert!(v
+        .behaviors
+        .iter()
+        .any(|s| s.id == "memory:known" && s.held == 1 && s.lost() == 1));
 
     let known = vec!["memory:known".to_string()];
     let v = admit(&known, &base, &expert);
