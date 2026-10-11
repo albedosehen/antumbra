@@ -38,6 +38,13 @@ const SCOPE: &str = "behavior-scope:";
 const SUPERSEDES: &str = "behavior-supersedes:";
 const EXPERT: &str = "behavior-expert:";
 const TRAINING: &str = "behavior-training:";
+/// A served expert measured on examples the behavior gained after the
+/// expert was trained, one entry per audit; see [`Audit`].
+const AUDIT: &str = "behavior-audit:";
+/// On a standing expert's card: each taught behavior's examples, as
+/// [`example_print`]s, and the later examples the expert was audited on.
+pub const CARD_EXAMPLES: &str = "examples";
+pub const CARD_AUDITED: &str = "audited";
 /// A memory the behavior was drawn from, one entry each. Read by the
 /// candidate pass, which leaves cited memories out; not part of the set a
 /// training is fingerprinted by, since the fingerprint hashes the content.
@@ -319,15 +326,26 @@ pub struct Training {
     /// controls fell or no behavior rose above the base model, never for a
     /// behavior it did not learn.
     pub admitted: bool,
+    /// How many held-out tasks the rates are over. Notes written before this
+    /// was kept read as none.
+    pub held: usize,
+    /// How likely, from the held-out counts, the expert's true pass rate on
+    /// this behavior is below the base model's. Admission refuses the set
+    /// when this passes the recipe's confidence; 0.5 says the counts said
+    /// nothing either way. The decision an [`Audit`] later checks.
+    pub worse: f32,
 }
 
 impl Training {
     /// How it went, for the user.
     pub fn describe(&self) -> String {
-        let rates = format!(
+        let mut rates = format!(
             "held-out {:.2} against the base model's {:.2}",
             self.expert, self.base
         );
+        if self.worse > 0.5 {
+            rates.push_str(&format!(", {:.0}% likely worse", self.worse * 100.0));
+        }
         const MORE: &str = "more examples in varied phrasing may teach it";
         match (self.learned, self.admitted) {
             (true, true) => format!("learned ({rates}); its scope's expert serves it"),
@@ -352,8 +370,14 @@ pub fn mark_training(evidence: &mut Vec<String>, training: &Training) {
     // go too: under today's rule such a set may be admitted.
     evidence.retain(|e| !e.starts_with(TRAINING) && !e.starts_with(REFUSED));
     evidence.push(format!(
-        "{TRAINING}{} base={:.2} expert={:.2} learned={} admitted={}",
-        training.set, training.base, training.expert, training.learned, training.admitted
+        "{TRAINING}{} base={:.2} expert={:.2} learned={} admitted={} held={} worse={:.2}",
+        training.set,
+        training.base,
+        training.expert,
+        training.learned,
+        training.admitted,
+        training.held,
+        training.worse
     ));
 }
 
@@ -366,13 +390,134 @@ pub fn training(evidence: &[String]) -> Option<Training> {
     let mut words = entry.split_whitespace();
     let set = words.next()?.to_string();
     let mut field = |name: &str| words.next()?.strip_prefix(name).map(str::to_string);
+    let base = field("base=")?.parse().ok()?;
+    let expert = field("expert=")?.parse().ok()?;
+    let learned = field("learned=")?.parse().ok()?;
+    let admitted = field("admitted=")?.parse().ok()?;
+    // Notes written before the counts were kept end here.
+    let held = field("held=").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let worse = field("worse=").and_then(|v| v.parse().ok()).unwrap_or(0.5);
     Some(Training {
         set,
-        base: field("base=")?.parse().ok()?,
-        expert: field("expert=")?.parse().ok()?,
-        learned: field("learned=")?.parse().ok()?,
-        admitted: field("admitted=")?.parse().ok()?,
+        base,
+        expert,
+        learned,
+        admitted,
+        held,
+        worse,
     })
+}
+
+/// A served expert measured, beside the base model, on examples a behavior
+/// gained after the expert was trained: tasks the training never saw, written
+/// by the user, so what they say about the expert comes from outside the loop
+/// that admitted it. The keeper runs one before it retrains a scope whose set
+/// changed, and it changes nothing about admission: it is the evidence the
+/// recipe's regression confidence is to be tuned from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Audit {
+    /// The [`fingerprint`] of the set the expert was trained on, which ties
+    /// the audit to the [`Training`] that admitted it.
+    pub set: String,
+    /// How many later examples were measured.
+    pub fresh: usize,
+    /// How many of them the base model passed.
+    pub base: usize,
+    /// How many the expert passed.
+    pub expert: usize,
+}
+
+impl Audit {
+    /// How it went, for the user.
+    pub fn describe(&self) -> String {
+        format!(
+            "audited on {} later example{}: the expert passed {}, the base model {}",
+            self.fresh,
+            if self.fresh == 1 { "" } else { "s" },
+            self.expert,
+            self.base
+        )
+    }
+}
+
+/// Note an audit of the scope's expert on this behavior's later examples.
+/// Audits keep: each is of different examples, and together they are the
+/// evidence on the expert's admission.
+pub fn mark_audit(evidence: &mut Vec<String>, audit: &Audit) {
+    evidence.push(format!(
+        "{AUDIT}{} fresh={} base={} expert={}",
+        audit.set, audit.fresh, audit.base, audit.expert
+    ));
+}
+
+/// Every audit noted in a behavior's evidence, oldest first.
+pub fn audits(evidence: &[String]) -> Vec<Audit> {
+    evidence
+        .iter()
+        .filter_map(|e| {
+            let mut words = e.strip_prefix(AUDIT)?.split_whitespace();
+            let set = words.next()?.to_string();
+            let mut field = |name: &str| words.next()?.strip_prefix(name)?.parse::<usize>().ok();
+            Some(Audit {
+                set,
+                fresh: field("fresh=")?,
+                base: field("base=")?,
+                expert: field("expert=")?,
+            })
+        })
+        .collect()
+}
+
+/// What names an example on a standing expert's card: the first eight bytes
+/// of a hash over its task and answer, as hex.
+pub fn example_print(e: &Example) -> String {
+    let mut h = Sha256::new();
+    for part in [e.task.as_str(), e.answer.as_str()] {
+        h.update((part.len() as u64).to_le_bytes());
+        h.update(part.as_bytes());
+    }
+    h.finalize()[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The examples `taught` has that the expert whose `card` this is was neither
+/// trained on nor audited on, by behavior: the fresh slice an audit measures.
+/// A behavior the card never taught is left out, since the expert made no
+/// decision about it; one with nothing new is left out too.
+pub fn fresh_examples(
+    taught: &[(Memory, Spec)],
+    card: &serde_json::Value,
+) -> Vec<(String, Vec<Example>)> {
+    let known = |key: &str, id: &str| -> Option<Vec<&str>> {
+        Some(
+            card.get(key)?
+                .get(id)?
+                .as_array()?
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect(),
+        )
+    };
+    taught
+        .iter()
+        .filter_map(|(m, spec)| {
+            let id = m.id.as_str();
+            let trained_on = known(CARD_EXAMPLES, id)?;
+            let audited = known(CARD_AUDITED, id).unwrap_or_default();
+            let fresh: Vec<Example> = spec
+                .examples
+                .iter()
+                .filter(|e| {
+                    let print = example_print(e);
+                    !trained_on.contains(&print.as_str()) && !audited.contains(&print.as_str())
+                })
+                .cloned()
+                .collect();
+            (!fresh.is_empty()).then(|| (id.to_string(), fresh))
+        })
+        .collect()
 }
 
 /// Whether this exact set was trained and its expert refused: every behavior

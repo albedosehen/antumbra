@@ -134,6 +134,8 @@ fn a_set_refused_before_a_restart_is_not_trained_again() {
                 expert: 0.0,
                 learned: false,
                 admitted: false,
+                held: 1,
+                worse: 0.5,
             },
         );
     }
