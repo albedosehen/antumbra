@@ -255,6 +255,17 @@ async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
             expert: 0.5,
             learned: false,
             admitted: true,
+            held: 2,
+            worse: 0.2,
+        },
+    );
+    antumbra_core::behavior::mark_audit(
+        &mut m.evidence,
+        &antumbra_core::behavior::Audit {
+            set: "00112233aabbccdd".into(),
+            fresh: 2,
+            base: 0,
+            expert: 1,
         },
     );
     memory::upsert(&store, &m).await?;
@@ -271,6 +282,10 @@ async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
     assert!(
         said.starts_with("not learned (held-out 0.50 against the base model's 0.00); its scope's expert serves the others without it"),
         "{said}"
+    );
+    assert_eq!(
+        listed[0].last_audit.as_deref(),
+        Some("audited on 2 later examples: the expert passed 1, the base model 0")
     );
     Ok(())
 }
@@ -350,6 +365,7 @@ fn a_behavior_with_nothing_wrong_and_no_training_matches_the_output_schema() {
         sources: Vec::new(),
         problems: Vec::new(),
         last_training: None,
+        last_audit: None,
     };
     assert_required_keys_present(&view);
 }

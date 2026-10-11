@@ -50,6 +50,7 @@ function behaviorItem(b) {
     sources.length ? h("span", {}, `from ${plural(sources.length, "memory", "memories")}`) : null,
     b.supersedes ? h("span", {}, "replaces an earlier one") : null,
     b.last_training ? h("span", { class: "muted" }, b.last_training) : null,
+    b.last_audit ? h("span", { class: "muted" }, b.last_audit) : null,
     ...(b.problems ?? []).map((p) => h("span", { class: "flag" }, p)),
     h("span", { class: "id" }, b.id),
   ];

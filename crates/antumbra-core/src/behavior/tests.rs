@@ -313,7 +313,140 @@ fn trained_in(set: &str, expert: f32, learned: bool, admitted: bool) -> Training
         expert,
         learned,
         admitted,
+        held: 3,
+        worse: 0.02,
     }
+}
+
+#[test]
+fn a_training_note_keeps_the_counts_behind_its_verdict_and_reads_older_notes() {
+    let mut evidence = Vec::new();
+    let slipped = Training {
+        set: "00112233aabbccdd".into(),
+        base: 1.0,
+        expert: 0.67,
+        learned: false,
+        admitted: true,
+        held: 3,
+        worse: 0.74,
+    };
+    mark_training(&mut evidence, &slipped);
+    assert_eq!(
+        evidence[0],
+        "behavior-training:00112233aabbccdd base=1.00 expert=0.67 learned=false admitted=true held=3 worse=0.74"
+    );
+    assert_eq!(training(&evidence), Some(slipped.clone()));
+    assert!(
+        slipped.describe().starts_with(
+            "not learned (held-out 0.67 against the base model's 1.00, 74% likely worse)"
+        ),
+        "{}",
+        slipped.describe()
+    );
+    // A note from before the counts were kept still reads, saying nothing
+    // about them.
+    let older = vec![
+        "behavior-training:ffeeddcc00112233 base=0.00 expert=1.00 learned=true admitted=true"
+            .to_string(),
+    ];
+    let read = training(&older).unwrap();
+    assert_eq!((read.held, read.worse), (0, 0.5));
+    assert_eq!(
+        read.describe(),
+        "learned (held-out 1.00 against the base model's 0.00); its scope's expert serves it"
+    );
+}
+
+#[test]
+fn an_audit_is_noted_beside_the_others_and_read_back_in_order() {
+    let mut m = recorded("memory:a", Status::Accepted, EVERYWHERE);
+    mark_training(
+        &mut m.evidence,
+        &trained_in("00112233aabbccdd", 1.0, true, true),
+    );
+    assert!(audits(&m.evidence).is_empty());
+    let first = Audit {
+        set: "00112233aabbccdd".into(),
+        fresh: 2,
+        base: 1,
+        expert: 2,
+    };
+    let second = Audit {
+        set: "00112233aabbccdd".into(),
+        fresh: 1,
+        base: 0,
+        expert: 0,
+    };
+    mark_audit(&mut m.evidence, &first);
+    mark_audit(&mut m.evidence, &second);
+    assert_eq!(
+        audits(&m.evidence),
+        [first.clone(), second.clone()],
+        "audits keep: each is of different examples"
+    );
+    assert_eq!(
+        first.describe(),
+        "audited on 2 later examples: the expert passed 2, the base model 1"
+    );
+    assert_eq!(
+        second.describe(),
+        "audited on 1 later example: the expert passed 0, the base model 0"
+    );
+    assert_eq!(
+        m.evidence
+            .iter()
+            .filter(|e| e.starts_with("behavior-audit:"))
+            .count(),
+        2
+    );
+    let state = State::of(&m.evidence).unwrap();
+    assert_eq!(state.status, Status::Accepted, "a note leaves the status");
+    assert!(
+        training(&m.evidence).is_some(),
+        "and the training note it checks"
+    );
+}
+
+#[test]
+fn the_fresh_examples_are_the_ones_a_card_was_neither_trained_nor_audited_on() {
+    let a = recorded("memory:a", Status::Trained, EVERYWHERE);
+    let b = recorded("memory:b", Status::Accepted, EVERYWHERE);
+    let taught = learnable(&[a.clone(), b.clone()], EVERYWHERE);
+    let prints: Vec<String> = ssh().examples.iter().map(example_print).collect();
+    assert_eq!(prints[0].len(), 16);
+    assert_ne!(prints[0], prints[1]);
+    assert_eq!(
+        example_print(&ssh().examples[0]),
+        prints[0],
+        "a print is of the example alone"
+    );
+
+    // The card taught a's first three examples and audited nothing; b it
+    // never taught.
+    let card = serde_json::json!({
+        "standing": true, "scope": EVERYWHERE, "set": "x",
+        CARD_EXAMPLES: { "memory:a": prints[..3] },
+    });
+    let fresh = fresh_examples(&taught, &card);
+    assert_eq!(
+        fresh.len(),
+        1,
+        "b was not on the card: no decision to check"
+    );
+    assert_eq!(fresh[0].0, "memory:a");
+    assert_eq!(fresh[0].1, [ssh().examples[3].clone()]);
+
+    // Audited once, that example is no longer fresh.
+    let card = serde_json::json!({
+        "standing": true, "scope": EVERYWHERE, "set": "x",
+        CARD_EXAMPLES: { "memory:a": prints[..3] },
+        CARD_AUDITED: { "memory:a": [prints[3]] },
+    });
+    assert!(fresh_examples(&taught, &card).is_empty());
+
+    // A card from before examples were kept audits nothing.
+    let card = serde_json::json!({ "standing": true, "scope": EVERYWHERE, "set": "x" });
+    assert!(fresh_examples(&taught, &card).is_empty());
 }
 
 #[test]

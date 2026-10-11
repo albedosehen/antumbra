@@ -107,6 +107,13 @@ pub(super) struct BehaviorView {
     /// the behaviors it learned, without the ones it did not.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) last_training: Option<String>,
+    /// The last time its scope's served expert was measured, beside the base
+    /// model, on examples this behavior gained after that expert was
+    /// trained: how many, and how many each passed. Evidence on the
+    /// admission, from tasks the training never saw; it changes nothing by
+    /// itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) last_audit: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -237,6 +244,7 @@ impl McpServer {
                 id: m.id.as_str().to_string(),
                 problems: spec.problems(),
                 last_training: behavior::training(&m.evidence).map(|t| t.describe()),
+                last_audit: behavior::audits(&m.evidence).last().map(|a| a.describe()),
                 rule: spec.rule,
                 scope: state.scope,
                 status: state.status.as_str().to_string(),

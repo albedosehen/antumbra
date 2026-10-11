@@ -247,6 +247,8 @@ async fn note(store: &Store, plan: &Plan, verdict: &Verdict, expert: Option<&str
             expert: score.map_or(0.0, |s| s.expert),
             learned,
             admitted: expert.is_some(),
+            held: score.map_or(0, |s| s.held),
+            worse: score.map_or(0.5, |s| s.worse),
         };
         behavior::mark_training(&mut m.evidence, &training);
         match expert {
@@ -256,6 +258,129 @@ async fn note(store: &Store, plan: &Plan, verdict: &Verdict, expert: Option<&str
         }
         m.updated_at = now;
         memory::upsert(store, &m).await?;
+    }
+    Ok(())
+}
+
+/// A served expert measured, beside the base model, on the examples its
+/// behaviors gained since it was trained: ground truth the training never saw.
+#[derive(Debug, Clone)]
+pub struct Audited {
+    pub expert: ExpertId,
+    /// The set the expert was trained on, from its card.
+    pub set: String,
+    /// Each behavior with later examples: its audit, and the prints of the
+    /// examples measured.
+    pub behaviors: Vec<(String, behavior::Audit, Vec<String>)>,
+}
+
+impl Audited {
+    /// How many later examples were measured, over every behavior.
+    pub fn fresh(&self) -> usize {
+        self.behaviors.iter().map(|(_, a, _)| a.fresh).sum()
+    }
+
+    /// How many of them the base model passed.
+    pub fn base(&self) -> usize {
+        self.behaviors.iter().map(|(_, a, _)| a.base).sum()
+    }
+
+    /// How many the expert passed.
+    pub fn passed(&self) -> usize {
+        self.behaviors.iter().map(|(_, a, _)| a.expert).sum()
+    }
+}
+
+/// Score `current`, the scope's served expert, and the base model on the
+/// examples `plan`'s behaviors gained since `current` was trained, before the
+/// changed set replaces it. Touches no store. `None` when nothing is new, or
+/// the card is from before examples were kept on it.
+pub async fn audit(plan: &Plan, current: &Expert, cfg: &RaftConfig) -> Result<Option<Audited>> {
+    let fresh = behavior::fresh_examples(&plan.taught, &current.capability_card);
+    if fresh.is_empty() {
+        return Ok(None);
+    }
+    let set = current
+        .capability_card
+        .get("set")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut tasks = Vec::new();
+    for (id, examples) in &fresh {
+        let Some((_, spec)) = plan.taught.iter().find(|(m, _)| m.id.as_str() == id) else {
+            continue;
+        };
+        tasks.extend(course::audit_tasks(id, spec, examples));
+    }
+    let cfg = RaftConfig {
+        temperature: 0.0,
+        samples_per_task: 1,
+        ..cfg.clone()
+    };
+    let run = RunId::new(format!("{}#audit", current.id.as_str()));
+    let loader = CandleModelLoader::new(cfg.clone());
+    let verifier = antumbra_critic::CommandVerifier;
+    let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
+    let base = eval_pass_rate(&mut model, &verifier, &tasks, &run, 1).await?;
+    drop(model);
+    let mut model = ModelLoader::load(
+        &loader,
+        &cfg.base_model,
+        Some(current.artifact_uri.as_str()),
+    )
+    .await?;
+    let expert = eval_pass_rate(&mut model, &verifier, &tasks, &run, 1).await?;
+    let behaviors = fresh
+        .iter()
+        .map(|(id, examples)| {
+            let prefix = format!("{id}#");
+            let (b, n) = course::counts(&base.per_task, &prefix);
+            let (e, _) = course::counts(&expert.per_task, &prefix);
+            let audit = behavior::Audit {
+                set: set.clone(),
+                fresh: n,
+                base: b,
+                expert: e,
+            };
+            let prints = examples.iter().map(behavior::example_print).collect();
+            (id.clone(), audit, prints)
+        })
+        .collect();
+    Ok(Some(Audited {
+        expert: current.id.clone(),
+        set,
+        behaviors,
+    }))
+}
+
+/// Note `audited` on each behavior it measured that is still as taught, and
+/// on the expert's card the examples now audited, so a later audit measures
+/// only what is newer still. The audit changes nothing else: not the expert,
+/// not the behaviors' status, not the training to come.
+pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result<()> {
+    let now = Utc::now();
+    for mut m in still_as_taught(store, plan).await? {
+        let Some((_, audit, _)) = audited
+            .behaviors
+            .iter()
+            .find(|(id, _, _)| id == m.id.as_str())
+        else {
+            continue;
+        };
+        behavior::mark_audit(&mut m.evidence, audit);
+        m.updated_at = now;
+        memory::upsert(store, &m).await?;
+    }
+    if let Some(mut e) = expert::get(store, &audited.expert).await? {
+        for (id, _, prints) in &audited.behaviors {
+            let slot = &mut e.capability_card[behavior::CARD_AUDITED][id.as_str()];
+            let mut list = slot.as_array().cloned().unwrap_or_default();
+            list.extend(prints.iter().map(|p| serde_json::Value::String(p.clone())));
+            *slot = serde_json::Value::Array(list);
+        }
+        expert::delete(store, &e.id).await?;
+        expert::insert(store, &e).await?;
     }
     Ok(())
 }
@@ -301,24 +426,36 @@ pub async fn mint(
         .filter(|i| !learned.contains(i))
         .collect();
     let now = Utc::now();
+    // Each taught behavior's examples by print, so an audit can tell the
+    // ones it gains later from these.
+    let examples: serde_json::Map<String, serde_json::Value> = plan
+        .taught
+        .iter()
+        .map(|(m, s)| {
+            let prints: Vec<String> = s.examples.iter().map(behavior::example_print).collect();
+            (m.id.as_str().to_string(), serde_json::json!(prints))
+        })
+        .collect();
+    let mut card = serde_json::json!({
+        "behaviors": learned, "rules": rules, "missed": missed,
+        "set": behavior::fingerprint(&plan.taught), "scope": plan.scope,
+        "private": true, "standing": true,
+        "recipe": {
+            "rank": trained.recipe.rank, "rounds": trained.recipe.rounds,
+            "learning_rate": trained.recipe.learning_rate,
+            "regression_confidence": trained.recipe.regression_confidence,
+        },
+        "controls": verdict.controls.iter().map(|c| serde_json::json!({
+            "family": c.family, "base": c.base, "expert": c.expert,
+        })).collect::<Vec<_>>(),
+    });
+    card[behavior::CARD_EXAMPLES] = serde_json::Value::Object(examples);
     let e = Expert {
         id: id.clone(),
         name: id.as_str().to_string(),
         base_model: trained.base_model,
         artifact_uri: trained.adapter_uri.clone(),
-        capability_card: serde_json::json!({
-            "behaviors": learned, "rules": rules, "missed": missed,
-            "set": behavior::fingerprint(&plan.taught), "scope": plan.scope,
-            "private": true, "standing": true,
-            "recipe": {
-                "rank": trained.recipe.rank, "rounds": trained.recipe.rounds,
-                "learning_rate": trained.recipe.learning_rate,
-                "regression_confidence": trained.recipe.regression_confidence,
-            },
-            "controls": verdict.controls.iter().map(|c| serde_json::json!({
-                "family": c.family, "base": c.base, "expert": c.expert,
-            })).collect::<Vec<_>>(),
-        }),
+        capability_card: card,
         capability_vec: Some(trained.capability_vec),
         fitness: trained.fitness,
         frozen_at: Some(now),
@@ -638,5 +775,106 @@ mod tests {
         .await
         .unwrap()
         .unwrap()
+    }
+
+    /// The GPU step of an audit is not run here; what it would measure, and
+    /// what is noted of the measurement, are.
+    #[tokio::test]
+    async fn an_audit_measures_only_what_the_card_never_saw_and_notes_it() {
+        use antumbra_core::behavior::{content, Example};
+        let (store, plan, trained) = learned_and_missed(true).await;
+        let report = mint(&store, &plan, trained, "rig").await.unwrap();
+        let (id, _) = report.expert.expect("minted");
+        let e = expert::get(&store, &id).await.unwrap().unwrap();
+        // The card names every taught example, so a later one stands out.
+        let prints = &e.capability_card[behavior::CARD_EXAMPLES]["memory:missed"];
+        assert_eq!(prints.as_array().map(Vec::len), Some(4));
+        assert!(
+            behavior::fresh_examples(&plan.taught, &e.capability_card).is_empty(),
+            "nothing newer than the card"
+        );
+
+        // The user adds an example to the behavior it missed.
+        let tenant = TenantId::new("ws:a");
+        let mut m = memory::get(&store, &tenant, &MemoryId::new("memory:missed"))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut spec = behavior::spec_of(&m.content).unwrap();
+        spec.examples.push(Example {
+            task: "t4".into(),
+            answer: "x".into(),
+        });
+        m.content = content(&spec);
+        memory::upsert(&store, &m).await.unwrap();
+        let again = plan_again(&store).await;
+        assert!(behavior::stale(&again.taught, Some(&e)), "a new set");
+        let fresh = behavior::fresh_examples(&again.taught, &e.capability_card);
+        assert_eq!(fresh.len(), 1, "{fresh:?}");
+        assert_eq!(fresh[0].0, "memory:missed");
+        assert_eq!(fresh[0].1, [spec.examples[4].clone()]);
+
+        // Measured, the audit is noted on the behavior and on the card.
+        let print = behavior::example_print(&fresh[0].1[0]);
+        let set = behavior::trained_set(&e).unwrap().to_string();
+        let audited = Audited {
+            expert: id.clone(),
+            set: set.clone(),
+            behaviors: vec![(
+                "memory:missed".into(),
+                behavior::Audit {
+                    set: set.clone(),
+                    fresh: 1,
+                    base: 0,
+                    expert: 1,
+                },
+                vec![print.clone()],
+            )],
+        };
+        assert_eq!(
+            (audited.fresh(), audited.base(), audited.passed()),
+            (1, 0, 1)
+        );
+        note_audit(&store, &again, &audited).await.unwrap();
+        let m = memory::get(&store, &tenant, &MemoryId::new("memory:missed"))
+            .await
+            .unwrap()
+            .unwrap();
+        let notes = behavior::audits(&m.evidence);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(
+            (
+                notes[0].set.as_str(),
+                notes[0].fresh,
+                notes[0].base,
+                notes[0].expert
+            ),
+            (set.as_str(), 1, 0, 1)
+        );
+        assert!(
+            behavior::training(&m.evidence).is_some(),
+            "the training note it checks stays"
+        );
+        assert_eq!(State::of(&m.evidence).unwrap().status, Status::Accepted);
+        let e = expert::get(&store, &id).await.unwrap().unwrap();
+        assert_eq!(
+            e.capability_card[behavior::CARD_AUDITED]["memory:missed"],
+            serde_json::json!([print])
+        );
+        assert_eq!(
+            behavior::trained_set(&e),
+            Some(set.as_str()),
+            "the card is otherwise as it was"
+        );
+        assert!(
+            behavior::fresh_examples(&again.taught, &e.capability_card).is_empty(),
+            "audited once, not again"
+        );
+        // The behavior that gained nothing was not audited.
+        let m = memory::get(&store, &tenant, &MemoryId::new("memory:learned"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(behavior::audits(&m.evidence).is_empty());
     }
 }

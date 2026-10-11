@@ -64,8 +64,8 @@ pub fn always() -> Value {
     json!({ "program": "python", "extract_code": false, "args": ["-c", "import sys; sys.exit(0)"] })
 }
 
-/// The examples to train on and the ones held out: every fourth, so a
-/// behavior with ten examples is admitted on two it never saw. Below four
+/// The examples to train on and the ones held out: every third, so a
+/// behavior with ten examples is admitted on three it never saw. Below three
 /// examples nothing is held out, and the behavior cannot be admitted.
 pub fn split(examples: &[Example]) -> (Vec<&Example>, Vec<&Example>) {
     let mut train = Vec::new();
@@ -87,15 +87,30 @@ pub struct BehaviorTasks {
     pub held: Vec<CorpusTask>,
 }
 
+/// One example as a task of behavior `id`, checked by `check`.
+fn task_of(id: &str, check: &Value, tag: &str, i: usize, e: &Example) -> CorpusTask {
+    let mut t = CorpusTask::new(format!("{id}#{tag}{i}"), e.task.clone())
+        .with_verify(check.clone())
+        .with_completion(e.answer.clone());
+    t.skill = Some(id.to_string());
+    t
+}
+
+/// Tasks from examples a behavior gained after its expert was trained, for an
+/// audit of that expert against the base model. Ids are `{id}#a{i}`; every
+/// task's skill is the behavior's id.
+pub fn audit_tasks(id: &str, spec: &Spec, examples: &[Example]) -> Vec<CorpusTask> {
+    let check = verify(spec);
+    examples
+        .iter()
+        .enumerate()
+        .map(|(i, e)| task_of(id, &check, "a", i, e))
+        .collect()
+}
+
 pub fn tasks(id: &str, spec: &Spec) -> BehaviorTasks {
     let check = verify(spec);
-    let task = |tag: &str, i: usize, e: &Example| {
-        let mut t = CorpusTask::new(format!("{id}#{tag}{i}"), e.task.clone())
-            .with_verify(check.clone())
-            .with_completion(e.answer.clone());
-        t.skill = Some(id.to_string());
-        t
-    };
+    let task = |tag: &str, i: usize, e: &Example| task_of(id, &check, tag, i, e);
     let (train, held) = split(&spec.examples);
     BehaviorTasks {
         train: train
@@ -230,7 +245,7 @@ fn rate(results: &[TaskResult], prefix: &str) -> Option<f32> {
 }
 
 /// How many answers under `prefix` passed, and how many there were.
-fn counts(results: &[TaskResult], prefix: &str) -> (usize, usize) {
+pub fn counts(results: &[TaskResult], prefix: &str) -> (usize, usize) {
     results
         .iter()
         .filter(|r| r.id.starts_with(prefix))

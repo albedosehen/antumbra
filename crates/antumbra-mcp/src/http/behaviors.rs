@@ -133,6 +133,9 @@ mod keeper {
         trained: usize,
         refused: usize,
         dropped: usize,
+        /// Served experts measured on the examples their behaviors gained,
+        /// before the changed set replaced them.
+        audited: usize,
     }
 
     pub(in crate::http) fn spawn(state: Arc<HttpState>) {
@@ -156,11 +159,12 @@ mod keeper {
                 let clock = Instant::now();
                 match pass(&state, &mut failed).await {
                     Ok(t) if t.trained + t.refused + t.dropped > 0 => eprintln!(
-                        "antumbra-mcp: standing experts, pass in {:.0}s: {} trained, {} refused, {} dropped",
+                        "antumbra-mcp: standing experts, pass in {:.0}s: {} trained, {} refused, {} dropped, {} audited",
                         clock.elapsed().as_secs_f32(),
                         t.trained,
                         t.refused,
-                        t.dropped
+                        t.dropped,
+                        t.audited
                     ),
                     Ok(_) => {}
                     Err(e) => eprintln!("antumbra-mcp: standing experts pass stopped: {e:#}"),
@@ -250,8 +254,47 @@ mod keeper {
                         state.store.signin_root().await?;
                         state.embedder_for(tenant).await
                     };
-                    let job = plan.clone();
                     let cfg = behave::standing_config(&state.recipe);
+                    // The expert this set replaces, measured first on what
+                    // the set gained since it was trained: tasks the user
+                    // wrote that neither it nor its admission ever saw. An
+                    // audit that cannot run is logged and skipped; it keeps
+                    // nothing from training.
+                    if let Some(e) =
+                        current.filter(|e| e.placed_on.as_deref() == Some(state.host.as_str()))
+                    {
+                        let (job, audit_cfg) = (plan.clone(), cfg.clone());
+                        let audited = crate::server::heavy::spawn_heavy(async move {
+                            behave::audit(&job, &e, &audit_cfg).await
+                        })
+                        .await
+                        .map_err(anyhow::Error::from)
+                        .and_then(|r| r.map_err(anyhow::Error::from));
+                        match audited {
+                            Ok(Some(a)) => {
+                                {
+                                    let _guard = state.auth.lock().await;
+                                    state.store.signin_root().await?;
+                                    behave::note_audit(&state.store, &plan, &a).await?;
+                                }
+                                tally.audited += 1;
+                                eprintln!(
+                                    "antumbra-mcp: standing experts, {} audited on {} later example(s) of {} behavior(s): the base model passed {}, the expert {}",
+                                    a.expert.as_str(),
+                                    a.fresh(),
+                                    a.behaviors.len(),
+                                    a.base(),
+                                    a.passed()
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(err) => eprintln!(
+                                "antumbra-mcp: standing experts, {}:{scope} not audited: {err:#}",
+                                user.as_str()
+                            ),
+                        }
+                    }
+                    let job = plan.clone();
                     let confidence = state.recipe.regression_confidence;
                     let trained = crate::server::heavy::spawn_heavy(async move {
                         behave::train(&job, embedder.as_ref(), &cfg, confidence).await

@@ -94,6 +94,26 @@ fn the_fewest_examples_a_behavior_is_recorded_with_hold_one_out() {
 }
 
 #[test]
+fn an_audit_asks_the_later_examples_under_the_behavior_s_own_check() {
+    let later = spec(2).examples;
+    let t = audit_tasks("memory:b1", &spec(8), &later);
+    assert_eq!(t.len(), 2);
+    assert_eq!(t[0].id, "memory:b1#a0");
+    assert_eq!(t[1].id, "memory:b1#a1");
+    assert!(t.iter().all(|t| t.skill.as_deref() == Some("memory:b1")));
+    assert_eq!(
+        t[1].completion.as_deref(),
+        Some("git checkout -b feat/1-work")
+    );
+    let args = t[0].verify["args"].as_array().unwrap();
+    assert_eq!(args[2], r#"["feat/\\d+-"]"#);
+    assert!(audit_tasks("memory:b1", &spec(8), &[]).is_empty());
+    // Counted under the behavior, like its held-out tasks.
+    let results = [result("memory:b1#a0", 1, 1), result("memory:b1#a1", 0, 1)];
+    assert_eq!(counts(&results, "memory:b1#"), (1, 2));
+}
+
+#[test]
 fn tasks_carry_the_check_the_answer_and_the_behavior() {
     let t = tasks("memory:b1", &spec(8));
     assert_eq!((t.train.len(), t.held.len()), (6, 2));
