@@ -229,6 +229,26 @@ fn standing_expert(scope: &str, behaviors: &[&str]) -> Expert {
 }
 
 #[test]
+fn a_standing_expert_is_a_user_s_in_one_workspace_only() {
+    let (a, b) = (TenantId::new("ws:a"), TenantId::new("ws:b"));
+    let user = UserId::new("user:a");
+    let mut e = standing_expert(EVERYWHERE, &[]);
+    assert!(
+        !is_standing_for(&e, &a, &user),
+        "without its compartment, no workspace can claim it"
+    );
+    e.compartment = Some(compartment_id(&a, &user));
+    assert!(is_standing_for(&e, &a, &user));
+    assert!(
+        !is_standing_for(&e, &b, &user),
+        "the same user id in another workspace"
+    );
+    assert!(!is_standing_for(&e, &a, &UserId::new("user:b")));
+    e.capability_card = serde_json::json!({ "scope": EVERYWHERE });
+    assert!(!is_standing_for(&e, &a, &user), "not standing");
+}
+
+#[test]
 fn a_standing_expert_learns_the_accepted_and_trained_behaviors_of_its_scope() {
     let all = vec![
         recorded("memory:accepted", Status::Accepted, EVERYWHERE),

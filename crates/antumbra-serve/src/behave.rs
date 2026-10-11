@@ -43,8 +43,20 @@ pub struct BehaveReport {
     pub expert: Option<(ExpertId, String)>,
 }
 
-/// The private standing expert for a user's behaviors in `scope`.
-pub fn expert_id(user: &UserId, scope: &str) -> ExpertId {
+/// The private standing expert for a user's behaviors in `scope`, in
+/// `tenant`. The workspace is in the id, and so in the adapter's file name:
+/// every hosted workspace's first user has the same id, and without it two
+/// workspaces would replace each other's expert and adapter.
+pub fn expert_id(tenant: &TenantId, user: &UserId, scope: &str) -> ExpertId {
+    ExpertId::new(format!(
+        "expert:{}:{}:behavior:{scope}",
+        tenant.as_str(),
+        user.as_str()
+    ))
+}
+
+/// The id a standing expert was minted under before the workspace was in it.
+fn legacy_expert_id(user: &UserId, scope: &str) -> ExpertId {
     ExpertId::new(format!("expert:{}:behavior:{scope}", user.as_str()))
 }
 
@@ -154,7 +166,11 @@ pub async fn train(
         samples_per_task: 1,
         ..cfg.clone()
     };
-    let run = RunId::new(expert_id(&plan.user, &plan.scope).as_str().to_string());
+    let run = RunId::new(
+        expert_id(&plan.tenant, &plan.user, &plan.scope)
+            .as_str()
+            .to_string(),
+    );
     let loader = CandleModelLoader::new(cfg.clone());
     let verifier = antumbra_critic::CommandVerifier;
     let mut model = ModelLoader::load(&loader, &cfg.base_model, None).await?;
@@ -439,7 +455,7 @@ pub async fn mint(
             expert: None,
         });
     }
-    let id = expert_id(&plan.user, &plan.scope);
+    let id = expert_id(&plan.tenant, &plan.user, &plan.scope);
     let verdict = trained.verdict;
     let learned = verdict.learned();
     let rules: Vec<&str> = plan
@@ -508,6 +524,15 @@ pub async fn mint(
         placed_on: Some(host.to_string()),
         created_at: now,
     };
+    // The scope's expert minted under the id without the workspace goes,
+    // when it is this workspace's: the scope keeps one. Another workspace's,
+    // under the same old id, is left as it is.
+    let legacy = legacy_expert_id(&plan.user, &plan.scope);
+    if let Some(old) = expert::get(store, &legacy).await? {
+        if behavior::is_standing_for(&old, &plan.tenant, &plan.user) {
+            expert::delete(store, &legacy).await?;
+        }
+    }
     expert::delete(store, &e.id).await?;
     expert::insert(store, &e).await?;
     note(store, plan, &verdict, Some(id.as_str())).await?;
@@ -564,11 +589,167 @@ mod tests {
     }
 
     #[test]
-    fn a_standing_expert_is_named_for_its_owner_and_scope() {
+    fn a_standing_expert_is_named_for_its_workspace_owner_and_scope() {
+        let user = UserId::new("user:owner");
+        let (a, b) = (TenantId::new("ws:a"), TenantId::new("ws:b"));
         assert_eq!(
-            expert_id(&UserId::new("user:a"), "everywhere").as_str(),
-            "expert:user:a:behavior:everywhere"
+            expert_id(&a, &user, "everywhere").as_str(),
+            "expert:ws:a:user:owner:behavior:everywhere"
         );
+        assert_ne!(
+            expert_id(&a, &user, "everywhere"),
+            expert_id(&b, &user, "everywhere"),
+            "every hosted workspace's first user is user:owner"
+        );
+    }
+
+    /// An admitted training of `ids` in `scope`, every behavior learned.
+    fn admitted(ids: &[&str], adapter: &str) -> Trained {
+        let learned = |id: &&str| antumbra_train::behave::BehaviorScore {
+            id: id.to_string(),
+            base: 0.0,
+            expert: 1.0,
+            admitted: true,
+            held: 3,
+            worse: 0.02,
+        };
+        Trained {
+            verdict: Verdict {
+                admitted: true,
+                behaviors: ids.iter().map(learned).collect(),
+                controls: Vec::new(),
+                reasons: Vec::new(),
+            },
+            replay: 0,
+            adapter_uri: adapter.into(),
+            base_model: "base".into(),
+            fitness: 1.0,
+            capability_vec: vec![0.0; EMBED_DIM],
+            recipe: behavior::Recipe::default(),
+        }
+    }
+
+    /// A plan for `tenant`'s `user:owner` everywhere, of one behavior held in
+    /// memory only: minting needs nothing from the store but the experts.
+    fn owner_plan(tenant: &str) -> Plan {
+        use antumbra_core::behavior::{content, Example};
+        let spec = Spec {
+            rule: "A rule.".into(),
+            must: vec!["x".into()],
+            must_not: vec![],
+            examples: (0..4)
+                .map(|i| Example {
+                    task: format!("t{i}"),
+                    answer: "x".into(),
+                })
+                .collect(),
+            violations: vec!["y".into()],
+        };
+        let m = Memory::new(
+            "memory:rule",
+            TenantId::new(tenant),
+            antumbra_core::MemoryNetwork::Opinion,
+            content(&spec),
+            1.0,
+            Utc::now(),
+        );
+        Plan {
+            tenant: TenantId::new(tenant),
+            user: UserId::new("user:owner"),
+            scope: "everywhere".into(),
+            taught: vec![(m, spec)],
+        }
+    }
+
+    #[tokio::test]
+    async fn two_workspaces_with_the_same_user_keep_their_own_standing_experts() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let (a, b) = (owner_plan("ws:a"), owner_plan("ws:b"));
+        let (ea, _) = mint(
+            &store,
+            &a,
+            admitted(&["memory:rule"], "adapters/a.safetensors"),
+            "rig",
+        )
+        .await
+        .unwrap()
+        .expert
+        .unwrap();
+        let (eb, _) = mint(
+            &store,
+            &b,
+            admitted(&["memory:rule"], "adapters/b.safetensors"),
+            "rig",
+        )
+        .await
+        .unwrap()
+        .expert
+        .unwrap();
+        assert_ne!(ea, eb);
+        let ea = expert::get(&store, &ea).await.unwrap().expect("a's kept");
+        let eb = expert::get(&store, &eb).await.unwrap().expect("b's kept");
+        assert_eq!(ea.artifact_uri, "adapters/a.safetensors");
+        assert_eq!(eb.artifact_uri, "adapters/b.safetensors");
+        let owner = UserId::new("user:owner");
+        assert!(behavior::is_standing_for(&ea, &a.tenant, &owner));
+        assert!(!behavior::is_standing_for(&ea, &b.tenant, &owner));
+        assert!(behavior::is_standing_for(&eb, &b.tenant, &owner));
+    }
+
+    #[tokio::test]
+    async fn minting_retires_this_workspace_s_expert_under_the_old_id_and_no_other() {
+        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let owner = UserId::new("user:owner");
+        let (a, b) = (owner_plan("ws:a"), owner_plan("ws:b"));
+        let old = |tenant: &TenantId| Expert {
+            id: legacy_expert_id(&owner, "everywhere"),
+            name: "old".into(),
+            base_model: "base".into(),
+            artifact_uri: "adapters/old.safetensors".into(),
+            capability_card: serde_json::json!({ "standing": true, "scope": "everywhere" }),
+            capability_vec: None,
+            fitness: 1.0,
+            frozen_at: Some(Utc::now()),
+            generation: Generation::ZERO,
+            owner: Some(owner.clone()),
+            compartment: Some(behavior::compartment_id(tenant, &owner)),
+            placed_on: Some("rig".into()),
+            created_at: Utc::now(),
+        };
+        let legacy = legacy_expert_id(&owner, "everywhere");
+
+        // Another workspace's, under the old id: minting here leaves it.
+        expert::insert(&store, &old(&b.tenant)).await.unwrap();
+        mint(
+            &store,
+            &a,
+            admitted(&["memory:rule"], "adapters/a.safetensors"),
+            "rig",
+        )
+        .await
+        .unwrap();
+        assert!(
+            expert::get(&store, &legacy).await.unwrap().is_some(),
+            "not this workspace's to retire"
+        );
+
+        // This workspace's, under the old id: minting here retires it.
+        expert::delete(&store, &legacy).await.unwrap();
+        expert::insert(&store, &old(&a.tenant)).await.unwrap();
+        mint(
+            &store,
+            &a,
+            admitted(&["memory:rule"], "adapters/a2.safetensors"),
+            "rig",
+        )
+        .await
+        .unwrap();
+        assert!(expert::get(&store, &legacy).await.unwrap().is_none());
+        let now = expert::get(&store, &expert_id(&a.tenant, &owner, "everywhere"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(now.artifact_uri, "adapters/a2.safetensors");
     }
 
     #[tokio::test]
@@ -643,7 +824,7 @@ mod tests {
         };
         let report = mint(&store, &plan, trained, "rig").await.unwrap();
         let minted = report.expert.unwrap().0;
-        assert_eq!(minted.as_str(), "expert:user:a:behavior:everywhere");
+        assert_eq!(minted.as_str(), "expert:ws:a:user:a:behavior:everywhere");
         let status = |id: &str| {
             let store = store.clone();
             let tenant = tenant.clone();

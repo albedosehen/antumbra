@@ -225,6 +225,16 @@ pub fn compartment_id(tenant: &TenantId, user: &UserId) -> CompartmentId {
     ))
 }
 
+/// Whether `e` is one of `user`'s standing experts in `tenant`. The owner
+/// alone does not say: every hosted workspace's first user has the same id,
+/// so the compartment it was trained from, which names the workspace,
+/// decides. Every standing expert has carried its compartment.
+pub fn is_standing_for(e: &Expert, tenant: &TenantId, user: &UserId) -> bool {
+    e.standing_scope().is_some()
+        && e.owner.as_ref() == Some(user)
+        && e.compartment.as_ref() == Some(&compartment_id(tenant, user))
+}
+
 /// A behavior as a memory's content: the rule first, for recall and the
 /// agent, then the fenced block training reads.
 pub fn content(spec: &Spec) -> String {

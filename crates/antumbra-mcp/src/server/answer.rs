@@ -104,7 +104,10 @@ impl McpServer {
         let mine: Vec<Expert> = lifecycle::routable(&self.store)
             .await?
             .into_iter()
-            .filter(|e| e.owner.as_ref() == Some(&self.user) && serve.can_serve(&e.id))
+            .filter(|e| {
+                antumbra_core::behavior::is_standing_for(e, &self.tenant, &self.user)
+                    && serve.can_serve(&e.id)
+            })
             .collect();
         Ok(scopes
             .iter()

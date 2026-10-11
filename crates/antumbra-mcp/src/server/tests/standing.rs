@@ -39,7 +39,11 @@ fn expert(id: &str, owner: &str, card: serde_json::Value, cap: Vec<f32>) -> Expe
         frozen_at: Some(now),
         generation: Generation::ZERO,
         owner: Some(UserId::new(owner)),
-        compartment: None,
+        // Trained from the owner's behaviors in the server's workspace.
+        compartment: Some(antumbra_core::behavior::compartment_id(
+            &TenantId::new("ws:test"),
+            &UserId::new(owner),
+        )),
         placed_on: None,
         created_at: now,
     }
@@ -124,6 +128,20 @@ async fn an_answer_composes_the_users_standing_experts_for_everywhere_and_its_re
             standing("everywhere"),
             elsewhere.clone(),
         ),
+        // The same user id in another workspace: every hosted workspace's
+        // first user shares one.
+        Expert {
+            compartment: Some(antumbra_core::behavior::compartment_id(
+                &TenantId::new("ws:other"),
+                &UserId::new("user:test"),
+            )),
+            ..expert(
+                "expert:other-workspace",
+                "user:test",
+                standing("everywhere"),
+                elsewhere.clone(),
+            )
+        },
     ] {
         expert::insert(&s.store, &e).await.unwrap();
     }
