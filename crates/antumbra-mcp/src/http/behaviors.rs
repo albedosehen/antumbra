@@ -115,9 +115,10 @@ mod keeper {
 
     use anyhow::Result;
 
-    use antumbra_core::{TenantId, UserId};
+    use antumbra_core::behavior::tuning;
+    use antumbra_core::{Memory, TenantId, UserId};
     use antumbra_serve::behave;
-    use antumbra_store::repo::{compartment, device, expert, memory};
+    use antumbra_store::repo::{behavior_tuning, compartment, device, expert, memory};
 
     use super::{plan_user, Failed, Need, ScopePlan};
     use crate::http::HttpState;
@@ -136,6 +137,8 @@ mod keeper {
         /// Served experts measured on the examples their behaviors gained,
         /// before the changed set replaced them.
         audited: usize,
+        /// Readings that moved a workspace's regression confidence.
+        tuned: usize,
     }
 
     pub(in crate::http) fn spawn(state: Arc<HttpState>) {
@@ -148,9 +151,14 @@ mod keeper {
             return;
         }
         eprintln!(
-            "antumbra-mcp: standing experts kept here, a pass every {} minutes, trained at {}",
+            "antumbra-mcp: standing experts kept here, a pass every {} minutes, trained at {}{}",
             INTERVAL.as_secs() / 60,
-            state.recipe.describe()
+            state.recipe.describe(),
+            if state.tune_confidence {
+                ", the confidence tuned from audits"
+            } else {
+                ""
+            }
         );
         tokio::spawn(async move {
             let mut failed = Failed::new();
@@ -158,13 +166,14 @@ mod keeper {
             loop {
                 let clock = Instant::now();
                 match pass(&state, &mut failed).await {
-                    Ok(t) if t.trained + t.refused + t.dropped > 0 => eprintln!(
-                        "antumbra-mcp: standing experts, pass in {:.0}s: {} trained, {} refused, {} dropped, {} audited",
+                    Ok(t) if t.trained + t.refused + t.dropped + t.tuned > 0 => eprintln!(
+                        "antumbra-mcp: standing experts, pass in {:.0}s: {} trained, {} refused, {} dropped, {} audited, {} tuned",
                         clock.elapsed().as_secs_f32(),
                         t.trained,
                         t.refused,
                         t.dropped,
-                        t.audited
+                        t.audited,
+                        t.tuned
                     ),
                     Ok(_) => {}
                     Err(e) => eprintln!("antumbra-mcp: standing experts pass stopped: {e:#}"),
@@ -181,12 +190,78 @@ mod keeper {
             compartment::list_named(&state.store, antumbra_core::behavior::COMPARTMENT_NAME).await?
         };
         let mut tally = Tally::default();
+        // Each workspace's behaviors, as read for its users, pooled for the
+        // reading of their audits after every user has been seen to.
+        let mut by_tenant: Vec<(TenantId, Vec<Memory>)> = Vec::new();
         for c in compartments {
-            user(state, &c.tenant, &c.owner, &c.id, failed, &mut tally).await?;
+            let memories = user(state, &c.tenant, &c.owner, &c.id, failed, &mut tally).await?;
+            match by_tenant.iter_mut().find(|(t, _)| *t == c.tenant) {
+                Some((_, all)) => all.extend(memories),
+                None => by_tenant.push((c.tenant.clone(), memories)),
+            }
+        }
+        if state.tune_confidence {
+            for (tenant, memories) in &by_tenant {
+                tune(state, tenant, memories, &mut tally).await?;
+            }
         }
         Ok(tally)
     }
 
+    /// The regression confidence a training in `tenant` is admitted at: the
+    /// last reading's, when the node tunes it, else the recipe's.
+    async fn confidence_for(state: &HttpState, tenant: &TenantId) -> Result<f64> {
+        if !state.tune_confidence {
+            return Ok(state.recipe.regression_confidence);
+        }
+        let _guard = state.auth.lock().await;
+        state.store.signin_root().await?;
+        let last = behavior_tuning::latest(&state.store, tenant).await?;
+        Ok(last.map_or(state.recipe.regression_confidence, |r| r.to))
+    }
+
+    /// Read `tenant`'s pooled audits against the confidence in force, and
+    /// move it when this reading and the one before lean the same way. The
+    /// same audits are never read twice, and every reading is kept. Audits
+    /// noted in this pass are read at the next.
+    async fn tune(
+        state: &HttpState,
+        tenant: &TenantId,
+        memories: &[Memory],
+        tally: &mut Tally,
+    ) -> Result<()> {
+        let pool = tuning::Pool::of(memories);
+        let _guard = state.auth.lock().await;
+        state.store.signin_root().await?;
+        let last = behavior_tuning::latest(&state.store, tenant).await?;
+        if last
+            .as_ref()
+            .is_some_and(|l| l.bets == pool.bets && l.fresh == pool.fresh)
+        {
+            return Ok(());
+        }
+        let current = last
+            .as_ref()
+            .map_or(state.recipe.regression_confidence, |l| l.to);
+        let previous = last.as_ref().and_then(|l| tuning::Lean::parse(&l.lean));
+        let Some(reading) = tuning::read(&pool, current, previous) else {
+            return Ok(());
+        };
+        let row = behavior_tuning::TuningRow::of(tenant, &reading, chrono::Utc::now());
+        behavior_tuning::append(&state.store, &row).await?;
+        if reading.moved() {
+            tally.tuned += 1;
+        }
+        eprintln!(
+            "antumbra-mcp: standing experts, {} regression confidence: {}",
+            tenant.as_str(),
+            reading.describe()
+        );
+        Ok(())
+    }
+
+    /// See to one user's scopes. Returns the behaviors read for the user, for
+    /// the workspace's reading; none when another node trains for them.
     async fn user(
         state: &HttpState,
         tenant: &TenantId,
@@ -194,7 +269,7 @@ mod keeper {
         compartment: &antumbra_core::CompartmentId,
         failed: &mut Failed,
         tally: &mut Tally,
-    ) -> Result<()> {
+    ) -> Result<Vec<Memory>> {
         let (memories, experts, here) = {
             let _guard = state.auth.lock().await;
             state.store.signin_root().await?;
@@ -213,7 +288,7 @@ mod keeper {
             (memories, experts, here)
         };
         if !here {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let scopes = plan_user(&memories, &experts, failed, tenant.as_str(), user.as_str());
         for ScopePlan {
@@ -295,7 +370,7 @@ mod keeper {
                         }
                     }
                     let job = plan.clone();
-                    let confidence = state.recipe.regression_confidence;
+                    let confidence = confidence_for(state, tenant).await?;
                     let trained = crate::server::heavy::spawn_heavy(async move {
                         behave::train(&job, embedder.as_ref(), &cfg, confidence).await
                     })
@@ -338,7 +413,7 @@ mod keeper {
                 }
             }
         }
-        Ok(())
+        Ok(memories)
     }
 }
 

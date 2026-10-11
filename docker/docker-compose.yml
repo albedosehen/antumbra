@@ -100,6 +100,10 @@ services:
       # the expert answers it worse than the base model before that refuses
       # the set (a probability above 0.5 and below 1).
       - ANTUMBRA_BEHAVE_REGRESSION_CONFIDENCE=${ANTUMBRA_BEHAVE_REGRESSION_CONFIDENCE:-0.9}
+      # Let the loop tune that confidence from the audits of the experts it
+      # admitted: per workspace, 0.02 at a time, only when two readings in a
+      # row agree, within 0.6 and 0.98. Off, the value above stands.
+      - ANTUMBRA_BEHAVE_TUNE_CONFIDENCE=${ANTUMBRA_BEHAVE_TUNE_CONFIDENCE:-false}
       # The copal document of record: each ingested document's original is
       # archived there before its chunks are stored. Unset = off, and ingest
       # keeps only the chunks. With the `copal` profile started:

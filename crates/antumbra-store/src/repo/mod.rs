@@ -5,6 +5,7 @@
 
 pub mod account;
 pub mod behavior;
+pub mod behavior_tuning;
 pub mod boundary;
 pub mod compartment;
 pub mod contribution;

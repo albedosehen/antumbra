@@ -168,6 +168,10 @@ struct HttpState {
     /// with the models feature.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
     recipe: antumbra_core::behavior::Recipe,
+    /// Whether the keeper tunes the recipe's regression confidence, per
+    /// workspace, from the audits of the experts it admitted.
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    tune_confidence: bool,
     /// The serving engine the `answer` tool drives, built once from the owner
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
@@ -223,6 +227,7 @@ pub async fn serve(
     profile: Option<Arc<crate::profile::ToolProfile>>,
     github: Option<GithubConfig>,
     recipe: antumbra_core::behavior::Recipe,
+    tune_confidence: bool,
 ) -> Result<()> {
     let mut store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -260,6 +265,7 @@ pub async fn serve(
         auth: Mutex::new(()),
         auto_propose,
         recipe,
+        tune_confidence,
         serve,
         reranker,
         decider,

@@ -38,6 +38,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         auth: Mutex::new(()),
         auto_propose: None,
         recipe: antumbra_core::behavior::Recipe::default(),
+        tune_confidence: false,
         serve: None,
         reranker: None,
         decider: None,

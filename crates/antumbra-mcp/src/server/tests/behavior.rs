@@ -266,18 +266,23 @@ async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
             fresh: 2,
             base: 0,
             expert: 1,
+            worse: Some(0.74),
         },
     );
     memory::upsert(&store, &m).await?;
-    let listed = s
+    let out = s
         .list_behaviors(Parameters(ListBehaviorsParams {
             status: None,
             scope: None,
         }))
         .await
         .unwrap()
-        .0
-        .behaviors;
+        .0;
+    assert!(
+        out.tuned_confidence.is_none() && out.tuning.is_empty(),
+        "no reading yet: the recipe's confidence stands"
+    );
+    let listed = out.behaviors;
     let said = listed[0].last_training.as_deref().unwrap_or_default();
     assert!(
         said.starts_with("not learned (held-out 0.50 against the base model's 0.00); its scope's expert serves the others without it"),

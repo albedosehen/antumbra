@@ -45,6 +45,10 @@ const AUDIT: &str = "behavior-audit:";
 /// [`example_print`]s, and the later examples the expert was audited on.
 pub const CARD_EXAMPLES: &str = "examples";
 pub const CARD_AUDITED: &str = "audited";
+/// On a standing expert's card: each taught behavior's held-out scores at
+/// admission (`base`, `expert`, `held`, `worse`, `learned`), the decision an
+/// audit later checks.
+pub const CARD_SCORES: &str = "scores";
 /// A memory the behavior was drawn from, one entry each. Read by the
 /// candidate pass, which leaves cited memories out; not part of the set a
 /// training is fingerprinted by, since the fingerprint hashes the content.
@@ -408,13 +412,68 @@ pub fn training(evidence: &[String]) -> Option<Training> {
     })
 }
 
+fn ln_factorial(n: usize) -> f64 {
+    (1..=n).map(|k| (k as f64).ln()).sum()
+}
+
+/// `ln B(a, b)` for positive integer parameters.
+fn ln_beta(a: usize, b: usize) -> f64 {
+    ln_factorial(a - 1) + ln_factorial(b - 1) - ln_factorial(a + b - 1)
+}
+
+/// `P(X > Y)` for `X ~ Beta(a1, b1)` and `Y ~ Beta(a2, b2)` with positive
+/// integer parameters, in closed form: the sum over the first shape of the
+/// ratio of beta functions (Cook, 2005).
+pub fn prob_beta_greater(a1: usize, b1: usize, a2: usize, b2: usize) -> f64 {
+    (0..a1)
+        .map(|i| {
+            (ln_beta(a2 + i, b1 + b2)
+                - ((b1 + i) as f64).ln()
+                - ln_beta(1 + i, b1)
+                - ln_beta(a2, b2))
+            .exp()
+        })
+        .sum::<f64>()
+        .clamp(0.0, 1.0)
+}
+
+/// How likely it is that the expert's true pass rate on a behavior is below
+/// the base model's, given `base_passed` and `expert_passed` of `held` tasks
+/// each. Each rate is a `Beta(1 + passed, 1 + failed)` from a flat prior, so
+/// the answer carries the evidence: 3 of 3 against 2 of 3 is about 0.74, one
+/// task lost of a few; 3 of 3 against 0 of 3 is above 0.98; 18 of 18 against
+/// 15 of 18 is above 0.9. With no held-out task there is nothing to say,
+/// and the answer is 0.5.
+pub fn prob_worse(base_passed: usize, expert_passed: usize, held: usize) -> f64 {
+    if held == 0 {
+        return 0.5;
+    }
+    let base_passed = base_passed.min(held);
+    let expert_passed = expert_passed.min(held);
+    prob_beta_greater(
+        1 + base_passed,
+        1 + held - base_passed,
+        1 + expert_passed,
+        1 + held - expert_passed,
+    )
+}
+
+/// On a standing expert's card, how likely admission found the expert worse
+/// than the base model on the behavior under any of `ids`: its own, or the
+/// one it supersedes. `None` for a card from before scores were kept on it.
+pub fn card_worse(card: &serde_json::Value, ids: &[&str]) -> Option<f32> {
+    ids.iter()
+        .find_map(|id| card.get(CARD_SCORES)?.get(id)?.get("worse")?.as_f64())
+        .map(|w| w as f32)
+}
+
 /// A served expert measured, beside the base model, on examples a behavior
 /// gained after the expert was trained: tasks the training never saw, written
 /// by the user, so what they say about the expert comes from outside the loop
 /// that admitted it. The keeper runs one before it retrains a scope whose set
 /// changed, and it changes nothing about admission: it is the evidence the
-/// recipe's regression confidence is to be tuned from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// recipe's regression confidence is tuned from ([`tuning`]).
+#[derive(Debug, Clone, PartialEq)]
 pub struct Audit {
     /// The [`fingerprint`] of the set the expert was trained on, which ties
     /// the audit to the [`Training`] that admitted it.
@@ -425,6 +484,11 @@ pub struct Audit {
     pub base: usize,
     /// How many the expert passed.
     pub expert: usize,
+    /// How likely admission found the expert worse than the base model on
+    /// this behavior, from the card: the bet the audit checks. Above 0.5, the
+    /// set was admitted although the behavior had slipped. `None` when the
+    /// card was minted before scores were kept on it.
+    pub worse: Option<f32>,
 }
 
 impl Audit {
@@ -444,10 +508,14 @@ impl Audit {
 /// Audits keep: each is of different examples, and together they are the
 /// evidence on the expert's admission.
 pub fn mark_audit(evidence: &mut Vec<String>, audit: &Audit) {
-    evidence.push(format!(
+    let mut note = format!(
         "{AUDIT}{} fresh={} base={} expert={}",
         audit.set, audit.fresh, audit.base, audit.expert
-    ));
+    );
+    if let Some(w) = audit.worse {
+        note.push_str(&format!(" worse={w:.2}"));
+    }
+    evidence.push(note);
 }
 
 /// Every audit noted in a behavior's evidence, oldest first.
@@ -457,12 +525,18 @@ pub fn audits(evidence: &[String]) -> Vec<Audit> {
         .filter_map(|e| {
             let mut words = e.strip_prefix(AUDIT)?.split_whitespace();
             let set = words.next()?.to_string();
-            let mut field = |name: &str| words.next()?.strip_prefix(name)?.parse::<usize>().ok();
+            let mut field = |name: &str| words.next()?.strip_prefix(name).map(str::to_string);
+            let fresh = field("fresh=")?.parse().ok()?;
+            let base = field("base=")?.parse().ok()?;
+            let expert = field("expert=")?.parse().ok()?;
+            // Notes from before the bet was kept end here.
+            let worse = field("worse=").and_then(|v| v.parse().ok());
             Some(Audit {
                 set,
-                fresh: field("fresh=")?,
-                base: field("base=")?,
-                expert: field("expert=")?,
+                fresh,
+                base,
+                expert,
+                worse,
             })
         })
         .collect()
@@ -757,6 +831,7 @@ pub fn stale(taught: &[(Memory, Spec)], expert: Option<&Expert>) -> bool {
 }
 
 pub mod candidate;
+pub mod tuning;
 
 #[cfg(test)]
 mod tests;
