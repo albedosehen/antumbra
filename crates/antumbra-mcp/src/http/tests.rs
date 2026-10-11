@@ -26,6 +26,7 @@ pub(super) async fn state_embedding(store: Store, embedder: Arc<dyn Embedder>) -
         auth: Mutex::new(()),
         auto_propose: None,
         recipe: antumbra_core::behavior::Recipe::default(),
+        tune_confidence: false,
         serve: None,
         reranker: None,
         decider: None,

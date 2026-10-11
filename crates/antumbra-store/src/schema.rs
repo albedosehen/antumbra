@@ -601,6 +601,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_mode(TableMode::Schemaless)
             .with_permissions(TENANT_PERMS)
             .with_indexes([unique_index("embedder_config_tenant_uq", ["tenant_id"])]),
+        // The loop's readings of a workspace's behavior audits against the
+        // regression confidence admission is held to: one row per reading,
+        // appended, the latest in force. Tenant-scoped like the behaviors.
+        table_schema("behavior_tuning")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(TENANT_PERMS)
+            .with_indexes([index("behavior_tuning_tenant_idx", ["tenant_id"])]),
     ]
 }
 

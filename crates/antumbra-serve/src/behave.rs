@@ -337,11 +337,23 @@ pub async fn audit(plan: &Plan, current: &Expert, cfg: &RaftConfig) -> Result<Op
             let prefix = format!("{id}#");
             let (b, n) = course::counts(&base.per_task, &prefix);
             let (e, _) = course::counts(&expert.per_task, &prefix);
+            // The bet admission made on it, under its id or the one it
+            // supersedes.
+            let earlier = plan
+                .taught
+                .iter()
+                .find(|(m, _)| m.id.as_str() == id)
+                .and_then(|(m, _)| State::of(&m.evidence))
+                .and_then(|s| s.supersedes);
+            let ids: Vec<&str> = std::iter::once(id.as_str())
+                .chain(earlier.as_deref())
+                .collect();
             let audit = behavior::Audit {
                 set: set.clone(),
                 fresh: n,
                 base: b,
                 expert: e,
+                worse: behavior::card_worse(&current.capability_card, &ids),
             };
             let prints = examples.iter().map(behavior::example_print).collect();
             (id.clone(), audit, prints)
@@ -466,6 +478,19 @@ pub async fn mint(
         })).collect::<Vec<_>>(),
     });
     card[behavior::CARD_EXAMPLES] = serde_json::Value::Object(examples);
+    // Each behavior's held-out scores at admission: the bet an audit checks.
+    let scores: serde_json::Map<String, serde_json::Value> = verdict
+        .behaviors
+        .iter()
+        .map(|s| {
+            let score = serde_json::json!({
+                "base": s.base, "expert": s.expert, "held": s.held,
+                "worse": s.worse, "learned": s.admitted,
+            });
+            (s.id.clone(), score)
+        })
+        .collect();
+    card[behavior::CARD_SCORES] = serde_json::Value::Object(scores);
     let e = Expert {
         id: id.clone(),
         name: id.as_str().to_string(),
@@ -742,6 +767,20 @@ mod tests {
         );
         let set = behavior::fingerprint(&plan.taught);
         assert_eq!(behavior::trained_set(&e), Some(set.as_str()));
+        // The card keeps each behavior's scores at admission, for the audit.
+        assert!(behavior::card_worse(&e.capability_card, &["memory:missed"]).is_some());
+        assert!(
+            behavior::card_worse(&e.capability_card, &["memory:later", "memory:learned"]).is_some(),
+            "read under the id a later recording supersedes"
+        );
+        assert_eq!(
+            behavior::card_worse(&e.capability_card, &["memory:other"]),
+            None
+        );
+        assert_eq!(
+            e.capability_card[behavior::CARD_SCORES]["memory:learned"]["learned"],
+            serde_json::json!(true)
+        );
 
         let (status, t) = stored(&store, "memory:learned").await;
         assert_eq!(status, Status::Trained);
@@ -843,6 +882,7 @@ mod tests {
                     fresh: 1,
                     base: 0,
                     expert: 1,
+                    worse: behavior::card_worse(&e.capability_card, &["memory:missed"]),
                 },
                 vec![print.clone()],
             )],
@@ -956,6 +996,7 @@ mod tests {
                     fresh: 1,
                     base: 1,
                     expert: 1,
+                    worse: None,
                 },
                 vec![print.clone()],
             )],

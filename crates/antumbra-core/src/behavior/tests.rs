@@ -370,12 +370,14 @@ fn an_audit_is_noted_beside_the_others_and_read_back_in_order() {
         fresh: 2,
         base: 1,
         expert: 2,
+        worse: Some(0.74),
     };
     let second = Audit {
         set: "00112233aabbccdd".into(),
         fresh: 1,
         base: 0,
         expert: 0,
+        worse: None,
     };
     mark_audit(&mut m.evidence, &first);
     mark_audit(&mut m.evidence, &second);
@@ -383,6 +385,19 @@ fn an_audit_is_noted_beside_the_others_and_read_back_in_order() {
         audits(&m.evidence),
         [first.clone(), second.clone()],
         "audits keep: each is of different examples"
+    );
+    assert!(
+        m.evidence
+            .iter()
+            .any(|e| e == "behavior-audit:00112233aabbccdd fresh=2 base=1 expert=2 worse=0.74"),
+        "{:?}",
+        m.evidence
+    );
+    assert!(
+        m.evidence
+            .iter()
+            .any(|e| e == "behavior-audit:00112233aabbccdd fresh=1 base=0 expert=0"),
+        "no bet known, none written"
     );
     assert_eq!(
         first.describe(),
@@ -447,6 +462,27 @@ fn the_fresh_examples_are_the_ones_a_card_was_neither_trained_nor_audited_on() {
     // A card from before examples were kept audits nothing.
     let card = serde_json::json!({ "standing": true, "scope": EVERYWHERE, "set": "x" });
     assert!(fresh_examples(&taught, &card).is_empty());
+}
+
+#[test]
+fn the_bet_an_audit_checks_is_read_off_the_card_under_either_id() {
+    let card = serde_json::json!({
+        "standing": true, "scope": EVERYWHERE, "set": "x",
+        CARD_SCORES: {
+            "memory:a": { "base": 1.0, "expert": 0.67, "held": 3, "worse": 0.74, "learned": false },
+            "memory:b": { "base": 0.0, "expert": 1.0, "held": 3, "worse": 0.02, "learned": true },
+        },
+    });
+    assert_eq!(card_worse(&card, &["memory:a"]), Some(0.74));
+    assert_eq!(
+        card_worse(&card, &["memory:a2", "memory:a"]),
+        Some(0.74),
+        "the one it supersedes"
+    );
+    assert_eq!(card_worse(&card, &["memory:b"]), Some(0.02));
+    assert_eq!(card_worse(&card, &["memory:c"]), None);
+    let older = serde_json::json!({ "standing": true, "scope": EVERYWHERE, "set": "x" });
+    assert_eq!(card_worse(&older, &["memory:a"]), None);
 }
 
 /// Recording a behavior again is how it gains examples: the new one carries

@@ -252,51 +252,9 @@ pub fn counts(results: &[TaskResult], prefix: &str) -> (usize, usize) {
         .fold((0, 0), |(p, t), r| (p + r.passed, t + r.total))
 }
 
-fn ln_factorial(n: usize) -> f64 {
-    (1..=n).map(|k| (k as f64).ln()).sum()
-}
-
-/// `ln B(a, b)` for positive integer parameters.
-fn ln_beta(a: usize, b: usize) -> f64 {
-    ln_factorial(a - 1) + ln_factorial(b - 1) - ln_factorial(a + b - 1)
-}
-
-/// `P(X > Y)` for `X ~ Beta(a1, b1)` and `Y ~ Beta(a2, b2)` with positive
-/// integer parameters, in closed form: the sum over the first shape of the
-/// ratio of beta functions (Cook, 2005).
-pub fn prob_beta_greater(a1: usize, b1: usize, a2: usize, b2: usize) -> f64 {
-    (0..a1)
-        .map(|i| {
-            (ln_beta(a2 + i, b1 + b2)
-                - ((b1 + i) as f64).ln()
-                - ln_beta(1 + i, b1)
-                - ln_beta(a2, b2))
-            .exp()
-        })
-        .sum::<f64>()
-        .clamp(0.0, 1.0)
-}
-
-/// How likely it is that the expert's true pass rate on a behavior is below
-/// the base model's, given `base_passed` and `expert_passed` of `held` tasks
-/// each. Each rate is a `Beta(1 + passed, 1 + failed)` from a flat prior, so
-/// the answer carries the evidence: 3 of 3 against 2 of 3 is about 0.74, one
-/// task lost of a few; 3 of 3 against 0 of 3 is above 0.98; 18 of 18 against
-/// 15 of 18 is above 0.9. With no held-out task there is nothing to say,
-/// and the answer is 0.5.
-pub fn prob_worse(base_passed: usize, expert_passed: usize, held: usize) -> f64 {
-    if held == 0 {
-        return 0.5;
-    }
-    let base_passed = base_passed.min(held);
-    let expert_passed = expert_passed.min(held);
-    prob_beta_greater(
-        1 + base_passed,
-        1 + held - base_passed,
-        1 + expert_passed,
-        1 + held - expert_passed,
-    )
-}
+// The odds admission is judged by live in the core, beside the tuning that
+// reads them back; they are the trainer's to use.
+pub use antumbra_core::behavior::{prob_beta_greater, prob_worse};
 
 /// Judge an expert behavior by behavior. One is learned when it passes its
 /// held-out tasks at least [`MIN_RATE`], and at least [`MIN_GAIN`] above the

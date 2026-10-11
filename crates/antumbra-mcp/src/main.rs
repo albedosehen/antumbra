@@ -140,6 +140,12 @@ struct Cli {
         default_value_t = 0.9
     )]
     behave_regression_confidence: f64,
+    /// Let the loop tune the regression confidence from the audits of the
+    /// experts it admitted: per workspace, one step of 0.02 at a time, only
+    /// when two readings in a row agree, never below 0.6 or above 0.98. Off,
+    /// the recipe's value stands and the audits are only noted.
+    #[arg(long, env = "ANTUMBRA_BEHAVE_TUNE_CONFIDENCE")]
+    behave_tune_confidence: bool,
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -769,6 +775,7 @@ async fn run() -> Result<()> {
             profile,
             github,
             recipe,
+            cli.behave_tune_confidence,
         )
         .await;
     }

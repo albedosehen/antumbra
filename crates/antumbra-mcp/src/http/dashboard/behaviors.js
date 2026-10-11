@@ -16,12 +16,14 @@ function behaviorsFilter() {
 
 /** The user's behaviors, newest first, cut to the filter's status. */
 async function loadBehaviors() {
-  const { behaviors } = await call("list_behaviors");
+  const { behaviors, tuned_confidence: tuned } = await call("list_behaviors");
   const counts = Object.fromEntries(BEHAVIOR_STATUSES.map((s) => [s, 0]));
   for (const b of behaviors) counts[b.status] = (counts[b.status] ?? 0) + 1;
-  byId("behaviors-summary").textContent = behaviors.length
-    ? BEHAVIOR_STATUSES.map((s) => `${numbers.format(counts[s])} ${s}`).join(" · ")
-    : "";
+  const summary = behaviors.length ? BEHAVIOR_STATUSES.map((s) => `${numbers.format(counts[s])} ${s}`) : [];
+  // The confidence the loop has tuned admission to, once it has read this
+  // workspace's audits; before that the server's recipe applies.
+  if (typeof tuned === "number") summary.push(`admission refuses at ${tuned.toFixed(2)}, tuned from its audits`);
+  byId("behaviors-summary").textContent = summary.join(" · ");
   const status = behaviorsFilter();
   const shown = status ? behaviors.filter((b) => b.status === status) : behaviors;
   const list = byId("behaviors");

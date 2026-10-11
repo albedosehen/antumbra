@@ -119,7 +119,28 @@ pub(super) struct BehaviorView {
 #[derive(Serialize, schemars::JsonSchema)]
 pub(super) struct BehaviorsOut {
     pub(super) behaviors: Vec<BehaviorView>,
+    /// The regression confidence admission in this workspace is held to,
+    /// once the loop has read the workspace's audits: the last reading's.
+    /// Absent, the server recipe's applies.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) tuned_confidence: Option<f64>,
+    /// The loop's recent readings of the workspace's audits, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) tuning: Vec<TuningView>,
 }
+
+/// One reading of a workspace's audits against its regression confidence.
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct TuningView {
+    pub(super) at: String,
+    pub(super) from: f64,
+    pub(super) to: f64,
+    /// What it read and what it did.
+    pub(super) said: String,
+}
+
+/// How many readings `list_behaviors` returns.
+const RECENT_READINGS: usize = 5;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct BehaviorIdParams {
@@ -257,7 +278,30 @@ impl McpServer {
                 sources: state.sources,
             })
             .collect();
-        Ok(Json(BehaviorsOut { behaviors }))
+        let readings = antumbra_store::repo::behavior_tuning::recent(
+            &self.store,
+            &self.tenant,
+            RECENT_READINGS,
+        )
+        .await
+        .map_err(err)?;
+        let tuned_confidence = readings.first().map(|r| r.to);
+        let tuning = readings
+            .iter()
+            .filter_map(|r| {
+                Some(TuningView {
+                    at: r.at.to_rfc3339(),
+                    from: r.from,
+                    to: r.to,
+                    said: r.reading()?.describe(),
+                })
+            })
+            .collect();
+        Ok(Json(BehaviorsOut {
+            behaviors,
+            tuned_confidence,
+            tuning,
+        }))
     }
 
     /// Accept a proposed behavior, so the user's expert learns it.
