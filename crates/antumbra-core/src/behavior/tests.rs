@@ -85,7 +85,7 @@ fn too_few_examples_no_violations_and_bad_patterns_are_named() {
     spec = ssh();
     spec.examples.truncate(3);
     assert!(
-        spec.problems().iter().any(|p| p.contains("one in four")),
+        spec.problems().iter().any(|p| p.contains("one in three")),
         "three examples hold none out"
     );
     assert!(

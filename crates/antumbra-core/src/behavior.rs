@@ -22,10 +22,10 @@ use crate::{Expert, Memory};
 /// The scope of a behavior that applies in every repository.
 pub const EVERYWHERE: &str = "everywhere";
 /// The fewest worked examples a behavior is recorded with. Four, because
-/// training holds one example in four out to admit the expert by
-/// (`antumbra_train::behave::split`): with three, nothing is held out, the
-/// expert can never be admitted, and every training of it is spent for
-/// nothing.
+/// training holds one example in three out to admit the expert by
+/// (`antumbra_train::behave::split`), and three would leave two to learn
+/// from and one to judge by. Ten, varied in phrasing and case, hold three out
+/// and teach more reliably.
 pub const MIN_EXAMPLES: usize = 4;
 
 /// The name of a user's behavior compartment, and the last part of its id.
@@ -173,7 +173,7 @@ impl Spec {
         let must_not = compile(&self.must_not, &mut problems);
         if self.examples.len() < MIN_EXAMPLES {
             problems.push(format!(
-                "{} example(s); a behavior needs at least {MIN_EXAMPLES}, since training holds one in four out to admit its expert by",
+                "{} example(s); a behavior needs at least {MIN_EXAMPLES}, since training holds one in three out to admit its expert by",
                 self.examples.len()
             ));
         }

@@ -24,14 +24,21 @@ fn result(id: &str, passed: usize, total: usize) -> TaskResult {
 }
 
 #[test]
-fn every_fourth_example_is_held_out() {
+fn every_third_example_is_held_out() {
     let ten = spec(10);
     let (train, held) = split(&ten.examples);
-    assert_eq!((train.len(), held.len()), (8, 2));
-    assert_eq!(held[0].task, "Start issue #3.");
+    assert_eq!(
+        (train.len(), held.len()),
+        (7, 3),
+        "three held out: one miss still clears the bar"
+    );
+    assert_eq!(held[0].task, "Start issue #2.");
     let three = spec(3);
     let (train, held) = split(&three.examples);
-    assert_eq!((train.len(), held.len()), (3, 0), "too few to hold any out");
+    assert_eq!((train.len(), held.len()), (2, 1));
+    let two = spec(2);
+    let (train, held) = split(&two.examples);
+    assert_eq!((train.len(), held.len()), (2, 0), "too few to hold any out");
 }
 
 #[test]
