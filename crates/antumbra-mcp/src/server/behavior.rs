@@ -32,8 +32,12 @@ pub(super) struct RecordBehaviorParams {
     #[serde(default)]
     pub(super) must_not: Vec<String>,
     /// At least four tasks the rule governs, each with an answer that follows
-    /// it: training holds one in three out to admit the expert by. Eight to
-    /// ten teach it more reliably. Vary the phrasing and the case.
+    /// it: training holds one in three out to admit the expert by. Ten, varied
+    /// in phrasing and case, teach a rule about a command or a code form
+    /// reliably. A rule about how to go about a task, stated in prose (verify
+    /// first, do not restart it, check the state before acting), needs sixteen
+    /// to twenty: at ten, most such rules were learned on only some of their
+    /// held-out tasks.
     pub(super) examples: Vec<ExampleParams>,
     /// Answers that break the rule, as an agent that did not know it would
     /// write them. The check must refuse each.
@@ -130,7 +134,7 @@ pub(super) struct BehaviorStatusOut {
 impl McpServer {
     /// Record how the user wants an agent to act, with a check.
     #[tool(
-        description = "Record a behavior: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least four example tasks with answers that follow it (training holds one in three out to admit the expert by; eight to ten, varied in phrasing, teach it more reliably); and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
+        description = "Record a behavior: a rule for how an agent should act on a class of tasks, with a check a program can apply. Use it when the user states or corrects how to act (a convention, a preference, a correction), so the user's own expert can learn it. Give the rule in one sentence; `must` and `must_not` regular expressions that decide whether an answer follows it; at least four example tasks with answers that follow it (training holds one in three out to admit the expert by; ten, varied in phrasing and case, teach a rule about a command or a code form reliably, and a prose rule about how to go about a task needs sixteen to twenty); and answers that break it. The check is tested against the examples and violations before anything is stored; if it fails, `problems` says why and nothing is written."
     )]
     pub(super) async fn record_behavior(
         &self,
