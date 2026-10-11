@@ -48,18 +48,23 @@ pub fn expert_id(user: &UserId, scope: &str) -> ExpertId {
     ExpertId::new(format!("expert:{}:behavior:{scope}", user.as_str()))
 }
 
-/// The training a standing expert gets when nobody chose one: three epochs at
-/// 1.5e-4, with answers up to 256 tokens so no replay answer is cut short.
-/// `antumbra behave` defaults to the same. Validation trained four behaviors
-/// at 3e-4; at that rate nine taught together broke the expert (command
-/// controls 34/40 to 20/40), and at 1.5e-4 the same nine were all learned with
-/// every control held, as were the four.
-pub fn standing_config() -> RaftConfig {
+/// The training a standing expert gets, from the node's `recipe`: its rank,
+/// epochs and learning rate, with answers up to 256 tokens so no replay answer
+/// is cut short. `antumbra behave` builds its config the same way. Alpha moves
+/// with the rank, so `alpha / rank`, the scale every expert is trained and
+/// served at, stays what the default is. The default recipe is three epochs at
+/// 1.5e-4 and rank 16: validation trained four behaviors at 3e-4; at that rate
+/// nine taught together broke the expert (command controls 34/40 to 20/40), and
+/// at 1.5e-4 the same nine were all learned with every control held.
+pub fn standing_config(recipe: &behavior::Recipe) -> RaftConfig {
+    let base = RaftConfig::default();
     RaftConfig {
-        rounds: 3,
+        lora_rank: recipe.rank,
+        lora_alpha: base.lora_alpha * recipe.rank as f64 / base.lora_rank as f64,
+        rounds: recipe.rounds,
         max_new_tokens: 256,
-        learning_rate: 1.5e-4,
-        ..RaftConfig::default()
+        learning_rate: recipe.learning_rate,
+        ..base
     }
 }
 
@@ -117,6 +122,9 @@ pub struct Trained {
     pub fitness: f32,
     /// The centroid of the tasks it was taught, which routes it for its owner.
     pub capability_vec: Vec<f32>,
+    /// What it was trained with, kept on the card so a measurement can be
+    /// read back against its settings.
+    pub recipe: behavior::Recipe,
 }
 
 /// Score the base, train beside its own replay, and score again. Touches no
@@ -185,6 +193,11 @@ pub async fn train(plan: &Plan, embedder: &dyn Embedder, cfg: &RaftConfig) -> Re
         base_model: cfg.base_model.clone(),
         fitness: scores.pass_rate,
         capability_vec: acc.iter().map(|v| v / n).collect(),
+        recipe: behavior::Recipe {
+            rank: cfg.lora_rank,
+            rounds: cfg.rounds,
+            learning_rate: cfg.learning_rate,
+        },
     })
 }
 
@@ -286,6 +299,10 @@ pub async fn mint(
             "behaviors": learned, "rules": rules, "missed": missed,
             "set": behavior::fingerprint(&plan.taught), "scope": plan.scope,
             "private": true, "standing": true,
+            "recipe": {
+                "rank": trained.recipe.rank, "rounds": trained.recipe.rounds,
+                "learning_rate": trained.recipe.learning_rate,
+            },
             "controls": verdict.controls.iter().map(|c| serde_json::json!({
                 "family": c.family, "base": c.base, "expert": c.expert,
             })).collect::<Vec<_>>(),
@@ -337,9 +354,22 @@ mod tests {
 
     #[test]
     fn a_standing_expert_trains_at_the_rate_nine_behaviors_held_at() {
-        let cfg = standing_config();
+        let cfg = standing_config(&behavior::Recipe::default());
         assert!(cfg.learning_rate <= 1.5e-4, "3e-4 broke nine behaviors");
         assert_eq!((cfg.rounds, cfg.max_new_tokens), (3, 256));
+        assert_eq!(cfg.lora_rank, RaftConfig::default().lora_rank);
+    }
+
+    /// A recipe at another rank keeps the scale every expert is trained and
+    /// served at: alpha moves with the rank.
+    #[test]
+    fn a_recipe_moves_alpha_with_the_rank_and_keeps_the_scale() {
+        let recipe = behavior::Recipe::new(32, 5, 1e-4).unwrap();
+        let cfg = standing_config(&recipe);
+        assert_eq!((cfg.lora_rank, cfg.rounds), (32, 5));
+        assert!((cfg.learning_rate - 1e-4).abs() < 1e-12);
+        assert!((cfg.lora_scale() - RaftConfig::default().lora_scale()).abs() < 1e-12);
+        assert_eq!(cfg.max_new_tokens, 256);
     }
 
     #[test]
@@ -416,6 +446,7 @@ mod tests {
             base_model: "base".into(),
             fitness: 1.0,
             capability_vec: vec![0.0; EMBED_DIM],
+            recipe: behavior::Recipe::default(),
         };
         let report = mint(&store, &plan, trained, "rig").await.unwrap();
         let minted = report.expert.unwrap().0;
@@ -511,6 +542,7 @@ mod tests {
             base_model: "base".into(),
             fitness: 0.5,
             capability_vec: vec![0.0; EMBED_DIM],
+            recipe: behavior::Recipe::default(),
         };
         (store, plan, trained)
     }

@@ -163,6 +163,11 @@ struct HttpState {
     auth: Mutex<()>,
     /// Autonomous propose threshold, applied to every per-identity server.
     auto_propose: Option<usize>,
+    /// The training every standing expert on this node gets; the serving
+    /// engine was built at its rank. Read by the keeper, which trains only
+    /// with the models feature.
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    recipe: antumbra_core::behavior::Recipe,
     /// The serving engine the `answer` tool drives, built once from the owner
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
@@ -217,6 +222,7 @@ pub async fn serve(
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     github: Option<GithubConfig>,
+    recipe: antumbra_core::behavior::Recipe,
 ) -> Result<()> {
     let mut store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -243,7 +249,7 @@ pub async fn serve(
     };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
-    let serve = crate::build_serve(&store, &host).await?;
+    let serve = crate::build_serve(&store, &host, &recipe).await?;
     let state = Arc::new(HttpState {
         store,
         serving,
@@ -253,6 +259,7 @@ pub async fn serve(
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
         auth: Mutex::new(()),
         auto_propose,
+        recipe,
         serve,
         reranker,
         decider,

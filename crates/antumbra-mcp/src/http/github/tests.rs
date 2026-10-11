@@ -37,6 +37,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
         auth: Mutex::new(()),
         auto_propose: None,
+        recipe: antumbra_core::behavior::Recipe::default(),
         serve: None,
         reranker: None,
         decider: None,

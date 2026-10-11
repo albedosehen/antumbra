@@ -145,8 +145,9 @@ mod keeper {
             return;
         }
         eprintln!(
-            "antumbra-mcp: standing experts kept here, a pass every {} minutes",
-            INTERVAL.as_secs() / 60
+            "antumbra-mcp: standing experts kept here, a pass every {} minutes, trained at {}",
+            INTERVAL.as_secs() / 60,
+            state.recipe.describe()
         );
         tokio::spawn(async move {
             let mut failed = Failed::new();
@@ -250,8 +251,9 @@ mod keeper {
                         state.embedder_for(tenant).await
                     };
                     let job = plan.clone();
+                    let cfg = behave::standing_config(&state.recipe);
                     let trained = crate::server::heavy::spawn_heavy(async move {
-                        behave::train(&job, embedder.as_ref(), &behave::standing_config()).await
+                        behave::train(&job, embedder.as_ref(), &cfg).await
                     })
                     .await??;
                     let report = {

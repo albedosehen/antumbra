@@ -33,6 +33,10 @@ pub struct BehaveArgs {
     /// behavior drawn from older memories is, rather than one they stated.
     #[arg(long, default_value_t = false)]
     pub propose: bool,
+    /// The adapter's LoRA rank. Nine behaviors were all learned at 16; 32 in
+    /// one expert were not.
+    #[arg(long, default_value_t = 16)]
+    pub rank: usize,
     /// Epochs over the examples and the replay: three taught four behaviors
     /// when this procedure was first run by hand.
     #[arg(long, default_value_t = 3)]
@@ -163,11 +167,11 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
     let store = crate::connect(url).await?;
     let embedder = crate::make_embedder()?;
     let scope = normalize_scope(a.scope.as_deref());
+    let recipe = antumbra_core::behavior::Recipe::new(a.rank, a.rounds, a.lr)
+        .map_err(|e| anyhow::anyhow!("--rank/--rounds/--lr: {e}"))?;
     let cfg = antumbra_serve::RaftConfig {
-        rounds: a.rounds,
         max_new_tokens: a.max_new_tokens,
-        learning_rate: a.lr,
-        ..antumbra_serve::RaftConfig::default()
+        ..antumbra_serve::behave::standing_config(&recipe)
     };
     let report = antumbra_serve::behave::train_behaviors(
         &store,
