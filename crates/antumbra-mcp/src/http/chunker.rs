@@ -9,9 +9,13 @@
 //! Every hour a pass reads every memory again, for one synced in under an older
 //! `updated_at` and for the chunks of a memory purged since.
 //!
-//! Database work runs in owner mode under the auth lock, a memory at a time,
-//! and embedding runs outside it, so a pass never holds a request up for longer
-//! than one memory's writes.
+//! Database work runs in owner mode under the auth lock and embedding runs
+//! outside it. Writes take the lock a memory at a time. A full pass's reads
+//! take it once per read, and each reads a whole workspace: 4.5 s on
+//! kuskokwim's 7,300 memories, during which a session being built waits. So
+//! the first pass waits [`FIRST`] after the server starts: a restart answers
+//! the clients reconnecting to it before the index reads anything, and recall
+//! reads whole memories for anything not cut yet.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,6 +33,10 @@ use super::HttpState;
 
 /// The pause between passes.
 const INTERVAL: Duration = Duration::from_secs(60);
+/// The wait before the first pass. Measured on kuskokwim: every hook call that
+/// took over two seconds in a day (4.2 to 4.7 s each) bar one came within
+/// seconds of a restart, waiting for the lock behind the first full pass.
+const FIRST: Duration = Duration::from_secs(90);
 /// Every this many passes reads every memory, not only the changed ones.
 const FULL_EVERY: u32 = 60;
 /// How far before a pass began the next one reads from: a write that landed
@@ -90,11 +98,17 @@ fn work(source: &ChunkSource, held: Option<&Indexed>) -> Work {
 /// Start the keeper, embedding up to `in_flight` pieces at once; zero leaves
 /// the index as it is, and recall reads whole memories for anything not in it.
 pub(super) fn spawn(state: Arc<HttpState>, in_flight: usize) {
+    spawn_after(state, in_flight, FIRST);
+}
+
+/// [`spawn`], its first pass `first` after now.
+fn spawn_after(state: Arc<HttpState>, in_flight: usize, first: Duration) {
     if in_flight == 0 {
         eprintln!("antumbra-mcp: chunk index not kept (ANTUMBRA_CHUNK_IN_FLIGHT=0)");
         return;
     }
     tokio::spawn(async move {
+        tokio::time::sleep(first).await;
         let mut since: Option<DateTime<Utc>> = None;
         let mut passes: u32 = 0;
         loop {
@@ -156,15 +170,21 @@ async fn workspace(
     in_flight: usize,
     tally: &mut Tally,
 ) -> Result<()> {
-    let (sources, mut held, embedder) = {
+    let sources = {
         let _guard = state.auth.lock().await;
         state.store.signin_root().await?;
-        let sources = memory_chunk::sources(&state.store, tenant, since).await?;
-        if sources.is_empty() && since.is_some() {
-            return Ok(());
-        }
-        // A full pass needs every memory's chunks, to find those whose memory
-        // is gone; a pass over what changed needs only theirs.
+        memory_chunk::sources(&state.store, tenant, since).await?
+    };
+    if sources.is_empty() && since.is_some() {
+        return Ok(());
+    }
+    // A full pass needs every memory's chunks, to find those whose memory is
+    // gone; a pass over what changed needs only theirs. Read under a hold of
+    // its own, so a request waits on one read at most: only this task writes
+    // chunks, so nothing changes the index between the two.
+    let (mut held, embedder) = {
+        let _guard = state.auth.lock().await;
+        state.store.signin_root().await?;
         let held = if since.is_none() {
             memory_chunk::indexed(&state.store, tenant).await?
         } else {
@@ -174,7 +194,7 @@ async fn workspace(
                 .collect();
             memory_chunk::indexed_among(&state.store, tenant, &ids).await?
         };
-        (sources, held, state.embedder_for(tenant).await)
+        (held, state.embedder_for(tenant).await)
     };
     let mut failures = 0;
     for source in &sources {
