@@ -68,6 +68,36 @@ async fn held(state: &HttpState) -> std::collections::HashMap<String, Indexed> {
         .unwrap()
 }
 
+/// A restart answers before the index reads anything: the first pass waits,
+/// with the auth lock free, and then runs.
+#[tokio::test]
+async fn the_first_pass_waits_so_a_restart_answers_first() {
+    let embedder = counting();
+    let state = keeper(embedder.clone()).await;
+    memory::upsert(&state.store, &note("memory:long", &long("alpha", 200)))
+        .await
+        .unwrap();
+    spawn_after(state.clone(), 4, Duration::from_millis(1500));
+
+    assert!(
+        state.auth.try_lock().is_ok(),
+        "a session built now does not wait on the index"
+    );
+    assert!(held(&state).await.is_empty(), "nothing read yet");
+    assert_eq!(embedder.calls.load(Ordering::SeqCst), 0);
+
+    let mut cut = false;
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if !held(&state).await.is_empty() {
+            cut = true;
+            break;
+        }
+    }
+    assert!(cut, "the first pass ran after its wait");
+    assert!(FIRST >= Duration::from_secs(60), "{FIRST:?}");
+}
+
 /// The first pass cuts every long memory and leaves a short one whole; the
 /// next finds nothing to do and embeds nothing.
 #[tokio::test]
