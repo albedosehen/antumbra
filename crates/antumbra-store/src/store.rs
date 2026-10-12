@@ -36,6 +36,11 @@ pub struct Store {
     /// [`Store::announce_changes`] asks for it. Shared by every clone made
     /// after that call.
     changes: Option<tokio::sync::mpsc::Sender<ChangeEvent>>,
+    /// The user this connection is signed in as through the record access,
+    /// or `None` in the owner view. Shared by every clone, as the connection
+    /// is. A record session cannot read its own principal, so a query that
+    /// needs the user takes it from here.
+    session: std::sync::Arc<std::sync::RwLock<Option<UserId>>>,
 }
 
 impl Store {
@@ -80,6 +85,7 @@ impl Store {
             database,
             db_owner: None,
             changes: None,
+            session: Default::default(),
         })
     }
 
@@ -120,13 +126,27 @@ impl Store {
         let creds = ScopeCredentials::new(&self.namespace, &self.database, TENANT_ACCESS)
             .with("tenant", tenant.as_str())
             .with("user", user.as_str());
+        self.set_session(None);
         self.client.signin(&creds).await.map_err(map)?;
+        self.set_session(Some(user.clone()));
         Ok(())
+    }
+
+    /// The user this connection is signed in as, or `None` in the owner view.
+    pub(crate) fn session_user(&self) -> Option<UserId> {
+        self.session.read().ok().and_then(|s| s.clone())
+    }
+
+    fn set_session(&self, user: Option<UserId>) {
+        if let Ok(mut s) = self.session.write() {
+            *s = user;
+        }
     }
 
     /// Drop the current session's authentication, returning to the owner/root
     /// view (full access on the embedded engine).
     pub async fn invalidate(&self) -> Result<()> {
+        self.set_session(None);
         self.client.invalidate().await.map_err(map)?;
         Ok(())
     }
@@ -141,6 +161,7 @@ impl Store {
     /// there). Use this, not `invalidate`, whenever owner access is required on
     /// a real deployment.
     pub async fn signin_root(&self) -> Result<()> {
+        self.set_session(None);
         if let Some((user, pass)) = &self.db_owner {
             let creds = DatabaseCredentials::new(&self.namespace, &self.database, user, pass);
             self.client.signin(&creds).await.map_err(map)?;

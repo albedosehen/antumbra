@@ -7,8 +7,9 @@
 //! 3.8 to 4.6 s in `recall chunks`, against 180 ms for the workspace's owner,
 //! while its dense leg over whole memories took 20 ms.
 //!
-//! A timing harness, so `#[ignore]`d; run it by hand:
+//! Timing harnesses, so `#[ignore]`d; run them by hand:
 //! `cargo test -p antumbra-store --release --lib chunk_acl_cost -- --ignored --nocapture`
+//! `cargo test -p antumbra-store --release --lib readable_set_cost -- --ignored --nocapture`
 //! (`ANTUMBRA_CHUNK_BENCH_MEMORIES` sets the memory count, eight pieces each).
 
 use std::time::Instant;
@@ -45,9 +46,18 @@ fn median(mut xs: Vec<f64>) -> f64 {
 
 const PIECES: usize = 8;
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "a timing harness; run by hand"]
-async fn chunk_acl_cost() -> Result<()> {
+/// The corpus both harnesses measure: `n` memories in the owner's own
+/// compartment and ten in the shared pool, eight pieces each, and nine
+/// query vectors.
+struct Corpus {
+    store: Store,
+    tenant: TenantId,
+    owner: UserId,
+    member: UserId,
+    queries: Vec<Vec<f32>>,
+}
+
+async fn corpus() -> Result<Corpus> {
     let n: usize = std::env::var("ANTUMBRA_CHUNK_BENCH_MEMORIES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -92,8 +102,30 @@ async fn chunk_acl_cost() -> Result<()> {
         shared * PIECES,
         started.elapsed().as_secs_f64()
     );
-    let queries: Vec<Vec<f32>> = (0..9).map(|_| rng.vector()).collect();
+    let queries = (0..9).map(|_| rng.vector()).collect();
+    Ok(Corpus {
+        store,
+        tenant,
+        owner,
+        member,
+        queries,
+    })
+}
+
+/// The index walk alone, for each session: what the read rule costs it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "a timing harness; run by hand"]
+async fn chunk_acl_cost() -> Result<()> {
+    let Corpus {
+        store,
+        tenant,
+        owner,
+        member,
+        queries,
+    } = corpus().await?;
     let k = 30;
+    let rows = k * ROWS_PER_MEMORY;
+    let long = Duration::from_secs(60);
 
     for (name, who) in [
         ("owner (reads every piece)", Some(&owner)),
@@ -104,21 +136,80 @@ async fn chunk_acl_cost() -> Result<()> {
             Some(user) => store.signin(&tenant, user).await?,
             None => store.signin_root().await?,
         }
-        nearest(&store, &tenant, &queries[0], k, None).await?;
-        let (mut full, mut scored) = (Vec::new(), Vec::new());
+        walk(&store, &tenant, &queries[0], rows, None, long).await?;
+        let mut times = Vec::new();
         let mut found = 0;
         for q in &queries {
             let t = Instant::now();
-            found = nearest(&store, &tenant, q, k, None).await?.len();
-            full.push(t.elapsed().as_secs_f64() * 1e3);
-            let t = Instant::now();
-            nearest_scored(&store, &tenant, q, k, None).await?;
-            scored.push(t.elapsed().as_secs_f64() * 1e3);
+            found = walk(&store, &tenant, q, rows, None, long).await?.len();
+            times.push(t.elapsed().as_secs_f64() * 1e3);
         }
         println!(
-            "{name:<38} nearest {:>8.1} ms  nearest_scored {:>8.1} ms  ({found} pieces)",
-            median(full),
-            median(scored)
+            "{name:<38} walk {:>8.1} ms  ({found} pieces)",
+            median(times)
+        );
+    }
+    store.signin_root().await?;
+    Ok(())
+}
+
+/// The chunk search a session gets, end to end: the exact search over the
+/// shared pool and the compartments it reads when they are few, the walk
+/// otherwise. Prints which index each exact query reads through, then the
+/// first search for each session (for the owner, the one that finds it reads
+/// too much and remembers it) and the median of the rest.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "a timing harness; run by hand"]
+async fn readable_set_cost() -> Result<()> {
+    let Corpus {
+        store,
+        tenant,
+        owner,
+        member,
+        queries,
+    } = corpus().await?;
+    for (name, user) in [("owner", &owner), ("member", &member)] {
+        store.signin(&tenant, user).await?;
+        let readable = readable_compartments(&store, &tenant, user).await?;
+        for (label, place) in [
+            ("shared pool", "compartment = NONE"),
+            ("compartments", "compartment INSIDE $readable"),
+        ] {
+            let surql = format!(
+                "SELECT memory FROM memory_chunk WHERE tenant_id = $tenant AND {place} EXPLAIN"
+            );
+            let vars = BTreeMap::from([
+                ("tenant".to_string(), json!(tenant.as_str())),
+                ("readable".to_string(), json!(readable)),
+            ]);
+            let plan = serde_json::to_string(
+                &store
+                    .client()
+                    .query_with_vars(&surql, vars)
+                    .await
+                    .map_err(map)?,
+            )?;
+            let index = plan
+                .split("\"index\":\"")
+                .nth(1)
+                .and_then(|s| s.split('"').next())
+                .unwrap_or("none");
+            println!("{name:<7} {label:<13} reads through {index}");
+        }
+        let t = Instant::now();
+        let first = nearest_scored(&store, &tenant, &queries[0], 30, None).await?;
+        let first_ms = t.elapsed().as_secs_f64() * 1e3;
+        let mut rest = Vec::new();
+        for q in &queries[1..] {
+            let t = Instant::now();
+            nearest_scored(&store, &tenant, q, 30, None).await?;
+            rest.push(t.elapsed().as_secs_f64() * 1e3);
+        }
+        println!(
+            "{name:<7} {} compartments  first search {first_ms:>7.1} ms ({} pieces)  then {:>7.1} ms",
+            readable.len(),
+            first.len(),
+            median(rest)
         );
     }
     store.signin_root().await?;

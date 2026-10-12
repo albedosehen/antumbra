@@ -22,8 +22,10 @@
 //! table walks the whole index, running the rule on every row. Measured
 //! on the chunk table: a member who could read 80 of 12,080 pieces got
 //! all 80 back, and took nearly ten times the owner's time to get them. The
-//! chunk search, the table where that cost is largest, is bounded by a
-//! timeout for it (`memory_chunk::SEARCH_TIMEOUT`).
+//! chunk search, the table where that cost is largest, searches a session
+//! that can read few pieces exactly instead, through an index on the
+//! chunk's compartment, and bounds the walk with a timeout for the rest
+//! (`memory_chunk::nearest_scored`).
 
 /// The candidate pool a filtered recall pulls before its residual
 /// filters run, so truncating to `k` afterwards still has `k` left.

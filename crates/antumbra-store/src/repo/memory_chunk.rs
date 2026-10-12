@@ -7,7 +7,8 @@
 //! when its memory is. Only the server writes it, in owner mode.
 
 use std::collections::{BTreeMap, HashMap};
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -18,11 +19,12 @@ use surql::query::crud::{delete_records, query_records, upsert_record};
 use surql::types::operators::{and_, eq, gt};
 use surql::types::RecordID;
 
-use antumbra_core::{cosine_similarity, Memory, MemoryNetwork, Result, TenantId};
+use antumbra_core::{cosine_similarity, Memory, MemoryNetwork, Result, TenantId, UserId};
 
 use crate::error::map;
 use crate::knn::search_effort;
 use crate::repo::memory;
+use crate::schema;
 use crate::store::Store;
 
 const TABLE: &str = "memory_chunk";
@@ -282,8 +284,26 @@ pub async fn nearest_scored(
 /// lexical legs, which the same session runs in milliseconds.
 pub const SEARCH_TIMEOUT: Duration = Duration::from_millis(1000);
 
+/// The most pieces the exact search reads for a session. A session that can
+/// read more is searched by the index walk, which finds enough readable
+/// pieces early when the session reads that much. Measured on the embedded
+/// engine (a release build): reading and scoring a piece costs about 0.09 ms,
+/// so the exact search stays near 0.2 s at this size, and 8 ms over 80.
+pub const EXACT_MAX: usize = 2000;
+
+/// How long a session found to read more than [`EXACT_MAX`] pieces is
+/// searched by the walk before the exact search is tried for it again.
+const WALK_FOR: Duration = Duration::from_secs(300);
+
 /// [`nearest_scored`] with the engine told to stop after `timeout`. A search
 /// stopped there finds nothing rather than failing the recall.
+///
+/// A record session that can read few pieces is searched exactly: the shared
+/// pool and the compartments it can read, each through the index on the
+/// chunk's compartment, scored here. The walk would run the read rule on
+/// every piece of the workspace to find them. The engine still applies the
+/// read rule to every piece either search reads, so the list of compartments
+/// decides what is cheap to read, never what is visible.
 pub(crate) async fn nearest_scored_within(
     store: &Store,
     tenant: &TenantId,
@@ -292,10 +312,86 @@ pub(crate) async fn nearest_scored_within(
     network: Option<MemoryNetwork>,
     timeout: Duration,
 ) -> Result<Vec<(String, f32)>> {
+    search(store, tenant, vector, k, network, timeout, EXACT_MAX).await
+}
+
+async fn search(
+    store: &Store,
+    tenant: &TenantId,
+    vector: &[f32],
+    k: usize,
+    network: Option<MemoryNetwork>,
+    timeout: Duration,
+    exact_max: usize,
+) -> Result<Vec<(String, f32)>> {
     if k == 0 || vector.iter().all(|x| *x == 0.0) {
         return Ok(Vec::new());
     }
     let rows = k.saturating_mul(ROWS_PER_MEMORY).clamp(k, MAX_ROWS);
+    if let Some(user) = store.session_user() {
+        let readable = readable_compartments(store, tenant, &user).await?;
+        let key = walk_key(tenant, &user, &readable);
+        if !walks(&key) {
+            match exact(
+                store, tenant, vector, rows, network, &readable, timeout, exact_max,
+            )
+            .await?
+            {
+                Some(pieces) => return Ok(pieces),
+                None => remember_walk(key),
+            }
+        }
+    }
+    walk(store, tenant, vector, rows, network, timeout).await
+}
+
+/// The variables every chunk search binds.
+fn search_vars(
+    tenant: &TenantId,
+    vector: &[f32],
+    network: Option<MemoryNetwork>,
+) -> BTreeMap<String, Value> {
+    let mut vars = BTreeMap::from([
+        ("tenant".to_string(), json!(tenant.as_str())),
+        ("vector".to_string(), json!(vector)),
+    ]);
+    if let Some(net) = network {
+        vars.insert("network".to_string(), json!(net.as_str()));
+    }
+    vars
+}
+
+/// `surql`'s rows, or `None` when the engine stopped it at its `TIMEOUT`.
+async fn bounded<T: serde::de::DeserializeOwned>(
+    store: &Store,
+    surql: &str,
+    vars: BTreeMap<String, Value>,
+    timeout: Duration,
+) -> Result<Option<Vec<T>>> {
+    match store.query_rows(surql, vars).await {
+        Ok(rows) => Ok(Some(rows)),
+        Err(e) if timed_out(&e.to_string()) => {
+            tracing::warn!(
+                target: "antumbra_store::recall",
+                timeout_ms = timeout.as_millis() as u64,
+                "the chunk search stopped at its timeout; recall goes on without it"
+            );
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The index walk: the `rows` readable pieces nearest `vector`, as the engine
+/// finds them, stopped at `timeout`.
+async fn walk(
+    store: &Store,
+    tenant: &TenantId,
+    vector: &[f32],
+    rows: usize,
+    network: Option<MemoryNetwork>,
+    timeout: Duration,
+) -> Result<Vec<(String, f32)>> {
     let also = if network.is_some() {
         " AND network = $network"
     } else {
@@ -308,30 +404,16 @@ pub(crate) async fn nearest_scored_within(
         search_effort(rows),
         timeout.as_nanos().max(1)
     );
-    let mut vars = BTreeMap::from([
-        ("tenant".to_string(), json!(tenant.as_str())),
-        ("vector".to_string(), json!(vector)),
-    ]);
-    if let Some(net) = network {
-        vars.insert("network".to_string(), json!(net.as_str()));
-    }
     #[derive(Deserialize)]
     struct Hit {
         memory: String,
         #[serde(default)]
         distance: Option<f64>,
     }
-    let hits: Vec<Hit> = match store.query_rows(&surql, vars).await {
-        Ok(hits) => hits,
-        Err(e) if timed_out(&e.to_string()) => {
-            tracing::warn!(
-                target: "antumbra_store::recall",
-                timeout_ms = timeout.as_millis() as u64,
-                "the chunk search stopped at its timeout; recall goes on without it"
-            );
-            return Ok(Vec::new());
-        }
-        Err(e) => return Err(e),
+    let Some(hits) =
+        bounded::<Hit>(store, &surql, search_vars(tenant, vector, network), timeout).await?
+    else {
+        return Ok(Vec::new());
     };
     // Ordered here, as `nearest` orders, rather than by the engine.
     let mut pieces: Vec<(String, f32)> = hits
@@ -340,6 +422,150 @@ pub(crate) async fn nearest_scored_within(
         .collect();
     pieces.sort_by(|a, b| b.1.total_cmp(&a.1));
     Ok(pieces)
+}
+
+/// The exact search: every piece of the shared pool and of `readable`, scored
+/// by cosine here and cut to the `rows` nearest. `None` when there are more
+/// than `max` of them, for the walk to search instead.
+///
+/// The shared pool and the compartments are read by two queries: OR'd
+/// together the planner reads the whole workspace and filters it, and an
+/// empty list read alone does the same, so it is not read at all.
+#[allow(clippy::too_many_arguments)]
+async fn exact(
+    store: &Store,
+    tenant: &TenantId,
+    vector: &[f32],
+    rows: usize,
+    network: Option<MemoryNetwork>,
+    readable: &[String],
+    timeout: Duration,
+    max: usize,
+) -> Result<Option<Vec<(String, f32)>>> {
+    let also = if network.is_some() {
+        " AND network = $network"
+    } else {
+        ""
+    };
+    let select = |place: &str, limit: usize| {
+        format!(
+            "SELECT memory, vector::similarity::cosine(embedding, $vector) AS score \
+             FROM {TABLE} WHERE tenant_id = $tenant AND {place}{also} \
+             LIMIT {limit} TIMEOUT {}ns",
+            timeout.as_nanos().max(1)
+        )
+    };
+    #[derive(Deserialize)]
+    struct Scored {
+        memory: String,
+        #[serde(default)]
+        score: Option<f64>,
+    }
+    let mut vars = search_vars(tenant, vector, network);
+    let Some(mut hits) = bounded::<Scored>(
+        store,
+        &select("compartment = NONE", max + 1),
+        vars.clone(),
+        timeout,
+    )
+    .await?
+    else {
+        return Ok(Some(Vec::new()));
+    };
+    if hits.len() > max {
+        return Ok(None);
+    }
+    if !readable.is_empty() {
+        vars.insert("readable".to_string(), json!(readable));
+        let left = max + 1 - hits.len();
+        let Some(more) = bounded::<Scored>(
+            store,
+            &select("compartment INSIDE $readable", left),
+            vars,
+            timeout,
+        )
+        .await?
+        else {
+            return Ok(Some(Vec::new()));
+        };
+        if hits.len() + more.len() > max {
+            return Ok(None);
+        }
+        hits.extend(more);
+    }
+    let mut pieces: Vec<(String, f32)> = hits
+        .into_iter()
+        .filter_map(|h| Some((h.memory, h.score? as f32)))
+        .collect();
+    pieces.sort_by(|a, b| b.1.total_cmp(&a.1));
+    pieces.truncate(rows);
+    Ok(Some(pieces))
+}
+
+/// The compartments `user` can read in `tenant` beside the shared pool: those
+/// it owns, those granted to it, and those offered to an enabled hive. The
+/// read rule's own branches, as lists, from the same text
+/// (`schema::{owned,granted,hive}_compartments`). The user is bound, not read
+/// from `$auth`: outside a permission clause a record session cannot read its
+/// own principal.
+pub(crate) async fn readable_compartments(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+) -> Result<Vec<String>> {
+    let surql = format!(
+        "RETURN array::union(array::union(({}), ({})), ({}))",
+        schema::owned_compartments("$tenant", "$user"),
+        schema::granted_compartments("$user"),
+        schema::hive_compartments("$tenant"),
+    );
+    let vars = BTreeMap::from([
+        ("tenant".to_string(), json!(tenant.as_str())),
+        ("user".to_string(), json!(user.as_str())),
+    ]);
+    let mut list: Vec<String> = store.query_rows(&surql, vars).await?;
+    list.sort();
+    list.dedup();
+    Ok(list)
+}
+
+type WalkKey = (String, String, u64);
+
+/// The sessions found to read more than the exact search takes, by tenant,
+/// user and the list of compartments they read, and when.
+fn walkers() -> &'static std::sync::Mutex<HashMap<WalkKey, Instant>> {
+    static WALKERS: OnceLock<std::sync::Mutex<HashMap<WalkKey, Instant>>> = OnceLock::new();
+    WALKERS.get_or_init(Default::default)
+}
+
+fn walk_key(tenant: &TenantId, user: &UserId, readable: &[String]) -> WalkKey {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    readable.hash(&mut h);
+    (
+        tenant.as_str().to_string(),
+        user.as_str().to_string(),
+        h.finish(),
+    )
+}
+
+/// Whether this session is searched by the walk for now. A changed list of
+/// compartments is a new key, so a grant or a revoke is seen at once.
+fn walks(key: &WalkKey) -> bool {
+    walkers()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(key).copied())
+        .is_some_and(|at| at.elapsed() < WALK_FOR)
+}
+
+fn remember_walk(key: WalkKey) {
+    if let Ok(mut m) = walkers().lock() {
+        if m.len() > 10_000 {
+            m.clear();
+        }
+        m.insert(key, Instant::now());
+    }
 }
 
 /// Whether an error is the engine stopping a query at its `TIMEOUT`.
