@@ -693,9 +693,13 @@ async fn run() -> Result<()> {
     });
     // Pay for the models' first use now rather than in the first recall, and
     // check the floor's calibration again once the reranker answers, when the
-    // endpoint did not say at startup what it serves.
+    // endpoint did not say at startup what it serves. A networked server
+    // waits for its embedder before it listens, so no call waits on the
+    // warm-up; a stdio session's handshake does not wait for it.
+    let warm =
+        cli.http.is_some() && warmup::embedder_now(embedder.as_ref(), warmup::EMBED_PATIENCE).await;
     warmup::spawn(
-        embedder.clone(),
+        (!warm).then(|| embedder.clone()),
         warm_scorer,
         rerank_url_for_recheck
             .filter(|_| served.is_none())
