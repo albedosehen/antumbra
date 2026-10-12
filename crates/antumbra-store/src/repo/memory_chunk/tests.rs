@@ -280,3 +280,133 @@ async fn the_chunk_leg_fetches_its_memories_by_key() -> Result<()> {
     assert!(memory::get_many(&store, &tenant, &[]).await?.is_empty());
     Ok(())
 }
+
+/// A member who can read little of a workspace is searched exactly: its own
+/// compartment, one granted to it, one offered to the hive and the shared
+/// pool, nearest first, and never a piece of another member's private
+/// compartment, even when the list of compartments names it. A session that
+/// can read more than the exact search takes is walked, and remembered.
+#[tokio::test]
+async fn a_member_who_reads_little_is_searched_exactly_and_sees_only_what_it_may() -> Result<()> {
+    use crate::repo::{compartment, hive, principal};
+    use antumbra_core::{
+        Capability, Compartment, Grant, Hive, HiveMembership, HiveOffer, OfferStatus, OfferedKind,
+    };
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("ws:exact");
+    let (owner, member) = (UserId::new("user:owner"), UserId::new("user:member"));
+    principal::provision(&store, &tenant, &owner).await?;
+    principal::provision(&store, &tenant, &member).await?;
+    let now = chrono::Utc::now();
+    for (id, who) in [
+        ("comp:owner-private", &owner),
+        ("comp:owner-granted", &owner),
+        ("comp:owner-hive", &owner),
+        ("comp:member", &member),
+    ] {
+        let c = Compartment::new(
+            CompartmentId::new(id),
+            tenant.clone(),
+            who.clone(),
+            "c",
+            now,
+        );
+        compartment::create(&store, &c).await?;
+    }
+    compartment::grant(
+        &store,
+        &Grant {
+            tenant: tenant.clone(),
+            compartment: CompartmentId::new("comp:owner-granted"),
+            grantee: member.clone(),
+            capability: Capability::Reference,
+            granted_by: owner.clone(),
+            created_at: now,
+            updated_at: now,
+            deleted_at: None,
+        },
+    )
+    .await?;
+    hive::set_enabled(&store, &Hive::new(tenant.clone(), true, now)).await?;
+    hive::set_membership(
+        &store,
+        &HiveMembership::new(tenant.clone(), owner.clone(), true, now),
+    )
+    .await?;
+    let mut offer = HiveOffer::new(
+        tenant.clone(),
+        OfferedKind::Compartment,
+        "comp:owner-hive",
+        owner.clone(),
+        now,
+    );
+    offer.status = OfferStatus::Accepted;
+    hive::offer(&store, &offer).await?;
+    // A memory of two pieces in each place, on axes of their own.
+    for (id, place, at) in [
+        ("memory:private", Some("comp:owner-private"), 10),
+        ("memory:granted", Some("comp:owner-granted"), 20),
+        ("memory:hive", Some("comp:owner-hive"), 30),
+        ("memory:mine", Some("comp:member"), 40),
+        ("memory:pool", None, 50),
+    ] {
+        let mut m = memory(id, "ws:exact", "a long memory", axis(at));
+        if let Some(c) = place {
+            m = m.in_compartment(CompartmentId::new(c));
+        }
+        replace(&store, &m, "hash", vec![axis(at), axis(at + 1)]).await?;
+    }
+    let long = Duration::from_secs(10);
+
+    store.signin(&tenant, &member).await?;
+    assert_eq!(store.session_user(), Some(member.clone()));
+    let readable = readable_compartments(&store, &tenant, &member).await?;
+    assert_eq!(
+        readable,
+        ["comp:member", "comp:owner-granted", "comp:owner-hive"]
+    );
+    let found = search(&store, &tenant, &axis(21), 5, None, long, 100).await?;
+    assert_eq!(
+        found.len(),
+        8,
+        "every piece it can read: four memories of two"
+    );
+    assert_eq!(
+        found[0],
+        ("memory:granted".to_string(), 1.0),
+        "nearest first"
+    );
+    assert!(
+        found.iter().all(|(m, _)| m != "memory:private"),
+        "{found:?}"
+    );
+    assert!(!walks(&walk_key(&tenant, &member, &readable)));
+    // The list decides what is cheap to read, never what is visible.
+    let forged = vec!["comp:owner-private".to_string()];
+    let read = exact(&store, &tenant, &axis(10), 20, None, &forged, long, 100)
+        .await?
+        .expect("within the cap");
+    assert!(read.iter().all(|(m, _)| m != "memory:private"), "{read:?}");
+
+    store.signin(&tenant, &owner).await?;
+    let key = walk_key(
+        &tenant,
+        &owner,
+        &readable_compartments(&store, &tenant, &owner).await?,
+    );
+    assert!(!walks(&key));
+    let walked = search(&store, &tenant, &axis(10), 5, None, long, 4).await?;
+    assert!(
+        walks(&key),
+        "more than the exact search takes: walked, and remembered"
+    );
+    assert_eq!(walked[0].0, "memory:private");
+
+    store.signin_root().await?;
+    assert_eq!(
+        store.session_user(),
+        None,
+        "the owner view searches by the walk"
+    );
+    Ok(())
+}

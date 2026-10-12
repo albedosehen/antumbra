@@ -116,10 +116,40 @@ const GRANT_PERMS: [(&str, &str); 4] = [
 /// into it. That asymmetry is intentional here, unlike the ones an earlier
 /// increment had to remove -- and the replication scope already handles it,
 /// because a user's nodes carry what they own rather than what they can read.
-const HIVE_VISIBLE_RULE: &str = "compartment IN (SELECT VALUE subject_id FROM hive_offer \
-     WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' \
-     AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) \
-     AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true))";
+fn hive_visible_rule() -> String {
+    format!("compartment IN ({})", hive_compartments("$auth.tenant"))
+}
+
+/// The compartments a member of `tenant` reads through the hive, as a list:
+/// the hive branch of the read rule. `tenant` is a SurrealQL expression,
+/// `$auth.tenant` in the rule and a bound variable outside it, where a record
+/// session cannot read its own principal and `$auth.tenant` is empty.
+pub(crate) fn hive_compartments(tenant: &str) -> String {
+    format!(
+        "SELECT VALUE subject_id FROM hive_offer \
+         WHERE tenant_id = {tenant} AND subject_kind = 'compartment' AND status = 'accepted' \
+         AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = {tenant} AND opted_in = true) \
+         AND {tenant} IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true)"
+    )
+}
+
+/// The compartments granted to `user`, as a list: the grant branch of the read
+/// rule. `user` is a SurrealQL expression, as `tenant` is for
+/// [`hive_compartments`].
+pub(crate) fn granted_compartments(user: &str) -> String {
+    format!("SELECT VALUE compartment FROM grant WHERE grantee = {user} AND deleted_at IS NONE")
+}
+
+/// The compartments `user` owns in `tenant`, live, as a list: the owner
+/// branch of the read rule, which reads each row's compartment record instead
+/// (see `memory_select_without_hive`); the same compartments, owner and
+/// tombstone.
+pub(crate) fn owned_compartments(tenant: &str, user: &str) -> String {
+    format!(
+        "SELECT VALUE key FROM compartment \
+         WHERE tenant_id = {tenant} AND owner = {user} AND deleted_at IS NONE"
+    )
+}
 
 /// A row's own compartment record, by the id `compartment::create` gives it:
 /// the key with `:`, `/`, `\`, `|` and spaces made `_` (`compartment::sanitize`,
@@ -144,7 +174,8 @@ fn memory_select_without_hive() -> String {
     format!(
         "tenant_id = $auth.tenant AND (compartment = NONE \
          OR ({OWN_COMPARTMENT}.owner = $auth.user AND {OWN_COMPARTMENT}.deleted_at IS NONE) \
-         OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE)"
+         OR compartment IN ({})",
+        granted_compartments("$auth.user")
     )
 }
 
@@ -156,7 +187,11 @@ fn memory_select_without_hive() -> String {
 /// that matters stops matching the one that is read, and this one is read on
 /// every recall in the system.
 pub(crate) fn memory_select_rule() -> String {
-    format!("{} OR {HIVE_VISIBLE_RULE})", memory_select_without_hive())
+    format!(
+        "{} OR {})",
+        memory_select_without_hive(),
+        hive_visible_rule()
+    )
 }
 
 /// The write rule for `memory` (create/update). A session may write a memory only
@@ -516,6 +551,13 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             ])
             .with_indexes([
                 index("memory_chunk_tenant_memory_idx", ["tenant_id", "memory"]),
+                // The pieces of a few compartments, read exactly for a session
+                // that can read little of a workspace
+                // (`memory_chunk::nearest_scored`).
+                index(
+                    "memory_chunk_tenant_compartment_idx",
+                    ["tenant_id", "compartment"],
+                ),
                 hnsw_index(
                     "memory_chunk_embedding_hnsw",
                     "embedding",
@@ -668,6 +710,20 @@ mod tests {
         let sql = generate_access_sql_with_options(&tenant_access(), true).unwrap();
         let rendered = sql.join("\n");
         assert!(rendered.contains("FOR SESSION 3600s"), "{rendered}");
+    }
+
+    /// The read rule is built from the subqueries the readable-compartment
+    /// lists share with it, and reads exactly as it did written out whole.
+    #[test]
+    fn the_read_rule_is_unchanged_by_sharing_its_subqueries() {
+        let before = r"tenant_id = $auth.tenant AND (compartment = NONE OR (type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).owner = $auth.user AND type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).deleted_at IS NONE) OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE) OR compartment IN (SELECT VALUE subject_id FROM hive_offer WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true)))";
+        assert_eq!(memory_select_rule(), before);
+        assert!(before.contains(&granted_compartments("$auth.user")));
+        assert!(before.contains(&hive_compartments("$auth.tenant")));
+        assert_eq!(
+            owned_compartments("$t", "$u"),
+            "SELECT VALUE key FROM compartment WHERE tenant_id = $t AND owner = $u AND deleted_at IS NONE"
+        );
     }
 
     #[test]
