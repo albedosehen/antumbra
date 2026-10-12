@@ -71,6 +71,51 @@ async fn chunks_are_replaced_found_and_removed_by_their_memory() -> Result<()> {
     Ok(())
 }
 
+/// A chunk search the engine stops at its timeout finds nothing, rather than
+/// failing the recall it is one leg of; within its time it finds the pieces.
+#[tokio::test]
+async fn a_chunk_search_stopped_at_its_timeout_finds_nothing_rather_than_failing() -> Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("ws:a");
+    for i in 0..40 {
+        let m = memory(&format!("memory:m{i}"), "ws:a", "a long memory", axis(i));
+        replace(
+            &store,
+            &m,
+            "hash",
+            (0..6).map(|j| axis((i + j) % 300)).collect(),
+        )
+        .await?;
+    }
+    let found =
+        nearest_scored_within(&store, &tenant, &axis(3), 10, None, Duration::from_secs(10)).await?;
+    assert!(!found.is_empty(), "within its time it finds the pieces");
+
+    let stopped =
+        nearest_scored_within(&store, &tenant, &axis(3), 10, None, Duration::from_nanos(1)).await;
+    assert!(
+        matches!(&stopped, Ok(p) if p.is_empty()),
+        "stopped, it finds nothing and does not fail: {stopped:?}"
+    );
+    assert!(
+        SEARCH_TIMEOUT >= Duration::from_millis(600),
+        "above the owner's slowest day"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_timeout_is_told_from_other_errors() {
+    // What the engine says, verbatim (SurrealDB 3, embedded).
+    assert!(timed_out(
+        "query error: The query was not executed because it exceeded the timeout: 1ns"
+    ));
+    assert!(timed_out("Query timed out"));
+    assert!(!timed_out(
+        "There was a problem with the database: Not enough permissions"
+    ));
+}
+
 /// A memory that moves keeps its chunks' vectors: refiling rewrites where
 /// they are filed and nothing else.
 #[tokio::test]

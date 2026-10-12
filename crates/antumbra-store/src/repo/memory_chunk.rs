@@ -7,6 +7,7 @@
 //! when its memory is. Only the server writes it, in owner mode.
 
 use std::collections::{BTreeMap, HashMap};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -263,6 +264,34 @@ pub async fn nearest_scored(
     k: usize,
     network: Option<MemoryNetwork>,
 ) -> Result<Vec<(String, f32)>> {
+    nearest_scored_within(store, tenant, vector, k, network, SEARCH_TIMEOUT).await
+}
+
+/// How long the chunk search may walk before the engine stops it.
+///
+/// Under a record session the engine checks the table's read rule during the
+/// index walk and keeps walking until it has the pieces it was asked for, so
+/// a session that can read fewer pieces than that walks the whole index,
+/// running the read rule on every one. Measured on the embedded engine (a
+/// debug build): 9.2 s for a member who could read 80 of 12,080 pieces, all
+/// 80 returned, against 0.96 s for the owner who read every piece. On
+/// kuskokwim the owner's chunk leg took at most 0.51 s in a day, and an
+/// identity that could read almost nothing took 2.9 to 4.6 s on every recall.
+///
+/// Past this the leg finds nothing and recall goes on with its dense and
+/// lexical legs, which the same session runs in milliseconds.
+pub const SEARCH_TIMEOUT: Duration = Duration::from_millis(1000);
+
+/// [`nearest_scored`] with the engine told to stop after `timeout`. A search
+/// stopped there finds nothing rather than failing the recall.
+pub(crate) async fn nearest_scored_within(
+    store: &Store,
+    tenant: &TenantId,
+    vector: &[f32],
+    k: usize,
+    network: Option<MemoryNetwork>,
+    timeout: Duration,
+) -> Result<Vec<(String, f32)>> {
     if k == 0 || vector.iter().all(|x| *x == 0.0) {
         return Ok(Vec::new());
     }
@@ -274,8 +303,10 @@ pub async fn nearest_scored(
     };
     let surql = format!(
         "SELECT memory, vector::distance::knn() AS distance FROM {TABLE} \
-         WHERE tenant_id = $tenant{also} AND embedding <|{rows},{}|> $vector",
-        search_effort(rows)
+         WHERE tenant_id = $tenant{also} AND embedding <|{rows},{}|> $vector \
+         TIMEOUT {}ns",
+        search_effort(rows),
+        timeout.as_nanos().max(1)
     );
     let mut vars = BTreeMap::from([
         ("tenant".to_string(), json!(tenant.as_str())),
@@ -290,7 +321,18 @@ pub async fn nearest_scored(
         #[serde(default)]
         distance: Option<f64>,
     }
-    let hits: Vec<Hit> = store.query_rows(&surql, vars).await?;
+    let hits: Vec<Hit> = match store.query_rows(&surql, vars).await {
+        Ok(hits) => hits,
+        Err(e) if timed_out(&e.to_string()) => {
+            tracing::warn!(
+                target: "antumbra_store::recall",
+                timeout_ms = timeout.as_millis() as u64,
+                "the chunk search stopped at its timeout; recall goes on without it"
+            );
+            return Ok(Vec::new());
+        }
+        Err(e) => return Err(e),
+    };
     // Ordered here, as `nearest` orders, rather than by the engine.
     let mut pieces: Vec<(String, f32)> = hits
         .into_iter()
@@ -298,6 +340,12 @@ pub async fn nearest_scored(
         .collect();
     pieces.sort_by(|a, b| b.1.total_cmp(&a.1));
     Ok(pieces)
+}
+
+/// Whether an error is the engine stopping a query at its `TIMEOUT`.
+fn timed_out(message: &str) -> bool {
+    let m = message.to_lowercase();
+    m.contains("timeout") || m.contains("timed out")
 }
 
 /// A memory as the chunker reads it: no embedding, and its tombstone if it
@@ -356,3 +404,6 @@ pub async fn tenants(store: &Store) -> Result<Vec<TenantId>> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod acl_cost;
