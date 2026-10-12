@@ -12,7 +12,9 @@
 //!
 //! Two kinds of span are exported: one per HTTP request (see the router in
 //! [`crate::http`]) and one per tool call ([`tool_span`]), and under a recall,
-//! one per stage ([`recall_stage`]) and per retrieval leg. None carries what
+//! one per stage ([`recall_stage`]) and per retrieval leg. A request that
+//! builds its identity's server has one more under it, with a span for each
+//! part of that ([`session_stage`]). None carries what
 //! the request was about: no query, memory or document text, no token, no
 //! request body. A tool call's span says which tool ran, in which
 //! workspace, and whether it failed and how, by kind and never by message,
@@ -262,6 +264,17 @@ pub(crate) fn recall_stage(stage: &'static str, items: usize) -> tracing::Span {
         otel.name = stage,
         antumbra.recall.items = items,
     )
+}
+
+/// The span one part of building an identity's server runs in, on the
+/// identity's first call: `session build` around the whole, and under it
+/// `session auth wait` (the wait for the auth lock), `session provision` (the
+/// owner-side writes and reads made holding it) and `session connect` (the
+/// identity's serving connection, signed in and warmed). A first call that
+/// is slow says which of these it waited on; the identity stays out, as it
+/// does from every span.
+pub(crate) fn session_stage(stage: &'static str) -> tracing::Span {
+    tracing::info_span!("session stage", otel.name = stage)
 }
 
 /// Records how a tool call ended on its span: `ok`, or `error` with the
