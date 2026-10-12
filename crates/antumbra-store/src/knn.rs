@@ -15,6 +15,15 @@
 //! So a filtered recall over-fetches and truncates, and an unfiltered
 //! one does not need to. That distinction is per-call-site and is
 //! stated at each of them.
+//!
+//! The table's read rule is not residual. Under a record session the
+//! engine checks it during the walk and keeps walking until it has the k
+//! rows asked for, so a session that can read fewer than k rows of a
+//! table walks the whole index, running the rule on every row. Measured
+//! on the chunk table: a member who could read 80 of 12,080 pieces got
+//! all 80 back, and took nearly ten times the owner's time to get them. The
+//! chunk search, the table where that cost is largest, is bounded by a
+//! timeout for it (`memory_chunk::SEARCH_TIMEOUT`).
 
 /// The candidate pool a filtered recall pulls before its residual
 /// filters run, so truncating to `k` afterwards still has `k` left.
