@@ -55,6 +55,7 @@ use axum::routing::{any, post};
 use axum::{Json, Router};
 use axum_tracing_opentelemetry::middleware::OtelAxumLayer;
 use tokio::sync::Mutex;
+use tracing::Instrument as _;
 
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
@@ -495,6 +496,7 @@ impl HttpState {
         // The SSE service registers each session's peer for live propagation.
         let mcp = self
             .mcp_for(identity)
+            .instrument(crate::telemetry::session_stage("session build"))
             .await?
             .with_registry(self.registry.clone());
         // The factory clones the (store-sharing) server for each MCP exchange.
@@ -518,7 +520,10 @@ impl HttpState {
         if let Some(s) = self.servers.lock().await.get(identity) {
             return Ok(s.clone());
         }
-        let mcp = self.mcp_for(identity).await?;
+        let mcp = self
+            .mcp_for(identity)
+            .instrument(crate::telemetry::session_stage("session build"))
+            .await?;
         self.servers
             .lock()
             .await
@@ -535,32 +540,45 @@ impl HttpState {
         let tenant = TenantId::new(&identity.tenant);
         let user = UserId::new(&identity.user);
         // Provision owner-side (principal + default compartment), under the auth
-        // lock in owner mode so it never races a signed-in request.
+        // lock in owner mode so it never races a signed-in request. The wait
+        // for the lock and the work done holding it are traced apart: a first
+        // call held up behind the chunker or the keeper shows as the wait.
         let (default_compartment, embedder) = {
-            let _guard = self.auth.lock().await;
-            self.store.signin_root().await?;
-            let dc = crate::provision_identity(&self.store, &tenant, &user).await?;
-            // This machine is a node in that user's fabric. A hosted server is
-            // not "nobody's machine": the agent's recall and store really are
-            // happening here, and if this box can train then it is where that
-            // user's genesis belongs. Registered once per identity, because
-            // both callers of `mcp_for` cache what it builds per identity
-            // (`service_for`, `rest_server_for`).
-            //
-            // Written as owner rather than under the user's record session,
-            // like the principal and the default compartment either side of
-            // it: DEVICE_PERMS exists to stop one *member* re-roling another
-            // member's machine, and the owner provisioning on behalf of the
-            // identity it just created is the same act as the two around it.
-            crate::register_node(&self.store, &tenant, &user, &self.host).await;
-            // Resolve the workspace's embedder under the owner connection.
-            let emb = self.embedder_for(&tenant).await;
-            (dc, emb)
+            let _guard = self
+                .auth
+                .lock()
+                .instrument(crate::telemetry::session_stage("session auth wait"))
+                .await;
+            async {
+                self.store.signin_root().await?;
+                let dc = crate::provision_identity(&self.store, &tenant, &user).await?;
+                // This machine is a node in that user's fabric. A hosted server is
+                // not "nobody's machine": the agent's recall and store really are
+                // happening here, and if this box can train then it is where that
+                // user's genesis belongs. Registered once per identity, because
+                // both callers of `mcp_for` cache what it builds per identity
+                // (`service_for`, `rest_server_for`).
+                //
+                // Written as owner rather than under the user's record session,
+                // like the principal and the default compartment either side of
+                // it: DEVICE_PERMS exists to stop one *member* re-roling another
+                // member's machine, and the owner provisioning on behalf of the
+                // identity it just created is the same act as the two around it.
+                crate::register_node(&self.store, &tenant, &user, &self.host).await;
+                // Resolve the workspace's embedder under the owner connection.
+                let emb = self.embedder_for(&tenant).await;
+                anyhow::Ok((dc, emb))
+            }
+            .instrument(crate::telemetry::session_stage("session provision"))
+            .await?
         };
         // The connection the tools run on: the identity's dedicated serving
         // connection on a remote (signed in once, reused, no per-request lock), or
         // the shared `store` on embedded (a request signs it in per call; `bind`).
-        let (conn, keeper) = self.serving_conn(identity, &tenant, &user).await?;
+        let (conn, keeper) = self
+            .serving_conn(identity, &tenant, &user)
+            .instrument(crate::telemetry::session_stage("session connect"))
+            .await?;
         let mut mcp = McpServer::new(
             conn,
             embedder,

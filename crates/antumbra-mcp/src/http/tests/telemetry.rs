@@ -260,6 +260,55 @@ async fn a_rest_tool_call_is_a_span_inside_its_request() {
     assert_eq!(tool.status, Status::Unset);
 }
 
+/// An identity's first call builds its server inside the request's span, one
+/// span for each part, so a slow first call says whether it waited for the
+/// auth lock, provisioned, or connected. The second call reuses the server and
+/// builds nothing. No part names the identity.
+#[tokio::test]
+async fn a_first_call_traces_building_its_server_and_a_second_builds_nothing() {
+    let traces = Traces::start();
+    let app = router(state().await);
+    for _ in 0..2 {
+        let resp = app
+            .clone()
+            .oneshot(call_request(
+                Some(&token("ws:traced", "user:traced")),
+                r#"{"tool":"workspace_stats"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    let build = traces.one("session build");
+    let requests: Vec<SpanData> = traces
+        .ended()
+        .into_iter()
+        .filter(|s| s.name == "POST /mcp/call")
+        .collect();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.span_context.span_id() == build.parent_span_id),
+        "the build is inside a request"
+    );
+    for stage in ["session auth wait", "session provision", "session connect"] {
+        assert_eq!(
+            traces.one(stage).parent_span_id,
+            build.span_context.span_id(),
+            "{stage} is part of the build"
+        );
+    }
+    let session: Vec<SpanData> = traces
+        .ended()
+        .into_iter()
+        .filter(|s| s.name.starts_with("session "))
+        .collect();
+    assert!(!mentions(&session, "user:traced"), "the user");
+    assert!(!mentions(&session, "ws:traced"), "the workspace");
+}
+
 /// A failed call marks its span an error, by kind. The error's message quotes
 /// the arguments: the caller is told, the trace is not.
 #[tokio::test]
