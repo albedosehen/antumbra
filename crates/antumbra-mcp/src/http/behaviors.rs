@@ -277,7 +277,7 @@ mod keeper {
             let experts: Vec<antumbra_core::Expert> = expert::list(&state.store)
                 .await?
                 .into_iter()
-                .filter(|e| e.owner.as_ref() == Some(user) && e.standing_scope().is_some())
+                .filter(|e| antumbra_core::behavior::is_standing_for(e, tenant, user))
                 .collect();
             // The fabric's trainer for this user, when it names one, does the work.
             let here = device::genesis_for_user(&state.store, tenant, user)
