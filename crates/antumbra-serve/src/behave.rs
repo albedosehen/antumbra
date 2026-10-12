@@ -599,7 +599,7 @@ mod tests {
         assert_ne!(
             expert_id(&a, &user, "everywhere"),
             expert_id(&b, &user, "everywhere"),
-            "every hosted workspace's first user is user:owner"
+            "a user id once shared by every hosted workspace's first user"
         );
     }
 

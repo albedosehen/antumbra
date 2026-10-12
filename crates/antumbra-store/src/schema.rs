@@ -636,7 +636,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // actor). Provisioned by the owner/root; read only by the SIGNIN.
         table_schema("principal")
             .with_mode(TableMode::Schemaless)
-            .with_indexes([unique_index("principal_tenant_user_uq", ["tenant", "user"])]),
+            .with_indexes([
+                unique_index("principal_tenant_user_uq", ["tenant", "user"]),
+                // The workspaces a user id belongs to, which provisioning
+                // reads to keep one to a user.
+                index("principal_user_idx", ["user"]),
+            ]),
         // Per-workspace embedder endpoint (hosted multi-tenant): one row per
         // tenant, tenant-scoped so a workspace sets only its own.
         table_schema("embedder_config")

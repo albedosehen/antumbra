@@ -178,6 +178,37 @@ async fn rest_call_dispatches_a_tool_then_reads_it_back() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+/// A user id names one user in one workspace: a token whose user already
+/// belongs to another workspace is refused with the reason, not a server
+/// error, and without naming the other workspace.
+#[tokio::test]
+async fn a_user_who_belongs_to_another_workspace_is_refused_with_the_reason() {
+    let st = state().await;
+    let first = token("ws:first", "user:same");
+    let list = r#"{"tool":"list_memories","arguments":{}}"#;
+    let resp = router(st.clone())
+        .oneshot(call_request(Some(&first), list))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let second = token("ws:second", "user:same");
+    let resp = router(st)
+        .oneshot(call_request(Some(&second), list))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(
+        body.contains("already belongs to another workspace"),
+        "{body}"
+    );
+    assert!(!body.contains("ws:first"), "{body}");
+}
+
 /// An identity's REST calls share one server: provisioned, and this node
 /// registered, on the first call only. Built per call, each one signed in as
 /// root and re-registered the node under the owner lock, and the node's
