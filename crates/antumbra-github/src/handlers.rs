@@ -22,8 +22,9 @@ use antumbra_core::{
 
 use crate::event::PullRequestEvent;
 
-/// The user the integration writes as, provisioned in each mapped workspace.
-pub const SYSTEM_USER: &str = "user:github";
+/// The user the integration writes as, provisioned in each mapped workspace:
+/// a system identity, so the one user id may belong to many workspaces.
+pub const SYSTEM_USER: &str = antumbra_core::ids::GITHUB_SYSTEM_USER;
 /// The host stamped on memories the integration writes.
 pub const SYSTEM_HOST: &str = "github";
 

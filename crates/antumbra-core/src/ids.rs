@@ -76,6 +76,24 @@ string_id!(
     /// User (person, team, or agent) identifier
     UserId
 );
+
+/// The user the GitHub App acts as in a workspace: a system identity, the
+/// same in every workspace the App is installed in. It writes memories on the
+/// workspace's behalf and owns nothing private.
+pub const GITHUB_SYSTEM_USER: &str = "user:github";
+
+/// The user ids that may belong to more than one workspace. Every other user
+/// id names one user in one workspace (`principal::provision` refuses a
+/// second), so a rule that matches on the user alone, as the expert table's
+/// read rule does, never matches another workspace's.
+pub const SYSTEM_USERS: &[&str] = &[GITHUB_SYSTEM_USER];
+
+impl UserId {
+    /// Whether this is a system identity that may belong to many workspaces.
+    pub fn is_system(&self) -> bool {
+        SYSTEM_USERS.contains(&self.as_str())
+    }
+}
 string_id!(
     /// Named latent-space of memories: the unit of
     /// organization, sharing, deletion, and reference-scope within a tenant.
@@ -108,6 +126,13 @@ impl core::fmt::Display for Generation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_system_identity_may_belong_to_many_workspaces() {
+        assert!(UserId::new(GITHUB_SYSTEM_USER).is_system());
+        assert!(!UserId::new("user:owner").is_system());
+        assert!(!UserId::new("user:github-fan").is_system());
+    }
 
     #[test]
     fn ids_roundtrip_as_transparent_strings() {

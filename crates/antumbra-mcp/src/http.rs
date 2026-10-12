@@ -461,7 +461,7 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
                 "antumbra-mcp: session init failed for {}/{}: {e}",
                 identity.tenant, identity.user
             );
-            return internal_error();
+            return init_failed(&e);
         }
     };
 
@@ -714,6 +714,20 @@ fn internal_error() -> Response {
         .into_response()
 }
 
+/// A session that could not be built: refused with the reason when the
+/// identity itself was refused, as a user id that belongs to another
+/// workspace is, and an internal error otherwise.
+fn init_failed(e: &anyhow::Error) -> Response {
+    match e.downcast_ref::<antumbra_core::AntumbraError>() {
+        Some(refusal) if refusal.is_rejection() => (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": refusal.to_string() })),
+        )
+            .into_response(),
+        _ => internal_error(),
+    }
+}
+
 fn bad_request(msg: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
@@ -813,7 +827,7 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
                 "antumbra-mcp: /mcp/call init failed for {}/{}: {e}",
                 identity.tenant, identity.user
             );
-            return internal_error();
+            return init_failed(&e);
         }
     };
     let mcp = match device {

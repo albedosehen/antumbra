@@ -123,6 +123,8 @@ docker compose -f docker/docker-compose.yml run --rm antumbra-mcp \
 
 Copy the printed JWT; it is your `ANTUMBRA_TOKEN`.
 
+A user id names one user in one workspace. The server refuses a token whose user already belongs to another workspace, so give each workspace's users their own ids (`user:default` here). The GitHub App's `user:github` is the one exception: it acts in every workspace it is installed in.
+
 ### 6. Open the console and CLI
 
 Both connect to the database over `ws://` with the root login from your `.env`:

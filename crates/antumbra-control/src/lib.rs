@@ -106,9 +106,11 @@ pub async fn signup(
     // Gate first: consume the invite (single-use) before doing any provisioning.
     invite::redeem(store, invite_code, now).await?;
 
-    // Each signup gets its own isolated workspace, owned by its first user.
+    // Each signup gets its own isolated workspace, owned by its first user, and
+    // a user id of its own: a user id names one user in one workspace, so a
+    // rule that matches on the user alone never matches another signup's rows.
     let tenant = TenantId::new(format!("ws:{}", uuid::Uuid::new_v4().simple()));
-    let user = UserId::new("user:owner");
+    let user = UserId::new(format!("user:{}", uuid::Uuid::new_v4().simple()));
     principal::provision(store, &tenant, &user).await?;
     account::create(
         store,
@@ -199,11 +201,19 @@ mod tests {
         let token = signup(&store, &id, "good-code", &issuer()).await.unwrap();
         let (tenant, user) = verify(&token);
         assert!(tenant.starts_with("ws:"), "a fresh workspace");
-        assert_eq!(user, "user:owner");
+        assert!(user.starts_with("user:") && user != "user:owner", "{user}");
 
         // Login returns a token for the SAME tenant/user.
         let login_token = login(&store, &id, &issuer()).await.unwrap();
-        assert_eq!(verify(&login_token), (tenant, user));
+        assert_eq!(verify(&login_token), (tenant.clone(), user.clone()));
+
+        // Another signup is another workspace and another user id: a user id
+        // names one user in one workspace.
+        invite::mint(&store, "second", None).await.unwrap();
+        let other = VerifiedIdentity::new("github:43");
+        let (tenant2, user2) = verify(&signup(&store, &other, "second", &issuer()).await.unwrap());
+        assert_ne!(tenant2, tenant);
+        assert_ne!(user2, user, "every signup's first user had been user:owner");
     }
 
     #[tokio::test]
@@ -247,7 +257,7 @@ mod tests {
         let jwt = authenticate(&store, &ml, &token, &issuer()).await.unwrap();
         let (tenant, user) = verify(&jwt);
         assert!(tenant.starts_with("ws:"));
-        assert_eq!(user, "user:owner");
+        assert!(user.starts_with("user:") && user != "user:owner", "{user}");
 
         // A second click of a *login* link for the same email logs in (no invite,
         // no second invite needed) to the SAME workspace.
