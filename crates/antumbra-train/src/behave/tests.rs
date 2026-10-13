@@ -105,8 +105,7 @@ fn an_audit_asks_the_later_examples_under_the_behavior_s_own_check() {
         t[1].completion.as_deref(),
         Some("git checkout -b feat/1-work")
     );
-    let args = t[0].verify["args"].as_array().unwrap();
-    assert_eq!(args[2], r#"["feat/\\d+-"]"#);
+    assert_eq!(t[0].verify["behavior"]["must"], json!([r"feat/\d+-"]));
     assert!(audit_tasks("memory:b1", &spec(8), &[]).is_empty());
     // Counted under the behavior, like its held-out tasks.
     let results = [result("memory:b1#a0", 1, 1), result("memory:b1#a1", 0, 1)];
@@ -124,9 +123,14 @@ fn tasks_carry_the_check_the_answer_and_the_behavior() {
         first.completion.as_deref(),
         Some("git checkout -b feat/0-work")
     );
-    let args = first.verify["args"].as_array().unwrap();
-    assert_eq!(args[2], r#"["feat/\\d+-"]"#, "patterns ride as arguments");
-    assert_eq!(args[3], r#"["feature/"]"#);
+    let check = &first.verify["behavior"];
+    assert_eq!(
+        check["must"],
+        json!([r"feat/\d+-"]),
+        "the behavior's own check"
+    );
+    assert_eq!(check["must_not"], json!(["feature/"]));
+    assert!(first.verify.get("program").is_none(), "judged in-process");
     assert!(t.held.iter().all(|h| h.id.starts_with("memory:b1#h")));
 }
 
