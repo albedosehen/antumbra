@@ -349,3 +349,33 @@ fn an_expert_is_admitted_with_what_it_learned_and_without_what_it_missed() {
         "the controls still hold it back"
     );
 }
+
+/// What a behavior was missed on is its first held-out task the expert
+/// failed, with the expert's answer. A behavior that passed every held-out
+/// task has none, and neither does a control.
+#[test]
+fn a_behavior_is_missed_on_its_first_failed_held_out_answer() {
+    let a = tasks("memory:a", &spec(6));
+    let b = tasks("memory:b", &spec(6));
+    let control = controls().remove(0);
+    let mut held = a.held.clone();
+    held.extend(b.held.clone());
+    held.push(control.clone());
+    let draw = |task: &CorpusTask, completion: &str, passed: bool| Draw {
+        task: task.id.clone(),
+        completion: completion.into(),
+        passed,
+    };
+    let draws = vec![
+        draw(&a.held[0], "git checkout -b feat/2-work", true),
+        draw(&a.held[1], "git switch -c feature/work", false),
+        draw(&b.held[0], "git checkout -b feat/2-work", true),
+        draw(&b.held[1], "git checkout -b feat/5-work", true),
+        draw(&control, "something else", false),
+    ];
+    let found = misses(&held, &draws);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].0, "memory:a");
+    assert_eq!(found[0].1.task, a.held[1].prompt);
+    assert_eq!(found[0].1.answer, "git switch -c feature/work");
+}
