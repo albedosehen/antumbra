@@ -57,6 +57,38 @@ pub(super) struct LoraLinear {
     grad: bool,
 }
 
+/// The spread a fresh adapter's `lora_a` factors are drawn with; `lora_b`
+/// starts at zero, so a fresh adapter changes nothing until it trains.
+pub(super) const LORA_A_STDEV: f64 = 0.02;
+
+/// Draw every `lora_a` factor in `varmap` again from `seed`, with the spread a
+/// fresh one is drawn with, in the order of their names. The device's own
+/// generator gives each new adapter whatever its stream has reached (and the
+/// CPU's cannot be seeded at all), so a training seeded here starts from the
+/// same factors in any process, on any device.
+pub(super) fn seed_lora_a(varmap: &VarMap, seed: u64) -> CResult<()> {
+    use rand::RngExt as _;
+    let vars = varmap.data().lock().expect("varmap lock");
+    let mut names: Vec<&String> = vars.keys().filter(|n| n.ends_with("lora_a")).collect();
+    names.sort();
+    let mut rng = StdRng::seed_from_u64(seed);
+    // Box-Muller: two uniforms make one standard normal.
+    let mut normal = || {
+        let u1: f64 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+        let u2: f64 = rng.random::<f64>();
+        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+    };
+    for name in names {
+        let var = &vars[name];
+        let values: Vec<f32> = (0..var.elem_count())
+            .map(|_| (normal() * LORA_A_STDEV) as f32)
+            .collect();
+        let drawn = Tensor::from_vec(values, var.shape(), var.device())?.to_dtype(var.dtype())?;
+        var.set(&drawn)?;
+    }
+    Ok(())
+}
+
 impl LoraLinear {
     /// Load the frozen base weight (+ optional bias) from `base`, and register
     /// fresh trainable LoRA factors in `lora`.
@@ -80,7 +112,7 @@ impl LoraLinear {
             "lora_a",
             Init::Randn {
                 mean: 0.0,
-                stdev: 0.02,
+                stdev: LORA_A_STDEV,
             },
         )?;
         let b = lora.get_with_hints((out_f, rank), "lora_b", candle_nn::init::ZERO)?;
@@ -538,6 +570,57 @@ mod tests {
             .flatten_all()?
             .max(0)?
             .to_scalar::<f32>()
+    }
+
+    /// A fresh adapter's factors, as a layer registers them, on the CPU.
+    fn fresh_factors() -> CResult<VarMap> {
+        let varmap = VarMap::new();
+        let vb = VarBuilder::from_varmap(&varmap, DType::F32, &Device::Cpu);
+        for layer in ["q", "v"] {
+            let vb = vb.pp(layer);
+            vb.get_with_hints(
+                (4, 32),
+                "lora_a",
+                Init::Randn {
+                    mean: 0.0,
+                    stdev: LORA_A_STDEV,
+                },
+            )?;
+            vb.get_with_hints((32, 4), "lora_b", candle_nn::init::ZERO)?;
+        }
+        Ok(varmap)
+    }
+
+    fn factor(varmap: &VarMap, name: &str) -> CResult<Vec<f32>> {
+        let vars = varmap.data().lock().expect("varmap lock");
+        vars[name].flatten_all()?.to_vec1::<f32>()
+    }
+
+    /// Two adapters seeded alike start from the same factors, whatever the
+    /// device's generator drew for them first; another seed starts elsewhere.
+    /// Only `lora_a` is drawn: `lora_b` stays zero, so a fresh adapter still
+    /// changes nothing, and the spread is a fresh adapter's.
+    #[test]
+    fn a_seeded_adapter_starts_from_its_seed_and_no_other_state() -> CResult<()> {
+        let (one, two, other) = (fresh_factors()?, fresh_factors()?, fresh_factors()?);
+        assert_ne!(
+            factor(&one, "q.lora_a")?,
+            factor(&two, "q.lora_a")?,
+            "unseeded, they differ"
+        );
+        seed_lora_a(&one, 7)?;
+        seed_lora_a(&two, 7)?;
+        seed_lora_a(&other, 8)?;
+        for name in ["q.lora_a", "v.lora_a"] {
+            assert_eq!(factor(&one, name)?, factor(&two, name)?, "{name}");
+            assert_ne!(factor(&one, name)?, factor(&other, name)?, "{name}");
+        }
+        assert_ne!(factor(&one, "q.lora_a")?, factor(&one, "v.lora_a")?);
+        assert!(factor(&one, "q.lora_b")?.iter().all(|x| *x == 0.0));
+        let drawn = factor(&one, "q.lora_a")?;
+        let sd = (drawn.iter().map(|x| x * x).sum::<f32>() / drawn.len() as f32).sqrt();
+        assert!((0.01..0.03).contains(&sd), "spread {sd}");
+        Ok(())
     }
 
     /// The rotary table is a function of position, not of the precision the

@@ -97,6 +97,13 @@ pub struct RaftConfig {
     /// example is backpropagated before the next is run, so memory does not
     /// grow with `n`.
     pub batch_size: usize,
+    /// Seed the run's own randomness: the adapter's starting factors and the
+    /// order its examples are trained in, each a stream of this seed shifted
+    /// by the process's generation seed. `None` takes both from the process's
+    /// running state, so a run then depends on what the process did before
+    /// it: the same set trained first and third in one server came out learned
+    /// and refused.
+    pub seed: Option<u64>,
 }
 
 impl Default for RaftConfig {
@@ -127,6 +134,7 @@ impl Default for RaftConfig {
             parent_adapter: None,
             replay_ratio: 0.0,
             batch_size: 1,
+            seed: None,
         }
     }
 }

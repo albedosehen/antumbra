@@ -146,6 +146,11 @@ struct Cli {
     /// the recipe's value stands and the audits are only noted.
     #[arg(long, env = "ANTUMBRA_BEHAVE_TUNE_CONFIDENCE")]
     behave_tune_confidence: bool,
+    /// Shift every seeded stream a training draws from: the same set trained
+    /// under another value is another draw, for measuring how much a training
+    /// varies. 0, the default, is the stream every training has used.
+    #[arg(long, env = "ANTUMBRA_GENERATION_SEED", default_value_t = 0)]
+    generation_seed: u64,
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -575,6 +580,8 @@ impl Cli {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse().without_empty_settings();
+    #[cfg(feature = "models")]
+    antumbra_serve::seed_generation(cli.generation_seed);
     // Secrets resolve once, from the inline flag or its file, and only the
     // resolved value is used from here on.
     let jwt_secret = secrets::resolve(

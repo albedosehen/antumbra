@@ -731,3 +731,22 @@ fn a_recipe_defaults_to_what_nine_behaviors_were_learned_with_and_refuses_nonsen
         "nothing would ever refuse"
     );
 }
+
+/// A training's seed follows what it teaches: the same behavior under another
+/// id seeds the same, the set's order does not matter, and a behavior changed
+/// seeds another. The set's print keeps the ids; the seed does not.
+#[test]
+fn a_training_is_seeded_from_what_it_teaches_not_where_it_is_stored() {
+    let taught = |id: &str| (recorded(id, Status::Accepted, EVERYWHERE), ssh());
+    let here = vec![taught("memory:a")];
+    let elsewhere = vec![taught("memory:elsewhere")];
+    assert_eq!(seed(&here), seed(&elsewhere));
+    assert_ne!(fingerprint(&here), fingerprint(&elsewhere));
+
+    let mut changed = taught("memory:b");
+    changed.0.content.push_str(" Changed.");
+    let two = vec![here[0].clone(), changed.clone()];
+    let swapped = vec![changed, here[0].clone()];
+    assert_eq!(seed(&two), seed(&swapped), "order does not matter");
+    assert_ne!(seed(&two), seed(&here));
+}

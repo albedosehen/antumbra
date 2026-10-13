@@ -334,6 +334,24 @@ pub fn fingerprint(taught: &[(Memory, Spec)]) -> String {
         .collect()
 }
 
+/// The seed a training of `taught` runs under: its behaviors' contents, in
+/// order, hashed. Unlike [`fingerprint`] it leaves out the ids, so the same
+/// rules, checks and examples train the same way whoever recorded them,
+/// under any id, in any workspace.
+pub fn seed(taught: &[(Memory, Spec)]) -> u64 {
+    let mut contents: Vec<&str> = taught.iter().map(|(m, _)| m.content.as_str()).collect();
+    contents.sort_unstable();
+    let mut h = Sha256::new();
+    for content in contents {
+        h.update((content.len() as u64).to_le_bytes());
+        h.update(content.as_bytes());
+    }
+    let digest = h.finalize();
+    let mut first = [0u8; 8];
+    first.copy_from_slice(&digest[..8]);
+    u64::from_le_bytes(first)
+}
+
 /// How the last training of a behavior's scope went for it: the set it was
 /// taught in, its held-out tasks, and whether the scope's expert was admitted.
 #[derive(Debug, Clone, PartialEq)]
