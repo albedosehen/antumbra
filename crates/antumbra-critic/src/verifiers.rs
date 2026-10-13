@@ -5,7 +5,9 @@
 //! that returns clean. The command/args/cwd come from the request's `verify`
 //! artifact (supplied per corpus task); the candidate completion is exposed to
 //! the command via the `ANTUMBRA_COMPLETION` environment variable. This is the
-//! ground-truth signal the critic densifies but never overrides.
+//! ground-truth signal the critic densifies but never overrides. Two rules run
+//! in-process instead: `contains_all`, every listed substring present, and
+//! `behavior`, a behavior's own check (`must` and `must_not` patterns).
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -98,6 +100,38 @@ impl Verifier for CommandVerifier {
         } else {
             raw_completion
         };
+
+        // In-process behavior check: every `must` pattern matches the completion
+        // and no `must_not` pattern does, judged by the same code that checked
+        // the behavior's examples when it was recorded, so a pattern means the
+        // same thing in both places. One that does not compile fails.
+        if let Some(check) = spec.get("behavior") {
+            let patterns = |key: &str| -> Vec<String> {
+                check
+                    .get(key)
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|p| p.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let passed = antumbra_core::behavior::check(
+                &patterns("must"),
+                &patterns("must_not"),
+                completion,
+            )
+            .unwrap_or(false);
+            return Ok(if passed {
+                VerifierVerdict {
+                    passed: true,
+                    value: 1.0,
+                }
+            } else {
+                fail()
+            });
+        }
 
         // In-process rule (no external process / no Python): the completion must
         // contain every listed substring. A real, deterministic reward.
@@ -228,6 +262,30 @@ mod tests {
         let bad = req(spec, "def sub(a, b):\n    return a - b\n");
         assert!(v.verify(&good).await.unwrap().passed);
         assert!(!v.verify(&bad).await.unwrap().passed);
+    }
+
+    /// A behavior's check runs in-process, matched as the behavior's examples
+    /// were when it was recorded: an inline case flag and a lookahead, which a
+    /// check may use, mean what they meant there. A pattern that does not
+    /// compile fails every answer.
+    #[tokio::test]
+    async fn a_behavior_check_passes_what_follows_and_refuses_what_breaks_it() {
+        async fn passes(spec: &serde_json::Value, answer: &str) -> bool {
+            let r = req(spec.clone(), answer);
+            CommandVerifier.verify(&r).await.unwrap().passed
+        }
+        let spec = serde_json::json!({ "behavior": {
+            "must": [r"(?i)git add (?!-A\b)\S"],
+            "must_not": ["--force"],
+        }});
+        assert!(passes(&spec, "GIT ADD src/lib.rs").await);
+        assert!(!passes(&spec, "git add -A").await, "misses must");
+        assert!(
+            !passes(&spec, "git add src/lib.rs && git push --force").await,
+            "matches must_not"
+        );
+        let broken = serde_json::json!({ "behavior": { "must": ["(unclosed"] } });
+        assert!(!passes(&broken, "anything").await);
     }
 
     #[test]

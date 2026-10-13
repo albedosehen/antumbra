@@ -34,28 +34,19 @@ pub const CONTROL_SLACK: f32 = 0.1;
 /// behaviors, half of them sat at 0.50 and read as missed.
 const HOLD_EVERY: usize = 3;
 
-/// The check, in the language the trainer's verifier runs. The patterns ride
-/// as arguments, so no pattern is ever spliced into code.
-const CHECK: &str = "import json,os,re,sys\n\
-c=os.environ.get('ANTUMBRA_COMPLETION','')\n\
-must=json.loads(sys.argv[1])\n\
-must_not=json.loads(sys.argv[2])\n\
-sys.exit(0 if all(re.search(p,c) for p in must) and not any(re.search(p,c) for p in must_not) else 1)";
-
 const REPLAY: &str = include_str!("../../../corpora/behave-replay.json");
 const CONTROLS: &str = include_str!("../../../corpora/behave-controls.json");
 
-/// The verifier spec that applies `spec`'s check to a completion.
+/// The verifier spec that applies `spec`'s check to a completion: the
+/// verifier's in-process `behavior` rule, which judges it with
+/// [`antumbra_core::behavior::check`], the code that checked the behavior's
+/// examples and violations when it was recorded. The trainer once ran the
+/// patterns through Python's `re` instead, a second dialect: a check could be
+/// accepted by one and read differently, or not at all, by the other.
 pub fn verify(spec: &Spec) -> Value {
     json!({
-        "program": "python",
         "extract_code": false,
-        "args": [
-            "-c",
-            CHECK,
-            serde_json::to_string(&spec.must).unwrap_or_default(),
-            serde_json::to_string(&spec.must_not).unwrap_or_default(),
-        ],
+        "behavior": { "must": spec.must, "must_not": spec.must_not },
     })
 }
 

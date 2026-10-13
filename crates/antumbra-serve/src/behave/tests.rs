@@ -689,3 +689,51 @@ async fn an_audit_follows_a_behavior_recorded_again() {
         "audited once, not again"
     );
 }
+
+/// The trainer judges an answer by a behavior's check exactly as recording
+/// judged its examples and violations: one matcher, one dialect. A violation
+/// ending in a newline is the case the trainer's old Python check read the
+/// other way, since Python's `$` also matches before a final newline.
+#[tokio::test]
+async fn the_trainer_judges_an_answer_as_recording_judged_the_examples() {
+    use antumbra_core::behavior::Example;
+    use antumbra_core::ports::{Verifier, VerifyRequest};
+    let spec = Spec {
+        rule: "Stage files by name.".into(),
+        must: vec![r"(?i)^git add (?!-A\b)\S+$".into()],
+        must_not: vec!["--force".into()],
+        examples: ["git add src/lib.rs", "GIT ADD Cargo.toml"]
+            .iter()
+            .map(|a| Example {
+                task: "Stage it.".into(),
+                answer: a.to_string(),
+            })
+            .collect(),
+        violations: vec![
+            "git add -A".into(),
+            "git add src/lib.rs\n".into(),
+            "git add --force x".into(),
+        ],
+    };
+    let verify = antumbra_train::behave::verify(&spec);
+    let verifier = antumbra_critic::CommandVerifier;
+    let answers = spec
+        .examples
+        .iter()
+        .map(|e| e.answer.clone())
+        .chain(spec.violations.iter().cloned());
+    for answer in answers {
+        let req = VerifyRequest {
+            run_id: RunId::new("r"),
+            step_idx: 0,
+            dimension: "exec".into(),
+            artifact: serde_json::json!({ "completion": answer, "verify": verify }),
+        };
+        assert_eq!(
+            verifier.verify(&req).await.unwrap().passed,
+            spec.follows(&answer).unwrap(),
+            "{answer:?}"
+        );
+    }
+    assert_eq!(spec.follows("git add src/lib.rs\n"), Some(false));
+}

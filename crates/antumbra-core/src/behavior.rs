@@ -151,16 +151,27 @@ fn follows(must: &[Regex], must_not: &[Regex], answer: &str) -> bool {
         && !must_not.iter().any(|r| r.is_match(answer).unwrap_or(false))
 }
 
+/// Whether `answer` passes a behavior's check: every `must` pattern matches
+/// it and no `must_not` pattern does. `None` when a pattern does not compile.
+///
+/// The one place a check is judged. Recording a behavior tests its examples
+/// and violations here, and the trainer scores held-out and audited answers
+/// here too, so an answer is judged by the same regular expressions, in the
+/// same dialect, as the examples it is measured against.
+pub fn check(must: &[String], must_not: &[String], answer: &str) -> Option<bool> {
+    let mut problems = Vec::new();
+    let must = compile(must, &mut problems);
+    let must_not = compile(must_not, &mut problems);
+    problems
+        .is_empty()
+        .then(|| follows(&must, &must_not, answer))
+}
+
 impl Spec {
-    /// Whether `answer` follows the behavior: every `must` pattern matches and
-    /// no `must_not` pattern does. `None` when a pattern does not compile.
+    /// Whether `answer` follows the behavior, by [`check`]. `None` when a
+    /// pattern does not compile.
     pub fn follows(&self, answer: &str) -> Option<bool> {
-        let mut problems = Vec::new();
-        let must = compile(&self.must, &mut problems);
-        let must_not = compile(&self.must_not, &mut problems);
-        problems
-            .is_empty()
-            .then(|| follows(&must, &must_not, answer))
+        check(&self.must, &self.must_not, answer)
     }
 
     /// Everything that keeps this behavior from training; empty when it can.
