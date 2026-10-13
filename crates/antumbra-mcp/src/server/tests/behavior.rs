@@ -269,6 +269,13 @@ async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
             worse: Some(0.74),
         },
     );
+    antumbra_core::behavior::missed::mark(
+        &mut m.evidence,
+        Some(&antumbra_core::behavior::missed::Missed::new(
+            "Start issue #7.",
+            "git switch -c issue-7",
+        )),
+    );
     memory::upsert(&store, &m).await?;
     let out = s
         .list_behaviors(Parameters(ListBehaviorsParams {
@@ -291,6 +298,11 @@ async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
     assert_eq!(
         listed[0].last_audit.as_deref(),
         Some("audited on 2 later examples: the expert passed 1, the base model 0")
+    );
+    let missed = listed[0].missed.as_ref().expect("what it was missed on");
+    assert_eq!(
+        (missed.task.as_str(), missed.answer.as_str()),
+        ("Start issue #7.", "git switch -c issue-7")
     );
     Ok(())
 }
@@ -371,6 +383,7 @@ fn a_behavior_with_nothing_wrong_and_no_training_matches_the_output_schema() {
         problems: Vec::new(),
         last_training: None,
         last_audit: None,
+        missed: None,
     };
     assert_required_keys_present(&view);
 }

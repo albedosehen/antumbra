@@ -114,6 +114,19 @@ pub(super) struct BehaviorView {
     /// itself.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) last_audit: Option<String>,
+    /// When its last training did not learn it: a held-out task it was
+    /// missed on, and the trained expert's answer, which failed the check.
+    /// An answer that does the right thing in other words points at the
+    /// check; one that does something else points at the examples.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) missed: Option<MissedView>,
+}
+
+/// A held-out task a behavior was missed on, and the expert's answer.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub(super) struct MissedView {
+    pub(super) task: String,
+    pub(super) answer: String,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -229,7 +242,7 @@ impl McpServer {
 
     /// The user's behaviors.
     #[tool(
-        description = "List your behaviors, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, how many examples and violations back it, and `problems` when something keeps it from being taught. Filter by `status` or `scope`."
+        description = "List your behaviors, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, how many examples and violations back it, and `problems` when something keeps it from being taught. One its last training did not learn says, under `missed`, a held-out task and what the expert answered instead. Filter by `status` or `scope`."
     )]
     pub(super) async fn list_behaviors(
         &self,
@@ -266,6 +279,10 @@ impl McpServer {
                 problems: spec.problems(),
                 last_training: behavior::training(&m.evidence).map(|t| t.describe()),
                 last_audit: behavior::audits(&m.evidence).last().map(|a| a.describe()),
+                missed: behavior::missed::of(&m.evidence).map(|x| MissedView {
+                    task: x.task,
+                    answer: x.answer,
+                }),
                 rule: spec.rule,
                 scope: state.scope,
                 status: state.status.as_str().to_string(),

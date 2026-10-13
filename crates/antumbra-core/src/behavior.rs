@@ -841,6 +841,7 @@ pub fn stale(taught: &[(Memory, Spec)], expert: Option<&Expert>) -> bool {
 }
 
 pub mod candidate;
+pub mod missed;
 pub mod tuning;
 
 #[cfg(test)]

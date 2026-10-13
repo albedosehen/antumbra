@@ -1,4 +1,3 @@
-
 use super::*;
 
 #[test]
@@ -59,6 +58,7 @@ fn admitted(ids: &[&str], adapter: &str) -> Trained {
         fitness: 1.0,
         capability_vec: vec![0.0; EMBED_DIM],
         recipe: behavior::Recipe::default(),
+        misses: Vec::new(),
     }
 }
 
@@ -254,6 +254,7 @@ async fn mint_marks_only_the_behaviors_still_as_they_were_taught() {
         fitness: 1.0,
         capability_vec: vec![0.0; EMBED_DIM],
         recipe: behavior::Recipe::default(),
+        misses: Vec::new(),
     };
     let report = mint(&store, &plan, trained, "rig").await.unwrap();
     let minted = report.expert.unwrap().0;
@@ -352,6 +353,7 @@ async fn learned_and_missed(admitted: bool) -> (Store, Plan, Trained) {
         fitness: 0.5,
         capability_vec: vec![0.0; EMBED_DIM],
         recipe: behavior::Recipe::default(),
+        misses: Vec::new(),
     };
     (store, plan, trained)
 }
@@ -432,6 +434,52 @@ async fn a_refused_expert_leaves_each_behavior_its_own_rates() {
 
     // Read again, the same set is refused as it stands.
     assert!(behavior::refused(&plan_again(&store).await.taught));
+}
+
+/// What a behavior's last training noted it was missed on, as stored now.
+async fn noted_miss(store: &Store, id: &str) -> Option<Missed> {
+    let m = memory::get(store, &TenantId::new("ws:a"), &MemoryId::new(id))
+        .await
+        .unwrap()
+        .unwrap();
+    missed::of(&m.evidence)
+}
+
+/// A behavior not learned notes the held-out task it was missed on and the
+/// expert's answer, whether the expert was admitted or refused. One learned
+/// notes none, even when it failed a held-out task on its way over the bar,
+/// and a note an earlier training left on it goes.
+#[tokio::test]
+async fn a_missed_behavior_notes_what_the_expert_answered_instead() {
+    for admitted in [true, false] {
+        let (store, plan, mut trained) = learned_and_missed(admitted).await;
+        trained.misses = vec![
+            ("memory:learned".into(), Missed::new("t2", "wrong once")),
+            (
+                "memory:missed".into(),
+                Missed::new("t2", "not the behavior"),
+            ),
+        ];
+        let id = MemoryId::new("memory:learned");
+        let tenant = TenantId::new("ws:a");
+        let mut earlier = memory::get(&store, &tenant, &id).await.unwrap().unwrap();
+        missed::mark(&mut earlier.evidence, Some(&Missed::new("t0", "before")));
+        memory::upsert(&store, &earlier).await.unwrap();
+
+        mint(&store, &plan, trained, "rig").await.unwrap();
+
+        let miss = noted_miss(&store, "memory:missed").await;
+        assert_eq!(
+            miss.map(|m| (m.task, m.answer)),
+            Some(("t2".into(), "not the behavior".into())),
+            "admitted: {admitted}"
+        );
+        assert_eq!(
+            noted_miss(&store, "memory:learned").await,
+            None,
+            "admitted: {admitted}"
+        );
+    }
 }
 
 async fn plan_again(store: &Store) -> Plan {

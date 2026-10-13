@@ -64,7 +64,19 @@ function behaviorItem(b) {
     { class: "behavior" },
     h("p", { class: "rule" }, b.rule),
     h("div", { class: "meta" }, ...meta),
+    b.missed ? missedItem(b.missed) : null,
     acts.length ? h("div", { class: "actions-row" }, ...acts) : null,
+  );
+}
+
+// What the expert answered instead, on a held-out task its last training
+// missed: text, never markup, since both are the user's and the model's words.
+function missedItem(missed) {
+  return h(
+    "div",
+    { class: "meta" },
+    h("span", { class: "muted" }, `missed on: ${missed.task}`),
+    h("span", { class: "muted" }, `the expert answered: ${missed.answer}`),
   );
 }
 

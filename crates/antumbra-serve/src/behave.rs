@@ -19,6 +19,7 @@
 
 use chrono::Utc;
 
+use antumbra_core::behavior::missed::{self, Missed};
 use antumbra_core::behavior::{self, learnable, Spec, State, Status};
 use antumbra_core::ports::Embedder;
 use antumbra_core::{
@@ -137,6 +138,9 @@ pub struct Trained {
     /// What it was trained with, kept on the card so a measurement can be
     /// read back against its settings.
     pub recipe: behavior::Recipe,
+    /// Each behavior's first held-out task the expert failed, with its
+    /// answer, by behavior id: noted on the ones it did not learn.
+    pub misses: Vec<(String, Missed)>,
 }
 
 /// Score the base, train beside its own replay, and score again. Touches no
@@ -213,6 +217,7 @@ pub async fn train(
     }
     let n = routed.len().max(1) as f32;
     Ok(Trained {
+        misses: course::misses(&held, &scores.draws),
         verdict,
         replay: replayed,
         adapter_uri: out.adapter_uri,
@@ -250,8 +255,16 @@ async fn still_as_taught(store: &Store, plan: &Plan) -> Result<Vec<Memory>> {
 
 /// Note on each behavior still as it was taught how this training went for
 /// it, and, when the expert was admitted, mark the ones it learned trained
-/// into `expert` and the ones it missed untrained.
-async fn note(store: &Store, plan: &Plan, verdict: &Verdict, expert: Option<&str>) -> Result<()> {
+/// into `expert` and the ones it missed untrained. One it did not learn also
+/// notes the held-out task it was missed on and the expert's answer, from
+/// `misses`; one it learned has that note cleared.
+async fn note(
+    store: &Store,
+    plan: &Plan,
+    verdict: &Verdict,
+    misses: &[(String, Missed)],
+    expert: Option<&str>,
+) -> Result<()> {
     let set = behavior::fingerprint(&plan.taught);
     let now = Utc::now();
     for mut m in still_as_taught(store, plan).await? {
@@ -267,6 +280,11 @@ async fn note(store: &Store, plan: &Plan, verdict: &Verdict, expert: Option<&str
             worse: score.map_or(0.5, |s| s.worse),
         };
         behavior::mark_training(&mut m.evidence, &training);
+        let miss = misses
+            .iter()
+            .find(|(id, _)| !learned && id == m.id.as_str())
+            .map(|(_, x)| x);
+        missed::mark(&mut m.evidence, miss);
         match expert {
             Some(e) if learned => behavior::mark_trained(&mut m.evidence, e),
             Some(_) => behavior::mark_untrained(&mut m.evidence),
@@ -435,7 +453,8 @@ pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result
 /// placed on `host`, the machine whose disk holds its adapter.
 ///
 /// Either way each behavior notes how the training went for it: its held-out
-/// rates, whether it was learned, and whether the expert was admitted. A set
+/// rates, whether it was learned, and whether the expert was admitted; and one
+/// not learned notes the task it was missed on and the expert's answer. A set
 /// whose expert was refused is not trained again until it changes. A
 /// behavior retired or recorded again while it trained is left as it now is:
 /// the next run sees it.
@@ -447,7 +466,7 @@ pub async fn mint(
 ) -> Result<BehaveReport> {
     let ids = plan.behaviors();
     if !trained.verdict.admitted {
-        note(store, plan, &trained.verdict, None).await?;
+        note(store, plan, &trained.verdict, &trained.misses, None).await?;
         return Ok(BehaveReport {
             behaviors: ids,
             replay: trained.replay,
@@ -535,7 +554,7 @@ pub async fn mint(
     }
     expert::delete(store, &e.id).await?;
     expert::insert(store, &e).await?;
-    note(store, plan, &verdict, Some(id.as_str())).await?;
+    note(store, plan, &verdict, &trained.misses, Some(id.as_str())).await?;
     Ok(BehaveReport {
         behaviors: ids,
         replay: trained.replay,

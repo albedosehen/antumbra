@@ -14,9 +14,10 @@
 
 use serde_json::{json, Value};
 
+use antumbra_core::behavior::missed::Missed;
 use antumbra_core::behavior::{Example, Spec};
 
-use crate::eval::TaskResult;
+use crate::eval::{Draw, TaskResult};
 use crate::model::CorpusTask;
 
 /// Each behavior's held-out tasks must pass at least this often.
@@ -168,6 +169,26 @@ pub fn controls() -> Vec<CorpusTask> {
         .into_iter()
         .filter_map(|(id, prompt, verify)| Some(CorpusTask::new(id, prompt).with_verify(verify?)))
         .collect()
+}
+
+/// Each behavior's first held-out task the trained expert failed, with its
+/// answer, by behavior id: from `draws`, the expert's scored answers to
+/// `held`, what it did instead. The controls belong to no behavior and are
+/// left out, and a behavior that passed every held-out task has none.
+pub fn misses(held: &[CorpusTask], draws: &[Draw]) -> Vec<(String, Missed)> {
+    let mut found: Vec<(String, Missed)> = Vec::new();
+    for draw in draws.iter().filter(|d| !d.passed) {
+        let Some(task) = held.iter().find(|t| t.id == draw.task) else {
+            continue;
+        };
+        let Some(id) = task.skill.as_deref() else {
+            continue;
+        };
+        if !found.iter().any(|(seen, _)| seen == id) {
+            found.push((id.to_string(), Missed::new(&task.prompt, &draw.completion)));
+        }
+    }
+    found
 }
 
 /// One behavior's held-out pass rates, base and expert.
