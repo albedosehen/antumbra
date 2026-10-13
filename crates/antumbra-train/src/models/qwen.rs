@@ -206,7 +206,16 @@ pub struct QwenCausalLm {
     /// how many have been taken from it; otherwise draws come from the
     /// process-wide nonce.
     draws: Option<(u64, u64)>,
+    /// When the run is seeded ([`RaftConfig::seed`]), the seed its training
+    /// shuffles come from and how many it has taken; otherwise each shuffle
+    /// comes from the process-wide nonce.
+    train_order: Option<(u64, u64)>,
 }
+
+/// What a seeded run's two streams are told apart by: the adapter's starting
+/// factors and the order it trains in.
+const INIT_STREAM: u64 = 0x1A17;
+const ORDER_STREAM: u64 = 0x5F37;
 
 /// Process-global generation nonce, so every `generate` call (even repeated
 /// single-sample calls from a best-of-K probe over freshly-loaded models) seeds
@@ -307,6 +316,14 @@ impl QwenCausalLm {
         if cfg.quantize_base {
             model.quantize_base(&device).map_err(ce)?;
         }
+        // A seeded run starts from factors drawn from its seed, not from
+        // wherever the device's generator has got to in this process.
+        let seeded = cfg
+            .seed
+            .map(|s| crate::seed::shifted(s, crate::seed::generation_seed()));
+        if let Some(s) = seeded {
+            seed_lora_a(&model.varmap, s ^ INIT_STREAM).map_err(ce)?;
+        }
 
         let opt = candle_nn::AdamW::new(
             model.varmap.all_vars(),
@@ -338,6 +355,7 @@ impl QwenCausalLm {
             chat,
             batch_size: cfg.batch_size.max(1),
             draws: None,
+            train_order: seeded.map(|s| (s ^ ORDER_STREAM, 0)),
         })
     }
 
@@ -646,12 +664,26 @@ impl QwenCausalLm {
     /// random across rounds. Returns the mean supervised loss over the steps
     /// taken.
     fn train_batch(&mut self, batch: &[SftExample], per_step: usize) -> Result<f32> {
-        let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // A seeded run takes its n-th shuffle from its own stream; otherwise
+        // the shuffle is the process's next.
+        let stream = match &mut self.train_order {
+            Some((base, taken)) => {
+                let s = base
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .wrapping_add(*taken);
+                *taken += 1;
+                s
+            }
+            None => {
+                let nonce = GEN_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                crate::seed::shifted(
+                    ORDER_STREAM.wrapping_mul(nonce.wrapping_add(1)),
+                    crate::seed::generation_seed(),
+                )
+            }
+        };
         let mut order: Vec<usize> = (0..batch.len()).collect();
-        let mut rng = StdRng::seed_from_u64(crate::seed::shifted(
-            0x5F37_u64.wrapping_mul(nonce.wrapping_add(1)),
-            crate::seed::generation_seed(),
-        ));
+        let mut rng = StdRng::seed_from_u64(stream);
         order.shuffle(&mut rng);
 
         let vars = self.model.varmap.all_vars();

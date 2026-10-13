@@ -125,6 +125,13 @@ pub async fn plan(
     Ok(Plan::of(tenant, user, scope, &memories))
 }
 
+/// The seed a training of `plan` runs under: [`behavior::seed`] of what it
+/// teaches, so the same behaviors train the same way for any user, under any
+/// scope, in any process.
+pub fn seed_of(plan: &Plan) -> u64 {
+    behavior::seed(&plan.taught)
+}
+
 /// A trained expert's scores and, when admitted, what minting needs.
 #[derive(Debug, Clone)]
 pub struct Trained {
@@ -165,9 +172,13 @@ pub async fn train(
         .map(|t| (t.skill.clone(), t.prompt.clone()))
         .collect();
 
+    // Seeded from the set taught, so the same set trains the same way in any
+    // process, whatever was trained before it; the node's generation seed
+    // shifts it for measuring how much a training varies.
     let cfg = RaftConfig {
         temperature: 0.0,
         samples_per_task: 1,
+        seed: Some(seed_of(plan)),
         ..cfg.clone()
     };
     let run = RunId::new(

@@ -36,6 +36,10 @@ pub mod behave;
 #[cfg(all(test, feature = "models"))]
 mod gpu_blend;
 
+/// Re-exported so the server can set the generation seed its trainings shift
+/// their seeded streams by.
+#[cfg(feature = "models")]
+pub use antumbra_train::seed::seed_generation;
 /// Re-exported so callers can construct [`MultiAdapterServe`] without depending
 /// on `antumbra-train` directly.
 #[cfg(feature = "models")]
