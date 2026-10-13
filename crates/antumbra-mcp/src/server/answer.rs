@@ -5,7 +5,7 @@
 //! the behaviors a user accepted for a scope: everywhere, or one repository.
 //! It is never the routed expert. It joins every answer in its scope, and
 //! answers alone a task like the ones it was taught when nothing else covers
-//! it.
+//! it, or any task when the caller asks for standing experts only.
 
 use super::*;
 use antumbra_core::behavior::{normalize_scope, EVERYWHERE};
@@ -18,7 +18,7 @@ impl McpServer {
     /// (the full recall→route→serve surface). Escalates when nothing covers it
     /// or when no serving engine is configured.
     #[tool(
-        description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter, with your standing behaviors (for everywhere and for `repo`) composed in. Escalates if nothing covers it."
+        description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter, with your standing behaviors (for everywhere and for `repo`) composed in. Escalates if nothing covers it. With `standing_only`, skip the routing and answer through your standing experts alone, to see what your behaviors do on their own."
     )]
     pub(super) async fn answer(
         &self,
@@ -31,9 +31,15 @@ impl McpServer {
                     .into(),
             )));
         };
-        let v = self.embedder.embed(&p.task).await.map_err(err)?;
-        let (routes, why) = self.routed(&v, 1).await.map_err(err)?;
-        let top = routes.first().map(|r| ExpertId::new(r.expert_id.clone()));
+        // Standing only: no route, and the task is embedded for nothing.
+        let (top, v, why) = if p.standing_only {
+            (None, None, Some("no standing expert of yours in scope"))
+        } else {
+            let v = self.embedder.embed(&p.task).await.map_err(err)?;
+            let (routes, why) = self.routed(&v, 1).await.map_err(err)?;
+            let top = routes.first().map(|r| ExpertId::new(r.expert_id.clone()));
+            (top, Some(v), why)
+        };
         // The serving engine snapshots its adapter population at startup; a route
         // to an expert it can't serve (e.g. one minted afterward) escalates cleanly
         // rather than surfacing a "no adapter registered" error.
@@ -50,12 +56,15 @@ impl McpServer {
             .await
             .map_err(err)?;
         // With nothing routed, a standing expert answers only a task like the
-        // ones it was taught; anything else is the generalist's.
+        // ones it was taught; anything else is the generalist's. Asked for
+        // standing experts only, they answer whatever the task is.
         let standing: Vec<ExpertId> = standing
             .into_iter()
             .filter(|e| {
-                top.is_some()
-                    || e.capability_similarity(&v)
+                p.standing_only
+                    || top.is_some()
+                    || v.as_ref()
+                        .and_then(|v| e.capability_similarity(v))
                         .is_some_and(|s| s >= PRIVATE_ROUTE_FLOOR)
             })
             .map(|e| e.id)
