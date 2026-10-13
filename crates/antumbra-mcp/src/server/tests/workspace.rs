@@ -657,6 +657,7 @@ async fn answer_routes_then_serves_through_the_expert() {
         .answer(Parameters(AnswerParams {
             task: "add two numbers".into(),
             repo: None,
+            standing_only: false,
         }))
         .await
         .unwrap();
@@ -712,6 +713,7 @@ async fn answer_escalates_when_the_routed_expert_is_not_servable() {
         .answer(Parameters(AnswerParams {
             task: "add two numbers".into(),
             repo: None,
+            standing_only: false,
         }))
         .await
         .unwrap();
@@ -730,6 +732,7 @@ async fn answer_without_a_serving_engine_reports_not_configured() {
         .answer(Parameters(AnswerParams {
             task: "x".into(),
             repo: None,
+            standing_only: false,
         }))
         .await
         .unwrap();

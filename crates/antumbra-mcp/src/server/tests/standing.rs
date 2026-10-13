@@ -96,6 +96,7 @@ fn ask(task: &str, repo: Option<&str>) -> Parameters<AnswerParams> {
     Parameters(AnswerParams {
         task: task.into(),
         repo: repo.map(str::to_string),
+        standing_only: false,
     })
 }
 
@@ -208,6 +209,57 @@ async fn with_nothing_routed_a_standing_expert_answers_only_a_task_like_its_own(
     let out = s.answer(ask(task, None)).await.unwrap();
     assert!(out.0.escalate, "a task unlike its own is the generalist's");
     assert!(out.0.standing.is_empty());
+    assert!(rec.blends.lock().unwrap().is_empty());
+}
+
+/// Asked for standing experts only, an answer leaves out the routed expert,
+/// even where the router covers the task, and serves through the user's
+/// standing experts for everywhere and the repository however unlike their
+/// own the task is. With none in scope it escalates and serves nothing.
+#[tokio::test]
+async fn an_answer_from_standing_experts_only_skips_the_route_and_the_likeness() {
+    let only = |repo: Option<&str>| {
+        Parameters(AnswerParams {
+            task: "add two numbers".into(),
+            repo: repo.map(str::to_string),
+            standing_only: true,
+        })
+    };
+    let mut unlike = vec![0.0; EMBED_DIM];
+    unlike[EMBED_DIM - 1] = 1.0;
+    let (s, rec) = covered().await;
+    for e in [
+        expert(
+            "expert:mine:everywhere",
+            "user:test",
+            standing("everywhere"),
+            unlike.clone(),
+        ),
+        expert(
+            "expert:mine:repo",
+            "user:test",
+            standing("github.com/o/r"),
+            unlike.clone(),
+        ),
+    ] {
+        expert::insert(&s.store, &e).await.unwrap();
+    }
+    let out = s.answer(only(Some("github.com/o/r"))).await.unwrap();
+    assert!(!out.0.escalate);
+    assert_eq!(out.0.expert_id.as_deref(), Some("expert:mine:everywhere"));
+    assert_eq!(
+        out.0.standing,
+        ["expert:mine:everywhere", "expert:mine:repo"]
+    );
+    assert_eq!(
+        *rec.blends.lock().unwrap(),
+        [vec!["expert:mine:everywhere", "expert:mine:repo"]],
+        "no routed expert in the blend"
+    );
+
+    let (s, rec) = covered().await;
+    let out = s.answer(only(None)).await.unwrap();
+    assert!(out.0.escalate, "no standing expert in scope");
     assert!(rec.blends.lock().unwrap().is_empty());
 }
 

@@ -499,6 +499,12 @@ pub(super) struct AnswerParams {
     /// everywhere always are.
     #[serde(default)]
     pub(super) repo: Option<String>,
+    /// Answer through your standing experts alone, for everywhere and for
+    /// `repo`: no routing, and whatever the task resembles. What your
+    /// behaviors do on their own, for measuring them. Escalates when you have
+    /// none in scope.
+    #[serde(default)]
+    pub(super) standing_only: bool,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
