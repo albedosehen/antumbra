@@ -5,6 +5,7 @@
 ### Relics
 
 - **Relics: pages an agent wrote, kept, found and viewed.** `publish_relic` stores an HTML page in copal (one file per version, at `relics/<slug>/v<N>.html`) and indexes its text, so `recall_documents` finds it. `list_relics` lists or searches the relics you can see, `get_relic` returns one with an address that displays it, and `set_relic_visibility` makes one public or private. The dashboard gains a gallery at `/relics`, with live previews, All / Yours / Shared with you, search and a list view, and a viewer at `/relic/<slug>`. A relic is private to its compartment's audience by default, viewed through a render link minted per view; a public one opens at `/relic/<slug>` for anyone who can reach the server, with no sign-in. Pages are shown only in a sandboxed `<iframe>` from copal's render origin, never by the dashboard's own origin. Needs `--copal-render-origin` (`ANTUMBRA_COPAL_RENDER_ORIGIN`) beside `--copal-addr`, and copal with render links, `/v1/public/{id}` and `COPAL_RENDER_FRAME_ANCESTORS` (Oneiriq/copal#119). A new `relic` table, read through the compartment and written by its owner only, is applied at boot.
+- **The Compose `copal` profile runs copal's render listener**, so a Compose host can keep relics: `COPAL_RENDER_ORIGIN`, `COPAL_RENDER_FRAME_ANCESTORS` and `COPAL_RENDER_PUBLISH` in `docker/.env` put it on the LAN (it defaults to this machine only, at `127.0.0.1:8093`); set `ANTUMBRA_COPAL_RENDER_ORIGIN` to the same origin.
 
 ## 0.1.1 - 2026-10-09
 

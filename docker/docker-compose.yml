@@ -352,6 +352,17 @@ services:
       - COPAL_EMBEDDING_ADDR=${COPAL_EMBEDDING_ADDR:-}
       - COPAL_EMBEDDING_MODEL=${COPAL_EMBEDDING_MODEL:-}
       - COPAL_EMBEDDING_DIMENSION=${COPAL_EMBEDDING_DIMENSION:-384}
+      # The render listener, where relics are displayed: pages run in a sandbox
+      # on an origin of their own, and the listener serves render links, short
+      # links and public pages and nothing else, so it may face the LAN where
+      # the tenant API may not. COPAL_RENDER_ORIGIN is the address a browser
+      # reaches it at (set antumbra-mcp's ANTUMBRA_COPAL_RENDER_ORIGIN to the
+      # same), and COPAL_RENDER_FRAME_ANCESTORS names the dashboard origins
+      # whose relics pages may frame it. The defaults are this machine only;
+      # copal refuses an empty origin, so they are never blank.
+      - COPAL_RENDER_BIND=0.0.0.0:8083
+      - COPAL_RENDER_ORIGIN=${COPAL_RENDER_ORIGIN:-http://127.0.0.1:8093}
+      - COPAL_RENDER_FRAME_ANCESTORS=${COPAL_RENDER_FRAME_ANCESTORS:-http://127.0.0.1:8081 http://localhost:8081}
     volumes:
       # The image owns /data/blobs as its copal user, and a fresh named volume
       # takes that ownership over.
@@ -364,6 +375,9 @@ services:
       # network (and probing by hand), never the LAN. NOT 8090 or 8091: the
       # control server and the reranker already bind those.
       - "127.0.0.1:8092:8080"
+      # The render listener: loopback unless a host publishes it, e.g.
+      # COPAL_RENDER_PUBLISH=10.0.0.132:8093 so relics open from the LAN.
+      - "${COPAL_RENDER_PUBLISH:-127.0.0.1:8093}:8083"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/readyz"]
       interval: 30s
