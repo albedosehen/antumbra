@@ -28,6 +28,7 @@ pub mod memory;
 pub mod memory_chunk;
 pub mod principal;
 pub mod recipe;
+pub mod relic;
 pub mod reward;
 pub mod router;
 pub mod shadow;

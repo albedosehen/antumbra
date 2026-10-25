@@ -22,6 +22,11 @@ const SCRIPT: &str = include_str!("dashboard/app.js");
 /// loaded after it and sharing its helpers.
 const BEHAVIORS: &str = include_str!("dashboard/behaviors.js");
 const STYLE: &str = include_str!("dashboard/app.css");
+/// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and
+/// one style for both pages, self-contained because the dashboard's script
+/// starts against the dashboard's own markup.
+const RELICS_SCRIPT: &str = include_str!("dashboard/relics.js");
+const RELICS_STYLE: &str = include_str!("dashboard/relics.css");
 
 /// The page's own script and style, and requests back to this server: nothing
 /// inline, nothing from elsewhere. The page renders stored text as text, never
@@ -44,6 +49,14 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
         .route("/dashboard/app.js", get(script))
         .route("/dashboard/behaviors.js", get(behaviors))
         .route("/dashboard/app.css", get(style))
+        .route(
+            "/dashboard/relics.js",
+            get(|| async { asset("text/javascript; charset=utf-8", RELICS_SCRIPT) }),
+        )
+        .route(
+            "/dashboard/relics.css",
+            get(|| async { asset("text/css; charset=utf-8", RELICS_STYLE) }),
+        )
 }
 
 async fn page() -> Response {
@@ -97,6 +110,8 @@ mod tests {
             ("/dashboard/app.js", "text/javascript"),
             ("/dashboard/behaviors.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
+            ("/dashboard/relics.js", "text/javascript"),
+            ("/dashboard/relics.css", "text/css"),
         ] {
             let res = get_path(path).await;
             assert_eq!(res.status(), StatusCode::OK, "{path}");
@@ -140,7 +155,11 @@ mod tests {
     /// memory that holds markup is shown, not run.
     #[test]
     fn the_scripts_never_write_markup() {
-        for (name, script) in [("app.js", SCRIPT), ("behaviors.js", BEHAVIORS)] {
+        for (name, script) in [
+            ("app.js", SCRIPT),
+            ("behaviors.js", BEHAVIORS),
+            ("relics.js", RELICS_SCRIPT),
+        ] {
             for sink in [
                 "innerHTML",
                 "outerHTML",

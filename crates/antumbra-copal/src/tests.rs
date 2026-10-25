@@ -497,3 +497,158 @@ async fn a_replay_already_holding_these_bytes_is_not_uploaded_again() {
         .unwrap();
     assert_eq!(t.calls().len(), 2);
 }
+
+/// A shared-tenancy archive that knows where relics are displayed.
+fn relic_archive(transport: Arc<FakeTransport>) -> CopalArchive {
+    archive("127.0.0.1:9010", transport).with_render_origin(Some("http://10.0.0.130:8083/".into()))
+}
+
+#[tokio::test]
+async fn a_relic_version_is_its_own_html_file() {
+    let t = Arc::new(FakeTransport::happy());
+    let got = relic_archive(t.clone())
+        .put_relic("ws:one", "ceiling", 2, "The Ceiling", "<p>page</p>", true)
+        .await
+        .unwrap();
+    assert_eq!(got.file_id, "01k6f2x9q3w8e5r7t1y4z6a8b0");
+
+    let calls = t.calls();
+    let Call::Post { url, body, .. } = &calls[0] else {
+        panic!("first call is the create, got {calls:?}");
+    };
+    assert_eq!(url, "http://127.0.0.1:9010/v1/files");
+    assert_eq!(body["path"], "relics/ceiling/v2.html");
+    assert_eq!(body["content_type"], "text/html; charset=utf-8");
+    assert_eq!(body["access"], "public");
+    assert_eq!(body["metadata"]["slug"], "ceiling");
+    assert_eq!(body["metadata"]["version"], 2);
+    let Call::Put {
+        content_type, body, ..
+    } = &calls[1]
+    else {
+        panic!("second call is the upload, got {calls:?}");
+    };
+    assert_eq!(content_type, "text/html; charset=utf-8");
+    assert_eq!(body, b"<p>page</p>");
+}
+
+#[tokio::test]
+async fn a_retried_publish_replays_its_version_and_the_next_one_does_not() {
+    let key = |calls: &[Call]| match &calls[0] {
+        Call::Post { body, .. } => body["idempotency_key"].as_str().unwrap().to_string(),
+        other => panic!("{other:?}"),
+    };
+    let publish = |workspace: &'static str, number: u32| async move {
+        let t = Arc::new(FakeTransport::happy());
+        relic_archive(t.clone())
+            .put_relic(workspace, "ceiling", number, "t", "a", false)
+            .await
+            .unwrap();
+        key(&t.calls())
+    };
+    let first = publish("ws:one", 1).await;
+    assert_eq!(first, publish("ws:one", 1).await, "a retry replays");
+    assert_ne!(first, publish("ws:one", 2).await, "the next version is new");
+    assert_ne!(
+        first,
+        publish("ws:two", 1).await,
+        "another workspace is new"
+    );
+    assert!(first.starts_with("antumbra-relic-"));
+}
+
+#[tokio::test]
+async fn access_changes_post_the_level() {
+    let t = Arc::new(FakeTransport::happy());
+    relic_archive(t.clone())
+        .set_access("ws:one", "01abc", false)
+        .await
+        .unwrap();
+    let calls = t.calls();
+    let Call::Post {
+        url,
+        body,
+        credential,
+    } = &calls[0]
+    else {
+        panic!("{calls:?}");
+    };
+    assert_eq!(url, "http://127.0.0.1:9010/v1/files/01abc/access");
+    assert_eq!(body, &json!({ "access": "private" }));
+    assert_eq!(credential, &tenant("antumbra"));
+}
+
+#[tokio::test]
+async fn render_links_must_land_on_the_render_origin() {
+    let t = Arc::new(FakeTransport {
+        create: Ok(json!({
+            "url": "http://10.0.0.130:8083/v1/render/cg1.abc.def",
+            "expires_at": "2026-10-24T20:00:00Z",
+        })),
+        ..FakeTransport::happy()
+    });
+    let link = relic_archive(t.clone())
+        .render_url("ws:one", "01abc", 300)
+        .await
+        .unwrap();
+    assert_eq!(link.url, "http://10.0.0.130:8083/v1/render/cg1.abc.def");
+    assert_eq!(link.expires_at.as_deref(), Some("2026-10-24T20:00:00Z"));
+    let calls = t.calls();
+    let Call::Post { url, body, .. } = &calls[0] else {
+        panic!("{calls:?}");
+    };
+    assert_eq!(url, "http://127.0.0.1:9010/v1/files/01abc/render-url");
+    assert_eq!(body, &json!({ "ttl_secs": 300 }));
+
+    // Anything else is refused, so the dashboard never frames it.
+    let elsewhere = Arc::new(FakeTransport {
+        create: Ok(json!({ "url": "http://10.0.0.130:8083.evil.example/v1/render/x" })),
+        ..FakeTransport::happy()
+    });
+    assert!(relic_archive(elsewhere)
+        .render_url("ws:one", "01abc", 300)
+        .await
+        .is_err());
+    // And with no render origin there is nothing to ask for.
+    assert!(archive("127.0.0.1:9010", Arc::new(FakeTransport::happy()))
+        .render_url("ws:one", "01abc", 300)
+        .await
+        .is_err());
+}
+
+#[test]
+fn a_public_file_has_a_permanent_address() {
+    let t = Arc::new(FakeTransport::happy());
+    assert_eq!(
+        relic_archive(t.clone()).public_url("01abc").as_deref(),
+        Some("http://10.0.0.130:8083/v1/public/01abc")
+    );
+    assert_eq!(archive("127.0.0.1:9010", t).public_url("01abc"), None);
+}
+
+#[test]
+fn a_render_origin_is_an_origin_and_nothing_more() {
+    let built = CopalArchive::from_flags(
+        Some("127.0.0.1:9010"),
+        Some("antumbra".into()),
+        None,
+        None,
+        Some("http://10.0.0.130:8083/".into()),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(built.render_origin(), Some("http://10.0.0.130:8083"));
+    for bad in [
+        "10.0.0.130:8083",
+        "http://h/path",
+        "https://h; frame-src *",
+        "ftp://h",
+    ] {
+        let refused =
+            CopalArchive::from_flags(Some("127.0.0.1:9010"), None, None, None, Some(bad.into()));
+        assert!(
+            matches!(refused, Err(CopalConfigError::RenderOrigin(_))),
+            "{bad:?}"
+        );
+    }
+}

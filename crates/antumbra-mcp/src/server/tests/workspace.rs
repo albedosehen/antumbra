@@ -858,12 +858,12 @@ async fn provenance_is_stored_and_scopes_recall() {
 }
 
 /// A tool profile is enforced where the agent first sees the tools and where
-/// it calls them: `agent` advertises its eighteen, the REST dispatch serves those
+/// it calls them: `agent` advertises its twenty-one, the REST dispatch serves those
 /// and refuses the rest by name, and no profile advertises everything.
 #[tokio::test]
 async fn a_tool_profile_narrows_what_is_advertised_and_served() {
     let all = McpServer::all_tool_names();
-    assert_eq!(all.len(), 34, "{all:?}");
+    assert_eq!(all.len(), 38, "{all:?}");
     let profile = crate::profile::ToolProfile::parse("agent", &all)
         .unwrap()
         .expect("agent is a profile, not `all`");
@@ -873,9 +873,12 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() {
         .into_iter()
         .map(|t| t.name.to_string())
         .collect();
-    assert_eq!(advertised.len(), 18, "{advertised:?}");
+    assert_eq!(advertised.len(), 21, "{advertised:?}");
     assert!(advertised.iter().any(|n| n == "recall_memories"));
+    assert!(advertised.iter().any(|n| n == "publish_relic"));
     assert!(!advertised.iter().any(|n| n == "share_compartment"));
+    // Who may see a relic is the user's call, made in the dashboard.
+    assert!(!advertised.iter().any(|n| n == "set_relic_visibility"));
 
     let stored = s
         .call_tool(
@@ -897,5 +900,5 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() {
         err.message
     );
 
-    assert_eq!(server().await.advertised_tools().len(), 34);
+    assert_eq!(server().await.advertised_tools().len(), 38);
 }

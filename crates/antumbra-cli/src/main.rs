@@ -175,6 +175,9 @@ async fn run() -> anyhow::Result<()> {
         cli.copal_tenant.clone(),
         cli.copal_key.clone(),
         cli.copal_keys.as_deref(),
+        // The CLI ingests documents; it publishes no relics, so it needs no
+        // render origin.
+        None,
     )?);
     match cli.command {
         Command::Setup { mode } => {

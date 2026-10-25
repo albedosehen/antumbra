@@ -54,4 +54,37 @@ ignore = [
   # object_store 0.14.1 or later.
   "RUSTSEC-2026-0194",
   "RUSTSEC-2026-0195",
+
+  # crypto-bigint 0.5.5 -- timing variability in operations meant to be
+  # constant-time. Fixed only in 0.7.6.
+  #
+  # Not clearable by a bump: it arrives through surrealdb-core 3.3.0's
+  # jsonwebtoken 10.4 -> p256 0.13 -> elliptic-curve 0.13, which cannot take
+  # crypto-bigint 0.7. Antumbra's own jsonwebtoken is 11 on aws-lc-rs and
+  # signs and verifies HS256 and RS256 only.
+  #
+  # Unreachable: the leak needs secret P-256 scalar operations to time, and
+  # nothing here performs one. SurrealDB would use p256 only for an access
+  # method configured with an ES algorithm; Antumbra's one access method
+  # (`tenant`, record access) configures no JWT algorithm, so SurrealDB signs
+  # its session tokens with HMAC. Drop this when surrealdb or jsonwebtoken
+  # moves to elliptic-curve 0.14.
+  "RUSTSEC-2026-0387",
+
+  # zip 7.4.0 -- archive extraction that preserves SUID/SGID bits (-0367),
+  # creates symlinks pointing outside the destination (-0368), and applies
+  # permissions through symlinks (-0369). Fixed in 9.0.
+  #
+  # Not clearable by a bump: zip arrives only through candle-core 0.10.2,
+  # which depends on zip 7.
+  #
+  # Unreachable: all three are in `ZipArchive::extract` and
+  # `ZipStreamReader::extract`, which write an archive out to disk. candle
+  # never calls either; it opens `.npz` and `.pth` files with
+  # `ZipArchive::new` and reads entries into memory by name, and writes
+  # `.npz` with `ZipWriter`. Nothing else in this workspace uses zip. Drop
+  # these when candle-core moves to zip 9.
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
 ]

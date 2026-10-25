@@ -39,6 +39,7 @@ pub mod ports;
 pub mod provenance;
 pub mod query;
 pub mod recipe;
+pub mod relic;
 pub mod reward;
 pub mod router;
 pub mod shadow;
@@ -81,6 +82,7 @@ pub use provenance::{
     GIT_EVIDENCE_PREFIX, ORPHAN_EVIDENCE_PREFIX,
 };
 pub use recipe::{RecipeRecord, TrainingRecipe};
+pub use relic::{Relic, RelicVersion, Visibility};
 pub use reward::{fold_step, RewardSignal, RewardSource};
 pub use router::{LearnedRouter, RouterExpert};
 pub use shadow::{Shadow, ShadowStatus};
