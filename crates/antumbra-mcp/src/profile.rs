@@ -42,6 +42,11 @@ pub const AGENT_PROFILE: &[&str] = &[
     "accept_behavior",
     "retire_behavior",
     "behavior_candidates",
+    // An agent publishes the pages it writes and finds them again; who may see
+    // one (set_relic_visibility) is the user's decision, made in the dashboard.
+    "publish_relic",
+    "list_relics",
+    "get_relic",
 ];
 
 /// The tools a session advertises and serves.

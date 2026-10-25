@@ -680,6 +680,7 @@ mod depgraph;
 mod device;
 mod handoff;
 mod lifecycle;
+mod relic_pages;
 mod workspace;
 mod written_from;
 

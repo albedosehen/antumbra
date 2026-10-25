@@ -159,6 +159,17 @@ pub struct CopalArchive {
     /// Which copal tenant receives each document (see [`CopalTenancy`]).
     tenancy: CopalTenancy,
     transport: Arc<dyn CopalTransport>,
+    /// The origin copal's render listener answers on (`COPAL_RENDER_ORIGIN`
+    /// on copal's side), where relics are displayed. `None` = relics cannot
+    /// be shown, so they cannot be published either.
+    render_origin: Option<String>,
+}
+
+/// A short-lived address that displays one copal file on the render origin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderLink {
+    pub url: String,
+    pub expires_at: Option<String>,
 }
 
 impl CopalArchive {
@@ -179,30 +190,27 @@ impl CopalArchive {
             base: normalize_base(addr),
             tenancy,
             transport,
+            render_origin: None,
         }
     }
 
-    /// Upload `content` as the document of record for (`workspace`, `title`,
-    /// `source`): create the file record (idempotent on (workspace, title), so
-    /// a re-ingest revisions the same file and two workspaces sharing a title
-    /// never revision each other's), then PUT the raw bytes. Returns the file
-    /// id + content digest every chunk of the document is stamped with.
-    /// `workspace` is the ingesting antumbra tenant; the archive's
-    /// [`CopalTenancy`] decides how (and as whom) the calls authenticate.
-    ///
-    /// Any failure is an error, never a partial success -- the caller fails
-    /// the ingest rather than storing chunks whose original was silently
-    /// dropped. That includes a workspace with no configured key under
-    /// [`CopalTenancy::PerWorkspaceKeys`]: refusing beats archiving into a
-    /// tenant that is not the workspace's own.
-    pub async fn archive_document(
-        &self,
-        workspace: &str,
-        title: &str,
-        source: Option<&str>,
-        content: &str,
-    ) -> Result<ArchivedDocument> {
-        let credential = match &self.tenancy {
+    /// Name the origin copal's render listener answers on, where relics are
+    /// displayed. A trailing slash is dropped.
+    pub fn with_render_origin(mut self, origin: Option<String>) -> Self {
+        self.render_origin = origin.map(|o| o.trim_end_matches('/').to_string());
+        self
+    }
+
+    /// The render origin, when one is configured.
+    pub fn render_origin(&self) -> Option<&str> {
+        self.render_origin.as_deref()
+    }
+
+    /// How a call for `workspace` proves its copal tenant (see
+    /// [`CopalTenancy`]). Fails, closed, for a workspace with no key under
+    /// [`CopalTenancy::PerWorkspaceKeys`] or one that cannot be a header.
+    fn credential(&self, workspace: &str) -> Result<CopalCredential> {
+        Ok(match &self.tenancy {
             CopalTenancy::Shared(t) => CopalCredential::Tenant(t.clone()),
             CopalTenancy::PerWorkspace => {
                 // The workspace becomes an HTTP header value here. Session
@@ -227,7 +235,143 @@ impl CopalArchive {
                 })?;
                 CopalCredential::Bearer(key.clone())
             }
-        };
+        })
+    }
+
+    /// Store one version of a relic: a new copal file at
+    /// `relics/<slug>/v<number>.html`, `public` or `private`. The create is
+    /// idempotent per (workspace, slug, number), so a publish retried after a
+    /// failure replays the same file instead of adding a second.
+    pub async fn put_relic(
+        &self,
+        workspace: &str,
+        slug: &str,
+        number: u32,
+        title: &str,
+        html: &str,
+        public: bool,
+    ) -> Result<ArchivedDocument> {
+        let credential = self.credential(workspace)?;
+        let base = self.base.clone();
+        let transport = self.transport.clone();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in workspace
+            .bytes()
+            .chain([0u8])
+            .chain(slug.bytes())
+            .chain([0u8])
+            .chain(number.to_string().into_bytes())
+        {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        let body = json!({
+            "path": format!("relics/{slug}/v{number}.html"),
+            "content_type": RELIC_CONTENT_TYPE,
+            "access": if public { "public" } else { "private" },
+            "idempotency_key": format!("antumbra-relic-{hash:016x}"),
+            "metadata": {
+                "title": title,
+                "workspace": workspace,
+                "slug": slug,
+                "version": number,
+            },
+        });
+        let html = html.to_string();
+        tokio::task::spawn_blocking(move || {
+            create_and_upload(
+                transport.as_ref(),
+                &base,
+                &credential,
+                &body,
+                RELIC_CONTENT_TYPE,
+                html.as_bytes(),
+            )
+        })
+        .await
+        .map_err(|e| AntumbraError::other(format!("copal relic task panicked: {e}")))?
+    }
+
+    /// Make a stored relic file public or private again.
+    pub async fn set_access(&self, workspace: &str, file_id: &str, public: bool) -> Result<()> {
+        let credential = self.credential(workspace)?;
+        let url = format!("{}/v1/files/{file_id}/access", self.base);
+        let transport = self.transport.clone();
+        let body = json!({ "access": if public { "public" } else { "private" } });
+        tokio::task::spawn_blocking(move || transport.post_json(&url, &credential, &body))
+            .await
+            .map_err(|e| AntumbraError::other(format!("copal access task panicked: {e}")))??;
+        Ok(())
+    }
+
+    /// A link that displays `file_id` on the render origin for `ttl_secs`.
+    /// Refused unless copal answers with an address on the configured render
+    /// origin, so nothing else is ever framed as a relic.
+    pub async fn render_url(
+        &self,
+        workspace: &str,
+        file_id: &str,
+        ttl_secs: u32,
+    ) -> Result<RenderLink> {
+        let origin = self
+            .render_origin
+            .clone()
+            .ok_or_else(|| AntumbraError::other("no copal render origin is configured"))?;
+        let credential = self.credential(workspace)?;
+        let url = format!("{}/v1/files/{file_id}/render-url", self.base);
+        let transport = self.transport.clone();
+        let body = json!({ "ttl_secs": ttl_secs });
+        let issued =
+            tokio::task::spawn_blocking(move || transport.post_json(&url, &credential, &body))
+                .await
+                .map_err(|e| AntumbraError::other(format!("copal render task panicked: {e}")))??;
+        let link = issued
+            .get("url")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AntumbraError::other("copal render response missing `url`"))?;
+        if !link.starts_with(&format!("{origin}/")) {
+            return Err(AntumbraError::other(
+                "copal answered with a render link outside the configured render origin",
+            ));
+        }
+        Ok(RenderLink {
+            url: link.to_string(),
+            expires_at: issued
+                .get("expires_at")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        })
+    }
+
+    /// The permanent address of a public relic file, which needs no call:
+    /// copal's render listener serves public files at `/v1/public/<id>`.
+    pub fn public_url(&self, file_id: &str) -> Option<String> {
+        self.render_origin
+            .as_deref()
+            .map(|origin| format!("{origin}/v1/public/{file_id}"))
+    }
+
+    /// Upload `content` as the document of record for (`workspace`, `title`,
+    /// `source`): create the file record (idempotent on (workspace, title), so
+    /// a re-ingest revisions the same file and two workspaces sharing a title
+    /// never revision each other's), then PUT the raw bytes. Returns the file
+    /// id + content digest every chunk of the document is stamped with.
+    /// `workspace` is the ingesting antumbra tenant; the archive's
+    /// [`CopalTenancy`] decides how (and as whom) the calls authenticate.
+    ///
+    /// Any failure is an error, never a partial success -- the caller fails
+    /// the ingest rather than storing chunks whose original was silently
+    /// dropped. That includes a workspace with no configured key under
+    /// [`CopalTenancy::PerWorkspaceKeys`]: refusing beats archiving into a
+    /// tenant that is not the workspace's own.
+    pub async fn archive_document(
+        &self,
+        workspace: &str,
+        title: &str,
+        source: Option<&str>,
+        content: &str,
+    ) -> Result<ArchivedDocument> {
+        let credential = self.credential(workspace)?;
         let base = self.base.clone();
         let transport = self.transport.clone();
         let workspace = workspace.to_string();
@@ -252,37 +396,62 @@ impl CopalArchive {
             if let Some(src) = source {
                 body["metadata"]["source"] = json!(src);
             }
-            let created = transport.post_json(&format!("{base}/v1/files"), &credential, &body)?;
-            let file_id = created
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| AntumbraError::other("copal create response missing `id`"))?;
-            let digest = content_digest(content.as_bytes());
-            if created.get("digest").and_then(Value::as_str) == Some(digest.as_str()) {
-                return Ok(ArchivedDocument {
-                    file_id: file_id.to_string(),
-                    digest,
-                });
-            }
-            let uploaded = transport.put_bytes(
-                &format!("{base}/v1/files/{file_id}/content"),
+            create_and_upload(
+                transport.as_ref(),
+                &base,
                 &credential,
+                &body,
                 "text/plain",
-                &digest,
                 content.as_bytes(),
-            )?;
-            let digest = uploaded
-                .get("digest")
-                .and_then(Value::as_str)
-                .ok_or_else(|| AntumbraError::other("copal upload response missing `digest`"))?;
-            Ok(ArchivedDocument {
-                file_id: file_id.to_string(),
-                digest: digest.to_string(),
-            })
+            )
         })
         .await
         .map_err(|e| AntumbraError::other(format!("copal archive task panicked: {e}")))?
     }
+}
+
+/// The content type relic files are stored and served with.
+const RELIC_CONTENT_TYPE: &str = "text/html; charset=utf-8";
+
+/// Create a file record from `body`, then upload `bytes` to it, declaring
+/// their sha256. A replayed record that already holds exactly these bytes is
+/// not uploaded again, since copal would add a version for identical content.
+/// Blocking: call it off the async runtime.
+fn create_and_upload(
+    transport: &dyn CopalTransport,
+    base: &str,
+    credential: &CopalCredential,
+    body: &Value,
+    content_type: &str,
+    bytes: &[u8],
+) -> Result<ArchivedDocument> {
+    let created = transport.post_json(&format!("{base}/v1/files"), credential, body)?;
+    let file_id = created
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AntumbraError::other("copal create response missing `id`"))?;
+    let digest = content_digest(bytes);
+    if created.get("digest").and_then(Value::as_str) == Some(digest.as_str()) {
+        return Ok(ArchivedDocument {
+            file_id: file_id.to_string(),
+            digest,
+        });
+    }
+    let uploaded = transport.put_bytes(
+        &format!("{base}/v1/files/{file_id}/content"),
+        credential,
+        content_type,
+        &digest,
+        bytes,
+    )?;
+    let digest = uploaded
+        .get("digest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AntumbraError::other("copal upload response missing `digest`"))?;
+    Ok(ArchivedDocument {
+        file_id: file_id.to_string(),
+        digest: digest.to_string(),
+    })
 }
 
 /// Mirror how copal itself normalizes an embedder address: a full URL base is
@@ -397,6 +566,11 @@ pub enum CopalConfigError {
         "--copal-keys {path}: the key for workspace {workspace} is not a plain ASCII credential"
     )]
     KeyNotAscii { path: String, workspace: String },
+    #[error(
+        "--copal-render-origin must be an http or https origin such as \
+         http://10.0.0.130:8083, not {0:?}"
+    )]
+    RenderOrigin(String),
 }
 
 impl CopalArchive {
@@ -412,6 +586,7 @@ impl CopalArchive {
         tenant: Option<String>,
         key: Option<String>,
         keys_file: Option<&std::path::Path>,
+        render_origin: Option<String>,
     ) -> std::result::Result<Option<Arc<Self>>, CopalConfigError> {
         let Some(addr) = addr else {
             return Ok(None);
@@ -423,7 +598,28 @@ impl CopalArchive {
             (None, None, Some(path)) => CopalTenancy::PerWorkspaceKeys(load_keys(path)?),
             _ => return Err(CopalConfigError::ConflictingTenancy),
         };
-        Ok(Some(Arc::new(Self::new(addr, tenancy))))
+        let render_origin = render_origin
+            .map(|raw| parse_render_origin(&raw))
+            .transpose()?;
+        Ok(Some(Arc::new(
+            Self::new(addr, tenancy).with_render_origin(render_origin),
+        )))
+    }
+}
+
+/// An `http` or `https` origin with no path, query or fragment, as copal
+/// itself requires of `COPAL_RENDER_ORIGIN`: relic links are built by
+/// appending a path to it, and the dashboard's frame policy names it.
+fn parse_render_origin(raw: &str) -> std::result::Result<String, CopalConfigError> {
+    let origin = raw.trim().trim_end_matches('/');
+    let authority = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"));
+    match authority {
+        Some(a) if !a.is_empty() && !a.contains(['/', '?', '#', ' ', ';', '\'']) => {
+            Ok(origin.to_string())
+        }
+        _ => Err(CopalConfigError::RenderOrigin(raw.to_string())),
     }
 }
 

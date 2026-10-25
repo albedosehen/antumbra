@@ -224,6 +224,13 @@ struct Cli {
     /// than landing in another tenant.
     #[arg(long, env = "ANTUMBRA_COPAL_KEYS")]
     copal_keys: Option<std::path::PathBuf>,
+    /// The origin copal's render listener answers on (its
+    /// `COPAL_RENDER_ORIGIN`), e.g. `http://10.0.0.130:8083`: where relics are
+    /// displayed, and the one origin the relic pages may frame. Relics need it
+    /// and an archive (`--copal-addr`); without either, publishing a relic is
+    /// refused and the gallery is empty.
+    #[arg(long, env = "ANTUMBRA_COPAL_RENDER_ORIGIN")]
+    copal_render_origin: Option<String>,
     /// Which tools this server advertises and serves: `all` (default), `agent`
     /// (the developer-agent profile: recall/store/reinforce/penalize memories,
     /// recall/ingest documents, route, answer), or a comma-separated list of
@@ -574,6 +581,7 @@ impl Cli {
         self.copal_tenant = set(self.copal_tenant);
         self.copal_key = set(self.copal_key);
         self.copal_keys = self.copal_keys.filter(|p| !p.as_os_str().is_empty());
+        self.copal_render_origin = set(self.copal_render_origin);
         self
     }
 }
@@ -724,6 +732,7 @@ async fn run() -> Result<()> {
         cli.copal_tenant,
         cli.copal_key,
         cli.copal_keys.as_deref(),
+        cli.copal_render_origin,
     )?;
     // The tool profile, validated against the real tool list so a typo
     // refuses at startup instead of silently hiding a tool.
@@ -864,12 +873,15 @@ mod tests {
             " ",
             "--copal-tenant",
             "",
+            "--copal-render-origin",
+            "",
         ])
         .expect("empty values parse")
         .without_empty_settings();
         assert_eq!(cli.rerank_url, None);
         assert_eq!(cli.copal_addr, None);
         assert_eq!(cli.copal_tenant, None);
+        assert_eq!(cli.copal_render_origin, None);
 
         let cli = Cli::try_parse_from([
             "antumbra-mcp",

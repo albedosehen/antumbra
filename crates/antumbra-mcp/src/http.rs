@@ -71,6 +71,7 @@ mod behaviors;
 mod chunker;
 mod dashboard;
 mod github;
+mod relics;
 pub(crate) use github::GithubConfig;
 
 type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
@@ -428,6 +429,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
         .merge(dashboard::routes())
+        .merge(relics::routes())
         .with_state(state)
         .layer(OtelAxumLayer::default().filter(traced))
 }

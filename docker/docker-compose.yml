@@ -113,6 +113,11 @@ services:
       - ANTUMBRA_COPAL_ADDR=${ANTUMBRA_COPAL_ADDR:-}
       - ANTUMBRA_COPAL_TENANT=${ANTUMBRA_COPAL_TENANT:-}
       - ANTUMBRA_COPAL_KEY=${ANTUMBRA_COPAL_KEY:-}
+      # Where copal displays pages (its COPAL_RENDER_ORIGIN), which relics need:
+      # the gallery at /relics frames that origin and nothing else. Unset, no
+      # relic can be published. Give copal COPAL_RENDER_FRAME_ANCESTORS naming
+      # this server's own address so its pages may be framed here.
+      - ANTUMBRA_COPAL_RENDER_ORIGIN=${ANTUMBRA_COPAL_RENDER_ORIGIN:-}
       # Trace export over OTLP/HTTP, all optional. Empty counts as unset, so the
       # export stays off unless docker/.env sets the endpoint, and the service
       # is named antumbra-mcp unless it names one. The headers can carry the

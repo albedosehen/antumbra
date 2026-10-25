@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Relic · Antumbra</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='84 84 344 344'%3E%3Cpath fill='%238A84CC' fill-rule='evenodd' d='M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z'/%3E%3Ccircle fill='%238A84CC' cx='148.5' cy='148.5' r='24'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="../dashboard/app.css">
+<link rel="stylesheet" href="../dashboard/relics.css">
+<script src="../dashboard/relics.js" defer></script>
+</head>
+<body data-page="viewer" data-base="../">
+
+<main id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <svg class="mark mark-large" viewBox="84 84 344 344" aria-hidden="true">
+      <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
+      <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
+    </svg>
+    <h1>Relic</h1>
+    <p class="lede">This relic is private, or there is none by this name. Sign in to see it.</p>
+    <form id="gate-form" class="gate-form" autocomplete="off">
+      <label for="token">Token</label>
+      <input id="token" name="token" type="password" spellcheck="false" autocapitalize="off" required>
+      <p class="hint">The same token the dashboard takes. It is kept in this tab only and cleared when the tab closes or you sign out.</p>
+      <p id="gate-error" class="error" role="alert" hidden></p>
+      <button type="submit">Open</button>
+    </form>
+  </div>
+</main>
+
+<div id="app" class="viewer" hidden>
+  <header class="bar relic-bar">
+    <a class="brand" href="../relics" aria-label="All relics">
+      <svg class="mark" viewBox="84 84 344 344" aria-hidden="true">
+        <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
+        <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
+      </svg>
+      <span class="wordmark">Relics</span>
+    </a>
+    <div class="relic-heading">
+      <h1 id="relic-title"></h1>
+      <p id="relic-meta" class="meta"></p>
+    </div>
+    <div class="actions">
+      <button id="visibility" type="button" class="quiet" hidden></button>
+      <button id="copy-link" type="button" class="quiet">Copy link</button>
+      <a id="open-raw" class="nav-link" target="_blank" rel="noopener noreferrer" hidden>Open alone</a>
+      <button id="signin" type="button" class="quiet" hidden>Sign in</button>
+      <button id="signout" type="button" class="quiet" hidden>Sign out</button>
+    </div>
+  </header>
+  <p id="copy-fallback" class="copy-fallback" hidden>
+    <label for="link-text" class="small muted">Copy this address:</label>
+    <input id="link-text" type="text" readonly>
+  </p>
+  <p id="viewer-error" class="failed" role="alert" hidden></p>
+  <iframe id="relic-frame" class="relic-frame" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" title="Relic"></iframe>
+</div>
+
+</body>
+</html>

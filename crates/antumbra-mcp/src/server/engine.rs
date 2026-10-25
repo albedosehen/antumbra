@@ -166,6 +166,7 @@ impl McpServer {
             + Self::candidates_router()
             + Self::answer_router()
             + Self::depgraph_router()
+            + Self::relic_router()
     }
 
     pub fn all_tool_names() -> Vec<String> {
@@ -506,6 +507,12 @@ impl McpServer {
             "share_compartment" => dispatch!(ShareParams, share_compartment),
             "revoke_compartment" => dispatch!(RevokeParams, revoke_compartment),
             "record_merges" => dispatch!(super::provenance::RecordMergesParams, record_merges),
+            "publish_relic" => dispatch!(relics::PublishRelicParams, publish_relic),
+            "list_relics" => dispatch!(relics::ListRelicsParams, list_relics),
+            "get_relic" => dispatch!(relics::RelicSlugParams, get_relic),
+            "set_relic_visibility" => {
+                dispatch!(relics::RelicVisibilityParams, set_relic_visibility)
+            }
             other => Err(ErrorData::invalid_params(
                 format!("unknown tool: {other}"),
                 None,

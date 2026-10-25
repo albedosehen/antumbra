@@ -1,0 +1,225 @@
+/* The relics gallery and viewer, on top of the dashboard's stylesheet and its
+   palette, type scale and 8px grid. */
+
+a.brand {
+  color: inherit;
+  text-decoration: none;
+}
+
+.wordmark {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.visibility {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.visibility-public {
+  color: var(--accent-text);
+}
+
+/* The gallery: cards with a live, scaled-down render of each relic. */
+
+.relic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relic-card {
+  min-width: 0;
+}
+
+.relic-link {
+  display: grid;
+  gap: 8px;
+  height: 100%;
+  padding: 0 0 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: border-color 150ms ease-out;
+}
+
+.relic-link:hover {
+  border-color: var(--line-strong);
+}
+
+.relic-preview {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+}
+
+/* The page renders at four times the card's width, then shrinks to fit, so a
+   preview shows the top of the page as a desktop would lay it out. Clicks go
+   to the card, never into the page. */
+.relic-preview iframe {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 400%;
+  height: 400%;
+  border: 0;
+  transform: scale(0.25);
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.relic-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: var(--ink-3);
+  font-size: var(--t-s);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.relic-title {
+  padding: 0 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.relic-byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 0 16px;
+  font-size: var(--t-s);
+  color: var(--ink-2);
+}
+
+.owner {
+  font-family: var(--mono);
+}
+
+/* The list layout: one row per relic, a small preview at the start. */
+
+.relic-grid.relic-list {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.relic-list .relic-link {
+  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 16px;
+  padding: 0;
+}
+
+.relic-list .relic-preview {
+  grid-row: 1 / span 2;
+  border-bottom: 0;
+  border-right: 1px solid var(--line);
+}
+
+.relic-list .relic-title,
+.relic-list .relic-byline {
+  padding: 0 16px 0 0;
+}
+
+.relic-list .relic-title {
+  align-self: end;
+}
+
+.relic-list .relic-byline {
+  align-self: start;
+}
+
+/* The viewer: the bar on top, the relic filling the rest of the window. */
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.relic-bar {
+  flex-wrap: wrap;
+}
+
+.relic-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.relic-heading h1 {
+  font-size: var(--t-m);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relic-heading .meta {
+  margin-top: 2px;
+}
+
+.relic-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.copy-fallback {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 8px 32px;
+  border-bottom: 1px solid var(--line);
+}
+
+.copy-fallback input {
+  flex: 1;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: var(--t-s);
+  color: var(--ink);
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+}
+
+.viewer > .failed {
+  padding: 8px 32px;
+}
+
+@media (max-width: 880px) {
+  .relic-list .relic-link {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+
+  .copy-fallback,
+  .viewer > .failed {
+    padding: 8px 16px;
+  }
+}

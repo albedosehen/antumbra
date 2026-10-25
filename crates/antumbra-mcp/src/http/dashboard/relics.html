@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Relics · Antumbra</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='84 84 344 344'%3E%3Cpath fill='%238A84CC' fill-rule='evenodd' d='M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z'/%3E%3Ccircle fill='%238A84CC' cx='148.5' cy='148.5' r='24'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="dashboard/app.css">
+<link rel="stylesheet" href="dashboard/relics.css">
+<script src="dashboard/relics.js" defer></script>
+</head>
+<body data-page="gallery" data-base="">
+
+<main id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <svg class="mark mark-large" viewBox="84 84 344 344" aria-hidden="true">
+      <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
+      <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
+    </svg>
+    <h1>Relics</h1>
+    <p class="lede">Sign in with a bearer token to see your relics.</p>
+    <form id="gate-form" class="gate-form" autocomplete="off">
+      <label for="token">Token</label>
+      <input id="token" name="token" type="password" spellcheck="false" autocapitalize="off" required>
+      <p class="hint">The same token the dashboard takes. It is kept in this tab only and cleared when the tab closes or you sign out. A public relic opens at its own address without one.</p>
+      <p id="gate-error" class="error" role="alert" hidden></p>
+      <button type="submit">Open relics</button>
+    </form>
+  </div>
+</main>
+
+<div id="app" hidden>
+  <header class="bar">
+    <a class="brand" href="dashboard">
+      <svg class="mark" viewBox="84 84 344 344" aria-hidden="true">
+        <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
+        <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
+      </svg>
+      <span class="wordmark">Antumbra</span>
+    </a>
+    <p class="who"><span id="who"></span></p>
+    <div class="actions">
+      <a class="nav-link" href="dashboard">Dashboard</a>
+      <button id="signout" type="button" class="quiet">Sign out</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section aria-labelledby="h-relics">
+      <div class="section-head">
+        <h1 id="h-relics">Relics</h1>
+        <p id="relics-summary" class="muted small" aria-live="polite"></p>
+      </div>
+      <form id="relic-search" class="recall" role="search">
+        <fieldset class="segmented">
+          <legend class="visually-hidden">Whose</legend>
+          <input id="scope-all" type="radio" name="scope" value="all" checked><label for="scope-all">All</label>
+          <input id="scope-mine" type="radio" name="scope" value="mine"><label for="scope-mine">Yours</label>
+          <input id="scope-shared" type="radio" name="scope" value="shared"><label for="scope-shared">Shared with you</label>
+        </fieldset>
+        <input id="relic-query" name="query" type="search" placeholder="Search relics by what they say" aria-label="Search relics">
+        <button type="submit">Search</button>
+        <fieldset class="segmented">
+          <legend class="visually-hidden">Layout</legend>
+          <input id="layout-grid" type="radio" name="layout" value="grid" checked><label for="layout-grid">Grid</label>
+          <input id="layout-list" type="radio" name="layout" value="list"><label for="layout-list">List</label>
+        </fieldset>
+      </form>
+      <p id="relics-note" class="note small" hidden></p>
+      <ul id="relics" class="relic-grid"></ul>
+    </section>
+  </main>
+</div>
+
+</body>
+</html>

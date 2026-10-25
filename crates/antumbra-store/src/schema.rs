@@ -223,6 +223,22 @@ fn document_perms() -> [(&'static str, String); 4] {
     ]
 }
 
+/// A relic is read as a document is, through its compartment: its owner and
+/// the compartment's grantees see it. Writes are the owner's alone, on top of
+/// the compartment write rule, so a member granted `link` on the compartment
+/// can still not republish, retitle or make public someone else's page. A
+/// public relic is served to strangers through a root read that names its
+/// slug and visibility, never through this rule.
+fn relic_perms() -> [(&'static str, String); 4] {
+    let write = format!("({MEMORY_WRITE_RULE}) AND owner = $auth.user");
+    [
+        ("select", memory_select_rule()),
+        ("create", write.clone()),
+        ("update", write.clone()),
+        ("delete", write),
+    ]
+}
+
 /// A device profile is a machine describing itself into its owner's fabric.
 /// Read is tenant-wide, because dispatch has to be able to find the user's
 /// genesis node from whichever node is asking. Write is the user's own:
@@ -607,6 +623,18 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ),
                 // BM25 full-text over content (sparse leg of hybrid recall).
                 bm25_index("document_chunk_content_fts", ["content"], CONTENT_ANALYZER),
+            ]),
+        // Relics: the pages a user keeps in copal, one row per relic keyed by
+        // its slug (unique across the server, since a public relic is found by
+        // slug alone), each version's copal file listed inside it. Read through
+        // the compartment like a document; written by its owner only.
+        table_schema("relic")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(relic_perms())
+            .with_indexes([
+                index("relic_tenant_owner_idx", ["tenant_id", "owner"]),
+                index("relic_tenant_updated_idx", ["tenant_id", "updated_at"]),
+                index("relic_tenant_compartment_idx", ["tenant_id", "compartment"]),
             ]),
         // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
         // subqueries resolve; ownership/sharing is carried in the rows (owner +

@@ -258,6 +258,7 @@ pub(crate) mod heavy;
 mod listing;
 mod params;
 mod provenance;
+mod relics;
 mod rerank_cache;
 pub(crate) use self::device::machine_name;
 use self::params::*;

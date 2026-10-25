@@ -16,6 +16,15 @@ async fn state_with(store: Store) -> Arc<HttpState> {
 
 /// A server state over `store` whose default embedder is `embedder`.
 pub(super) async fn state_embedding(store: Store, embedder: Arc<dyn Embedder>) -> Arc<HttpState> {
+    state_archived(store, embedder, None).await
+}
+
+/// As [`state_embedding`], with a copal archive.
+pub(super) async fn state_archived(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+) -> Arc<HttpState> {
     Arc::new(HttpState {
         serving: Serving::Shared(store.clone()),
         store,
@@ -30,7 +39,7 @@ pub(super) async fn state_embedding(store: Store, embedder: Arc<dyn Embedder>) -
         serve: None,
         reranker: None,
         decider: None,
-        copal: None,
+        copal,
         profile: None,
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -465,6 +474,7 @@ async fn live_notification_reaches_a_grantees_stream() {
     assert!(found, "grantee's SSE stream got the change; saw: {seen}");
 }
 
+mod relics;
 mod shutdown;
 mod telemetry;
 mod written_from;

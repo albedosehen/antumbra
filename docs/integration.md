@@ -156,6 +156,14 @@ Offline is the default and the privacy floor: nothing leaves the building. The h
 
 The HTTP server also serves a dashboard at `/dashboard` (for example `http://localhost:8081/dashboard`). Sign in with the same kind of bearer token a hook uses (`antumbra-mcp --mint-token`, or the token your sign-in link gave you). It shows the workspace counts, the expert population with each expert's status and fitness (and a box to route a task through it, or have the covering expert answer it, which writes nothing), your compartments, your knowledge documents, your behaviors by status (each with its scope, how many examples and violations back it, the memories it was drawn from, how its last training went, and what keeps it from being taught), the dependency graph (every pair of services with its evidence, and any service's blast radius either way), and memory: recalled by meaning or listed newest first, filtered by network, each with its git anchor and its relations to other memories. It reads, but for the two decisions on a behavior: Accept, so your expert learns it at its next training, and Retire. It calls the same tools through `/mcp/call`, so it sees exactly what the token's identity may see. The token stays in that browser tab and is gone when the tab closes or you sign out.
 
+### Relics
+
+A relic is a page an agent wrote, kept so you can find it and open it again: a report, a dashboard, an essay. The agent calls `publish_relic` with a title and a complete HTML document (images, styles and scripts inline). The page is stored in copal, one file per version, and its text is indexed so `recall_documents` and the gallery's search find it by what it says. Publishing again under the same slug adds a version at the same address.
+
+The gallery is at `/relics` (for example `http://localhost:8081/relics`): your relics and those in compartments shared with you, as cards with a live preview of each page, filtered by All, Yours or Shared with you, searchable, in a grid or a list. Each relic opens at `/relic/<slug>`. A relic is private by default, seen by you and whoever its compartment is shared with, and viewing it mints a render link for that view, so nothing you type expires. Make it public from the viewer (or with `set_relic_visibility`) and anyone who can reach the server opens `/relic/<slug>` without signing in.
+
+A relic is never displayed by the dashboard's own origin, where your token lives. It runs in an `<iframe>` from copal's render origin, sandboxed in an origin of its own with no network access. That needs three settings: the server's `--copal-addr` and `--copal-render-origin` (`ANTUMBRA_COPAL_RENDER_ORIGIN`, copal's `COPAL_RENDER_ORIGIN`), and on copal, `COPAL_RENDER_FRAME_ANCESTORS` naming this server's address so copal lets the gallery frame its pages. Without them `publish_relic` refuses and says which is missing.
+
 ---
 
 ## Leaving work for another of your machines

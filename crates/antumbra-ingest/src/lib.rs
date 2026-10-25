@@ -83,6 +83,20 @@ pub async fn ingest_text(
         ),
         None => None,
     };
+    ingest_recorded(store, embedder, tenant, doc, archived).await
+}
+
+/// Chunk, embed and store `doc` whose document of record already exists:
+/// every chunk is stamped with `archived` when given. The second half of
+/// [`ingest_text`], for a caller that keeps the original itself, as a relic
+/// does (its HTML is the file of record, and its text is what is indexed).
+pub async fn ingest_recorded(
+    store: &Store,
+    embedder: &dyn Embedder,
+    tenant: &TenantId,
+    doc: &Document,
+    archived: Option<ArchivedDocument>,
+) -> anyhow::Result<Ingested> {
     let source = source_of(doc);
     let now = Utc::now();
     let mut chunks = Vec::new();
