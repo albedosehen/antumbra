@@ -162,6 +162,10 @@ mod tests {
             "accept_behavior",
             "retire_behavior",
             "behavior_candidates",
+            "publish_relic",
+            "list_relics",
+            "get_relic",
+            "set_relic_visibility",
             "population",
             "share_compartment",
         ]
@@ -179,6 +183,8 @@ mod tests {
         assert_eq!(names.len(), AGENT_PROFILE.len());
         assert!(agent.allows("recall_memories") && agent.allows("answer"));
         assert!(!agent.allows("share_compartment") && !agent.allows("population"));
+        // An agent publishes relics; who may see one is the user's call.
+        assert!(agent.allows("publish_relic") && !agent.allows("set_relic_visibility"));
     }
 
     #[test]
