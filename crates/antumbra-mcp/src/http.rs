@@ -807,6 +807,13 @@ fn is_cold_auth_race_msg(msg: &str) -> bool {
     msg.contains("Anonymous access") || msg.contains("Not enough permissions")
 }
 
+/// The largest `/mcp/call` body read. A relic's page may be 2 MiB of HTML, and
+/// JSON escaping (quotes, backslashes, newlines) grows it, so the ceiling sits
+/// above that; a knowledge document rides the same way. It was 64 KiB, which
+/// refused any page or document past roughly 60 KB. The body is read only
+/// after the token is verified.
+const MAX_CALL_BODY: usize = 4 * 1024 * 1024;
+
 /// REST convenience surface: `POST /mcp/call {tool, arguments}` returns the
 /// tool's JSON result, so a one-shot client (a lifecycle hook fetching bootstrap
 /// context) can call a tool without the JSON-RPC initialize -> tools/call
@@ -828,7 +835,7 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
     // holds its token.
     let device = caller_device(req.headers());
 
-    let body = match axum::body::to_bytes(req.into_body(), 64 * 1024).await {
+    let body = match axum::body::to_bytes(req.into_body(), MAX_CALL_BODY).await {
         Ok(b) => b,
         Err(_) => return bad_request("request body unreadable or too large"),
     };

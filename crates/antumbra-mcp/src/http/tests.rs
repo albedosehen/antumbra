@@ -187,6 +187,37 @@ async fn rest_call_dispatches_a_tool_then_reads_it_back() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+/// The REST shim takes a body the size of a real page: a knowledge document or
+/// a relic's HTML past the old 64 KiB ceiling lands, and a body past the new
+/// ceiling is refused as the caller's fault rather than read.
+#[tokio::test]
+async fn rest_calls_take_a_page_sized_body_and_refuse_a_larger_one() {
+    let st = state().await;
+    let tok = token("ws:big", "user:big");
+    let content = "The ceiling pays for the floor. ".repeat(4_000);
+    assert!(content.len() > 100 * 1024);
+    let ingest = serde_json::json!({
+        "tool": "ingest_document",
+        "arguments": { "title": "A long essay", "content": content },
+    })
+    .to_string();
+    let resp = router(st.clone())
+        .oneshot(call_request(Some(&tok), &ingest))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let huge = format!(
+        r#"{{"tool":"ingest_document","arguments":{{"title":"x","content":"{}"}}}}"#,
+        "x".repeat(MAX_CALL_BODY)
+    );
+    let resp = router(st)
+        .oneshot(call_request(Some(&tok), &huge))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
 /// A user id names one user in one workspace: a token whose user already
 /// belongs to another workspace is refused with the reason, not a server
 /// error, and without naming the other workspace.
