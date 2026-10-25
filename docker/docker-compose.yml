@@ -37,7 +37,10 @@ services:
       - ALL
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/surreal", "isready", "--endpoint", "http://localhost:8000"]
+      # Over the websocket, isready's own default. SurrealDB 3.2.4 answers the
+      # http:// form "Method not allowed" while serving normally, which left the
+      # container unhealthy and every `up` of a dependent refusing to start it.
+      test: ["CMD", "/surreal", "isready", "--endpoint", "ws://localhost:8000"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -322,7 +325,8 @@ services:
       - ALL
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/surreal", "isready", "--endpoint", "http://localhost:8000"]
+      # Over the websocket, as for the memory store's database above.
+      test: ["CMD", "/surreal", "isready", "--endpoint", "ws://localhost:8000"]
       interval: 10s
       timeout: 5s
       retries: 6

@@ -82,4 +82,18 @@ fi
 sleep 8
 docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' | grep antumbra
 docker inspect antumbra-mcp --format 'after: {{.Config.Image}} created {{.Created}}'
+
+# `compose up` reports a dependency that never became healthy and still exits
+# 0, leaving the recreated container Created but not running: an outage this
+# script once reported as OK. Check what is actually running before saying so.
+down=""
+for c in antumbra-mcp $(grep -q '^ANTUMBRA_COPAL_ADDR=.\+' .env 2>/dev/null && echo antumbra-copal); do
+    if [ "$(docker inspect "$c" --format '{{.State.Running}}' 2>/dev/null)" != "true" ]; then
+        down="$down $c"
+    fi
+done
+if [ -n "$down" ]; then
+    echo "== deploy $SHA end $(date -u +%FT%TZ) FAILED: not running:$down"
+    exit 1
+fi
 echo "== deploy $SHA end $(date -u +%FT%TZ) OK"
