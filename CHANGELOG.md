@@ -1,11 +1,46 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-10-26
+
+Relics, and behaviors you can teach. An agent can now keep the pages it writes as relics, found and viewed in the dashboard, and the behavior loop learns a rule from your memories, trains it into a standing expert, and checks that the expert still follows it.
 
 ### Relics
 
-- **Relics: pages an agent wrote, kept, found and viewed.** `publish_relic` stores an HTML page in copal (one file per version, at `relics/<slug>/v<N>.html`) and indexes its text, so `recall_documents` finds it. `list_relics` lists or searches the relics you can see, `get_relic` returns one with an address that displays it, and `set_relic_visibility` makes one public or private. The dashboard gains a gallery at `/relics`, with live previews, All / Yours / Shared with you, search and a list view, and a viewer at `/relic/<slug>`. A relic is private to its compartment's audience by default, viewed through a render link minted per view; a public one opens at `/relic/<slug>` for anyone who can reach the server, with no sign-in. Pages are shown only in a sandboxed `<iframe>` from copal's render origin, never by the dashboard's own origin. Needs `--copal-render-origin` (`ANTUMBRA_COPAL_RENDER_ORIGIN`) beside `--copal-addr`, and copal with render links, `/v1/public/{id}` and `COPAL_RENDER_FRAME_ANCESTORS` (Oneiriq/copal#119). A new `relic` table, read through the compartment and written by its owner only, is applied at boot.
-- **The Compose `copal` profile runs copal's render listener**, so a Compose host can keep relics: `COPAL_RENDER_ORIGIN`, `COPAL_RENDER_FRAME_ANCESTORS` and `COPAL_RENDER_PUBLISH` in `docker/.env` put it on the LAN (it defaults to this machine only, at `127.0.0.1:8093`); set `ANTUMBRA_COPAL_RENDER_ORIGIN` to the same origin.
+- **Relics: pages an agent wrote, kept, found and viewed** ([#236](https://github.com/albedosehen/antumbra/pull/236)). `publish_relic` stores an HTML page in copal (one file per version, at `relics/<slug>/v<N>.html`) and indexes its text, so `recall_documents` finds it. `list_relics` lists or searches the relics you can see, `get_relic` returns one with an address that displays it, and `set_relic_visibility` makes one public or private. The dashboard gains a gallery at `/relics`, with live previews, All / Yours / Shared with you, search and a list view, and a viewer at `/relic/<slug>`. A relic is private to its compartment's audience by default, viewed through a render link minted per view; a public one opens at `/relic/<slug>` for anyone who can reach the server, with no sign-in. Pages are shown only in a sandboxed `<iframe>` from copal's render origin, never by the dashboard's own origin. Needs `--copal-render-origin` (`ANTUMBRA_COPAL_RENDER_ORIGIN`) beside `--copal-addr`, and copal with render links, `/v1/public/{id}` and `COPAL_RENDER_FRAME_ANCESTORS` (Oneiriq/copal#119). A new `relic` table, read through the compartment and written by its owner only, is applied at boot.
+- **The Compose `copal` profile runs copal's render listener**, so a Compose host can keep relics: `COPAL_RENDER_ORIGIN`, `COPAL_RENDER_FRAME_ANCESTORS` and `COPAL_RENDER_PUBLISH` in `docker/.env` put it on the LAN (it defaults to this machine only, at `127.0.0.1:8093`); set `ANTUMBRA_COPAL_RENDER_ORIGIN` to the same origin ([#238](https://github.com/albedosehen/antumbra/pull/238)).
+- **`/mcp/call` takes a page-sized body.** The REST shim read at most 64 KiB, so a relic or a knowledge document past about 60 KB was refused before it reached the tool; the ceiling is now 4 MiB ([#237](https://github.com/albedosehen/antumbra/pull/237)).
+
+### Behaviors and standing experts (experimental)
+
+- **`behavior_candidates` finds the rules you already stated.** It reads the store in order and offers the memories that may state a behavior (opinions, feedback and convention tags, phrases about how to act), and a behavior records the memories it was drawn from, so a pass converges ([#212](https://github.com/albedosehen/antumbra/pull/212)).
+- **The dashboard has a Behaviors section** with Accept and Retire, filtered by status, showing each rule's scope, examples, violations, sources and how its last training went ([#213](https://github.com/albedosehen/antumbra/pull/213)).
+- **The training recipe is the node's to set**: `--behave-rank`, `--behave-rounds` and `--behave-lr` (defaults rank 16, 3 rounds, 1.5e-4), refused at start when they could train nothing ([#215](https://github.com/albedosehen/antumbra/pull/215)).
+- **One example in three is held out**, so a behavior recorded with ten examples is judged on three and one miss still reads as learned ([#216](https://github.com/albedosehen/antumbra/pull/216)). The docs say how many examples a prose rule needs ([#217](https://github.com/albedosehen/antumbra/pull/217)).
+- **A regression is a probability.** A behavior the expert answers worse than the base model refuses the set when that is likely past the regression confidence (`--behave-regression-confidence`, default 0.9), instead of by a fixed distance ([#219](https://github.com/albedosehen/antumbra/pull/219)).
+- **A served expert is audited** on the examples its behaviors gained since it was trained, and the audit follows a behavior recorded again with more examples ([#220](https://github.com/albedosehen/antumbra/pull/220), [#221](https://github.com/albedosehen/antumbra/pull/221)). With `--behave-tune-confidence`, the loop tunes the regression confidence per workspace from those audits ([#222](https://github.com/albedosehen/antumbra/pull/222)).
+- **A behavior not learned says what the expert answered instead**: its first failed held-out task and the answer, in `list_behaviors` and on the dashboard ([#232](https://github.com/albedosehen/antumbra/pull/232)).
+- **One judge for a check.** The trainer scores answers with the same check `record_behavior` uses, so a rule recorded in one regex dialect is never judged in another ([#233](https://github.com/albedosehen/antumbra/pull/233)), and a behavior whose examples hold code fences reads back whole ([#214](https://github.com/albedosehen/antumbra/pull/214)).
+- **`answer` can serve through your standing experts alone** (`standing_only`) ([#234](https://github.com/albedosehen/antumbra/pull/234)), and a behavior training is seeded from what it teaches, so the same rules train the same way in any process (`--generation-seed`) ([#235](https://github.com/albedosehen/antumbra/pull/235)).
+- **A standing expert is one workspace's**, no longer shared by workspaces whose users have the same id ([#223](https://github.com/albedosehen/antumbra/pull/223)).
+
+### Recall and identity
+
+- **A session that can read little of a workspace is searched exactly**: the chunk leg finds the nearest pieces it may read in milliseconds, where it used to walk the whole index for seconds ([#226](https://github.com/albedosehen/antumbra/pull/226), [#227](https://github.com/albedosehen/antumbra/pull/227)).
+- **A user id names one user in one workspace**: hosted signup gives each new workspace's first user an id of its own, so private experts can never be listed or routed across workspaces ([#228](https://github.com/albedosehen/antumbra/pull/228)).
+
+### Server
+
+- **A restart answers at once.** The chunk index's first pass no longer holds the auth lock, and a networked server listens only once its embedder answers, so the first calls after a start no longer wait seconds ([#224](https://github.com/albedosehen/antumbra/pull/224), [#225](https://github.com/albedosehen/antumbra/pull/225)).
+- **A first call's trace says what building its session waited on**: the auth lock, provisioning, or the serving connection ([#229](https://github.com/albedosehen/antumbra/pull/229)).
+
+### Docker
+
+- **SurrealDB health checks run over the websocket.** SurrealDB 3.2.4 answers the `http://` form "Method not allowed" while serving normally, which left both databases unhealthy and kept a recreated server from starting; `kusko-deploy.sh` now fails when a service is not running instead of reporting OK ([#239](https://github.com/albedosehen/antumbra/pull/239)).
+- **Images built from `main` are also tagged `main-<timestamp>-<short sha>`**, so image automation can order them ([#230](https://github.com/albedosehen/antumbra/pull/230)).
+
+### Security
+
+- **Dependencies moved past the October 2026 advisories**: quinn-proto 0.11.19 and ammonia ([#231](https://github.com/albedosehen/antumbra/pull/231)); rustls 0.23.46, rustls-webpki 0.103.16, webpki-roots and webpki-root-certs 1.0.11, ammonia 4.2.4 and zip 7.4.0 (with #236). The two advisories no release clears, crypto-bigint through SurrealDB's JWT stack and zip through candle, are documented as unreachable in `.cargo/audit.toml`.
 
 ## 0.1.1 - 2026-10-09
 
