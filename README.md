@@ -119,11 +119,11 @@ irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cl
 ```
 
 ```bash
-git clone https://github.com/albedosehen/antumbra.git   # the local stack is built from the repository
-cd antumbra
-antumbra setup local     # or, against a hosted workspace (no clone needed): antumbra setup hosted <url> --token-file <file>
+antumbra setup local     # or, against a hosted workspace: antumbra setup hosted <url> --token-file <file>
 antumbra setup check
 ```
+
+No clone is needed: outside one, setup writes the stack's compose file to `~/.antumbra/stack` and pulls the server image published for its version (`ghcr.io/albedosehen/antumbra-mcp`, for x86-64 and ARM). Run it inside a clone and it builds the server from the source instead, which the GPU build (`--gpu`) always does.
 
 **[docs/getting-started.md](docs/getting-started.md)** walks through it, and through each step by hand, for macOS, Windows, and Linux. Agents setting it up for someone follow **[docs/agent-setup.md](docs/agent-setup.md)**. The paths below cover just the binaries.
 

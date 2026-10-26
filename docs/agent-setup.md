@@ -39,14 +39,9 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/re
 irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
 ```
 
-A setup on this machine also needs the repository, because the local stack is built from it (this needs git; ask before installing it):
+A setup on this machine does not need the repository. Outside a clone, setup pulls the server image published for the CLI's version. Inside one, it builds the server from the source instead. Only the GPU build (`--gpu`) needs a clone, and so git (ask before installing it).
 
-```sh
-git clone https://github.com/albedosehen/antumbra.git
-cd antumbra
-```
-
-To build the command from that clone instead of using the installer, they need Rust through [rustup](https://rustup.rs) (ask before installing it): `cargo install --path crates/antumbra-cli --locked`. The first build takes several minutes.
+To build the command from a clone instead of using the installer, they need Rust through [rustup](https://rustup.rs) (ask before installing it): `cargo install --path crates/antumbra-cli --locked`. The first build takes several minutes.
 
 ## 3a. On this machine
 
@@ -57,19 +52,22 @@ docker version --format '{{.Server.Version}}'
 curl -s http://127.0.0.1:11434/api/tags
 ```
 
-- Docker missing or not running: [Docker Desktop](https://docs.docker.com/get-docker/) on macOS and Windows, Docker Engine on Linux. It must be running.
+- Docker missing or not running: [Docker Desktop](https://docs.docker.com/get-docker/) on macOS and Windows, Docker Engine on Linux (in WSL, either Docker Engine in the distro or Docker Desktop's WSL integration). It must be running.
 - ollama missing: [ollama.com](https://ollama.com). It must be running.
 - On macOS and Linux the hooks also need `jq` and `curl`.
 
-Then, from inside the clone:
+Then, from any directory:
 
 ```sh
 antumbra setup local --yes
 ```
 
-It checks the prerequisites again, pulls the embedding model, generates the stack's secrets into `docker/.env`, builds and starts the store and the server in Docker (the slow part, once), mints a token, proves recall works with it, and connects Claude Code. The last lines read `Antumbra is set up.`
+It checks the prerequisites again, pulls the embedding model, writes the stack's compose file to `~/.antumbra/stack/docker` and generates its secrets into the `.env` beside it, pulls the server image and starts the store and the server in Docker, mints a token, proves recall works with it, and connects Claude Code. The last lines read `Antumbra is set up.` Run from inside a clone, it uses the clone's `docker/` instead and builds the server from the source, which takes several minutes the first time.
 
-On Linux, if setup says ollama only listens on 127.0.0.1, the person needs to change ollama's service (the message gives the exact `systemctl` steps; they need sudo). Ask them to, then run setup again.
+If setup says the server's container cannot reach ollama, the message names the fix for the kind of Docker this is. Ask the person to make it, then run setup again:
+
+- Linux with Docker Engine: ollama only listens on 127.0.0.1, so its service needs changing (the message gives the exact `systemctl` steps; they need sudo).
+- WSL with Docker Desktop: containers run in Docker Desktop's VM, which reaches the Windows host rather than the WSL distro. Either run ollama on Windows (and stop the copy in WSL), or turn on WSL's mirrored networking (`networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, then `wsl --shutdown` from Windows) and start ollama in WSL with `OLLAMA_HOST=0.0.0.0`. Both are changes on the Windows side.
 
 ## 3b. A hosted workspace
 
@@ -115,13 +113,13 @@ Say this if they ask:
 - `~/.claude/settings.json`: hooks on SessionStart, UserPromptSubmit, Stop and PreCompact; `ANTUMBRA_URL`, `ANTUMBRA_WORKSPACE_ID` and (when absent) `ANTUMBRA_HOST_ID` under `env`; `autoMemoryEnabled: false` when the file did not say (pass `--keep-auto-memory` to skip). A backup sits beside it, `settings.json.antumbra-backup-<time>`.
 - Claude Code's MCP servers: `antumbra`, user scope, reading the token from its file on each connection.
 - The server: this machine is listed among their devices under its `ANTUMBRA_HOST_ID`, as a memory node. Each session start names it again, which keeps "last seen" current. If they want a particular name, set `ANTUMBRA_HOST_ID` in the settings' `env` before running setup, since setup keeps a name that is already there.
-- Local only: `docker/.env` in the clone, the containers `antumbra-surrealdb` and `antumbra-mcp` (they restart with Docker), and the database in `~/.antumbra/surrealdb`.
+- Local only: the stack's compose file and `.env` in `~/.antumbra/stack/docker` (or `docker/.env` in the clone, when setup ran from one), the containers `antumbra-surrealdb` and `antumbra-mcp` (they restart with Docker), and the database in `~/.antumbra/surrealdb`.
 
 ## Undo
 
 ```sh
 claude mcp remove antumbra --scope user
-docker compose -f docker/docker-compose.yml down      # local only, from the clone
+docker compose -f ~/.antumbra/stack/docker/docker-compose.yml down   # local only (from a clone: docker/docker-compose.yml)
 ```
 
 Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`.
@@ -132,7 +130,9 @@ Then restore the settings backup over `~/.claude/settings.json` and delete `~/.a
 | --- | --- |
 | `Docker is not installed, or not running` | Install or start Docker, then run setup again. |
 | `ollama is not answering` | Install or start ollama. |
-| `is not inside a clone of the Antumbra repository` | `cd` into the clone, or pass `--repo <path>`. |
+| `is not inside a clone of the Antumbra repository` | Only `--repo` and `--gpu` need a clone: point `--repo` at the clone, or leave both out to run the published image. |
+| `docker pull ... failed` | Check the machine is online. A CLI built from source has no published image at its version: run setup inside the clone, or install the CLI from the release. |
+| `the server's container cannot reach ollama` | Follow the steps the message prints for their setup (see 3a). |
 | `ollama only listens on 127.0.0.1` (Linux) | The person runs the `systemctl` steps in the message. |
 | `the server ... refused the token` | The token expired or is for another server; ask for a new one. |
 | `the claude command is not on your PATH` | Claude Code is not installed where setup can find it; setup prints the one `claude mcp add-json` command to run once it is. |

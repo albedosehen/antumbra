@@ -1,24 +1,34 @@
 name: mcp-image
 
-# Publishes the antumbra-mcp image on main pushes. The main workspace has no
-# private dependencies, so the build needs no secret.
+# Publishes the antumbra-mcp image on main pushes and on release tags. The main
+# workspace has no private dependencies, so the build needs no secret.
 #
-# Three tags: the commit, `latest`, and main-<YYYYMMDDHHmmss>-<short sha>. The
-# last sorts by when it was built, which is what a Flux ImagePolicy needs to
-# pick the newest build of main on its own; the commit tag stays for pins
-# written by hand.
+# A main push gets three tags: the commit, `latest`, and
+# main-<YYYYMMDDHHmmss>-<short sha>. The last sorts by when it was built, which
+# is what a Flux ImagePolicy needs to pick the newest build of main on its own;
+# the commit tag stays for pins written by hand.
+#
+# A release tag (v0.2.1) gets the version, 0.2.1, for linux/amd64 and
+# linux/arm64, each built on a runner of its own architecture. It is the image
+# `antumbra setup local` pulls when it runs outside a clone, at the CLI's own
+# version, so a Mac or an ARM Linux host runs it natively.
 
 on:
   push:
     branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  IMAGE: ghcr.io/albedosehen/antumbra-mcp
+
 jobs:
   image:
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,7 +40,7 @@ jobs:
         run: |
           short=$(git rev-parse --short=7 HEAD)
           stamp=$(date -u +%Y%m%d%H%M%S)
-          echo "main=ghcr.io/albedosehen/antumbra-mcp:main-${stamp}-${short}" >> "$GITHUB_OUTPUT"
+          echo "main=${IMAGE}:main-${stamp}-${short}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v4
         with:
@@ -43,6 +53,83 @@ jobs:
           file: docker/Dockerfile
           push: true
           tags: |
-            ghcr.io/albedosehen/antumbra-mcp:${{ github.sha }}
-            ghcr.io/albedosehen/antumbra-mcp:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
             ${{ steps.tags.outputs.main }}
+
+  # One platform per runner, pushed by digest only. `release` names them.
+  release-platform:
+    if: github.ref_type == 'tag'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=Elastic-2.0
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      - name: Keep the digest
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: release-platform
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag the release
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --annotation "index:org.opencontainers.image.description=The Antumbra MCP server, as antumbra setup local runs it." \
+            --annotation "index:org.opencontainers.image.licenses=Elastic-2.0" \
+            -t "${IMAGE}:${version}" \
+            $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${version}"

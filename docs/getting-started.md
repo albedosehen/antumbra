@@ -20,17 +20,17 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/re
 irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
 ```
 
-Then, from a clone of the repository (the local stack is built from it):
+Then, from any directory:
 
 ```bash
-git clone https://github.com/albedosehen/antumbra.git
-cd antumbra
 antumbra setup local
 ```
 
-With [Rust](https://rustup.rs) you can build the CLI from the clone instead of using the installer: `cargo install --path crates/antumbra-cli --locked`.
+No clone is needed. Outside one, setup writes the stack's compose file to `~/.antumbra/stack/docker` and pulls the server image published for its own version, `ghcr.io/albedosehen/antumbra-mcp:<version>` (x86-64 and ARM). Inside a clone of the repository it builds the server from the source instead, which is what the GPU build (`--gpu`) always does. Upgrading is the same two steps: run the installer again, then `antumbra setup local`, which moves the stack to the new version's image and keeps the store and the token.
 
-`antumbra setup local` does every step in the next section for you: it checks Docker and ollama, pulls the embedding model, generates the secrets into `docker/.env`, starts the stack, mints a token into `~/.antumbra/token.txt`, proves recall works with it, writes the hooks to `~/.antumbra/hooks`, wires them into Claude Code's `settings.json` (backed up, added to, never rewritten), and registers the MCP server. Run it again any time; it keeps what is already in place. `--dry-run` shows what it would change.
+With [Rust](https://rustup.rs) you can build the CLI from a clone instead of using the installer: `cargo install --path crates/antumbra-cli --locked`.
+
+`antumbra setup local` does every step in the next section for you: it checks Docker and ollama, pulls the embedding model, generates the secrets into `docker/.env` (`~/.antumbra/stack/docker/.env` without a clone), starts the stack, mints a token into `~/.antumbra/token.txt`, proves recall works with it, writes the hooks to `~/.antumbra/hooks`, wires them into Claude Code's `settings.json` (backed up, added to, never rewritten), and registers the MCP server. Run it again any time; it keeps what is already in place. `--dry-run` shows what it would change.
 
 Somebody else runs the server? Connect to it instead, with the token or the sign-in link you were given:
 

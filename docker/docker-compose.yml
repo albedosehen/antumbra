@@ -50,7 +50,11 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: antumbra-mcp:local
+    # Built from the clone unless ANTUMBRA_IMAGE names a published image.
+    # `antumbra setup local` run outside a clone sets it to the release image
+    # at the CLI's own version (ghcr.io/albedosehen/antumbra-mcp:<version>) and
+    # pulls it instead of building.
+    image: ${ANTUMBRA_IMAGE:-antumbra-mcp:local}
     container_name: antumbra-mcp
     depends_on:
       surrealdb:

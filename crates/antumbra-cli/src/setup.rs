@@ -5,7 +5,10 @@
 //! - **`local`**: the store and the MCP server on this machine, in Docker, with
 //!   embeddings from ollama. Setup checks what is installed, pulls the
 //!   embedding model, fills in `docker/.env` with generated secrets, starts the
-//!   stack, mints a token, and proves the server answers with it.
+//!   stack, mints a token, and proves the server answers with it. Inside a
+//!   clone of the repository the server is built from it. Anywhere else setup
+//!   writes the compose file it carries to `~/.antumbra/stack` and pulls the
+//!   server image published for its own version.
 //! - **`hosted <url>`**: a workspace someone else runs. Setup takes the token
 //!   (or the sign-in link that carries one), proves the server accepts it, and
 //!   reads the workspace from it.
@@ -42,11 +45,19 @@ const MODEL: &str = "all-minilm";
 const EMBED_DIM: usize = 384;
 /// The MCP server's port in the local stack.
 const MCP_PORT: u16 = 8081;
+/// The server image, published for every release at the release's version.
+/// `setup local` outside a clone runs the one at its own version.
+const IMAGE: &str = "ghcr.io/albedosehen/antumbra-mcp";
+/// The stack for running without a clone: the compose file and `.env`
+/// template this CLI was released with.
+const STACK_COMPOSE: &str = include_str!("../../../docker/docker-compose.yml");
+const STACK_ENV_EXAMPLE: &str = include_str!("../../../docker/.env.example");
 
 #[derive(Subcommand)]
 pub enum SetupMode {
     /// Run the store and the MCP server on this machine, in Docker, and connect
-    /// Claude Code to them. Run it from a clone of the repository.
+    /// Claude Code to them. Inside a clone of the repository the server is
+    /// built from it, and anywhere else the published server image is pulled.
     Local(LocalArgs),
     /// Connect Claude Code to a hosted workspace, with the token (or the
     /// sign-in link) you were given.
@@ -79,8 +90,8 @@ pub struct Common {
 
 #[derive(Args, Clone, Debug)]
 pub struct LocalArgs {
-    /// The repository clone to run the stack from (default: the one you are
-    /// in).
+    /// The repository clone to build the server from (default: the one you are
+    /// in). With none, the published server image is pulled instead.
     #[arg(long)]
     pub repo: Option<PathBuf>,
     /// Where ollama answers on this machine.
@@ -88,7 +99,8 @@ pub struct LocalArgs {
     pub ollama: String,
     /// The GPU build (Linux, or Windows through WSL2, with an NVIDIA card):
     /// embeddings in-process, answers from trained experts, consolidation on
-    /// its own. ollama is not needed with it.
+    /// its own. ollama is not needed with it. It is built from source, so it
+    /// runs from a clone.
     #[arg(long)]
     pub gpu: bool,
     /// The workspace the token grants.
@@ -200,12 +212,20 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     let antumbra = home.join(".antumbra");
     println!("Setting up Antumbra on this machine.\n");
 
-    let repo = find_repo(args.repo.as_deref())?;
-    steps.ok(format!("repository at {}", repo.display()));
-    let compose = repo.join("docker").join("docker-compose.yml");
-    let mut compose_files = vec![compose.clone()];
+    let stack = find_stack(args.repo.as_deref(), args.gpu)?;
+    match &stack {
+        Stack::Clone(repo) => steps.ok(format!(
+            "repository at {}, which the server is built from",
+            repo.display()
+        )),
+        Stack::Pulled { image } => steps.ok(format!(
+            "no clone here, so the server is the published image {image}"
+        )),
+    }
+    let docker = stack.docker(&antumbra);
+    let mut compose_files = vec![docker.join("docker-compose.yml")];
     if args.gpu {
-        compose_files.push(repo.join("docker").join("docker-compose.gpu.yml"));
+        compose_files.push(docker.join("docker-compose.gpu.yml"));
     }
 
     // Docker, and compose.
@@ -243,12 +263,56 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         ensure_ollama(&args.ollama, &steps)?;
     }
 
+    // The stack's compose file, when there is no clone to run it from. It is
+    // this release's, so it is replaced when it differs. Settings belong in
+    // the .env beside it, which setup only adds to.
+    if matches!(stack, Stack::Pulled { .. }) {
+        let compose = &compose_files[0];
+        if std::fs::read_to_string(compose).ok().as_deref() == Some(STACK_COMPOSE) {
+            steps.ok(format!(
+                "the stack's compose file is in {}",
+                docker.display()
+            ));
+        } else if steps.dry_run {
+            steps.would(format!(
+                "write this release's compose file to {}",
+                docker.display()
+            ));
+        } else {
+            std::fs::create_dir_all(&docker)?;
+            std::fs::write(compose, STACK_COMPOSE)?;
+            std::fs::write(docker.join(".env.example"), STACK_ENV_EXAMPLE)?;
+            steps.ok(format!(
+                "wrote this release's compose file to {}",
+                docker.display()
+            ));
+        }
+    }
+
     // docker/.env.
     let data = antumbra.join("surrealdb");
-    let env_path = repo.join("docker").join(".env");
-    let example =
-        std::fs::read_to_string(repo.join("docker").join(".env.example")).unwrap_or_default();
-    let existing = std::fs::read_to_string(&env_path).ok();
+    let env_path = docker.join(".env");
+    let env_name = match &stack {
+        Stack::Clone(_) => "docker/.env".to_string(),
+        Stack::Pulled { .. } => env_path.display().to_string(),
+    };
+    let example = match &stack {
+        Stack::Clone(_) => std::fs::read_to_string(docker.join(".env.example")).unwrap_or_default(),
+        Stack::Pulled { .. } => STACK_ENV_EXAMPLE.to_string(),
+    };
+    let on_disk = std::fs::read_to_string(&env_path).ok();
+    // A stack an earlier setup ran from a clone keeps that clone's secrets:
+    // the store's root password is fixed when its data is first written, and
+    // the token was signed with the old secret.
+    let carried = match (&stack, &on_disk) {
+        (Stack::Pulled { .. }, None) => earlier_env(&antumbra),
+        _ => None,
+    };
+    let existing = on_disk.clone().or_else(|| {
+        carried
+            .as_ref()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+    });
     let wants = vec![
         env_file::Want {
             name: "SURREAL_PASS",
@@ -263,15 +327,44 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             value: data.to_string_lossy().replace('\\', "/"),
         },
     ];
-    let (env_text, wrote) = env_file::fill(existing.as_deref(), &example, &wants);
-    if wrote.is_empty() {
-        steps.ok("docker/.env already holds the stack's secrets");
+    let (mut env_text, wrote) = env_file::fill(existing.as_deref(), &example, &wants);
+    let mut moved_image = None;
+    if let Stack::Pulled { image } = &stack {
+        let have = env_file::get(&env_text, "ANTUMBRA_IMAGE");
+        if have != Some(image.as_str()) {
+            if release_image_moves(have) {
+                env_text = env_file::set(&env_text, "ANTUMBRA_IMAGE", image);
+                moved_image = Some(image.as_str());
+            } else {
+                steps.ok(format!(
+                    "{env_name} names its own server image, {}, which setup keeps",
+                    have.unwrap_or_default()
+                ));
+            }
+        }
+    }
+    let mut said = Vec::new();
+    if let Some(from) = &carried {
+        said.push(format!("carried over from {}", from.display()));
+    }
+    if !wrote.is_empty() {
+        said.push(format!("generated {}", wrote.join(", ")));
+    }
+    if let Some(image) = moved_image {
+        said.push(format!("server image {image}"));
+    }
+    if said.is_empty() {
+        steps.ok(format!("{env_name} already holds the stack's secrets"));
     } else if steps.dry_run {
-        steps.would(format!("write {} to docker/.env", wrote.join(", ")));
+        for part in &said {
+            steps.would(format!("write {env_name}: {part}"));
+        }
     } else {
         std::fs::create_dir_all(&data)?;
         write_private(&env_path, &env_text)?;
-        steps.ok(format!("docker/.env: generated {}", wrote.join(", ")));
+        for part in &said {
+            steps.ok(format!("{env_name}: {part}"));
+        }
     }
     let data_dir = env_file::get(&env_text, "ANTUMBRA_SURREAL_DATA")
         .map(PathBuf::from)
@@ -282,12 +375,28 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     }
 
     // The stack.
+    let image = env_file::get(&env_text, "ANTUMBRA_IMAGE")
+        .unwrap_or_default()
+        .to_string();
+    let build = match &stack {
+        Stack::Clone(_) => "--build",
+        Stack::Pulled { .. } => "--no-build",
+    };
     let mut up: Vec<String> = compose_args(&compose_files);
-    up.extend(["up", "-d", "--build", "surrealdb", "antumbra-mcp"].map(String::from));
+    up.extend(["up", "-d", build, "surrealdb", "antumbra-mcp"].map(String::from));
     if steps.dry_run {
+        if matches!(stack, Stack::Pulled { .. }) {
+            steps.would(format!("pull {image} unless Docker has it"));
+        }
         steps.would(format!("run docker {}", up.join(" ")));
     } else {
-        println!("\n  Starting the store and the server. The first run builds the server image,\n  which takes several minutes; later runs rebuild only what the clone changed.\n");
+        match &stack {
+            Stack::Clone(_) => println!("\n  Starting the store and the server. The first run builds the server image,\n  which takes several minutes; later runs rebuild only what the clone changed.\n"),
+            Stack::Pulled { .. } => {
+                pull_image(&image, &env_name, &steps)?;
+                println!("\n  Starting the store and the server.\n");
+            }
+        }
         let status = Command::new("docker").args(&up).status()?;
         if !status.success() {
             anyhow::bail!("`docker {}` failed; its output is above", up.join(" "));
@@ -352,7 +461,14 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         "url": url,
         "workspace": args.workspace,
         "user": args.user,
-        "repo": repo,
+        "repo": match &stack {
+            Stack::Clone(repo) => json!(repo),
+            Stack::Pulled { .. } => Value::Null,
+        },
+        "image": match &stack {
+            Stack::Clone(_) => Value::Null,
+            Stack::Pulled { .. } => Value::String(image),
+        },
         "compose": compose_files,
         "token_file": token_path,
         "ollama": if args.gpu { Value::Null } else { Value::String(args.ollama.clone()) },
@@ -368,9 +484,47 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     )
 }
 
-/// The repository to run the stack from: the one given, or the one the
-/// current directory is in.
-fn find_repo(given: Option<&Path>) -> anyhow::Result<PathBuf> {
+/// Where the local stack runs from, which decides how the server image is had.
+enum Stack {
+    /// A clone of the repository: the image is built from it.
+    Clone(PathBuf),
+    /// No clone: the compose file this CLI carries, written to
+    /// `~/.antumbra/stack/docker`, and the release image at this CLI's
+    /// version, pulled.
+    Pulled { image: String },
+}
+
+impl Stack {
+    /// The directory holding the compose files and `.env`.
+    fn docker(&self, antumbra: &Path) -> PathBuf {
+        match self {
+            Stack::Clone(repo) => repo.join("docker"),
+            Stack::Pulled { .. } => antumbra.join("stack").join("docker"),
+        }
+    }
+}
+
+/// A clone to build from when there is one, the published image when not.
+/// The GPU build has no published image, so it needs the clone.
+fn find_stack(given: Option<&Path>, gpu: bool) -> anyhow::Result<Stack> {
+    if let Some(repo) = find_repo(given)? {
+        return Ok(Stack::Clone(repo));
+    }
+    if gpu {
+        anyhow::bail!(
+            "{} is not inside a clone of the Antumbra repository, and the GPU build is built from source.\n  Clone it, cd into it, and run this again (or pass --repo <path>).",
+            std::env::current_dir()?.display()
+        );
+    }
+    Ok(Stack::Pulled {
+        image: format!("{IMAGE}:{}", env!("CARGO_PKG_VERSION")),
+    })
+}
+
+/// The repository clone to build the server from: the one given, or the one
+/// the current directory is in. `None` when no clone was given and there is
+/// none here.
+fn find_repo(given: Option<&Path>) -> anyhow::Result<Option<PathBuf>> {
     let start = match given {
         Some(p) => p.to_path_buf(),
         None => std::env::current_dir()?,
@@ -379,13 +533,60 @@ fn find_repo(given: Option<&Path>) -> anyhow::Result<PathBuf> {
         if dir.join("docker").join("docker-compose.yml").is_file()
             && dir.join("crates").join("antumbra-mcp").is_dir()
         {
-            return Ok(dir.to_path_buf());
+            return Ok(Some(dir.to_path_buf()));
         }
     }
-    anyhow::bail!(
-        "{} is not inside a clone of the Antumbra repository.\n  The local setup builds the server from the repository: clone it, cd into it, and run this again (or pass --repo <path>).",
-        start.display()
-    )
+    if given.is_some() {
+        anyhow::bail!(
+            "{} is not inside a clone of the Antumbra repository.\n  Pass --repo the clone's path, or leave --repo out to run the published server image.",
+            start.display()
+        );
+    }
+    Ok(None)
+}
+
+/// The `.env` of the clone an earlier setup ran the stack from, when it is
+/// still there.
+fn earlier_env(antumbra: &Path) -> Option<PathBuf> {
+    let state: Value =
+        serde_json::from_str(&std::fs::read_to_string(antumbra.join("setup.json")).ok()?).ok()?;
+    let env = PathBuf::from(state.get("repo")?.as_str()?)
+        .join("docker")
+        .join(".env");
+    env.is_file().then_some(env)
+}
+
+/// Whether setup moves the `.env`'s server image to this CLI's release: when
+/// it names none, or names a release image. One named by hand stays.
+fn release_image_moves(have: Option<&str>) -> bool {
+    match have {
+        None => true,
+        Some(image) => image.is_empty() || image.starts_with(&format!("{IMAGE}:")),
+    }
+}
+
+/// The server image, pulled unless Docker already has it.
+fn pull_image(image: &str, env_name: &str, steps: &Steps) -> anyhow::Result<()> {
+    let have = Command::new("docker")
+        .args(["image", "inspect", "--format", "{{.Id}}", image])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if have {
+        steps.ok(format!("Docker has the server image {image}"));
+        return Ok(());
+    }
+    println!("\n  Downloading the server image {image}.\n");
+    let status = Command::new("docker").args(["pull", image]).status()?;
+    if !status.success() {
+        anyhow::bail!(
+            "`docker pull {image}` failed (its output is above).\n  A CLI built from source has no published image at its version: run setup inside your clone to build the server there, or set ANTUMBRA_IMAGE in {env_name} to a released image."
+        );
+    }
+    println!();
+    steps.ok(format!("pulled the server image {image}"));
+    Ok(())
 }
 
 /// ollama answering, the model pulled, and vectors of the store's width.
@@ -537,7 +738,7 @@ fn unreachable_from_container(port: &str) -> String {
         || Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists();
     let head =
         format!("the server's container cannot reach ollama at host.docker.internal:{port}.");
-    let elsewhere = "(Running ollama somewhere the container can reach? Set ANTUMBRA_EMBEDDER_URL in docker/.env.)";
+    let elsewhere = "(Running ollama somewhere the container can reach? Set ANTUMBRA_EMBEDDER_URL in the stack's .env: docker/.env in a clone, ~/.antumbra/stack/docker/.env without one.)";
     if desktop && wsl {
         format!(
             "{head}\n  Docker Desktop runs containers in its own VM, where host.docker.internal is the Windows host, not this WSL distro.\n  Either:\n    - run ollama on Windows instead (https://ollama.com) and stop the copy in WSL, so only one owns port {port}; or\n    - let this distro share Windows' network: in %UserProfile%\\.wslconfig put\n        [wsl2]\n        networkingMode=mirrored\n      run `wsl --shutdown` from Windows, start ollama here with OLLAMA_HOST=0.0.0.0, and run this again.\n  {elsewhere}"
@@ -1644,8 +1845,64 @@ mod tests {
     #[test]
     fn the_repository_is_found_from_inside_it() {
         let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let repo = find_repo(Some(here)).unwrap();
+        let repo = find_repo(Some(here)).unwrap().unwrap();
         assert!(repo.join("docker").join("docker-compose.yml").is_file());
-        assert!(find_repo(Some(&std::env::temp_dir())).is_err());
+        assert!(
+            find_repo(Some(&std::env::temp_dir())).is_err(),
+            "a directory given that is not a clone is an error, not the published image"
+        );
+    }
+
+    #[test]
+    fn the_stack_without_a_clone_runs_the_image_setup_names() {
+        assert!(STACK_COMPOSE.contains("image: ${ANTUMBRA_IMAGE:-antumbra-mcp:local}"));
+        for name in [
+            "SURREAL_PASS=",
+            "ANTUMBRA_JWT_SECRET=",
+            "ANTUMBRA_SURREAL_DATA=",
+        ] {
+            assert!(STACK_ENV_EXAMPLE.contains(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_upgrade_moves_a_release_image_and_keeps_one_named_by_hand() {
+        assert!(release_image_moves(None));
+        assert!(release_image_moves(Some("")));
+        assert!(release_image_moves(Some(
+            "ghcr.io/albedosehen/antumbra-mcp:0.2.0"
+        )));
+        assert!(!release_image_moves(Some(
+            "registry.example/antumbra-mcp:mine"
+        )));
+        assert!(!release_image_moves(Some("antumbra-mcp:local")));
+        assert!(!release_image_moves(Some(
+            "ghcr.io/albedosehen/antumbra-mcp-gpu:0.2.0"
+        )));
+    }
+
+    #[test]
+    fn an_earlier_clone_setup_lends_its_env_to_the_stack() {
+        let dir = std::env::temp_dir().join(format!("antumbra-earlier-{}", std::process::id()));
+        let clone = dir.join("clone");
+        std::fs::create_dir_all(clone.join("docker")).unwrap();
+        std::fs::write(clone.join("docker").join(".env"), "SURREAL_PASS=old\n").unwrap();
+        std::fs::write(
+            dir.join("setup.json"),
+            serde_json::to_string(&json!({ "mode": "local", "repo": clone })).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(earlier_env(&dir), Some(clone.join("docker").join(".env")));
+        std::fs::write(
+            dir.join("setup.json"),
+            serde_json::to_string(&json!({ "mode": "local", "repo": null })).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            earlier_env(&dir),
+            None,
+            "a pulled stack has no clone to lend"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

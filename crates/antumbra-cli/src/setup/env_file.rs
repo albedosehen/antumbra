@@ -65,6 +65,21 @@ pub fn fill(existing: Option<&str>, example: &str, wants: &[Want]) -> (String, V
     (text, wrote)
 }
 
+/// `text` with `name` set to `value`, whatever it held before: the line that
+/// sets it (the last, which is the one compose reads) is replaced in place, or
+/// a line is added at the end.
+pub fn set(text: &str, name: &str, value: &str) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let line = format!("{name}={value}");
+    match lines.iter().rposition(|l| value_for(l, name).is_some()) {
+        Some(i) => lines[i] = line,
+        None => lines.push(line),
+    }
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +140,19 @@ mod tests {
         let (twice, wrote) = fill(Some(&once), EXAMPLE, &wants());
         assert_eq!(once, twice);
         assert!(wrote.is_empty());
+    }
+
+    #[test]
+    fn set_replaces_the_value_in_place_or_adds_it() {
+        let text = "# ANTUMBRA_IMAGE=example\nANTUMBRA_IMAGE=old:1\nOTHER=x\n";
+        let moved = set(text, "ANTUMBRA_IMAGE", "new:2");
+        assert_eq!(
+            moved,
+            "# ANTUMBRA_IMAGE=example\nANTUMBRA_IMAGE=new:2\nOTHER=x\n"
+        );
+        let added = set("OTHER=x\n", "ANTUMBRA_IMAGE", "new:2");
+        assert_eq!(added, "OTHER=x\nANTUMBRA_IMAGE=new:2\n");
+        assert_eq!(get(&added, "ANTUMBRA_IMAGE"), Some("new:2"));
     }
 
     #[test]
