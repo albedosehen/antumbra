@@ -7,6 +7,10 @@
 - **`antumbra setup local` needs no clone.** Outside a clone of the repository, setup writes the compose file the CLI carries to `~/.antumbra/stack/docker`, fills in the `.env` beside it, and pulls the server image published for the CLI's own version, `ghcr.io/albedosehen/antumbra-mcp:<version>`, instead of building it. Running setup again after an upgrade moves the stack to the new version's image, and an image named by hand in that `.env` (`ANTUMBRA_IMAGE`) is kept. A stack an earlier setup ran from a clone carries that clone's `docker/.env` over, so the store's password and the token still work. Inside a clone, setup builds from the source as before, and the GPU build (`--gpu`) still needs one.
 - **Release tags publish the server image** for linux/amd64 and linux/arm64, each built on a runner of its own architecture, tagged with the version. Main pushes keep their tags. The compose file's server image is `${ANTUMBRA_IMAGE:-antumbra-mcp:local}`, so a clone that does not set it builds as before.
 
+### Behaviors
+
+- **`record_behavior` says everything a call lacks at once.** A call without `rule`, `must`, `examples` or `violations` failed on the first missing field, so an agent learned the arguments one error per call; it now gets every problem in one `problems` list, and the schema still asks for all four. A violation written as a `{task, answer}` pair, the way an example is, is read as its answer. The capture hooks name the fields and the four-example minimum, where they asked only for "the rule, a check and examples".
+
 ## 0.2.0 - 2026-10-26
 
 Relics, and behaviors you can teach. An agent can now keep the pages it writes as relics, found and viewed in the dashboard, and the behavior loop learns a rule from your memories, trains it into a standing expert, and checks that the expert still follows it.

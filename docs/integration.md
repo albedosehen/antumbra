@@ -173,12 +173,12 @@ A session can leave a note for a session on another of your machines: "rerun thi
 ## Behaviors: what your own expert learns
 
 A memory is something to look up. A behavior is how you want an agent to act on a class of tasks: "reach a host by its SSH alias", "name an issue branch `feat/{issue}-{slug}`", "open pull requests against main". When you state or correct one, the agent records it with `record_behavior`:
-- the rule in one sentence;
+- `rule`, the rule in one sentence;
 - `must` and `must_not` regular expressions that decide whether an answer follows it;
-- at least four example tasks with answers that follow it, since training holds one in three out to admit your expert by (ten, varied in phrasing and case, teach a rule about a command or a code form reliably; a prose rule about how to go about a task needs sixteen to twenty, since at ten most such rules were learned on only some of their held-out tasks);
-- answers that break it.
+- `examples`, at least four `{task, answer}` pairs whose answers follow it, since training holds one in three out to admit your expert by (ten, varied in phrasing and case, teach a rule about a command or a code form reliably; a prose rule about how to go about a task needs sixteen to twenty, since at ten most such rules were learned on only some of their held-out tasks);
+- `violations`, answers that break it, each a plain string (one written as a `{task, answer}` pair is read as its answer).
 
-The check is tested against the examples and the violations before anything is stored, and `problems` says what to fix when it fails.
+The check is tested against the examples and the violations before anything is stored, and `problems` says what to fix when it fails. A call that leaves out `rule`, `must`, `examples` or `violations` is answered the same way, with everything it lacks in one `problems` list, so the agent fixes the call once instead of meeting one missing field per try.
 
 A behavior is proposed until you accept it (`accept_behavior`, or Accept in the dashboard's Behaviors section), unless you stated it yourself. `retire_behavior` drops one, and recording a new one with `supersedes` replaces an old one. `list_behaviors` shows them by status. They live in your own `behavior` compartment, private to you, and recall finds them like any memory.
 
