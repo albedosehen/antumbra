@@ -307,16 +307,139 @@ async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// [`branch_rule`] as the JSON arguments an agent sends, its `violations`
+/// written as given.
+fn branch_rule_args(violations: serde_json::Value) -> serde_json::Value {
+    let p = branch_rule(None, false);
+    serde_json::json!({
+        "rule": p.rule, "must": p.must, "must_not": p.must_not,
+        "examples": p.examples.iter().map(|e| serde_json::json!({"task": e.task, "answer": e.answer})).collect::<Vec<_>>(),
+        "violations": violations,
+    })
+}
+
+fn problems_of(out: &serde_json::Value) -> Vec<&str> {
+    out["problems"]
+        .as_array()
+        .map(|ps| ps.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// The first call an agent made from the capture hook's old wording, which
+/// asked for "the rule, a check and examples": a `check` the tool has no field
+/// for, one example, no violations. It is told everything it lacks in one
+/// answer, where deserialization named one missing field per call.
+#[tokio::test]
+async fn a_call_that_leaves_parts_out_is_told_everything_it_lacks_at_once() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let s = server_for(&store, "user:lily");
+    let out = s
+        .call_tool(
+            "record_behavior",
+            serde_json::json!({
+                "rule": "Name a branch for an issue feat/{issue}-{slug}.",
+                "check": { "must": [r"feat/\d+-[a-z0-9-]+"] },
+                "examples": [{ "task": "Start issue #42.", "answer": "git checkout -b feat/42-add-login-page" }],
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(out["recorded"], false);
+    let problems = problems_of(&out);
+    for lacking in ["`must` pattern", "1 example(s)", "`violations`"] {
+        assert!(
+            problems.iter().any(|p| p.contains(lacking)),
+            "{lacking}: {problems:?}"
+        );
+    }
+    assert!(list(&s, None).await.is_empty(), "nothing written");
+
+    let empty = s
+        .call_tool("record_behavior", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(
+        problems_of(&empty).contains(&"the rule is empty"),
+        "{empty}"
+    );
+    Ok(())
+}
+
+/// An agent that writes a violation the way it wrote the examples, as a
+/// `{task, answer}` pair, is read: the answer is the violation, and the check
+/// is held to it.
+#[tokio::test]
+async fn a_violation_written_as_an_example_is_read_as_its_answer() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let s = server_for(&store, "user:lily");
+
+    let passed = s
+        .call_tool(
+            "record_behavior",
+            branch_rule_args(serde_json::json!([
+                { "task": "Start issue #9.", "answer": "git checkout -b feat/9-anything" },
+            ])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(passed["recorded"], false);
+    assert_eq!(
+        problems_of(&passed),
+        ["the check passes the violating answer `git checkout -b feat/9-anything`"]
+    );
+
+    let recorded = s
+        .call_tool(
+            "record_behavior",
+            branch_rule_args(serde_json::json!([
+                { "task": "Start issue #42, Add login page.", "answer": "git checkout -b feature/add-login-page" },
+                "git checkout -b issue-42",
+            ])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(recorded["recorded"], true, "{recorded}");
+    let listed = s
+        .call_tool("list_behaviors", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed["behaviors"][0]["violations"], 2);
+    Ok(())
+}
+
+/// Read leniently, the spec's fields are still what the schema asks for: an
+/// agent is told to send all four, none offers a default to lean on, and a
+/// violation is a string.
+#[test]
+fn the_schema_still_asks_for_the_rule_the_check_the_examples_and_the_violations() {
+    let tools = McpServer::tool_router().list_all();
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "record_behavior")
+        .expect("listed");
+    let schema = serde_json::to_value(&tool.input_schema).unwrap();
+    let spec = ["rule", "must", "examples", "violations"];
+    assert_eq!(schema["required"], serde_json::json!(spec));
+    for field in spec {
+        let prop = &schema["properties"][field];
+        assert!(prop.get("default").is_none(), "{field}: {prop}");
+    }
+    assert_eq!(
+        schema["properties"]["violations"]["items"]["type"],
+        "string"
+    );
+    assert_eq!(
+        schema["properties"]["must_not"]["default"],
+        serde_json::json!([]),
+        "a field that may be left out keeps its default"
+    );
+}
+
 #[tokio::test]
 async fn the_tools_answer_to_the_names_they_had_before_the_us_spelling() -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let s = server_for(&store, "user:lily");
-    let p = branch_rule(None, false);
-    let args = serde_json::json!({
-        "rule": p.rule, "must": p.must, "must_not": p.must_not,
-        "examples": p.examples.iter().map(|e| serde_json::json!({"task": e.task, "answer": e.answer})).collect::<Vec<_>>(),
-        "violations": p.violations,
-    });
+    let args = branch_rule_args(serde_json::json!(branch_rule(None, false).violations));
     let recorded = s.call_tool("record_behaviour", args).await.unwrap();
     let id = recorded["id"].as_str().unwrap().to_string();
     let accepted = s

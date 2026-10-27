@@ -201,7 +201,7 @@ impl Spec {
         }
         if self.violations.is_empty() {
             problems.push(
-                "no violating answer, so nothing shows the check refuses what breaks the rule"
+                "no violating answer in `violations`, so nothing shows the check refuses what breaks the rule"
                     .to_string(),
             );
         }

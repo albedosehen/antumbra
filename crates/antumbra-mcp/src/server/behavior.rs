@@ -21,12 +21,19 @@ pub(super) struct ExampleParams {
     pub(super) answer: String,
 }
 
+// The schema an agent reads requires the rule, `must`, the examples and the
+// violations (`require_the_spec`), but a call that leaves any out is still
+// read, so `problems` names everything it lacks in one answer instead of
+// deserialization naming one missing field per call.
 #[derive(Deserialize, schemars::JsonSchema)]
+#[schemars(transform = require_the_spec)]
 pub(super) struct RecordBehaviorParams {
     /// The rule in one sentence, as the user would say it.
+    #[serde(default)]
     pub(super) rule: String,
     /// Regular expressions every answer that follows the rule matches. At
     /// least one: a check that only refuses passes an empty answer.
+    #[serde(default)]
     pub(super) must: Vec<String>,
     /// Regular expressions no answer that follows the rule matches.
     #[serde(default)]
@@ -38,9 +45,11 @@ pub(super) struct RecordBehaviorParams {
     /// first, do not restart it, check the state before acting), needs sixteen
     /// to twenty: at ten, most such rules were learned on only some of their
     /// held-out tasks.
+    #[serde(default)]
     pub(super) examples: Vec<ExampleParams>,
     /// Answers that break the rule, as an agent that did not know it would
     /// write them. The check must refuse each.
+    #[serde(default, deserialize_with = "violation_answers")]
     pub(super) violations: Vec<String>,
     /// The repository it applies to (`host/org/name`), or omit for everywhere.
     pub(super) scope: Option<String>,
@@ -54,6 +63,47 @@ pub(super) struct RecordBehaviorParams {
     /// They are not offered as candidates again.
     #[serde(default)]
     pub(super) sources: Vec<String>,
+}
+
+/// The fields [`RecordBehaviorParams`] reads when absent but asks for.
+const SPEC_FIELDS: [&str; 4] = ["rule", "must", "examples", "violations"];
+
+/// Lists [`SPEC_FIELDS`] as required again, and drops the empty default
+/// `#[serde(default)]` gives each, which would read as leave-it-out.
+fn require_the_spec(schema: &mut schemars::Schema) {
+    if let Some(props) = schema
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for name in SPEC_FIELDS {
+            if let Some(prop) = props
+                .get_mut(name)
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                prop.remove("default");
+            }
+        }
+    }
+    schema.insert("required".into(), serde_json::json!(SPEC_FIELDS));
+}
+
+/// A violation as an agent writes it: the answer itself, or a `{task,
+/// answer}` pair written the way an example is.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Violation {
+    Answer(String),
+    Example { answer: String },
+}
+
+/// The violations' answers, however each was written.
+fn violation_answers<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    Ok(Vec::<Violation>::deserialize(d)?
+        .into_iter()
+        .map(|v| match v {
+            Violation::Answer(answer) | Violation::Example { answer } => answer,
+        })
+        .collect())
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
