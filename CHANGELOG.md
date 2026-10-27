@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Relics
+
+- **A relic downloads as HTML, Markdown or PDF** ([#244](https://github.com/albedosehen/antumbra/pull/244)). The viewer gains a Download control, and `GET /relic/<slug>/export?format=html|md|pdf` hands the current version over as a file to whoever may view it: the token's identity, or anyone for a public relic, with a private relic and a missing one the same 404. The server reads the bytes from copal and answers with an attachment under a `sandbox` policy, so the dashboard's origin still never runs a page. Markdown keeps headings, emphasis, links, lists, quotes, code with its language and tables, numeric columns aligned right; scripts, styles, form controls and drawings are left out. PDF is printed by a Gotenberg service named by `--pdf-renderer` (`ANTUMBRA_PDF_RENDERER`), with the page's backgrounds and `@page` size; without one, the viewer says to print from the browser instead.
+- **The Compose `pdf` profile runs that renderer** (`gotenberg/gotenberg:8.37.0`) with no host port, refusing private addresses, so a page cannot reach the network while it prints ([#244](https://github.com/albedosehen/antumbra/pull/244)).
+
 ## 0.2.1 - 2026-10-27
 
 Setup without a clone, and behaviors an agent records on the first try. `antumbra setup local` runs the server image published for the CLI's version, so installing the CLI is all a local stack needs, and `record_behavior` tells an agent everything a call lacks in one answer.
