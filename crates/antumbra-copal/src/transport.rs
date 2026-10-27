@@ -66,6 +66,26 @@ impl CopalTransport for UreqTransport {
             .map_err(|e| AntumbraError::other(format!("copal PUT {url} failed: {e}")))?;
         answer("PUT", url, resp)
     }
+
+    fn get_bytes(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
+        let mut resp = authed(self.agent.get(url), credential)
+            .call()
+            .map_err(|e| AntumbraError::other(format!("copal GET {url} failed: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.body_mut().read_to_string().unwrap_or_default();
+            return Err(AntumbraError::other(format!(
+                "copal GET {url} answered {}: {}",
+                status.as_u16(),
+                refusal(&text)
+            )));
+        }
+        resp.body_mut()
+            .with_config()
+            .limit(limit)
+            .read_to_vec()
+            .map_err(|e| AntumbraError::other(format!("copal GET {url} body: {e}")))
+    }
 }
 
 /// A response's JSON, or an error carrying copal's own account of why it

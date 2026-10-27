@@ -86,11 +86,11 @@ impl std::fmt::Debug for CopalCredential {
     }
 }
 
-/// The two network operations an archive performs: POST a JSON body (create the
-/// file record) and PUT raw bytes (upload the content, declaring their sha256
-/// `digest` for copal to verify), each authenticated by a [`CopalCredential`]
-/// and returning the parsed JSON response. Behind a trait so the archive's
-/// logic is testable without a socket.
+/// The network operations an archive performs: POST a JSON body (create the
+/// file record), PUT raw bytes (upload the content, declaring their sha256
+/// `digest` for copal to verify), and GET raw bytes (read a file back, which
+/// is how a relic is exported), each authenticated by a [`CopalCredential`].
+/// Behind a trait so the archive's logic is testable without a socket.
 pub trait CopalTransport: Send + Sync {
     fn post_json(&self, url: &str, credential: &CopalCredential, body: &Value) -> Result<Value>;
     fn put_bytes(
@@ -101,6 +101,14 @@ pub trait CopalTransport: Send + Sync {
         digest: &str,
         body: &[u8],
     ) -> Result<Value>;
+    /// The body at `url`, refused when it is longer than `limit` bytes. A
+    /// transport that only archives need not read, so the default refuses.
+    fn get_bytes(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
+        let _ = (url, credential, limit);
+        Err(AntumbraError::other(
+            "this copal transport cannot read files",
+        ))
+    }
 }
 
 /// The sha256 of `bytes` as copal writes a content digest: 64 lowercase hex
@@ -343,6 +351,18 @@ impl CopalArchive {
         })
     }
 
+    /// The bytes `file_id` holds, read as `workspace`: how a relic is exported.
+    /// Refused above [`MAX_READ_BYTES`], so one export cannot hold the server's
+    /// memory hostage.
+    pub async fn read_file(&self, workspace: &str, file_id: &str) -> Result<Vec<u8>> {
+        let credential = self.credential(workspace)?;
+        let url = format!("{}/v1/files/{file_id}/content", self.base);
+        let transport = self.transport.clone();
+        tokio::task::spawn_blocking(move || transport.get_bytes(&url, &credential, MAX_READ_BYTES))
+            .await
+            .map_err(|e| AntumbraError::other(format!("copal read task panicked: {e}")))?
+    }
+
     /// The permanent address of a public relic file, which needs no call:
     /// copal's render listener serves public files at `/v1/public/<id>`.
     pub fn public_url(&self, file_id: &str) -> Option<String> {
@@ -412,6 +432,10 @@ impl CopalArchive {
 
 /// The content type relic files are stored and served with.
 const RELIC_CONTENT_TYPE: &str = "text/html; charset=utf-8";
+
+/// The most [`CopalArchive::read_file`] reads back: well above any page an
+/// agent writes, with its images inlined.
+pub const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Create a file record from `body`, then upload `bytes` to it, declaring
 /// their sha256. A replayed record that already holds exactly these bytes is

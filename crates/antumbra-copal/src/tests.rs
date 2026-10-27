@@ -652,3 +652,73 @@ fn a_render_origin_is_an_origin_and_nothing_more() {
         );
     }
 }
+
+/// Answers every read with `content` and records what was asked for.
+struct ReadingTransport {
+    content: Vec<u8>,
+    reads: Mutex<Vec<(String, CopalCredential, u64)>>,
+}
+
+impl CopalTransport for ReadingTransport {
+    fn post_json(&self, _url: &str, _credential: &CopalCredential, _body: &Value) -> Result<Value> {
+        Err(AntumbraError::other("a read never posts"))
+    }
+
+    fn put_bytes(
+        &self,
+        _url: &str,
+        _credential: &CopalCredential,
+        _content_type: &str,
+        _digest: &str,
+        _body: &[u8],
+    ) -> Result<Value> {
+        Err(AntumbraError::other("a read never uploads"))
+    }
+
+    fn get_bytes(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
+        self.reads
+            .lock()
+            .unwrap()
+            .push((url.into(), credential.clone(), limit));
+        Ok(self.content.clone())
+    }
+}
+
+#[tokio::test]
+async fn a_file_is_read_back_as_its_workspace_under_a_size_limit() {
+    let t = Arc::new(ReadingTransport {
+        content: b"<h1>kept</h1>".to_vec(),
+        reads: Mutex::new(Vec::new()),
+    });
+    let keyed = CopalArchive::with_transport(
+        "http://copal:8080/",
+        CopalTenancy::PerWorkspaceKeys([("ws:one".to_string(), "ck1.one".to_string())].into()),
+        t.clone(),
+    );
+    let bytes = keyed.read_file("ws:one", "01relicfile").await.unwrap();
+    assert_eq!(bytes, b"<h1>kept</h1>");
+    let reads = t.reads.lock().unwrap().clone();
+    assert_eq!(
+        reads,
+        vec![(
+            "http://copal:8080/v1/files/01relicfile/content".to_string(),
+            bearer("ck1.one"),
+            MAX_READ_BYTES,
+        )]
+    );
+    // A workspace with no key reads nothing, closed, like every other call.
+    assert!(keyed.read_file("ws:other", "01relicfile").await.is_err());
+    assert_eq!(t.reads.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_transport_that_only_archives_refuses_to_read() {
+    let refused = archive("127.0.0.1:9010", Arc::new(FakeTransport::happy()))
+        .read_file("ws:one", "01relicfile")
+        .await
+        .unwrap_err();
+    assert!(
+        refused.to_string().contains("cannot read files"),
+        "{refused}"
+    );
+}

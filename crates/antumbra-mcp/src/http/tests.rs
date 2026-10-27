@@ -40,6 +40,7 @@ pub(super) async fn state_archived(
         reranker: None,
         decider: None,
         copal,
+        pdf: None,
         profile: None,
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),

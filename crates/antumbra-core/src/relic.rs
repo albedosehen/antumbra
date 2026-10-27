@@ -16,6 +16,10 @@ use chrono::{DateTime, Utc};
 
 use crate::{CompartmentId, TenantId, UserId};
 
+mod markdown;
+
+pub use markdown::html_to_markdown;
+
 /// Who may see a relic beyond its compartment's audience.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {

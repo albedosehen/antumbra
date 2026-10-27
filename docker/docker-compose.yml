@@ -125,6 +125,10 @@ services:
       # relic can be published. Give copal COPAL_RENDER_FRAME_ANCESTORS naming
       # this server's own address so its pages may be framed here.
       - ANTUMBRA_COPAL_RENDER_ORIGIN=${ANTUMBRA_COPAL_RENDER_ORIGIN:-}
+      # What prints a relic as PDF for the viewer's Download: the `pdf`
+      # profile's service, ANTUMBRA_PDF_RENDERER=http://pdf:3000. Unset, a
+      # relic still downloads as HTML and Markdown.
+      - ANTUMBRA_PDF_RENDERER=${ANTUMBRA_PDF_RENDERER:-}
       # Trace export over OTLP/HTTP, all optional. Empty counts as unset, so the
       # export stays off unless docker/.env sets the endpoint, and the service
       # is named antumbra-mcp unless it names one. The headers can carry the
@@ -440,6 +444,30 @@ services:
     cap_drop:
       - ALL
     read_only: true
+    restart: unless-stopped
+
+  # Gotenberg (gotenberg.dev): headless Chromium that prints relics as PDF for
+  # the viewer's Download. OPT-IN:
+  #   docker compose -f docker/docker-compose.yml --profile pdf up -d pdf
+  # then set ANTUMBRA_PDF_RENDERER=http://pdf:3000 in docker/.env and recreate
+  # antumbra-mcp. No host port: only antumbra-mcp reaches it. A page it prints
+  # may load web fonts and scripts from the internet, but nothing on a private
+  # address (the LAN, this host), and the service fetches no URL on request.
+  pdf:
+    image: ${ANTUMBRA_PDF_IMAGE:-gotenberg/gotenberg:8.37.0}
+    container_name: antumbra-pdf
+    profiles: ["pdf"]
+    command:
+      - gotenberg
+      - --chromium-deny-private-ips=true
+      - --api-disable-download-from=true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
 volumes:

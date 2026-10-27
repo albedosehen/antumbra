@@ -177,7 +177,43 @@ fn first_chars(text: &str, n: usize) -> &str {
     }
 }
 
+/// The current version of a relic as an export takes it away: its HTML as it
+/// was published, and the slug and version that name the file.
+pub(crate) struct RelicSource {
+    pub(crate) slug: String,
+    pub(crate) version: u32,
+    pub(crate) html: Vec<u8>,
+}
+
+/// Read the current version of `relic` out of `archive`, as its own tenant.
+/// Whoever calls this has already decided the reader may see it.
+pub(crate) async fn read_relic(
+    archive: &antumbra_copal::CopalArchive,
+    relic: &Relic,
+) -> antumbra_core::Result<RelicSource> {
+    let current = relic
+        .current()
+        .ok_or_else(|| antumbra_core::AntumbraError::other("the relic has no versions"))?;
+    let html = archive
+        .read_file(relic.tenant.as_str(), &current.copal_file)
+        .await?;
+    Ok(RelicSource {
+        slug: relic.slug.clone(),
+        version: current.number,
+        html,
+    })
+}
+
 impl McpServer {
+    /// The relic `slug` for an export, when this session may see it; refused
+    /// exactly as `get_relic` refuses otherwise. Only the row: the caller
+    /// reads the bytes with [`read_relic`] after letting go of the session's
+    /// connection, so a long read holds up no one else.
+    pub(crate) async fn relic_to_export(&self, slug: &str) -> Result<Relic, ErrorData> {
+        self.relic_archive()?;
+        self.seen_relic(slug).await
+    }
+
     /// The archive relics are kept in, refused unless it can display them.
     fn relic_archive(&self) -> Result<&antumbra_copal::CopalArchive, ErrorData> {
         match self.copal.as_deref() {
