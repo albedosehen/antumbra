@@ -562,6 +562,24 @@ async fn apply_pending_is_a_noop_with_nothing_staged() {
     assert_eq!(app.mode, Mode::Normal);
 }
 
+/// A token that is not an operator's reads the console and acts on nothing:
+/// asking to act stages nothing and says why.
+#[tokio::test]
+async fn a_read_only_console_stages_no_action_and_says_why() {
+    let (_store, mut app) = seeded().await;
+    app.operator = false;
+    app.set_focus(Focus::Boundaries);
+    app.request_action();
+    app.request_freeze();
+    app.request_graduate();
+    assert!(app.pending.is_none());
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(
+        app.events.iter().any(|e| e.text.contains("read-only")),
+        "the event stream says it is read-only"
+    );
+}
+
 #[tokio::test]
 async fn request_action_skips_a_pruned_shadow_and_experts() {
     let (_store, mut app) = seeded().await;

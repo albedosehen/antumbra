@@ -68,14 +68,25 @@ fn connect_overlay_guides_agent_wiring() {
     app.open_connect();
     assert_eq!(app.mode, Mode::Connect, "the connect panel is open");
     let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
-    assert!(text.contains("mint-token"), "shows the token-mint command");
     assert!(
-        text.contains("scripts/hooks"),
-        "points at the hook templates"
+        text.contains("antumbra setup local"),
+        "shows the one-command setup"
+    );
+    assert!(text.contains("antumbra setup check"), "and how to check it");
+    assert!(
+        text.contains("http://127.0.0.1:8081"),
+        "names the server this console reads"
     );
     assert!(
-        text.contains("surrealkv://./data/antumbra.skv"),
-        "echoes the bound store url in the MCP-server command"
+        text.contains("an operator's token"),
+        "says what its token may do"
+    );
+
+    app.operator = false;
+    let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
+    assert!(
+        text.contains("read-only"),
+        "a plain token's console says it is read-only"
     );
 }
 
