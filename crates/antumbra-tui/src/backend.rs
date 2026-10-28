@@ -146,10 +146,14 @@ impl Server {
         let mut res = req
             .call()
             .with_context(|| format!("could not reach {}", self.url))?;
-        if res.status().as_u16() == 304 {
-            return Ok(None);
+        match res.status().as_u16() {
+            304 => return Ok(None),
+            404 => bail!(
+                "the server at {} has no console: it runs an Antumbra older than 0.2.2",
+                self.url
+            ),
+            status => self.check(status)?,
         }
-        self.check(res.status().as_u16())?;
         let tag = res
             .headers()
             .get("etag")
