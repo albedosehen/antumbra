@@ -1,20 +1,17 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
-//! and the learned gate, loaded from the store and ticked for animation.
+//! and the learned gate, read through the [`Backend`] and ticked for animation.
 
-use antumbra_core::generational::{GenerationHead, LoopCommand};
+use antumbra_core::console::Action as ConsoleAction;
+pub use antumbra_core::console::Snapshot;
+use antumbra_core::generational::GenerationHead;
 use antumbra_core::{
     BoundaryId, EvaluationRun, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory,
-    MemoryEdge, RunId, Shadow, ShadowId, ShadowStatus,
+    MemoryEdge, RunId, Shadow, ShadowId,
 };
-use antumbra_store::repo::{
-    boundary, edge, evaluation, expert, generation, loop_control, memory, router, shadow,
-};
-use antumbra_store::Store;
-
-use chrono::Utc;
 
 use std::collections::HashMap;
 
+use crate::backend::Backend;
 use crate::command::{self, Action, Command};
 use crate::events::{Event, EventKind};
 use crate::theme::Theme;
@@ -267,74 +264,24 @@ pub struct App {
     /// Launched with `--demo`: a throwaway seeded store, shown as a badge so the
     /// operator knows nothing persists.
     pub demo: bool,
-    /// The store url this console is bound to, surfaced in the connect panel so
-    /// the generated MCP-server command matches what the operator is viewing.
-    pub store_url: String,
+    /// Where the console reads from (the server's address, or the demo), for
+    /// the connect panel.
+    pub source: String,
+    /// The token may act on the substrate, and the substrate's pages are
+    /// filled. Without it the console reads the workspace and acts on nothing.
+    pub operator: bool,
+    /// How often the view is read again ([`Backend::reload_every_ms`]).
+    pub reload_every_ms: f64,
     /// Where the console was started, for each memory's scope.
     pub git: antumbra_core::GitContext,
     pub should_quit: bool,
 }
 
-/// A consistent read of everything the console shows, loaded in one place so the
-/// run loop can run it OFF the render thread; only the cheap
-/// [`App::apply_snapshot`] then touches `App`. Loading thousands of rows over a
-/// `ws://` connection must never block input.
-pub struct Snapshot {
-    pub experts: Vec<Expert>,
-    pub boundaries: Vec<FailureBoundary>,
-    pub shadows: Vec<Shadow>,
-    pub memories: Vec<Memory>,
-    pub edges: Vec<MemoryEdge>,
-    pub loop_heads: Vec<GenerationHead>,
-    pub loop_halt_pending: bool,
-    pub evals: Vec<EvaluationRun>,
-    pub router: Option<LearnedRouter>,
-}
-
-impl Snapshot {
-    /// Read the whole console view. Pure sorts that need no `App` state are done
-    /// here; the expert sort (which depends on the active column) is deferred to
-    /// [`App::apply_snapshot`].
-    pub async fn load(store: &Store) -> anyhow::Result<Self> {
-        let experts = expert::list(store).await?;
-        let boundaries = boundary::list(store).await?;
-        let mut shadows = shadow::list(store).await?;
-        // Newest first, so the penumbra view leads with current training.
-        shadows.sort_by_key(|s| std::cmp::Reverse(s.created_at));
-        // Lite load (no embedding vectors): the console never shows them and a
-        // whole store of embeddings stalls a ws:// read. Grouped by network then
-        // strongest first, so each network leads with its anchors.
-        let mut memories = memory::all_unscoped_lite(store).await?;
-        memories.sort_by(|a, b| {
-            a.network
-                .as_str()
-                .cmp(b.network.as_str())
-                .then(b.confidence.total_cmp(&a.confidence))
-        });
-        let edges = edge::all_unscoped(store).await?;
-        let loop_heads = generation::all_heads(store).await?;
-        let loop_halt_pending = match loop_heads.first() {
-            Some(head) => loop_control::load(store, &head.run_id).await? == LoopCommand::Halt,
-            None => false,
-        };
-        let evals = evaluation::recent_unscoped(store).await?;
-        let router = router::load(store).await?;
-        Ok(Self {
-            experts,
-            boundaries,
-            shadows,
-            memories,
-            edges,
-            loop_heads,
-            loop_halt_pending,
-            evals,
-            router,
-        })
-    }
-}
-
 impl App {
-    pub async fn load(store: &Store) -> anyhow::Result<Self> {
+    /// The console over `backend`, with its first snapshot read. A first read
+    /// that fails is the caller's to report; later ones are events
+    /// ([`Self::refresh`]).
+    pub async fn load(backend: &Backend) -> anyhow::Result<Self> {
         let mut app = Self {
             experts: Vec::new(),
             boundaries: Vec::new(),
@@ -385,11 +332,14 @@ impl App {
             idle: false,
             render_tier: crate::render::RenderTier::default(),
             demo: false,
-            store_url: String::new(),
+            source: backend.describe(),
+            operator: false,
+            reload_every_ms: backend.reload_every_ms(),
             git: crate::here::context(&std::env::current_dir().unwrap_or_default()),
             should_quit: false,
         };
-        app.reload(store).await?;
+        app.real_embedder = backend.routes_for_real();
+        app.reload(backend).await?;
         Ok(app)
     }
 
@@ -404,9 +354,21 @@ impl App {
             && self.evals.is_empty()
     }
 
-    pub async fn reload(&mut self, store: &Store) -> anyhow::Result<()> {
-        self.apply_snapshot(Snapshot::load(store).await?);
+    pub async fn reload(&mut self, backend: &Backend) -> anyhow::Result<()> {
+        match backend.snapshot().await? {
+            Some(snapshot) => self.apply_snapshot(snapshot),
+            // Nothing changed since the last read.
+            None => self.since_reload_ms = 0.0,
+        }
         Ok(())
+    }
+
+    /// [`Self::reload`], saying a failure in the event stream rather than
+    /// ending the console: over a network, a missed read is ordinary.
+    pub async fn refresh(&mut self, backend: &Backend) {
+        if let Err(e) = self.reload(backend).await {
+            self.operator_event(format!("reload failed · {e:#}"));
+        }
     }
 
     /// Swap in a freshly loaded [`Snapshot`]: re-run the App-state-dependent expert
@@ -428,6 +390,7 @@ impl App {
         self.loop_halt_pending = snap.loop_halt_pending;
         self.evals = snap.evals;
         self.router = snap.router;
+        self.operator = snap.operator;
         if !self.experts.is_empty() && self.selected >= self.experts.len() {
             self.selected = self.experts.len() - 1;
         }
@@ -546,9 +509,23 @@ impl App {
         self.push_event(EventKind::System, text);
     }
 
+    /// Whether this console may act. A read-only one says how to become able.
+    fn may_act(&mut self) -> bool {
+        if !self.operator {
+            self.operator_event(
+                "read-only · acting needs an operator's token (antumbra-mcp --mint-token --operator)"
+                    .into(),
+            );
+        }
+        self.operator
+    }
+
     /// Stage the operator action for the focused selection (`x`), opening the
     /// confirm prompt. Prune the focused shadow, or delete the focused boundary.
     pub fn request_action(&mut self) {
+        if !self.may_act() {
+            return;
+        }
         // The Loop page's operator action is a graceful halt of the run.
         if self.page == Page::Loop {
             if let Some(head) = self.loop_heads.first().filter(|_| !self.loop_halt_pending) {
@@ -580,6 +557,9 @@ impl App {
     /// Stage graduating the selected shadow (the palette's graduate command):
     /// promote it into the population, unless it already graduated.
     pub fn request_graduate(&mut self) {
+        if !self.may_act() {
+            return;
+        }
         if let Some(s) = self
             .selected_shadow()
             .filter(|s| s.status.as_str() != "graduated")
@@ -592,6 +572,9 @@ impl App {
     /// Stage freezing the selected expert, or thawing it if already frozen (the
     /// palette's freeze command toggles on the expert's current state).
     pub fn request_freeze(&mut self) {
+        if !self.may_act() {
+            return;
+        }
         if let Some(e) = self.selected_expert() {
             let freeze = !e.is_frozen();
             self.pending = Some(Pending::FreezeExpert(e.id.clone(), freeze));
@@ -631,60 +614,63 @@ impl App {
         self.mode = Mode::Normal;
     }
 
-    /// Carry out the staged operator mutation against the store, then reload so
-    /// the change (and the event it raises) shows immediately. Returns to the
-    /// live view whether or not anything was staged.
-    pub async fn apply_pending(&mut self, store: &Store) -> anyhow::Result<()> {
+    /// Carry out the staged operator action through `backend`, then reload so
+    /// the change (and the event it raises) shows immediately. A refusal or a
+    /// target that is gone is said in the event stream. Returns to the live
+    /// view whether or not anything was staged.
+    pub async fn apply_pending(&mut self, backend: &Backend) {
         if let Some(pending) = self.pending.take() {
-            match pending {
-                Pending::PruneShadow(id) => {
-                    if let Some(s) = self.shadows.iter().find(|s| s.id.as_str() == id.as_str()) {
-                        let mut pruned = s.clone();
-                        pruned.status = ShadowStatus::Pruned;
-                        shadow::upsert(store, &pruned).await?;
-                    }
+            let (action, said) = match pending {
+                Pending::PruneShadow(shadow) => (ConsoleAction::PruneShadow { shadow }, None),
+                Pending::GraduateShadow(shadow) => (ConsoleAction::GraduateShadow { shadow }, None),
+                Pending::FreezeExpert(expert, true) => {
+                    (ConsoleAction::FreezeExpert { expert }, None)
                 }
-                Pending::GraduateShadow(id) => {
-                    if let Some(s) = self.shadows.iter().find(|s| s.id.as_str() == id.as_str()) {
-                        let mut graduated = s.clone();
-                        graduated.status = ShadowStatus::Graduated;
-                        shadow::upsert(store, &graduated).await?;
-                    }
+                Pending::FreezeExpert(expert, false) => {
+                    (ConsoleAction::ThawExpert { expert }, None)
                 }
-                Pending::FreezeExpert(id, freeze) => {
-                    let frozen_at = if freeze { Some(Utc::now()) } else { None };
-                    expert::set_frozen(store, &id, frozen_at).await?;
-                }
-                Pending::DeleteBoundary(id) => {
+                Pending::DeleteBoundary(boundary) => {
                     let behavior = self
                         .boundaries
                         .iter()
-                        .find(|b| b.id.as_str() == id.as_str())
-                        .map(|b| b.behavior.clone());
-                    boundary::delete(store, &id).await?;
-                    if let Some(behavior) = behavior {
-                        self.operator_event(format!("boundary removed · {behavior}"));
-                    }
+                        .find(|b| b.id.as_str() == boundary.as_str())
+                        .map(|b| format!("boundary removed · {}", b.behavior));
+                    (ConsoleAction::DeleteBoundary { boundary }, behavior)
                 }
                 Pending::HaltLoop(run) => {
-                    loop_control::set(store, &run, LoopCommand::Halt).await?;
-                    self.operator_event(format!("halt requested · loop {}", run.as_str()));
+                    let said = format!("halt requested · loop {}", run.as_str());
+                    (ConsoleAction::HaltLoop { run }, Some(said))
                 }
-            }
-            self.reload(store).await?;
+            };
+            self.act(backend, action, said).await;
         }
         self.mode = Mode::Normal;
-        Ok(())
     }
 
     /// Cancel a pending loop halt (clear the control back to `Run`), then reload.
-    pub async fn cancel_halt(&mut self, store: &Store) -> anyhow::Result<()> {
-        if let Some(run) = self.loop_heads.first().map(|h| h.run_id.clone()) {
-            loop_control::clear(store, &run).await?;
-            self.operator_event(format!("halt canceled · loop {}", run.as_str()));
-            self.reload(store).await?;
+    pub async fn cancel_halt(&mut self, backend: &Backend) {
+        if !self.may_act() {
+            return;
         }
-        Ok(())
+        if let Some(run) = self.loop_heads.first().map(|h| h.run_id.clone()) {
+            let said = format!("halt canceled · loop {}", run.as_str());
+            self.act(backend, ConsoleAction::CancelHalt { run }, Some(said))
+                .await;
+        }
+    }
+
+    /// Send `action`, say `said` once it is done, and reload.
+    async fn act(&mut self, backend: &Backend, action: ConsoleAction, said: Option<String>) {
+        match backend.act(action).await {
+            Ok(true) => {
+                if let Some(said) = said {
+                    self.operator_event(said);
+                }
+            }
+            Ok(false) => self.operator_event("not done · it is no longer there".into()),
+            Err(e) => self.operator_event(format!("not done · {e:#}")),
+        }
+        self.refresh(backend).await;
     }
 
     /// Record an event at the head of the stream (newest first), capped.

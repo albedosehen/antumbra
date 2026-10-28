@@ -184,10 +184,10 @@ impl App {
         }
     }
 
-    /// Reload from the store roughly every two seconds so the console stays live
-    /// while the population is trained from another process.
+    /// Read the view again every few seconds so the console stays live while
+    /// the population is trained from another process.
     pub fn wants_reload(&self) -> bool {
-        self.since_reload_ms >= 2000.0
+        self.since_reload_ms >= self.reload_every_ms
     }
 
     /// Advance the highlighted item in the focused list (wraps). Routes through

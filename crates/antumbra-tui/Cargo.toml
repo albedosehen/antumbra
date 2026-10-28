@@ -6,22 +6,18 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Antumbra operator console: a live, animated TUI over the population (umbra), boundaries (antumbra), and the learned gate. ratatui + tachyonfx."
+description = "Antumbra operator console (`antumbra tui`): a live, animated TUI over the population (umbra), boundaries (antumbra), and the learned gate, read from the Antumbra server. ratatui + tachyonfx."
 
-[package.metadata.wix]
-upgrade-guid = "F71ABE7F-DB06-4E54-80F6-877B0B1713D9"
-path-guid = "C6AD2A37-72A9-439C-88C4-F1E86E935DE4"
-license = false
-eula = false
-
-[[bin]]
-name = "antumbra-tui"
-path = "src/main.rs"
+# A library `antumbra tui` runs; it ships inside the `antumbra` command.
+[package.metadata.dist]
+dist = false
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
-antumbra-embed = { path = "../antumbra-embed" }
+# The server's console routes are plain HTTP; a blocking request run off the
+# async runtime, as the CLI and the embedder do.
+ureq = { version = "3", features = ["json"] }
 ratatui.workspace = true
 tachyonfx.workspace = true
 tokio.workspace = true

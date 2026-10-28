@@ -5,7 +5,7 @@ Measured with [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (sou
 ```bash
 # The headline number (excludes binary entrypoints + the TUI render layer; see below).
 # The [\\/] char class matches both path separators (CI is unix, Windows uses `\`):
-cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui[\\/]src[\\/]ui[\\/]|antumbra-tui[\\/]src[\\/]snapshot\.rs)'
+cargo llvm-cov --workspace --ignore-filename-regex '(main\.rs$|antumbra-tui[\\/]src[\\/]lib\.rs$|antumbra-tui[\\/]src[\\/]ui[\\/]|antumbra-tui[\\/]src[\\/]snapshot\.rs)'
 
 # Everything, no exclusions:
 cargo llvm-cov --workspace --summary-only
@@ -40,7 +40,7 @@ To fold the gated paths into the headline coverage, run the same env in front of
 
 ## What is excluded from the headline metric, and why
 
-- **`*/main.rs`**: binary entrypoints, namely `fn main`, the tokio/runtime bootstrap, and the top-level command dispatch. This is glue; the logic each arm calls lives in the library crates, which are measured. (The CLI's _command-handler_ modules `ops.rs`/`commands.rs` are **not** excluded; they are counted, and partially covered by `crates/antumbra-cli/tests/cli_smoke.rs`, which drives the real binary through its no-GPU commands.)
+- **`*/main.rs`**, and the console's `antumbra-tui/src/lib.rs` (its entry and terminal key loop, which `antumbra tui` calls): binary entrypoints, namely `fn main`, the tokio/runtime bootstrap, and the top-level command dispatch. This is glue; the logic each arm calls lives in the library crates, which are measured. (The CLI's _command-handler_ modules `ops.rs`/`commands.rs` are **not** excluded; they are counted, and partially covered by `crates/antumbra-cli/tests/cli_smoke.rs`, which drives the real binary through its no-GPU commands.)
 - **`antumbra-tui/src/ui/` + `snapshot.rs`**: the terminal UI **render layer** (presentation), namely the ratatui drawing, the canvas graph, and the headless buffer→text/PNG snapshot scaffolding. The crate's **logic** is no longer excluded: the app state machine (`app.rs`), fuzzy command/filter matching (`command.rs`), the store-change event diff (`events.rs`), frame pacing/monitor detection (`pacing.rs`), scrolling (`scroll.rs`), and theme/overlay/transition helpers are now measured, covered by the 40+ snapshot/unit/store-backed tests.
 - **GPU / `models`-gated code**: the real candle Qwen + LoRA model stack is behind the `models` feature and is not compiled in the default build, so it is not part of the coverage surface at all. Its CPU-testable logic (decode policy, config, RAFT/consolidation orchestration over fakes, etc.) _is_ measured.
 

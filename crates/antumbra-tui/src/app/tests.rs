@@ -1,4 +1,11 @@
 use super::*;
+use crate::backend::Backend;
+use antumbra_core::generational::LoopCommand;
+use antumbra_core::ShadowStatus;
+use antumbra_store::repo::{
+    boundary, edge, evaluation, expert, generation, loop_control, memory, shadow,
+};
+use antumbra_store::Store;
 
 #[test]
 fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() {
@@ -23,7 +30,7 @@ fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() {
 async fn the_sovereign_page_reads_counters_from_the_store_and_selects_among_them(
 ) -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
-    let mut app = App::load(&store).await?;
+    let mut app = App::load(&Backend::demo(store.clone())).await?;
     app.set_page(Page::Sovereign);
     // Nothing to select: the keys must not move a selection that is not there.
     app.select_next();
@@ -40,7 +47,7 @@ async fn the_sovereign_page_reads_counters_from_the_store_and_selects_among_them
         );
         memory::upsert(&store, &counter).await?;
     }
-    app.apply_snapshot(Snapshot::load(&store).await?);
+    app.apply_snapshot(antumbra_store::repo::console::everything(&store).await?);
     assert_eq!(app.sovereign.skills.len(), 2);
     app.select_next();
     assert_eq!(app.selected_skill, 1);
@@ -58,7 +65,7 @@ async fn the_sovereign_page_reads_counters_from_the_store_and_selects_among_them
         &MemoryId::new("memory:review"),
     )
     .await?;
-    app.apply_snapshot(Snapshot::load(&store).await?);
+    app.apply_snapshot(antumbra_store::repo::console::everything(&store).await?);
     assert!(app.selected_skill < app.sovereign.skills.len().max(1));
     Ok(())
 }
@@ -105,7 +112,7 @@ async fn seeded() -> (Store, App) {
     )
     .await
     .unwrap();
-    let app = App::load(&store).await.unwrap();
+    let app = App::load(&Backend::demo(store.clone())).await.unwrap();
     (store, app)
 }
 
@@ -115,7 +122,7 @@ async fn prune_writes_to_the_store_and_raises_an_event() {
     app.focus = Focus::Shadows;
     app.request_action();
     assert!(matches!(app.pending, Some(Pending::PruneShadow(_))));
-    app.apply_pending(&store).await.unwrap();
+    app.apply_pending(&Backend::demo(store.clone())).await;
 
     let s = app
         .shadows
@@ -136,7 +143,7 @@ async fn delete_removes_the_boundary_and_raises_an_event() {
     let (store, mut app) = seeded().await;
     app.focus = Focus::Boundaries;
     app.request_action();
-    app.apply_pending(&store).await.unwrap();
+    app.apply_pending(&Backend::demo(store.clone())).await;
 
     assert!(app.boundaries.is_empty(), "the boundary is gone");
     assert!(
@@ -153,7 +160,7 @@ async fn graduate_writes_to_the_store_and_raises_an_event() {
     app.focus = Focus::Shadows;
     app.request_graduate();
     assert!(matches!(app.pending, Some(Pending::GraduateShadow(_))));
-    app.apply_pending(&store).await.unwrap();
+    app.apply_pending(&Backend::demo(store.clone())).await;
 
     let s = app
         .shadows
@@ -206,7 +213,7 @@ async fn freeze_toggles_the_expert_and_raises_events() {
     )
     .await
     .unwrap();
-    app.reload(&store).await.unwrap();
+    app.reload(&Backend::demo(store.clone())).await.unwrap();
     app.focus = Focus::Experts;
     app.selected = app
         .experts
@@ -217,7 +224,7 @@ async fn freeze_toggles_the_expert_and_raises_events() {
     // First toggle freezes.
     app.request_freeze();
     assert!(matches!(app.pending, Some(Pending::FreezeExpert(_, true))));
-    app.apply_pending(&store).await.unwrap();
+    app.apply_pending(&Backend::demo(store.clone())).await;
     let frozen = app
         .experts
         .iter()
@@ -229,7 +236,7 @@ async fn freeze_toggles_the_expert_and_raises_events() {
     // Second toggle thaws (the command reads the current state).
     app.request_freeze();
     assert!(matches!(app.pending, Some(Pending::FreezeExpert(_, false))));
-    app.apply_pending(&store).await.unwrap();
+    app.apply_pending(&Backend::demo(store.clone())).await;
     let thawed = app
         .experts
         .iter()
@@ -319,7 +326,7 @@ async fn loop_and_evals_load_for_their_pages() {
     )
     .await
     .unwrap();
-    app.reload(&store).await.unwrap();
+    app.reload(&Backend::demo(store.clone())).await.unwrap();
 
     assert_eq!(app.loop_heads.len(), 1);
     assert_eq!(app.loop_heads[0].state, LoopState::Decide);
@@ -359,7 +366,7 @@ async fn loop_page_selects_runs_and_drills_into_eval_history() {
     )
     .await
     .unwrap();
-    app.reload(&store).await.unwrap();
+    app.reload(&Backend::demo(store.clone())).await.unwrap();
     assert_eq!(app.loop_heads.len(), 2);
 
     // j/k drive selected_loop and wrap (the Loop page now owns a selection).
@@ -397,7 +404,7 @@ async fn loop_page_selects_runs_and_drills_into_eval_history() {
 
     // Reload clamps an out-of-range selection back into the heads.
     app.selected_loop = 9;
-    app.reload(&store).await.unwrap();
+    app.reload(&Backend::demo(store.clone())).await.unwrap();
     assert!(app.selected_loop < app.loop_heads.len());
 
     // With no heads, Enter is a no-op (no empty drill-down).
@@ -412,7 +419,7 @@ async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
     let (store, mut app) = seeded().await;
     let head = GenerationHead::new(RunId::new("run:z"), Utc::now());
     generation::save_head(&store, &head).await.unwrap();
-    app.reload(&store).await.unwrap();
+    app.reload(&Backend::demo(store.clone())).await.unwrap();
     assert_eq!(app.loop_heads.len(), 1);
     assert!(!app.loop_halt_pending);
 
@@ -420,7 +427,7 @@ async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
     app.page = Page::Loop;
     app.request_action();
     assert!(matches!(app.pending, Some(Pending::HaltLoop(_))));
-    app.apply_pending(&store).await.unwrap();
+    app.apply_pending(&Backend::demo(store.clone())).await;
     assert!(app.loop_halt_pending, "halt is now pending");
     assert_eq!(
         loop_control::load(&store, &RunId::new("run:z"))
@@ -434,7 +441,7 @@ async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
     assert!(app.pending.is_none());
 
     // Canceling clears the control back to Run.
-    app.cancel_halt(&store).await.unwrap();
+    app.cancel_halt(&Backend::demo(store.clone())).await;
     assert!(!app.loop_halt_pending);
     assert_eq!(
         loop_control::load(&store, &RunId::new("run:z"))
@@ -524,7 +531,7 @@ async fn memories_and_edges_load_and_drive_the_memory_page() {
     )
     .await
     .unwrap();
-    app.reload(&store).await.unwrap();
+    app.reload(&Backend::demo(store.clone())).await.unwrap();
 
     assert_eq!(app.memories.len(), 2);
     assert_eq!(app.edges.len(), 1);
@@ -549,7 +556,7 @@ async fn memories_and_edges_load_and_drive_the_memory_page() {
 #[tokio::test]
 async fn apply_pending_is_a_noop_with_nothing_staged() {
     let (store, mut app) = seeded().await;
-    app.apply_pending(&store).await.unwrap();
+    app.apply_pending(&Backend::demo(store.clone())).await;
     assert_eq!(app.shadows.len(), 1);
     assert_eq!(app.boundaries.len(), 1);
     assert_eq!(app.mode, Mode::Normal);

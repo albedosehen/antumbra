@@ -14,9 +14,9 @@ path = "src/main.rs"
 
 # Not a release artifact. `dist` packages every workspace binary by default and
 # then demands WiX GUIDs for the MSI installer, which is how a benchmark
-# harness came to fail the release plan. The three binaries that DO ship
-# (antumbra-cli, antumbra-mcp, antumbra-tui, the same three `just install`
-# installs) carry their GUIDs; this one opts out instead of inventing some.
+# harness came to fail the release plan. The two binaries that DO ship
+# (antumbra-cli and antumbra-mcp, the same two `just install` installs) carry
+# their GUIDs; this one opts out instead of inventing some.
 [package.metadata.dist]
 dist = false
 
