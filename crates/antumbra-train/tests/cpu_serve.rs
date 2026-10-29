@@ -10,9 +10,11 @@
 //!     cargo test -p antumbra-train --features models --release --test cpu_serve -- --ignored --nocapture
 //!
 //! Without `ANTUMBRA_CPU_ADAPTER` the model serves its fresh adapter, which
-//! costs the same per token. `ANTUMBRA_CPU_BASE` overrides the base, which is
-//! pulled from the HF hub on first run (~3 GB). The model is built on the CPU
-//! even in a `cuda` build: this measures the CPU, not the best device.
+//! costs the same per token. `ANTUMBRA_CPU_QUANT` (`q8_0` or `q4_k`) loads the
+//! base to serve in that form; without it the base is dense f32.
+//! `ANTUMBRA_CPU_BASE` overrides the base, which is pulled from the HF hub on
+//! first run (~3 GB). The model is built on the CPU even in a `cuda` build:
+//! this measures the CPU, not the best device.
 
 #![cfg(feature = "models")]
 
@@ -65,9 +67,15 @@ async fn an_expert_serves_on_the_cpu() {
     if let Ok(base) = std::env::var("ANTUMBRA_CPU_BASE") {
         cfg.base_model = base;
     }
+    if let Ok(quant) = std::env::var("ANTUMBRA_CPU_QUANT") {
+        cfg.serve_quant = Some(quant.parse().expect("ANTUMBRA_CPU_QUANT is q8_0 or q4_k"));
+    }
+    let form = cfg
+        .serve_quant
+        .map_or("f32".to_string(), |q| format!("{q:?}"));
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get());
     eprintln!(
-        "base {} on the CPU ({threads} threads), adapter {}",
+        "base {} ({form}) on the CPU ({threads} threads), adapter {}",
         cfg.base_model,
         adapter.as_deref().unwrap_or("none (fresh)")
     );
@@ -103,7 +111,7 @@ async fn an_expert_serves_on_the_cpu() {
     assert!(blend_tokens > 0, "the blend produced no tokens");
 
     eprintln!(
-        "RESULT cpu f32, {threads} threads: load {load_secs:.1}s; \
+        "RESULT cpu {form}, {threads} threads: load {load_secs:.1}s; \
          rank {}: {tokens} tokens in {secs:.1}s = {:.2} tok/s; \
          rank {blend_rank}: {blend_tokens} tokens in {blend_secs:.1}s = {:.2} tok/s",
         cfg.lora_rank,

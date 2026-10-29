@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use candle_core::quantized::{GgmlDType, QTensor};
+use candle_core::quantized::{GgmlDType, QMatMul, QTensor};
 use candle_core::{DType, Device, Result as CResult, Tensor, D};
 use candle_nn::init::Init;
 use candle_nn::{Activation, Embedding, Module, Optimizer, VarBuilder, VarMap};
@@ -29,7 +29,7 @@ use async_trait::async_trait;
 use antumbra_core::{AntumbraError, Result};
 
 use crate::accumulate::GradSum;
-use crate::config::RaftConfig;
+use crate::config::{RaftConfig, ServeQuant};
 use crate::frozen::frozen_matmul_t;
 use crate::grpo::{token_logprobs, GrpoExperience, GrpoLm, GrpoSample};
 use crate::model::{CausalLm, SftExample};
@@ -75,12 +75,18 @@ pub struct QwenLora {
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
     lm_head_w: Tensor,
+    /// The head as a model loaded to serve reads it (Q8_0), in place of the
+    /// dense `lm_head_w`. `Some` exactly when the model was loaded to serve.
+    lm_head_q: Option<QMatMul>,
     device: Device,
     dtype: DType,
     varmap: VarMap,
 }
 
 impl QwenLora {
+    /// With `serve`, every projection's base is quantized to that type as its
+    /// layer loads (so the dense base is never held whole) and multiplied in
+    /// that form, and the head is held as Q8_0: the model can only serve.
     fn build(
         cfg: &Config,
         base: &VarBuilder,
@@ -88,6 +94,7 @@ impl QwenLora {
         varmap: VarMap,
         rank: usize,
         scale: f64,
+        serve: Option<GgmlDType>,
     ) -> CResult<Self> {
         let vb_m = base.pp("model");
         let lora_m = lora_vb.pp("model");
@@ -96,14 +103,18 @@ impl QwenLora {
         let rotary = Arc::new(RotaryEmbedding::new(base.dtype(), cfg, base.device())?);
         let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
         for i in 0..cfg.num_hidden_layers {
-            layers.push(DecoderLayer::load(
+            let mut layer = DecoderLayer::load(
                 rotary.clone(),
                 cfg,
                 rank,
                 scale,
                 &vb_m.pp("layers").pp(i),
                 &lora_m.pp("layers").pp(i),
-            )?);
+            )?;
+            if let Some(dtype) = serve {
+                layer.serve_quantized(dtype)?;
+            }
+            layers.push(layer);
         }
         let norm = RmsNorm::load(cfg.hidden_size, cfg.rms_norm_eps, &vb_m.pp("norm"))?;
         let lm_head_w = if base.contains_tensor("lm_head.weight") {
@@ -111,15 +122,36 @@ impl QwenLora {
         } else {
             embed_tokens.embeddings().clone()
         };
+        // Tied to the embeddings, the head is the largest weight there is, and
+        // read whole every token; the lookup still needs the dense rows. Q8_0,
+        // not the body's Q4_K: the head picks every token.
+        let lm_head_q = match serve {
+            Some(_) => {
+                let cpu = lm_head_w.to_device(&Device::Cpu)?.to_dtype(DType::F32)?;
+                let q = QTensor::quantize_onto(&cpu, GgmlDType::Q8_0, base.device())?;
+                Some(QMatMul::from_qtensor(q)?)
+            }
+            None => None,
+        };
         Ok(Self {
             embed_tokens,
             layers,
             norm,
             lm_head_w,
+            lm_head_q,
             device: base.device().clone(),
             dtype: base.dtype(),
             varmap,
         })
+    }
+
+    /// Logits from hidden states, through the quantized head when the model
+    /// was loaded to serve.
+    fn logits(&self, hidden: &Tensor) -> CResult<Tensor> {
+        match &self.lm_head_q {
+            Some(q) => served_matmul(q, hidden),
+            None => frozen_matmul_t(hidden, &self.lm_head_w),
+        }
     }
 
     fn causal_mask(&self, seq: usize, offset: usize) -> CResult<Tensor> {
@@ -309,11 +341,13 @@ impl QwenCausalLm {
             varmap,
             cfg.lora_rank,
             cfg.lora_scale(),
+            cfg.serve_quant.map(ServeQuant::to_ggml),
         )
         .map_err(ce)?;
         // 4-bit QLoRA base (v1 efficiency): dequant-in-forward. A capacity lever for
-        // larger bases; off by default on the 1.5B base.
-        if cfg.quantize_base {
+        // larger bases; off by default on the 1.5B base. A model loaded to serve
+        // has its base quantized already.
+        if cfg.quantize_base && cfg.serve_quant.is_none() {
             model.quantize_base(&device).map_err(ce)?;
         }
         // A seeded run starts from factors drawn from its seed, not from
@@ -366,6 +400,18 @@ impl QwenCausalLm {
     /// into the f32 model the CPU runs.
     pub fn load_adapter(&mut self, path: &str) -> Result<()> {
         crate::compose::restore_adapter(&self.model.varmap, path)
+    }
+
+    /// Refuse a training step on a model loaded to serve: its quantized base
+    /// product has no backward, so the step would reach every layer's factors
+    /// with the wrong gradient.
+    fn ensure_trainable(&self) -> Result<()> {
+        if self.model.lm_head_q.is_some() {
+            return Err(AntumbraError::other(
+                "this model was loaded to serve, with a quantized base that carries no gradient; it cannot train",
+            ));
+        }
+        Ok(())
     }
 
     /// Load `(adapter_path, weight)` adapters as one blend: stacked, each block
@@ -457,7 +503,9 @@ impl QwenCausalLm {
                 .map_err(ce)?;
             let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
             let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
-            let logits = frozen_matmul_t(&last, &self.model.lm_head_w)
+            let logits = self
+                .model
+                .logits(&last)
                 .map_err(ce)?
                 .squeeze(0)
                 .map_err(ce)?
@@ -496,7 +544,7 @@ impl QwenCausalLm {
             .map_err(ce)?;
         let logits = (|| {
             let hidden = self.model.hidden(&input, 0, false)?;
-            frozen_matmul_t(&hidden, &self.model.lm_head_w)?.to_dtype(DType::F32)
+            self.model.logits(&hidden)?.to_dtype(DType::F32)
         })();
         self.model.set_lora(true);
         logits.map_err(ce)
@@ -515,7 +563,8 @@ impl QwenCausalLm {
             .map_err(ce)?;
         let hidden = self.model.hidden(&input, 0, false).map_err(ce)?;
         let last = hidden.narrow(1, ids.len() - 1, 1).map_err(ce)?;
-        frozen_matmul_t(&last, &self.model.lm_head_w)
+        self.model
+            .logits(&last)
             .map_err(ce)?
             .flatten_all()
             .map_err(ce)?
@@ -546,7 +595,9 @@ impl QwenCausalLm {
                 .map_err(ce)?;
             let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
             let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
-            let logits = frozen_matmul_t(&last, &self.model.lm_head_w)
+            let logits = self
+                .model
+                .logits(&last)
                 .map_err(ce)?
                 .squeeze(0)
                 .map_err(ce)?
@@ -627,7 +678,9 @@ impl QwenCausalLm {
         let mask = Tensor::from_vec(mask, (1, full_ids.len()), &self.model.device).map_err(ce)?;
 
         let hidden = self.model.hidden(&input, 0, false).map_err(ce)?;
-        let logits = frozen_matmul_t(&hidden, &self.model.lm_head_w)
+        let logits = self
+            .model
+            .logits(&hidden)
             .map_err(ce)?
             .to_dtype(DType::F32)
             .map_err(ce)?;
@@ -637,6 +690,7 @@ impl QwenCausalLm {
 
     /// One example, one optimizer step (batch-of-1 SGD). The per-example path.
     fn train_one(&mut self, example: &SftExample) -> Result<f32> {
+        self.ensure_trainable()?;
         match self.forward_loss(example)? {
             Some(loss) => {
                 self.opt.backward_step(&loss).map_err(ce)?;
@@ -662,6 +716,7 @@ impl QwenCausalLm {
     /// random across rounds. Returns the mean supervised loss over the steps
     /// taken.
     fn train_batch(&mut self, batch: &[SftExample], per_step: usize) -> Result<f32> {
+        self.ensure_trainable()?;
         // A seeded run takes its n-th shuffle from its own stream; otherwise
         // the shuffle is the process's next.
         let stream = match &mut self.train_order {
@@ -843,6 +898,7 @@ impl GrpoLm for QwenCausalLm {
         group: &[GrpoExperience],
         cfg: &RaftConfig,
     ) -> Result<f32> {
+        self.ensure_trainable()?;
         let dev = self.model.device.clone();
         let prompt_ids = self.encode(&self.wrap_prompt(prompt))?;
         let plen = prompt_ids.len();

@@ -1,6 +1,7 @@
 //! Trainer configuration. RAFT-style reward-ranked LoRA fine-tuning
 //! over an f16 frozen, code-capable base.
 
+use candle_core::quantized::GgmlDType;
 use candle_core::DType;
 
 use antumbra_core::TrainingRecipe;
@@ -35,6 +36,39 @@ impl TrainDtype {
             TrainDtype::F16 => DType::F16,
             TrainDtype::Bf16 => DType::BF16,
             TrainDtype::F32 => DType::F32,
+        }
+    }
+}
+
+/// How a model loaded only to serve holds its frozen base: multiplied in a
+/// quantized form by candle's quantized kernels, never dequantized. On a CPU,
+/// where every decoded token reads every weight, Q8_0 reads about a quarter of
+/// the f32 bytes and Q4_K about a sixth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServeQuant {
+    Q8_0,
+    Q4K,
+}
+
+impl std::str::FromStr for ServeQuant {
+    type Err = antumbra_core::AntumbraError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "q8_0" | "q8" => Ok(ServeQuant::Q8_0),
+            "q4_k" | "q4k" | "q4" => Ok(ServeQuant::Q4K),
+            other => Err(antumbra_core::AntumbraError::other(format!(
+                "unknown serving quantization `{other}` (use q8_0 or q4_k)"
+            ))),
+        }
+    }
+}
+
+impl ServeQuant {
+    pub fn to_ggml(self) -> GgmlDType {
+        match self {
+            ServeQuant::Q8_0 => GgmlDType::Q8_0,
+            ServeQuant::Q4K => GgmlDType::Q4K,
         }
     }
 }
@@ -80,6 +114,12 @@ pub struct RaftConfig {
     /// Quantize the frozen base to 4-bit Q4_K (QLoRA-proper, v1 efficiency);
     /// dequantized in the forward. A capacity lever for larger bases.
     pub quantize_base: bool,
+    /// Load the model to serve, with its frozen base quantized this way and
+    /// multiplied in that form (see [`ServeQuant`]). Each layer is quantized as
+    /// it loads, so the dense base is never held whole, and the head is held
+    /// as Q8_0. A model loaded so cannot train: the quantized product carries
+    /// no gradient. `None` keeps the base dense (or `quantize_base`'s form).
+    pub serve_quant: Option<ServeQuant>,
     /// Warm-start the LoRA from this saved adapter instead of fresh factors, so
     /// training *continues* a prior expert. `None` trains from scratch.
     /// Used for the monolithic continual-fine-tune arm.
@@ -131,6 +171,7 @@ impl Default for RaftConfig {
             clip_eps: 0.2,
             kl_beta: 0.04,
             quantize_base: false,
+            serve_quant: None,
             parent_adapter: None,
             replay_ratio: 0.0,
             batch_size: 1,
@@ -269,6 +310,21 @@ mod tests {
         let scale = cfg.lora_scale();
         assert!(scale.is_finite(), "a rank-0 adapter must not yield NaN");
         assert_eq!(scale, 0.0);
+    }
+
+    #[test]
+    fn a_serving_quantization_parses_by_its_ggml_name() {
+        for (name, want) in [
+            ("q8_0", ServeQuant::Q8_0),
+            ("Q8", ServeQuant::Q8_0),
+            ("q4_k", ServeQuant::Q4K),
+            (" Q4K ", ServeQuant::Q4K),
+        ] {
+            assert_eq!(name.parse::<ServeQuant>().unwrap(), want, "{name}");
+        }
+        assert!("q2_k".parse::<ServeQuant>().is_err());
+        assert_eq!(ServeQuant::Q4K.to_ggml(), GgmlDType::Q4K);
+        assert_eq!(RaftConfig::default().serve_quant, None);
     }
 
     #[test]

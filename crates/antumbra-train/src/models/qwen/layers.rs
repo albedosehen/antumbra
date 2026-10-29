@@ -21,6 +21,15 @@ pub(super) fn matmul_t(x: &Tensor, w: &Tensor) -> CResult<Tensor> {
     x.matmul(&w)
 }
 
+/// `x · Wᵀ` through candle's quantized kernels. They take a contiguous f32 (or
+/// f16) input, so `x` is brought to f32 and the product handed back in `x`'s
+/// dtype; on the CPU, where the model is f32 already, both casts are free.
+pub(super) fn served_matmul(w: &QMatMul, x: &Tensor) -> CResult<Tensor> {
+    let dtype = x.dtype();
+    w.forward(&x.to_dtype(DType::F32)?.contiguous()?)?
+        .to_dtype(dtype)
+}
+
 /// GQA: repeat each KV head `n_rep` times to match the query heads.
 pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
     if n_rep == 1 {
@@ -37,9 +46,16 @@ pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 /// The frozen base weight: a dense tensor, or a 4-bit Q4_K `QTensor` that is
 /// dequantized in the forward (QLoRA-proper, v1 efficiency). Either way it is a
 /// constant; gradients only reach the LoRA factors.
+///
+/// `Served` is the third form, for a model loaded only to serve: the weight is
+/// multiplied in its quantized form and never dequantized, so a decoded token
+/// reads the quantized bytes and no more. That product has no backward, so it
+/// would also cut the gradient to every earlier layer's factors; a served
+/// model does not train.
 pub(super) enum BaseWeight {
     Dense(Tensor),
     Quantized(QTensor),
+    Served(QMatMul),
 }
 
 pub(super) struct LoraLinear {
@@ -128,14 +144,16 @@ impl LoraLinear {
     }
 
     pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
-        let base_w = match &self.base {
-            BaseWeight::Dense(w) => w.clone(),
-            BaseWeight::Quantized(q) => q.dequantize(x.device())?.to_dtype(x.dtype())?,
-        };
         // The base is frozen, so its product computes no gradient for the
         // weight: candle's plain matmul would build one for every base
         // weight on every training step and never use it.
-        let mut out = frozen_matmul_t(x, &base_w)?;
+        let mut out = match &self.base {
+            BaseWeight::Dense(w) => frozen_matmul_t(x, w)?,
+            BaseWeight::Quantized(q) => {
+                frozen_matmul_t(x, &q.dequantize(x.device())?.to_dtype(x.dtype())?)?
+            }
+            BaseWeight::Served(q) => served_matmul(q, x)?,
+        };
         if self.enabled {
             // Detaching the factors when grad is off keeps generation off the
             // autograd graph: same values, no retained activations or dequant.
@@ -169,6 +187,23 @@ impl LoraLinear {
             let q = QTensor::quantize_onto(&cpu, GgmlDType::Q4K, device)?;
             self.base = BaseWeight::Quantized(q);
         }
+        Ok(())
+    }
+
+    /// Hold the frozen base for serving, quantized to `dtype` and multiplied
+    /// in that form. Q4_K needs the `in` dim divisible by 256 and Q8_0 by 32,
+    /// which holds for every Qwen projection. The dense weight is dropped here,
+    /// so a model built layer by layer never holds its whole dense base.
+    pub(super) fn serve_quantized(&mut self, dtype: GgmlDType) -> CResult<()> {
+        let w = match &self.base {
+            BaseWeight::Dense(w) => w.clone(),
+            BaseWeight::Quantized(q) => q.dequantize(&Device::Cpu)?,
+            BaseWeight::Served(_) => return Ok(()),
+        };
+        let device = w.device().clone();
+        let cpu = w.to_device(&Device::Cpu)?.to_dtype(DType::F32)?;
+        let q = QTensor::quantize_onto(&cpu, dtype, &device)?;
+        self.base = BaseWeight::Served(QMatMul::from_qtensor(q)?);
         Ok(())
     }
 }
@@ -390,6 +425,13 @@ impl Attention {
         self.v_proj.quantize(device)?;
         self.o_proj.quantize(device)
     }
+
+    pub(super) fn serve_quantized(&mut self, dtype: GgmlDType) -> CResult<()> {
+        self.q_proj.serve_quantized(dtype)?;
+        self.k_proj.serve_quantized(dtype)?;
+        self.v_proj.serve_quantized(dtype)?;
+        self.o_proj.serve_quantized(dtype)
+    }
 }
 
 // --- MLP -------------------------------------------------------------------
@@ -464,6 +506,12 @@ impl Mlp {
         self.gate_proj.quantize(device)?;
         self.up_proj.quantize(device)?;
         self.down_proj.quantize(device)
+    }
+
+    pub(super) fn serve_quantized(&mut self, dtype: GgmlDType) -> CResult<()> {
+        self.gate_proj.serve_quantized(dtype)?;
+        self.up_proj.serve_quantized(dtype)?;
+        self.down_proj.serve_quantized(dtype)
     }
 }
 
@@ -542,6 +590,11 @@ impl DecoderLayer {
         self.self_attn.quantize_base(device)?;
         self.mlp.quantize_base(device)
     }
+
+    pub(super) fn serve_quantized(&mut self, dtype: GgmlDType) -> CResult<()> {
+        self.self_attn.serve_quantized(dtype)?;
+        self.mlp.serve_quantized(dtype)
+    }
 }
 
 #[cfg(test)]
@@ -589,6 +642,47 @@ mod tests {
             vb.get_with_hints((32, 4), "lora_b", candle_nn::init::ZERO)?;
         }
         Ok(varmap)
+    }
+
+    /// A bias-free LoRA linear over `base`, generating (grad off), scale 2.
+    fn linear(base: BaseWeight, a: &Tensor, b: &Tensor) -> LoraLinear {
+        LoraLinear {
+            base,
+            base_b: None,
+            a: a.clone(),
+            b: b.clone(),
+            scale: 2.0,
+            enabled: true,
+            grad: false,
+        }
+    }
+
+    /// A base served quantized multiplies close to the dense one, and the
+    /// adapter on top of it is added exactly: the LoRA branch never touches
+    /// the quantized weight.
+    #[test]
+    fn a_served_base_tracks_the_dense_one_and_keeps_the_adapter_exact() -> CResult<()> {
+        let dev = Device::Cpu;
+        let (out_f, in_f, rank) = (8, 256, 4);
+        let w = Tensor::randn(0f32, 1.0, (out_f, in_f), &dev)?;
+        let a = Tensor::randn(0f32, 0.1, (rank, in_f), &dev)?;
+        let b = Tensor::randn(0f32, 0.1, (out_f, rank), &dev)?;
+        let x = Tensor::randn(0f32, 1.0, (1, 3, in_f), &dev)?;
+        let dense = linear(BaseWeight::Dense(w.clone()), &a, &b).forward(&x)?;
+        let peak = dense.abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()?;
+        for (dtype, bound) in [(GgmlDType::Q8_0, 0.03), (GgmlDType::Q4K, 0.15)] {
+            let mut served = linear(BaseWeight::Dense(w.clone()), &a, &b);
+            served.serve_quantized(dtype)?;
+            assert!(matches!(served.base, BaseWeight::Served(_)));
+            let with = served.forward(&x)?;
+            let gap = largest_gap(&dense, &with)? / peak;
+            assert!(gap < bound, "{dtype:?}: off by {gap} of the peak");
+            served.set_enabled(false);
+            let without = served.forward(&x)?;
+            let lora = matmul_t(&matmul_t(&x, &a)?, &b)?.affine(2.0, 0.0)?;
+            assert!(largest_gap(&(with - without)?, &lora)? < 1e-4, "{dtype:?}");
+        }
+        Ok(())
     }
 
     fn factor(varmap: &VarMap, name: &str) -> CResult<Vec<f32>> {
