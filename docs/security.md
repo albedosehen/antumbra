@@ -5,7 +5,7 @@ The trust model and the boundaries that enforce it. Summarizes a 2026-06 audit: 
 ## Threat model
 
 - **Adversary:** a malicious or buggy tenant/user on the networked MCP surface, or untrusted data ingested into the store (memories, documents, traces).
-- **Out of scope:** the operator running the binaries. CLI inputs (`--corpus`, `--url`, `--embed-url`, file paths) are operator-trusted; protecting the host from its own operator is not a goal.
+- **Out of scope:** the operator running the binaries. CLI inputs (`--corpus`, `--url`, `--embedder-url`, file paths) are operator-trusted; protecting the host from its own operator is not a goal.
 - **Crown jewels:** cross-tenant confidentiality (one tenant must never read or write another's data) and the integrity of the frozen population.
 
 ## Tenant isolation (the core guarantee)
@@ -29,7 +29,8 @@ Isolation is **engine-enforced**, defense-in-depth:
 
 - **Verifier command execution** (`antumbra-critic` `CommandVerifier`): runs the `{program, args, cwd}` from a corpus task's `verify` spec. This spec comes **only** from an operator-supplied `--corpus` JSON file. It is **not stored in the database, not writable by any tenant or MCP request**, and the trace-ingestion path (`antumbra-train` `harness.rs`) uses in-process marker checks (`contains_all`), never a command. So a corpus file is **executable config**, like a Makefile or CI step, so treat it as trusted. It is `Command::new`
   - explicit args (no shell), so there is no shell-string injection. If you ever run corpora from a shared/community source, sandbox the verifier and/or allowlist the program first.
-- **Embeddings endpoint** (`antumbra-embed`): the URL and bearer key are operator-configured (`--embed-url` / `ANTUMBRA_EMBED_URL` / `ANTUMBRA_EMBED_KEY`), never derived from tenant or stored data, so not an SSRF sink. If a future feature lets a request choose the URL, validate it against localhost/private ranges first.
+- **Embeddings endpoint** (`antumbra-embed`): the URL and bearer key are operator-configured (`--embedder-url` / `ANTUMBRA_EMBEDDER_URL` / `ANTUMBRA_EMBEDDER_KEY`), never derived from tenant or stored data, so not an SSRF sink. If a future feature lets a request choose the URL, validate it against localhost/private ranges first.
+- **The console's routes** (`/console/snapshot`, `/console/action`): the snapshot's workspace part is read on the caller's scoped connection, so the engine's permissions confine it as they do every tool. Its substrate part and every action are read and written as the owner, and only for a token carrying the `operator` claim, checked on each request; the claim rides beside the identity rather than in it, so the per-identity caches never mix an operator's session with a plain one. Only the self-hosted HS256 mint writes the claim (`--mint-token --operator`); the hosted RS256 mint never does, and a token minted before the claim existed reads as not an operator's. Each action is written to the server's stderr with the identity that took it.
 - **Artifact paths**: the loop's regression fingerprint reads `adapter_uri` from disk; the URI is trainer-/operator-derived and the run-id-derived filename is sanitised. On a missing file it now falls back to a digest **of the uri** (deterministic, distinct per adapter) rather than echoing the raw path.
 
 ## Secrets handling

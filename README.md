@@ -129,27 +129,26 @@ No clone is needed: outside one, setup writes the stack's compose file to `~/.an
 
 ### Prebuilt binaries (no Rust toolchain)
 
-Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on x86-64) from the latest GitHub release. The operator console (`antumbra-tui`):
+Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on x86-64) from the latest GitHub release. The `antumbra` command, which holds the operator console (`antumbra tui`):
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-tui-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-tui-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
 ```
 
-The CLI (`antumbra`) and the MCP server (`antumbra-mcp`) install the same way, swapping `antumbra-tui` for `antumbra-cli` or `antumbra-mcp` in the URL. Windows `.msi` packages, per-OS archives, and checksums are attached to every [release](https://github.com/albedosehen/antumbra/releases).
+The MCP server (`antumbra-mcp`) installs the same way, with `antumbra-mcp` in place of `antumbra-cli` in the URL; `antumbra setup local` runs it in Docker instead, so most people never install it by hand. Windows `.msi` packages, per-OS archives, and checksums are attached to every [release](https://github.com/albedosehen/antumbra/releases).
 
 ### From source (needs the Rust toolchain)
 
 ```bash
-just install        # builds + installs antumbra, antumbra-tui, antumbra-mcp into ~/.cargo/bin
+just install        # builds + installs antumbra and antumbra-mcp into ~/.cargo/bin
 # or, without `just`:
 cargo install --path crates/antumbra-cli --locked
-cargo install --path crates/antumbra-tui --locked
 cargo install --path crates/antumbra-mcp --locked
 ```
 
@@ -158,14 +157,17 @@ Both the prebuilt binaries and `just install` produce the light, no-GPU build. G
 ## Run
 
 ```bash
-# Operator console (ratatui): a live view of the population, gate, loop, and memory.
-antumbra-tui
+# Operator console (ratatui): a live view of the population, gate, loop, and
+# memory, read from the Antumbra server with the address and token the hooks
+# use. `antumbra --tui` is the same; `--demo` shows a seeded population with no
+# server. An operator's token (antumbra-mcp --mint-token --operator, which
+# `antumbra setup local` mints) also shows the substrate and may act on it.
+antumbra tui
 
 # Drive the durable loop with the scripted DEMO trainer (--demo: it always
 # graduates; real training is `train` under --features models), then inspect
-# it. The CLI and the operator console share one persistent on-disk store by
-# default, so state from one command is there for the next (and shows up live
-# in antumbra-tui).
+# it. The CLI keeps one persistent on-disk store by default, so state from one
+# command is there for the next.
 antumbra schema                        # print the generated DDL
 antumbra loop --demo --generations 3
 antumbra status

@@ -419,11 +419,14 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     } else {
         wait_for(&url)?;
         steps.ok(format!("the server answers at {url}"));
+        // A token from before the operator claim is replaced: on their own
+        // stack, the person is its operator.
         let token = match std::fs::read_to_string(&token_path)
             .ok()
             .map(|t| t.trim().to_string())
-            .filter(|t| token::looks_like_jwt(t) && verify(&url, t).is_ok())
-        {
+            .filter(|t| {
+                token::looks_like_jwt(t) && token::is_operator(t) && verify(&url, t).is_ok()
+            }) {
             Some(t) => {
                 steps.ok(format!(
                     "kept the token in {}, which the server accepts",
@@ -823,7 +826,28 @@ fn wait_for(url: &str) -> anyhow::Result<()> {
 }
 
 /// A token signed with the stack's own secret, minted by the server's image.
+/// The stack is the person's own, so the token is its operator's and `antumbra
+/// tui` may act on it. An image from before the operator claim (one named by
+/// hand in the stack's `.env`) mints a plain token instead, and says so.
 fn mint(compose_files: &[PathBuf], workspace: &str, user: &str) -> anyhow::Result<String> {
+    match mint_with(compose_files, workspace, user, true) {
+        Ok(token) => Ok(token),
+        Err(e) if e.to_string().contains("--operator") => {
+            eprintln!(
+                "  this server image cannot mint an operator's token; `antumbra tui` will be read-only"
+            );
+            mint_with(compose_files, workspace, user, false)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn mint_with(
+    compose_files: &[PathBuf],
+    workspace: &str,
+    user: &str,
+    operator: bool,
+) -> anyhow::Result<String> {
     let mut args = compose_args(compose_files);
     args.extend(
         [
@@ -842,6 +866,9 @@ fn mint(compose_files: &[PathBuf], workspace: &str, user: &str) -> anyhow::Resul
         ]
         .map(String::from),
     );
+    if operator {
+        args.push("--operator".into());
+    }
     let out = Command::new("docker")
         .args(&args)
         .stderr(Stdio::piped())

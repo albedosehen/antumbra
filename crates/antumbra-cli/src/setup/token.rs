@@ -41,6 +41,14 @@ pub fn expires(token: &str) -> Option<i64> {
     claims(token)?.get("exp").and_then(Value::as_i64)
 }
 
+/// Whether the token is its server's operator's, which `antumbra tui` needs
+/// to act on the substrate.
+pub fn is_operator(token: &str) -> bool {
+    claims(token)
+        .and_then(|c| c.get("operator").and_then(Value::as_bool))
+        .unwrap_or(false)
+}
+
 /// What the user pasted: a token, or a sign-in link to trade for one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pasted {
@@ -92,6 +100,17 @@ mod tests {
         assert_eq!(workspace(&t).as_deref(), Some("ws:acme"));
         assert_eq!(expires(&t), Some(1_893_456_000));
         assert_eq!(workspace("a.b.c"), None);
+    }
+
+    #[test]
+    fn only_a_token_that_says_so_is_an_operators() {
+        assert!(is_operator(&token(
+            r#"{"tenant":"ws:acme","user":"user:dana","operator":true}"#
+        )));
+        assert!(!is_operator(&token(
+            r#"{"tenant":"ws:acme","user":"user:dana"}"#
+        )));
+        assert!(!is_operator("a.b.c"));
     }
 
     #[test]

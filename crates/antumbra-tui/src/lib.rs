@@ -1,14 +1,15 @@
-//! Antumbra operator console: a live, animated view of the
-//! population (umbra), boundaries (antumbra), and the learned gate, over the
-//! same SurrealDB store the CLI drives. Interactive: route-ask through the gate,
-//! a live event stream of store changes, drill-down inspection, and operator
-//! actions (prune / delete) behind a confirm.
+//! Antumbra operator console (`antumbra tui`): a live, animated view of the
+//! population (umbra), boundaries (antumbra), and the learned gate, read from
+//! the Antumbra server with the same address and token the hooks use.
+//! Interactive: route-ask through the gate, a live event stream of what
+//! changed, drill-down inspection, and operator actions (prune / delete)
+//! behind a confirm, for an operator's token.
 
 mod app;
+mod backend;
 mod command;
 mod events;
 mod here;
-mod live;
 mod overlay;
 mod pacing;
 mod render;
@@ -22,32 +23,36 @@ mod ui;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
-use clap::{Parser, Subcommand};
+use anyhow::{Context, Result};
+use clap::Subcommand;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use tachyonfx::{Duration as FxDuration, EffectRenderer};
 
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::FixedEmbedder;
-use antumbra_embed::HttpEmbedder;
-use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
+use antumbra_store::{Store, EMBED_DIM};
 
 use crate::app::{App, Mode};
+use crate::backend::{Backend, Server};
 use crate::command::Action;
 
-#[derive(Parser)]
-#[command(name = "antumbra-tui", about = "Antumbra operator console")]
-struct Args {
-    /// SurrealDB url (same store the CLI uses).
-    #[arg(long, default_value = "surrealkv://./data/antumbra.skv", global = true)]
-    url: String,
-    /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
-    /// embedded store or an unauthenticated server. Reads as owner over the wire.
-    #[arg(long, env = "ANTUMBRA_DB_USER", global = true)]
-    db_user: Option<String>,
-    /// Root password for the remote SurrealDB.
-    #[arg(long, env = "ANTUMBRA_DB_PASS", global = true)]
-    db_pass: Option<String>,
+/// `antumbra tui`'s options.
+#[derive(clap::Args)]
+pub struct Args {
+    /// The Antumbra server to read from: the one the hooks and the agent use.
+    #[arg(
+        long,
+        env = "ANTUMBRA_URL",
+        default_value = "http://127.0.0.1:8081",
+        global = true
+    )]
+    surface: String,
+    /// The token to present. Without it, the file `ANTUMBRA_TOKEN_FILE` names,
+    /// else `~/.antumbra/token.txt`, which `antumbra setup` writes. An
+    /// operator's token (`antumbra-mcp --mint-token --operator`) also shows the
+    /// substrate's pages and may act on them.
+    #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true, global = true)]
+    token: Option<String>,
     /// Pin the frame-rate cap (Hz) to a fixed value. Omit to follow the active
     /// monitor's refresh rate automatically; adjust live with `+`/`-`, `a` to
     /// resume following.
@@ -57,18 +62,6 @@ struct Args {
     /// CPU. Off by default so the console runs at the full cap continuously.
     #[arg(long)]
     power_save: bool,
-    /// Embeddings endpoint (OpenAI-compatible `/embeddings`) for the route-ask, so
-    /// it embeds queries with the SAME model the population was built with. Omit
-    /// to use the model-free demo embedder (only coherent on a demo/FixedEmbedder
-    /// store).
-    #[arg(long, env = "ANTUMBRA_EMBED_URL")]
-    embed_url: Option<String>,
-    /// The model name sent to the embeddings endpoint.
-    #[arg(long, env = "ANTUMBRA_EMBED_MODEL", default_value = "all-MiniLM-L6-v2")]
-    embed_model: String,
-    /// Optional bearer token for the embeddings endpoint.
-    #[arg(long, env = "ANTUMBRA_EMBED_KEY")]
-    embed_key: Option<String>,
     /// How visuals render: `auto` probes the terminal once and picks the richest
     /// tier; `canvas` forces the universal Braille/vector path (the safe default
     /// everywhere); `ascii` forces coarse dot markers for dumb terminals;
@@ -82,9 +75,9 @@ struct Args {
         global = true
     )]
     render: render::RenderMode,
-    /// Launch against a seeded in-memory demo population instead of reading
-    /// `--url`, so a fresh install shows the console alive immediately. Nothing
-    /// persists; it is a throwaway store for exploring the interface.
+    /// Show a seeded demo population held in memory instead of reading the
+    /// server, so the console can be explored before anything is set up.
+    /// Nothing persists.
     #[arg(long)]
     demo: bool,
     #[command(subcommand)]
@@ -120,7 +113,7 @@ enum Command {
         /// or confirm.
         #[arg(long, default_value = "none")]
         overlay: String,
-        /// Render a seeded in-memory demo population instead of reading `--url`.
+        /// Render the seeded demo population instead of reading the server.
         #[arg(long)]
         demo: bool,
     },
@@ -131,41 +124,37 @@ enum Command {
     Monitors,
 }
 
-fn main() -> Result<()> {
-    // Host the runtime on a large-stack thread: SurrealDB's ACL subqueries
-    // recurse past the 1 MB Windows main-thread stack (see the CLI note).
-    std::thread::Builder::new()
-        .stack_size(256 * 1024 * 1024)
-        .spawn(|| {
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?
-                .block_on(app_main())
-        })?
-        .join()
-        .map_err(|_| anyhow::anyhow!("antumbra-tui worker thread panicked"))?
+/// Where `args` says to read: the seeded demo, or the server with its token.
+async fn backend(args: &Args, demo: bool) -> Result<Backend> {
+    Ok(if demo {
+        Backend::demo(seed_demo().await?)
+    } else {
+        Backend::Server(Arc::new(Server::new(
+            &args.surface,
+            backend::token(args.token.clone())?,
+        )))
+    })
 }
 
-async fn app_main() -> Result<()> {
-    let args = Args::parse();
+/// Run `antumbra tui`. Called on the CLI's runtime, whose thread already has
+/// the large stack the demo's in-memory store needs.
+pub async fn run(args: Args) -> Result<()> {
     match args.command {
         Some(Command::Snapshot {
-            out,
+            ref out,
             width,
             height,
             at_ms,
-            page,
-            layout,
-            focus,
-            overlay,
+            ref page,
+            ref layout,
+            ref focus,
+            ref overlay,
             demo,
         }) => {
-            let store = if demo {
-                seed_demo().await?
-            } else {
-                connect(&args.url, args.db_user.as_deref(), args.db_pass.as_deref()).await?
-            };
-            let mut app = App::load(&store).await?;
+            let backend = backend(&args, demo || args.demo).await?;
+            let mut app = App::load(&backend).await.with_context(|| {
+                format!("could not read the console from {}", backend.describe())
+            })?;
             app.set_page(match page.as_str() {
                 "memory" => app::Page::Memory,
                 "loop" => app::Page::Loop,
@@ -200,11 +189,7 @@ async fn app_main() -> Result<()> {
                     for c in "string handling".chars() {
                         app.ask_input(c);
                     }
-                    let emb = FixedEmbedder::new(EMBED_DIM);
-                    if let Ok(v) = emb.embed(&app.ask_query).await {
-                        let routed = app.router.as_ref().map(|r| r.route(&v)).unwrap_or_default();
-                        app.set_ask_result(&routed);
-                    }
+                    ask_route(&mut app, &backend).await;
                 }
                 _ => {}
             }
@@ -223,21 +208,13 @@ async fn app_main() -> Result<()> {
         None => {}
     }
 
-    // `--demo` seeds a throwaway in-memory population so a fresh install shows the
-    // console alive without a populated store; otherwise read the configured store.
-    let store = if args.demo {
-        seed_demo().await?
-    } else {
-        connect(&args.url, args.db_user.as_deref(), args.db_pass.as_deref()).await?
-    };
-    let mut app = App::load(&store).await?;
+    // `--demo` seeds a throwaway in-memory population so the console can be
+    // explored before anything is set up; otherwise read the server.
+    let backend = backend(&args, args.demo).await?;
+    let mut app = App::load(&backend)
+        .await
+        .with_context(|| format!("could not read the console from {}", backend.describe()))?;
     app.demo = args.demo;
-    // The connect panel echoes this back in the MCP-server command it suggests.
-    app.store_url = if args.demo {
-        "mem://".into()
-    } else {
-        args.url.clone()
-    };
     // Capture the terminal window now, while it's focused, so the follow tracks
     // this window between monitors rather than re-reading focus each tick.
     app.capture_window();
@@ -249,16 +226,8 @@ async fn app_main() -> Result<()> {
         Some(fps) => app.pin_fps(fps),
         None => app.follow_monitor(),
     }
-    // The route-ask embedder. With `--embed-url`, the same OpenAI-compatible
-    // endpoint the population was built with, so routing is meaningful on real
-    // data; otherwise the model-free byte-histogram FixedEmbedder (demo only).
-    app.real_embedder = args.embed_url.is_some();
-    let embedder: Arc<dyn Embedder> = match args.embed_url {
-        Some(url) => Arc::new(HttpEmbedder::new(url, args.embed_model, args.embed_key)),
-        None => Arc::new(FixedEmbedder::new(EMBED_DIM)),
-    };
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal, &mut app, &store, embedder.as_ref()).await;
+    let result = run_loop(&mut terminal, &mut app, &backend).await;
     ratatui::restore();
     result
 }
@@ -586,35 +555,17 @@ async fn seed_demo() -> Result<Store> {
     Ok(store)
 }
 
-async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
-    let mut builder = ConnectionConfig::builder()
-        .url(url)
-        .namespace("antumbra")
-        .database("main");
-    // Root login for an authenticated remote (`ws://`); embedded stores need none.
-    // The console reads as owner, so it sees the whole population and memory.
-    if let (Some(user), Some(pass)) = (db_user, db_pass) {
-        builder = builder.username(user).password(pass);
-    }
-    let config = builder.build()?;
-    // A read-only console must NOT re-apply the schema: re-running the `DEFINE`s
-    // rebuilds the memory HNSW index over the whole store on every launch (slow on
-    // a populated remote). The store is provisioned by the CLI/MCP/loop; here we
-    // only connect as owner and observe.
-    Ok(Store::connect_without_schema(config, EMBED_DIM).await?)
-}
-
 /// Run a palette-chosen [`Action`], queuing any view transition it implies. The
 /// single place actions take effect, shared by the palette (keybindings call the
 /// same app methods directly).
 async fn apply_action(
     app: &mut App,
-    store: &Store,
+    backend: &Backend,
     transition: &mut Option<transition::Pending>,
     action: Action,
 ) -> Result<()> {
     match action {
-        Action::Reload => app.reload(store).await?,
+        Action::Reload => app.refresh(backend).await,
         Action::CycleTheme => {
             app.cycle_theme();
             *transition = Some(transition::theme_wash(&app.theme()));
@@ -624,7 +575,7 @@ async fn apply_action(
             *transition = Some(transition::layout_switch());
         }
         Action::CycleSort => app.cycle_sort(),
-        Action::CancelHalt => app.cancel_halt(store).await?,
+        Action::CancelHalt => app.cancel_halt(backend).await,
         Action::Focus(target) => {
             app.set_focus(target);
             *transition = Some(transition::focus_switch());
@@ -675,38 +626,34 @@ async fn apply_action(
     Ok(())
 }
 
-/// Embed the ask query and route it through the learned gate, storing the
-/// distribution on the app. A failed embed or an absent router yields an empty
-/// (escalate) result.
-async fn ask_route(app: &mut App, embedder: &dyn Embedder) {
-    let routed = match embedder.embed(&app.ask_query).await {
-        Ok(vec) => app
-            .router
-            .as_ref()
-            .map(|r| r.route(&vec))
-            .unwrap_or_default(),
-        Err(_) => Vec::new(),
+/// Route the ask query through the gate, storing the distribution on the app.
+/// A failure is said in the event stream and yields an empty (escalate) result.
+async fn ask_route(app: &mut App, backend: &Backend) {
+    let routed = match backend.route(&app.ask_query, app.router.as_ref()).await {
+        Ok(routed) => routed,
+        Err(e) => {
+            app.operator_event(format!("ask failed · {e:#}"));
+            Vec::new()
+        }
     };
     app.set_ask_result(&routed);
 }
 
-async fn run(
+async fn run_loop(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
-    store: &Store,
-    embedder: &dyn Embedder,
+    backend: &Backend,
 ) -> Result<()> {
     // Honor sub-16ms frame budgets on Windows (restored on drop).
     let _timer = pacing::TimerResolution::acquire();
-    // Live store watchers: an external write (a captured memory, a graduated
-    // expert) triggers an immediate reload instead of waiting for the periodic
-    // tick. Best-effort, so the console runs unchanged where live queries are
-    // unavailable; the watchers stop when these receivers drop at return.
-    let mut live = live::watch_store(store).await;
-    // The periodic refresh runs OFF the render thread: a store with thousands of
-    // rows over `ws://` takes long enough that awaiting it inline stutters input.
-    // At most one load is in flight; its result is applied (cheaply) when ready.
-    let mut reload_inflight: Option<tokio::task::JoinHandle<anyhow::Result<app::Snapshot>>> = None;
+    // The periodic refresh runs OFF the render thread: a snapshot of thousands
+    // of memories takes long enough to read that awaiting it inline stutters
+    // input. At most one read is in flight; its result is applied (cheaply)
+    // when ready. A run of failed reads is said once, when it starts.
+    let mut reload_inflight: Option<
+        tokio::task::JoinHandle<anyhow::Result<Option<app::Snapshot>>>,
+    > = None;
+    let mut reads_failing = false;
     let mut last = Instant::now();
     // The active view-switch effect (and the scope it animates), processed
     // against the frame buffer and cleared when it finishes.
@@ -771,7 +718,7 @@ async fn run(
                                 let action = app.palette_action();
                                 app.close_overlay();
                                 if let Some(action) = action {
-                                    apply_action(app, store, &mut transition, action).await?;
+                                    apply_action(app, backend, &mut transition, action).await?;
                                 }
                             }
                             KeyCode::Backspace => app.palette_backspace(),
@@ -844,13 +791,13 @@ async fn run(
                         Mode::Ask => match key.code {
                             KeyCode::Esc => app.close_overlay(),
                             KeyCode::Backspace => app.ask_backspace(),
-                            KeyCode::Enter => ask_route(app, embedder).await,
+                            KeyCode::Enter => ask_route(app, backend).await,
                             KeyCode::Char(c) => app.ask_input(c),
                             _ => {}
                         },
                         Mode::Confirm => match key.code {
                             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                                app.apply_pending(store).await?
+                                app.apply_pending(backend).await
                             }
                             _ => app.cancel_action(),
                         },
@@ -918,7 +865,7 @@ async fn run(
                             KeyCode::Char('+') | KeyCode::Char('=') => app.fps_up(),
                             KeyCode::Char('-') | KeyCode::Char('_') => app.fps_down(),
                             KeyCode::Char('a') => app.follow_monitor(),
-                            KeyCode::Char('r') => app.reload(store).await?,
+                            KeyCode::Char('r') => app.refresh(backend).await,
                             KeyCode::Char('?') => {
                                 app.toggle_help();
                                 if app.mode == Mode::Help {
@@ -931,22 +878,33 @@ async fn run(
                 }
             }
         }
-        // Apply a finished off-thread load (cheap), then start a new one when a
-        // live change lands or the periodic tick is due. The load never blocks the
-        // render loop; the explicit `r` / operator-action reloads stay inline.
+        // Apply a finished off-thread read (cheap), then start a new one when the
+        // periodic tick is due. The read never blocks the render loop; the
+        // explicit `r` / operator-action reloads stay inline.
         if reload_inflight.as_ref().is_some_and(|h| h.is_finished()) {
             if let Some(handle) = reload_inflight.take() {
-                if let Ok(Ok(snap)) = handle.await {
-                    app.apply_snapshot(snap);
+                match handle.await {
+                    Ok(Ok(read)) => {
+                        if reads_failing {
+                            reads_failing = false;
+                            app.operator_event(format!("reading {} again", backend.describe()));
+                        }
+                        if let Some(snap) = read {
+                            app.apply_snapshot(snap);
+                        }
+                    }
+                    Ok(Err(e)) if !reads_failing => {
+                        reads_failing = true;
+                        app.operator_event(format!("reload failed · {e:#}"));
+                    }
+                    _ => {}
                 }
             }
         }
-        if reload_inflight.is_none() && (live::drained_change(&mut live) || app.wants_reload()) {
+        if reload_inflight.is_none() && app.wants_reload() {
             app.since_reload_ms = 0.0; // restart the interval from this request
-            let store = store.clone();
-            reload_inflight = Some(tokio::spawn(
-                async move { app::Snapshot::load(&store).await },
-            ));
+            let backend = backend.clone();
+            reload_inflight = Some(tokio::spawn(async move { backend.snapshot().await }));
         }
         if app.should_quit {
             return Ok(());
