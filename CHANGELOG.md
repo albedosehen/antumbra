@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 - 2026-10-28
+
+The console, in the one command and through the server. `antumbra tui` reads the Antumbra server with the token the hooks use, so a workstation needs no database password, and an operator's token lets it act on the substrate ([#245](https://github.com/albedosehen/antumbra/pull/245)).
 
 ### The console
 
