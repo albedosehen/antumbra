@@ -48,6 +48,10 @@ pub(super) struct StoredOut {
     /// (only when the autonomous propose trigger is enabled and fired).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) auto_proposed: Vec<String>,
+    /// Existing memories the system linked this one to (`references`), the
+    /// ones it came close to. Absent when none was close enough.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) linked: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -83,6 +87,10 @@ pub(super) struct RecallParams {
     /// can return fewer than `top_k`, and `list_memories` with `host` reads
     /// them all.
     pub(super) host: Option<String>,
+    /// The client session this recall is for. The hooks pass their session
+    /// id, so when the turn ends the system can judge which of what it was
+    /// shown the work drew on. An agent may leave it out.
+    pub(super) session: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -161,6 +169,11 @@ pub(super) struct MemoryView {
     /// this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) similarity: Option<f32>,
+    /// How strongly the memory stands now, in `[0, 1]`, on a recall: its
+    /// confidence, faded by the time since it was last of use and lowered by
+    /// how often it was passed over. The system keeps it; nobody tends it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) strength: Option<f32>,
     /// How long `content` is in the store, in characters. Always present, so a
     /// caller can tell a short memory from a long one it is seeing the front of.
     pub(super) content_chars: u32,
@@ -213,6 +226,7 @@ impl From<&Memory> for MemoryView {
             orphaned_at: orphan_of(&m.evidence).map(|o| o.at.to_rfc3339()),
             updated_at: m.updated_at.to_rfc3339(),
             similarity: None,
+            strength: None,
             content_chars: m.content.chars().count() as u32,
             truncated: false,
         }

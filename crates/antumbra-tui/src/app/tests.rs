@@ -47,7 +47,9 @@ async fn the_sovereign_page_reads_counters_from_the_store_and_selects_among_them
         );
         memory::upsert(&store, &counter).await?;
     }
-    app.apply_snapshot(antumbra_store::repo::console::everything(&store).await?);
+    app.apply_snapshot(
+        antumbra_store::repo::console::everything(&store, &TenantId::new("ws:t")).await?,
+    );
     assert_eq!(app.sovereign.skills.len(), 2);
     app.select_next();
     assert_eq!(app.selected_skill, 1);
@@ -65,7 +67,9 @@ async fn the_sovereign_page_reads_counters_from_the_store_and_selects_among_them
         &MemoryId::new("memory:review"),
     )
     .await?;
-    app.apply_snapshot(antumbra_store::repo::console::everything(&store).await?);
+    app.apply_snapshot(
+        antumbra_store::repo::console::everything(&store, &TenantId::new("ws:t")).await?,
+    );
     assert!(app.selected_skill < app.sovereign.skills.len().max(1));
     Ok(())
 }

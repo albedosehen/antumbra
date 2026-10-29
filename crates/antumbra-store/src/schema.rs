@@ -602,6 +602,28 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("memory_edge_to_idx", ["tenant_id", "to_id"]),
                 index("memory_edge_created_at_idx", ["created_at"]),
             ]),
+        // What the system has seen of each memory's use: one row per
+        // (tenant, memory), counted by the server as it watches recall and the
+        // work after it. Apart from `memory` so a count never rewrites the
+        // memory (its `updated_at` drives replication); not replicated.
+        table_schema("memory_use")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(TENANT_PERMS)
+            .with_indexes([unique_index(
+                "memory_use_tenant_memory_uq",
+                ["tenant_id", "memory_id"],
+            )]),
+        // A workspace's memory knobs: one row per tenant. Its own sessions
+        // read it; only the owner (an operator's console action) writes it.
+        table_schema("memory_policy")
+            .with_mode(TableMode::Schemaless)
+            .with_permissions([
+                ("select", "tenant_id = $auth.tenant"),
+                ("create", "false"),
+                ("update", "false"),
+                ("delete", "false"),
+            ])
+            .with_indexes([unique_index("memory_policy_tenant_uq", ["tenant_id"])]),
         // Knowledge documents: a document's embedded chunks, a distinct type
         // from episodic `memory` but isolated the same way (the compartment rule
         // in the engine + the repo's tenant filter). HNSW-indexed for semantic

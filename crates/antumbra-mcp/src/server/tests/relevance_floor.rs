@@ -32,6 +32,7 @@ async fn recall(s: &McpServer, query: &str, floor: Option<f32>) -> MemoriesOut {
         network: None,
         full: None,
         floor,
+        session: None,
     }))
     .await
     .unwrap()

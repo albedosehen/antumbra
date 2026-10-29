@@ -40,6 +40,9 @@ try {
     $payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
     $prompt = [string]$payload.prompt
     $cwd = [string]$payload.cwd
+    # Named on the recall, so when the turn ends (the capture hook) the system
+    # can judge which of what it showed this session the answer drew on.
+    $sessionId = [string]$payload.session_id
 } catch { exit 0 }
 
 if (-not $prompt -or $prompt.Trim().Length -lt 2) { exit 0 }
@@ -75,6 +78,7 @@ if ($cwd -and (Test-Path $cwd)) {
 $memories = @()
 try {
     $arguments = @{ query = $query; top_k = 3 }
+    if ($sessionId) { $arguments['session'] = $sessionId }
     if ($repo) { $arguments['repo'] = [string]$repo }
     if ($branch -and $branch -ne 'HEAD') { $arguments['branch'] = [string]$branch }
     $body = @{ tool = 'recall_memories'; arguments = $arguments } | ConvertTo-Json -Compress -Depth 6
@@ -117,19 +121,21 @@ $lines = foreach ($m in $memories) {
     $content = [string]$m.content
     if (-not $content) { continue }
     if ($content.Length -gt 900) {
-        $content = $content.Substring(0, 900) + " [truncated - full entry: $($m.id)]"
+        $content = $content.Substring(0, 900) + " [truncated]"
     }
     # The scope tag says whether this was learned here: in_scope, other_branch,
-    # other_repo, or absent when the caller gave no git context.
+    # other_repo, or absent when the caller gave no git context. The id lets the
+    # agent judge the memory itself when its work proves it right or wrong.
     $tag = if ($m.scope) { " [$($m.scope)]" } else { '' }
-    "- ($($m.network))$tag $content"
+    "- ($($m.network))$tag $($m.id): $content"
 }
 
 if (-not $lines) { exit 0 }
 
 $context = "## Antumbra recall (top matches for this prompt)`n`n" +
     ($lines -join "`n`n") +
-    "`n`nThese are automatic; call recall_memories for a deeper or differently-phrased search."
+    "`n`nThese are automatic; call recall_memories for a deeper or differently-phrased search. " +
+    "The system notes which of these your answer draws on; when your own work proves one right or wrong, you may reinforce_memory or penalize_memory it by id."
 
 $json = @{
     hookSpecificOutput = @{

@@ -84,6 +84,10 @@ jobs:
           printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh > /dev/null
           again=$(printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh)
           test -z "$again"
+      - name: capture reports the end of a turn, once (.sh)
+        run: bash scripts/hooks/tests/capture.sh
+      - name: capture reports the end of a turn, once (.ps1)
+        run: pwsh -NoProfile -File scripts/hooks/tests/capture.ps1
       - name: strip-attribution denies vendor attribution, allows a clean command
         run: |
           deny=$(printf '%s' '{"tool_input":{"command":"git commit -m x --trailer Co-Authored-By:Claude"}}' | bash scripts/hooks/strip-attribution.sh)

@@ -30,6 +30,9 @@ command -v curl >/dev/null 2>&1 || exit 0
 PAYLOAD="$(cat)"
 PROMPT="$(printf '%s' "$PAYLOAD" | jq -r '.prompt // ""' 2>/dev/null || echo '')"
 CWD="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // ""' 2>/dev/null || echo '')"
+# Named on the recall, so when the turn ends (the capture hook) the system can
+# judge which of what it showed this session the answer drew on.
+SESSION="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // ""' 2>/dev/null || echo '')"
 [ "${#PROMPT}" -lt 2 ] && exit 0
 
 # A background task's notification reaches this hook as a prompt too
@@ -64,11 +67,12 @@ fi
 BUDGET="${ANTUMBRA_RECALL_BUDGET_SEC:-10}"
 case "$BUDGET" in '' | *[!0-9]*) BUDGET=10 ;; esac
 
-BODY="$(jq -nc --arg q "$QUERY" --arg repo "$REPO" --arg branch "$BRANCH" '
+BODY="$(jq -nc --arg q "$QUERY" --arg repo "$REPO" --arg branch "$BRANCH" --arg session "$SESSION" '
     { tool: "recall_memories",
       arguments: ({ query: $q, top_k: 3 }
-                  + (if $repo   == "" then {} else { repo: $repo }     end)
-                  + (if $branch == "" then {} else { branch: $branch } end)) }')"
+                  + (if $session == "" then {} else { session: $session } end)
+                  + (if $repo    == "" then {} else { repo: $repo }       end)
+                  + (if $branch  == "" then {} else { branch: $branch }   end)) }')"
 
 RESP="$(curl -s -X POST "$URL/mcp/call" \
     -H 'Content-Type: application/json' \
@@ -84,8 +88,9 @@ LINES="$(printf '%s' "$RESP" | jq -r '
     | map(select(.content != null))
     | map("- (" + (.network // "unknown") + ")"
           + (if .scope then " [" + .scope + "]" else "" end) + " "
+          + (.id // "?") + ": "
           + (if (.content | length) > 900
-             then (.content[0:900] + " [truncated - full entry: " + (.id // "?") + "]")
+             then (.content[0:900] + " [truncated]")
              else .content end))
     | join("\n\n")' 2>/dev/null || true)"
 [ -z "$LINES" ] && exit 0
@@ -94,7 +99,7 @@ CONTEXT="## Antumbra recall (top matches for this prompt)
 
 $LINES
 
-These are automatic; call recall_memories for a deeper or differently-phrased search."
+These are automatic; call recall_memories for a deeper or differently-phrased search. The system notes which of these your answer draws on; when your own work proves one right or wrong, you may reinforce_memory or penalize_memory it by id."
 
 jq -nc --arg ctx "$CONTEXT" \
     '{ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: $ctx } }'

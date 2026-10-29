@@ -19,7 +19,7 @@ use super::{gauge_spans, heading, kv};
 /// animation also targets). `None` in the live view.
 pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     match app.mode {
-        Mode::Help => Some(overlay::centered(frame, 56, 28)),
+        Mode::Help => Some(overlay::centered(frame, 56, 29)),
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
             Some(overlay::centered(frame, 56, listed + 4))
@@ -43,6 +43,11 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
             Some(overlay::centered(frame, 60, rows + 5))
         }
         Mode::Confirm => Some(overlay::centered(frame, 58, 6)),
+        Mode::Knobs => Some(overlay::centered(
+            frame,
+            86,
+            antumbra_core::usage::KNOBS.len() as u16 + 8,
+        )),
         Mode::Normal => None,
     }
 }
@@ -536,6 +541,7 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
         bind(":", "command palette (ask · route a task here)"),
         bind("e", "live event stream of store changes"),
         bind("c", "connect your agent: hooks + token"),
+        bind("K", "memory knobs: how memories are kept"),
         bind("x", "prune/graduate · freeze · delete"),
         bind("r", "reload from the store"),
         bind("? esc", "close this help"),

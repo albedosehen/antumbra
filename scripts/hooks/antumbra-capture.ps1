@@ -7,15 +7,51 @@
 # Git-aware: inside a repository the nudge carries the exact provenance to stamp
 # on memories about this code (repo slug, commit, branch), so a later session
 # can tell whether each one still applies.
+#
+# At the end of a turn it also tells the server how the turn ended
+# (`observe_turn`, with the turn's last answer), so the system can judge which
+# of the memories it showed this session the answer drew on. Nobody has to
+# reinforce or penalize by hand. Brief and fail-open: a server that is down or
+# slower than two seconds leaves the turn unjudged and the stop unaffected.
 $hookInput   = [System.Console]::In.ReadToEnd()
 $json        = $hookInput | ConvertFrom-Json -ErrorAction SilentlyContinue
 $sessionId   = if ($json.session_id) { $json.session_id } else { 'default' }
 $event       = if ($json.hook_event_name) { $json.hook_event_name } else { 'Stop' }
 $workspace   = if ($env:ANTUMBRA_WORKSPACE_ID) { $env:ANTUMBRA_WORKSPACE_ID } else { '<workspace>' }
 
-$sentinel = Join-Path $env:TEMP "antumbra-capture-$event-$sessionId"
+$tmp = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+$sentinel = Join-Path $tmp "antumbra-capture-$event-$sessionId"
 if (Test-Path $sentinel) { Remove-Item $sentinel -Force; exit 0 }
 New-Item -ItemType File -Path $sentinel -Force | Out-Null
+
+if ($event -eq 'Stop' -and $json.last_assistant_message) {
+    $apiUrl = if ($env:ANTUMBRA_URL) { $env:ANTUMBRA_URL } else { 'http://127.0.0.1:8081' }
+    $token = if ($env:ANTUMBRA_TOKEN) { $env:ANTUMBRA_TOKEN } else {
+        $file = if ($env:ANTUMBRA_TOKEN_FILE) { $env:ANTUMBRA_TOKEN_FILE }
+                else { Join-Path $HOME '.antumbra/token.txt' }
+        try { if (Test-Path $file) { (Get-Content $file -Raw).Trim() } else { '' } } catch { '' }
+    }
+    if ($token) {
+        try {
+            Add-Type -AssemblyName System.Net.Http
+            $text = [string]$json.last_assistant_message
+            if ($text.Length -gt 4000) { $text = $text.Substring(0, 4000) }
+            $arguments = @{ session = [string]$sessionId; text = $text }
+            if ($json.prompt_id) { $arguments['turn'] = [string]$json.prompt_id }
+            $body = @{ tool = 'observe_turn'; arguments = $arguments } | ConvertTo-Json -Compress -Depth 4
+            $handler = New-Object System.Net.Http.HttpClientHandler
+            $handler.UseProxy = $false
+            $client = New-Object System.Net.Http.HttpClient($handler)
+            try {
+                $client.Timeout = [TimeSpan]::FromSeconds(2)
+                $client.DefaultRequestHeaders.Authorization =
+                    New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $token)
+                $content = New-Object System.Net.Http.StringContent($body, [System.Text.Encoding]::UTF8, 'application/json')
+                [void]$client.PostAsync("$apiUrl/mcp/call", $content).GetAwaiter().GetResult()
+            } finally { $client.Dispose() }
+        } catch { }
+    }
+}
 
 # Where the session is, in git terms (fail-open: no repository, no anchor).
 function Invoke-Git([string[]]$GitArgs) {

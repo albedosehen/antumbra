@@ -111,7 +111,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
                     });
                 }
             }
-            // Nodes: confidence tints the glyph; the selected trace is accented,
+            // Nodes: strength tints the glyph; the selected trace is accented,
             // a consolidated one is filled. Iterate only the capped set.
             for (gi, m, x, y) in &nodes {
                 let selected = *gi == app.selected_memory;
@@ -125,7 +125,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
                 let col = if selected {
                     t.accent
                 } else {
-                    t.fitness(m.confidence, 0.9)
+                    t.fitness(app.strength_of(m), 0.9)
                 };
                 ctx.print(*x, *y, Span::styled(glyph, Style::default().fg(col)));
             }
@@ -181,6 +181,44 @@ fn anchor_lines<'a>(t: &Theme, evidence: &[String], app: &App, w: usize) -> Opti
     Some(lines)
 }
 
+/// What the system has seen of a memory's use: how often recall showed it,
+/// how often the work drew on it or passed it over, and when it was last of
+/// use. "never seen" for one the system has not watched yet.
+fn use_lines<'a>(t: &Theme, app: &App, m: &antumbra_core::Memory) -> Vec<Line<'a>> {
+    let Some(u) = app.usage_of(m) else {
+        return vec![kv(t, "use", "never seen")];
+    };
+    let mut lines = vec![
+        kv(t, "recalled", &u.recalled.to_string()),
+        kv(
+            t,
+            "used",
+            &format!("{} · passed over {}", u.uses(), u.passed_over()),
+        ),
+    ];
+    if u.good + u.bad > 0 {
+        lines.push(kv(t, "judged", &format!("good {} · bad {}", u.good, u.bad)));
+    }
+    if let Some(at) = u.last_used_at {
+        lines.push(kv(t, "last used", &ago(chrono::Utc::now() - at)));
+    }
+    lines
+}
+
+/// A duration as the coarsest unit that fits: `3d ago`, `5h ago`, `now`.
+fn ago(d: chrono::Duration) -> String {
+    let (days, hours, minutes) = (d.num_days(), d.num_hours(), d.num_minutes());
+    if days > 0 {
+        format!("{days}d ago")
+    } else if hours > 0 {
+        format!("{hours}h ago")
+    } else if minutes > 0 {
+        format!("{minutes}m ago")
+    } else {
+        "now".into()
+    }
+}
+
 /// Clip `s` to `max` columns, ending in an ellipsis when cut.
 fn clip(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -209,15 +247,18 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     };
     let w = inner.width.saturating_sub(1) as usize;
 
+    let strength = app.strength_of(m);
     let mut lines = vec![
         heading(&t, clip(&m.content, w)),
         Line::from(""),
         kv(&t, "network", m.network.as_str()),
         kv(&t, "status", m.status.as_str()),
+        gauge_row(&t, "strength", strength, t.fitness(strength, 1.0)),
         gauge_row(&t, "confidence", m.confidence, t.fitness(m.confidence, 1.0)),
         kv(&t, "reinforce", &m.reinforcement.to_string()),
         kv(&t, "volatile", if m.volatile { "yes" } else { "no" }),
     ];
+    lines.extend(use_lines(&t, app, m));
     if let Some(exp) = &m.consolidated_expert {
         lines.push(kv(&t, "expert", exp.as_str()));
     }

@@ -28,6 +28,7 @@ async fn recall_long(s: &McpServer, n: usize, full: Option<bool>) -> Vec<MemoryV
         network: None,
         full,
         floor: None,
+        session: None,
     }))
     .await
     .unwrap()

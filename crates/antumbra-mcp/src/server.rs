@@ -88,6 +88,10 @@ pub struct McpServer {
     /// and every recalled row is returned, which is the behavior before this
     /// existed and the behavior a deployment without a head keeps.
     decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
+    /// The system's hand on memories: the knobs read, what each session was
+    /// shown, the turns judged. One per process where the HTTP surface shares
+    /// it ([`McpServer::with_steward`]); a server of its own otherwise.
+    steward: Arc<Steward>,
 }
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
@@ -260,9 +264,11 @@ mod params;
 mod provenance;
 mod relics;
 mod rerank_cache;
+mod steward;
 pub(crate) use self::device::machine_name;
 use self::params::*;
 pub(crate) use self::relics::read_relic;
+pub(crate) use self::steward::Steward;
 use rerank_cache::RerankCache;
 
 #[tool_router(router = memory_router)]
@@ -321,10 +327,18 @@ impl McpServer {
                 None,
             ));
         }
+        // The system links it to what it comes close to, and counts a
+        // restatement of what is already known as that memory recurring.
+        let policy = self.policy().await;
+        let linked = self.link_new(&m, &policy).await;
         // The autonomous propose trigger (a no-op when disabled or below its
         // threshold): the antumbra organizes the inbox once it grows.
         let auto_proposed = self.maybe_auto_propose().await.map_err(err)?;
-        Ok(Json(StoredOut { id, auto_proposed }))
+        Ok(Json(StoredOut {
+            id,
+            auto_proposed,
+            linked,
+        }))
     }
 
     /// How many candidates to pull from hybrid recall before reranking: a wide
@@ -477,6 +491,12 @@ impl McpServer {
             )
             .instrument(crate::telemetry::recall_stage("recall rerank", candidates))
             .await;
+        // Strength moves the relevance order as far as the workspace's knobs
+        // let it, before scope demotion, which keeps the order within each
+        // scope, so a strong memory rises among its peers and never past an
+        // in-scope one.
+        let policy = self.policy().await;
+        let (hits, strengths) = self.by_strength(hits, &policy).await;
         // Scope each hit against where the caller is (repo + branch): a memory
         // learned on another branch or in another repo is demoted below the
         // in-scope ones, never hidden. The hook that boots a session goes
@@ -493,6 +513,7 @@ impl McpServer {
                 .embedding
                 .as_deref()
                 .map(|e| antumbra_core::cosine_similarity(&q, e));
+            view.strength = strengths.get(m.id.as_str()).copied();
             view
         };
         let memories: Vec<MemoryView> = if p.repo.is_some() || p.branch.is_some() {
@@ -542,6 +563,9 @@ impl McpServer {
             .into_iter()
             .map(|v| v.bounded(full, params::RECALL_CONTENT_CHARS))
             .collect();
+        let shown: Vec<MemoryId> = memories.iter().map(|v| MemoryId::new(&v.id)).collect();
+        self.record_shown(&shown, p.session.as_deref(), &policy)
+            .await;
         Ok(Json(MemoriesOut {
             // Only claim the floor emptied the result when it had something to
             // empty. A store with no matching rows at all is a different answer,
@@ -757,26 +781,25 @@ impl McpServer {
 
     /// Reinforce a memory that proved useful.
     #[tool(
-        description = "Reinforce a memory (raise its strength and recurrence) when it proves useful."
+        description = "Reinforce a memory when your own work shows it was right or useful: raises its confidence and restarts its fade. The system already counts the memories your work draws on, so call this for a judgment of your own, not as a chore."
     )]
     async fn reinforce_memory(
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<Json<ReinforceOut>, ErrorData> {
-        match memory::reinforce(
-            &self.store,
-            &self.tenant,
-            &MemoryId::new(p.memory_id),
-            Utc::now(),
-        )
-        .await
-        .map_err(err)?
+        let id = MemoryId::new(p.memory_id);
+        match memory::reinforce(&self.store, &self.tenant, &id, Utc::now())
+            .await
+            .map_err(err)?
         {
-            Some(m) => Ok(Json(ReinforceOut {
-                found: true,
-                reinforcement: m.reinforcement,
-                confidence: m.confidence,
-            })),
+            Some(m) => {
+                self.record_judgment(&id, true).await;
+                Ok(Json(ReinforceOut {
+                    found: true,
+                    reinforcement: m.reinforcement,
+                    confidence: m.confidence,
+                }))
+            }
             None => Ok(Json(ReinforceOut {
                 found: false,
                 reinforcement: 0,
@@ -787,26 +810,25 @@ impl McpServer {
 
     /// Penalize a memory whose thesis was falsified (the inverse of reinforce).
     #[tool(
-        description = "Penalize a memory (a falsified thesis, e.g. a losing trade): decay its confidence. The inverse of reinforce_memory."
+        description = "Penalize a memory when your own work shows it was wrong, stale or misleading (a falsified thesis, e.g. a losing trade): decays its confidence. The inverse of reinforce_memory."
     )]
     async fn penalize_memory(
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<Json<ReinforceOut>, ErrorData> {
-        match memory::penalize(
-            &self.store,
-            &self.tenant,
-            &MemoryId::new(p.memory_id),
-            Utc::now(),
-        )
-        .await
-        .map_err(err)?
+        let id = MemoryId::new(p.memory_id);
+        match memory::penalize(&self.store, &self.tenant, &id, Utc::now())
+            .await
+            .map_err(err)?
         {
-            Some(m) => Ok(Json(ReinforceOut {
-                found: true,
-                reinforcement: m.reinforcement,
-                confidence: m.confidence,
-            })),
+            Some(m) => {
+                self.record_judgment(&id, false).await;
+                Ok(Json(ReinforceOut {
+                    found: true,
+                    reinforcement: m.reinforcement,
+                    confidence: m.confidence,
+                }))
+            }
             None => Ok(Json(ReinforceOut {
                 found: false,
                 reinforcement: 0,
@@ -844,6 +866,20 @@ impl McpServer {
         &self,
         Parameters(p): Parameters<RelateParams>,
     ) -> Result<Json<RelateOut>, ErrorData> {
+        // Both ends must be memories this workspace can see: an edge to an id
+        // that never existed, or to a forgotten memory, is refused rather than
+        // left dangling in the graph.
+        for end in [&p.from_id, &p.to_id] {
+            let found = memory::get(&self.store, &self.tenant, &MemoryId::new(end.as_str()))
+                .await
+                .map_err(err)?;
+            if found.is_none() {
+                return Err(ErrorData::invalid_params(
+                    format!("no memory {end} in this workspace: relate two memories that exist"),
+                    None,
+                ));
+            }
+        }
         let e = MemoryEdge::new(
             self.tenant.clone(),
             p.from_id,

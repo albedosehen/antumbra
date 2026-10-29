@@ -49,6 +49,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
+        steward: Arc::default(),
     })
 }
 

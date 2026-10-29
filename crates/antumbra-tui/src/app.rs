@@ -6,7 +6,7 @@ pub use antumbra_core::console::Snapshot;
 use antumbra_core::generational::GenerationHead;
 use antumbra_core::{
     BoundaryId, EvaluationRun, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory,
-    MemoryEdge, RunId, Shadow, ShadowId,
+    MemoryEdge, MemoryPolicy, MemoryUse, RunId, Shadow, ShadowId,
 };
 
 use std::collections::HashMap;
@@ -42,6 +42,8 @@ pub enum Mode {
     /// The "connect your agent" panel: how to wire the MCP hooks + mint a token.
     Connect,
     Confirm,
+    /// The workspace's memory knobs: read by anyone, turned by an operator.
+    Knobs,
 }
 
 /// An operator mutation awaiting a yes/no confirmation.
@@ -56,6 +58,8 @@ pub enum Pending {
     DeleteBoundary(BoundaryId),
     /// Ask the generational loop to halt gracefully at the next generation.
     HaltLoop(RunId),
+    /// Replace the workspace's memory knobs with these.
+    SetMemoryPolicy(MemoryPolicy),
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -174,6 +178,14 @@ pub struct App {
     pub memories: Vec<Memory>,
     /// Typed edges between memories (references / supersedes / contradicts / …).
     pub edges: Vec<MemoryEdge>,
+    /// What the system has seen of each memory's use, by memory id.
+    pub usage: HashMap<String, MemoryUse>,
+    /// The workspace's memory knobs, which each memory's strength is read with.
+    pub policy: MemoryPolicy,
+    /// The knob highlighted in the knobs panel, and the values being turned
+    /// there before they are applied.
+    pub knob_selected: usize,
+    pub knob_draft: MemoryPolicy,
     /// Index into `memories` of the highlighted trace (Memory page).
     pub selected_memory: usize,
     /// The Sovereign page's reading of `memories`, made once per reload.
@@ -293,6 +305,10 @@ impl App {
             shadows: Vec::new(),
             memories: Vec::new(),
             edges: Vec::new(),
+            usage: HashMap::new(),
+            policy: MemoryPolicy::default(),
+            knob_selected: 0,
+            knob_draft: MemoryPolicy::default(),
             selected_memory: 0,
             sovereign: crate::sovereign::View::default(),
             selected_skill: 0,
@@ -397,6 +413,17 @@ impl App {
             .selected_skill
             .min(self.sovereign.skills.len().saturating_sub(1));
         self.edges = snap.edges;
+        self.usage = snap
+            .usage
+            .into_iter()
+            .map(|u| (u.memory.as_str().to_string(), u))
+            .collect();
+        // A panel left open keeps what is being turned; a closed one follows
+        // the server.
+        if self.mode != Mode::Knobs {
+            self.knob_draft = snap.policy.clone();
+        }
+        self.policy = snap.policy;
         self.loop_heads = snap.loop_heads;
         self.loop_halt_pending = snap.loop_halt_pending;
         self.evals = snap.evals;
@@ -616,6 +643,10 @@ impl App {
                     .map_or_else(|| id.as_str().to_string(), |b| b.behavior.clone());
                 format!("Delete boundary \"{behavior}\" ?")
             }
+            Pending::SetMemoryPolicy(policy) => match self.knobs_changed(policy) {
+                1 => format!("Apply {} ?", self.knob_changes(policy)),
+                n => format!("Apply {n} knob changes ?"),
+            },
         })
     }
 
@@ -651,6 +682,10 @@ impl App {
                 Pending::HaltLoop(run) => {
                     let said = format!("halt requested · loop {}", run.as_str());
                     (ConsoleAction::HaltLoop { run }, Some(said))
+                }
+                Pending::SetMemoryPolicy(policy) => {
+                    let said = format!("memory knobs set · {}", self.knob_changes(&policy));
+                    (ConsoleAction::SetMemoryPolicy { policy }, Some(said))
                 }
             };
             self.act(backend, action, said).await;
@@ -939,6 +974,9 @@ impl App {
     }
 }
 
+mod knobs;
 #[cfg(test)]
 mod tests;
 mod view;
+
+pub use knobs::knob_value;

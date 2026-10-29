@@ -794,6 +794,7 @@ async fn provenance_is_stored_and_scopes_recall() {
             network: None,
             full: None,
             floor: None,
+            session: None,
         }))
         .await
         .unwrap();
@@ -819,6 +820,7 @@ async fn provenance_is_stored_and_scopes_recall() {
             network: None,
             full: None,
             floor: None,
+            session: None,
         }))
         .await
         .unwrap();

@@ -46,6 +46,7 @@ pub mod router;
 pub mod shadow;
 pub mod slice;
 pub mod trust;
+pub mod usage;
 pub mod vector;
 pub mod verifier;
 
@@ -91,6 +92,7 @@ pub use trust::{
     after_measurement, grants_reward, upper_bound, Anchor, Case, Label, Tally, TrustMeasurement,
     TrustPolicy, TrustVerdict,
 };
+pub use usage::{strength, MemoryPolicy, MemoryUse};
 pub use vector::truncate_renormalize;
 pub use verifier::{
     canonical_json, count_grant, current_trust, named_verifier, verifier_address, JudgedSample,
