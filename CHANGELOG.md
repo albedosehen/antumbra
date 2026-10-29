@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.4 - 2026-10-29
+
+A console with nothing to type. `antumbra tui` finds the server and token your agent uses, so after `antumbra setup` it needs no flags, and it prefers an operator's token when one is on hand ([#250](https://github.com/albedosehen/antumbra/pull/250)).
 
 ### The console
 
