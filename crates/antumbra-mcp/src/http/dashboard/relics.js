@@ -430,10 +430,68 @@ async function copyLink() {
   }
 }
 
+/** The name the server gave the file, from its Content-Disposition. */
+function filenameOf(disposition) {
+  const match = /filename="([^"]+)"/.exec(disposition || "");
+  return match ? match[1] : null;
+}
+
+/** Download the current version as `format`. The server reads it from copal
+ *  and answers with a file; this page only hands the bytes to the browser to
+ *  save, so nothing the relic holds is parsed here. */
+async function download(format, button) {
+  const slug = slugOfPage();
+  const failed = byId("viewer-error");
+  failed.hidden = true;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = format === "pdf" ? "Printing…" : "Preparing…";
+  try {
+    const headers = state.token ? { authorization: `Bearer ${state.token}` } : {};
+    const res = await fetch(`${encodeURIComponent(slug)}/export?format=${format}`, {
+      headers,
+      cache: "no-store",
+      credentials: "omit",
+    });
+    if (res.status === 401) throw new SignedOut();
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text || `${res.status} ${res.statusText}`;
+      try {
+        message = JSON.parse(text).error || message;
+      } catch {
+        // Not JSON: the text is the message.
+      }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = h("a", {
+      href: url,
+      download: filenameOf(res.headers.get("content-disposition")) || `${slug}.${format}`,
+      hidden: true,
+    });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (error) {
+    if (error instanceof SignedOut) return signOut(REFUSED);
+    failed.textContent = `Could not download it: ${error.message}`;
+    failed.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
 function wireViewer() {
   byId("visibility").addEventListener("click", toggleVisibility);
   byId("copy-link").addEventListener("click", copyLink);
   byId("signin").addEventListener("click", () => showGate());
+  for (const button of document.querySelectorAll("[data-format]")) {
+    button.addEventListener("click", () => download(button.dataset.format, button));
+  }
 }
 
 // Start

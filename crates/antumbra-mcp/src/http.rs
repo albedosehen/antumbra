@@ -191,6 +191,9 @@ struct HttpState {
     /// workspace's documents land in and how the calls authenticate (the
     /// tenant header, or `ck1` keys once copal runs its deployed auth mode).
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    /// What prints a relic as PDF for the viewer's download, when the operator
+    /// runs one; without it a relic downloads as HTML and Markdown only.
+    pdf: Option<Arc<crate::pdf::PdfRenderer>>,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     /// The GitHub App webhook receiver (`POST /github/webhook`), when the
     /// operator configured its secret and the repository-to-workspace map.
@@ -227,6 +230,7 @@ pub async fn serve(
     // module stays free of any calibration choice.
     decider: Option<Arc<dyn antumbra_core::ports::TypedDecider>>,
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    pdf: Option<Arc<crate::pdf::PdfRenderer>>,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     github: Option<GithubConfig>,
     recipe: antumbra_core::behavior::Recipe,
@@ -273,6 +277,7 @@ pub async fn serve(
         reranker,
         decider,
         copal,
+        pdf,
         profile,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),

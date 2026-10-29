@@ -262,6 +262,7 @@ mod relics;
 mod rerank_cache;
 pub(crate) use self::device::machine_name;
 use self::params::*;
+pub(crate) use self::relics::read_relic;
 use rerank_cache::RerankCache;
 
 #[tool_router(router = memory_router)]

@@ -43,6 +43,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         reranker: None,
         decider: None,
         copal: None,
+        pdf: None,
         profile: None,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),

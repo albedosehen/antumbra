@@ -47,6 +47,14 @@
     <div class="actions">
       <button id="visibility" type="button" class="quiet" hidden></button>
       <button id="copy-link" type="button" class="quiet">Copy link</button>
+      <div class="export" role="group" aria-labelledby="export-label">
+        <span id="export-label" class="export-label">Download</span>
+        <span class="export-formats">
+          <button type="button" class="quiet" data-format="html" title="The page as it was published">HTML</button>
+          <button type="button" class="quiet" data-format="md" title="The page's text, headings, lists and tables">Markdown</button>
+          <button type="button" class="quiet" data-format="pdf" title="The page printed to PDF">PDF</button>
+        </span>
+      </div>
       <a id="open-raw" class="nav-link" target="_blank" rel="noopener noreferrer" hidden>Open alone</a>
       <button id="signin" type="button" class="quiet" hidden>Sign in</button>
       <button id="signout" type="button" class="quiet" hidden>Sign out</button>

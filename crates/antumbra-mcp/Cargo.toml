@@ -43,6 +43,9 @@ rmcp = { version = "3", features = ["server", "macros", "transport-io", "transpo
 # bearer token whose claims become $auth (tenant, user).
 axum = "0.8"
 jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+# The relic viewer's PDF download is printed by a Gotenberg service; the same
+# blocking client the copal archive uses.
+ureq = "3"
 # The `Embedder` port (and the answer-escalate test fake) are `#[async_trait]`.
 async-trait.workspace = true
 # The chunk index's keeper embeds a memory's pieces a few at a time; the tests

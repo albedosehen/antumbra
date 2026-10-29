@@ -36,6 +36,7 @@ mod embed;
 mod hardware;
 mod http;
 mod notify;
+mod pdf;
 mod profile;
 mod secrets;
 mod server;
@@ -236,6 +237,11 @@ struct Cli {
     /// refused and the gallery is empty.
     #[arg(long, env = "ANTUMBRA_COPAL_RENDER_ORIGIN")]
     copal_render_origin: Option<String>,
+    /// A Gotenberg service (gotenberg.dev) that prints relics as PDF for the
+    /// viewer's download, e.g. `http://pdf:3000` with the Compose `pdf`
+    /// profile. Without one, relics still download as HTML and Markdown.
+    #[arg(long, env = "ANTUMBRA_PDF_RENDERER")]
+    pdf_renderer: Option<String>,
     /// Which tools this server advertises and serves: `all` (default), `agent`
     /// (the developer-agent profile: recall/store/reinforce/penalize memories,
     /// recall/ingest documents, route, answer), or a comma-separated list of
@@ -587,6 +593,7 @@ impl Cli {
         self.copal_key = set(self.copal_key);
         self.copal_keys = self.copal_keys.filter(|p| !p.as_os_str().is_empty());
         self.copal_render_origin = set(self.copal_render_origin);
+        self.pdf_renderer = set(self.pdf_renderer);
         self
     }
 }
@@ -741,6 +748,14 @@ async fn run() -> Result<()> {
         cli.copal_keys.as_deref(),
         cli.copal_render_origin,
     )?;
+    // The relic viewer's PDF download, printed by a renderer beside the
+    // server; only the networked surface has a viewer.
+    let pdf = cli
+        .pdf_renderer
+        .as_deref()
+        .map(pdf::PdfRenderer::new)
+        .transpose()?
+        .map(Arc::new);
     // The tool profile, validated against the real tool list so a typo
     // refuses at startup instead of silently hiding a tool.
     let profile = profile::ToolProfile::parse(&cli.tools, &server::McpServer::all_tool_names())?
@@ -799,6 +814,7 @@ async fn run() -> Result<()> {
             reranker,
             decider,
             copal,
+            pdf,
             profile,
             github,
             recipe,

@@ -164,6 +164,10 @@ The gallery is at `/relics` (for example `http://localhost:8081/relics`): your r
 
 A relic is never displayed by the dashboard's own origin, where your token lives. It runs in an `<iframe>` from copal's render origin, sandboxed in an origin of its own with no network access. That needs three settings: the server's `--copal-addr` and `--copal-render-origin` (`ANTUMBRA_COPAL_RENDER_ORIGIN`, copal's `COPAL_RENDER_ORIGIN`), and on copal, `COPAL_RENDER_FRAME_ANCESTORS` naming this server's address so copal lets the gallery frame its pages. Without them `publish_relic` refuses and says which is missing.
 
+A relic downloads from its viewer as HTML (the page as it was published), Markdown (its headings, text, lists, code and tables) or PDF, so it can be sent to someone who cannot reach the server. The server reads the current version from copal and answers with a file under a `sandbox` policy, so the dashboard's origin still never runs the page. A script can ask for the same file: `GET /relic/<slug>/export?format=html|md|pdf`, with the token as a bearer for a private relic, or with none for a public one. A private relic and a missing one are the same 404.
+
+PDF takes a browser engine, so the server hands the page to a [Gotenberg](https://gotenberg.dev) service named by `--pdf-renderer` (`ANTUMBRA_PDF_RENDERER`) and returns what it prints, backgrounds included and at the page's own `@page` size. The Compose `pdf` profile runs one with no host port; set `ANTUMBRA_PDF_RENDERER=http://pdf:3000`. It refuses private addresses (`--chromium-deny-private-ips`), so a page can load web fonts and libraries while it prints but cannot reach your network. Without a renderer the PDF button says so, and the browser's Print on **Open alone** saves one instead.
+
 ---
 
 ## Leaving work for another of your machines
