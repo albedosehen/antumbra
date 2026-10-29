@@ -46,7 +46,7 @@ pub mod trainer;
 pub mod models;
 
 pub use compose::compose_adapters;
-pub use config::{RaftConfig, TrainDtype};
+pub use config::{RaftConfig, ServeQuant, TrainDtype};
 pub use consolidate::{
     interleave_replay, replay_from_tasks, score_memory, ConsolidationPolicy, Verdict,
 };

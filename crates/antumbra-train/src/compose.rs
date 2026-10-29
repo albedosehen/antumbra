@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 
 use candle_core::{Device, Tensor};
+use candle_nn::VarMap;
 
 use antumbra_core::{AntumbraError, Result};
 
@@ -39,6 +40,27 @@ pub fn compose_adapters(specs: &[(String, f32)], out_path: &str) -> Result<usize
     }
     candle_core::safetensors::save(&out, out_path).map_err(ce)?;
     Ok(rank)
+}
+
+/// Restore one saved adapter into `vars` by name, each factor cast to its
+/// variable's dtype. An expert saved in bf16 on the GPU then loads into a
+/// model held in f32, as every model on the CPU is; candle's own
+/// `VarMap::load` refuses the mismatch.
+pub fn restore_adapter(vars: &VarMap, path: &str) -> Result<()> {
+    let fail = |e: candle_core::Error| AntumbraError::other(format!("load adapter `{path}`: {e}"));
+    let vars = vars.data().lock().expect("varmap lock");
+    let Some(device) = vars.values().next().map(|v| v.device().clone()) else {
+        return Ok(());
+    };
+    let saved = candle_core::safetensors::load(path, &device).map_err(fail)?;
+    for (name, var) in vars.iter() {
+        let t = saved.get(name).ok_or_else(|| {
+            AntumbraError::other(format!("load adapter `{path}`: no factor {name}"))
+        })?;
+        var.set(&t.to_dtype(var.dtype()).map_err(fail)?)
+            .map_err(fail)?;
+    }
+    Ok(())
 }
 
 /// The rank of an adapter's factors: the rows of any `lora_a`.
@@ -230,5 +252,50 @@ mod tests {
         partial.remove("p.lora_b");
         assert!(blend(&[(p, 1.0), (partial, 1.0)], Some(2)).is_err());
         assert!(blend(&[], Some(2)).is_err());
+    }
+
+    /// A model's LoRA factors as the CPU holds them: zeroed f32 `Var`s.
+    fn f32_vars(rank: usize, inn: usize, out: usize) -> VarMap {
+        let vars = VarMap::new();
+        let vb = candle_nn::VarBuilder::from_varmap(&vars, candle_core::DType::F32, &Device::Cpu);
+        vb.get_with_hints((rank, inn), "p.lora_a", candle_nn::init::ZERO)
+            .unwrap();
+        vb.get_with_hints((out, rank), "p.lora_b", candle_nn::init::ZERO)
+            .unwrap();
+        vars
+    }
+
+    #[test]
+    fn a_bf16_adapter_restores_into_f32_factors() {
+        // Every value is exact in bf16, so the cast must reproduce it.
+        let path = std::env::temp_dir().join("ant_restore_bf16.safetensors");
+        let saved: HashMap<String, Tensor> = factors(&[0.5, -1.25], &[3.0], 1, 2, 1)
+            .into_iter()
+            .map(|(k, t)| (k, t.to_dtype(candle_core::DType::BF16).unwrap()))
+            .collect();
+        candle_core::safetensors::save(&saved, &path).unwrap();
+        let vars = f32_vars(1, 2, 1);
+        restore_adapter(&vars, path.to_str().unwrap()).unwrap();
+        let data = vars.data().lock().unwrap();
+        let a = data["p.lora_a"].as_tensor();
+        assert_eq!(a.dtype(), candle_core::DType::F32);
+        assert_eq!(
+            a.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
+            [0.5, -1.25]
+        );
+        let b = data["p.lora_b"].as_tensor();
+        assert_eq!(b.flatten_all().unwrap().to_vec1::<f32>().unwrap(), [3.0]);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn an_adapter_missing_a_factor_names_it() {
+        let path = std::env::temp_dir().join("ant_restore_partial.safetensors");
+        let mut partial = factors(&[0.5, -1.25], &[3.0], 1, 2, 1);
+        partial.remove("p.lora_b");
+        candle_core::safetensors::save(&partial, &path).unwrap();
+        let err = restore_adapter(&f32_vars(1, 2, 1), path.to_str().unwrap()).unwrap_err();
+        assert!(err.to_string().contains("p.lora_b"), "{err}");
+        std::fs::remove_file(path).ok();
     }
 }

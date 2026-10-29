@@ -5,3 +5,12 @@
 # main workspace has no git dependencies, so this is inert for a default build.
 [net]
 git-fetch-with-cli = true
+
+# x86_64 builds target x86-64-v3: AVX2, FMA and F16C, on every Intel CPU since
+# Haswell (2013) and AMD CPU since Excavator (2015). candle compiles its
+# quantized CPU kernels only when the build has AVX2; without it, a node serving
+# an expert on its CPU multiplies every quantized weight through the scalar
+# fallback. A `RUSTFLAGS` in the environment replaces this. aarch64 needs
+# nothing: NEON is on by default.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=x86-64-v3"]
