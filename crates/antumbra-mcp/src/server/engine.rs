@@ -46,6 +46,13 @@ fn current_name(name: &str) -> &str {
 }
 
 impl McpServer {
+    /// The connection this session's tools run on: scoped to its identity, so
+    /// the engine's permissions apply to whatever reads through it (the
+    /// console's workspace snapshot).
+    pub(crate) fn scoped_store(&self) -> &Store {
+        &self.store
+    }
+
     /// `serve` is the engine the `answer` tool drives (a real `MultiAdapterServe`
     /// under `--features models`, a fake in tests, or `None` for a route-only
     /// surface where `answer` reports serving is not configured).
@@ -139,8 +146,9 @@ impl McpServer {
     }
 
     /// Refresh the record session when it is about to expire, before a tool
-    /// runs on it. A no-op without a keeper or while the session is fresh.
-    pub(super) async fn keep_session(&self) -> Result<(), ErrorData> {
+    /// (or the console's snapshot) runs on it. A no-op without a keeper or
+    /// while the session is fresh.
+    pub(crate) async fn keep_session(&self) -> Result<(), ErrorData> {
         if let Some(keeper) = &self.session {
             keeper.refresh_if_stale().await.map_err(|e| {
                 ErrorData::internal_error(format!("session refresh failed: {e}"), None)

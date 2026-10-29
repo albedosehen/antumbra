@@ -87,7 +87,10 @@ impl EdgeType {
 }
 
 /// A directed, tenant-scoped edge `from -> to` in the Penumbra graph.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Serde is for the console's snapshot ([`crate::console::Snapshot`]); the
+/// store maps its own rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryEdge {
     pub tenant: TenantId,
     pub from_id: MemoryId,
@@ -118,7 +121,10 @@ impl MemoryEdge {
 }
 
 /// A tenant-scoped memory trace in the Penumbra.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Serde is for the console's snapshot ([`crate::console::Snapshot`]); the
+/// store maps its own rows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Memory {
     /// Globally-unique id (the SurrealDB record key).
     pub id: MemoryId,

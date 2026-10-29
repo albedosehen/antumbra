@@ -94,9 +94,9 @@ pub(super) fn first_run_hint(f: &mut Frame, app: &App) {
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
-/// The "connect your agent" panel (`c`): a guided, copyable reference for wiring
-/// the MCP lifecycle hooks and minting a hook token, so connecting an agent is an
-/// in-app step instead of a hunt through the README.
+/// The "connect your agent" panel (`c`): how to wire an agent to Antumbra,
+/// which server this console reads, and what its token may do, so connecting
+/// is an in-app step instead of a hunt through the README.
 pub(super) fn connect_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
     let Some(area) = overlay_area(app, f.area()) else {
@@ -107,78 +107,57 @@ pub(super) fn connect_overlay(f: &mut Frame, app: &App) {
     let val = Style::default().fg(t.value);
     let cmd = Style::default().fg(t.accent);
     let step = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
-    let url = if app.store_url.is_empty() {
-        "<your --url>"
+    let role = if app.demo {
+        "the demo acts on its own store".to_string()
+    } else if app.operator {
+        "an operator's token: it may act on the substrate".to_string()
     } else {
-        app.store_url.as_str()
+        "read-only: an operator's token is minted with antumbra-mcp --mint-token --operator"
+            .to_string()
     };
     let line = |spans: Vec<Span<'static>>| Line::from(spans);
     let lines = vec![
         Line::from(Span::styled(
-            "Plug a coding agent (Claude Code / Cursor) into Antumbra over MCP.",
+            "Plug a coding agent (Claude Code) into Antumbra.",
             val,
         )),
         Line::from(""),
         line(vec![
             Span::styled("1  ", step),
-            Span::styled("Serve this store over MCP (HTTP):", dim),
+            Span::styled("Set it up in one command:", dim),
         ]),
         Line::from(Span::styled(
-            "     antumbra-mcp --http 127.0.0.1:8081 \\".to_string(),
+            "     antumbra setup local           a server on this machine".to_string(),
             cmd,
         )),
-        Line::from(Span::styled(format!("       --url {url}"), cmd)),
+        Line::from(Span::styled(
+            "     antumbra setup hosted <url>    a server you were given".to_string(),
+            cmd,
+        )),
         Line::from(""),
         line(vec![
             Span::styled("2  ", step),
-            Span::styled("Mint a long-lived hook token:", dim),
+            Span::styled("Check what is in place:", dim),
         ]),
-        Line::from(Span::styled(
-            "     antumbra-mcp --mint-token --tenant <ws> --user <you> \\".to_string(),
-            cmd,
-        )),
-        Line::from(Span::styled(
-            "       --jwt-secret <secret> --token-ttl-days 365".to_string(),
-            cmd,
-        )),
+        Line::from(Span::styled("     antumbra setup check".to_string(), cmd)),
         Line::from(""),
         line(vec![
             Span::styled("3  ", step),
-            Span::styled("Set the hook environment:", dim),
+            Span::styled(
+                "This console reads the same server, with the same token:",
+                dim,
+            ),
         ]),
-        Line::from(Span::styled(
-            "     ANTUMBRA_URL=http://127.0.0.1:8081   ANTUMBRA_WORKSPACE_ID=<ws>".to_string(),
-            val,
-        )),
-        Line::from(Span::styled(
-            "     ANTUMBRA_TOKEN=<step 2>   ANTUMBRA_HOST_ID=<this device>".to_string(),
-            val,
-        )),
-        Line::from(""),
-        line(vec![
-            Span::styled("4  ", step),
-            Span::styled("Add the hooks to your agent's settings.json:", dim),
-        ]),
-        Line::from(Span::styled(
-            "     macOS / Linux   bash ./scripts/hooks/<name>.sh".to_string(),
-            cmd,
-        )),
-        Line::from(Span::styled(
-            "     Windows         pwsh -File ./scripts/hooks/<name>.ps1".to_string(),
-            cmd,
-        )),
-        Line::from(Span::styled(
-            "     SessionStart=bootstrap  Stop=capture  PreToolUse=strip".to_string(),
-            dim,
-        )),
+        Line::from(Span::styled(format!("     {}", app.source), val)),
+        Line::from(Span::styled(format!("     {role}"), dim)),
         Line::from(""),
         Line::from(Span::styled(
-            "Full walkthrough: scripts/hooks/README.md".to_string(),
+            "Full walkthrough: docs/agent-setup.md".to_string(),
             dim,
         )),
         Line::from(Span::styled(
             format!(
-                "store: {} memories, {} experts          q/esc to close",
+                "{} memories, {} experts          q/esc to close",
                 app.memories.len(),
                 app.experts.len()
             ),
@@ -238,7 +217,7 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
     ])];
     if !app.real_embedder {
         head.push(Line::from(Span::styled(
-            "  byte-histogram · pass --embed-url to match your model",
+            "  byte-histogram stand-in · through a server, the server embeds with its model",
             Style::default().fg(t.warning),
         )));
     }

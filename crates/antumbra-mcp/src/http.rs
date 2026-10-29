@@ -69,6 +69,7 @@ use crate::server::McpServer;
 
 mod behaviors;
 mod chunker;
+mod console;
 mod dashboard;
 mod github;
 mod relics;
@@ -433,6 +434,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/mcp", any(handle))
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
+        .merge(console::routes())
         .merge(dashboard::routes())
         .merge(relics::routes())
         .with_state(state)

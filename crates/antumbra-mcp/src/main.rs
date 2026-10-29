@@ -158,6 +158,11 @@ struct Cli {
     /// otherwise only verifies, never mints).
     #[arg(long)]
     mint_token: bool,
+    /// With `--mint-token`: the token may also read the substrate's own state
+    /// (shadows, boundaries, the loop) and act on it from `antumbra tui`. For
+    /// whoever runs this server, never for a workspace's ordinary members.
+    #[arg(long, requires = "mint_token")]
+    operator: bool,
     /// Validity, in days, of a `--mint-token` token.
     #[arg(long, default_value_t = 365)]
     token_ttl_days: u64,
@@ -620,10 +625,12 @@ async fn run() -> Result<()> {
             )
         })?;
         let ttl = std::time::Duration::from_secs(cli.token_ttl_days * 24 * 60 * 60);
-        println!(
-            "{}",
-            auth::mint_hs256(secret.as_bytes(), &cli.tenant, &cli.user, ttl)?
-        );
+        let mint = if cli.operator {
+            auth::mint_hs256_operator
+        } else {
+            auth::mint_hs256
+        };
+        println!("{}", mint(secret.as_bytes(), &cli.tenant, &cli.user, ttl)?);
         return Ok(());
     }
 

@@ -3,11 +3,10 @@ default:
 
 install:
     cargo install --path crates/antumbra-cli --locked
-    cargo install --path crates/antumbra-tui --locked
     cargo install --path crates/antumbra-mcp --locked
 
 uninstall:
-    cargo uninstall antumbra-cli antumbra-tui antumbra-mcp
+    cargo uninstall antumbra-cli antumbra-mcp
 
 test:
     cargo test --workspace

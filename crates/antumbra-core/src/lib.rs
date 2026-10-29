@@ -14,6 +14,7 @@ pub mod boundary;
 pub mod calibrate;
 pub mod chunk;
 pub mod compartment;
+pub mod console;
 pub mod contribution;
 pub mod critic;
 pub mod depgraph;

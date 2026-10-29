@@ -161,8 +161,18 @@ fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("antumbra worker thread panicked"))?
 }
 
+/// `antumbra --tui ...` is `antumbra tui ...`. Only a leading `--tui` is read
+/// so; anywhere else it is an argument like any other.
+fn tui_alias(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<_> = args.collect();
+    if args.get(1).is_some_and(|a| a == "--tui") {
+        args[1] = "tui".into();
+    }
+    args
+}
+
 async fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(tui_alias(std::env::args_os()));
     let _ = DB_CREDS.set((cli.db_user.clone(), cli.db_pass.clone()));
     let _ = EMBEDDER.set(EmbedderChoice {
         url: cli.embedder_url.clone(),
@@ -188,6 +198,7 @@ async fn run() -> anyhow::Result<()> {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.
             tokio::task::spawn_blocking(move || claude::run::run(action)).await??;
         }
+        Command::Tui(args) => antumbra_tui::run(args).await?,
         Command::Verifier { action } => verifiers::run(&cli.url, action).await?,
         Command::Critic { action } => critic_cmd::run(action).await?,
         Command::GateSweep(args) => gate_sweep::run(&cli.url, args).await?,
@@ -871,4 +882,30 @@ async fn run() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn parsed(argv: &[&str]) -> Command {
+        let argv = argv.iter().map(std::ffi::OsString::from);
+        Cli::try_parse_from(tui_alias(argv)).unwrap().command
+    }
+
+    #[test]
+    fn the_console_is_tui_or_a_leading_tui_flag() {
+        assert!(matches!(parsed(&["antumbra", "tui"]), Command::Tui(_)));
+        assert!(matches!(
+            parsed(&["antumbra", "--tui", "--demo"]),
+            Command::Tui(_)
+        ));
+        let elsewhere = tui_alias(
+            ["antumbra", "setup", "--tui"]
+                .iter()
+                .map(std::ffi::OsString::from),
+        );
+        assert_eq!(elsewhere[2], "--tui", "only a leading --tui is the console");
+    }
 }

@@ -17,7 +17,7 @@ docker compose -f docker/docker-compose.yml up -d
 - **SurrealDB** comes up on `ws://127.0.0.1:8000/rpc` (namespace `antumbra`, database `main`, isolated from anything else on the server).
 - **antumbra-mcp** comes up on `http://127.0.0.1:8081` once SurrealDB is healthy.
 
-Because the database is a real `ws://` server, the MCP server, the `antumbra-tui` console, the CLI, and your coding agent can all connect at the same time, unlike the single-writer embedded `surrealkv` file.
+Because the database is a real `ws://` server, the MCP server and the CLI can both connect to it at the same time (the console, `antumbra tui`, and your coding agent reach it through the MCP server), unlike the single-writer embedded `surrealkv` file.
 
 ## Why these choices
 

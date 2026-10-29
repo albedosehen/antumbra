@@ -8,6 +8,7 @@ pub mod behavior;
 pub mod behavior_tuning;
 pub mod boundary;
 pub mod compartment;
+pub mod console;
 pub mod contribution;
 pub mod device;
 pub mod document;

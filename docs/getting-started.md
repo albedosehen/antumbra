@@ -4,7 +4,7 @@ Antumbra is a private memory and specialist substrate your coding agent plugs in
 
 ## Architecture in one line
 
-A SurrealDB v3 database and the Antumbra MCP server run in Docker (hardened, non-root); the operator console (`antumbra-tui`) and CLI (`antumbra`) run as native binaries; embeddings come from a local `ollama`. Everything talks to one `ws://` database, so the server, console, CLI, and your agent can all connect at once.
+A SurrealDB v3 database and the Antumbra MCP server run in Docker (hardened, non-root); the CLI (`antumbra`, which holds the operator console, `antumbra tui`) runs as a native binary; embeddings come from a local `ollama`. The server and the CLI reach one `ws://` database, and the console and your agent reach the server, so all of them can run at once.
 
 ## The quick way
 
@@ -71,14 +71,13 @@ ollama pull all-minilm
 - **Linux:** so the Dockerized server can reach ollama, start it listening on all interfaces: `OLLAMA_HOST=0.0.0.0 ollama serve` (or set `OLLAMA_HOST=0.0.0.0` in its service unit). On macOS/Windows Docker Desktop this is automatic.
 - **WSL with Docker Desktop:** containers run in Docker Desktop's VM, where `host.docker.internal` is the Windows host, not your WSL distro. If setup reports that the container cannot reach ollama, either run ollama on Windows (and stop the copy in WSL), or set `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, run `wsl --shutdown`, and start ollama in WSL with `OLLAMA_HOST=0.0.0.0`.
 
-### 2. Install the console and CLI
+### 2. Install the CLI
 
 ```bash
-cargo install --path crates/antumbra-cli --locked   # the `antumbra` CLI
-cargo install --path crates/antumbra-tui --locked   # the `antumbra-tui` console
+cargo install --path crates/antumbra-cli --locked   # the `antumbra` CLI, console included
 ```
 
-If you have [`just`](https://github.com/casey/just), `just install` builds all three binaries instead. The first build compiles the whole dependency graph and is slow; it happens once. Both land in `~/.cargo/bin`, which rustup puts on your PATH.
+If you have [`just`](https://github.com/casey/just), `just install` builds it and the MCP server instead. The first build compiles the whole dependency graph and is slow; it happens once. It lands in `~/.cargo/bin`, which rustup puts on your PATH.
 
 ### 3. Configure secrets
 
@@ -118,29 +117,33 @@ The MCP server verifies a signed token on every call. Mint a long-lived one (it 
 
 ```bash
 docker compose -f docker/docker-compose.yml run --rm antumbra-mcp \
-  --mint-token --tenant ws:default --user user:default --token-ttl-days 365
+  --mint-token --operator --tenant ws:default --user user:default --token-ttl-days 365
 ```
 
-Copy the printed JWT; it is your `ANTUMBRA_TOKEN`.
+Copy the printed JWT; it is your `ANTUMBRA_TOKEN`. `--operator` makes it this server's operator's: the console then also shows the substrate (shadows, boundaries, the loop) and may act on it. Leave it out for anyone else's token.
 
 A user id names one user in one workspace. The server refuses a token whose user already belongs to another workspace, so give each workspace's users their own ids (`user:default` here). The GitHub App's `user:github` is the one exception: it acts in every workspace it is installed in.
 
 ### 6. Open the console and CLI
 
-Both connect to the database over `ws://` with the root login from your `.env`:
+The console reads the server, with the token from step 5:
+
+```bash
+antumbra tui --surface http://127.0.0.1:8081 --token <the token from step 5>
+```
+
+Once `ANTUMBRA_URL` and `ANTUMBRA_TOKEN` are set (step 7), or the token is saved in `~/.antumbra/token.txt`, plain `antumbra tui` is enough. The CLI's store commands connect to the database over `ws://` with the root login from your `.env`:
 
 ```bash
 # macOS/Linux
 PASS=$(grep '^SURREAL_PASS=' docker/.env | cut -d= -f2-)
-antumbra-tui --url ws://127.0.0.1:8000/rpc --db-user root --db-pass "$PASS"
-antumbra     --url ws://127.0.0.1:8000/rpc --db-user root --db-pass "$PASS" status
+antumbra --url ws://127.0.0.1:8000/rpc --db-user root --db-pass "$PASS" status
 ```
 
 ```powershell
 # Windows (PowerShell)
 $PASS = (Get-Content docker/.env | ? { $_ -like 'SURREAL_PASS=*' }) -replace '^SURREAL_PASS=',''
-antumbra-tui --url ws://127.0.0.1:8000/rpc --db-user root --db-pass $PASS
-antumbra     --url ws://127.0.0.1:8000/rpc --db-user root --db-pass $PASS status
+antumbra --url ws://127.0.0.1:8000/rpc --db-user root --db-pass $PASS status
 ```
 
 In the console, press `?` for the keymap and `c` for the "connect your agent" panel. It is empty until your agent (or `antumbra seed`) writes memories.
@@ -170,18 +173,20 @@ See [Running the trainer → the GPU server](running-the-trainer.md#the-gpu-serv
 
 ## Just kicking the tires?
 
-You need none of the above to look around. From a clone:
+You need none of the above to look around. With the CLI installed:
 
 ```bash
-cargo run -p antumbra-tui -- --demo
+antumbra tui --demo
 ```
 
-renders a seeded console against a throwaway in-memory store.
+renders a seeded console against a throwaway in-memory store. From a clone, `cargo run -p antumbra-cli -- tui --demo` does the same.
 
 ## Troubleshooting
 
-- **`antumbra-tui: command not found`**: `~/.cargo/bin` is not on your PATH yet. Open a new shell after installing rustup, or run the binary from `target/release/`.
-- **Console or CLI hangs or errors connecting to `ws://`**: the stack is not up. Check `docker compose -f docker/docker-compose.yml ps` and `... logs`.
+- **`antumbra: command not found`**: `~/.cargo/bin` is not on your PATH yet. Open a new shell after installing rustup, or run the binary from `target/release/`.
+- **The console says it could not reach the server, or the server refused the token**: the stack is not up, or the token is for another server. Check `docker compose -f docker/docker-compose.yml ps`, and `antumbra setup check`.
+- **The console is read-only**: its token is not an operator's. Mint one with `--operator` (step 5).
+- **The CLI hangs or errors connecting to `ws://`**: the stack is not up. Check `docker compose -f docker/docker-compose.yml ps` and `... logs`.
 - **Memories store but recall is nonsense**: the embedder is unreachable or mismatched. Confirm ollama is running and `ollama pull all-minilm` succeeded; on Linux confirm ollama is bound with `OLLAMA_HOST=0.0.0.0`.
 - **`antumbra-surrealdb` keeps restarting on Linux**: the data directory is not writable by uid 65532. Run `sudo chown -R 65532:65532 <ANTUMBRA_SURREAL_DATA>`.
 - **Windows: `ollama pull` is not found in Git Bash**: run it in PowerShell or CMD instead.

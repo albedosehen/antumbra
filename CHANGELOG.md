@@ -7,6 +7,21 @@
 - **A relic downloads as HTML, Markdown or PDF** ([#244](https://github.com/albedosehen/antumbra/pull/244)). The viewer gains a Download control, and `GET /relic/<slug>/export?format=html|md|pdf` hands the current version over as a file to whoever may view it: the token's identity, or anyone for a public relic, with a private relic and a missing one the same 404. The server reads the bytes from copal and answers with an attachment under a `sandbox` policy, so the dashboard's origin still never runs a page. Markdown keeps headings, emphasis, links, lists, quotes, code with its language and tables, numeric columns aligned right; scripts, styles, form controls and drawings are left out. PDF is printed by a Gotenberg service named by `--pdf-renderer` (`ANTUMBRA_PDF_RENDERER`), with the page's backgrounds and `@page` size; without one, the viewer says to print from the browser instead.
 - **The Compose `pdf` profile runs that renderer** (`gotenberg/gotenberg:8.37.0`) with no host port, refusing private addresses, so a page cannot reach the network while it prints ([#244](https://github.com/albedosehen/antumbra/pull/244)).
 
+### The console
+
+- **The console reads a networked server after an hour** ([#248](https://github.com/albedosehen/antumbra/pull/248)). Where the server signs each identity in to its own database (a Compose or Kubernetes deployment), `/console/snapshot` read through that identity's connection without refreshing its session first, as every tool call does, so a read more than an hour after the last refresh failed with "the session has expired". The snapshot now refreshes it first.
+
+## 0.2.2 - 2026-10-28
+
+The console, in the one command and through the server. `antumbra tui` reads the Antumbra server with the token the hooks use, so a workstation needs no database password, and an operator's token lets it act on the substrate ([#245](https://github.com/albedosehen/antumbra/pull/245)).
+
+### The console
+
+- **`antumbra tui` is the operator console, inside the one `antumbra` command.** `antumbra --tui` is the same. The separate `antumbra-tui` binary and its installers are gone: installing the CLI installs the console.
+- **The console reads the Antumbra server**, with the address and token the hooks use (`ANTUMBRA_URL` and `ANTUMBRA_TOKEN`, else `~/.antumbra/token.txt`), instead of opening the database with its root password. It reads every five seconds, and the server answers an unchanged view with no body. `ask` routes through the server, which embeds with its own model. `--url`, `--db-user`, `--db-pass` and `--embed-url` are gone; `--demo` still shows a seeded population with no server.
+- **An operator's token.** `antumbra-mcp --mint-token --operator` mints a token with an `operator` claim. Any token's console shows its own workspace: its memories and their links, and the experts it may route to. An operator's also shows the substrate, which belongs to no workspace (shadows, boundaries, the loop, evaluations, the router), and may act on it: prune or graduate a shadow, freeze or thaw an expert, delete a boundary, halt the loop. `antumbra setup local` mints whoever runs the stack an operator's token, replacing a plain one it kept. A token minted before the claim reads as not an operator's, and the hosted mint never writes it.
+- **The server's console routes**, `GET /console/snapshot` and `POST /console/action`, take the same bearer token as `/mcp`. They are not MCP tools, so no agent is offered them.
+
 ## 0.2.1 - 2026-10-27
 
 Setup without a clone, and behaviors an agent records on the first try. `antumbra setup local` runs the server image published for the CLI's version, so installing the CLI is all a local stack needs, and `record_behavior` tells an agent everything a call lacks in one answer.

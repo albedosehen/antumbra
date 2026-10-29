@@ -192,7 +192,9 @@ fn demo_app() -> App {
         idle: false,
         render_tier: crate::render::RenderTier::default(),
         demo: false,
-        store_url: "surrealkv://./data/antumbra.skv".into(),
+        source: "http://127.0.0.1:8081".into(),
+        operator: true,
+        reload_every_ms: 2000.0,
         git: antumbra_core::GitContext {
             repo: Some("github.com/acme/orders".into()),
             branch: Some("main".into()),

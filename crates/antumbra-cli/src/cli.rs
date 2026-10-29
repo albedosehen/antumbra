@@ -6,9 +6,10 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "antumbra", about = "Antumbra operator CLI", version)]
 pub struct Cli {
-    /// SurrealDB url. Defaults to a persistent on-disk store shared with the
-    /// operator console (`antumbra-tui`), so state carries across commands. Use
-    /// `mem://` for an ephemeral run, or `ws://host:8000/rpc` for a remote server.
+    /// SurrealDB url. Defaults to a persistent on-disk store, so state carries
+    /// across commands. Use `mem://` for an ephemeral run, or
+    /// `ws://host:8000/rpc` for a remote server. (`antumbra tui` reads the
+    /// Antumbra server instead.)
     #[arg(long, global = true, default_value = "surrealkv://./data/antumbra.skv")]
     pub url: String,
     /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
@@ -324,6 +325,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ClaudeAction,
     },
+    /// The operator console: a live view of the population, the memory and
+    /// the loop, read from the Antumbra server with the hooks' address and
+    /// token. `antumbra --tui` is the same. `--demo` shows a seeded
+    /// population with no server.
+    Tui(antumbra_tui::Args),
     /// The verifier namespace: propose a check, measure it
     /// against ground truth the loop did not produce, and move it. Only a
     /// sound measurement lets a synthesized verifier grant reward.

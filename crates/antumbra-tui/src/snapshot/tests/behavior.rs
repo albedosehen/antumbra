@@ -68,14 +68,27 @@ fn connect_overlay_guides_agent_wiring() {
     app.open_connect();
     assert_eq!(app.mode, Mode::Connect, "the connect panel is open");
     let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
-    assert!(text.contains("mint-token"), "shows the token-mint command");
     assert!(
-        text.contains("scripts/hooks"),
-        "points at the hook templates"
+        text.contains("antumbra setup local"),
+        "shows the one-command setup"
     );
+    assert!(text.contains("antumbra setup check"), "and how to check it");
     assert!(
-        text.contains("surrealkv://./data/antumbra.skv"),
-        "echoes the bound store url in the MCP-server command"
+        text.contains("http://127.0.0.1:8081"),
+        "names the server this console reads"
+    );
+    // The read-only line names an operator's token too (it says how to mint
+    // one), so the two roles are told apart by what only each one says.
+    assert!(
+        text.contains("may act on the substrate") && !text.contains("read-only"),
+        "an operator's console says it may act"
+    );
+
+    app.operator = false;
+    let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
+    assert!(
+        text.contains("read-only") && !text.contains("may act on the substrate"),
+        "a plain token's console says it is read-only"
     );
 }
 

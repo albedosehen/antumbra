@@ -24,12 +24,28 @@ pub struct Identity {
     pub user: String,
 }
 
+/// A verified token's identity and whether it may operate the substrate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Access {
+    pub identity: Identity,
+    /// Minted with `--operator`: the token may read the substrate's own state
+    /// (shadows, boundaries, the loop) and act on it from the console. Kept out
+    /// of [`Identity`], which keys the server's per-identity caches, so an
+    /// operator token and a plain one for the same user share a server and the
+    /// role is checked on each request.
+    pub operator: bool,
+}
+
 /// The claims the server requires. `tenant` and `user` become `$auth`; `exp` is
-/// validated by the library. Any other claims in the token are ignored.
+/// validated by the library. `operator` is absent from every token minted
+/// before it existed, which reads as not an operator. Any other claims in the
+/// token are ignored.
 #[derive(Debug, Deserialize)]
 struct Claims {
     tenant: String,
     user: String,
+    #[serde(default)]
+    operator: bool,
 }
 
 /// The claims a minted token carries (the inverse of [`Claims`]). `aud` is set
@@ -47,6 +63,8 @@ struct MintClaims<'a> {
     jti: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     aud: Option<&'a str>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    operator: bool,
 }
 
 impl<'a> MintClaims<'a> {
@@ -59,6 +77,7 @@ impl<'a> MintClaims<'a> {
             iat: now,
             jti: uuid::Uuid::new_v4().simple().to_string(),
             aud,
+            operator: false,
         }
     }
 }
@@ -77,12 +96,34 @@ pub fn mint_hs256(
     user: &str,
     ttl: std::time::Duration,
 ) -> Result<String, AuthError> {
-    if tenant.trim().is_empty() || user.trim().is_empty() {
+    sign_hs256(secret, MintClaims::new(tenant, user, ttl, None))
+}
+
+/// [`mint_hs256`] for the substrate's operator: the token also carries the
+/// `operator` claim ([`Access::operator`]). Only the self-hosted mint offers
+/// it; the hosted RS256 mint never does.
+pub fn mint_hs256_operator(
+    secret: &[u8],
+    tenant: &str,
+    user: &str,
+    ttl: std::time::Duration,
+) -> Result<String, AuthError> {
+    sign_hs256(
+        secret,
+        MintClaims {
+            operator: true,
+            ..MintClaims::new(tenant, user, ttl, None)
+        },
+    )
+}
+
+fn sign_hs256(secret: &[u8], claims: MintClaims<'_>) -> Result<String, AuthError> {
+    if claims.tenant.trim().is_empty() || claims.user.trim().is_empty() {
         return Err(AuthError::Invalid("empty tenant/user".into()));
     }
     encode(
         &Header::new(Algorithm::HS256),
-        &MintClaims::new(tenant, user, ttl, None),
+        &claims,
         &EncodingKey::from_secret(secret),
     )
     .map_err(|e| AuthError::Invalid(e.to_string()))
@@ -181,27 +222,40 @@ impl JwtVerifier {
 
     /// Verify a raw token string and return its identity.
     pub fn verify(&self, token: &str) -> Result<Identity, AuthError> {
+        self.verify_access(token).map(|a| a.identity)
+    }
+
+    /// Verify a raw token string and return its identity and role.
+    pub fn verify_access(&self, token: &str) -> Result<Access, AuthError> {
         let data = decode::<Claims>(token, &self.key, &self.validation)
             .map_err(|e| AuthError::Invalid(e.to_string()))?;
         let c = data.claims;
         if c.tenant.trim().is_empty() || c.user.trim().is_empty() {
             return Err(AuthError::Invalid("empty tenant/user claim".into()));
         }
-        Ok(Identity {
-            tenant: c.tenant,
-            user: c.user,
+        Ok(Access {
+            identity: Identity {
+                tenant: c.tenant,
+                user: c.user,
+            },
+            operator: c.operator,
         })
     }
 
     /// Extract and verify from an `Authorization` header value
     /// (`Bearer <jwt>`, case-insensitive scheme).
     pub fn verify_header(&self, header: Option<&str>) -> Result<Identity, AuthError> {
+        self.verify_header_access(header).map(|a| a.identity)
+    }
+
+    /// [`Self::verify_header`], with the token's role.
+    pub fn verify_header_access(&self, header: Option<&str>) -> Result<Access, AuthError> {
         let raw = header.ok_or(AuthError::Missing)?;
         let token = raw
             .strip_prefix("Bearer ")
             .or_else(|| raw.strip_prefix("bearer "))
             .ok_or(AuthError::Missing)?;
-        self.verify(token.trim())
+        self.verify_access(token.trim())
     }
 }
 
@@ -437,6 +491,33 @@ dwIDAQAB
         assert_ne!(a.jti, b.jti, "every mint gets its own token id");
         let now = get_current_timestamp();
         assert!(a.iat <= now && a.iat > now - 60, "iat is the mint time");
+    }
+
+    #[test]
+    fn only_a_token_minted_as_operator_is_one() {
+        let ttl = std::time::Duration::from_secs(3600);
+        let v = JwtVerifier::hs256(SECRET);
+        let plain = v
+            .verify_access(&mint_hs256(SECRET, "ws:1", "user:a", ttl).unwrap())
+            .unwrap();
+        assert!(!plain.operator);
+        let operator = v
+            .verify_access(&mint_hs256_operator(SECRET, "ws:1", "user:a", ttl).unwrap())
+            .unwrap();
+        assert!(operator.operator);
+        assert_eq!(
+            operator.identity, plain.identity,
+            "the role is not part of the identity"
+        );
+        // A token minted before the claim existed carries no `operator` at all.
+        let older = v
+            .verify_header_access(Some(&format!(
+                "Bearer {}",
+                mint("ws:1", "user:a", future(), None)
+            )))
+            .unwrap();
+        assert!(!older.operator);
+        assert!(mint_hs256_operator(SECRET, "ws:1", " ", ttl).is_err());
     }
 
     #[test]
