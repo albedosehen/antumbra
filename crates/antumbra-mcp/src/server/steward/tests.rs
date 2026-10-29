@@ -157,13 +157,30 @@ async fn what_an_agent_recalled_for_itself_counts_only_when_used() {
     let out = observe(&s, Some("another-session"), "turn-1", "beta, three retries").await;
     assert_eq!((out.judged, out.used), (0, 1));
     let b = seen(&s, &beta).await.unwrap();
-    assert_eq!((b.used, b.judged), (1, 0));
+    assert_eq!((b.used, b.judged), (1, 1), "a use is a judgment too");
     let a = seen(&s, &alpha).await.unwrap();
     assert_eq!(
         a.passed_over(),
         0,
         "never held against a memory no one session saw"
     );
+}
+
+#[tokio::test]
+async fn a_pass_over_still_counts_beside_an_agents_own_use() {
+    let s = server().await;
+    let beta = store(&s, "beta: billing retries a failed charge three times")
+        .await
+        .id;
+    // Used once from the agent's own recall...
+    recall(&s, "billing retries", None).await;
+    observe(&s, Some("session-1"), "turn-1", "beta, three retries").await;
+    // ...then shown to a session whose answer is about something else.
+    recall(&s, "billing retries", Some("session-2")).await;
+    observe(&s, Some("session-2"), "turn-2", "an unrelated answer").await;
+    let b = seen(&s, &beta).await.unwrap();
+    assert_eq!((b.used, b.judged), (1, 2));
+    assert_eq!(b.passed_over(), 1);
 }
 
 #[tokio::test]

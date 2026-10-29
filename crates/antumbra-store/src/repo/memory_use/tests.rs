@@ -61,13 +61,13 @@ async fn an_agents_judgment_and_a_restatement_count_as_uses() -> Result<()> {
     record(&s, &ws, &ids(&["memory:1"]), Seen::GOOD, now).await?;
     record(&s, &ws, &ids(&["memory:1"]), Seen::RECURRED, now).await?;
     record(&s, &ws, &ids(&["memory:1"]), Seen::BAD, now).await?;
-    record(&s, &ws, &ids(&["memory:1"]), Seen::USED_UNJUDGED, now).await?;
+    record(&s, &ws, &ids(&["memory:1"]), Seen::USED, now).await?;
     let got = for_memories(&s, &ws, &ids(&["memory:1", "memory:none"])).await?;
     assert_eq!(got.len(), 1);
     let u = &got[0];
     assert_eq!(
         (u.good, u.recurred, u.bad, u.used, u.judged),
-        (1, 1, 1, 1, 0)
+        (1, 1, 1, 1, 1)
     );
     assert_eq!(u.uses(), 3);
     assert_eq!(u.passed_over(), 0);
