@@ -26,6 +26,7 @@ $null = Start-ThreadJob -ArgumentList $listener, $request -ScriptBlock {
             $call = $listener.GetContext()
             $reader = [System.IO.StreamReader]::new($call.Request.InputStream)
             [System.IO.File]::WriteAllText($requestFile, $reader.ReadToEnd())
+            [System.IO.File]::WriteAllText("$requestFile.host", [string]$call.Request.Headers['X-Antumbra-Host'])
             $bytes = [System.Text.Encoding]::UTF8.GetBytes('{}')
             $call.Response.ContentType = 'application/json'
             try {
@@ -63,6 +64,14 @@ foreach ($script:runner in $runners) {
     $sent = if (Test-Path $request) { Get-Content -Raw $request | ConvertFrom-Json } else { $null }
     Check 'reports the turn to the server' ($sent -and $sent.tool -eq 'observe_turn')
     Check 'with its session, turn and answer' ($sent -and $sent.arguments.session -eq $session -and $sent.arguments.turn -eq 'p1' -and $sent.arguments.text -eq 'deployed it blue green')
+
+    Write-Output 'the end of a turn on a named machine'
+    $env:ANTUMBRA_HOST_ID = 'windows'
+    $null = Invoke-Hook @{ session_id = "$session-h"; prompt_id = 'p2'; hook_event_name = 'Stop'; last_assistant_message = 'done' }
+    Remove-Item Env:ANTUMBRA_HOST_ID
+    Check 'names the machine as the MCP client does' ((Get-Content -Raw "$request.host") -eq 'windows')
+    $tmp = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+    Remove-Item (Join-Path $tmp "antumbra-capture-Stop-$session-h") -ErrorAction SilentlyContinue
 
     Write-Output 'the stop after the nudge'
     $out = Invoke-Hook @{ session_id = $session; prompt_id = 'p1'; hook_event_name = 'Stop'; last_assistant_message = 'saved' }
