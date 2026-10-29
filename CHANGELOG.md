@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### The console
+
+- **`antumbra tui` needs no flags.** It reads the server your agent uses: `--surface`, else `ANTUMBRA_URL`, else the one Claude Code's settings name (where `antumbra setup` writes it), else the one `antumbra setup` recorded, else this machine's. Before, a terminal without `ANTUMBRA_URL` read `127.0.0.1:8081` whatever the agent used.
+- **The console prefers an operator's token.** Without `--token`, it takes whichever token on hand is an operator's (`ANTUMBRA_TOKEN`, the file `ANTUMBRA_TOKEN_FILE` names, `~/.antumbra/token.txt`, and those in Claude Code's settings), else the first found, so a hook token in the environment no longer hides an operator's token saved to the file. The connect panel (`c`) says where the server and the token were found, and a console that finds no server says to run `antumbra setup`.
+
 ## 0.2.3 - 2026-10-29
 
 Relics you can take with you, and a console that keeps reading. A relic downloads as HTML, Markdown or PDF, and `antumbra tui` keeps reading a networked server past the hour its session lasts.

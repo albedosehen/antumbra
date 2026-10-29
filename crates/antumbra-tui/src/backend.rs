@@ -6,7 +6,6 @@
 //! when the token is an operator's ([`antumbra_core::console`]); only an
 //! operator's token may act.
 
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -19,6 +18,8 @@ use antumbra_core::testing::FixedEmbedder;
 use antumbra_core::{ExpertId, LearnedRouter};
 use antumbra_store::repo::console;
 use antumbra_store::{Store, EMBED_DIM};
+
+use crate::settings::Found;
 
 /// The most a snapshot may weigh. It holds every memory the workspace has,
 /// without their vectors; `ureq` reads at most 10 MiB unless told otherwise.
@@ -101,6 +102,32 @@ impl Backend {
         }
     }
 
+    /// Where the server's address and the token were found, for the connect
+    /// panel; `None` for the demo.
+    pub fn found_from(&self) -> Option<(String, String)> {
+        match self {
+            Backend::Server(server) => {
+                Some((server.surface_from.clone(), server.token_from.clone()))
+            }
+            Backend::Demo(_) => None,
+        }
+    }
+
+    /// Why the first read failed, with where the server was found, and what
+    /// to do when nothing named one.
+    pub fn unreachable(&self) -> String {
+        match self.found_from() {
+            Some((from, _)) if from == crate::settings::DEFAULT_FROM => format!(
+                "could not read the console from {} ({from}); run `antumbra setup`, or pass --surface",
+                self.describe()
+            ),
+            Some((from, _)) => {
+                format!("could not read the console from {} (from {from})", self.describe())
+            }
+            None => format!("could not read the console from {}", self.describe()),
+        }
+    }
+
     /// Whether `ask` embeds with the population's own model.
     pub fn routes_for_real(&self) -> bool {
         matches!(self, Backend::Server(_))
@@ -111,16 +138,21 @@ impl Backend {
 pub struct Server {
     url: String,
     token: String,
+    /// Where the address and the token were found ([`crate::settings`]).
+    surface_from: String,
+    token_from: String,
     agent: ureq::Agent,
     /// The tag of the last snapshot read, so an unchanged one is not sent again.
     seen: Mutex<Option<String>>,
 }
 
 impl Server {
-    pub fn new(url: &str, token: String) -> Self {
+    pub fn new(surface: Found, token: Found) -> Self {
         Self {
-            url: url.trim_end_matches('/').to_string(),
-            token,
+            url: surface.value.trim_end_matches('/').to_string(),
+            token: token.value,
+            surface_from: surface.from,
+            token_from: token.from,
             agent: ureq::Agent::config_builder()
                 .timeout_global(Some(TIMEOUT))
                 .http_status_as_error(false)
@@ -214,39 +246,11 @@ impl Server {
         match status {
             200..=299 => Ok(()),
             401 => bail!(
-                "the server at {} refused the token; it may have expired, or be for another server",
-                self.url
+                "the server at {} refused the token from {}; it may have expired, or be for another server",
+                self.url,
+                self.token_from
             ),
             _ => bail!("the server at {} answered {status}", self.url),
         }
     }
-}
-
-/// The token the console presents, found as the hooks find it: the one given
-/// (`--token` or `ANTUMBRA_TOKEN`), else the file `ANTUMBRA_TOKEN_FILE` names,
-/// else `~/.antumbra/token.txt`, which `antumbra setup` writes.
-pub fn token(given: Option<String>) -> Result<String> {
-    if let Some(token) = given.filter(|t| !t.trim().is_empty()) {
-        return Ok(token.trim().to_string());
-    }
-    let path = match std::env::var_os("ANTUMBRA_TOKEN_FILE") {
-        Some(path) => PathBuf::from(path),
-        None => std::env::var_os("USERPROFILE")
-            .or_else(|| std::env::var_os("HOME"))
-            .map(|home| PathBuf::from(home).join(".antumbra").join("token.txt"))
-            .context(
-                "no home directory (neither USERPROFILE nor HOME is set) to find the token in",
-            )?,
-    };
-    let token = std::fs::read_to_string(&path).with_context(|| {
-        format!(
-            "no token: give one with --token or ANTUMBRA_TOKEN, or run `antumbra setup` to save one to {}",
-            path.display()
-        )
-    })?;
-    let token = token.trim().to_string();
-    if token.is_empty() {
-        bail!("{} is empty", path.display());
-    }
-    Ok(token)
 }

@@ -126,13 +126,13 @@ A user id names one user in one workspace. The server refuses a token whose user
 
 ### 6. Open the console and CLI
 
-The console reads the server, with the token from step 5:
+The console reads the server. Save the token from step 5 to `~/.antumbra/token.txt` (where `antumbra setup` keeps it) and it needs nothing else, since this server is the default:
 
 ```bash
-antumbra tui --surface http://127.0.0.1:8081 --token <the token from step 5>
+antumbra tui
 ```
 
-Once `ANTUMBRA_URL` and `ANTUMBRA_TOKEN` are set (step 7), or the token is saved in `~/.antumbra/token.txt`, plain `antumbra tui` is enough. The CLI's store commands connect to the database over `ws://` with the root login from your `.env`:
+Once Claude Code's settings name a server (step 7, or `antumbra setup`), `antumbra tui` reads that one. `--surface` and `--token` override what it finds. The CLI's store commands connect to the database over `ws://` with the root login from your `.env`:
 
 ```bash
 # macOS/Linux

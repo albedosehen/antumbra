@@ -18,6 +18,8 @@ antumbra-store = { path = "../antumbra-store" }
 # The server's console routes are plain HTTP; a blocking request run off the
 # async runtime, as the CLI and the embedder do.
 ureq = { version = "3", features = ["json"] }
+# Reads a token's claims (unverified) to prefer an operator's among those on hand.
+base64 = "0.22"
 ratatui.workspace = true
 tachyonfx.workspace = true
 tokio.workspace = true
