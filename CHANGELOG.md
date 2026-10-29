@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.5 - 2026-10-29
+
+Memories the system keeps itself. Nobody has to reinforce or penalize a memory: the server counts what recall shows, judges at the end of each turn which of those the answer drew on, links a new memory to what it restates, and lets an unused one fade at its network's half-life. An operator steers it with knobs while it runs ([#253](https://github.com/albedosehen/antumbra/pull/253)).
+
+### Memory
+
+- **The system watches how each memory is used.** Recall counts every memory it returns; the prompt hook names its session, and the capture hook reports the end of each turn (`observe_turn`, which no agent is offered). The server asks the relevance head whether the answer drew on each memory the session was shown, or compares embeddings where no head is configured: drawn on counts as used, the rest as passed over. What an agent recalled for itself counts only when the answer drew on it.
+- **Strength.** Each memory's strength is its confidence, halved for every half-life since it was last of use and lowered the more often it was passed over. It is read at every recall, never stored. Recall returns it as `strength` and lets it move the order a little after relevance, within each scope.
+- **New memories link to what they restate.** `store_memory` links a new memory (`references`) to the existing ones it comes close to, and one close enough counts as that memory recurring. It returns the ids it linked.
+- **An agent's own judgment still counts.** `reinforce_memory` and `penalize_memory` are an agent's lever when its work shows a memory right or wrong; the prompt hook now shows each memory's id so it can.
+- **The counts live apart from the memory** (`memory_use`), so counting a recall never re-sends a memory to other devices. Each server counts what it sees.
+- **`relate_memories` refuses an end that does not exist** instead of storing an edge to nothing.
+
+### The console
+
+- **Knobs (`K`).** The workspace's memory knobs: whether the system governs memories, the half-life of an unused fact, experience, judgment and volatile memory, how sure it must be that an answer drew on a memory, how close a new memory must come to be linked or to count as a restatement, the most links, how much a pass-over weighs, and how far strength moves recall. Anyone sees them; an operator's token turns them, and they apply to the next recall.
+- **The Memory page shows strength** beside confidence, how often each memory was recalled, used and passed over, and when it was last of use. It lists each network strongest first and leaves out edges whose end is gone.
+
+### Hooks
+
+- Run `antumbra setup` again to install the new hooks. A hook installed by hand needs the new `antumbra-prompt-recall` and `antumbra-capture` copied over it.
+
 ## 0.2.4 - 2026-10-29
 
 A console with nothing to type. `antumbra tui` finds the server and token your agent uses, so after `antumbra setup` it needs no flags, and it prefers an operator's token when one is on hand ([#250](https://github.com/albedosehen/antumbra/pull/250)).
