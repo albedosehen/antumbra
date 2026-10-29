@@ -21,6 +21,9 @@ mod theme;
 mod transition;
 mod ui;
 
+/// The workspace `--demo` seeds and reads its memories as.
+pub(crate) const DEMO_TENANT: &str = "ws:demo";
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -409,7 +412,7 @@ async fn seed_demo() -> Result<Store> {
     // Penumbra memory traces (the Memory page) across the three networks, with one
     // consolidated into an expert, plus edges including a contradiction and a
     // supersession; the native consolidation→retire signal.
-    let tenant = "ws:demo";
+    let tenant = DEMO_TENANT;
     let mems = [
         (
             "memory:deno",
@@ -803,6 +806,17 @@ async fn run_loop(
                             }
                             _ => app.cancel_action(),
                         },
+                        Mode::Knobs => match key.code {
+                            KeyCode::Char('K') | KeyCode::Char('q') | KeyCode::Esc => {
+                                app.close_knobs()
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => app.knob_move(1),
+                            KeyCode::Up | KeyCode::Char('k') => app.knob_move(-1),
+                            KeyCode::Right | KeyCode::Char('l') => app.knob_turn(1),
+                            KeyCode::Left | KeyCode::Char('h') => app.knob_turn(-1),
+                            KeyCode::Enter => app.request_knobs(),
+                            _ => {}
+                        },
                         Mode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
@@ -829,6 +843,10 @@ async fn run_loop(
                             }
                             KeyCode::Char('c') => {
                                 app.open_connect();
+                                transition = Some(transition::overlay_open());
+                            }
+                            KeyCode::Char('K') => {
+                                app.open_knobs();
                                 transition = Some(transition::overlay_open());
                             }
                             KeyCode::Char('x') => {

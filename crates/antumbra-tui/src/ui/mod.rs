@@ -13,6 +13,7 @@ mod detail;
 mod evals;
 mod graph;
 mod heatmap;
+mod knobs;
 mod loops;
 mod memory;
 mod overlays;
@@ -71,6 +72,7 @@ pub fn render(f: &mut Frame, app: &App) {
             Mode::Connect => overlays::connect_overlay(f, app),
             Mode::Ask => overlays::ask_overlay(f, app),
             Mode::Confirm => overlays::confirm_overlay(f, app),
+            Mode::Knobs => knobs::knobs_overlay(f, app),
             Mode::Normal => {}
         }
     }

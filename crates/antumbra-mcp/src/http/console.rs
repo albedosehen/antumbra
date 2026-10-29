@@ -20,6 +20,7 @@ use axum::{Json, Router};
 use serde_json::json;
 
 use antumbra_core::console::Action;
+use antumbra_core::TenantId;
 use antumbra_store::repo::console;
 
 use super::{bad_request, init_failed, internal_error, unauthorized, HttpState};
@@ -79,7 +80,7 @@ async fn snapshot(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Re
                 return internal_error();
             }
         };
-        console::workspace(mcp.scoped_store()).await
+        console::workspace(mcp.scoped_store(), &TenantId::new(&identity.tenant)).await
     };
     let mut snapshot = match workspace {
         Ok(s) => s,
@@ -165,12 +166,20 @@ async fn action(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Resp
         "antumbra-mcp: console action by {}/{}: {action:?}",
         identity.tenant, identity.user
     );
+    let tenant = TenantId::new(&identity.tenant);
+    let retunes = matches!(action, Action::SetMemoryPolicy { .. });
     match as_owner(&state, |store| async move {
-        Ok(console::apply(&store, &action).await?)
+        Ok(console::apply(&store, &tenant, &action).await?)
     })
     .await
     {
-        Ok(true) => Json(json!({ "applied": true })).into_response(),
+        Ok(true) => {
+            // The next recall in this workspace reads the new knobs.
+            if retunes {
+                state.steward.forget_policy(&identity.tenant);
+            }
+            Json(json!({ "applied": true })).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "no such shadow, expert, boundary or loop" })),

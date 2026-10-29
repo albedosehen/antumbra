@@ -46,6 +46,7 @@ pub(super) async fn state_archived(
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
+        steward: Arc::default(),
     })
 }
 

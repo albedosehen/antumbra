@@ -17,15 +17,16 @@ mkdir -p "$WORK/bin"
 cat > "$WORK/bin/curl" <<'CURL'
 #!/usr/bin/env bash
 touch "$CURL_CALLED"
+printf '%s\n' "$@" > "$CURL_ARGS"
 cat "$CURL_ANSWER"
 CURL
 chmod +x "$WORK/bin/curl"
 printf '%s' '{"memories":[{"id":"memory:a","network":"world","content":"keep it plain"}]}' > "$WORK/answer.json"
-export CURL_ANSWER="$WORK/answer.json" CURL_CALLED="$WORK/called" ANTUMBRA_TOKEN=test-token
+export CURL_ANSWER="$WORK/answer.json" CURL_CALLED="$WORK/called" CURL_ARGS="$WORK/args" ANTUMBRA_TOKEN=test-token
 
 run() {
     rm -f "$CURL_CALLED"
-    jq -nc --arg p "$1" --arg cwd "$WORK" '{ prompt: $p, cwd: $cwd }' |
+    jq -nc --arg p "$1" --arg cwd "$WORK" '{ prompt: $p, cwd: $cwd, session_id: "session-1" }' |
         PATH="$WORK/bin:$PATH" bash "$HOOK"
 }
 
@@ -33,6 +34,10 @@ echo 'a prompt'
 out="$(run 'how do we word caveats')"
 printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | contains("keep it plain")' > /dev/null
 check 'is recalled for' $?
+printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | contains("memory:a: keep it plain")' > /dev/null
+check 'names each memory, so an agent can judge it' $?
+grep -q '"session":"session-1"' "$CURL_ARGS"
+check 'names its session on the recall' $?
 
 # A background task's notification reaches the hook as a prompt too. A recall
 # on its wording finds memories about notifications, every time.

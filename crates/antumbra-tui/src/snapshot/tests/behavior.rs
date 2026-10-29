@@ -426,6 +426,48 @@ fn operator_action_stages_a_confirm_prompt() {
     );
 }
 
+// `K` opens the memory knobs; an operator turns one and applies it behind a
+// confirm, and a console without an operator's token only reads them.
+#[test]
+fn the_knobs_panel_turns_a_knob_behind_a_confirm() {
+    let mut app = demo_app();
+    app.operator = true;
+    app.open_knobs();
+    assert_eq!(app.mode, Mode::Knobs);
+    let text = to_text(&render(&mut app, 100, 26, 1600.0).unwrap());
+    assert!(text.contains("memory knobs"), "knobs modal titled:\n{text}");
+    assert!(text.contains("world_half_life_days"), "every knob listed");
+
+    app.knob_move(1);
+    app.knob_turn(-1);
+    assert_eq!(app.knob_draft.world_half_life_days, 165.0);
+    let text = to_text(&render(&mut app, 100, 26, 1600.0).unwrap());
+    assert!(
+        text.contains("(was 180)"),
+        "the turned knob shows what it was"
+    );
+    app.request_knobs();
+    assert_eq!(app.mode, Mode::Confirm);
+    assert_eq!(
+        app.pending_prompt().unwrap(),
+        "Apply world_half_life_days 180 → 165 ?"
+    );
+    app.cancel_action();
+
+    // Without an operator's token nothing turns, and the panel says why.
+    app.operator = false;
+    app.open_knobs();
+    app.knob_turn(1);
+    assert_eq!(app.knob_draft, app.policy);
+    let text = to_text(&render(&mut app, 100, 26, 1600.0).unwrap());
+    assert!(
+        text.contains("Read-only"),
+        "says who may turn them:\n{text}"
+    );
+    app.close_knobs();
+    assert_eq!(app.mode, Mode::Normal);
+}
+
 // Theme, layout, and focus each cycle through their states and wrap.
 #[test]
 fn theme_layout_focus_cycle_and_wrap() {

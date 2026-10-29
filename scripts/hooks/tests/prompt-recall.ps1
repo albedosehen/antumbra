@@ -18,6 +18,7 @@ function Check([string]$What, [bool]$Holds) {
 # --- a surface that answers every call with the response file, after the delay --
 $response = Join-Path $work 'response.json'
 $delay = Join-Path $work 'delay.txt'
+$request = Join-Path $work 'request.json'
 Set-Content -Path $response -Value '{}'
 Set-Content -Path $delay -Value '0'
 $port = Get-Random -Minimum 20000 -Maximum 40000
@@ -25,11 +26,13 @@ $url = "http://127.0.0.1:$port"
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("$url/")
 $listener.Start()
-$null = Start-ThreadJob -ArgumentList $listener, $response, $delay -ScriptBlock {
-    param($listener, $responseFile, $delayFile)
+$null = Start-ThreadJob -ArgumentList $listener, $response, $delay, $request -ScriptBlock {
+    param($listener, $responseFile, $delayFile, $requestFile)
     try {
         while ($listener.IsListening) {
             $call = $listener.GetContext()
+            $reader = [System.IO.StreamReader]::new($call.Request.InputStream)
+            [System.IO.File]::WriteAllText($requestFile, $reader.ReadToEnd())
             $wait = [int](Get-Content -Raw $delayFile)
             if ($wait -gt 0) { Start-Sleep -Seconds $wait }
             $bytes = [System.IO.File]::ReadAllBytes($responseFile)
@@ -59,7 +62,7 @@ $runners = @('pwsh')
 if ($IsWindows -and (Get-Command powershell -ErrorAction SilentlyContinue)) { $runners += 'powershell' }
 
 function Invoke-Hook([string]$Prompt) {
-    $payload = @{ prompt = $Prompt; cwd = $work } | ConvertTo-Json -Compress
+    $payload = @{ prompt = $Prompt; cwd = $work; session_id = 'session-1' } | ConvertTo-Json -Compress
     return ($payload | & $script:runner -NoProfile -NonInteractive -File $hook | Out-String).Trim()
 }
 
@@ -87,7 +90,10 @@ foreach ($script:runner in $runners) {
     Check 'answers as a UserPromptSubmit hook' ($answer.hookSpecificOutput.hookEventName -eq 'UserPromptSubmit')
     Check 'carries the em dash intact' $ctx.Contains("plain $dash always")
     Check 'tags where the memory was learned' $ctx.Contains('(world) [in_scope]')
-    Check 'cuts a long memory and names the whole entry' $ctx.Contains('[truncated - full entry: memory:b]')
+    Check 'names each memory, so an agent can judge it' $ctx.Contains('memory:a: keep it plain')
+    Check 'cuts a long memory' ($ctx.Contains('memory:b: yyy') -and $ctx.Contains('[truncated]'))
+    $sent = Get-Content -Raw $request | ConvertFrom-Json
+    Check 'names its session on the recall' ($sent.arguments.session -eq 'session-1')
 
     Write-Output 'nothing recalled'
     Set-Surface '{"memories":[]}'

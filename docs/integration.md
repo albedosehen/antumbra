@@ -38,7 +38,7 @@ A **SessionStart** hook calls Antumbra and injects the result as the session's o
 }
 ```
 
-The script fetches the bootstrap memory and returns it as `additionalContext`. (See the [`scripts/hooks/`](../scripts/hooks/) templates.) _Today:_ the capture + attribution hooks work as-is (they emit hook decisions, no Antumbra call), the long-lived **hook token** is mintable with `antumbra-mcp --mint-token`, and the bootstrap fetch's transport (`POST /mcp/call {tool, arguments}`) is now live, so the SessionStart script works end-to-end. (Alternatively, have the agent run `recall_memories` at the top of its first turn with no SessionStart script at all.)
+The script fetches the bootstrap memory and returns it as `additionalContext`. (See the [`scripts/hooks/`](../scripts/hooks/) templates.) _Today:_ the capture + attribution hooks work as-is (they emit hook decisions; the capture hook also reports the end of each turn, see [How the system keeps its memories](#how-the-system-keeps-its-memories)), the long-lived **hook token** is mintable with `antumbra-mcp --mint-token`, and the bootstrap fetch's transport (`POST /mcp/call {tool, arguments}`) is now live, so the SessionStart script works end-to-end. (Alternatively, have the agent run `recall_memories` at the top of its first turn with no SessionStart script at all.)
 
 ### 2. Capture on stop / before compaction (nothing learned is lost)
 
@@ -241,6 +241,21 @@ It drafts `Source control` from the remotes of your working trees, proposing an 
 
 The operator console shows both on its Sovereign page (`5` in `antumbra tui`, or `antumbra tui snapshot --page sovereign` for one frame): the rules, current or retired, and skill use, stalest first, from the memories of the workspace the console's token reads. It is read-only and queries nothing new.
 
+## How the system keeps its memories
+
+Nobody has to reinforce or penalize a memory by hand. The server watches how each one is used and keeps its standing itself:
+
+- **Shown.** Recall counts every memory it returns. The prompt hook names its session on the recall, so the server knows which memories that session was shown.
+- **Used or passed over.** When a turn ends, the capture hook sends the turn's last answer (`observe_turn`, which no agent is offered). The server asks the relevance head, the same one behind recall's floor, whether the answer drew on each memory the session was shown; where no head is configured it compares embeddings. Each one drawn on counts as used, the rest as passed over. What an agent recalled for itself is tied to no one session, so it counts only when the answer drew on it, never against it.
+- **Restated.** A new memory is linked (`references`) to the existing ones it comes close to, and one close enough to say the same thing counts as that memory recurring. `store_memory` returns the ids it linked.
+- **Judged by an agent.** When an agent's own work shows a memory right or wrong, it may `reinforce_memory` or `penalize_memory` it. That moves the memory's confidence, and the server counts it beside its own signals. The prompt hook shows each memory's id so the agent can.
+
+From those counts the server reads each memory's **strength** whenever it reads the memory: its confidence, halved for every half-life since it was last of use (or written, if never), and lowered the more often it was passed over against how often it was used. Recall lets strength move its order a little after relevance, and returns it as `strength`. Nothing is written back, so a knob change applies to the next read and loses nothing.
+
+The counts live in their own table, apart from the memory, so counting a recall never re-sends a memory to other devices. Each server counts what it sees; counts are not replicated.
+
+**The knobs** belong to the workspace, and an operator turns them from the console (`K`) while the server runs: whether the system governs memories at all (`auto`), the half-life of an unused fact, experience, judgment and volatile memory (180, 90, 180 and 14 days), how sure it must be that an answer drew on a memory (`use_threshold`, 0.55), how close a new memory must come to be linked (0.80) or to count as a restatement (0.92), the most links a new memory gets (3), how much each pass-over weighs (0.1), and how far strength moves recall's order (0.25, where 0 is relevance alone). An agent's token cannot change them.
+
 ## The operator console
 
 `antumbra tui` (or `antumbra --tui`) shows the population, the memory, the loop and its evaluations, read from the Antumbra server your agent uses. It needs no flags after `antumbra setup`, or a Claude Code wired by hand:
@@ -250,7 +265,7 @@ The operator console shows both on its Sovereign page (`5` in `antumbra tui`, or
 
 The connect panel (`c`) says where each was found. It reads every few seconds, and the server answers an unchanged view with no body. `--demo` shows a seeded population held in memory, with no server.
 
-What it shows depends on the token. Any token shows its own workspace: its memories and their links, and the experts it may route to. An operator's token also shows the substrate, which belongs to no workspace: shadows in training, failure boundaries, the loop and its evaluations, and the router. Only an operator's token may act from the console: prune or graduate a shadow, freeze or thaw an expert, delete a boundary, halt the loop or cancel the halt. The server's operator mints one with `antumbra-mcp --mint-token --operator`, and `antumbra setup local` mints one for whoever runs the stack. A hosted workspace's tokens are never operators'.
+What it shows depends on the token. Any token shows its own workspace: its memories and their links, and the experts it may route to. An operator's token also shows the substrate, which belongs to no workspace: shadows in training, failure boundaries, the loop and its evaluations, and the router. Only an operator's token may act from the console: prune or graduate a shadow, freeze or thaw an expert, delete a boundary, halt the loop or cancel the halt, and turn the workspace's memory knobs (`K`). The Memory page shows each memory's strength beside its confidence, how often it was recalled, used and passed over, and when it was last of use, and lists each network strongest first. The server's operator mints one with `antumbra-mcp --mint-token --operator`, and `antumbra setup local` mints one for whoever runs the stack. A hosted workspace's tokens are never operators'.
 
 The console reads `GET /console/snapshot` and acts with `POST /console/action`, both with the bearer token. Neither is an MCP tool, so no agent is offered them.
 

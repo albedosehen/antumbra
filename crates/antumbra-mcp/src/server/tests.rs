@@ -65,6 +65,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
             network: None,
             full: None,
             floor: None,
+            session: None,
         }))
         .await
         .unwrap();
@@ -210,6 +211,7 @@ async fn a_recall_scores_each_memory_and_the_score_follows_it_through_the_demoti
             network: None,
             full: None,
             floor: None,
+            session: None,
         }))
         .await
         .map_err(said)?;
@@ -272,6 +274,7 @@ async fn seed_and_recall(s: &McpServer, query: &str) -> Vec<String> {
         network: None,
         full: None,
         floor: None,
+        session: None,
     }))
     .await
     .unwrap()

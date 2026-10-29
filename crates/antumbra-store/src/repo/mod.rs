@@ -27,6 +27,8 @@ pub mod magic_use;
 pub mod manifest_set;
 pub mod memory;
 pub mod memory_chunk;
+pub mod memory_policy;
+pub mod memory_use;
 pub mod principal;
 pub mod recipe;
 pub mod relic;

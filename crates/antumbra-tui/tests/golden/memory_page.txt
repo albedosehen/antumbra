@@ -8,18 +8,18 @@
 │                                                                        ││                                            │
 │                                                                        ││network    world                            │
 │                                                                        ││status     committed                        │
-│                                                                        ││confidence ██████████▍─ 0.86                │
-│                                   ◉⠂                                   ││reinforce  4                                │
-│                                 ⢀⠔⠁                                    ││volatile   no                               │
-│                                ⡠⠊                                      ││                                            │
-│                              ⢀⠔⠁                                       ││evidence                                    │
-│                             ⡠⠃   world                                 ││  · session-log                             │
-│                           ⢀⠜                                           ││                                            │
-│                          ⡠⠃                                            ││edges (2)                                   │
-│                        ⢀⠜                                              ││  ← contradicts memory:incident             │
-│                       ⡰⠁                                               ││  → caused      memory:incident             │
-│                     ⢀⠎                                                 ││                                            │
-│                    ⡰⠁                                                  ││                                            │
+│                                                                        ││strength   ██████████▍─ 0.86                │
+│                                   ◉⠂                                   ││confidence ██████████▍─ 0.86                │
+│                                 ⢀⠔⠁                                    ││reinforce  4                                │
+│                                ⡠⠊                                      ││volatile   no                               │
+│                              ⢀⠔⠁                                       ││use        never seen                       │
+│                             ⡠⠃   world                                 ││                                            │
+│                           ⢀⠜                                           ││evidence                                    │
+│                          ⡠⠃                                            ││  · session-log                             │
+│                        ⢀⠜                                              ││                                            │
+│                       ⡰⠁                                               ││edges (2)                                   │
+│                     ⢀⠎                                                 ││  ← contradicts memory:incident             │
+│                    ⡰⠁                                                  ││  → caused      memory:incident             │
 │                  ⢠⠊                                                    ││                                            │
 │                 ⡔⠁                                                     ││                                            │
 │              ○⢠⠊                                       ○               ││                                            │

@@ -15,6 +15,7 @@ use crate::generational::GenerationHead;
 use crate::ids::{BoundaryId, ExpertId, RunId, ShadowId};
 use crate::memory::{Memory, MemoryEdge};
 use crate::router::LearnedRouter;
+use crate::usage::{MemoryPolicy, MemoryUse};
 use crate::{Expert, FailureBoundary, Shadow};
 
 /// Everything the console shows, read in one go.
@@ -24,7 +25,17 @@ pub struct Snapshot {
     /// Memories without their embeddings, grouped by network and strongest
     /// first within each.
     pub memories: Vec<Memory>,
+    /// The edges between the memories listed; an edge whose end is gone is
+    /// left out.
     pub edges: Vec<MemoryEdge>,
+    /// What the system has seen of each memory's use, for those it has seen.
+    /// Empty from a server older than 0.2.5.
+    #[serde(default)]
+    pub usage: Vec<MemoryUse>,
+    /// The workspace's knobs, which the strength of every memory is read
+    /// with.
+    #[serde(default)]
+    pub policy: MemoryPolicy,
     pub boundaries: Vec<FailureBoundary>,
     /// Newest first.
     pub shadows: Vec<Shadow>,
@@ -39,9 +50,13 @@ pub struct Snapshot {
 }
 
 /// An operator's action on the substrate, from the console.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
+    /// Replace the operator's workspace's knobs (clamped into range).
+    SetMemoryPolicy {
+        policy: MemoryPolicy,
+    },
     PruneShadow {
         shadow: ShadowId,
     },
@@ -102,5 +117,31 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&snapshot).unwrap()).unwrap();
         assert_eq!(back.memories, snapshot.memories);
         assert!(back.operator);
+    }
+
+    #[test]
+    fn a_snapshot_from_an_older_server_reads_with_the_default_knobs() {
+        let back: Snapshot = serde_json::from_value(serde_json::json!({
+            "experts": [], "memories": [], "edges": [], "boundaries": [], "shadows": [],
+            "loop_heads": [], "loop_halt_pending": false, "evals": [], "router": null,
+            "operator": false
+        }))
+        .unwrap();
+        assert!(back.usage.is_empty());
+        assert_eq!(back.policy, MemoryPolicy::default());
+    }
+
+    #[test]
+    fn setting_the_knobs_reads_as_its_name_and_policy() {
+        let wire = serde_json::json!({
+            "action": "set_memory_policy",
+            "policy": { "auto": false, "strength_weight": 0.5 }
+        });
+        let Action::SetMemoryPolicy { policy } = serde_json::from_value(wire).unwrap() else {
+            panic!("not a policy action");
+        };
+        assert!(!policy.auto);
+        assert_eq!(policy.strength_weight, 0.5);
+        assert_eq!(policy.max_links, MemoryPolicy::default().max_links);
     }
 }

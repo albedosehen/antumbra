@@ -4,8 +4,15 @@
 use super::*;
 use crate::schema::EMBED_DIM;
 use antumbra_core::{
-    Expert, FailureBoundary, Generation, GenerationHead, Memory, MemoryNetwork, RunId, Shadow,
+    EdgeType, Expert, FailureBoundary, Generation, GenerationHead, Memory, MemoryEdge, MemoryId,
+    MemoryNetwork, MemoryPolicy, RunId, Shadow,
 };
+
+use crate::repo::memory_use::{self, Seen};
+
+fn ws() -> TenantId {
+    TenantId::new("ws:a")
+}
 
 fn expert(id: &str) -> Expert {
     Expert {
@@ -74,7 +81,7 @@ async fn seeded() -> Result<Store> {
 #[tokio::test]
 async fn everything_reads_both_parts_and_marks_an_operator() -> Result<()> {
     let s = seeded().await?;
-    let snapshot = everything(&s).await?;
+    let snapshot = everything(&s, &ws()).await?;
     assert_eq!(snapshot.experts.len(), 1);
     assert_eq!(snapshot.memories.len(), 1);
     assert!(
@@ -87,7 +94,7 @@ async fn everything_reads_both_parts_and_marks_an_operator() -> Result<()> {
     assert!(!snapshot.loop_halt_pending);
     assert!(snapshot.operator);
 
-    let workspace_only = workspace(&s).await?;
+    let workspace_only = workspace(&s, &ws()).await?;
     assert!(!workspace_only.operator);
     assert!(workspace_only.shadows.is_empty() && workspace_only.boundaries.is_empty());
     Ok(())
@@ -103,6 +110,7 @@ async fn each_action_changes_what_it_names() -> Result<()> {
     assert!(
         apply(
             &s,
+            &ws(),
             &Action::GraduateShadow {
                 shadow: shadow_id.clone()
             }
@@ -114,6 +122,7 @@ async fn each_action_changes_what_it_names() -> Result<()> {
     assert!(
         apply(
             &s,
+            &ws(),
             &Action::PruneShadow {
                 shadow: shadow_id.clone()
             }
@@ -126,6 +135,7 @@ async fn each_action_changes_what_it_names() -> Result<()> {
     assert!(
         apply(
             &s,
+            &ws(),
             &Action::FreezeExpert {
                 expert: expert_id.clone()
             }
@@ -140,6 +150,7 @@ async fn each_action_changes_what_it_names() -> Result<()> {
     assert!(
         apply(
             &s,
+            &ws(),
             &Action::ThawExpert {
                 expert: expert_id.clone()
             }
@@ -152,14 +163,15 @@ async fn each_action_changes_what_it_names() -> Result<()> {
         .frozen_at
         .is_none());
 
-    assert!(apply(&s, &Action::HaltLoop { run: run.clone() }).await?);
-    assert!(everything(&s).await?.loop_halt_pending);
-    assert!(apply(&s, &Action::CancelHalt { run: run.clone() }).await?);
-    assert!(!everything(&s).await?.loop_halt_pending);
+    assert!(apply(&s, &ws(), &Action::HaltLoop { run: run.clone() }).await?);
+    assert!(everything(&s, &ws()).await?.loop_halt_pending);
+    assert!(apply(&s, &ws(), &Action::CancelHalt { run: run.clone() }).await?);
+    assert!(!everything(&s, &ws()).await?.loop_halt_pending);
 
     assert!(
         apply(
             &s,
+            &ws(),
             &Action::DeleteBoundary {
                 boundary: BoundaryId::new("boundary:a")
             }
@@ -167,6 +179,64 @@ async fn each_action_changes_what_it_names() -> Result<()> {
         .await?
     );
     assert!(boundary::list(&s).await?.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_workspace_part_carries_use_knobs_and_only_whole_edges() -> Result<()> {
+    let s = seeded().await?;
+    let old = Utc::now() - chrono::Duration::days(400);
+    memory::upsert(
+        &s,
+        &Memory::new(
+            "memory:b",
+            "ws:a",
+            MemoryNetwork::World,
+            "an old fact",
+            0.9,
+            old,
+        ),
+    )
+    .await?;
+    let now = Utc::now();
+    for (from, to) in [("memory:a", "memory:b"), ("memory:gone", "memory:a")] {
+        edge::relate(
+            &s,
+            &MemoryEdge::new("ws:a", from, to, EdgeType::References, 1.0, now),
+        )
+        .await?;
+    }
+    memory_use::record(&s, &ws(), &[MemoryId::new("memory:a")], Seen::USED, now).await?;
+
+    let snapshot = workspace(&s, &ws()).await?;
+    assert_eq!(
+        snapshot.edges.len(),
+        1,
+        "the edge from a missing memory is left out"
+    );
+    assert_eq!(snapshot.usage.len(), 1);
+    assert_eq!(snapshot.policy, MemoryPolicy::default());
+    // The fresh, used memory outranks the more confident one left unused for
+    // more than two world half-lives.
+    let order: Vec<&str> = snapshot.memories.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(order, ["memory:a", "memory:b"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_operator_turns_the_workspaces_knobs() -> Result<()> {
+    let s = seeded().await?;
+    let turned = MemoryPolicy {
+        world_half_life_days: 30.0,
+        max_links: 99,
+        ..MemoryPolicy::default()
+    };
+    assert!(apply(&s, &ws(), &Action::SetMemoryPolicy { policy: turned }).await?);
+    let policy = workspace(&s, &ws()).await?.policy;
+    assert_eq!(policy.world_half_life_days, 30.0);
+    assert_eq!(policy.max_links, 10, "clamped");
+    let other = workspace(&s, &TenantId::new("ws:b")).await?.policy;
+    assert_eq!(other, MemoryPolicy::default());
     Ok(())
 }
 
@@ -187,7 +257,7 @@ async fn an_absent_target_is_reported_and_left_alone() -> Result<()> {
             run: RunId::new("run:none"),
         },
     ] {
-        assert!(!apply(&s, &action).await?, "{action:?}");
+        assert!(!apply(&s, &ws(), &action).await?, "{action:?}");
     }
     assert_eq!(
         loop_control::load(&s, &RunId::new("run:none")).await?,

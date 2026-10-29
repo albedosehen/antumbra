@@ -152,6 +152,7 @@ async fn recall_can_be_one_machines() {
             repo: None,
             branch: None,
             floor: None,
+            session: None,
             full: None,
             host: host.map(str::to_string),
         }))

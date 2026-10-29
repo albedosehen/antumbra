@@ -82,6 +82,7 @@ impl McpServer {
             profile: None,
             session: None,
             decider: None,
+            steward: Arc::new(Steward::default()),
         }
     }
 
@@ -445,7 +446,11 @@ impl McpServer {
         name: &str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, ErrorData> {
-        self.check_profile(name)?;
+        // A turn's end is reported by the client's hook, not called by an
+        // agent, so no tool profile narrows it away.
+        if name != "observe_turn" {
+            self.check_profile(name)?;
+        }
         self.keep_session().await?;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
@@ -461,6 +466,7 @@ impl McpServer {
         match name {
             "store_memory" => dispatch!(StoreParams, store_memory),
             "recall_memories" => dispatch!(RecallParams, recall_memories),
+            "observe_turn" => dispatch!(steward::ObserveParams, observe_turn),
             "ingest_document" => dispatch!(IngestDocumentParams, ingest_document),
             "recall_documents" => dispatch!(RecallDocumentsParams, recall_documents),
             "reinforce_memory" => dispatch!(IdParams, reinforce_memory),

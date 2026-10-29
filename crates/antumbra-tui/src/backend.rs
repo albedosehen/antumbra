@@ -28,6 +28,11 @@ const MAX_SNAPSHOT: u64 = 512 * 1024 * 1024;
 /// How long one request to the server may take, a whole snapshot included.
 const TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The workspace the demo seeds and reads as.
+fn demo_tenant() -> antumbra_core::TenantId {
+    antumbra_core::TenantId::new(crate::DEMO_TENANT)
+}
+
 #[derive(Clone)]
 pub enum Backend {
     Server(Arc<Server>),
@@ -48,7 +53,7 @@ impl Backend {
                 let server = server.clone();
                 tokio::task::spawn_blocking(move || server.snapshot()).await?
             }
-            Backend::Demo(store) => Ok(Some(console::everything(store).await?)),
+            Backend::Demo(store) => Ok(Some(console::everything(store, &demo_tenant()).await?)),
         }
     }
 
@@ -68,7 +73,7 @@ impl Backend {
                 let server = server.clone();
                 tokio::task::spawn_blocking(move || server.act(&action)).await?
             }
-            Backend::Demo(store) => Ok(console::apply(store, &action).await?),
+            Backend::Demo(store) => Ok(console::apply(store, &demo_tenant(), &action).await?),
         }
     }
 

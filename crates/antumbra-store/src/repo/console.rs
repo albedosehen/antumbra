@@ -8,34 +8,55 @@
 //! need the owner's connection, since a workspace session may read none of the
 //! substrate's own tables.
 
+use std::collections::{HashMap, HashSet};
+
 use chrono::Utc;
 
 use antumbra_core::console::{Action, Snapshot};
 use antumbra_core::generational::LoopCommand;
-use antumbra_core::{BoundaryId, ExpertId, Result, ShadowId, ShadowStatus};
+use antumbra_core::{strength, BoundaryId, ExpertId, Result, ShadowId, ShadowStatus, TenantId};
 
 use crate::repo::{
-    boundary, edge, evaluation, expert, generation, loop_control, memory, router, shadow,
+    boundary, edge, evaluation, expert, generation, loop_control, memory, memory_policy,
+    memory_use, router, shadow,
 };
 use crate::store::Store;
 
 /// The workspace's part of a snapshot: the experts, memories and edges
-/// `store` may read. The memories come without their embeddings, grouped by
-/// network and strongest first within each.
-pub async fn workspace(store: &Store) -> Result<Snapshot> {
+/// `store` may read, what the system has seen of their use, and `tenant`'s
+/// knobs. The memories come without their embeddings, grouped by network and
+/// strongest first within each; an edge whose end is not among them (a
+/// forgotten memory, or an id that never existed) is left out.
+pub async fn workspace(store: &Store, tenant: &TenantId) -> Result<Snapshot> {
     let experts = expert::list(store).await?;
     let mut memories = memory::all_unscoped_lite(store).await?;
+    let usage = memory_use::all(store, tenant).await?;
+    let policy = memory_policy::get(store, tenant).await?;
+    let now = Utc::now();
+    let seen: HashMap<&str, _> = usage.iter().map(|u| (u.memory.as_str(), u)).collect();
+    let mut strengths: HashMap<String, f32> = HashMap::with_capacity(memories.len());
+    for m in &memories {
+        let s = strength(m, seen.get(m.id.as_str()).copied(), &policy, now);
+        strengths.insert(m.id.as_str().to_string(), s);
+    }
     memories.sort_by(|a, b| {
         a.network
             .as_str()
             .cmp(b.network.as_str())
-            .then(b.confidence.total_cmp(&a.confidence))
+            .then(strengths[b.id.as_str()].total_cmp(&strengths[a.id.as_str()]))
     });
-    let edges = edge::all_unscoped(store).await?;
+    let listed: HashSet<&str> = memories.iter().map(|m| m.id.as_str()).collect();
+    let edges = edge::all_unscoped(store)
+        .await?
+        .into_iter()
+        .filter(|e| listed.contains(e.from_id.as_str()) && listed.contains(e.to_id.as_str()))
+        .collect();
     Ok(Snapshot {
         experts,
         memories,
         edges,
+        usage,
+        policy,
         ..Snapshot::default()
     })
 }
@@ -59,17 +80,21 @@ pub async fn substrate(store: &Store, snapshot: &mut Snapshot) -> Result<()> {
 }
 
 /// The whole snapshot from one owner connection, for the console's demo,
-/// which reads its own store.
-pub async fn everything(store: &Store) -> Result<Snapshot> {
-    let mut snapshot = workspace(store).await?;
+/// which reads its own store as `tenant`.
+pub async fn everything(store: &Store, tenant: &TenantId) -> Result<Snapshot> {
+    let mut snapshot = workspace(store, tenant).await?;
     substrate(store, &mut snapshot).await?;
     Ok(snapshot)
 }
 
-/// Carry out an operator's action, as the owner. Returns whether its target
-/// exists; an absent one is left alone.
-pub async fn apply(store: &Store, action: &Action) -> Result<bool> {
+/// Carry out an operator's action, as the owner, for an operator of `tenant`.
+/// Returns whether its target exists; an absent one is left alone.
+pub async fn apply(store: &Store, tenant: &TenantId, action: &Action) -> Result<bool> {
     match action {
+        Action::SetMemoryPolicy { policy } => {
+            memory_policy::set(store, tenant, policy).await?;
+            Ok(true)
+        }
         Action::PruneShadow { shadow } => set_shadow(store, shadow, ShadowStatus::Pruned).await,
         Action::GraduateShadow { shadow } => {
             set_shadow(store, shadow, ShadowStatus::Graduated).await

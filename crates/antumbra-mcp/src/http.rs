@@ -210,6 +210,10 @@ struct HttpState {
     /// Live-propagation delivery: each session registers its peer here on
     /// initialize; the change watcher pushes shared-memory changes to recipients.
     registry: crate::notify::PeerRegistry,
+    /// The system's hand on memories, shared by every identity's servers: an
+    /// agent's recall over `/mcp` and its hook's report over `/mcp/call` land
+    /// on different servers, and the console's knob changes clear its cache.
+    steward: Arc<crate::server::Steward>,
 }
 
 /// Serve the networked surface on `addr` over one shared connection to `url`.
@@ -283,6 +287,7 @@ pub async fn serve(
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
+        steward: Arc::default(),
     });
     spawn_live_propagation(state.clone(), announced);
     chunker::spawn(state.clone(), chunk_in_flight);
@@ -615,7 +620,7 @@ impl HttpState {
         if let Some(profile) = self.profile.clone() {
             mcp = mcp.with_tool_profile(profile);
         }
-        Ok(mcp)
+        Ok(mcp.with_steward(self.steward.clone()))
     }
 
     /// The scoped connection an identity's tools run on, with its session keeper

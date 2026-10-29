@@ -21,6 +21,7 @@
 │  :       command palette (ask · route a task here)   │
 │  e       live event stream of store changes          │
 │  c       connect your agent: hooks + token           │
+│  K       memory knobs: how memories are kept         │
 │  x       prune/graduate · freeze · delete            │
 │  r       reload from the store                       │
 │  ? esc   close this help                             │

@@ -321,6 +321,7 @@ mod tests {
             network: None,
             full: None,
             floor: None,
+            session: None,
         }))
         .await
         .unwrap()
