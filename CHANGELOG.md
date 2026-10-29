@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 - 2026-10-29
+
+Relics you can take with you, and a console that keeps reading. A relic downloads as HTML, Markdown or PDF, and `antumbra tui` keeps reading a networked server past the hour its session lasts.
 
 ### Relics
 

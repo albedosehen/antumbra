@@ -167,7 +167,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-auth"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "jsonwebtoken 11.0.0",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-bench"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "antumbra-embed",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-boundary"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "async-trait",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-cli"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-boundary",
  "antumbra-copal",
@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-control"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-auth",
  "antumbra-core",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-copal"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "serde_json",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-critic"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "async-trait",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-eclipse"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "serde",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-embed"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "antumbra-store",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-gate"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "chrono",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-github"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "chrono",
@@ -327,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-ingest"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-copal",
  "antumbra-core",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-loop"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-boundary",
  "antumbra-core",
@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-mcp"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-auth",
  "antumbra-copal",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-rerank"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "async-trait",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-serve"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-boundary",
  "antumbra-core",
@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-store"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-boundary",
  "antumbra-core",
@@ -445,7 +445,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-sync"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "antumbra-store",
@@ -457,7 +457,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-train"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "antumbra-core",
  "async-trait",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-tui"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ab_glyph",
  "antumbra-core",
