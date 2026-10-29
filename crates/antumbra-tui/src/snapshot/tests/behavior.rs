@@ -77,15 +77,17 @@ fn connect_overlay_guides_agent_wiring() {
         text.contains("http://127.0.0.1:8081"),
         "names the server this console reads"
     );
+    // The read-only line names an operator's token too (it says how to mint
+    // one), so the two roles are told apart by what only each one says.
     assert!(
-        text.contains("an operator's token"),
-        "says what its token may do"
+        text.contains("may act on the substrate") && !text.contains("read-only"),
+        "an operator's console says it may act"
     );
 
     app.operator = false;
     let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
     assert!(
-        text.contains("read-only"),
+        text.contains("read-only") && !text.contains("may act on the substrate"),
         "a plain token's console says it is read-only"
     );
 }
