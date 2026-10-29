@@ -146,8 +146,9 @@ impl McpServer {
     }
 
     /// Refresh the record session when it is about to expire, before a tool
-    /// runs on it. A no-op without a keeper or while the session is fresh.
-    pub(super) async fn keep_session(&self) -> Result<(), ErrorData> {
+    /// (or the console's snapshot) runs on it. A no-op without a keeper or
+    /// while the session is fresh.
+    pub(crate) async fn keep_session(&self) -> Result<(), ErrorData> {
         if let Some(keeper) = &self.session {
             keeper.refresh_if_stale().await.map_err(|e| {
                 ErrorData::internal_error(format!("session refresh failed: {e}"), None)

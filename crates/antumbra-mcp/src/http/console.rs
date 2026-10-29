@@ -64,6 +64,13 @@ async fn snapshot(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Re
             return init_failed(&e);
         }
     };
+    // On a remote the identity's connection outlives its record session, as
+    // a tool call's does; refresh it first, or a console read an hour after
+    // the last refresh answers "the session has expired".
+    if let Err(e) = mcp.keep_session().await {
+        eprintln!("antumbra-mcp: /console/snapshot {}", e.message);
+        return internal_error();
+    }
     let workspace = {
         let _guard = match state.bind(identity).await {
             Ok(g) => g,
