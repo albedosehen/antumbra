@@ -267,6 +267,11 @@ pub struct App {
     /// Where the console reads from (the server's address, or the demo), for
     /// the connect panel.
     pub source: String,
+    /// Where the server's address and the token were found (a flag, the
+    /// environment, Claude Code's settings, `antumbra setup`), for the connect
+    /// panel; empty for the demo.
+    pub source_from: String,
+    pub token_from: String,
     /// The token may act on the substrate, and the substrate's pages are
     /// filled. Without it the console reads the workspace and acts on nothing.
     pub operator: bool,
@@ -333,12 +338,18 @@ impl App {
             render_tier: crate::render::RenderTier::default(),
             demo: false,
             source: backend.describe(),
+            source_from: String::new(),
+            token_from: String::new(),
             operator: false,
             reload_every_ms: backend.reload_every_ms(),
             git: crate::here::context(&std::env::current_dir().unwrap_or_default()),
             should_quit: false,
         };
         app.real_embedder = backend.routes_for_real();
+        if let Some((surface_from, token_from)) = backend.found_from() {
+            app.source_from = surface_from;
+            app.token_from = token_from;
+        }
         app.reload(backend).await?;
         Ok(app)
     }

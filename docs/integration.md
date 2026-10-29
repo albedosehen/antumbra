@@ -243,7 +243,12 @@ The operator console shows both on its Sovereign page (`5` in `antumbra tui`, or
 
 ## The operator console
 
-`antumbra tui` (or `antumbra --tui`) shows the population, the memory, the loop and its evaluations, read from the Antumbra server with the same address and token the hooks use: `--surface` or `ANTUMBRA_URL`, and `--token` or `ANTUMBRA_TOKEN`, else the file `ANTUMBRA_TOKEN_FILE` names, else `~/.antumbra/token.txt`. It reads every few seconds, and the server answers an unchanged view with no body. `--demo` shows a seeded population held in memory, with no server.
+`antumbra tui` (or `antumbra --tui`) shows the population, the memory, the loop and its evaluations, read from the Antumbra server your agent uses. It needs no flags after `antumbra setup`, or a Claude Code wired by hand:
+
+- The server is `--surface`, else `ANTUMBRA_URL`, else the one Claude Code's settings name (`env.ANTUMBRA_URL` in `settings.json`, under `CLAUDE_CONFIG_DIR` or `~/.claude`, where `antumbra setup` writes it), else the one `antumbra setup` recorded in `~/.antumbra/setup.json`, else `http://127.0.0.1:8081`.
+- The token is `--token`, else whichever token on hand is an operator's, else the first found: `ANTUMBRA_TOKEN`, the file `ANTUMBRA_TOKEN_FILE` names, `~/.antumbra/token.txt`, then those two in Claude Code's settings. A hook token in the environment and an operator's token saved to the file give the console the operator's.
+
+The connect panel (`c`) says where each was found. It reads every few seconds, and the server answers an unchanged view with no body. `--demo` shows a seeded population held in memory, with no server.
 
 What it shows depends on the token. Any token shows its own workspace: its memories and their links, and the experts it may route to. An operator's token also shows the substrate, which belongs to no workspace: shadows in training, failure boundaries, the loop and its evaluations, and the router. Only an operator's token may act from the console: prune or graduate a shadow, freeze or thaw an expert, delete a boundary, halt the loop or cancel the halt. The server's operator mints one with `antumbra-mcp --mint-token --operator`, and `antumbra setup local` mints one for whoever runs the stack. A hosted workspace's tokens are never operators'.
 

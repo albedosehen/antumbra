@@ -193,6 +193,8 @@ fn demo_app() -> App {
         render_tier: crate::render::RenderTier::default(),
         demo: false,
         source: "http://127.0.0.1:8081".into(),
+        source_from: "Claude Code's settings".into(),
+        token_from: "~/.antumbra/token.txt".into(),
         operator: true,
         reload_every_ms: 2000.0,
         git: antumbra_core::GitContext {

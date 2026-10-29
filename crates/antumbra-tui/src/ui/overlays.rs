@@ -144,11 +144,22 @@ pub(super) fn connect_overlay(f: &mut Frame, app: &App) {
         line(vec![
             Span::styled("3  ", step),
             Span::styled(
-                "This console reads the same server, with the same token:",
+                "This console reads the same server, with no flags needed:",
                 dim,
             ),
         ]),
         Line::from(Span::styled(format!("     {}", app.source), val)),
+        Line::from(Span::styled(
+            if app.source_from.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "     server from {}, token from {}",
+                    app.source_from, app.token_from
+                )
+            },
+            dim,
+        )),
         Line::from(Span::styled(format!("     {role}"), dim)),
         Line::from(""),
         Line::from(Span::styled(

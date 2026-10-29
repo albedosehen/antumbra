@@ -14,6 +14,7 @@ mod overlay;
 mod pacing;
 mod render;
 mod scroll;
+mod settings;
 mod snapshot;
 mod sovereign;
 mod theme;
@@ -39,19 +40,17 @@ use crate::command::Action;
 /// `antumbra tui`'s options.
 #[derive(clap::Args)]
 pub struct Args {
-    /// The Antumbra server to read from: the one the hooks and the agent use.
-    #[arg(
-        long,
-        env = "ANTUMBRA_URL",
-        default_value = "http://127.0.0.1:8081",
-        global = true
-    )]
-    surface: String,
-    /// The token to present. Without it, the file `ANTUMBRA_TOKEN_FILE` names,
-    /// else `~/.antumbra/token.txt`, which `antumbra setup` writes. An
-    /// operator's token (`antumbra-mcp --mint-token --operator`) also shows the
-    /// substrate's pages and may act on them.
-    #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true, global = true)]
+    /// The Antumbra server to read from. Without it: `ANTUMBRA_URL`, else the
+    /// one Claude Code's settings name (where `antumbra setup` writes it),
+    /// else the one `antumbra setup` recorded, else this machine's.
+    #[arg(long, global = true)]
+    surface: Option<String>,
+    /// The token to present. Without it, every token on hand is a candidate
+    /// (`ANTUMBRA_TOKEN`, the file `ANTUMBRA_TOKEN_FILE` names,
+    /// `~/.antumbra/token.txt`, and those in Claude Code's settings), and an
+    /// operator's is preferred: it also shows the substrate's pages and may
+    /// act on them (`antumbra-mcp --mint-token --operator`).
+    #[arg(long, global = true)]
     token: Option<String>,
     /// Pin the frame-rate cap (Hz) to a fixed value. Omit to follow the active
     /// monitor's refresh rate automatically; adjust live with `+`/`-`, `a` to
@@ -124,14 +123,17 @@ enum Command {
     Monitors,
 }
 
-/// Where `args` says to read: the seeded demo, or the server with its token.
+/// Where `args` says to read: the seeded demo, or the server with its token,
+/// found where the agent's connection is configured when not given
+/// ([`settings`]).
 async fn backend(args: &Args, demo: bool) -> Result<Backend> {
     Ok(if demo {
         Backend::demo(seed_demo().await?)
     } else {
+        let places = settings::Places::here();
         Backend::Server(Arc::new(Server::new(
-            &args.surface,
-            backend::token(args.token.clone())?,
+            settings::surface(args.surface.clone(), &places),
+            settings::token(args.token.clone(), &places)?,
         )))
     })
 }
@@ -152,9 +154,9 @@ pub async fn run(args: Args) -> Result<()> {
             demo,
         }) => {
             let backend = backend(&args, demo || args.demo).await?;
-            let mut app = App::load(&backend).await.with_context(|| {
-                format!("could not read the console from {}", backend.describe())
-            })?;
+            let mut app = App::load(&backend)
+                .await
+                .with_context(|| backend.unreachable())?;
             app.set_page(match page.as_str() {
                 "memory" => app::Page::Memory,
                 "loop" => app::Page::Loop,
@@ -213,7 +215,7 @@ pub async fn run(args: Args) -> Result<()> {
     let backend = backend(&args, args.demo).await?;
     let mut app = App::load(&backend)
         .await
-        .with_context(|| format!("could not read the console from {}", backend.describe()))?;
+        .with_context(|| backend.unreachable())?;
     app.demo = args.demo;
     // Capture the terminal window now, while it's focused, so the follow tracks
     // this window between monitors rather than re-reading focus each tick.
