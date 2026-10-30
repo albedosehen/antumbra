@@ -188,6 +188,7 @@ mod tests {
             ok_context_vec: None,
             confidence,
             generation: Generation::ZERO,
+            owner: None,
             created_at: Utc::now(),
         }
     }

@@ -111,6 +111,7 @@ async fn seeded() -> (Store, App) {
             ok_context_vec: None,
             confidence: 0.5,
             generation: Generation::ZERO,
+            owner: None,
             created_at: Utc::now(),
         },
     )

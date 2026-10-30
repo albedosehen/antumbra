@@ -580,6 +580,7 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() {
             ok_context_vec: Some(ok_vec),
             confidence: 0.9,
             generation: Generation::ZERO,
+            owner: None,
             created_at: Utc::now(),
         },
     )

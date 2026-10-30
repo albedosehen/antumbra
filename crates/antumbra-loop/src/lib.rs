@@ -918,6 +918,7 @@ impl<'a> GenerationLoop<'a> {
             ok_context_vec: None,
             confidence: 0.3,
             generation,
+            owner: None,
             created_at: Utc::now(),
         };
         boundary::upsert(self.store, &b).await

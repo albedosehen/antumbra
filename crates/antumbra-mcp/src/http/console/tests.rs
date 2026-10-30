@@ -86,6 +86,7 @@ async fn seeded() -> Arc<HttpState> {
             ok_context_vec: None,
             confidence: 0.8,
             generation: Generation::ZERO,
+            owner: None,
             created_at: Utc::now(),
         },
     )

@@ -11,7 +11,7 @@ use surql::query::builder::Query;
 use surql::query::crud::{delete_record, query_records, upsert_record};
 use surql::types::RecordID;
 
-use antumbra_core::{BoundaryId, FailureBoundary, Generation, Grain, Result};
+use antumbra_core::{BoundaryId, FailureBoundary, Generation, Grain, Result, UserId};
 
 use crate::dto::parse_dt;
 use crate::error::map;
@@ -38,6 +38,10 @@ struct BoundaryRow {
     #[serde(default)]
     confidence: f32,
     generation: u32,
+    // Left off a shared boundary, so it reads as NONE (the read rule's shared
+    // branch); a written null would hide it from every session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<UserId>,
     created_at: String,
 }
 
@@ -54,6 +58,7 @@ impl BoundaryRow {
             ok_context_vec: b.ok_context_vec.clone(),
             confidence: b.confidence,
             generation: b.generation.0,
+            owner: b.owner.clone(),
             created_at: b.created_at.to_rfc3339(),
         }
     }
@@ -70,6 +75,7 @@ impl BoundaryRow {
             ok_context_vec: self.ok_context_vec,
             confidence: self.confidence,
             generation: Generation(self.generation),
+            owner: self.owner,
             created_at: parse_dt(&self.created_at)?,
         })
     }
@@ -102,9 +108,9 @@ pub async fn list(store: &Store) -> Result<Vec<FailureBoundary>> {
 /// The `k` boundaries whose context is nearest `query` (inhibitory-penalty
 /// lookup via routing-as-retrieval), through `fb_ctx_hnsw`.
 ///
-/// The boundary population is shared and unfiltered, so the index
-/// returns exactly the `k` asked for and the metric is the index's own
-/// cosine.
+/// No app-side filter narrows the search, so the index returns exactly the
+/// `k` asked for and the metric is the index's own cosine. Under a record
+/// session the engine still leaves out another user's private boundaries.
 pub async fn knn_by_context(
     store: &Store,
     query: &[f32],
