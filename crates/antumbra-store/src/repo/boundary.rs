@@ -38,7 +38,9 @@ struct BoundaryRow {
     #[serde(default)]
     confidence: f32,
     generation: u32,
-    #[serde(default)]
+    // Left off a shared boundary, so it reads as NONE (the read rule's shared
+    // branch); a written null would hide it from every session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     owner: Option<UserId>,
     created_at: String,
 }
