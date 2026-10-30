@@ -304,12 +304,27 @@ mod keeper {
                 scope.clone(),
             );
             match need {
-                Need::Nothing => {}
+                // An expert minted before trainings were recorded gets its
+                // shadow and its boundaries, once.
+                Need::Nothing => {
+                    if let Some(e) = current {
+                        let plan = behave::Plan {
+                            tenant: tenant.clone(),
+                            user: user.clone(),
+                            scope: scope.clone(),
+                            taught,
+                        };
+                        let _guard = state.auth.lock().await;
+                        state.store.signin_root().await?;
+                        behave::record_standing(&state.store, &plan, &e).await?;
+                    }
+                }
                 Need::Drop => {
                     if let Some(e) = current {
                         let _guard = state.auth.lock().await;
                         state.store.signin_root().await?;
                         expert::delete(&state.store, &e.id).await?;
+                        behave::forget_boundaries(&state.store, &e.id).await?;
                         tally.dropped += 1;
                         eprintln!(
                             "antumbra-mcp: standing experts, {} dropped: nothing left to teach",
@@ -371,10 +386,28 @@ mod keeper {
                     }
                     let job = plan.clone();
                     let confidence = confidence_for(state, tenant).await?;
+                    // The training is a shadow in the penumbra while it
+                    // runs, settled by `mint`, or pruned if it fails.
+                    {
+                        let _guard = state.auth.lock().await;
+                        state.store.signin_root().await?;
+                        behave::begin(&state.store, &plan).await?;
+                    }
                     let trained = crate::server::heavy::spawn_heavy(async move {
                         behave::train(&job, embedder.as_ref(), &cfg, confidence).await
                     })
-                    .await??;
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .and_then(|r| r.map_err(anyhow::Error::from));
+                    let trained = match trained {
+                        Ok(t) => t,
+                        Err(e) => {
+                            let _guard = state.auth.lock().await;
+                            state.store.signin_root().await?;
+                            behave::abandon(&state.store, &plan).await?;
+                            return Err(e);
+                        }
+                    };
                     let report = {
                         let _guard = state.auth.lock().await;
                         state.store.signin_root().await?;

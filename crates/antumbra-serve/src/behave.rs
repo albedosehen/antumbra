@@ -23,9 +23,10 @@ use antumbra_core::behavior::missed::{self, Missed};
 use antumbra_core::behavior::{self, learnable, Spec, State, Status};
 use antumbra_core::ports::Embedder;
 use antumbra_core::{
-    Expert, ExpertId, Generation, Memory, MemoryId, Result, RunId, TenantId, UserId,
+    BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Memory, MemoryId, Result, RunId,
+    Shadow, ShadowId, ShadowStatus, TenantId, UserId,
 };
-use antumbra_store::repo::{expert, memory, principal};
+use antumbra_store::repo::{boundary, expert, memory, principal, shadow};
 use antumbra_store::{Store, EMBED_DIM};
 use antumbra_train::behave::{self as course, Verdict};
 use antumbra_train::{
@@ -140,6 +141,9 @@ pub struct Trained {
     pub adapter_uri: String,
     pub base_model: String,
     pub fitness: f32,
+    /// The base model's pass rate on the same held-out tasks, before
+    /// training: where the shadow's reward curve starts.
+    pub base_fitness: f32,
     /// The centroid of the tasks it was taught, which routes it for its owner.
     pub capability_vec: Vec<f32>,
     /// What it was trained with, kept on the card so a measurement can be
@@ -234,6 +238,7 @@ pub async fn train(
         adapter_uri: out.adapter_uri,
         base_model: cfg.base_model.clone(),
         fitness: scores.pass_rate,
+        base_fitness: base.pass_rate,
         capability_vec: acc.iter().map(|v| v / n).collect(),
         recipe: behavior::Recipe {
             rank: cfg.lora_rank,
@@ -305,6 +310,210 @@ async fn note(
         memory::upsert(store, &m).await?;
     }
     Ok(())
+}
+
+/// The shadow a training of `plan` is recorded as: its scope's standing
+/// expert, under `shadow:`, and the set it teaches, so the same set trained
+/// again is the same row and a changed set a new one.
+pub fn shadow_id(plan: &Plan) -> ShadowId {
+    let set = behavior::fingerprint(&plan.taught);
+    ShadowId::new(format!(
+        "shadow:{}:{}:behavior:{}:{}",
+        plan.tenant.as_str(),
+        plan.user.as_str(),
+        plan.scope,
+        &set[..set.len().min(12)]
+    ))
+}
+
+/// Record a training of `plan` as begun: its shadow, exploring, in the
+/// penumbra while the GPU works. The expert it would replace is its parent.
+/// [`mint`] settles it, and [`abandon`] prunes it when the training fails.
+pub async fn begin(store: &Store, plan: &Plan) -> Result<Shadow> {
+    let current = expert_id(&plan.tenant, &plan.user, &plan.scope);
+    let parent = expert::get(store, &current).await?.map(|e| e.id);
+    let mut sh = Shadow::spawn(shadow_id(plan), Generation::ZERO, parent, Utc::now());
+    sh.advance_to(ShadowStatus::Exploring)?;
+    shadow::upsert(store, &sh).await?;
+    Ok(sh)
+}
+
+/// Prune the shadow [`begin`] recorded for `plan`, when its training failed
+/// before it could be scored. One already settled is left as it is.
+pub async fn abandon(store: &Store, plan: &Plan) -> Result<()> {
+    let Some(mut sh) = shadow::get(store, &shadow_id(plan)).await? else {
+        return Ok(());
+    };
+    if sh.status.is_terminal() {
+        return Ok(());
+    }
+    sh.advance_to(ShadowStatus::Pruned)?;
+    shadow::upsert(store, &sh).await
+}
+
+/// Settle `plan`'s shadow from its training: scored on the held-out tasks,
+/// the curve running from the base model's pass rate to the trained one's,
+/// then graduated into the standing expert when admitted, else pruned. A
+/// training [`begin`] did not record starts its shadow here, from `parent`.
+async fn settle(
+    store: &Store,
+    plan: &Plan,
+    parent: Option<ExpertId>,
+    adapter_uri: String,
+    curve: Vec<f32>,
+    admitted: bool,
+) -> Result<()> {
+    let id = shadow_id(plan);
+    let mut sh = match shadow::get(store, &id).await? {
+        Some(sh) if !sh.status.is_terminal() => sh,
+        _ => Shadow::spawn(id, Generation::ZERO, parent, Utc::now()),
+    };
+    if sh.status == ShadowStatus::Spawning {
+        sh.advance_to(ShadowStatus::Exploring)?;
+    }
+    if sh.status == ShadowStatus::Exploring {
+        sh.advance_to(ShadowStatus::Scoring)?;
+    }
+    sh.adapter_uri = Some(adapter_uri);
+    sh.reward_curve = curve;
+    sh.advance_to(if admitted {
+        ShadowStatus::Graduated
+    } else {
+        ShadowStatus::Pruned
+    })?;
+    shadow::upsert(store, &sh).await
+}
+
+/// The prefix of every boundary recorded beside the standing expert `expert`.
+fn boundary_prefix(expert: &ExpertId) -> String {
+    format!("boundary:{}:", expert.as_str())
+}
+
+/// Bring the boundaries beside `plan`'s standing expert in step with its
+/// latest training. Each behavior the training missed is an open boundary:
+/// the rule, held fixed, and the held-out task the expert did not follow it
+/// on, with its answer. Open (no context where it is acceptable), so it is
+/// recorded and never gates routing. Its confidence is the share of the
+/// behavior's held-out tasks the expert failed. It belongs to the user, as
+/// the rule does. One an admitted expert learned, or one no longer taught,
+/// goes; one a refused training learned stays, since nothing serves it.
+async fn record_boundaries(
+    store: &Store,
+    plan: &Plan,
+    verdict: &Verdict,
+    misses: &[(String, Missed)],
+) -> Result<()> {
+    let prefix = boundary_prefix(&expert_id(&plan.tenant, &plan.user, &plan.scope));
+    let learned = verdict.learned();
+    let now = Utc::now();
+    for (m, spec) in &plan.taught {
+        let id = m.id.as_str();
+        let Some(score) = verdict.behaviors.iter().find(|s| s.id == id && !s.admitted) else {
+            continue;
+        };
+        let mut context = serde_json::json!({ "scope": plan.scope });
+        if let Some((_, miss)) = misses.iter().find(|(b, _)| b == id) {
+            context["task"] = miss.task.clone().into();
+            context["answer"] = miss.answer.clone().into();
+        }
+        let b = FailureBoundary {
+            id: BoundaryId::new(format!("{prefix}{id}")),
+            behavior: spec.rule.clone(),
+            fail_context: context,
+            near_ok_context: None,
+            governing_features: Vec::new(),
+            grain: None,
+            context_vec: None,
+            ok_context_vec: None,
+            confidence: (1.0 - score.expert).clamp(0.0, 1.0),
+            generation: Generation::ZERO,
+            owner: Some(plan.user.clone()),
+            created_at: now,
+        };
+        boundary::upsert(store, &b).await?;
+    }
+    let taught = plan.behaviors();
+    for b in boundary::list(store).await? {
+        let Some(behavior) = b.id.as_str().strip_prefix(&prefix) else {
+            continue;
+        };
+        let gone = !taught.iter().any(|t| t == behavior);
+        let served = verdict.admitted && learned.contains(&behavior);
+        if gone || served {
+            boundary::delete(store, &b.id).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Remove the boundaries recorded beside `expert`: a standing expert dropped
+/// with nothing left to teach takes them with it.
+pub async fn forget_boundaries(store: &Store, expert: &ExpertId) -> Result<()> {
+    let prefix = boundary_prefix(expert);
+    for b in boundary::list(store).await? {
+        if b.id.as_str().starts_with(&prefix) {
+            boundary::delete(store, &b.id).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Record a standing expert minted before trainings were: its graduated
+/// shadow, from its card, and an open boundary for each behavior it missed,
+/// with the miss noted on the behavior. Only while `expert` is in step with
+/// the set `plan` teaches, and only once: one whose shadow is recorded is
+/// left be. The card keeps the trained pass rate and not the base model's,
+/// so the curve is that one reading, and a card without a behavior's scores
+/// reads its pass rate as even.
+pub async fn record_standing(store: &Store, plan: &Plan, expert: &Expert) -> Result<()> {
+    let set = behavior::fingerprint(&plan.taught);
+    if behavior::trained_set(expert) != Some(set.as_str()) {
+        return Ok(());
+    }
+    let id = shadow_id(plan);
+    if shadow::get(store, &id).await?.is_some() {
+        return Ok(());
+    }
+    let scores = expert.capability_card.get(behavior::CARD_SCORES);
+    let score = |id: &str, key: &str| scores.and_then(|s| s.get(id)?.get(key)?.as_f64());
+    let learned = behavior::taught_by(expert);
+    let verdict = Verdict {
+        admitted: true,
+        behaviors: plan
+            .taught
+            .iter()
+            .map(|(m, _)| {
+                let id = m.id.as_str();
+                course::BehaviorScore {
+                    id: id.to_string(),
+                    base: score(id, "base").unwrap_or(0.0) as f32,
+                    expert: score(id, "expert").unwrap_or(0.5) as f32,
+                    admitted: learned.iter().any(|l| l == id),
+                    held: score(id, "held").unwrap_or(0.0) as usize,
+                    worse: score(id, "worse").unwrap_or(0.5) as f32,
+                }
+            })
+            .collect(),
+        controls: Vec::new(),
+        reasons: Vec::new(),
+    };
+    let misses: Vec<(String, Missed)> = plan
+        .taught
+        .iter()
+        .filter_map(|(m, _)| missed::of(&m.evidence).map(|x| (m.id.as_str().to_string(), x)))
+        .collect();
+    record_boundaries(store, plan, &verdict, &misses).await?;
+    let mut sh = Shadow::spawn(id, Generation::ZERO, None, expert.created_at);
+    sh.adapter_uri = Some(expert.artifact_uri.clone());
+    sh.reward_curve = vec![expert.fitness];
+    for to in [
+        ShadowStatus::Exploring,
+        ShadowStatus::Scoring,
+        ShadowStatus::Graduated,
+    ] {
+        sh.advance_to(to)?;
+    }
+    shadow::upsert(store, &sh).await
 }
 
 /// A served expert measured, beside the base model, on the examples its
@@ -469,6 +678,10 @@ pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result
 /// whose expert was refused is not trained again until it changes. A
 /// behavior retired or recorded again while it trained is left as it now is:
 /// the next run sees it.
+///
+/// Either way, too, the training settles its shadow in the penumbra,
+/// graduated or pruned, and the behaviors it missed stand as open boundaries
+/// beside the expert in the antumbra.
 pub async fn mint(
     store: &Store,
     plan: &Plan,
@@ -476,8 +689,14 @@ pub async fn mint(
     host: &str,
 ) -> Result<BehaveReport> {
     let ids = plan.behaviors();
+    let id = expert_id(&plan.tenant, &plan.user, &plan.scope);
+    // The expert this training would replace: its shadow's parent.
+    let parent = expert::get(store, &id).await?.map(|e| e.id);
+    let curve = vec![trained.base_fitness, trained.fitness];
+    record_boundaries(store, plan, &trained.verdict, &trained.misses).await?;
     if !trained.verdict.admitted {
         note(store, plan, &trained.verdict, &trained.misses, None).await?;
+        settle(store, plan, parent, trained.adapter_uri, curve, false).await?;
         return Ok(BehaveReport {
             behaviors: ids,
             replay: trained.replay,
@@ -485,7 +704,6 @@ pub async fn mint(
             expert: None,
         });
     }
-    let id = expert_id(&plan.tenant, &plan.user, &plan.scope);
     let verdict = trained.verdict;
     let learned = verdict.learned();
     let rules: Vec<&str> = plan
@@ -566,6 +784,15 @@ pub async fn mint(
     expert::delete(store, &e.id).await?;
     expert::insert(store, &e).await?;
     note(store, plan, &verdict, &trained.misses, Some(id.as_str())).await?;
+    settle(
+        store,
+        plan,
+        parent,
+        trained.adapter_uri.clone(),
+        curve,
+        true,
+    )
+    .await?;
     Ok(BehaveReport {
         behaviors: ids,
         replay: trained.replay,
@@ -588,7 +815,14 @@ pub async fn train_behaviors(
     let Some(plan) = plan(store, tenant, user, scope).await? else {
         return Ok(None);
     };
-    let trained = train(&plan, embedder, cfg, confidence).await?;
+    begin(store, &plan).await?;
+    let trained = match train(&plan, embedder, cfg, confidence).await {
+        Ok(t) => t,
+        Err(e) => {
+            abandon(store, &plan).await?;
+            return Err(e);
+        }
+    };
     Ok(Some(
         mint(store, &plan, trained, &antumbra_core::this_host()).await?,
     ))

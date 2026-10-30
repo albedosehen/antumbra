@@ -56,6 +56,7 @@ fn admitted(ids: &[&str], adapter: &str) -> Trained {
         adapter_uri: adapter.into(),
         base_model: "base".into(),
         fitness: 1.0,
+        base_fitness: 0.0,
         capability_vec: vec![0.0; EMBED_DIM],
         recipe: behavior::Recipe::default(),
         misses: Vec::new(),
@@ -252,6 +253,7 @@ async fn mint_marks_only_the_behaviors_still_as_they_were_taught() {
         adapter_uri: "adapters/x.safetensors".into(),
         base_model: "base".into(),
         fitness: 1.0,
+        base_fitness: 0.0,
         capability_vec: vec![0.0; EMBED_DIM],
         recipe: behavior::Recipe::default(),
         misses: Vec::new(),
@@ -351,6 +353,7 @@ async fn learned_and_missed(admitted: bool) -> (Store, Plan, Trained) {
         adapter_uri: "adapters/x.safetensors".into(),
         base_model: "base".into(),
         fitness: 0.5,
+        base_fitness: 0.25,
         capability_vec: vec![0.0; EMBED_DIM],
         recipe: behavior::Recipe::default(),
         misses: Vec::new(),
@@ -480,6 +483,223 @@ async fn a_missed_behavior_notes_what_the_expert_answered_instead() {
             "admitted: {admitted}"
         );
     }
+}
+
+/// The shadow `plan`'s training is recorded as, as stored now.
+async fn shadow_of(store: &Store, plan: &Plan) -> Shadow {
+    shadow::get(store, &shadow_id(plan)).await.unwrap().unwrap()
+}
+
+/// A training is a shadow in the penumbra: exploring once begun, then scored
+/// from the base model's pass rate to its own and graduated when admitted,
+/// in the row it began in.
+#[tokio::test]
+async fn an_admitted_training_graduates_its_shadow() {
+    let (store, plan, trained) = learned_and_missed(true).await;
+    let begun = begin(&store, &plan).await.unwrap();
+    assert_eq!(begun.parent_expert, None, "no expert before the first");
+    let exploring = shadow_of(&store, &plan).await;
+    assert_eq!(exploring.status, ShadowStatus::Exploring);
+
+    mint(&store, &plan, trained, "rig").await.unwrap();
+    let sh = shadow_of(&store, &plan).await;
+    assert_eq!(sh.status, ShadowStatus::Graduated);
+    assert_eq!(sh.reward_curve, vec![0.25, 0.5]);
+    assert_eq!(sh.adapter_uri.as_deref(), Some("adapters/x.safetensors"));
+    assert_eq!(sh.created_at, exploring.created_at, "the row begun");
+}
+
+#[tokio::test]
+async fn a_refused_training_prunes_its_shadow_though_never_begun() {
+    let (store, plan, trained) = learned_and_missed(false).await;
+    mint(&store, &plan, trained, "rig").await.unwrap();
+    let sh = shadow_of(&store, &plan).await;
+    assert_eq!(sh.status, ShadowStatus::Pruned);
+    assert_eq!(sh.reward_curve, vec![0.25, 0.5]);
+}
+
+/// A training that fails is pruned, and one settled stays as it is. The
+/// next training of the scope descends from the expert the last minted.
+#[tokio::test]
+async fn a_failed_training_is_pruned_and_the_next_descends_from_the_expert() {
+    let (store, plan, trained) = learned_and_missed(true).await;
+    begin(&store, &plan).await.unwrap();
+    abandon(&store, &plan).await.unwrap();
+    assert_eq!(shadow_of(&store, &plan).await.status, ShadowStatus::Pruned);
+    abandon(&store, &plan).await.unwrap();
+    assert_eq!(shadow_of(&store, &plan).await.status, ShadowStatus::Pruned);
+
+    mint(&store, &plan, trained, "rig").await.unwrap();
+    assert_eq!(
+        shadow_of(&store, &plan).await.status,
+        ShadowStatus::Graduated
+    );
+    let again = begin(&store, &plan).await.unwrap();
+    assert_eq!(
+        again.parent_expert,
+        Some(expert_id(&plan.tenant, &plan.user, &plan.scope))
+    );
+}
+
+/// The boundaries beside `plan`'s scope's standing expert.
+async fn boundaries_of(store: &Store, plan: &Plan) -> Vec<FailureBoundary> {
+    let prefix = boundary_prefix(&expert_id(&plan.tenant, &plan.user, &plan.scope));
+    boundary::list(store)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|b| b.id.as_str().starts_with(&prefix))
+        .collect()
+}
+
+/// A boundary beside `plan`'s scope's expert, for `behavior`, as an earlier
+/// training would have left it.
+fn earlier_boundary(plan: &Plan, behavior: &str) -> FailureBoundary {
+    let prefix = boundary_prefix(&expert_id(&plan.tenant, &plan.user, &plan.scope));
+    FailureBoundary {
+        id: BoundaryId::new(format!("{prefix}{behavior}")),
+        behavior: "An earlier rule.".into(),
+        fail_context: serde_json::json!({ "scope": plan.scope }),
+        near_ok_context: None,
+        governing_features: Vec::new(),
+        grain: None,
+        context_vec: None,
+        ok_context_vec: None,
+        confidence: 1.0,
+        generation: Generation::ZERO,
+        owner: Some(plan.user.clone()),
+        created_at: Utc::now(),
+    }
+}
+
+/// A behavior the training missed stands as an open boundary beside the
+/// expert, its owner's: the rule, the task it was missed on and the answer
+/// given, inert in routing, as confident as the share of its held-out tasks
+/// failed. One the training learned has none, and one no longer taught goes.
+#[tokio::test]
+async fn a_missed_behavior_stands_as_an_open_boundary_of_its_owner() {
+    for admitted in [true, false] {
+        let (store, plan, mut trained) = learned_and_missed(admitted).await;
+        boundary::upsert(&store, &earlier_boundary(&plan, "memory:retired"))
+            .await
+            .unwrap();
+        trained.misses = vec![(
+            "memory:missed".into(),
+            Missed::new("t2", "not the behavior"),
+        )];
+        mint(&store, &plan, trained, "rig").await.unwrap();
+
+        let found = boundaries_of(&store, &plan).await;
+        assert_eq!(found.len(), 1, "admitted: {admitted}");
+        let b = &found[0];
+        assert_eq!(b.behavior, "Rule two.");
+        assert!(!b.is_actionable(), "open, so it never gates routing");
+        assert_eq!(b.owner, Some(UserId::new("user:a")));
+        assert_eq!(b.fail_context["scope"], "everywhere");
+        assert_eq!(b.fail_context["task"], "t2");
+        assert_eq!(b.fail_context["answer"], "not the behavior");
+        assert!((b.confidence - 0.5).abs() < 1e-6);
+    }
+}
+
+/// A boundary stands until an admitted expert learns its behavior: a refused
+/// training that learned it leaves it, since nothing serves it. Dropping the
+/// expert takes its boundaries, and no other scope's.
+#[tokio::test]
+async fn a_boundary_goes_once_an_expert_learns_it_or_is_dropped() {
+    let (store, plan, trained) = learned_and_missed(true).await;
+    let mut all_learned = trained.clone();
+    for s in &mut all_learned.verdict.behaviors {
+        s.admitted = true;
+        s.expert = 1.0;
+    }
+    mint(&store, &plan, trained, "rig").await.unwrap();
+    assert_eq!(boundaries_of(&store, &plan).await.len(), 1);
+
+    let mut refused = all_learned.clone();
+    refused.verdict.admitted = false;
+    mint(&store, &plan, refused, "rig").await.unwrap();
+    assert_eq!(boundaries_of(&store, &plan).await.len(), 1, "refused");
+
+    mint(&store, &plan, all_learned, "rig").await.unwrap();
+    assert!(boundaries_of(&store, &plan).await.is_empty(), "learned");
+
+    let elsewhere = Plan {
+        scope: "everywhere-else".into(),
+        ..plan.clone()
+    };
+    boundary::upsert(&store, &earlier_boundary(&plan, "memory:missed"))
+        .await
+        .unwrap();
+    boundary::upsert(&store, &earlier_boundary(&elsewhere, "memory:missed"))
+        .await
+        .unwrap();
+    forget_boundaries(&store, &expert_id(&plan.tenant, &plan.user, &plan.scope))
+        .await
+        .unwrap();
+    assert!(boundaries_of(&store, &plan).await.is_empty(), "dropped");
+    assert_eq!(boundaries_of(&store, &elsewhere).await.len(), 1);
+}
+
+/// A standing expert minted before trainings were recorded gets its
+/// graduated shadow, and its missed behavior its boundary, from its card and
+/// the miss noted on the behavior: once, and only while it is in step with
+/// the set.
+#[tokio::test]
+async fn a_standing_expert_from_before_is_recorded_from_its_card() {
+    let (minted, plan, mut trained) = learned_and_missed(true).await;
+    trained.misses = vec![(
+        "memory:missed".into(),
+        Missed::new("t2", "not the behavior"),
+    )];
+    let (id, _) = mint(&minted, &plan, trained, "rig")
+        .await
+        .unwrap()
+        .expert
+        .unwrap();
+    let e = expert::get(&minted, &id).await.unwrap().unwrap();
+
+    // The same behaviors, and the expert, where the training was not recorded.
+    let (store, _, _) = learned_and_missed(true).await;
+    let missed_id = MemoryId::new("memory:missed");
+    let tenant = TenantId::new("ws:a");
+    let mut m = memory::get(&store, &tenant, &missed_id)
+        .await
+        .unwrap()
+        .unwrap();
+    missed::mark(
+        &mut m.evidence,
+        Some(&Missed::new("t2", "not the behavior")),
+    );
+    memory::upsert(&store, &m).await.unwrap();
+    expert::insert(&store, &e).await.unwrap();
+    let plan = plan_again(&store).await;
+
+    let mut elsewhere = e.clone();
+    elsewhere.capability_card["set"] = "another set".into();
+    record_standing(&store, &plan, &elsewhere).await.unwrap();
+    assert!(
+        shadow::get(&store, &shadow_id(&plan))
+            .await
+            .unwrap()
+            .is_none(),
+        "not in step with the set"
+    );
+
+    record_standing(&store, &plan, &e).await.unwrap();
+    let sh = shadow_of(&store, &plan).await;
+    assert_eq!(sh.status, ShadowStatus::Graduated);
+    assert_eq!(sh.reward_curve, vec![0.5]);
+    assert_eq!(sh.adapter_uri.as_deref(), Some("adapters/x.safetensors"));
+    let found = boundaries_of(&store, &plan).await;
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].behavior, "Rule two.");
+    assert_eq!(found[0].fail_context["answer"], "not the behavior");
+    assert!((found[0].confidence - 0.5).abs() < 1e-6);
+
+    boundary::delete(&store, &found[0].id).await.unwrap();
+    record_standing(&store, &plan, &e).await.unwrap();
+    assert!(boundaries_of(&store, &plan).await.is_empty(), "once");
 }
 
 async fn plan_again(store: &Store) -> Plan {
