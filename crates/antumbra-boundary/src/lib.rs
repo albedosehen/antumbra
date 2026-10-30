@@ -175,6 +175,7 @@ pub fn finding_to_boundary(
         ok_context_vec,
         confidence,
         generation,
+        owner: None,
         created_at: now,
     }
 }

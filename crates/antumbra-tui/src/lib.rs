@@ -378,6 +378,7 @@ async fn seed_demo() -> Result<Store> {
                 ok_context_vec: None,
                 confidence: if actionable { 0.8 } else { 0.3 },
                 generation: Generation::ZERO,
+                owner: None,
                 created_at: now,
             },
         )

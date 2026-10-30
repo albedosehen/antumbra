@@ -39,8 +39,8 @@ fn content_analyzer() -> AnalyzerDefinition {
     standard_analyzer(CONTENT_ANALYZER)
 }
 
-/// Permissions for the shared-population tables (the umbra: experts, the learned
-/// router, boundaries). Any authenticated tenant session may READ them (the
+/// Permissions for the shared-population tables (the umbra: the learned
+/// router and its kin). Any authenticated tenant session may READ them (the
 /// brain is shared across tenants), but only the owner/root may WRITE (a record
 /// session is denied; the rootful owner connection bypasses the clause).
 /// `WHERE true` / `WHERE false` are the always / never predicates. Private
@@ -63,6 +63,12 @@ const EXPERT_PERMS: [(&str, &str); 4] = [
     ("update", "false"),
     ("delete", "false"),
 ];
+
+/// Boundary permissions, the experts' rule: a session reads a **shared**
+/// boundary (`owner = NONE`) or one it **owns**. A boundary recorded from
+/// training a user's behaviors holds the behavior's rule, which is as private
+/// as the standing expert that carries it on its card.
+const BOUNDARY_PERMS: [(&str, &str); 4] = EXPERT_PERMS;
 
 /// Tenant-scoped permissions: any authenticated session in the tenant may
 /// read/write the row (the engine still bars cross-tenant access).
@@ -362,10 +368,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema("reward_signal")
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("reward_run_idx", ["run_id", "step_idx"])]),
-        // Inhibitory store (antumbra): the counterfactual boundary of competence. Shared population.
+        // Inhibitory store (antumbra): the counterfactual boundary of competence.
+        // Shared, but for the boundaries a user's own training recorded.
         table_schema("failure_boundary")
             .with_mode(TableMode::Schemaless)
-            .with_permissions(SHARED_POPULATION_PERMS)
+            .with_permissions(BOUNDARY_PERMS)
             .with_indexes([
                 unique_index("fb_key_uq", ["key"]),
                 hnsw_index(

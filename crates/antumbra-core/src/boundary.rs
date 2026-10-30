@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{BoundaryId, Generation};
+use crate::ids::{BoundaryId, Generation, UserId};
 
 /// Infer the single governing feature that distinguishes a contrastive pair: the
 /// one context key whose value differs between C (the failing context) and C'
@@ -90,6 +90,11 @@ pub struct FailureBoundary {
     pub confidence: f32,
     #[serde(default)]
     pub generation: Generation,
+    /// The user a private boundary belongs to, as a private expert does: one
+    /// recorded from training their own behaviors names them, and only they
+    /// (and the owner connection) read it. `None` = the shared population's.
+    #[serde(default)]
+    pub owner: Option<UserId>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -215,6 +220,7 @@ mod tests {
             ok_context_vec: None,
             confidence,
             generation: Generation::ZERO,
+            owner: None,
             created_at: Utc::now(),
         }
     }

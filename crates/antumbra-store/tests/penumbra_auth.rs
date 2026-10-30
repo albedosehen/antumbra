@@ -6,8 +6,11 @@
 use chrono::Utc;
 
 use antumbra_core::router::{LearnedRouter, RouterExpert};
-use antumbra_core::{Expert, ExpertId, Generation, Memory, MemoryNetwork, TenantId, UserId};
-use antumbra_store::repo::{expert, memory, principal, router};
+use antumbra_core::{
+    BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Memory, MemoryNetwork, TenantId,
+    UserId,
+};
+use antumbra_store::repo::{boundary, expert, memory, principal, router};
 use antumbra_store::Store;
 
 fn trace(id: &str, tenant: &str, content: &str, embed: Vec<f32>) -> Memory {
@@ -92,6 +95,68 @@ async fn shared_population_is_readable_under_tenant_auth() {
     );
     assert_eq!(seen[0].id, ExpertId::new("expert:adder"));
     assert!(router::load(&store).await.unwrap().is_some());
+}
+
+fn boundary(id: &str, owner: Option<&str>) -> FailureBoundary {
+    FailureBoundary {
+        id: BoundaryId::new(id),
+        behavior: format!("rule of {id}"),
+        fail_context: serde_json::json!({ "task": "a task" }),
+        near_ok_context: None,
+        governing_features: Vec::new(),
+        grain: None,
+        context_vec: None,
+        ok_context_vec: None,
+        confidence: 0.3,
+        generation: Generation::ZERO,
+        owner: owner.map(UserId::new),
+        created_at: Utc::now(),
+    }
+}
+
+#[tokio::test]
+async fn a_private_boundary_is_read_only_by_its_owner() {
+    // A boundary recorded from training a user's behaviors holds the rule, so
+    // it is as private as their standing expert: a shared boundary reads
+    // through to every session, a private one only to its owner.
+    let store = Store::connect_memory(4).await.unwrap();
+    let alpha = TenantId::new("ws:alpha");
+    for u in ["user:a", "user:other"] {
+        principal::provision(&store, &alpha, &UserId::new(u))
+            .await
+            .unwrap();
+    }
+    boundary::upsert(&store, &boundary("boundary:shared", None))
+        .await
+        .unwrap();
+    boundary::upsert(&store, &boundary("boundary:private", Some("user:other")))
+        .await
+        .unwrap();
+
+    store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
+    let seen: Vec<BoundaryId> = boundary::list(&store)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|b| b.id)
+        .collect();
+    assert_eq!(
+        seen,
+        vec![BoundaryId::new("boundary:shared")],
+        "another user's private boundary must be hidden"
+    );
+
+    store
+        .signin(&alpha, &UserId::new("user:other"))
+        .await
+        .unwrap();
+    let mine = boundary::list(&store).await.unwrap();
+    assert_eq!(mine.len(), 2, "the owner reads their own and the shared");
+    let private = mine
+        .iter()
+        .find(|b| b.id == BoundaryId::new("boundary:private"))
+        .unwrap();
+    assert_eq!(private.owner, Some(UserId::new("user:other")));
 }
 
 #[tokio::test]

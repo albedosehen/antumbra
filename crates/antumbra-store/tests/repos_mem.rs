@@ -71,6 +71,7 @@ async fn boundary_persists_and_recalls_by_context() {
         ok_context_vec: Some(vec![0.0, 1.0, 0.0, 0.0]),
         confidence: 0.8,
         generation: Generation::ZERO,
+        owner: None,
         created_at: Utc::now(),
     };
     boundary::upsert(&store, &b).await.unwrap();

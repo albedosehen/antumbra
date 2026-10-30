@@ -284,6 +284,7 @@ async fn a_graduating_expert_retires_the_boundaries_it_covers() {
         ok_context_vec: Some(far.clone()),
         confidence: 0.9,
         generation: Generation::ZERO,
+        owner: None,
         created_at: now,
     };
     // Uncovered: capability is closer to C' than to C -> not covered -> retained.
