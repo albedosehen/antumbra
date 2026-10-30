@@ -54,13 +54,11 @@ impl Seen {
         judged: true,
         ..Seen::NOTHING
     };
+    /// Judged against the work and drawn on. Every use is also a judgment, so
+    /// `judged - used` is exactly the times it was passed over, whichever way
+    /// it was shown.
     pub const USED: Seen = Seen {
         judged: true,
-        used: true,
-        ..Seen::NOTHING
-    };
-    /// Drawn on by work it was not judged against (an agent's own recall).
-    pub const USED_UNJUDGED: Seen = Seen {
         used: true,
         ..Seen::NOTHING
     };

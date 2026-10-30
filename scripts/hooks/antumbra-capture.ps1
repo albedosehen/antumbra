@@ -46,6 +46,11 @@ if ($event -eq 'Stop' -and $json.last_assistant_message) {
                 $client.Timeout = [TimeSpan]::FromSeconds(2)
                 $client.DefaultRequestHeaders.Authorization =
                     New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $token)
+                # The machine, named as the MCP client names it
+                # (antumbra-mcp-headers), so what this machine's agent recalled
+                # for itself is judged against this turn.
+                $hostId = if ($env:ANTUMBRA_HOST_ID) { $env:ANTUMBRA_HOST_ID.Trim() } else { '' }
+                if ($hostId) { [void]$client.DefaultRequestHeaders.TryAddWithoutValidation('X-Antumbra-Host', $hostId) }
                 $content = New-Object System.Net.Http.StringContent($body, [System.Text.Encoding]::UTF8, 'application/json')
                 [void]$client.PostAsync("$apiUrl/mcp/call", $content).GetAwaiter().GetResult()
             } finally { $client.Dispose() }

@@ -390,10 +390,12 @@ impl McpServer {
             }
         }
         let now = Utc::now();
+        // What the agent recalled for itself is recorded only when drawn on,
+        // and then as any use is: a judgment that came out used.
         for (ids, seen) in [
             (&used, Seen::USED),
             (&passed, Seen::PASSED_OVER),
-            (&used_own, Seen::USED_UNJUDGED),
+            (&used_own, Seen::USED),
         ] {
             memory_use::record(&self.store, &self.tenant, ids, seen, now)
                 .await

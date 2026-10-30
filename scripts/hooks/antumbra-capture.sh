@@ -41,11 +41,22 @@ if [ "$event" = "Stop" ] && command -v curl >/dev/null 2>&1; then
           arguments: ({ session: $s, text: $text[0:4000] }
                       + (if .prompt_id then { turn: .prompt_id } else {} end)) }
       end' 2>/dev/null || true)
+  # The machine, named as the MCP client names it (antumbra-mcp-headers), so
+  # what this machine's agent recalled for itself is judged against this turn.
+  host_id="$(printf '%s' "${ANTUMBRA_HOST_ID:-}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   if [ -n "$token" ] && [ -n "$body" ]; then
-    curl -s -o /dev/null -X POST "$url/mcp/call" \
-      -H 'Content-Type: application/json' \
-      -H "Authorization: Bearer $token" \
-      --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
+    if [ -n "$host_id" ]; then
+      curl -s -o /dev/null -X POST "$url/mcp/call" \
+        -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer $token" \
+        -H "X-Antumbra-Host: $host_id" \
+        --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
+    else
+      curl -s -o /dev/null -X POST "$url/mcp/call" \
+        -H 'Content-Type: application/json' \
+        -H "Authorization: Bearer $token" \
+        --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
+    fi
   fi
 fi
 

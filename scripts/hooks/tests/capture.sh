@@ -36,6 +36,11 @@ check 'reports the turn to the server' $?
 printf '%s' "$body" | jq -e '.arguments == {session: "s1", text: "deployed it blue green", turn: "p1"}' > /dev/null
 check 'with its session, turn and answer' $?
 
+echo 'the end of a turn on a named machine'
+out="$(ANTUMBRA_HOST_ID=windows run '{"session_id":"s4","prompt_id":"p4","hook_event_name":"Stop","last_assistant_message":"done"}')"
+grep -qx 'X-Antumbra-Host: windows' "$CURL_ARGS"
+check 'names the machine as the MCP client does' $?
+
 echo 'the stop after the nudge'
 out="$(run '{"session_id":"s1","prompt_id":"p1","hook_event_name":"Stop","last_assistant_message":"saved"}')"
 test -z "$out" && test ! -e "$CURL_ARGS"
