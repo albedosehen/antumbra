@@ -86,7 +86,7 @@ flowchart LR
 
 ### QLoRA - Quantized LoRA
 
-LoRA, but the frozen base is stored in 4-bit to save memory; adapters stay full precision; gradients flow through the dequantized base into the adapters. Antumbra v0 uses an f16/bf16 base - true 4-bit is the deferred MT-4 step.
+LoRA, but the frozen base is stored in 4-bit to save memory; adapters stay full precision; gradients flow through the dequantized base into the adapters. Antumbra trains over a bf16 base by default; `antumbra train --quantize-base` holds the base as 4-bit `Q4_K` instead and dequantizes it on the fly, as drawn here, in about a quarter of the memory.
 
 ```mermaid
 flowchart LR
@@ -106,7 +106,7 @@ The specific 4-bit number format QLoRA introduced: a quantization grid that is i
 
 ### GGUF
 
-The llama.cpp model file format (quantized weights such as `Q4_K`, plus metadata). candle and `llama-cpp-2` load and serve these, so a graduated adapter is serveable without re-quantizing. (Originally an acronym, "GPT-Generated Unified Format"; now effectively just the format name.)
+The llama.cpp model file format (quantized weights such as `Q4_K`, plus metadata). (Originally an acronym, "GPT-Generated Unified Format"; now effectively just the format name.) Antumbra reads and writes no GGUF files: the base comes from the Hugging Face hub as safetensors, and every expert is saved as safetensors. What it shares with GGUF is the quantization types: candle implements `Q4_K` and its kin in memory, and the 4-bit base option uses them. To serve an expert with llama.cpp instead, its adapter would first be converted to llama.cpp's own LoRA format.
 
 ---
 
@@ -155,7 +155,7 @@ flowchart LR
 
 ## How they compose
 
-The whole trainer in one picture: **RAFT** (the loop) drives **SFT** on **PEFT/LoRA** adapters over a frozen base, rewarded by **RLVR** verifiers, on **candle** - with **GRPO** and **QLoRA/NF4/GGUF** as the labeled upgrade path.
+The whole trainer in one picture: **RAFT** (the loop) drives **SFT** on **PEFT/LoRA** adapters over a frozen base, rewarded by **RLVR** verifiers, on **candle** - with **GRPO** as the other training algorithm and a 4-bit **QLoRA** base (`Q4_K`, not NF4) as an option.
 
 ```mermaid
 flowchart TD

@@ -257,7 +257,7 @@ impl Serve for MultiAdapterServe {
 #[cfg(not(feature = "models"))]
 #[derive(Debug, Clone)]
 pub struct MultiAdapterServe {
-    /// GGUF / safetensors path of the shared, code-capable base.
+    /// The shared, code-capable base: a Hugging Face model id.
     pub base_model_uri: String,
     /// Directory of frozen LoRA adapters to hot-swap.
     pub adapter_dir: String,
@@ -294,7 +294,7 @@ mod tests {
 
     #[tokio::test]
     async fn serve_seam_reports_unimplemented() {
-        let serve = MultiAdapterServe::new("mem://base.gguf", "/adapters");
+        let serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B-Instruct", "/adapters");
         let req = ActRequest {
             task_id: "t:1".into(),
             prompt: "hello".into(),

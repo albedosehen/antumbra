@@ -55,8 +55,8 @@ flowchart TB
     CRIT -. "out-of-scope / cold-start only" .-> FLAG["optional flagship<br/>escalation tier (shrinks over time)"]
 ```
 
-- **Serving** - `llama-cpp-2` (GGUF base + LoRA hot-swap) or `mistral.rs` (candle, ISQ, OpenAI-compatible). One base + many adapters = **S-LoRA-style multi-adapter serving** on a single GPU.
-- **Trainer** - `candle` (`burn` fallback) for QLoRA adapters _and_ the gate. The heaviest Rust ML work.
+- **Serving** - `candle`, through the same model code the trainer uses, so an expert is served by exactly what trained it. One resident base + many adapters, each request's adapter hot-swapped onto the base = **S-LoRA-style multi-adapter serving** on a single GPU. The base comes from the Hugging Face hub as safetensors and every expert is saved as safetensors; no GGUF file is read or written, and nothing is converted to serve. `llama-cpp-2` and `mistral.rs` are not used.
+- **Trainer** - `candle` (`burn` fallback) for LoRA adapters _and_ the gate, over a bf16 base, or a 4-bit one (`Q4_K`, dequantized in the forward) when `antumbra train --quantize-base` asks for it. The heaviest Rust ML work.
 - **Substrate** - one SurrealDB instance is every store + the durable flow state.
 
 ---
@@ -139,8 +139,8 @@ erDiagram
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Language    | **Rust** (single plane)                                                                                                        |
 | Substrate   | **SurrealDB ≥ 3.0** via `surql-rs` (`oneiriq-surql` ≥ 0.28)                                                                    |
-| Inference   | `llama-cpp-2` (GGUF + LoRA) and/or `mistral.rs` (S-LoRA-style multi-adapter)                                                   |
-| Training    | **`candle`** - QLoRA adapters **and** the gate (NF4 4-bit base + LoRA); `burn` fallback                                        |
+| Inference   | **`candle`**, the trainer's own model code: one resident base, each request's adapter hot-swapped onto it (S-LoRA-style)       |
+| Training    | **`candle`** - LoRA adapters **and** the gate, over a bf16 base or an opt-in 4-bit `Q4_K` one; `burn` fallback                 |
 | Base model  | open, **code-capable** (Qwen-Coder-class or a code-tuned OLMo 3); shared by all adapters                                       |
 | Embeddings  | 384-d (all-MiniLM-L6-v2, candle BERT, CPU); capability vectors are the centroid of solved-task embeddings (evaluated behavior) |
 | Async / CLI | `tokio`; `ratatui` (terminal-native ergonomics)                                                                                |
@@ -194,7 +194,7 @@ All **nineteen crates** exist and compile (eighteen workspace members plus the s
 | embed (the MCP runtime surface)                                                | **implemented + tested** - the OpenAI-compatible `HttpEmbedder` (behind the `Embedder` port, dimension-enforced) shared by the MCP server and the TUI, so route/ask/recall embed with the same model the population was built with.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | tui (the boundary-conditioned gate, the operator console)                      | **interactive operator console** (ratatui + tachyonfx), run as `antumbra tui`, over the live population/gate as the server sends it (`/console/snapshot`, with the hooks' token; the substrate's pages and the actions need an operator's token): route-ask through the server's gate, a live event stream of what changed between reads, drill-down inspection, a tabbed multi-page shell (population · memory · loop · evals), switchable layouts (focused / dashboard / graph / sortable table), a KPI metric strip, time-series charts and a reward-landscape heatmap, multi-monitor high-refresh pacing, fuzzy filter/command palette, switchable themes, and operator actions (prune/graduate shadow · freeze/thaw expert · delete boundary · graceful-stop the loop) behind a confirm, plus drill-downs (route-ask, evaluation regression, gate/router inspector). Capability-tiered rendering (`--render`; raster sixel/kitty behind a `raster` feature) keeps the Braille/Canvas path universal. A headless `snapshot` mode emits a text grid (e2e) + a PNG screenshot. |
 
-Not yet runtime-validated / built: a live multi-tenant deployment of the networked MCP against a `ws://` server; the learned latent gate (v0 is the heuristic coverage gate); GGUF-Q4 quantized backward (MT-4); `SCHEMAFULL` + the surql-rs migration-history runner.
+Not yet runtime-validated / built: a live multi-tenant deployment of the networked MCP against a `ws://` server; the learned latent gate (v0 is the heuristic coverage gate); `SCHEMAFULL` + the surql-rs migration-history runner.
 
 ---
 
