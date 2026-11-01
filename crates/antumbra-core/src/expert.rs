@@ -14,9 +14,10 @@ use crate::ids::{CompartmentId, ExpertId, Generation, UserId};
 pub struct Expert {
     pub id: ExpertId,
     pub name: String,
-    /// The shared base this adapter rides on (e.g. a code-tuned 7-8B).
+    /// The shared base this adapter rides on: a Hugging Face model id
+    /// (`Qwen/Qwen2.5-Coder-1.5B-Instruct` by default).
     pub base_model: String,
-    /// Path to the adapter artifact (gguf / safetensors / lora).
+    /// Path to the adapter's safetensors file: its LoRA factors.
     pub artifact_uri: String,
     /// Structured "what I do" card.
     #[serde(default)]
