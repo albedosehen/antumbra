@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.6 - 2026-11-01
+
+Training you can watch, and experts on the CPU. A standing expert's training now shows in the console as a shadow, and what it missed as a boundary; a node without a GPU can serve experts at a usable speed; and the memory counts from 0.2.5 add up. x86-64 builds now need a CPU with AVX2.
+
+### Training
+
+- **A standing expert's training is a shadow** ([#256](https://github.com/albedosehen/antumbra/pull/256)). The server's keeper writes it as `exploring` while it trains, then `graduated` when the expert is admitted or `pruned` when it is refused or fails, with a reward curve from the base model's held-out pass rate to the trained one's. The console's penumbra had stayed empty on a server, because only the CLI's loop wrote shadows. An expert minted before this gets its shadow once, from its card.
+- **What a training missed is a boundary** ([#256](https://github.com/albedosehen/antumbra/pull/256)). Each behavior the expert did not follow becomes an open boundary beside it, holding the rule, the task it missed and its answer, at the share of that behavior's tasks it failed. Open boundaries are recorded, never gating routing. One goes away when an admitted expert learns the behavior or the behavior is no longer taught.
+- **A boundary can belong to a user** ([#256](https://github.com/albedosehen/antumbra/pull/256)). One from a behavior holds that user's own rule, so only they read it. Existing boundaries have no owner and stay shared.
+
+### Serving on the CPU
+
+- **A bf16 expert loads into a CPU model** ([#252](https://github.com/albedosehen/antumbra/pull/252)). Experts are saved in bf16 and every CPU model is held in f32, so serving one, or warm-starting from one, failed on the CPU. Each factor is now cast losslessly as it loads.
+- **The base can be served quantized** ([#252](https://github.com/albedosehen/antumbra/pull/252)), as Q8_0 or Q4_K, each projection quantized as its layer loads and never dequantized. Experts stay dense beside it. On an i9-11900H a production expert went from about 1.4 tokens a second over the dense base to 6.4 at Q8_0 and 8.8 at Q4_K, and loading from about 3 minutes to 15 to 41 seconds. A model loaded this way serves only; training keeps its own path.
+- **x86-64 builds target x86-64-v3** ([#252](https://github.com/albedosehen/antumbra/pull/252)), so candle's quantized kernels use AVX2 instead of their scalar fallback. The release binaries and images need AVX2, FMA and F16C: Intel since Haswell (2013), AMD since Excavator (2015). ARM builds are unchanged.
+
+### Memory
+
+- **Pass-overs add up** ([#255](https://github.com/albedosehen/antumbra/pull/255)). A memory an agent recalled for itself and then drew on counted as used but not as judged, so `judged - used` undercounted the pass-overs of any memory that also had one. Every use now counts as a judgment.
+- **The capture hook names the machine** ([#255](https://github.com/albedosehen/antumbra/pull/255)), as the MCP client does (`X-Antumbra-Host` from `ANTUMBRA_HOST_ID`), so what an agent recalled for itself is judged against the turn that used it. Run `antumbra setup` again, or copy the new `antumbra-capture` over a hand-installed one.
+
+### Docs
+
+- **How Antumbra holds models** ([#257](https://github.com/albedosehen/antumbra/pull/257)). The docs said GGUF and NF4, which the code never used. They now say what it does: a safetensors base from the Hugging Face hub and safetensors experts, served by candle, trained over a bf16 base (or Q4_K in memory with `--quantize-base`).
+
 ## 0.2.5 - 2026-10-29
 
 Memories the system keeps itself. Nobody has to reinforce or penalize a memory: the server counts what recall shows, judges at the end of each turn which of those the answer drew on, links a new memory to what it restates, and lets an unused one fade at its network's half-life. An operator steers it with knobs while it runs ([#253](https://github.com/albedosehen/antumbra/pull/253)).
