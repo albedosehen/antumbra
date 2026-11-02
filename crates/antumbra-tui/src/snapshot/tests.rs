@@ -221,6 +221,52 @@ fn graduated_shadow() -> Shadow {
     }
 }
 
+/// A standing expert's training as the keeper records it: from the base
+/// model's held-out pass rate to the trained expert's.
+fn kept_shadow() -> Shadow {
+    Shadow {
+        id: antumbra_core::behavior::shadow_id(
+            &antumbra_core::TenantId::new("ws:default"),
+            &antumbra_core::UserId::new("user:default"),
+            "code",
+            "5c0ffee1d2e3f4a5",
+        ),
+        parent_expert: Some(ExpertId::new(
+            "expert:ws:default:user:default:behavior:code",
+        )),
+        adapter_uri: Some("adapters/code.safetensors".into()),
+        status: ShadowStatus::Graduated,
+        generation: Generation::ZERO,
+        reward_curve: vec![0.42, 0.91],
+        created_at: Utc::now(),
+    }
+}
+
+/// The open boundary a training leaves for a behavior it missed: the rule,
+/// and the held-out task it was not followed on with the answer given.
+fn missed_boundary() -> FailureBoundary {
+    FailureBoundary {
+        id: BoundaryId::new(
+            "boundary:expert:ws:default:user:default:behavior:code:memory:tests-first",
+        ),
+        behavior: "Run the test suite before calling a change done.".into(),
+        fail_context: serde_json::json!({
+            "scope": "code",
+            "task": "Rename the config loader's environment variable and tell me when it is finished.",
+            "answer": "Done: ANTUMBRA_CFG is now ANTUMBRA_CONFIG everywhere.",
+        }),
+        near_ok_context: None,
+        governing_features: Vec::new(),
+        grain: None,
+        context_vec: None,
+        ok_context_vec: None,
+        confidence: 0.33,
+        generation: Generation::ZERO,
+        owner: Some(antumbra_core::UserId::new("user:default")),
+        created_at: Utc::now(),
+    }
+}
+
 fn actionable_boundary() -> FailureBoundary {
     FailureBoundary {
         id: BoundaryId::new("boundary:demo-0"),

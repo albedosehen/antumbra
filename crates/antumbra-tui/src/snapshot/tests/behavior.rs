@@ -737,6 +737,94 @@ fn auto_follow_tags_the_cap_until_pinned() {
     );
 }
 
+// A standing expert's training reads by the scope it trained, its pass rate
+// from the base model's to the trained expert's, and not by its long id.
+#[test]
+fn a_standing_experts_training_reads_by_its_scope() {
+    let mut app = demo_app();
+    app.shadows = vec![kept_shadow()];
+    app.focus = Focus::Shadows;
+    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    assert!(
+        text.contains("✦ code · behaviors · 0.42 → 0.91"),
+        "the list row names the scope and the change:\n{text}"
+    );
+    assert!(text.contains("standing expert's training"), "titled as one");
+    assert!(text.contains("base"), "the base model's rate is labeled");
+    assert!(text.contains("trained"), "the trained rate is labeled");
+    assert!(
+        text.contains("pass rate · base → trained"),
+        "the chart says what its two points are"
+    );
+    assert!(
+        !text.contains("shadow:ws:"),
+        "the sixty-character id is not what the panel shows:\n{text}"
+    );
+}
+
+// An open boundary from a training shows what it was recorded from: the
+// scope, the task the expert missed and its answer, and whose it is.
+#[test]
+fn an_open_boundary_shows_the_task_it_missed() {
+    let mut app = demo_app();
+    app.boundaries = vec![missed_boundary()];
+    app.focus = Focus::Boundaries;
+    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    assert!(
+        text.contains("○ code · Run the test suite"),
+        "the list row names the scope:\n{text}"
+    );
+    assert!(text.contains("open · recorded, inert"), "open, so inert");
+    assert!(text.contains("private to"), "the owner is shown");
+    assert!(text.contains("user:default"), "by name");
+    assert!(
+        text.contains("Rename the config"),
+        "the missed task is shown"
+    );
+    assert!(text.contains("answer"), "and the answer given");
+    assert!(
+        !text.contains("feature    -"),
+        "no empty feature row for a boundary that has none:\n{text}"
+    );
+}
+
+// The gate summary lists only boundaries that gate routing: an open one,
+// listed with the stop glyph, would read as a gate.
+#[test]
+fn the_gate_summary_lists_no_open_boundary() {
+    let mut app = demo_app();
+    app.boundaries = vec![missed_boundary()];
+    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    assert!(
+        text.contains("1 (0 actionable)"),
+        "counted, none actionable:\n{text}"
+    );
+    assert!(!text.contains('⛔'), "no stop glyph for it:\n{text}");
+}
+
+// The console's prune and graduate steer the generational loop; on a standing
+// expert's training, which its keeper settles, they decline and say why.
+#[test]
+fn a_standing_experts_training_is_left_to_its_keeper() {
+    let mut app = demo_app();
+    app.shadows = vec![kept_shadow()];
+    app.focus = Focus::Shadows;
+    app.request_action();
+    assert!(app.pending.is_none(), "no prune staged");
+    assert_eq!(app.mode, Mode::Normal);
+    app.request_graduate();
+    assert!(app.pending.is_none(), "no graduation staged");
+    assert!(
+        app.events.iter().any(|e| e.text.contains("keeper")),
+        "the reason is on the event line"
+    );
+    // The loop's own shadows still take both.
+    app.shadows = vec![graduated_shadow()];
+    app.shadows[0].status = ShadowStatus::Exploring;
+    app.request_action();
+    assert!(app.pending.is_some(), "a loop shadow is still pruned");
+}
+
 // Tab into the boundaries focus: the inspector replaces the expert detail and
 // shows the selected scope's behavior, actionable status, and governing feature.
 #[test]
