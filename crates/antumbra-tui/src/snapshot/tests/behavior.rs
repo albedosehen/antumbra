@@ -746,7 +746,7 @@ fn a_standing_experts_training_reads_by_its_scope() {
     app.focus = Focus::Shadows;
     let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
     assert!(
-        text.contains("✦ code · behaviors · 0.42 → 0.91"),
+        text.contains("✦ code · 0.42 → 0.91"),
         "the list row names the scope and the change:\n{text}"
     );
     assert!(text.contains("standing expert's training"), "titled as one");
@@ -762,6 +762,55 @@ fn a_standing_experts_training_reads_by_its_scope() {
     );
 }
 
+// A repository's scope is its path, which fills a narrow list's row: the
+// lists name it by the repository, so a training keeps its reading and the
+// behaviors one expert missed read apart, where each row had shown the same
+// path and nothing after it.
+#[test]
+fn a_repository_scope_leaves_room_in_the_lists() {
+    let scope = "github.com/acme/orders-service-backend";
+    let mut app = demo_app();
+    let mut s = kept_shadow();
+    s.id = antumbra_core::behavior::shadow_id(
+        &antumbra_core::TenantId::new("ws:default"),
+        &antumbra_core::UserId::new("user:default"),
+        scope,
+        "5c0ffee1d2e3f4a5",
+    );
+    s.reward_curve = vec![0.68];
+    app.shadows = vec![s];
+    app.focus = Focus::Shadows;
+    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    assert!(
+        text.contains("✦ orders-service-backend · 0.68"),
+        "the repository's name and the reading fit:\n{text}"
+    );
+
+    let rules = [
+        "Before handing back a branch, run the contract tests.",
+        "Never log an order's payload, only its id.",
+    ];
+    app.boundaries = rules
+        .iter()
+        .map(|rule| {
+            let mut b = missed_boundary();
+            b.behavior = (*rule).into();
+            b.fail_context["scope"] = scope.into();
+            b
+        })
+        .collect();
+    app.focus = Focus::Boundaries;
+    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    assert!(
+        text.contains("○ Before handing back a branch"),
+        "one behavior reads:\n{text}"
+    );
+    assert!(
+        text.contains("○ Never log an order's"),
+        "and the other, apart from it:\n{text}"
+    );
+}
+
 // An open boundary from a training shows what it was recorded from: the
 // scope, the task the expert missed and its answer, and whose it is.
 #[test]
@@ -771,8 +820,8 @@ fn an_open_boundary_shows_the_task_it_missed() {
     app.focus = Focus::Boundaries;
     let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
     assert!(
-        text.contains("○ code · Run the test suite"),
-        "the list row names the scope:\n{text}"
+        text.contains("○ Run the test suite"),
+        "the list row leads with the behavior:\n{text}"
     );
     assert!(text.contains("open · recorded, inert"), "open, so inert");
     assert!(text.contains("private to"), "the owner is shown");
