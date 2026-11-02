@@ -265,17 +265,36 @@ fn reward_span(curve: &[f32]) -> Option<String> {
     }
 }
 
+/// A scope as a list shows it: a repository's, such as
+/// `github.com/acme/orders`, by the repository's name, the last part of its
+/// path; any other, such as `everywhere`, as it is. A repository's path fills
+/// a list's row before the row says anything else; the panel below the list
+/// gives it whole.
+fn short_scope(scope: &str) -> &str {
+    scope
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(scope)
+}
+
 /// A shadow's list row: its status glyph (graduated ✦, pruned ×, in flight
-/// ◌), its name and where its reward went. The glyph and the row's color
-/// carry the status, which the training panel spells out; the list is
+/// ◌), what it trained and where its reward went. The glyph and the row's
+/// color carry the status, which the training panel spells out; the list is
 /// narrow, and the trained reading at the row's end is what it is read for.
+/// A standing expert's training is named by its scope, shortened; the loop's
+/// by its id and generation.
 fn shadow_row(s: &Shadow) -> String {
     let glyph = match s.status.as_str() {
         "graduated" => "✦",
         "pruned" => "×",
         _ => "◌",
     };
-    let mut row = format!("{glyph} {}", shadow_name(s));
+    let name = match behavior::shadow_scope(&s.id) {
+        Some(scope) => short_scope(scope).to_string(),
+        None => shadow_name(s),
+    };
+    let mut row = format!("{glyph} {name}");
     if let Some(r) = reward_span(&s.reward_curve) {
         row.push_str(" · ");
         row.push_str(&r);
@@ -283,12 +302,15 @@ fn shadow_row(s: &Shadow) -> String {
     row
 }
 
-/// A boundary's list row: actionable ⛔ or open ○, then the scope its
-/// context names, when it names one (a training's does), and the behavior.
+/// A boundary's list row: actionable ⛔ or open ○, the behavior, then the
+/// scope its context names, shortened, when it names one (a training's
+/// does). The behavior leads: a standing expert misses several behaviors in
+/// one scope, and with the scope first a narrow list shows the same words on
+/// each of their rows.
 fn boundary_row(b: &FailureBoundary) -> String {
     let glyph = if b.is_actionable() { "⛔" } else { "○" };
     match b.fail_context.get("scope").and_then(|s| s.as_str()) {
-        Some(scope) => format!("{glyph} {scope} · {}", b.behavior),
+        Some(scope) => format!("{glyph} {} · {}", b.behavior, short_scope(scope)),
         None => format!("{glyph} {}", b.behavior),
     }
 }
