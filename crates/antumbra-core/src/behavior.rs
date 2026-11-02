@@ -16,7 +16,7 @@ use fancy_regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::ids::{CompartmentId, TenantId, UserId};
+use crate::ids::{CompartmentId, ShadowId, TenantId, UserId};
 use crate::{Expert, Memory};
 
 /// The scope of a behavior that applies in every repository.
@@ -234,6 +234,30 @@ pub fn compartment_id(tenant: &TenantId, user: &UserId) -> CompartmentId {
         tenant.as_str(),
         user.as_str()
     ))
+}
+
+/// The shadow a training of `user`'s behaviors in `scope` is recorded as, in
+/// the penumbra: the workspace, the user and the scope under `shadow:`, then
+/// the first twelve characters of the taught set's [`fingerprint`], so the
+/// same set trained again is the same row and a changed set a new one.
+pub fn shadow_id(tenant: &TenantId, user: &UserId, scope: &str, set: &str) -> ShadowId {
+    ShadowId::new(format!(
+        "shadow:{}:{}:behavior:{scope}:{}",
+        tenant.as_str(),
+        user.as_str(),
+        &set[..set.len().min(12)]
+    ))
+}
+
+/// The scope a [`shadow_id`] trained behaviors for, or `None` for any other
+/// shadow, such as one of the generational loop's. The workspace and user
+/// ids hold colons themselves, so the scope is found from the `behavior`
+/// marker on, and the set after it is the last part.
+pub fn shadow_scope(id: &ShadowId) -> Option<&str> {
+    let rest = id.as_str().strip_prefix("shadow:")?;
+    let (_, rest) = rest.split_once(":behavior:")?;
+    let (scope, _set) = rest.rsplit_once(':')?;
+    (!scope.is_empty()).then_some(scope)
 }
 
 /// Whether `e` is one of `user`'s standing experts in `tenant`. The owner

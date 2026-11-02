@@ -312,18 +312,16 @@ async fn note(
     Ok(())
 }
 
-/// The shadow a training of `plan` is recorded as: its scope's standing
-/// expert, under `shadow:`, and the set it teaches, so the same set trained
-/// again is the same row and a changed set a new one.
+/// The shadow a training of `plan` is recorded as ([`behavior::shadow_id`]):
+/// the same set trained again is the same row and a changed set a new one.
+/// The console reads the scope back from it.
 pub fn shadow_id(plan: &Plan) -> ShadowId {
-    let set = behavior::fingerprint(&plan.taught);
-    ShadowId::new(format!(
-        "shadow:{}:{}:behavior:{}:{}",
-        plan.tenant.as_str(),
-        plan.user.as_str(),
-        plan.scope,
-        &set[..set.len().min(12)]
-    ))
+    behavior::shadow_id(
+        &plan.tenant,
+        &plan.user,
+        &plan.scope,
+        &behavior::fingerprint(&plan.taught),
+    )
 }
 
 /// Record a training of `plan` as begun: its shadow, exploring, in the

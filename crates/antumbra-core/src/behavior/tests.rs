@@ -35,6 +35,33 @@ fn ssh() -> Spec {
 }
 
 #[test]
+fn a_training_shadow_names_the_scope_it_trained() {
+    let id = shadow_id(
+        &TenantId::new("ws:default"),
+        &UserId::new("user:default"),
+        "code",
+        "0123456789abcdef",
+    );
+    assert_eq!(
+        id.as_str(),
+        "shadow:ws:default:user:default:behavior:code:0123456789ab"
+    );
+    assert_eq!(shadow_scope(&id), Some("code"));
+    // A scope with a colon of its own is read whole.
+    let repo = shadow_id(
+        &TenantId::new("ws:a"),
+        &UserId::new("user:b"),
+        "repo:acme/orders",
+        "ff",
+    );
+    assert_eq!(shadow_scope(&repo), Some("repo:acme/orders"));
+    // The generational loop's shadows name no scope.
+    for other in ["shadow:g3", "shadow:run-1:g3:7", "behavior:code:ab"] {
+        assert_eq!(shadow_scope(&ShadowId::new(other)), None, "{other}");
+    }
+}
+
+#[test]
 fn a_behavior_with_a_discriminating_check_has_no_problems() {
     assert_eq!(ssh().problems(), Vec::<String>::new());
     assert_eq!(ssh().follows("ssh em0 nvidia-smi"), Some(true));

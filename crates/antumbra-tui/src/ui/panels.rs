@@ -10,7 +10,12 @@ use ratatui::Frame;
 use crate::app::{App, Focus};
 use crate::scroll;
 
-use super::{gauge_row, heading, kv, panel, panel_focused, shadow_color};
+use antumbra_core::behavior;
+
+use super::{
+    boundary_row, clip, context_fields, gauge_row, heading, kv, panel, panel_focused, shadow_color,
+    shadow_row,
+};
 
 /// The selected expert's detail plus the gate summary (the umbra focus).
 pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
@@ -88,7 +93,9 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
         "boundaries",
         &format!("{} ({} actionable)", app.boundaries.len(), actionable),
     ));
-    for b in app.boundaries.iter().take(3) {
+    // Only the actionable ones inhibit routing; an open one is recorded and
+    // inert, and listed here it would read as a gate.
+    for b in app.boundaries.iter().filter(|b| b.is_actionable()).take(3) {
         let feat = b.governing_features.first().cloned().unwrap_or_default();
         g.push(Line::from(Span::styled(
             format!("  ⛔ {} · {}", b.behavior, feat),
@@ -121,10 +128,9 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
         )));
     } else {
         for b in &app.boundaries {
-            let actionable = b.is_actionable();
             lines.push(Line::from(Span::styled(
-                format!("{} {}", if actionable { "⛔" } else { "○" }, b.behavior),
-                Style::default().fg(if actionable { t.alert } else { t.dim }),
+                boundary_row(b),
+                Style::default().fg(if b.is_actionable() { t.alert } else { t.dim }),
             )));
         }
     }
@@ -145,7 +151,11 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
 
     let mut d: Vec<Line> = Vec::new();
     if let Some(b) = app.selected_boundary() {
-        d.push(heading(&t, b.behavior.clone()));
+        // Each row on one line, so none pushes the next out of the panel: the
+        // room inside the border, and beside a row's key.
+        let width = (rows[1].width as usize).saturating_sub(2);
+        let room = width.saturating_sub(11);
+        d.push(heading(&t, clip(&b.behavior, width)));
         let (status, sc) = if b.is_actionable() {
             ("actionable · gates routing", t.alert)
         } else {
@@ -155,24 +165,35 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!("{:<11}", "status"), Style::default().fg(t.dim)),
             Span::styled(status.to_string(), Style::default().fg(sc)),
         ]));
-        let feat = if b.governing_features.is_empty() {
-            "-".to_string()
-        } else {
-            b.governing_features.join(", ")
-        };
-        d.push(kv(&t, "feature", &feat));
-        d.push(kv(
-            &t,
-            "grain",
-            &b.grain
-                .map(|g| format!("{g:?}"))
-                .unwrap_or_else(|| "-".into()),
-        ));
+        if !b.governing_features.is_empty() {
+            d.push(kv(&t, "feature", &b.governing_features.join(", ")));
+        }
+        if let Some(g) = b.grain {
+            d.push(kv(&t, "grain", &format!("{g:?}")));
+        }
         d.push(gauge_row(&t, "confidence", b.confidence, t.accent));
-        // The contrastive pair that makes it actionable: incorrect in C, fine in C'.
-        if let Some(ok) = &b.near_ok_context {
-            d.push(kv(&t, "incorrect", &b.fail_context.to_string()));
-            d.push(kv(&t, "acceptable", &ok.to_string()));
+        if let Some(owner) = &b.owner {
+            d.push(kv(&t, "private to", owner.as_str()));
+        }
+        match &b.near_ok_context {
+            // The contrastive pair that makes it actionable: incorrect in C,
+            // fine in C'.
+            Some(ok) => {
+                d.push(kv(
+                    &t,
+                    "incorrect",
+                    &clip(&b.fail_context.to_string(), room),
+                ));
+                d.push(kv(&t, "acceptable", &clip(&ok.to_string(), room)));
+            }
+            // An open one has only the context it failed in. A training's
+            // names the scope, the held-out task and the answer given.
+            None => {
+                for (k, v) in context_fields(&b.fail_context) {
+                    let flat = v.split_whitespace().collect::<Vec<_>>().join(" ");
+                    d.push(kv(&t, &k, &clip(&flat, room)));
+                }
+            }
         }
     } else {
         d.push(Line::from(Span::styled(
@@ -211,19 +232,8 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
         )));
     } else {
         for s in &app.shadows {
-            let glyph = match s.status.as_str() {
-                "graduated" => "✦",
-                "pruned" => "×",
-                _ => "◌",
-            };
             lines.push(Line::from(Span::styled(
-                format!(
-                    "{} {} · g{} · {}",
-                    glyph,
-                    s.id.as_str(),
-                    s.generation.0,
-                    s.status.as_str()
-                ),
+                shadow_row(s),
                 Style::default().fg(shadow_color(&t, s.status.as_str())),
             )));
         }
@@ -244,8 +254,17 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     );
 
     let mut d: Vec<Line> = Vec::new();
+    let scope = app
+        .selected_shadow()
+        .and_then(|s| behavior::shadow_scope(&s.id));
+    let kept = scope.is_some();
     if let Some(s) = app.selected_shadow() {
-        d.push(heading(&t, s.id.as_str().to_string()));
+        let width = (rows[1].width as usize).saturating_sub(2);
+        let title = match scope {
+            Some(scope) => format!("{scope} · a standing expert's training"),
+            None => s.id.as_str().to_string(),
+        };
+        d.push(heading(&t, clip(&title, width)));
         d.push(Line::from(vec![
             Span::styled(format!("{:<11}", "status"), Style::default().fg(t.dim)),
             Span::styled(
@@ -253,14 +272,21 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(shadow_color(&t, s.status.as_str())),
             ),
         ]));
-        d.push(kv(&t, "generation", &s.generation.0.to_string()));
-        let final_reward = s.reward_curve.last().copied().unwrap_or(0.0);
-        d.push(gauge_row(
-            &t,
-            "final reward",
-            final_reward,
-            t.fitness(final_reward, 1.0),
-        ));
+        let last = s.reward_curve.last().copied().unwrap_or(0.0);
+        if kept {
+            // The held-out pass rate before training and after: the base
+            // model's, then the expert's. One recorded from an expert's card
+            // has only the trained one, which the card keeps.
+            let base = match s.reward_curve.as_slice() {
+                [base, _, ..] => format!("{base:.2}"),
+                _ => "not recorded".into(),
+            };
+            d.push(kv(&t, "base", &base));
+            d.push(gauge_row(&t, "trained", last, t.fitness(last, 1.0)));
+        } else {
+            d.push(kv(&t, "generation", &s.generation.0.to_string()));
+            d.push(gauge_row(&t, "final reward", last, t.fitness(last, 1.0)));
+        }
     } else {
         d.push(Line::from(Span::styled(
             "(select a shadow with ↑↓)",
@@ -281,17 +307,21 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
         .selected_shadow()
         .map(|s| s.reward_curve.as_slice())
         .unwrap_or(&[]);
-    reward_chart(f, app, rows[2], curve);
+    reward_chart(f, app, rows[2], curve, kept);
 }
 
 /// The selected shadow's reward curve as a line chart over training steps: the
-/// trajectory that decides graduation vs collapse.
-fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32]) {
+/// trajectory that decides graduation vs collapse. A standing expert's
+/// training (`kept`) reads two points, the base model's pass rate and the
+/// trained expert's.
+fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32], kept: bool) {
     let t = app.theme();
-    let block = panel(
-        &t,
-        Span::styled(" reward · over steps ", Style::default().fg(t.ink)),
-    );
+    let title = if kept {
+        " pass rate · base → trained "
+    } else {
+        " reward · over steps "
+    };
+    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink)));
     if curve.is_empty() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -389,13 +419,8 @@ fn penumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
         app.shadows
             .iter()
             .map(|s| {
-                let glyph = match s.status.as_str() {
-                    "graduated" => "✦",
-                    "pruned" => "×",
-                    _ => "◌",
-                };
                 Line::from(Span::styled(
-                    format!("{} {} · {}", glyph, s.id.as_str(), s.status.as_str()),
+                    shadow_row(s),
                     Style::default().fg(shadow_color(&t, s.status.as_str())),
                 ))
             })
@@ -424,10 +449,9 @@ fn antumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
         app.boundaries
             .iter()
             .map(|b| {
-                let actionable = b.is_actionable();
                 Line::from(Span::styled(
-                    format!("{} {}", if actionable { "⛔" } else { "○" }, b.behavior),
-                    Style::default().fg(if actionable { t.alert } else { t.dim }),
+                    boundary_row(b),
+                    Style::default().fg(if b.is_actionable() { t.alert } else { t.dim }),
                 ))
             })
             .collect()

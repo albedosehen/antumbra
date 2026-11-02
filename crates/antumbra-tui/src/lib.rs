@@ -410,6 +410,55 @@ async fn seed_demo() -> Result<Store> {
         )
         .await?;
     }
+    // And a standing expert's training, as the keeper records one on a node
+    // that trains: its shadow, from the base model's held-out pass rate to the
+    // trained expert's, and an open boundary, private to its user, for the
+    // behavior it missed, with the task it was not followed on.
+    let user = antumbra_core::UserId::new("user:demo");
+    let standing = ExpertId::new(format!(
+        "expert:{DEMO_TENANT}:{}:behavior:code",
+        user.as_str()
+    ));
+    shadow::upsert(
+        &store,
+        &Shadow {
+            id: antumbra_core::behavior::shadow_id(
+                &antumbra_core::TenantId::new(DEMO_TENANT),
+                &user,
+                "code",
+                "5c0ffee1d2e3f4a5",
+            ),
+            parent_expert: None,
+            adapter_uri: Some("mem://standing-code".into()),
+            status: ShadowStatus::Graduated,
+            generation: Generation::ZERO,
+            reward_curve: vec![0.42, 0.91],
+            created_at: now,
+        },
+    )
+    .await?;
+    boundary::upsert(
+        &store,
+        &FailureBoundary {
+            id: BoundaryId::new(format!("boundary:{}:memory:tests-first", standing.as_str())),
+            behavior: "Run the test suite before calling a change done.".into(),
+            fail_context: serde_json::json!({
+                "scope": "code",
+                "task": "Rename the config loader's environment variable and tell me when it is finished.",
+                "answer": "Done: ANTUMBRA_CFG is now ANTUMBRA_CONFIG everywhere.",
+            }),
+            near_ok_context: None,
+            governing_features: Vec::new(),
+            grain: None,
+            context_vec: None,
+            ok_context_vec: None,
+            confidence: 0.33,
+            generation: Generation::ZERO,
+            owner: Some(user),
+            created_at: now,
+        },
+    )
+    .await?;
     // Penumbra memory traces (the Memory page) across the three networks, with one
     // consolidated into an expert, plus edges including a contradiction and a
     // supersession; the native consolidation→retire signal.

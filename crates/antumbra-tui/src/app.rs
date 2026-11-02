@@ -1,6 +1,7 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, read through the [`Backend`] and ticked for animation.
 
+use antumbra_core::behavior;
 use antumbra_core::console::Action as ConsoleAction;
 pub use antumbra_core::console::Snapshot;
 use antumbra_core::generational::GenerationHead;
@@ -576,6 +577,9 @@ impl App {
         if self.page != Page::Population {
             return;
         }
+        if self.focus == Focus::Shadows && self.selected_is_kept() {
+            return;
+        }
         let pending = match self.focus {
             Focus::Shadows => self
                 .selected_shadow()
@@ -592,10 +596,29 @@ impl App {
         }
     }
 
+    /// Whether the selected shadow is a standing expert's training, said on
+    /// the event line when it is. Pruning and graduating steer the
+    /// generational loop, which reads them back; the standing-experts keeper
+    /// settles its own trainings and never does, so on one of its shadows
+    /// either would only misstate what is serving.
+    fn selected_is_kept(&mut self) -> bool {
+        let Some(scope) = self
+            .selected_shadow()
+            .and_then(|s| behavior::shadow_scope(&s.id))
+            .map(str::to_owned)
+        else {
+            return false;
+        };
+        self.operator_event(format!(
+            "{scope}: the keeper settles a standing expert's training · freeze the expert to stop it serving"
+        ));
+        true
+    }
+
     /// Stage graduating the selected shadow (the palette's graduate command):
     /// promote it into the population, unless it already graduated.
     pub fn request_graduate(&mut self) {
-        if !self.may_act() {
+        if !self.may_act() || self.selected_is_kept() {
             return;
         }
         if let Some(s) = self

@@ -19,7 +19,7 @@ use antumbra_core::{scope_of_evidence, EdgeType, GitProvenance, MemoryNetwork, S
 use crate::app::App;
 use crate::theme::Theme;
 
-use super::{gauge_row, heading, kv, panel};
+use super::{clip, gauge_row, heading, kv, panel};
 
 /// The three networks and where their clusters anchor on the canvas.
 const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
@@ -217,16 +217,6 @@ fn ago(d: chrono::Duration) -> String {
     } else {
         "now".into()
     }
-}
-
-/// Clip `s` to `max` columns, ending in an ellipsis when cut.
-fn clip(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
 }
 
 /// The selected trace: its fields, evidence, and the edges touching it.

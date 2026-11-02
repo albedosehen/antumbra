@@ -29,6 +29,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType};
 use ratatui::Frame;
 
+use antumbra_core::behavior;
+use antumbra_core::{FailureBoundary, Shadow};
+
 use crate::app::{App, Focus, LayoutMode, Mode, Page};
 use crate::overlay;
 use crate::theme::Theme;
@@ -165,7 +168,7 @@ fn heading<'a>(t: &Theme, text: String) -> Line<'a> {
     ))
 }
 
-fn kv<'a>(t: &Theme, k: &'a str, v: &str) -> Line<'a> {
+fn kv<'a>(t: &Theme, k: &str, v: &str) -> Line<'a> {
     Line::from(vec![
         Span::styled(format!("{k:<11}"), Style::default().fg(t.dim)),
         Span::styled(v.to_string(), Style::default().fg(t.value)),
@@ -228,4 +231,89 @@ fn shadow_color(t: &Theme, status: &str) -> Color {
         "pruned" => t.dim,
         _ => t.warning,
     }
+}
+
+/// Clip `s` to `max` columns, ending in an ellipsis when cut.
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// A shadow's name: a standing expert's training by the scope it trained,
+/// any other (the generational loop's) by its id and generation. A standing
+/// expert's trainings are all generation zero, and their ids run to some
+/// sixty characters, the scope near the end where a list cuts it off.
+fn shadow_name(s: &Shadow) -> String {
+    match behavior::shadow_scope(&s.id) {
+        Some(scope) => format!("{scope} · behaviors"),
+        None => format!("{} · g{}", s.id.as_str(), s.generation.0),
+    }
+}
+
+/// A reward curve from its first reading to its last, `0.42 → 0.91`, or the
+/// one reading a curve of one has. A standing expert's training reads the
+/// base model's held-out pass rate and then the trained expert's.
+fn reward_span(curve: &[f32]) -> Option<String> {
+    match curve {
+        [] => None,
+        [only] => Some(format!("{only:.2}")),
+        [first, .., last] => Some(format!("{first:.2} → {last:.2}")),
+    }
+}
+
+/// A shadow's list row: its status glyph (graduated ✦, pruned ×, in flight
+/// ◌), its name and where its reward went. The glyph and the row's color
+/// carry the status, which the training panel spells out; the list is
+/// narrow, and the trained reading at the row's end is what it is read for.
+fn shadow_row(s: &Shadow) -> String {
+    let glyph = match s.status.as_str() {
+        "graduated" => "✦",
+        "pruned" => "×",
+        _ => "◌",
+    };
+    let mut row = format!("{glyph} {}", shadow_name(s));
+    if let Some(r) = reward_span(&s.reward_curve) {
+        row.push_str(" · ");
+        row.push_str(&r);
+    }
+    row
+}
+
+/// A boundary's list row: actionable ⛔ or open ○, then the scope its
+/// context names, when it names one (a training's does), and the behavior.
+fn boundary_row(b: &FailureBoundary) -> String {
+    let glyph = if b.is_actionable() { "⛔" } else { "○" };
+    match b.fail_context.get("scope").and_then(|s| s.as_str()) {
+        Some(scope) => format!("{glyph} {scope} · {}", b.behavior),
+        None => format!("{glyph} {}", b.behavior),
+    }
+}
+
+/// A boundary context's fields as `(key, value)` rows, a string value as it
+/// is and any other as JSON: the scope, the task and the answer first, as a
+/// training records them, then the rest in order. A context that is not an
+/// object is one row.
+fn context_fields(context: &serde_json::Value) -> Vec<(String, String)> {
+    const FIRST: [&str; 3] = ["scope", "task", "answer"];
+    let Some(map) = context.as_object() else {
+        return match context {
+            serde_json::Value::Null => Vec::new(),
+            other => vec![("context".into(), other.to_string())],
+        };
+    };
+    let mut keys: Vec<&String> = map.keys().collect();
+    keys.sort_by_key(|k| FIRST.iter().position(|f| f == k).unwrap_or(FIRST.len()));
+    keys.into_iter()
+        .map(|k| {
+            let v = &map[k];
+            (
+                k.clone(),
+                v.as_str().map_or_else(|| v.to_string(), str::to_string),
+            )
+        })
+        .collect()
 }

@@ -2,6 +2,7 @@
 //! `enter` overlay renders, dispatched by `overlays::detail_overlay`. Pure
 //! over `&App`, so the snapshot goldens exercise them headlessly.
 
+use antumbra_core::behavior;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -11,7 +12,10 @@ use crate::theme::Theme;
 use super::evals::{status_color, status_label};
 use super::loops::{stage_blurb, stage_label, STAGES};
 use super::overlays::{json_lines, section};
-use super::{gauge_row, gauge_spans, heading, kv, shadow_color, sparkline_row};
+use super::{
+    context_fields, gauge_row, gauge_spans, heading, kv, reward_span, shadow_color, shadow_name,
+    sparkline_row,
+};
 /// The evaluation drill-down: the run's fields, the regression comparison
 /// against the previous run for the same subject (the no-forgetting
 /// tripwire), and the subject's run history, all from the loaded set.
@@ -342,6 +346,7 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
             ))],
         );
     };
+    let scope = behavior::shadow_scope(&s.id);
     let mut l = vec![heading(t, s.id.as_str().to_string())];
     l.push(Line::from(vec![
         Span::styled(format!("{:<11}", "status"), Style::default().fg(t.dim)),
@@ -350,12 +355,30 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
             Style::default().fg(shadow_color(t, s.status.as_str())),
         ),
     ]));
-    l.push(kv(t, "generation", &s.generation.0.to_string()));
-    l.push(kv(
-        t,
-        "parent",
-        s.parent_expert.as_ref().map_or("-", |p| p.as_str()),
-    ));
+    match scope {
+        // Settled by the standing-experts keeper, from the held-out tasks;
+        // its parent is the expert it would replace.
+        Some(scope) => {
+            l.push(kv(t, "kind", "a standing expert's training"));
+            l.push(kv(t, "scope", scope));
+            l.push(kv(
+                t,
+                "replaces",
+                s.parent_expert.as_ref().map_or("-", |p| p.as_str()),
+            ));
+            if let Some(r) = reward_span(&s.reward_curve) {
+                l.push(kv(t, "pass rate", &r));
+            }
+        }
+        None => {
+            l.push(kv(t, "generation", &s.generation.0.to_string()));
+            l.push(kv(
+                t,
+                "parent",
+                s.parent_expert.as_ref().map_or("-", |p| p.as_str()),
+            ));
+        }
+    }
     l.push(kv(t, "adapter", s.adapter_uri.as_deref().unwrap_or("-")));
     let final_reward = s.reward_curve.last().copied().unwrap_or(0.0);
     l.push(gauge_row(
@@ -378,7 +401,7 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
         )));
     }
     l.push(kv(t, "created", &s.created_at.to_rfc3339()));
-    (format!("shadow · {}", s.id.as_str()), l)
+    (format!("shadow · {}", shadow_name(s)), l)
 }
 
 pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
@@ -404,6 +427,11 @@ pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static
     l.push(gauge_row(t, "confidence", b.confidence, t.accent));
     l.push(kv(
         t,
+        "owner",
+        b.owner.as_ref().map_or("shared", |o| o.as_str()),
+    ));
+    l.push(kv(
+        t,
         "grain",
         &b.grain.map_or_else(|| "-".into(), |g| format!("{g:?}")),
     ));
@@ -414,14 +442,31 @@ pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static
         b.governing_features.join(", ")
     };
     l.push(kv(t, "features", &feat));
+    l.push(kv(t, "id", b.id.as_str()));
     l.push(kv(t, "created", &b.created_at.to_rfc3339()));
     l.push(Line::from(""));
     l.push(section(t, "fail context (C)"));
-    l.extend(json_lines(t, &b.fail_context));
+    // A training's context is its scope, the task and the answer given, read
+    // as fields; a nested one, as the loop records, as JSON.
+    if fields_read_flat(&b.fail_context) {
+        for (k, v) in context_fields(&b.fail_context) {
+            l.push(kv(t, &k, &v));
+        }
+    } else {
+        l.extend(json_lines(t, &b.fail_context));
+    }
     if let Some(ok) = &b.near_ok_context {
         l.push(Line::from(""));
         l.push(section(t, "acceptable context (C')"));
         l.extend(json_lines(t, ok));
     }
     (format!("boundary · {}", b.behavior), l)
+}
+
+/// Whether `context` is an object of plain values, which read better as
+/// fields than as JSON.
+fn fields_read_flat(context: &serde_json::Value) -> bool {
+    context
+        .as_object()
+        .is_some_and(|m| !m.is_empty() && m.values().all(|v| !v.is_object() && !v.is_array()))
 }
