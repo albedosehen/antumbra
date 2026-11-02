@@ -2,13 +2,19 @@
 
 ## 0.2.6 - 2026-11-01
 
-Training you can watch, and experts on the CPU. A standing expert's training now shows in the console as a shadow, and what it missed as a boundary; a node without a GPU can serve experts at a usable speed; and the memory counts from 0.2.5 add up. x86-64 builds now need a CPU with AVX2.
+Training you can watch, and experts on the CPU. A standing expert's training now shows in the console as a shadow, and what it missed as a boundary, each read by the scope it trained; a node without a GPU can serve experts at a usable speed; and the memory counts from 0.2.5 add up. x86-64 builds now need a CPU with AVX2.
 
 ### Training
 
 - **A standing expert's training is a shadow** ([#256](https://github.com/albedosehen/antumbra/pull/256)). The server's keeper writes it as `exploring` while it trains, then `graduated` when the expert is admitted or `pruned` when it is refused or fails, with a reward curve from the base model's held-out pass rate to the trained one's. The console's penumbra had stayed empty on a server, because only the CLI's loop wrote shadows. An expert minted before this gets its shadow once, from its card.
 - **What a training missed is a boundary** ([#256](https://github.com/albedosehen/antumbra/pull/256)). Each behavior the expert did not follow becomes an open boundary beside it, holding the rule, the task it missed and its answer, at the share of that behavior's tasks it failed. Open boundaries are recorded, never gating routing. One goes away when an admitted expert learns the behavior or the behavior is no longer taught.
 - **A boundary can belong to a user** ([#256](https://github.com/albedosehen/antumbra/pull/256)). One from a behavior holds that user's own rule, so only they read it. Existing boundaries have no owner and stay shared.
+
+### The console
+
+- **A training reads by its scope** ([#259](https://github.com/albedosehen/antumbra/pull/259)). The penumbra listed a standing expert's training by its id, some sixty characters with the scope where the list cut it off; it now reads `✦ code · behaviors · 0.42 → 0.91`, the pass rate from the base model's to the trained expert's, and its panel gives both. Every shadow's row now ends in where its reward went, its status in its glyph and color.
+- **An open boundary shows what it was recorded from** ([#259](https://github.com/albedosehen/antumbra/pull/259)): the scope, the task the expert missed and its answer, and whose it is. The inspector showed a boundary's context only when it was actionable, and every boundary a training leaves is open. The gate summary lists only actionable boundaries, the ones that inhibit routing.
+- **Prune and graduate leave a training to its keeper** ([#259](https://github.com/albedosehen/antumbra/pull/259)). They set a shadow's status for the generational loop to read back; the keeper settles its own trainings and never does, so on one of its shadows the console declines them and says to freeze the expert instead.
 
 ### Serving on the CPU
 
