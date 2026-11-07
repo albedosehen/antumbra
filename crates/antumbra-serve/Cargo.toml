@@ -13,12 +13,12 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 # The real candle embedder (all-MiniLM-L6-v2) lives here behind the `models`
 # feature so the default serve build stays light. Mirrors antumbra-train.
-candle-core = { version = "0.10", optional = true }
-candle-nn = { version = "0.10", optional = true }
-candle-transformers = { version = "0.10", optional = true }
-# Pinned to 0.22 to match candle-core's transitive tokenizers (^0.22) -- a newer
-# minor would just duplicate the crate in the tree until candle updates.
-tokenizers = { version = "0.22", optional = true }
+candle-core = { version = "0.11", optional = true }
+candle-nn = { version = "0.11", optional = true }
+candle-transformers = { version = "0.11", optional = true }
+# Pinned to 0.23 to match candle-core's transitive tokenizers (^0.23.1) -- a
+# different minor would just duplicate the crate in the tree until candle moves.
+tokenizers = { version = "0.23", optional = true }
 # The stable 1.0.0 release (this pin rode the rc.1 pre-release until it shipped).
 hf-hub = { version = "1.0.0", optional = true, default-features = false, features = ["blocking", "rustls-tls"] }
 # Candle serving reuses the trainer's Qwen2.5-Coder + LoRA model (hardware-adaptive serving).
