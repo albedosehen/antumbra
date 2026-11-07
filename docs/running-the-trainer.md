@@ -179,6 +179,8 @@ Open levers if quality is still short: more examples per skill, denser-than-bina
 
 ## Building for CUDA on Windows (CUDA 13.3 + MSVC): validated 2026-06-05
 
+> **Changed with candle 0.11 (2026-11), not yet re-validated on the CUDA box.** candle 0.11 brings cudarc 0.19.10, whose build script knows CUDA toolkits up to **13.4**, so a 13.3 `nvcc` no longer trips the version panic in step 1 below. The off-`PATH` trick now does the opposite of what it did: with `nvcc` unreachable, `fallback-latest` picks **13.4** bindings, newer than the installed 13.3 libraries. Make the bindings match the toolkit instead, either by leaving `%CUDA_PATH%\bin` on `PATH` so cudarc detects 13.3, or by setting `CUDARC_CUDA_VERSION=13030` (the pin from the note at the end of this section, at 13.3). Step 2 (the CCCL preprocessor flag) is unaffected.
+
 candle 0.10 compiles its CUDA kernels with `nvcc` (which needs the MSVC host compiler) and pins **cudarc 0.19**, whose build script only knows CUDA toolkits **≤ 13.2**. A newer toolkit (13.3) trips two failures; both are handled:
 
 1. **cudarc version panic** (`Unsupported cuda toolkit version: 13.3`). cudarc's probe runs bare `nvcc` (found via `PATH`) and panics on an unknown version. The `cudarc/fallback-latest` feature (wired into `antumbra-train`'s `cuda` feature) makes it fall back to its newest supported version (13.2, ABI- compatible with the 13.3 libs), but _only when the `nvcc` probe fails to run_. So **keep `nvcc` off `PATH` at build time**; candle-kernels still finds it via `CUDA_PATH`.
