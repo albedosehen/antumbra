@@ -49,10 +49,10 @@ lettre = { version = "0.11", default-features = false, features = [
 # docs/schema.graphql). It declares the contract; nothing executes it yet.
 # Published on crates.io; off by default all the same, since the four routes
 # this server serves do not need it.
-oneiriq-kayak = { version = "0.1", optional = true }
+oneiriq-kayak = { version = "0.2", optional = true }
 # The schema vocabulary kayak resolves the contract against; the same version
 # the store builds its TableDefinitions with, so the two speak one type.
-oneiriq-surql = { version = "0.34.2", default-features = false, features = ["client-rustls"], optional = true }
+oneiriq-surql = { version = "0.35.0", default-features = false, features = ["client-rustls"], optional = true }
 
 [dev-dependencies]
 # `oneshot` drives the axum router in tests without binding a socket.
@@ -65,3 +65,12 @@ smtp = ["dep:lettre"]
 # The kayak wire contract, its drift gate (tests/contract.rs), and the artifact
 # generation. The four routes this server actually serves do not need it.
 contract = ["dep:oneiriq-kayak", "dep:oneiriq-surql"]
+
+# TEMPORARY, remove before merge: oneiriq-surql 0.35.0 and oneiriq-kayak 0.2.0
+# (their moves to the SurrealDB 4 SDK) are not on crates.io yet, so they are
+# taken from local checkouts of Oneiriq/surql-rs feat/surrealdb-4 and
+# Oneiriq/kayak feat/surql-0.35. This workspace needs its own patch: the root
+# workspace's does not reach it, and antumbra-store asks for surql 0.35.
+[patch.crates-io]
+oneiriq-surql = { path = "../../../../../../surql-rs/.claude/worktrees/surrealdb-4" }
+oneiriq-kayak = { path = "../../../../../../kayak/.claude/worktrees/surql-0.35" }

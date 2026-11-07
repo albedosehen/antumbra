@@ -4,7 +4,9 @@
 use serde::de::DeserializeOwned;
 
 use surql::connection::auth::{DatabaseCredentials, RootCredentials, ScopeCredentials};
+use surql::connection::config::EXPERIMENTAL_UPGRADE_FROM_3X;
 use surql::connection::ConnectionConfig;
+use surql::SurqlError;
 use surql::query::builder::Query;
 use surql::query::crud::query_records;
 use surql::types::operators::Operator;
@@ -20,6 +22,48 @@ use crate::schema::{self, EMBED_DIM, TENANT_ACCESS};
 /// dropped. Announcements are notifications, so a consumer that far behind
 /// loses some rather than stalling the writes.
 const ANNOUNCED_BACKLOG: usize = 256;
+
+/// Set to `true` to let an embedded store (`surrealkv://`) that SurrealDB 3.x
+/// wrote open on this build, which runs SurrealDB 4. SurrealDB converts such a
+/// store to its 4.x format in place the first time it opens it, one way: a 3.x
+/// build cannot open it afterwards, and SurrealDB 4.0 calls the conversion
+/// experimental. Without it, opening such a store fails and leaves it as it
+/// was. A remote `ws://` database is unaffected; its server upgrades on its
+/// own terms.
+pub const UPGRADE_FROM_3X_ENV: &str = "ANTUMBRA_UPGRADE_STORE_FROM_3X";
+
+/// Whether [`UPGRADE_FROM_3X_ENV`] asks for the upgrade.
+fn upgrade_from_3x_requested() -> bool {
+    std::env::var(UPGRADE_FROM_3X_ENV).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// A failed connect, with a refused 3.x store explained in Antumbra's own
+/// terms: SurrealDB's message names a server setting, and surql's names its
+/// builder, neither of which an Antumbra user sets.
+fn connect_error(url: &str, err: SurqlError) -> AntumbraError {
+    fn refusal(err: &SurqlError) -> Option<&str> {
+        match err {
+            SurqlError::DatastoreUpgradeRefused { reason } => Some(reason),
+            SurqlError::WithContext { source, .. } => refusal(source),
+            _ => None,
+        }
+    }
+    match refusal(&err) {
+        Some(reason) => AntumbraError::store(format!(
+            "the store at {url} was written by SurrealDB 3.x, and this Antumbra runs SurrealDB \
+             4, which opens it only by converting it to the 4.x format in place, one way: a \
+             3.x build cannot open it afterwards, and SurrealDB 4.0 calls the conversion \
+             experimental. The store is unchanged. To convert it, back up its directory first, \
+             then start again with {UPGRADE_FROM_3X_ENV}=true. SurrealDB said: {reason}"
+        )),
+        None => map(err),
+    }
+}
 
 #[derive(Clone)]
 pub struct Store {
@@ -74,10 +118,33 @@ impl Store {
         config: ConnectionConfig,
         embed_dim: usize,
     ) -> Result<Self> {
+        Self::open(config, embed_dim, upgrade_from_3x_requested()).await
+    }
+
+    /// [`Store::connect_without_schema`], with whether an embedded store
+    /// written by SurrealDB 3.x may be converted given here rather than read
+    /// from [`UPGRADE_FROM_3X_ENV`].
+    #[doc(hidden)]
+    pub async fn open(
+        mut config: ConnectionConfig,
+        embed_dim: usize,
+        upgrade_from_3x: bool,
+    ) -> Result<Self> {
+        if upgrade_from_3x {
+            // surql hands datastore options to embedded engines only, so a
+            // remote `ws://` connection is unaffected by this.
+            config
+                .datastore_options
+                .insert(EXPERIMENTAL_UPGRADE_FROM_3X.to_string(), "true".to_string());
+        }
         let namespace = config.namespace().to_string();
         let database = config.database().to_string();
+        let url = config.url().to_string();
         let client = DatabaseClient::new(config).map_err(map)?;
-        client.connect().await.map_err(map)?;
+        client
+            .connect()
+            .await
+            .map_err(|err| connect_error(&url, err))?;
         Ok(Store {
             client,
             embed_dim,

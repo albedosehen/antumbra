@@ -15,7 +15,7 @@ pub mod schema;
 pub mod store;
 
 pub use schema::{EMBED_DIM, TENANT_SESSION};
-pub use store::Store;
+pub use store::{Store, UPGRADE_FROM_3X_ENV};
 
 // Re-export the connection config so callers can point at a real server
 // without depending on surql-rs directly.

@@ -48,7 +48,14 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
 tachyonfx = "0.25"
-oneiriq-surql = { version = "0.34.2", default-features = false, features = ["client-rustls"] }
+oneiriq-surql = { version = "0.35.0", default-features = false, features = ["client-rustls"] }
+
+# TEMPORARY, remove before merge: oneiriq-surql 0.35.0 (its move to the
+# SurrealDB 4 SDK) is not on crates.io yet, so it is taken from a local
+# checkout of Oneiriq/surql-rs branch feat/surrealdb-4. Replace with the
+# published version once it is released.
+[patch.crates-io]
+oneiriq-surql = { path = "../../../../surql-rs/.claude/worktrees/surrealdb-4" }
 
 [profile.dev]
 opt-level = 0

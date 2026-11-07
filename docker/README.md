@@ -1,6 +1,6 @@
 # Antumbra local Docker stack
 
-A hardened, **non-root** local stack: SurrealDB v3 (Antumbra needs v3) plus the `antumbra-mcp` server, with embeddings served by a host ollama, and an optional `antumbra-control-server` for hosted signup. Everything binds to `127.0.0.1` and every container runs as uid 65532 with capabilities dropped and `no-new-privileges`.
+A hardened, **non-root** local stack: a SurrealDB v3 server (Antumbra speaks to it with the SurrealDB 4 SDK, which works with 3.x and 4.x servers; see [Moving the server to SurrealDB 4](#moving-the-server-to-surrealdb-4)) plus the `antumbra-mcp` server, with embeddings served by a host ollama, and an optional `antumbra-control-server` for hosted signup. Everything binds to `127.0.0.1` and every container runs as uid 65532 with capabilities dropped and `no-new-privileges`.
 
 ## Prerequisites
 
@@ -133,6 +133,16 @@ docker compose -f docker/docker-compose.yml up -d antumbra-mcp
 ```
 
 copal answers on the compose network and on `127.0.0.1:8092` only: its default `header` auth trusts the caller to name its tenant, which is how antumbra presents each workspace as its own tenant, and why it never belongs on the LAN. For copal's `keys` auth mode, set `ANTUMBRA_COPAL_KEY` (or pass `--copal-keys`) instead.
+
+## Moving the server to SurrealDB 4
+
+Nothing requires it: Antumbra uses the SurrealDB 4 SDK, which connects to the `v3.2.4` server this stack runs. When you do move the `surrealdb` service to a `v4` image, know that SurrealDB 4.0's upgrade is one-way and, in 4.0, experimental:
+
+- A 4.0 server refuses to start on the data a 3.x server wrote until it is started once with `SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true`.
+- 4.0 drops RocksDB, which this stack's server uses, and converts the directory to SurrealKV on that first start. It needs room for two copies, and it answers neither `/health` nor `isready` until the conversion finishes, so give the healthcheck time at that start.
+- A 3.x server cannot open the directory afterwards.
+
+So first take a `surreal export` with the 3.x server and copy `ANTUMBRA_SURREAL_DATA`. After the upgrade, rebuild the two full-text indexes, whose scores are otherwise off for memories that were updated and later deleted: `REBUILD INDEX memory_content_fts ON memory;` and `REBUILD INDEX document_chunk_content_fts ON document_chunk;`, each as its own statement. Rebuilding the HNSW indexes is optional and only makes searches faster. SurrealDB's guide, "Upgrading from 3.x to 4.0", has the rest.
 
 ## Notes
 

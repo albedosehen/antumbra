@@ -152,6 +152,14 @@ Antumbra is the **same engine** in both modes; only the transport and identity d
 
 Offline is the default and the privacy floor: nothing leaves the building. The hosted surface adds multi-tenant sharing, device sync, and live propagation. The ACL is enforced **in the database engine**, so a tenant can never see another tenant's rows even if a handler forgets a filter.
 
+### An embedded store from before SurrealDB 4
+
+Antumbra runs the SurrealDB 4 SDK. A remote `ws://` database needs nothing for that: the 4.x SDK works with a 3.x server, which can move to 4.x later on its own terms (see the Docker stack's README). An embedded `surrealkv://` store that an earlier Antumbra wrote is different. SurrealDB 4 opens it only by converting it to the 4.x format in place, one way, so a 3.x build cannot open it afterwards, and SurrealDB 4.0 calls that conversion experimental. Antumbra therefore refuses such a store by default, leaves it as it was, and says why. To convert it:
+
+1. Stop everything that uses the store and copy its directory (by default `./data/antumbra.skv`) somewhere safe.
+2. Start once with `ANTUMBRA_UPGRADE_STORE_FROM_3X=true` in the environment (the CLI, `antumbra-mcp`, or the control server; whichever opens it first converts it).
+3. Later starts need no setting.
+
 ### The dashboard
 
 The HTTP server also serves a dashboard at `/dashboard` (for example `http://localhost:8081/dashboard`). Sign in with the same kind of bearer token a hook uses (`antumbra-mcp --mint-token`, or the token your sign-in link gave you). It shows the workspace counts, the expert population with each expert's status and fitness (and a box to route a task through it, or have the covering expert answer it, which writes nothing), your compartments, your knowledge documents, your behaviors by status (each with its scope, how many examples and violations back it, the memories it was drawn from, how its last training went, and what keeps it from being taught), the dependency graph (every pair of services with its evidence, and any service's blast radius either way), and memory: recalled by meaning or listed newest first, filtered by network, each with its git anchor and its relations to other memories. It reads, but for the two decisions on a behavior: Accept, so your expert learns it at its next training, and Retire. It calls the same tools through `/mcp/call`, so it sees exactly what the token's identity may see. The token stays in that browser tab and is gone when the tab closes or you sign out.

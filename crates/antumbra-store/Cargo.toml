@@ -12,7 +12,7 @@ oneiriq-surql.workspace = true
 # Direct dep purely to light up the embedded in-memory engine (additive
 # feature unification with surql-rs's `surrealdb/rustls`). Lets the store +
 # durable loop be tested fully in-process with no external server.
-surrealdb = { version = "3", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
+surrealdb = { version = "4", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

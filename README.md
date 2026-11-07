@@ -85,7 +85,7 @@ Antumbra carries its own first-class memory and runtime rather than running alon
 
 Every milestone is a falsifiable experiment with a kill criterion.
 
-- **Storage** Leverages SurrealDB v3 for persistence storage for offline/online functionality
+- **Storage** Leverages SurrealDB (the 4.x SDK, against an embedded store or a 3.x or 4.x server) for persistence storage for offline/online functionality
 - Multi-tenancy, identity, and isolation are engine-enforced and signed JWT authenticated over the wire. single process; data in SurrealDB via `surql-rs` (builder-only); training and serving via `candle`.
 
 **substrate:** one frozen, code-capable base (Qwen2.5-Coder-1.5B-Instruct) on a single 24 GB GPU, a growing library of frozen LoRA experts, and a boundary-conditioned coverage gate. The real candle trainer/server is behind a `models` feature; the default build runs a CPU demo trainer so the orchestration is exercisable without a GPU.
