@@ -233,6 +233,46 @@ pub fn html_to_text(html: &str) -> String {
     tidy(&raw)
 }
 
+/// Whether the page declares a viewport (`<meta name="viewport" ...>`).
+/// Without one a phone lays the page out as a desktop page about 980px wide
+/// and shrinks it to fit, so its text is too small to read wherever the page
+/// is the whole tab (opened alone, or at its public address). In the viewer's
+/// frame a page is laid out at the frame's width either way.
+pub fn has_viewport_meta(html: &str) -> bool {
+    let lower = html.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("<meta") {
+        let start = from + at;
+        let (name, closing, end) = read_tag(&lower, start);
+        if name == "meta" && !closing && names_viewport(&lower[start..end]) {
+            return true;
+        }
+        from = end.max(start + 1);
+    }
+    false
+}
+
+/// Whether a lowercase `<meta ...>` tag's `name` attribute is `viewport`, in
+/// any of the ways HTML lets an attribute be written.
+fn names_viewport(tag: &str) -> bool {
+    let squashed = tag
+        .split_ascii_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" =", "=")
+        .replace("= ", "=");
+    [" name=\"viewport\"", " name='viewport'", " name=viewport"]
+        .iter()
+        .any(|form| {
+            squashed.match_indices(form).any(|(at, _)| {
+                let after = squashed.as_bytes().get(at + form.len());
+                // An unquoted value ends at a space or the tag's end, so
+                // `name=viewports` is not it.
+                !form.ends_with('t') || matches!(after, None | Some(b' ' | b'>' | b'/'))
+            })
+        })
+}
+
 /// The tag starting at `start` (a `<`): its lowercase name, whether it closes
 /// an element, and the index just past its `>`, honoring quoted attributes.
 fn read_tag(lower: &str, start: usize) -> (String, bool, usize) {
@@ -396,5 +436,27 @@ mod tests {
         );
         assert_eq!(html_to_text("before <script>never closed"), "before");
         assert_eq!(html_to_text(r#"<a title="a > b">kept</a>"#), "kept");
+    }
+
+    #[test]
+    fn a_viewport_is_found_however_its_tag_is_written() {
+        for declared in [
+            r#"<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>"#,
+            r#"<META NAME="Viewport" CONTENT="width=device-width">"#,
+            "<meta content='width=device-width' name='viewport' />",
+            "<meta\n  name = viewport\n  content=width=device-width>",
+            "<meta name=viewport>",
+        ] {
+            assert!(has_viewport_meta(declared), "{declared:?}");
+        }
+        for missing in [
+            "<h1>A fragment</h1>",
+            r#"<meta charset="utf-8"><meta name="description" content="viewport">"#,
+            r#"<meta data-name="viewport" content="width=device-width">"#,
+            "<meta name=viewports>",
+            r#"<metadata name="viewport"></metadata>"#,
+        ] {
+            assert!(!has_viewport_meta(missing), "{missing:?}");
+        }
     }
 }

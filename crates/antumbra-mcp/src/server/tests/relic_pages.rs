@@ -127,7 +127,8 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
         &s,
         json!({
             "title": "The Ceiling Pays for the Floor",
-            "html": "<h1>The ceiling pays</h1><script>var DATA = [1947, 65.2];</script>",
+            "html": "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+                     <h1>The ceiling pays</h1><script>var DATA = [1947, 65.2];</script>",
         }),
     )
     .await;
@@ -170,6 +171,13 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
     .await;
     assert_eq!(second["version"], 2);
     assert_eq!(second["visibility"], "public");
+    // A page with no viewport still lands, and says what a phone will make of it.
+    assert!(
+        second["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("declares no viewport")),
+        "{second}"
+    );
     let second_file = "01relicfile000000000000002";
     assert_eq!(
         second["public_url"],

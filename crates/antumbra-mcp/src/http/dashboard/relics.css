@@ -1,5 +1,19 @@
 /* The relics gallery and viewer, on top of the dashboard's stylesheet and its
-   palette, type scale and 8px grid. */
+   palette, type scale and 8px grid. They are read on phones and tablets,
+   upright and turned, as much as on desktops: every layout below holds from
+   320px wide, and from a landscape phone's 320px or so of height. */
+
+/* Text keeps its size when a phone turns: no inflation in landscape. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* The visible height, between a phone's toolbars, where the browser knows it. */
+.gate {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
 
 a.brand {
   color: inherit;
@@ -22,6 +36,13 @@ a.brand {
   stroke-linejoin: round;
 }
 
+.icon-dots {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  stroke: none;
+}
+
 .visibility {
   display: inline-flex;
   align-items: center;
@@ -34,9 +55,14 @@ a.brand {
 
 /* The gallery: cards with a live, scaled-down render of each relic. */
 
+.relic-search input[type="search"] {
+  flex-basis: 240px;
+}
+
 .relic-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* No wider than the screen: a 280px card never forces a sideways scroll. */
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 24px;
   margin: 0;
   padding: 0;
@@ -59,13 +85,25 @@ a.brand {
   text-decoration: none;
   overflow: hidden;
   transition: border-color 150ms ease-out;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.relic-link:hover {
+/* Only where there is a pointer to hover with; on a touch screen a hover state
+   sticks to whatever was last tapped. */
+@media (hover: hover) {
+  .relic-link:hover {
+    border-color: var(--line-strong);
+  }
+}
+
+.relic-link:active {
   border-color: var(--line-strong);
 }
 
 .relic-preview {
+  /* How many times the card's width the page is laid out at before it is
+     shrunk to fit: a desktop's width on a desktop's card. */
+  --zoom: 4;
   position: relative;
   aspect-ratio: 16 / 10;
   overflow: hidden;
@@ -73,16 +111,16 @@ a.brand {
   background: var(--raised);
 }
 
-/* The page renders at four times the card's width, then shrinks to fit, so a
-   preview shows the top of the page as a desktop would lay it out. Clicks go
-   to the card, never into the page. */
+/* The page renders at --zoom times the card's width, then shrinks to fit, so a
+   preview shows the top of the page as a wide screen would lay it out. Clicks
+   go to the card, never into the page. */
 .relic-preview iframe {
   position: absolute;
   inset: 0 auto auto 0;
-  width: 400%;
-  height: 400%;
+  width: calc(var(--zoom) * 100%);
+  height: calc(var(--zoom) * 100%);
   border: 0;
-  transform: scale(0.25);
+  transform: scale(calc(1 / var(--zoom)));
   transform-origin: 0 0;
   pointer-events: none;
 }
@@ -159,6 +197,7 @@ a.brand {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
 }
 
 .relic-bar {
@@ -179,6 +218,11 @@ a.brand {
 
 .relic-heading .meta {
   margin-top: 2px;
+}
+
+/* The menu button shows only where the actions fold away (below). */
+.menu-toggle {
+  display: none;
 }
 
 /* Download: the formats read as one control, a label and joined buttons. */
@@ -218,7 +262,12 @@ a.brand {
 
 .relic-frame {
   flex: 1;
-  width: 100%;
+  /* The frame may shrink past its default 150px on a short screen. */
+  min-height: 0;
+  /* One pixel, at least the full width: WebKit then sizes the frame to the
+     window rather than to a page laid out wider than it. */
+  width: 1px;
+  min-width: 100%;
   border: 0;
   background: #ffffff;
 }
@@ -234,6 +283,7 @@ a.brand {
 
 .copy-fallback input {
   flex: 1;
+  min-width: 0;
   font: inherit;
   font-family: var(--mono);
   font-size: var(--t-s);
@@ -248,7 +298,160 @@ a.brand {
   padding: 8px 32px;
 }
 
+/* A compact viewer: below the width the bar's actions fit beside a readable
+   title, and on a screen too short to spare them a second row (a phone on its
+   side), the bar is one row (the mark, the title, its details on one line)
+   and the actions fold into a menu under a button. relics.js holds the same
+   query, to close the menu when the screen leaves it. */
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (max-width: 1199.98px), (max-height: 560px) {
+  .relic-bar {
+    --bar-x: 32px;
+    flex-wrap: nowrap;
+    gap: 12px;
+    padding: 8px var(--bar-x);
+  }
+
+  .relic-heading .meta {
+    display: block;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .relic-heading .meta > * + * {
+    margin-left: 12px;
+  }
+
+  .menu-toggle {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 40px;
+    padding: 0;
+  }
+
+  .viewer.menu-open .menu-toggle {
+    background: var(--accent-soft);
+  }
+
+  /* The menu: a panel under the button, over the top of the page. */
+  .relic-bar .actions {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: var(--bar-x);
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    width: min(288px, calc(100vw - 2 * var(--bar-x)));
+    max-height: calc(100vh - 88px);
+    max-height: calc(100dvh - 88px);
+    margin: 0;
+    padding: 8px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-l);
+    background: var(--raised);
+    box-shadow: 0 2px 4px rgb(0 0 0 / 0.06), 0 12px 32px rgb(0 0 0 / 0.18);
+  }
+
+  .viewer.menu-open .relic-bar .actions {
+    display: flex;
+    animation: menu-in 150ms ease-out;
+  }
+
+  /* A frame keeps the taps made on it; while the menu is open they fall
+     through to this page instead, which closes the menu. */
+  .viewer.menu-open .relic-frame {
+    pointer-events: none;
+  }
+
+  .relic-bar .actions > button,
+  .relic-bar .actions > .nav-link {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--ink);
+    font-size: var(--t-m);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-align: left;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .relic-bar .actions > button:active,
+  .relic-bar .actions > .nav-link:active {
+    background: var(--accent-soft);
+  }
+
+  /* Download, set off from the actions above it. */
+  .relic-bar .export {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 12px 12px 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .relic-bar .export-formats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .relic-bar .export-formats button {
+    min-height: 44px;
+    padding-inline: 8px;
+  }
+
+  /* Signing in or out comes last, under a rule of its own. */
+  .relic-bar .actions > .session {
+    position: relative;
+    margin-top: 9px;
+  }
+
+  .relic-bar .actions > .session::before {
+    content: "";
+    position: absolute;
+    top: -5px;
+    left: 0;
+    right: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+
+@media (hover: hover) {
+  @media (max-width: 1199.98px), (max-height: 560px) {
+    .relic-bar .actions > button:hover,
+    .relic-bar .actions > .nav-link:hover {
+      background: var(--accent-soft);
+      text-decoration: none;
+    }
+  }
+}
+
+/* Tablets upright, and phones */
+
 @media (max-width: 880px) {
+  .relic-bar {
+    --bar-x: 16px;
+  }
+
   .relic-list .relic-link {
     grid-template-columns: 112px minmax(0, 1fr);
   }
@@ -256,5 +459,112 @@ a.brand {
   .copy-fallback,
   .viewer > .failed {
     padding: 8px 16px;
+  }
+}
+
+/* The search on a narrow screen: whose and which layout share the first row,
+   the search field and its button the second. */
+@media (max-width: 767.98px) {
+  .relic-search {
+    gap: 8px;
+  }
+
+  .relic-search .scope {
+    order: 1;
+  }
+
+  .relic-search .layout {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .relic-search input[type="search"] {
+    order: 3;
+    flex: 1 1 160px;
+    min-width: 0;
+  }
+
+  .relic-search button[type="submit"] {
+    order: 4;
+  }
+}
+
+/* Phones upright */
+
+@media (max-width: 599.98px) {
+  /* The mark alone takes you back to the gallery; the title gets the room. */
+  .relic-bar .wordmark {
+    display: none;
+  }
+
+  /* A preview on a phone's card lays the page out a little narrower, so its
+     text is still large enough to recognize. */
+  .relic-preview {
+    --zoom: 3;
+  }
+}
+
+@media (max-width: 479.98px) {
+  .label-tail {
+    display: none;
+  }
+
+  .relic-search .segmented label {
+    padding-inline: 10px;
+  }
+}
+
+/* A landscape phone: the sign-in card starts at the top and scrolls. */
+@media (max-height: 560px) {
+  .gate {
+    place-items: start center;
+    padding-block: 16px;
+  }
+
+  .gate-card {
+    padding: 24px;
+  }
+
+  .gate-card .mark-large {
+    width: 32px;
+    height: 32px;
+  }
+
+  .gate-card h1 {
+    margin-top: 16px;
+  }
+
+  .gate-card .lede {
+    margin-bottom: 16px;
+  }
+}
+
+/* A finger, not a pointer: every target at least 44px. */
+@media (pointer: coarse) {
+  .relic-bar button,
+  .relic-search button,
+  .relic-search input[type="search"],
+  .gate-form button,
+  .gate-form input {
+    min-height: 44px;
+  }
+
+  .menu-toggle {
+    width: 44px;
+  }
+
+  .relic-search .segmented label {
+    padding-block: 10px;
+  }
+
+  /* iOS zooms into any text field set smaller than 16px when it is focused. */
+  .copy-fallback input {
+    font-size: 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer.menu-open .relic-bar .actions {
+    animation: none;
   }
 }
