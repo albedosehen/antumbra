@@ -117,6 +117,12 @@ pub async fn neighbors(
         .from_table(TABLE)
         .map_err(map)?
         .where_(cond)
+        // SurrealDB 4 returns a scan's rows in no particular order, so a memory
+        // with more neighbors than the cap would get a different subset on each
+        // call; ordering by id keeps the subset (and its order) stable, as key
+        // order did on 3.x.
+        .order_by("id", "ASC")
+        .map_err(map)?
         .limit(NEIGHBOR_LIMIT)
         .map_err(map)?;
     let rows: Vec<EdgeRow> = query_records(store.client(), &q).await.map_err(map)?;
