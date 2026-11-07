@@ -569,8 +569,28 @@ fn configs() -> Vec<(String, Arc<dyn Embedder>)> {
     v
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // The shape of the CLI and the MCP server: the embedded SurrealDB 4 engine
+    // overflows the default stacks, both the thread that blocks on the run (1
+    // MiB on Windows) and the runtime's workers (2 MiB; SurrealDB recommends
+    // 10 MiB).
+    let worker = |e: std::io::Error| antumbra_core::AntumbraError::other(format!("bench runtime: {e}"));
+    std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(16 * 1024 * 1024)
+                .build()
+                .map_err(worker)?
+                .block_on(run())
+        })
+        .map_err(worker)?
+        .join()
+        .map_err(|_| antumbra_core::AntumbraError::other("antumbra-bench worker thread panicked".to_string()))?
+}
+
+async fn run() -> Result<()> {
     let corpus = match std::env::var("ANTUMBRA_BENCH_LABELS") {
         Ok(path) => Corpus::from_labels(
             &std::fs::read_to_string(&path)
