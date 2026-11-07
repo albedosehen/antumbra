@@ -53,16 +53,16 @@
         <h1 id="h-relics">Relics</h1>
         <p id="relics-summary" class="muted small" aria-live="polite"></p>
       </div>
-      <form id="relic-search" class="recall" role="search">
-        <fieldset class="segmented">
+      <form id="relic-search" class="recall relic-search" role="search">
+        <fieldset class="segmented scope">
           <legend class="visually-hidden">Whose</legend>
           <input id="scope-all" type="radio" name="scope" value="all" checked><label for="scope-all">All</label>
           <input id="scope-mine" type="radio" name="scope" value="mine"><label for="scope-mine">Yours</label>
-          <input id="scope-shared" type="radio" name="scope" value="shared"><label for="scope-shared">Shared with you</label>
+          <input id="scope-shared" type="radio" name="scope" value="shared"><label for="scope-shared">Shared<span class="label-tail"> with you</span></label>
         </fieldset>
         <input id="relic-query" name="query" type="search" placeholder="Search relics by what they say" aria-label="Search relics">
         <button type="submit">Search</button>
-        <fieldset class="segmented">
+        <fieldset class="segmented layout">
           <legend class="visually-hidden">Layout</legend>
           <input id="layout-grid" type="radio" name="layout" value="grid" checked><label for="layout-grid">Grid</label>
           <input id="layout-list" type="radio" name="layout" value="list"><label for="layout-list">List</label>

@@ -31,6 +31,11 @@ pub(super) struct PublishRelicParams {
     pub(super) title: String,
     /// The page: a complete HTML document. Inline its images, styles and
     /// scripts; it is shown in a sandbox with no network access of its own.
+    /// It is read on phones and tablets, upright and turned, as well as on
+    /// desktops: give it `<meta name="viewport" content="width=device-width,
+    /// initial-scale=1">` and a layout that holds from 320px wide up, with
+    /// fluid widths, no fixed page width, and wide tables, code and diagrams
+    /// scrolling in their own boxes rather than widening the page.
     pub(super) html: String,
     /// The address, `/relic/<slug>`: lowercase letters, digits and hyphens.
     /// Omit it to derive one from the title. Naming a relic you already have
@@ -442,6 +447,15 @@ impl McpServer {
         }
 
         let mut notes = Vec::new();
+        if !core_relic::has_viewport_meta(&p.html) {
+            notes.push(
+                "the page declares no viewport, so a phone opening it alone or at its public \
+                 address lays it out as a desktop page and shrinks it; add <meta \
+                 name=\"viewport\" content=\"width=device-width, initial-scale=1\"> to its head \
+                 and publish again."
+                    .to_string(),
+            );
+        }
         // Only the current version is ever public: the one before it closes.
         if let Some(previous) = previous {
             if let Err(e) = archive
