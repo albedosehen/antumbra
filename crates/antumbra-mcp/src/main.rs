@@ -559,12 +559,15 @@ fn main() -> Result<()> {
     let _telemetry = telemetry::init();
     // SurrealDB's engine-enforced ACL subqueries for tenant isolation and memory compartments recurse deep;
     // host the runtime on a large-stack thread so the 1 MB Windows main-thread
-    // stack does not overflow (see the matching note in the CLI).
+    // stack does not overflow (see the matching note in the CLI). Requests run
+    // on the worker threads, where an embedded SurrealDB 4 engine overflows the
+    // 2 MiB default, so they get room too (SurrealDB recommends 10 MiB).
     std::thread::Builder::new()
         .stack_size(256 * 1024 * 1024)
         .spawn(|| {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
+                .thread_stack_size(16 * 1024 * 1024)
                 .build()?;
             let outcome = runtime.block_on(run());
             // Whatever still runs on the blocking pool (an embed call, a
