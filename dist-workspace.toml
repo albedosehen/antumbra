@@ -17,3 +17,10 @@ install-path = "CARGO_HOME"
 hosting = "github"
 # Whether to install an updater program
 install-updater = false
+
+# The runner each target builds on, where dist's default no longer exists.
+# GitHub stopped offering the macOS 14 Apple silicon runner dist picks for
+# aarch64-apple-darwin ("The configuration 'macos-14-arm64-us-default' is not
+# supported"), which failed the v0.2.7 release; macOS 15 is Apple silicon too.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
