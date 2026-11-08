@@ -11,17 +11,17 @@ antumbra-core = { path = "../antumbra-core" }
 async-trait.workspace = true
 # candle is the training engine. CPU backend by default so the
 # workspace stays buildable everywhere; `cuda`/`metal` light up the GPU.
-candle-core = "0.10"
-candle-nn = "0.10"
+candle-core = "0.11"
+candle-nn = "0.11"
 serde_json.workspace = true
 thiserror.workspace = true
 # The real model stack (MT-1), behind the `models` feature so the default
-# workspace build stays light. candle 0.10 -> cudarc 0.19 (CUDA 13 via
+# workspace build stays light. candle 0.11 -> cudarc 0.19 (CUDA 13 via
 # cuda-version-from-build-system) + hf-hub 1.0.
 serde = { workspace = true, optional = true }
-# Pinned to 0.22 to match candle-core's transitive tokenizers (^0.22) -- a newer
-# minor would just duplicate the crate in the tree until candle updates.
-tokenizers = { version = "0.22", optional = true }
+# Pinned to 0.23 to match candle-core's transitive tokenizers (^0.23.1) -- a
+# different minor would just duplicate the crate in the tree until candle moves.
+tokenizers = { version = "0.23", optional = true }
 # The stable 1.0.0 release (this pin rode the rc.1 pre-release until it shipped).
 hf-hub = { version = "1.0.0", optional = true, default-features = false, features = ["blocking", "rustls-tls"] }
 # Not model-gated: the decode policy (repetition penalty / nucleus sampling) is
@@ -29,11 +29,11 @@ hf-hub = { version = "1.0.0", optional = true, default-features = false, feature
 rand = "0.10"
 # A trained critic behind the Critic port holds its model across an await.
 tokio = { workspace = true, features = ["sync"] }
-# candle 0.10 pins cudarc 0.19, whose nvcc probe only knows CUDA <= 13.2 and
-# panics on a newer toolkit (e.g. 13.3). `fallback-latest` makes it use its
-# newest supported version (13.2, ABI-compatible with 13.3 libs) when the bare
-# `nvcc` probe can't resolve a known version. Declared only to add that feature
-# to the cudarc candle already pulls under `cuda`.
+# candle 0.11 pins cudarc 0.19 (^0.19.10), whose nvcc probe knows the CUDA
+# toolkits it lists (<= 13.4 as of 0.19.10) and panics on a newer one.
+# `fallback-latest` makes it use its newest supported version when the bare
+# `nvcc` probe fails to run. Declared only to add that feature to the cudarc
+# candle already pulls under `cuda`.
 cudarc = { version = "0.19", default-features = false, optional = true }
 
 [features]

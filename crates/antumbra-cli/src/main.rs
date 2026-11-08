@@ -144,16 +144,22 @@ const DEMO_SPECIALISTS: [(&str, &str); 3] = [
     ),
 ];
 
+/// The stack of each runtime worker thread: room for the embedded SurrealDB 4
+/// engine, which overflows the 2 MiB default (SurrealDB recommends 10 MiB).
+const WORKER_STACK: usize = 16 * 1024 * 1024;
+
 fn main() -> anyhow::Result<()> {
     // SurrealDB query evaluation (the engine-enforced ACL subqueries for tenant
     // isolation and memory compartments) recurses deep; the OS default main-thread stack (1 MB on Windows)
-    // overflows. Host the runtime on a thread with a large stack. (Tests pass
-    // because they run on tokio worker threads, which already have room.)
+    // overflows. Host the runtime on a thread with a large stack. The embedded
+    // SurrealDB 4 engine also runs queries on the runtime's worker threads,
+    // whose 2 MiB default overflows on it; SurrealDB asks for 10 MiB there.
     std::thread::Builder::new()
         .stack_size(256 * 1024 * 1024)
         .spawn(|| {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
+                .thread_stack_size(WORKER_STACK)
                 .build()?
                 .block_on(run())
         })?

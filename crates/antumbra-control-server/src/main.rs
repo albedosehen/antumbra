@@ -249,8 +249,26 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // The shape of the CLI and the MCP server: SurrealDB query evaluation
+    // recurses deep, and an embedded SurrealDB 4 engine overflows both the
+    // thread that blocks on the run (1 MiB on Windows) and the runtime's
+    // workers (2 MiB; SurrealDB recommends 10 MiB). A `ws://` store runs its
+    // queries on its server, but `--url` may name an embedded one.
+    std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(16 * 1024 * 1024)
+                .build()?
+                .block_on(run())
+        })?
+        .join()
+        .map_err(|_| anyhow::anyhow!("antumbra-control-server worker thread panicked"))?
+}
+
+async fn run() -> anyhow::Result<()> {
     match Cli::parse().cmd {
         Command::Serve(a) => serve(a).await,
         Command::MintInvite(a) => {
