@@ -71,20 +71,44 @@ ignore = [
   # moves to elliptic-curve 0.14.
   "RUSTSEC-2026-0387",
 
-  # zip 7.4.0 -- archive extraction that preserves SUID/SGID bits (-0367),
-  # creates symlinks pointing outside the destination (-0368), and applies
-  # permissions through symlinks (-0369). Fixed in 9.0.
+  # surrealdb-core 3.3.0 -- data race and double free through reblessive
+  # 0.4.3, whose stack and runner types claim `Send` and `Sync`
+  # unconditionally (-0454). Fixed in surrealdb 4.0, which drops reblessive.
   #
-  # Not clearable by a bump: zip arrives only through candle-core 0.10.2,
-  # which depends on zip 7.
+  # Not clearable by a bump: every 3.x release, 3.3.5 included, keeps
+  # reblessive 0.4.3. Antumbra's move to SurrealDB 4 is held for a 4.0.0
+  # planner bug that breaks vector recall under a member's session
+  # (surrealdb/surrealdb#7668).
   #
-  # Unreachable: all three are in `ZipArchive::extract` and
-  # `ZipStreamReader::extract`, which write an archive out to disk. candle
-  # never calls either; it opens `.npz` and `.pth` files with
-  # `ZipArchive::new` and reads entries into memory by name, and writes
-  # `.npz` with `ZipWriter`. Nothing else in this workspace uses zip. Drop
-  # these when candle-core moves to zip 9.
-  "RUSTSEC-2026-0367",
-  "RUSTSEC-2026-0368",
-  "RUSTSEC-2026-0369",
+  # Not reached the way surrealdb-core 3.3.0 drives reblessive. The advisory
+  # needs one of two uses: polling two copies of a driver future from
+  # `Runner::step_async`/`finish_async` on different threads, or moving a
+  # stack to another thread while the thread that made it keeps an alias of
+  # its `!Send` state. Outside its tests surrealdb-core calls neither of
+  # those methods; it builds only `TreeStack`s and drives each with
+  # `stack.enter(..).finish().await`, where `finish` consumes the runner, so
+  # no driver future is copied and a stack moves only with the one future
+  # that owns it. Antumbra never calls reblessive itself, and where it runs
+  # against a SurrealDB server over ws://, as the compose deployment does, no
+  # statement runs through this build's executor at all. Drop this when
+  # Antumbra moves to SurrealDB 4.
+  "RUSTSEC-2026-0454",
+
+  # surrealkv 0.21.4 -- out-of-bounds read when an internal key shorter than
+  # 16 bytes is decoded, reachable from a crafted or corrupted SSTable on disk
+  # (-0452). Fixed in 1.2.0.
+  #
+  # Not clearable by a bump: surrealdb-kvs-surrealkv 3.3.x requires surrealkv
+  # ^0.21.4; 1.2 ships only with SurrealDB 4, which is held as above.
+  #
+  # Reachable only from the store's own files. surrealkv reads SSTables from
+  # an embedded store's directory (`--url surrealkv://...`, the default for
+  # the CLI and for a one-machine MCP server), which only the Antumbra process
+  # writes; whoever can plant a crafted table there can already rewrite the
+  # store. What remains is a table corrupted on disk, which a release build
+  # reads eight bytes out of bounds instead of refusing. The compose
+  # deployment runs SurrealDB as its own server (rocksdb, over ws://), where
+  # this build's surrealkv opens nothing. Drop this when Antumbra moves to
+  # SurrealDB 4.
+  "RUSTSEC-2026-0452",
 ]

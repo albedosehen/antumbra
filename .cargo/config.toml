@@ -14,3 +14,11 @@ git-fetch-with-cli = true
 # nothing: NEON is on by default.
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+# The embedded SurrealDB 4 engine needs a deeper stack than a thread's 2 MiB
+# default (SurrealDB recommends 10 MiB), and the test harness's threads, which
+# also host each `#[tokio::test]` runtime, take theirs from RUST_MIN_STACK. The
+# binaries size their own runtime threads. An RUST_MIN_STACK already in the
+# environment wins.
+[env]
+RUST_MIN_STACK = "16777216"
