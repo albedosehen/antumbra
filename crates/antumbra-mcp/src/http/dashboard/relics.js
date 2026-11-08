@@ -15,6 +15,10 @@ const PAGE = document.body.dataset.page;
 const PREVIEW_CONCURRENCY = 4;
 const REFUSED =
   "The server refused the token: it has expired, been revoked, or was signed with another key.";
+// Where the viewer's actions fold into a menu: below the width they fit in
+// beside a readable title, and on a screen too short to spare them a row.
+// relics.css holds the same query.
+const COMPACT = "(max-width: 1199.98px), (max-height: 560px)";
 
 const stamps = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -134,6 +138,7 @@ async function call(tool, args = {}) {
 // Signing in and out
 
 function showGate(message) {
+  setMenu(false);
   byId("app").hidden = true;
   byId("gate").hidden = false;
   const error = byId("gate-error");
@@ -328,6 +333,57 @@ function slugOfPage() {
 
 const viewer = { relic: null };
 
+// The menu the actions fold into on a compact screen. It stays open while an
+// action answers in place (Copied, Make private, Preparing…) and closes when
+// one leaves it: a tap elsewhere, Escape, focus moving into the relic, or the
+// screen turning wide enough to show the actions in the bar.
+
+function menuIsOpen() {
+  return byId("app").classList.contains("menu-open");
+}
+
+function setMenu(open) {
+  const toggle = byId("menu-toggle");
+  if (!toggle) return;
+  byId("app").classList.toggle("menu-open", open);
+  toggle.setAttribute("aria-expanded", String(open));
+}
+
+function wireMenu() {
+  const toggle = byId("menu-toggle");
+  const menu = byId("relic-actions");
+  toggle.addEventListener("click", (event) => {
+    const open = !menuIsOpen();
+    setMenu(open);
+    // Opened from the keyboard (a click with no pointer): focus goes in.
+    if (open && event.detail === 0) {
+      menu.querySelector("button:not([hidden]), a:not([hidden])")?.focus();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (menuIsOpen() && !event.target.closest("#relic-actions, #menu-toggle")) setMenu(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !menuIsOpen()) return;
+    setMenu(false);
+    toggle.focus();
+  });
+  // Focus leaving for somewhere named (tabbing past the last action, into the
+  // relic's frame) closes it. A tap on a button WebKit will not focus leaves
+  // no such target, and must not close the menu before its click lands; nor
+  // does the address field Copy link selects from, which closes it itself
+  // when the copy fails.
+  for (const node of [toggle, menu]) {
+    node.addEventListener("focusout", (event) => {
+      const next = event.relatedTarget;
+      if (!next || menu.contains(next) || next === toggle || next.id === "link-text") return;
+      setMenu(false);
+    });
+  }
+  byId("open-raw").addEventListener("click", () => setMenu(false));
+  matchMedia(COMPACT).addEventListener("change", () => setMenu(false));
+}
+
 function showRelic(relic, url) {
   showApp();
   document.title = `${relic.title} · Relics`;
@@ -401,6 +457,7 @@ async function toggleVisibility() {
     await loadSignedIn(relic.slug);
   } catch (error) {
     if (error instanceof SignedOut) return signOut(REFUSED);
+    setMenu(false);
     const failed = byId("viewer-error");
     failed.textContent = `Could not change who sees it: ${error.message}`;
     failed.hidden = false;
@@ -409,17 +466,23 @@ async function toggleVisibility() {
   }
 }
 
+function sayCopied(button) {
+  button.textContent = "Copied";
+  setTimeout(() => {
+    button.textContent = "Copy link";
+  }, 1500);
+}
+
 /** Copy the relic's address. The clipboard API needs a secure context, which
- *  a LAN address over plain HTTP is not; then the address is shown to copy. */
+ *  a LAN address over plain HTTP is not. There the older copy command still
+ *  copies a selection while the tap that asked for it is fresh (as it is on a
+ *  phone); failing that, the address is shown to copy by hand. */
 async function copyLink() {
   const address = location.href;
+  const button = byId("copy-link");
   try {
     await navigator.clipboard.writeText(address);
-    const button = byId("copy-link");
-    button.textContent = "Copied";
-    setTimeout(() => {
-      button.textContent = "Copy link";
-    }, 1500);
+    sayCopied(button);
   } catch {
     const fallback = byId("copy-fallback");
     const input = byId("link-text");
@@ -427,6 +490,21 @@ async function copyLink() {
     fallback.hidden = false;
     input.focus();
     input.select();
+    input.setSelectionRange(0, address.length);
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      // Refused: the address stays shown.
+    }
+    if (copied) {
+      fallback.hidden = true;
+      button.focus();
+      sayCopied(button);
+    } else {
+      setMenu(false);
+      input.focus();
+    }
   }
 }
 
@@ -477,6 +555,7 @@ async function download(format, button) {
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch (error) {
     if (error instanceof SignedOut) return signOut(REFUSED);
+    setMenu(false);
     failed.textContent = `Could not download it: ${error.message}`;
     failed.hidden = false;
   } finally {
@@ -486,6 +565,7 @@ async function download(format, button) {
 }
 
 function wireViewer() {
+  wireMenu();
   byId("visibility").addEventListener("click", toggleVisibility);
   byId("copy-link").addEventListener("click", copyLink);
   byId("signin").addEventListener("click", () => showGate());
