@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.7 - 2026-11-07
+
+Relics on phones and tablets, and a clean audit. The relic viewer and gallery hold on a phone or a tablet, upright or turned; candle 0.11 takes zip 7 and its four advisories out of the build; and the two SurrealDB advisories are carried, with their reasons, until Antumbra moves to SurrealDB 4.
+
+### Relics
+
+- **The viewer fits a phone or a tablet** ([#261](https://github.com/albedosehen/antumbra/pull/261)). Below 1200px wide, and on any screen 560px tall or less, the bar is one row: the mark, the title and its details on one line each, and a menu button. The actions fold into a panel under it with 44px rows. The relic fills the visible height (`100dvh`) instead of reaching behind a phone's toolbars. On a phone the bar's actions had run off the screen and the whole page scrolled sideways, and on a phone on its side the bar took 201 of 390 pixels. At 1200px and up the bar is as it was.
+- **Copy link copies over plain HTTP** ([#261](https://github.com/albedosehen/antumbra/pull/261)). A LAN address is withheld the clipboard API, so on a phone the address was always shown to copy by hand; the older copy command now copies while the tap is fresh, and the address is shown only when that fails.
+- **The gallery reflows on a narrow screen** ([#261](https://github.com/albedosehen/antumbra/pull/261)). Whose and which layout share a row and the search its own, a card never forces a sideways scroll, a phone's previews lay the page out at three times the card's width instead of four so their text stays legible, and every target is 44px under a finger.
+- **`publish_relic` says when a page declares no viewport** ([#261](https://github.com/albedosehen/antumbra/pull/261)), since a phone opening such a page alone or at its public address lays it out as a desktop page and shrinks it. Its `html` parameter now asks for a layout that holds from 320px wide.
+
+### The console
+
+- **A repository's scope is named by the repository in the lists** ([#260](https://github.com/albedosehen/antumbra/pull/260)). A standing expert trained for a repository has the repository's path as its scope, and in a list about forty columns wide that path filled the row before the row said anything else. The lists now name a repository by the last part of its path, and the panels below them still give it whole. A shadow's row is the scope and its reading, `✦ orders-service · 0.68`; a boundary's row leads with the behavior and ends in the scope.
+
+### Dependencies and security
+
+- **candle 0.11** ([#262](https://github.com/albedosehen/antumbra/pull/262)). zip 7.4.0 and its four advisories (RUSTSEC-2026-0367, -0368, -0369 and -0429) leave the build, and tokenizers moves to 0.23 with it. Two things change on the CPU. On AVX-512 VNNI CPUs candle keeps a repacked copy of quantized weights, so serving a Q8_0 or Q4_K base peaks higher (on a 1.5B model, Q8_0 from 3.3 to 4.8 GB and Q4_K from 2.7 to 3.9 GB) while Q8_0 decodes faster. Its thread pools now default to physical cores; `RAYON_NUM_THREADS` or `CANDLE_NUM_THREADS` sets them.
+- **The two SurrealDB advisories are carried while SurrealDB 4 is held** ([#262](https://github.com/albedosehen/antumbra/pull/262)). RUSTSEC-2026-0454 (surrealdb-core's reblessive) and RUSTSEC-2026-0452 (surrealkv) are fixed only in SurrealDB 4. That move is ready but held: SurrealDB 4.0.0 fails a member's vector search when a table's read rule holds a subquery, which Antumbra's grant and hive rules do ([surrealdb/surrealdb#7668](https://github.com/surrealdb/surrealdb/issues/7668)). `.cargo/audit.toml` says why neither is reached here, and both entries go with that move.
+
+### Fixes
+
+- **A memory's neighbors are read in id order** ([#262](https://github.com/albedosehen/antumbra/pull/262)). The read is capped at 256 edges, and SurrealDB 4 returns a scan's rows in no fixed order, so a memory with more edges would get a different set on each call.
+- **Runtime threads have room for an embedded SurrealDB** ([#262](https://github.com/albedosehen/antumbra/pull/262)). `antumbra`, `antumbra-mcp`, `antumbra-bench` and `antumbra-control-server` give their runtime threads 16 MiB stacks, as SurrealDB asks of an embedded engine, and the bench and control server block on a 256 MiB thread as the CLI and MCP server already did.
+
+### Docs
+
+- **The Windows CUDA 13.3 build changes with candle 0.11** ([#262](https://github.com/albedosehen/antumbra/pull/262)). cudarc now knows CUDA 13.4, so keeping `nvcc` off `PATH` would fall back to 13.4 bindings; keep it on `PATH`, or set `CUDARC_CUDA_VERSION=13030`.
+
 ## 0.2.6 - 2026-11-01
 
 Training you can watch, and experts on the CPU. A standing expert's training now shows in the console as a shadow, and what it missed as a boundary, each read by the scope it trained; a node without a GPU can serve experts at a usable speed; and the memory counts from 0.2.5 add up. x86-64 builds now need a CPU with AVX2.
