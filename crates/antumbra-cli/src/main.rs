@@ -900,6 +900,34 @@ mod tests {
         Cli::try_parse_from(tui_alias(argv)).unwrap().command
     }
 
+    /// What clap says against `argv`, or nothing when it parses.
+    fn refusal(argv: &[&str]) -> String {
+        let argv = argv.iter().map(std::ffi::OsString::from);
+        Cli::try_parse_from(tui_alias(argv)).map_or_else(|e| e.to_string(), |_| String::new())
+    }
+
+    // A day count is bounded at the parser, so the date arithmetic behind it
+    // cannot overflow on a typo: a usage error naming the range, not a panic.
+    #[test]
+    fn a_day_count_past_a_century_is_a_usage_error() {
+        let huge = "999999999999999";
+        for argv in [
+            ["antumbra", "claude", "skills", "--days", huge],
+            ["antumbra", "claude", "reanchor", "--days", huge],
+            ["antumbra", "verifier", "measure", "--ttl-days", huge],
+        ] {
+            assert!(
+                refusal(&argv).contains("0..=36500"),
+                "{argv:?}: {}",
+                refusal(&argv)
+            );
+        }
+        // clap reads `-1` as a flag before any range applies: refused all the same.
+        assert!(!refusal(&["antumbra", "claude", "reanchor", "--days", "-1"]).is_empty());
+        assert!(refusal(&["antumbra", "claude", "skills", "--days", "45"]).is_empty());
+        assert!(refusal(&["antumbra", "claude", "reanchor", "--days", "3"]).is_empty());
+    }
+
     #[test]
     fn the_console_is_tui_or_a_leading_tui_flag() {
         assert!(matches!(parsed(&["antumbra", "tui"]), Command::Tui(_)));

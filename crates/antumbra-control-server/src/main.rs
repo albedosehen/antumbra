@@ -81,8 +81,9 @@ struct StoreArgs {
 struct MintInviteArgs {
     #[command(flatten)]
     store: StoreArgs,
-    /// Days until the invite expires; `0` mints a non-expiring code.
-    #[arg(long, default_value_t = 14)]
+    /// Days until the invite expires; `0` mints a non-expiring code. Bounded
+    /// at a century, so the date arithmetic behind it cannot overflow.
+    #[arg(long, default_value_t = 14, value_parser = clap::value_parser!(i64).range(0..=36_500))]
     ttl_days: i64,
 }
 
@@ -390,6 +391,23 @@ mod tests {
                 serve.dev_mailer
             );
         }
+        Ok(())
+    }
+
+    // A day count is bounded at the parser, so the date arithmetic behind it
+    // cannot overflow on a typo: a usage error naming the range, not a panic.
+    #[test]
+    fn an_invite_ttl_past_a_century_is_a_usage_error() -> anyhow::Result<()> {
+        let mint = |ttl: &str| {
+            Cli::try_parse_from(["antumbra-control-server", "mint-invite", "--ttl-days", ttl])
+        };
+        let Err(e) = mint("999999999999999") else {
+            anyhow::bail!("a ttl past a century was accepted");
+        };
+        anyhow::ensure!(e.to_string().contains("0..=36500"), "{e}");
+        anyhow::ensure!(mint("-1").is_err(), "a negative ttl was accepted");
+        mint("0")?;
+        mint("36500")?;
         Ok(())
     }
 
