@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! `antumbra-mcp`: the Model Context Protocol server that exposes Antumbra's
 //! Penumbra memory to an agent. The runtime surface that lets a client (Claude
 //! Code, any MCP host) talk to Antumbra instead of a separate memory service.
@@ -840,12 +838,13 @@ fn build_verifier(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_store::testing::mem_store;
 
     // The store flags are the shared ones (#303): the password's environment
     // value is hidden in --help, and the url reads its variable, as in every
     // binary; --db-pass-file still excludes --db-pass across the flatten.
     #[test]
-    fn the_store_flags_read_as_in_every_binary() {
+    fn the_store_flags_read_as_in_every_binary() -> Result<()> {
         use clap::CommandFactory;
         let cmd = Cli::command();
         cmd.clone().debug_assert();
@@ -865,6 +864,7 @@ mod tests {
         assert!(
             Cli::try_parse_from(["antumbra-mcp", "--db-pass", "x", "--db-pass-file", "f"]).is_err()
         );
+        Ok(())
     }
 
     // The verifier refuses a secret an offline search would find, and the
@@ -906,7 +906,9 @@ mod tests {
     /// What compose hands over for an unset endpoint is an empty string, and
     /// clap keeps it; the server treats it as no endpoint at all.
     #[test]
-    fn an_empty_endpoint_setting_is_an_unset_one() {
+    fn an_empty_endpoint_setting_is_an_unset_one() -> Result<()> {
+        use anyhow::Context as _;
+
         let cli = Cli::try_parse_from([
             "antumbra-mcp",
             "--rerank-url",
@@ -918,7 +920,7 @@ mod tests {
             "--copal-render-origin",
             "",
         ])
-        .expect("empty values parse")
+        .context("empty values parse")?
         .without_empty_settings();
         assert_eq!(cli.rerank_url, None);
         assert_eq!(cli.copal.copal_addr, None);
@@ -932,19 +934,21 @@ mod tests {
             "--copal-addr",
             "http://copal:8080",
         ])
-        .expect("set values parse")
+        .context("set values parse")?
         .without_empty_settings();
         assert_eq!(cli.rerank_url.as_deref(), Some("http://rerank/rerank"));
         assert_eq!(cli.copal.copal_addr.as_deref(), Some("http://copal:8080"));
+        Ok(())
     }
 
     #[test]
-    fn an_empty_population_still_names_a_base() {
+    fn an_empty_population_still_names_a_base() -> Result<()> {
         assert_eq!(serving_base(None, "org/base"), "org/base");
         assert_eq!(
             serving_base(Some("org/trained-on"), "org/base"),
             "org/trained-on"
         );
+        Ok(())
     }
 
     /// A node puts itself in the user's fabric on start, under its own record
@@ -953,7 +957,7 @@ mod tests {
     /// as the owner.
     #[tokio::test]
     async fn a_node_registers_itself_as_the_user_it_serves() -> Result<()> {
-        let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:fabric");
         let user = UserId::new("user:lily");
         provision_identity(&store, &tenant, &user).await?;
@@ -991,7 +995,7 @@ mod tests {
     #[cfg(feature = "models")]
     #[tokio::test]
     async fn a_fresh_node_gets_a_serving_engine() -> Result<()> {
-        let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
+        let store = mem_store().await?;
         let Some(serve) = build_serve(
             &store,
             "test-host",
@@ -1013,7 +1017,7 @@ mod tests {
     // keys hide their environment values in --help, every flag keeps its name
     // and default.
     #[test]
-    fn the_embedder_and_copal_flags_read_as_in_every_binary() {
+    fn the_embedder_and_copal_flags_read_as_in_every_binary() -> Result<()> {
         use clap::CommandFactory;
         let cmd = Cli::command();
         cmd.clone().debug_assert();
@@ -1048,7 +1052,9 @@ mod tests {
             ("copal_key", "copal-key", "ANTUMBRA_COPAL_KEY"),
             ("copal_keys", "copal-keys", "ANTUMBRA_COPAL_KEYS"),
         ] {
-            let got = flag(id).unwrap_or_else(|| panic!("{id} is a flag"));
+            let Some(got) = flag(id) else {
+                anyhow::bail!("{id} is a flag");
+            };
             assert_eq!(got.0.as_deref(), Some(long), "{id}");
             assert_eq!(got.1.as_deref(), Some(env), "{id}");
             assert_eq!(
@@ -1057,5 +1063,6 @@ mod tests {
                 "{id} hides its value iff a key"
             );
         }
+        Ok(())
     }
 }

@@ -39,47 +39,53 @@ mod tests {
 
     static SEQ: AtomicU32 = AtomicU32::new(0);
 
-    fn secret_file(content: &str) -> std::path::PathBuf {
+    fn secret_file(content: &str) -> Result<std::path::PathBuf> {
         let path = std::env::temp_dir().join(format!(
             "antumbra-secret-{}-{}",
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         ));
-        std::fs::write(&path, content).unwrap();
-        path
+        std::fs::write(&path, content)?;
+        Ok(path)
     }
 
     #[test]
-    fn a_file_is_read_and_trimmed_and_inline_passes_through() {
-        let path = secret_file("s3cret\n");
+    fn a_file_is_read_and_trimmed_and_inline_passes_through() -> Result<()> {
+        let path = secret_file("s3cret\n")?;
         assert_eq!(
-            resolve(None, Some(&path), "JWT secret").unwrap().as_deref(),
+            resolve(None, Some(&path), "JWT secret")?.as_deref(),
             Some("s3cret")
         );
         assert_eq!(
-            resolve(Some("inline".into()), None, "JWT secret")
-                .unwrap()
-                .as_deref(),
+            resolve(Some("inline".into()), None, "JWT secret")?.as_deref(),
             Some("inline")
         );
-        assert_eq!(resolve(None, None, "JWT secret").unwrap(), None);
+        assert_eq!(resolve(None, None, "JWT secret")?, None);
         std::fs::remove_file(path).ok();
+        Ok(())
     }
 
     #[test]
-    fn an_empty_or_missing_file_and_both_forms_are_refused() {
-        let empty = secret_file("  \n");
-        let err = resolve(None, Some(&empty), "database password").unwrap_err();
+    fn an_empty_or_missing_file_and_both_forms_are_refused() -> Result<()> {
+        let empty = secret_file("  \n")?;
+        let Err(err) = resolve(None, Some(&empty), "database password") else {
+            bail!("an empty secret file was accepted");
+        };
         assert!(err.to_string().contains("is empty"), "{err}");
         std::fs::remove_file(&empty).ok();
 
         let missing = std::env::temp_dir().join("antumbra-secret-that-does-not-exist");
-        let err = resolve(None, Some(&missing), "database password").unwrap_err();
+        let Err(err) = resolve(None, Some(&missing), "database password") else {
+            bail!("a missing secret file was accepted");
+        };
         assert!(err.to_string().contains("cannot read"), "{err}");
 
-        let present = secret_file("x");
-        let err = resolve(Some("y".into()), Some(&present), "database password").unwrap_err();
+        let present = secret_file("x")?;
+        let Err(err) = resolve(Some("y".into()), Some(&present), "database password") else {
+            bail!("a secret given both inline and as a file was accepted");
+        };
         assert!(err.to_string().contains("pass one"), "{err}");
         std::fs::remove_file(present).ok();
+        Ok(())
     }
 }
