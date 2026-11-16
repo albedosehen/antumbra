@@ -87,43 +87,95 @@ impl McpServer {
         }))
     }
 
+    /// The compartment `id` as one of this session's own, or the refusal to
+    /// hand back: a compartment that is not the caller's, or does not exist,
+    /// reads the same, since every member can see the workspace's compartments
+    /// and sharing or revoking is the owner's alone.
+    async fn own_compartment(&self, id: &CompartmentId) -> Result<(), ErrorData> {
+        let owned = compartment::get(&self.store, &self.tenant, id)
+            .await
+            .map_err(err)?
+            .is_some_and(|c| c.owner == self.user);
+        if owned {
+            return Ok(());
+        }
+        Err(ErrorData::invalid_params(
+            format!(
+                "compartment '{}' is not one you own (or does not exist); only its owner shares or \
+                 revokes it, and list_compartments names yours",
+                id.as_str()
+            ),
+            None,
+        ))
+    }
+
     /// Share a compartment you own with another user.
     #[tool(
-        description = "Share one of your compartments with another user: reference (they can recall it) or link (they can also connect to it)."
+        description = "Share one of your compartments with another user: reference (they can recall it) or link (they can also connect to it). Only the compartment's owner may share it, with a user of this workspace."
     )]
     pub(super) async fn share_compartment(
         &self,
         Parameters(p): Parameters<ShareParams>,
     ) -> Result<Json<ShareOut>, ErrorData> {
+        let id = CompartmentId::new(p.compartment_id);
+        self.own_compartment(&id).await?;
+        let grantee = UserId::new(p.grantee);
+        if grantee == self.user {
+            return Err(ErrorData::invalid_params(
+                "a compartment is already its owner's; name another user",
+                None,
+            ));
+        }
         let g = Grant::new(
             self.tenant.clone(),
-            CompartmentId::new(p.compartment_id),
-            UserId::new(p.grantee),
+            id.clone(),
+            grantee.clone(),
             parse_capability(&p.capability),
             self.user.clone(),
             Utc::now(),
         );
         compartment::grant(&self.store, &g).await.map_err(err)?;
+        // The engine refuses a grant it does not permit by persisting nothing,
+        // without an error. A share that did not land is not reported as one.
+        if compartment::granted(&self.store, &self.tenant, &id, &grantee)
+            .await
+            .map_err(err)?
+            .is_none()
+        {
+            return Err(ErrorData::internal_error(
+                "the share did not land: the store refused the grant",
+                None,
+            ));
+        }
         Ok(Json(ShareOut { shared: true }))
     }
 
     /// Revoke a user's access to one of your compartments.
     #[tool(
-        description = "Revoke a user's access to one of your compartments (takes effect immediately)."
+        description = "Revoke a user's access to one of your compartments (takes effect immediately). Only the compartment's owner may revoke."
     )]
     pub(super) async fn revoke_compartment(
         &self,
         Parameters(p): Parameters<RevokeParams>,
     ) -> Result<Json<RevokeOut>, ErrorData> {
-        compartment::revoke(
-            &self.store,
-            &self.tenant,
-            &CompartmentId::new(p.compartment_id),
-            &UserId::new(p.grantee),
-            Utc::now(),
-        )
-        .await
-        .map_err(err)?;
+        let id = CompartmentId::new(p.compartment_id);
+        self.own_compartment(&id).await?;
+        let grantee = UserId::new(p.grantee);
+        compartment::revoke(&self.store, &self.tenant, &id, &grantee, Utc::now())
+            .await
+            .map_err(err)?;
+        // As with a share: a grant still live after the revoke is a revoke
+        // that did not land.
+        if compartment::granted(&self.store, &self.tenant, &id, &grantee)
+            .await
+            .map_err(err)?
+            .is_some()
+        {
+            return Err(ErrorData::internal_error(
+                "the revoke did not land: the grant is still live",
+                None,
+            ));
+        }
         Ok(Json(RevokeOut { revoked: true }))
     }
 }

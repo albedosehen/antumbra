@@ -393,6 +393,96 @@ async fn compartment_tools_create_list_store_share() {
     );
 }
 
+// Sharing and revoking are the owner's: another member of the workspace who
+// names your compartment is refused in words, not told `shared: true` while
+// the engine persisted nothing; a share that landed reads back as a grant,
+// and a revoke that landed leaves none. Two users' servers over one store.
+#[tokio::test]
+async fn sharing_someone_elses_compartment_is_refused_not_reported_shared() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let tenant = TenantId::new("ws:test");
+    let server_for = |user: &str| {
+        McpServer::new(
+            store.clone(),
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            tenant.clone(),
+            UserId::new(user),
+            "test-host".into(),
+            CompartmentId::new(format!("comp:{user}:default")),
+            None,
+        )
+    };
+    let a = server_for("user:a");
+    let b = server_for("user:b");
+    let owned = a
+        .create_compartment(Parameters(CreateCompartmentParams { name: "a's".into() }))
+        .await?;
+    let id = CompartmentId::new(owned.0.id.clone());
+    let share = |grantee: &str| ShareParams {
+        compartment_id: owned.0.id.clone(),
+        grantee: grantee.into(),
+        capability: "reference".into(),
+    };
+    let grants = || antumbra_store::repo::compartment::list_grants(&store, &tenant, &id);
+
+    let Err(e) = b.share_compartment(Parameters(share("user:c"))).await else {
+        anyhow::bail!("B shared A's compartment");
+    };
+    anyhow::ensure!(
+        e.code == rmcp::model::ErrorCode::INVALID_PARAMS && e.message.contains("not one you own"),
+        "{e:?}"
+    );
+    let Err(e) = b
+        .share_compartment(Parameters(ShareParams {
+            compartment_id: "comp:nowhere".into(),
+            ..share("user:c")
+        }))
+        .await
+    else {
+        anyhow::bail!("B shared a compartment that does not exist");
+    };
+    anyhow::ensure!(e.code == rmcp::model::ErrorCode::INVALID_PARAMS, "{e:?}");
+    let Err(e) = a.share_compartment(Parameters(share("user:a"))).await else {
+        anyhow::bail!("A shared a compartment with its own owner");
+    };
+    anyhow::ensure!(e.code == rmcp::model::ErrorCode::INVALID_PARAMS, "{e:?}");
+    anyhow::ensure!(grants().await?.is_empty(), "a refused share left a grant");
+
+    anyhow::ensure!(
+        a.share_compartment(Parameters(share("user:c")))
+            .await?
+            .0
+            .shared
+    );
+    let after = grants().await?;
+    anyhow::ensure!(
+        after.len() == 1
+            && after
+                .first()
+                .is_some_and(|g| g.grantee == UserId::new("user:c")),
+        "the owner's share did not read back as one grant"
+    );
+
+    let revoke = || RevokeParams {
+        compartment_id: owned.0.id.clone(),
+        grantee: "user:c".into(),
+    };
+    let Err(e) = b.revoke_compartment(Parameters(revoke())).await else {
+        anyhow::bail!("B revoked a grant on A's compartment");
+    };
+    anyhow::ensure!(e.code == rmcp::model::ErrorCode::INVALID_PARAMS, "{e:?}");
+    anyhow::ensure!(
+        grants().await?.len() == 1,
+        "B's refused revoke changed the grants"
+    );
+    anyhow::ensure!(a.revoke_compartment(Parameters(revoke())).await?.0.revoked);
+    anyhow::ensure!(
+        grants().await?.is_empty(),
+        "the owner's revoke did not land"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn propose_compartments_clusters_inbox_then_applies() {
     let s = server().await;
