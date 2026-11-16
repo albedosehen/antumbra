@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use antumbra_core::ports::AcceptabilityProbe;
-use antumbra_core::{BoundaryId, FailureBoundary, Generation, Grain, Result};
+use antumbra_core::{AntumbraError, BoundaryId, FailureBoundary, Generation, Grain, Result};
 
 // `BoundaryFinding` (the recovered scope: behavior, governing feature, and the
 // C/C' context pair) now lives in `antumbra-core` so a `TrainOutcome` can carry
@@ -28,17 +28,25 @@ pub type Candidate = (String, Vec<Value>);
 /// until the probe judges the behavior acceptable. Returns the first recovered
 /// scope, or `None` if no single-feature change flips acceptability.
 ///
-/// `fail_context` must be a JSON object (the context C where B is incorrect).
+/// `fail_context` is a JSON object (the context C where B is incorrect): each
+/// candidate is that object with one feature changed. Anything else is an
+/// error, not a search; indexing into it would panic.
 pub async fn find_scope(
     behavior: &str,
     fail_context: &Value,
     candidates: &[Candidate],
     probe: &dyn AcceptabilityProbe,
 ) -> Result<Option<BoundaryFinding>> {
+    let Some(fail) = fail_context.as_object() else {
+        return Err(AntumbraError::other(
+            "find_scope: the failing context must be a JSON object of feature to value",
+        ));
+    };
     for (feature, values) in candidates {
         for value in values {
-            let mut candidate = fail_context.clone();
-            candidate[feature.as_str()] = value.clone();
+            let mut candidate = fail.clone();
+            candidate.insert(feature.clone(), value.clone());
+            let candidate = Value::Object(candidate);
             if probe.acceptable(behavior, &candidate).await? {
                 return Ok(Some(BoundaryFinding {
                     behavior: behavior.to_string(),
@@ -233,6 +241,32 @@ mod tests {
             .await
             .unwrap();
         assert!(finding.is_none());
+    }
+
+    // A failing context that is not an object is refused in words, where
+    // indexing into it would have panicked: the contract the doc stated is
+    // now checked.
+    #[tokio::test]
+    async fn rejects_a_context_that_is_not_an_object() -> Result<()> {
+        let probe = FeatureProbe {
+            feature: "runtime".into(),
+            ok_value: serde_json::json!("node"),
+        };
+        let candidates = vec![("runtime".to_string(), vec![serde_json::json!("node")])];
+        for odd in [
+            serde_json::json!("deno"),
+            serde_json::json!(["deno"]),
+            serde_json::Value::Null,
+            serde_json::json!(7),
+        ] {
+            let Err(e) = find_scope("npm install", &odd, &candidates, &probe).await else {
+                return Err(AntumbraError::other(format!("{odd} was searched over")));
+            };
+            if !e.to_string().contains("JSON object") {
+                return Err(AntumbraError::other(format!("not the contract: {e}")));
+            }
+        }
+        Ok(())
     }
 
     #[tokio::test]
