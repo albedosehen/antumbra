@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! End-to-end with fakes: the loop grows a population, the gate routes a task
 //! to a graduated expert, and the serve seam answers for it -- the whole v0
 //! spine (train -> graduate -> route -> serve) wired together, no GPU.
@@ -12,12 +10,12 @@ use antumbra_core::{
 use antumbra_gate::{route, GateConfig};
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, compartment, expert, memory, principal};
-use antumbra_store::Store;
+use antumbra_store::testing::mem_store_of;
 use chrono::Utc;
 
 #[tokio::test]
-async fn train_graduate_route_then_serve() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn train_graduate_route_then_serve() -> anyhow::Result<()> {
+    let store = mem_store_of(8).await?;
     let exemplars = vec!["reverse a string".to_string(), "format text".to_string()];
     let trainer = ScriptedTrainer::graduating_with_exemplars(exemplars.clone());
     let embedder = FixedEmbedder::new(8);
@@ -25,16 +23,15 @@ async fn train_graduate_route_then_serve() {
     let run = RunId::new("run:e2e");
     GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default())
         .run_until(&run, 1)
-        .await
-        .expect("run");
+        .await?;
 
-    let experts = expert::list(&store).await.unwrap();
+    let experts = expert::list(&store).await?;
     assert_eq!(experts.len(), 1, "the loop graduated one expert");
 
     // Route a task near the expert's learned capability. Threshold off so the
     // pipeline (not the escalation heuristic, covered elsewhere) is what's under test.
-    let task_vec = embedder.embed("reverse a string").await.unwrap();
-    let boundaries = boundary::list(&store).await.unwrap();
+    let task_vec = embedder.embed("reverse a string").await?;
+    let boundaries = boundary::list(&store).await?;
     let cfg = GateConfig {
         coverage_threshold: -1.0,
         ..GateConfig::default()
@@ -52,9 +49,9 @@ async fn train_graduate_route_then_serve() {
             adapters: vec![chosen],
             weights: Vec::new(),
         })
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(out.final_output, "reverse 'abc'");
+    Ok(())
 }
 
 /// The `propose-compartments` op's distinctive logic: the pool filter (inbox +
@@ -63,17 +60,15 @@ async fn train_graduate_route_then_serve() {
 /// `ops::propose_compartments` against a real store (the op is private to the
 /// bin). Clustering itself is unit-tested in `antumbra-core::penumbra`.
 #[tokio::test]
-async fn propose_compartments_pool_filter_and_apply() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn propose_compartments_pool_filter_and_apply() -> anyhow::Result<()> {
+    let store = mem_store_of(8).await?;
     let embedder = FixedEmbedder::new(8);
     let tenant = TenantId::new("ws:e2e");
     let user_a = UserId::new("user:a");
     let user_b = UserId::new("user:b");
     let inbox = CompartmentId::new("comp:ws:e2e:user:a:default");
     let now = Utc::now();
-    principal::provision(&store, &tenant, &user_a)
-        .await
-        .unwrap();
+    principal::provision(&store, &tenant, &user_a).await?;
 
     // Three inbox memories (user A) that should cluster + move.
     for (id, content) in [
@@ -81,16 +76,16 @@ async fn propose_compartments_pool_filter_and_apply() {
         ("memory:2", "deno test typescript suite"),
         ("memory:3", "deno bundle typescript output"),
     ] {
-        let v = embedder.embed(content).await.unwrap();
+        let v = embedder.embed(content).await?;
         let m = Memory::new(id, tenant.clone(), MemoryNetwork::World, content, 0.8, now)
             .with_embedding(v)
             .by(user_a.clone(), "host")
             .in_compartment(inbox.clone());
-        memory::upsert(&store, &m).await.unwrap();
+        memory::upsert(&store, &m).await?;
     }
     // One already in a NAMED compartment (filed) -> excluded.
     {
-        let v = embedder.embed("deno fmt typescript files").await.unwrap();
+        let v = embedder.embed("deno fmt typescript files").await?;
         let m = Memory::new(
             "memory:filed",
             tenant.clone(),
@@ -102,11 +97,11 @@ async fn propose_compartments_pool_filter_and_apply() {
         .with_embedding(v)
         .by(user_a.clone(), "host")
         .in_compartment(CompartmentId::new("comp:named"));
-        memory::upsert(&store, &m).await.unwrap();
+        memory::upsert(&store, &m).await?;
     }
     // One uncompartmented but authored by ANOTHER user -> excluded.
     {
-        let v = embedder.embed("deno lint typescript code").await.unwrap();
+        let v = embedder.embed("deno lint typescript code").await?;
         let m = Memory::new(
             "memory:other",
             tenant.clone(),
@@ -117,13 +112,12 @@ async fn propose_compartments_pool_filter_and_apply() {
         )
         .with_embedding(v)
         .by(user_b.clone(), "host");
-        memory::upsert(&store, &m).await.unwrap();
+        memory::upsert(&store, &m).await?;
     }
 
     // The op's pool filter.
     let pool: Vec<Memory> = memory::list(&store, &tenant)
-        .await
-        .unwrap()
+        .await?
         .into_iter()
         .filter(|m| {
             m.compartment.as_ref() == Some(&inbox)
@@ -153,21 +147,20 @@ async fn propose_compartments_pool_filter_and_apply() {
         now,
     )
     .proposed();
-    compartment::create(&store, &c).await.unwrap();
+    compartment::create(&store, &c).await?;
     for mid in &p.members {
-        let mut m = memory::get(&store, &tenant, mid).await.unwrap().unwrap();
+        let Some(mut m) = memory::get(&store, &tenant, mid).await? else {
+            anyhow::bail!("proposed member {mid} is not in the store");
+        };
         m.compartment = Some(new_id.clone());
-        memory::upsert(&store, &m).await.unwrap();
+        memory::upsert(&store, &m).await?;
     }
 
-    let moved = memory::list_by_compartment(&store, &tenant, &new_id)
-        .await
-        .unwrap();
+    let moved = memory::list_by_compartment(&store, &tenant, &new_id).await?;
     assert_eq!(moved.len(), 3, "the inbox region moved into the proposal");
     // The filed and other-user memories are untouched.
     let still_filed =
-        memory::list_by_compartment(&store, &tenant, &CompartmentId::new("comp:named"))
-            .await
-            .unwrap();
+        memory::list_by_compartment(&store, &tenant, &CompartmentId::new("comp:named")).await?;
     assert_eq!(still_filed.len(), 1);
+    Ok(())
 }

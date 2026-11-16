@@ -158,20 +158,19 @@ mod tests {
     ]"#;
 
     #[test]
-    fn merges_are_read_oldest_first_without_forks_or_missing_commits() {
-        let merges = merges_in(LISTED).unwrap();
+    fn merges_are_read_oldest_first_without_forks_or_missing_commits() -> anyhow::Result<()> {
+        let merges = merges_in(LISTED)?;
         let numbers: Vec<u64> = merges.iter().map(|m| m.number).collect();
         assert_eq!(numbers, vec![50, 51]);
         assert_eq!(merges[1].commits, vec!["5df8993", "229e6c4"]);
         assert_eq!(merges[1].commit, "4e1318f");
+        Ok(())
     }
 
     #[test]
-    fn a_window_keeps_the_recent_merges_and_any_it_cannot_date() {
-        let mut merges = merges_in(LISTED).unwrap();
-        let cutoff = DateTime::parse_from_rfc3339("2026-09-23T17:30:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
+    fn a_window_keeps_the_recent_merges_and_any_it_cannot_date() -> anyhow::Result<()> {
+        let mut merges = merges_in(LISTED)?;
+        let cutoff = DateTime::parse_from_rfc3339("2026-09-23T17:30:00Z")?.with_timezone(&Utc);
         let recent: Vec<u64> = merged_since(merges.clone(), cutoff)
             .iter()
             .map(|m| m.number)
@@ -183,12 +182,17 @@ mod tests {
             .map(|m| m.number)
             .collect();
         assert_eq!(kept, vec![50, 51]);
+        Ok(())
     }
 
     #[test]
-    fn unreadable_gh_output_is_an_error_that_says_so() {
-        let err = merges_in("not json").unwrap_err().to_string();
+    fn unreadable_gh_output_is_an_error_that_says_so() -> anyhow::Result<()> {
+        let Err(err) = merges_in("not json") else {
+            anyhow::bail!("text that is not JSON was read as a merge list");
+        };
+        let err = err.to_string();
         assert!(err.contains("gh pr list"), "{err}");
+        Ok(())
     }
 
     /// A stand-in surface that answers `record_merges` with `each` for every
@@ -210,14 +214,14 @@ mod tests {
     }
 
     #[test]
-    fn one_call_carries_every_merge_in_order_and_what_each_moved_is_said() {
+    fn one_call_carries_every_merge_in_order_and_what_each_moved_is_said() -> anyhow::Result<()> {
         let (calls, answer) = surface(json!({ "moved": 2, "not_writable": 0 }));
         let call = |tool: &str, args: Value| {
             calls.borrow_mut().push(args.clone());
             answer(tool, args)
         };
-        let merges = merges_in(LISTED).unwrap();
-        let said = report(&call, "github.com/albedosehen/antumbra", &merges, false).unwrap();
+        let merges = merges_in(LISTED)?;
+        let said = report(&call, "github.com/albedosehen/antumbra", &merges, false)?;
         let calls = calls.into_inner();
         assert_eq!(calls.len(), 1, "one call for every merge");
         assert_eq!(calls[0]["repo"], "github.com/albedosehen/antumbra");
@@ -233,13 +237,14 @@ mod tests {
                 "2 merge(s) reported, 4 memory(ies) moved",
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_merge_that_moves_nothing_is_counted_but_not_listed() {
-        let merges = merges_in(LISTED).unwrap();
+    fn a_merge_that_moves_nothing_is_counted_but_not_listed() -> anyhow::Result<()> {
+        let merges = merges_in(LISTED)?;
         let (_, shared) = surface(json!({ "moved": 0, "not_writable": 1 }));
-        let said = report(&shared, "r/o/n", &merges[..1], false).unwrap();
+        let said = report(&shared, "r/o/n", &merges[..1], false)?;
         assert_eq!(
             said,
             vec![
@@ -248,36 +253,41 @@ mod tests {
             ]
         );
         let (_, quiet) = surface(json!({ "moved": 0, "not_writable": 0 }));
-        let said = report(&quiet, "r/o/n", &merges[..1], false).unwrap();
+        let said = report(&quiet, "r/o/n", &merges[..1], false)?;
         assert_eq!(said, vec!["1 merge(s) reported, 0 memory(ies) moved"]);
+        Ok(())
     }
 
     #[test]
-    fn no_merges_calls_nothing() {
+    fn no_merges_calls_nothing() -> anyhow::Result<()> {
         let call = |_: &str, _: Value| -> anyhow::Result<Value> {
-            panic!("nothing to report, so nothing to call")
+            anyhow::bail!("nothing to report, so nothing to call")
         };
-        let said = report(&call, "r/o/n", &[], false).unwrap();
+        let said = report(&call, "r/o/n", &[], false)?;
         assert_eq!(said, vec!["0 merge(s) reported, 0 memory(ies) moved"]);
+        Ok(())
     }
 
     /// An answer that does not account for every merge sent is an error, not a
     /// report that silently skips some.
     #[test]
-    fn an_answer_short_of_the_merges_sent_is_an_error() {
+    fn an_answer_short_of_the_merges_sent_is_an_error() -> anyhow::Result<()> {
         let call = |_: &str, _: Value| Ok(json!({ "merges": [{ "moved": 1 }] }));
-        let merges = merges_in(LISTED).unwrap();
-        let err = report(&call, "r/o/n", &merges, false).unwrap_err();
+        let merges = merges_in(LISTED)?;
+        let Err(err) = report(&call, "r/o/n", &merges, false) else {
+            anyhow::bail!("an answer short of the merges sent was accepted");
+        };
         assert!(err.to_string().contains("1 merge(s) of the 2"), "{err}");
+        Ok(())
     }
 
     #[test]
-    fn a_dry_run_calls_nothing() {
+    fn a_dry_run_calls_nothing() -> anyhow::Result<()> {
         let call = |_: &str, _: Value| -> anyhow::Result<Value> {
-            panic!("a dry run must not call the surface")
+            anyhow::bail!("a dry run must not call the surface")
         };
-        let merges = merges_in(LISTED).unwrap();
-        let said = report(&call, "r/o/n", &merges, true).unwrap();
+        let merges = merges_in(LISTED)?;
+        let said = report(&call, "r/o/n", &merges, true)?;
         assert_eq!(
             said,
             vec![
@@ -285,17 +295,21 @@ mod tests {
                 "would report #51 fix/rerank-budget -> main",
             ]
         );
+        Ok(())
     }
 
     /// A surface too old to know the tool stops the run with its own words,
     /// rather than reporting nothing moved.
     #[test]
-    fn a_refusal_stops_the_run() {
+    fn a_refusal_stops_the_run() -> anyhow::Result<()> {
         let call = |_: &str, _: Value| -> anyhow::Result<Value> {
             anyhow::bail!("unknown tool: record_merges")
         };
-        let merges = merges_in(LISTED).unwrap();
-        let err = report(&call, "r/o/n", &merges, false).unwrap_err();
+        let merges = merges_in(LISTED)?;
+        let Err(err) = report(&call, "r/o/n", &merges, false) else {
+            anyhow::bail!("the surface's refusal was not an error");
+        };
         assert!(err.to_string().contains("unknown tool"));
+        Ok(())
     }
 }

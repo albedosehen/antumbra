@@ -875,16 +875,18 @@ pub async fn store_facts(
 mod tests {
     use super::*;
     #[test]
-    fn run_for_output_captures_stdout_and_reports_failure() {
-        let ok = run_for_output(&["cargo".to_string(), "--version".to_string()]).unwrap();
+    fn run_for_output_captures_stdout_and_reports_failure() -> anyhow::Result<()> {
+        let ok = run_for_output(&["cargo".to_string(), "--version".to_string()])?;
         assert!(ok.starts_with("cargo "));
-        let err = run_for_output(&[
+        let Err(err) = run_for_output(&[
             "cargo".to_string(),
             "definitely-not-a-cargo-subcommand".to_string(),
-        ])
-        .unwrap_err()
-        .to_string();
+        ]) else {
+            anyhow::bail!("a failing command's output was taken for a success");
+        };
+        let err = err.to_string();
         assert!(err.contains("exited with"), "{err}");
         assert!(run_for_output(&[]).is_err());
+        Ok(())
     }
 }

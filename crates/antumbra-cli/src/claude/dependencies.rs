@@ -161,7 +161,7 @@ mod tests {
     /// depending repository was read; installed copies are not read as the
     /// repository's own, and a slug is one repository whatever its case.
     #[test]
-    fn an_edge_names_its_manifest_at_the_commit_it_was_read() {
+    fn an_edge_names_its_manifest_at_the_commit_it_was_read() -> anyhow::Result<()> {
         let trees = fleet();
         assert_eq!(trees[0].manifests.len(), 1, "node_modules is not read");
         let mut twice = fleet();
@@ -186,10 +186,11 @@ mod tests {
                 },
             })]
         );
+        Ok(())
     }
 
     #[test]
-    fn records_each_edge_and_says_whether_it_was_new() {
+    fn records_each_edge_and_says_whether_it_was_new() -> anyhow::Result<()> {
         let asked = RefCell::new(Vec::new());
         let seen_before = RefCell::new(false);
         let surface = |tool: &str, arguments: Value| {
@@ -200,8 +201,8 @@ mod tests {
         let trees = fleet();
         let mut twice = fleet();
         twice.extend(fleet());
-        let first = record(&surface, &twice, false).unwrap();
-        let second = record(&surface, &trees, false).unwrap();
+        let first = record(&surface, &twice, false)?;
+        let second = record(&surface, &trees, false)?;
         assert_eq!(
             first,
             [
@@ -217,11 +218,12 @@ mod tests {
         assert!(asked.borrow().iter().all(|(t, _)| t == "record_dependency"));
 
         asked.borrow_mut().clear();
-        let dry = record(&surface, &trees, true).unwrap();
+        let dry = record(&surface, &trees, true)?;
         assert!(dry[2].starts_with("found    "), "{dry:?}");
         assert!(
             asked.borrow().is_empty(),
             "a dry run asks the surface nothing"
         );
+        Ok(())
     }
 }
