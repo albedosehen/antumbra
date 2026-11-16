@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Durable generational loop validation: the loop grows the population across generations,
 //! survives a simulated kill/restart by resuming from the persisted head,
 //! prunes (does not grow) when shadows collapse, and writes its full lineage
@@ -10,19 +8,20 @@ use antumbra_core::generational::LoopState;
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{
-    BoundaryFinding, BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary,
-    Generation, Grain, RunId, ShadowStatus, SubjectKind,
+    AntumbraError, BoundaryFinding, BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId,
+    FailureBoundary, Generation, Grain, Result, RunId, ShadowStatus, SubjectKind,
 };
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{
     boundary, evaluation, expert, generation, loop_control, reward, shadow,
 };
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 use chrono::Utc;
 
 #[tokio::test]
-async fn grows_population_and_resumes_after_restart() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn grows_population_and_resumes_after_restart() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer::graduating();
     let embedder = FixedEmbedder::new(8);
     let cfg = LoopConfig {
@@ -35,100 +34,100 @@ async fn grows_population_and_resumes_after_restart() {
     // First "process": run one generation, then drop the loop (simulated kill).
     {
         let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg.clone());
-        let mut head = lp.resume_or_init(&run).await.unwrap();
+        let mut head = lp.resume_or_init(&run).await?;
         assert_eq!(head.state, LoopState::Grow);
         assert_eq!(head.generation, Generation::ZERO);
 
-        let report = lp.run_generation(&mut head).await.unwrap();
+        let report = lp.run_generation(&mut head).await?;
         assert!(report.graduated);
         assert_eq!(head.state, LoopState::Grow);
         assert_eq!(head.generation, Generation(1));
     }
 
     // The population + lineage persisted independently of the loop object.
-    assert_eq!(expert::list(&store).await.unwrap().len(), 1);
+    assert_eq!(expert::list(&store).await?.len(), 1);
     assert_eq!(
         shadow::list_by_status(&store, ShadowStatus::Graduated)
-            .await
-            .unwrap()
+            .await?
             .len(),
         1
     );
-    assert!(!reward::list_by_run(&store, &run).await.unwrap().is_empty());
+    assert!(!reward::list_by_run(&store, &run).await?.is_empty());
 
     // Second "process": a fresh loop resumes from the persisted head.
     {
         let lp = GenerationLoop::new(&store, &trainer, &embedder, cfg.clone());
-        let head = lp.resume_or_init(&run).await.unwrap();
+        let head = lp.resume_or_init(&run).await?;
         assert_eq!(head.generation, Generation(1)); // resumed, not reset
         assert_eq!(head.state, LoopState::Grow);
 
-        let reports = lp.run_until(&run, 2).await.unwrap();
+        let reports = lp.run_until(&run, 2).await?;
         assert_eq!(reports.len(), 1);
     }
 
-    assert_eq!(expert::list(&store).await.unwrap().len(), 2);
+    assert_eq!(expert::list(&store).await?.len(), 2);
     assert_eq!(
         shadow::list_by_status(&store, ShadowStatus::Graduated)
-            .await
-            .unwrap()
+            .await?
             .len(),
         2
     );
+    Ok(())
 }
 
 // A cooperative halt of the durable loop: an operator sets the loop control to Halt; the
 // runner stops at the next generation boundary, checkpoints the head as Paused,
 // and consumes the signal. Re-running resumes from that checkpoint.
 #[tokio::test]
-async fn an_operator_halt_stops_the_loop_at_a_generation_boundary() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn an_operator_halt_stops_the_loop_at_a_generation_boundary() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer::graduating();
     let embedder = FixedEmbedder::new(8);
     let run = RunId::new("run:halt");
 
     // Halt requested before the run starts → it stops immediately, no generations.
-    loop_control::set(&store, &run, LoopCommand::Halt)
-        .await
-        .unwrap();
+    loop_control::set(&store, &run, LoopCommand::Halt).await?;
     let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
-    let reports = lp.run_until(&run, 3).await.unwrap();
+    let reports = lp.run_until(&run, 3).await?;
     assert!(reports.is_empty(), "halted before any generation ran");
 
     // The head is checkpointed Paused and the control was consumed (back to Run).
-    let head = generation::load_head(&store, &run).await.unwrap().unwrap();
+    let head = generation::load_head(&store, &run)
+        .await?
+        .ok_or_else(|| AntumbraError::other("the run has no head"))?;
     assert_eq!(head.state, LoopState::Paused);
     assert_eq!(head.generation, Generation::ZERO);
     assert_eq!(
-        loop_control::load(&store, &run).await.unwrap(),
+        loop_control::load(&store, &run).await?,
         LoopCommand::Run,
         "the halt was consumed"
     );
 
     // Re-running with no control resumes out of Paused and makes progress.
-    let reports = lp.run_until(&run, 1).await.unwrap();
+    let reports = lp.run_until(&run, 1).await?;
     assert_eq!(reports.len(), 1, "resumed and ran one generation");
-    assert_eq!(expert::list(&store).await.unwrap().len(), 1);
+    assert_eq!(expert::list(&store).await?.len(), 1);
+    Ok(())
 }
 
 #[tokio::test]
-async fn capability_vector_is_learned_from_solved_exemplars() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn capability_vector_is_learned_from_solved_exemplars() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let exemplars = vec!["reverse a string".to_string(), "format text".to_string()];
     let trainer = ScriptedTrainer::graduating_with_exemplars(exemplars.clone());
     let embedder = FixedEmbedder::new(8);
     let run = RunId::new("run:cap");
 
     let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
-    let mut head = lp.resume_or_init(&run).await.unwrap();
-    let report = lp.run_generation(&mut head).await.unwrap();
+    let mut head = lp.resume_or_init(&run).await?;
+    let report = lp.run_generation(&mut head).await?;
     assert!(report.graduated);
 
     // The expert's capability vector must be the centroid of the embedded
     // solved-task prompts -- learned from evaluated behavior, not a label.
     let mut expected = [0.0f32; 8];
     for ex in &exemplars {
-        let v = embedder.embed(ex).await.unwrap();
+        let v = embedder.embed(ex).await?;
         for (e, x) in expected.iter_mut().zip(v.iter()) {
             *e += *x;
         }
@@ -137,45 +136,47 @@ async fn capability_vector_is_learned_from_solved_exemplars() {
         .iter_mut()
         .for_each(|e| *e /= exemplars.len() as f32);
 
-    let experts = expert::list(&store).await.unwrap();
+    let experts = expert::list(&store).await?;
     assert_eq!(experts.len(), 1);
     let cap = experts[0]
         .capability_vec
         .as_ref()
-        .expect("graduated expert has a capability vector");
+        .ok_or_else(|| AntumbraError::other("the graduated expert has no capability vector"))?;
     assert_eq!(cap.len(), 8);
     for (c, e) in cap.iter().zip(expected.iter()) {
         assert!((c - e).abs() < 1e-6, "cap {c} != expected centroid {e}");
     }
+    Ok(())
 }
 
 // The no-forgetting tripwire (the frozen-expert population): across generations, every frozen expert
 // stays byte-identical to its freeze baseline, so each generation reports zero
 // regressions -- the freeze holds.
 #[tokio::test]
-async fn the_freeze_holds_across_generations() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn the_freeze_holds_across_generations() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer::graduating();
     let embedder = FixedEmbedder::new(8);
     let run = RunId::new("run:hold");
 
     let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
-    let reports = lp.run_until(&run, 2).await.unwrap();
+    let reports = lp.run_until(&run, 2).await?;
 
     assert_eq!(reports.len(), 2);
     assert!(
         reports.iter().all(|r| r.regressions.is_empty()),
         "frozen experts must not drift from their freeze baseline"
     );
-    assert_eq!(expert::list(&store).await.unwrap().len(), 2);
+    assert_eq!(expert::list(&store).await?.len(), 2);
+    Ok(())
 }
 
 // The kill criterion fires: a frozen expert whose current artifact no longer
 // matches its freeze-baseline fingerprint (the adapter was re-pointed / corrupted
 // after it froze) is caught by the tripwire and reported.
 #[tokio::test]
-async fn a_drifted_frozen_expert_trips_the_no_forgetting_check() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn a_drifted_frozen_expert_trips_the_no_forgetting_check() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer::graduating();
     let embedder = FixedEmbedder::new(8);
     let run = RunId::new("run:nf");
@@ -198,7 +199,7 @@ async fn a_drifted_frozen_expert_trips_the_no_forgetting_check() {
         placed_on: None,
         created_at: now,
     };
-    expert::insert(&store, &expert).await.unwrap();
+    expert::insert(&store, &expert).await?;
     // ...but whose freeze baseline recorded a DIFFERENT fingerprint.
     evaluation::insert(
         &store,
@@ -213,51 +214,50 @@ async fn a_drifted_frozen_expert_trips_the_no_forgetting_check() {
             created_at: now,
         },
     )
-    .await
-    .unwrap();
+    .await?;
 
-    let regressions = lp.check_no_forgetting(&run).await.unwrap();
+    let regressions = lp.check_no_forgetting(&run).await?;
     assert_eq!(
         regressions,
         vec![ExpertId::new("expert:e1")],
         "the drifted frozen expert is caught by the kill criterion"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn collapsing_shadows_are_pruned_and_logged() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn collapsing_shadows_are_pruned_and_logged() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer::collapsing(); // final_fitness 0.0
     let embedder = FixedEmbedder::new(8);
     let run = RunId::new("run:prune");
 
     let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
-    let mut head = lp.resume_or_init(&run).await.unwrap();
-    let report = lp.run_generation(&mut head).await.unwrap();
+    let mut head = lp.resume_or_init(&run).await?;
+    let report = lp.run_generation(&mut head).await?;
 
     assert!(!report.graduated);
     assert_eq!(report.fitness, 0.0);
     assert_eq!(head.generation, Generation(1));
 
     // nothing graduated into the population
-    assert!(expert::list(&store).await.unwrap().is_empty());
+    assert!(expert::list(&store).await?.is_empty());
     // the shadow is pruned
     assert_eq!(
         shadow::list_by_status(&store, ShadowStatus::Pruned)
-            .await
-            .unwrap()
+            .await?
             .len(),
         1
     );
     // and an open-negative boundary was logged (recorded but NOT actionable)
-    let boundaries = boundary::list(&store).await.unwrap();
+    let boundaries = boundary::list(&store).await?;
     assert_eq!(boundaries.len(), 1);
     assert!(!boundaries[0].is_actionable());
     // the failure is captured as an evaluation run
-    let evals = evaluation::list_for_subject(&store, SubjectKind::Shadow, report.shadow.as_str())
-        .await
-        .unwrap();
+    let evals =
+        evaluation::list_for_subject(&store, SubjectKind::Shadow, report.shadow.as_str()).await?;
     assert_eq!(evals.len(), 1);
+    Ok(())
 }
 
 // A graduating expert retires the boundaries it now covers (retire-on-correction lifecycle):
@@ -265,12 +265,12 @@ async fn collapsing_shadows_are_pruned_and_logged() {
 // the gap is filled and the boundary must stop gating routing. A boundary it does
 // not cover is left intact.
 #[tokio::test]
-async fn a_graduating_expert_retires_the_boundaries_it_covers() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn a_graduating_expert_retires_the_boundaries_it_covers() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let embedder = FixedEmbedder::new(8);
     let exemplar = "reverse a string";
-    let cap = embedder.embed(exemplar).await.unwrap();
-    let far = embedder.embed("unrelated gardening prose").await.unwrap();
+    let cap = embedder.embed(exemplar).await?;
+    let far = embedder.embed("unrelated gardening prose").await?;
     let now = Utc::now();
 
     // Covered: the expert's capability == this boundary's failure context (and is
@@ -296,19 +296,20 @@ async fn a_graduating_expert_retires_the_boundaries_it_covers() {
         ok_context_vec: Some(cap.clone()),
         ..covered.clone()
     };
-    boundary::upsert(&store, &covered).await.unwrap();
-    boundary::upsert(&store, &uncovered).await.unwrap();
+    boundary::upsert(&store, &covered).await?;
+    boundary::upsert(&store, &uncovered).await?;
 
     // Graduate an expert whose capability vector is the centroid of `exemplar`.
     let trainer = ScriptedTrainer::graduating_with_exemplars(vec![exemplar.to_string()]);
     let run = RunId::new("run:retire");
     let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
-    let mut head = lp.resume_or_init(&run).await.unwrap();
-    lp.run_generation(&mut head).await.unwrap();
+    let mut head = lp.resume_or_init(&run).await?;
+    lp.run_generation(&mut head).await?;
 
-    let remaining = boundary::list(&store).await.unwrap();
+    let remaining = boundary::list(&store).await?;
     assert_eq!(remaining.len(), 1, "the covered boundary was retired");
     assert_eq!(remaining[0].id.as_str(), "boundary:uncovered");
+    Ok(())
 }
 
 // A capture run that surfaces a verified correction's contrastive pair persists
@@ -316,8 +317,8 @@ async fn a_graduating_expert_retires_the_boundaries_it_covers() {
 // both contexts so the relative-margin inhibition can fire -- unlike the
 // open-negative a prune logs.
 #[tokio::test]
-async fn a_captured_correction_persists_an_actionable_boundary() {
-    let store = Store::connect_memory(8).await.expect("connect");
+async fn a_captured_correction_persists_an_actionable_boundary() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let finding = BoundaryFinding {
         behavior: "add a dep".into(),
         governing_feature: "runtime".into(),
@@ -329,10 +330,10 @@ async fn a_captured_correction_persists_an_actionable_boundary() {
     let run = RunId::new("run:cap");
 
     let lp = GenerationLoop::new(&store, &trainer, &embedder, LoopConfig::default());
-    let mut head = lp.resume_or_init(&run).await.unwrap();
-    lp.run_generation(&mut head).await.unwrap();
+    let mut head = lp.resume_or_init(&run).await?;
+    lp.run_generation(&mut head).await?;
 
-    let boundaries = boundary::list(&store).await.unwrap();
+    let boundaries = boundary::list(&store).await?;
     assert_eq!(boundaries.len(), 1);
     let b = &boundaries[0];
     assert!(b.is_actionable(), "a recovered C' makes it actionable");
@@ -348,17 +349,18 @@ async fn a_captured_correction_persists_an_actionable_boundary() {
     // The two context embeddings differ (C vs C'), so the relative margin is
     // meaningful rather than degenerate.
     assert_ne!(b.context_vec, b.ok_context_vec);
+    Ok(())
 }
 
 /// A generation is read through the standing instruments, and the slice a
 /// task lands in comes from its id alone -- so nothing the loop decides can
 /// move a task across the anchor.
 #[tokio::test]
-async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Result<()> {
+async fn a_generation_is_measured_through_the_instruments() -> Result<()> {
     use antumbra_core::ports::TaskOutcome;
     use antumbra_eclipse::Slice;
 
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let partition = antumbra_eclipse::Partition::default();
     // Tasks chosen so the default partition puts them on both sides of the
     // anchor; the ids are the ones eclipse's own pinning test names.
@@ -402,7 +404,7 @@ async fn a_generation_is_measured_through_the_instruments() -> antumbra_core::Re
 
     let measured = report
         .instruments
-        .ok_or_else(|| antumbra_core::AntumbraError::other("the generation was not measured"))?;
+        .ok_or_else(|| AntumbraError::other("the generation was not measured"))?;
     // The visible task passed and the held-out one did not, which is the gap
     // that serves as the primary hacking alarm.
     assert_eq!(measured.widest_gap().map(|(_, w)| w), Some(1.0));
@@ -431,8 +433,8 @@ async fn one_generation(
     trainer: &ScriptedTrainer,
     partition: Option<antumbra_eclipse::Partition>,
     run: &str,
-) -> antumbra_core::Result<antumbra_loop::GenerationReport> {
-    let store = Store::connect_memory(8).await?;
+) -> Result<antumbra_loop::GenerationReport> {
+    let store = mem_store_of(8).await?;
     let embedder = FixedEmbedder::new(8);
     let cfg = LoopConfig {
         partition,
@@ -447,7 +449,7 @@ async fn one_generation(
 /// unmeasured, and the loop says so rather than inventing a report from one
 /// number. That distinction is the whole reason the instruments exist.
 #[tokio::test]
-async fn a_generation_with_no_per_task_results_is_not_measured() -> antumbra_core::Result<()> {
+async fn a_generation_with_no_per_task_results_is_not_measured() -> Result<()> {
     let report = one_generation(
         &ScriptedTrainer::graduating(),
         Some(antumbra_eclipse::Partition::default()),
@@ -464,7 +466,7 @@ async fn a_generation_with_no_per_task_results_is_not_measured() -> antumbra_cor
 /// With no partition nothing was held out, so per-task results are a list of
 /// learned tasks, and slicing it would invent a gap between them.
 #[tokio::test]
-async fn a_generation_with_nothing_held_out_is_not_measured() -> antumbra_core::Result<()> {
+async fn a_generation_with_nothing_held_out_is_not_measured() -> Result<()> {
     let trainer = ScriptedTrainer {
         per_task: one_task_per_slice(),
         ..ScriptedTrainer::graduating()
@@ -479,7 +481,7 @@ async fn a_generation_with_nothing_held_out_is_not_measured() -> antumbra_core::
 /// every persisted gap was a difference between two sets of trained tasks. A
 /// trainer that does not confirm the holdout it enforced gets no instruments.
 #[tokio::test]
-async fn a_trainer_that_ignores_the_holdout_is_not_measured() -> antumbra_core::Result<()> {
+async fn a_trainer_that_ignores_the_holdout_is_not_measured() -> Result<()> {
     let trainer = ScriptedTrainer {
         per_task: one_task_per_slice(),
         ignores_holdout: true,
@@ -501,8 +503,8 @@ async fn a_trainer_that_ignores_the_holdout_is_not_measured() -> antumbra_core::
 /// The instruments are persisted beside the fitness they qualify, with the
 /// seed they were read under.
 #[tokio::test]
-async fn the_measurement_is_stored_with_the_score_it_qualifies() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(8).await?;
+async fn the_measurement_is_stored_with_the_score_it_qualifies() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer {
         per_task: one_task_per_slice(),
         ..ScriptedTrainer::graduating()
@@ -522,7 +524,7 @@ async fn the_measurement_is_stored_with_the_score_it_qualifies() -> antumbra_cor
     let metrics = rows
         .first()
         .and_then(|r| r.metrics.clone())
-        .ok_or_else(|| antumbra_core::AntumbraError::other("no evaluation row"))?;
+        .ok_or_else(|| AntumbraError::other("no evaluation row"))?;
     assert_eq!(metrics["partition_seed"], serde_json::json!(0));
     assert_eq!(
         metrics["instruments"]["audit"]["measured"],
@@ -540,7 +542,7 @@ async fn climbing_run(
     partition: antumbra_eclipse::Partition,
     generations: std::ops::Range<u32>,
     audit_passes_from: Option<u32>,
-) -> antumbra_core::Result<Vec<antumbra_loop::GenerationReport>> {
+) -> Result<Vec<antumbra_loop::GenerationReport>> {
     let embedder = FixedEmbedder::new(8);
     let mut reports = Vec::new();
     for g in generations {
@@ -581,8 +583,8 @@ fn audit_measured(report: &antumbra_loop::GenerationReport) -> Option<u32> {
 /// schedule the audit task is not measured at all, which is different from
 /// measured and failed.
 #[tokio::test]
-async fn the_audit_slice_is_measured_on_its_schedule() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(8).await?;
+async fn the_audit_slice_is_measured_on_its_schedule() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let partition = antumbra_eclipse::Partition::default();
     let reports = climbing_run(&store, &RunId::new("run:k"), partition, 0..3, Some(0)).await?;
     // Default k is 2: generations 0 and 2 are audited, 1 is not.
@@ -599,10 +601,9 @@ async fn the_audit_slice_is_measured_on_its_schedule() -> antumbra_core::Result<
 /// The recipe search's kill criterion, read by the loop: ten generations of a
 /// search score climbing while the audit slice stays where it was.
 #[tokio::test]
-async fn a_climb_the_audit_slice_does_not_follow_reads_as_overtuning() -> antumbra_core::Result<()>
-{
+async fn a_climb_the_audit_slice_does_not_follow_reads_as_overtuning() -> Result<()> {
     use antumbra_eclipse::Trend;
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let run = RunId::new("run:overtuned");
     let partition = antumbra_eclipse::Partition::default();
     let reports = climbing_run(&store, &run, partition, 0..10, None).await?;
@@ -626,8 +627,8 @@ async fn a_climb_the_audit_slice_does_not_follow_reads_as_overtuning() -> antumb
 
 /// The same climb, with the audit slice following it, is a real gain.
 #[tokio::test]
-async fn a_climb_the_audit_slice_follows_reads_as_carrying() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(8).await?;
+async fn a_climb_the_audit_slice_follows_reads_as_carrying() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let partition = antumbra_eclipse::Partition::default();
     let reports = climbing_run(&store, &RunId::new("run:carry"), partition, 0..10, Some(4)).await?;
     assert_eq!(
@@ -640,8 +641,8 @@ async fn a_climb_the_audit_slice_follows_reads_as_carrying() -> antumbra_core::R
 /// A reseed repartitions the corpus, so generations measured under the old
 /// seed read a different audit slice and do not count toward the new trend.
 #[tokio::test]
-async fn a_reseed_starts_the_trend_over() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(8).await?;
+async fn a_reseed_starts_the_trend_over() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let run = RunId::new("run:reseeded");
     let before = antumbra_eclipse::Partition::default();
     climbing_run(&store, &run, before, 0..10, None).await?;
@@ -678,9 +679,8 @@ fn with_impossible(impossible_passed: bool) -> ScriptedTrainer {
 /// A pass on an impossible task is proof of a shortcut, so the
 /// generation fails whole -- however well it scored -- and nothing graduates.
 #[tokio::test]
-async fn a_generation_that_passes_an_impossible_task_does_not_graduate() -> antumbra_core::Result<()>
-{
-    let store = Store::connect_memory(8).await?;
+async fn a_generation_that_passes_an_impossible_task_does_not_graduate() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let partition = antumbra_eclipse::Partition::default();
     let cfg = LoopConfig {
         partition: Some(partition),
@@ -696,7 +696,7 @@ async fn a_generation_that_passes_an_impossible_task_does_not_graduate() -> antu
     assert!(!report.graduated, "and a shortcut stopped it anyway");
     let measured = report
         .instruments
-        .ok_or_else(|| antumbra_core::AntumbraError::other("not measured"))?;
+        .ok_or_else(|| AntumbraError::other("not measured"))?;
     assert_eq!(
         measured.impossible_passed,
         vec!["unsatisfiable".to_string()]
@@ -707,8 +707,8 @@ async fn a_generation_that_passes_an_impossible_task_does_not_graduate() -> antu
 
 /// Failing an impossible task is the expected outcome and costs nothing.
 #[tokio::test]
-async fn failing_an_impossible_task_is_what_should_happen() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(8).await?;
+async fn failing_an_impossible_task_is_what_should_happen() -> Result<()> {
+    let store = mem_store_of(8).await?;
     let cfg = LoopConfig {
         partition: Some(antumbra_eclipse::Partition::default()),
         ..LoopConfig::default()
@@ -723,7 +723,7 @@ async fn failing_an_impossible_task_is_what_should_happen() -> antumbra_core::Re
     assert!(report.graduated);
     let measured = report
         .instruments
-        .ok_or_else(|| antumbra_core::AntumbraError::other("not measured"))?;
+        .ok_or_else(|| AntumbraError::other("not measured"))?;
     assert_eq!(measured.impossible_measured, 1);
     Ok(())
 }

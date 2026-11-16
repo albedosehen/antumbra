@@ -1,5 +1,7 @@
 use chrono::Utc;
 
+use antumbra_core::AntumbraError;
+
 use super::*;
 
 fn region(name: &str, acceptability: f32, centroid: Vec<f32>) -> RegionCensus {
@@ -23,7 +25,7 @@ fn task(id: &str, region: &str) -> TaskPrompt {
 }
 
 #[test]
-fn the_census_is_the_populations_score_by_region() {
+fn the_census_is_the_populations_score_by_region() -> Result<()> {
     let tasks = [
         task("a1", "a"),
         task("a2", "a"),
@@ -61,10 +63,11 @@ fn the_census_is_the_populations_score_by_region() {
         !c.contains_key("c"),
         "a region nothing was scored on has no census"
     );
+    Ok(())
 }
 
 #[test]
-fn the_gate_keeps_out_what_the_population_cannot_reach() {
+fn the_gate_keeps_out_what_the_population_cannot_reach() -> Result<()> {
     let census = [
         region("never", 0.0, vec![1.0, 0.0]),
         region("reachable", 0.3, vec![0.0, 1.0]),
@@ -74,10 +77,11 @@ fn the_gate_keeps_out_what_the_population_cannot_reach() {
     assert!(!candidates[0].admitted && candidates[1].admitted);
     let (_, none) = choose(&census[..1], &[], &GrowPolicy::default());
     assert!(none.is_none(), "nothing admitted, nothing chosen");
+    Ok(())
 }
 
 #[test]
-fn learnability_prefers_the_half_solved_region() {
+fn learnability_prefers_the_half_solved_region() -> Result<()> {
     let census = [
         region("nearly-solved", 0.95, vec![1.0, 0.0, 0.0]),
         region("half", 0.5, vec![0.0, 1.0, 0.0]),
@@ -86,12 +90,13 @@ fn learnability_prefers_the_half_solved_region() {
     let (candidates, chosen) = choose(&census, &[], &GrowPolicy::default());
     assert_eq!(chosen.as_deref(), Some("half"));
     assert!((candidates[1].learnability - 0.25).abs() < 1e-6);
+    Ok(())
 }
 
 /// A region just like the one chosen recently gives up part of its
 /// learnability, and a less learnable but different one is chosen instead.
 #[test]
-fn redundancy_with_recent_choices_steers_elsewhere() {
+fn redundancy_with_recent_choices_steers_elsewhere() -> Result<()> {
     let census = [
         region("again", 0.5, vec![1.0, 0.0]),
         region("elsewhere", 0.3, vec![0.0, 1.0]),
@@ -102,6 +107,7 @@ fn redundancy_with_recent_choices_steers_elsewhere() {
     assert_eq!(steered.as_deref(), Some("elsewhere"));
     assert!((candidates[0].penalty - 0.5).abs() < 1e-6);
     assert!((candidates[0].score - 0.125).abs() < 1e-6);
+    Ok(())
 }
 
 fn decided(
@@ -139,7 +145,7 @@ fn decided(
 /// The uniform baseline picks among the admitted regions only, the same one
 /// for the same run and generation, and not always the same one.
 #[test]
-fn the_uniform_baseline_draws_among_the_admitted() {
+fn the_uniform_baseline_draws_among_the_admitted() -> Result<()> {
     let census = [
         region("never", 0.0, vec![1.0, 0.0, 0.0]),
         region("a", 0.5, vec![0.0, 1.0, 0.0]),
@@ -158,6 +164,7 @@ fn the_uniform_baseline_draws_among_the_admitted() {
         uniformly(&candidates, &run, Generation(3))
     );
     assert!(uniformly(&candidates[..1], &run, Generation(0)).is_none());
+    Ok(())
 }
 
 /// The credit a region's choices realized overrides its learnability: the
@@ -165,7 +172,7 @@ fn the_uniform_baseline_draws_among_the_admitted() {
 /// bad evidence; and a region whose choice gained is preferred even when it
 /// is less learnable.
 #[test]
-fn realized_credit_decides_and_learnability_only_shapes() {
+fn realized_credit_decides_and_learnability_only_shapes() -> Result<()> {
     let census = [
         region("grids", 0.44, vec![1.0, 0.0, 0.0]),
         region("mappings", 0.4, vec![0.0, 1.0, 0.0]),
@@ -184,7 +191,8 @@ fn realized_credit_decides_and_learnability_only_shapes() {
 
     let lost: BTreeMap<String, Vec<f32>> =
         [("grids".to_string(), vec![-0.09])].into_iter().collect();
-    let (chosen, expected) = by_credit(&candidates, &lost, &policy).expect("a choice");
+    let (chosen, expected) = by_credit(&candidates, &lost, &policy)
+        .ok_or_else(|| AntumbraError::other("no region was chosen"))?;
     assert_eq!(chosen, "mappings");
     assert!((expected - 0.096).abs() < 1e-4, "{expected}");
 
@@ -197,10 +205,11 @@ fn realized_credit_decides_and_learnability_only_shapes() {
             .as_deref(),
         Some("dates")
     );
+    Ok(())
 }
 
 #[test]
-fn a_decisions_credit_belongs_to_the_choice_before_it() {
+fn a_decisions_credit_belongs_to_the_choice_before_it() -> Result<()> {
     let mut first = decided(0, Some("a"), &[], &["a"]);
     first.credit = None;
     let mut second = decided(1, Some("b"), &[], &["b"]);
@@ -208,10 +217,11 @@ fn a_decisions_credit_belongs_to_the_choice_before_it() {
     let by = realized(&[&first, &second], Some(0.2));
     assert_eq!(by.get("a"), Some(&vec![-0.1]));
     assert_eq!(by.get("b"), Some(&vec![0.2]));
+    Ok(())
 }
 
 #[test]
-fn diversity_reads_entropy_coverage_and_revived_regions() {
+fn diversity_reads_entropy_coverage_and_revived_regions() -> Result<()> {
     let even = [
         decided(0, Some("a"), &[], &["a", "b"]),
         decided(1, Some("b"), &[], &["a", "b"]),
@@ -229,12 +239,13 @@ fn diversity_reads_entropy_coverage_and_revived_regions() {
     assert!(d.entropy.is_sign_positive(), "not a negative zero");
     assert_eq!(d.revived, 1, "c was gated out and now passes");
     assert_eq!(diversity(&[], 3).coverage, 0.0);
+    Ok(())
 }
 
 /// The expert most of a region's tasks go to serves it; escalation can win,
 /// and a tie goes to the lowest id.
 #[test]
-fn the_serving_expert_is_the_plurality_of_the_regions_routes() {
+fn the_serving_expert_is_the_plurality_of_the_regions_routes() -> Result<()> {
     let counts = |pairs: &[(Option<&str>, u32)]| -> BTreeMap<Option<String>, u32> {
         pairs
             .iter()
@@ -258,4 +269,5 @@ fn the_serving_expert_is_the_plurality_of_the_regions_routes() {
         Some("expert:a".into())
     );
     assert_eq!(plurality(&BTreeMap::new()), None);
+    Ok(())
 }
