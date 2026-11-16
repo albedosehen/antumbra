@@ -715,7 +715,7 @@ mod written_from;
 #[tokio::test]
 async fn a_revoked_token_is_refused_like_an_expired_one() -> anyhow::Result<()> {
     use antumbra_store::repo::revocation;
-    let st = state().await;
+    let st = state().await?;
     // The real mint, not the tests' bare helper: a revocation names the id a
     // minted token carries.
     let tok = antumbra_auth::mint_hs256(
@@ -729,7 +729,7 @@ async fn a_revoked_token_is_refused_like_an_expired_one() -> anyhow::Result<()> 
     };
     let list = r#"{"tool":"list_memories","arguments":{}}"#;
     let before = router(st.clone())
-        .oneshot(call_request(Some(&tok), list))
+        .oneshot(call_request(Some(&tok), list)?)
         .await?
         .status();
     anyhow::ensure!(
@@ -751,7 +751,7 @@ async fn a_revoked_token_is_refused_like_an_expired_one() -> anyhow::Result<()> 
     anyhow::ensure!(super::revocation::refresh(&st).await? == 1);
 
     let rest = router(st.clone())
-        .oneshot(call_request(Some(&tok), list))
+        .oneshot(call_request(Some(&tok), list)?)
         .await?
         .status();
     anyhow::ensure!(rest == StatusCode::UNAUTHORIZED, "/mcp/call: {rest}");
