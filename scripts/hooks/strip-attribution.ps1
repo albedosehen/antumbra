@@ -14,7 +14,7 @@ $cmd       = if ($json.tool_input.command) { [string]$json.tool_input.command } 
 # file stays ASCII; a command carrying the emoji's JSON escapes as text is
 # denied too. Extend per your policy.
 $robot   = "`u{1F916}"
-$pattern = 'co-authored-by:.*(claude|anthropic\.com|gpt|openai|copilot)|\\uD83E\\uDD16 generated|\\ud83e\\udd16 generated|generated with \[|\[claude code\]|noreply@anthropic\.com'
+$pattern = 'co-authored-by:.*(claude|anthropic\.com|gpt|openai|copilot)|\uD83E\uDD16 generated|\\ud83e\\udd16 generated|generated with \[|\[claude code\]|noreply@anthropic\.com'
 
 if ($cmd -match $pattern) {
     @{

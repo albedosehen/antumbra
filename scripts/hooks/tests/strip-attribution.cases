@@ -9,7 +9,7 @@ deny	{"tool_input":{"command":"git commit -m x --trailer Co-Authored-By:Claude"}
 deny	{"tool_name":"PowerShell","tool_input":{"command":"gh pr create --body \"x\n\nco-authored-by: GPT-5\""}}
 deny	{"tool_input":{"command":"git commit -m \"fix\" -m \"Co-authored-by: Copilot <copilot@github.com>\""}}
 deny	{"tool_input":{"command":"git commit -m \"🤖 Generated with Claude Code\""}}
-deny	{"tool_input":{"command":"git commit -m \"\\ud83e\\udd16 generated with [Claude Code](https://claude.ai/code)\""}}
+deny	{"tool_input":{"command":"git commit -m \"\ud83e\udd16 generated with [Claude Code](https://claude.ai/code)\""}}
 deny	{"tool_input":{"command":"git commit -m \"feat: x\n\nGenerated with [Codex]\""}}
 deny	{"tool_input":{"command":"gh pr create --title t --body \"[Claude Code] opened this\""}}
 deny	{"tool_input":{"command":"git commit --author=\"Bot <noreply@anthropic.com>\" -m x"}}
