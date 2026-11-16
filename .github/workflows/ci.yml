@@ -88,18 +88,10 @@ jobs:
         run: bash scripts/hooks/tests/capture.sh
       - name: capture reports the end of a turn, once (.ps1)
         run: pwsh -NoProfile -File scripts/hooks/tests/capture.ps1
-      - name: strip-attribution denies vendor attribution, allows a clean command
-        run: |
-          deny=$(printf '%s' '{"tool_input":{"command":"git commit -m x --trailer Co-Authored-By:Claude"}}' | bash scripts/hooks/strip-attribution.sh)
-          echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' > /dev/null
-          clean=$(printf '%s' '{"tool_input":{"command":"git commit -m clean"}}' | bash scripts/hooks/strip-attribution.sh)
-          test -z "$clean"
-          # Case-insensitive, the PowerShell tool's input too, escaped quotes kept whole.
-          deny=$(printf '%s' '{"tool_name":"PowerShell","tool_input":{"command":"gh pr create --body \"x\n\nco-authored-by: GPT-5\""}}' | bash scripts/hooks/strip-attribution.sh)
-          echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' > /dev/null
-          # Only the command counts, not the tool call's description.
-          clean=$(printf '%s' '{"tool_input":{"command":"git commit -m \"plain \\\"quoted\\\" message\"","description":"no Co-Authored-By: Claude here"}}' | bash scripts/hooks/strip-attribution.sh)
-          test -z "$clean"
+      - name: strip-attribution denies vendor attribution and allows a clean command, over one list of cases (.sh)
+        run: bash scripts/hooks/tests/strip-attribution.sh
+      - name: strip-attribution denies vendor attribution and allows a clean command, over one list of cases (.ps1)
+        run: pwsh -NoProfile -File scripts/hooks/tests/strip-attribution.ps1
       - name: session-start emits valid additionalContext (no server → cold bootstrap)
         run: |
           ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
