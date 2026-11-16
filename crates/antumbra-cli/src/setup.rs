@@ -372,7 +372,9 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         }
     } else {
         std::fs::create_dir_all(&data)?;
-        write_private(&env_path, &env_text)?;
+        if let Some(caveat) = write_private(&env_path, &env_text)? {
+            steps.warn(caveat);
+        }
         for part in &said {
             steps.ok(format!("{env_name}: {part}"));
         }
@@ -447,7 +449,9 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             }
             None => {
                 let t = mint(&compose_files, &args.workspace, &args.user)?;
-                write_private(&token_path, &t)?;
+                if let Some(caveat) = write_private(&token_path, &t)? {
+                    steps.warn(caveat);
+                }
                 steps.ok(format!(
                     "minted a token for {} / {}, saved to {} (valid for a year)",
                     args.workspace,
@@ -962,7 +966,9 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
     if steps.dry_run {
         steps.would(format!("save the token to {}", token_path.display()));
     } else {
-        write_private(&token_path, &token)?;
+        if let Some(caveat) = write_private(&token_path, &token)? {
+            steps.warn(caveat);
+        }
         steps.ok(format!("token saved to {}", token_path.display()));
     }
 
@@ -1460,6 +1466,12 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         );
     } else {
         ok(format!("token in {}", token_path.display()));
+        if let Some(problem) = private_file_problem(&token_path) {
+            fail(
+                problem,
+                "run setup again, which rewrites it readable by you alone".into(),
+            );
+        }
         match verify(&url, &token) {
             Ok(()) => {
                 reachable = true;
@@ -1768,29 +1780,102 @@ fn agent(timeout: Duration) -> ureq::Agent {
     antumbra_http::agent(timeout)
 }
 
-/// Writes a file only its owner can read (a token, the stack's secrets).
-fn write_private(path: &Path, text: &str) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+/// Writes a file only its owner can read (a token, the stack's secrets). The
+/// directory it lives in is made the owner's alone; the text goes to a
+/// temporary name beside it, with the final permissions, and is renamed into
+/// place, so a crash mid-write leaves the old file or none, never a truncated
+/// token. On Windows the file is given an owner-only DACL after the rename.
+/// What could not be tightened comes back as a caveat for the caller to show.
+fn write_private(path: &Path, text: &str) -> anyhow::Result<Option<String>> {
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let temporary = {
+        let mut name = path
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_else(|| "private".into());
+        name.push(".tmp");
+        parent.join(name)
+    };
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)?;
+        // A directory that was there before, however it was made, holds the
+        // same secrets: it is the owner's alone too.
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .mode(0o600)
-            .open(path)?;
+            .open(&temporary)?;
         file.write_all(text.as_bytes())?;
-        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
-        Ok(())
+        file.sync_all()?;
+        drop(file);
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::rename(&temporary, path)?;
+        Ok(None)
     }
     #[cfg(not(unix))]
     {
-        std::fs::write(path, text)?;
-        Ok(())
+        std::fs::create_dir_all(parent)?;
+        let mut file = std::fs::File::create(&temporary)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)?;
+        // The file inherits the directory's ACL; cut the inheritance and grant
+        // the owner alone. icacls ships with Windows, so a failure here is a
+        // restricted account or a filesystem without ACLs, worth a word.
+        let Ok(user) = std::env::var("USERNAME") else {
+            return Ok(Some(format!(
+                "{} keeps the permissions it inherited; USERNAME is not set, so it could not be made yours alone",
+                path.display()
+            )));
+        };
+        let tightened = std::process::Command::new("icacls")
+            .arg(path)
+            .args(["/inheritance:r", "/grant:r", &format!("{user}:F")])
+            .output();
+        match tightened {
+            Ok(out) if out.status.success() => Ok(None),
+            Ok(out) => Ok(Some(format!(
+                "{} keeps the permissions it inherited; icacls refused: {}",
+                path.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ))),
+            Err(e) => Ok(Some(format!(
+                "{} keeps the permissions it inherited; icacls could not run: {e}",
+                path.display()
+            ))),
+        }
     }
+}
+
+/// Why `path` is not the owner's alone, when it is not: a token readable by
+/// another user of the machine is that user's token too.
+#[cfg(unix)]
+fn private_file_problem(path: &Path) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).ok()?.permissions().mode() & 0o777;
+    (mode & 0o077 != 0).then(|| {
+        format!(
+            "{} is readable by other users of this machine (mode {mode:o})",
+            path.display()
+        )
+    })
+}
+
+/// The DACL is set when the file is written; it is not read back here.
+#[cfg(not(unix))]
+fn private_file_problem(_path: &Path) -> Option<String> {
+    None
 }
 
 #[cfg(unix)]
@@ -2007,5 +2092,42 @@ mod tests {
             "a pulled stack has no clone to lend"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A private file is the owner's alone, as is its directory, and is
+    /// replaced whole: a second write leaves the new text, no temporary, and
+    /// the same permissions.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_file_is_the_owners_alone_and_replaced_whole() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("antumbra-private-{}", std::process::id()));
+        let path = dir.join("nested").join("token.txt");
+        let caveat = write_private(&path, "first\n")?;
+        anyhow::ensure!(caveat.is_none(), "{caveat:?}");
+        let second = write_private(&path, "second\n")?;
+        anyhow::ensure!(second.is_none(), "{second:?}");
+        let mode = |p: &Path| -> anyhow::Result<u32> {
+            Ok(std::fs::metadata(p)?.permissions().mode() & 0o777)
+        };
+        anyhow::ensure!(std::fs::read_to_string(&path)? == "second\n");
+        anyhow::ensure!(mode(&path)? == 0o600, "file mode {:o}", mode(&path)?);
+        anyhow::ensure!(
+            mode(&dir.join("nested"))? == 0o700,
+            "dir mode {:o}",
+            mode(&dir.join("nested"))?
+        );
+        anyhow::ensure!(
+            !dir.join("nested").join("token.txt.tmp").exists(),
+            "the temporary is gone"
+        );
+        anyhow::ensure!(private_file_problem(&path).is_none());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+        let Some(problem) = private_file_problem(&path) else {
+            anyhow::bail!("a file readable by others was not a problem");
+        };
+        anyhow::ensure!(problem.contains("644"), "{problem}");
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 }
