@@ -32,6 +32,10 @@ pub struct Identity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Access {
     pub identity: Identity,
+    /// The token's own id, when it carries one: what a revocation names.
+    pub jti: Option<String>,
+    /// When the token expires, as seconds since the epoch.
+    pub expires_at: u64,
     /// Minted with `--operator`: the token may read the substrate's own state
     /// (shadows, boundaries, the loop) and act on it from the console. Kept out
     /// of [`Identity`], which keys the server's per-identity caches, so an
@@ -50,14 +54,20 @@ struct Claims {
     user: String,
     #[serde(default)]
     operator: bool,
+    /// The token's own id, which a revocation names. Every mint sets one; a
+    /// token from before ids were added carries none and cannot be revoked
+    /// short of rotating the key.
+    #[serde(default)]
+    jti: Option<String>,
+    exp: u64,
 }
 
 /// The claims a minted token carries (the inverse of [`Claims`]). `aud` is set
 /// only by the RS256 (hosted) mint so a token can be scoped to one server; the
 /// HS256 mint omits it (the offline verifier opts out of audience by default).
-/// `iat` and `jti` are forward hooks: issuance time for rotation/debugging and
-/// a unique id a future revocation list can key on. The verifier ignores both
-/// today (a token is judged by signature, expiry, and scope claims alone).
+/// `iat` is a forward hook (issuance time, for rotation and debugging); `jti`
+/// is the id the revocation list keys on, which the verifier hands back in
+/// [`Access`] for the server to check.
 #[derive(Debug, Serialize)]
 struct MintClaims<'a> {
     tenant: &'a str,
@@ -242,6 +252,8 @@ impl JwtVerifier {
                 tenant: c.tenant,
                 user: c.user,
             },
+            jti: c.jti,
+            expires_at: c.exp,
             operator: c.operator,
         })
     }
@@ -473,6 +485,27 @@ dwIDAQAB
         .unwrap();
         let other = JwtVerifier::hs256(b"a-different-secret");
         assert!(matches!(other.verify(&token), Err(AuthError::Invalid(_))));
+    }
+
+    /// The verifier hands back the token's own id and expiry, so a server can
+    /// hold the id against its denylist and say when the token ends.
+    #[test]
+    fn a_verified_token_carries_its_id_and_expiry() -> Result<(), AuthError> {
+        let token = mint_hs256(
+            SECRET,
+            "ws:a",
+            "user:a",
+            std::time::Duration::from_secs(600),
+        )
+        .map_err(|e| AuthError::Invalid(e.to_string()))?;
+        let access = JwtVerifier::hs256(SECRET).verify_access(&token)?;
+        let Some(jti) = &access.jti else {
+            return Err(AuthError::Invalid("a minted token carries an id".into()));
+        };
+        assert_eq!(jti.len(), 32, "a simple uuid");
+        let now = get_current_timestamp();
+        assert!(access.expires_at > now && access.expires_at <= now + 600);
+        Ok(())
     }
 
     #[test]

@@ -1460,6 +1460,15 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         );
     } else {
         ok(format!("token in {}", token_path.display()));
+        if let Some(exp) = token::expires(&token) {
+            let left = exp - chrono::Utc::now().timestamp();
+            if left <= 3 * 86_400 {
+                println!(
+                    "  ! the token expires in {} hours; ask for a new sign-in link and run `antumbra setup hosted <url>` again before then",
+                    left.max(0) / 3600
+                );
+            }
+        }
         match verify(&url, &token) {
             Ok(()) => {
                 reachable = true;

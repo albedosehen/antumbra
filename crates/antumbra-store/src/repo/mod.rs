@@ -32,6 +32,7 @@ pub mod memory_use;
 pub mod principal;
 pub mod recipe;
 pub mod relic;
+pub mod revocation;
 pub mod reward;
 pub mod router;
 pub mod shadow;

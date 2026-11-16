@@ -486,6 +486,7 @@ async fn run() -> anyhow::Result<()> {
         Command::Revive { expert, note } => {
             ops::move_expert(&cli.url, &expert, antumbra_core::ExpertStatus::Active, note).await?;
         }
+        Command::RevokeToken(args) => ops::revoke_token(&cli.url, args).await?,
         Command::Remember(args) => ops::remember(&cli.url, args).await?,
         Command::Ingest(args) => {
             ops::ingest(&cli.url, copal_archive().as_deref(), args).await?;
