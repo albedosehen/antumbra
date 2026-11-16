@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-train (shadow models hold the plasticity; the candle QLoRA trainer)
 //!
 //! The DIY `candle` path that trains shadow adapters from **verified outcomes**
@@ -222,16 +220,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn candle_loader_reports_unimplemented() {
+    async fn candle_loader_reports_unimplemented() -> Result<()> {
         let loader = CandleModelLoader::new(RaftConfig::default());
         // `load` is now defined on two loader traits; name one explicitly.
-        let err = ModelLoader::load(&loader, "Qwen/Qwen2.5-Coder-1.5B", None)
-            .await
-            .unwrap_err();
+        let Err(err) = ModelLoader::load(&loader, "Qwen/Qwen2.5-Coder-1.5B", None).await else {
+            return Err(AntumbraError::other("the stub model loader loaded a model"));
+        };
         assert!(matches!(err, AntumbraError::Unimplemented(_)));
-        let err = GrpoModelLoader::load(&loader, "Qwen/Qwen2.5-Coder-1.5B", None)
-            .await
-            .unwrap_err();
+        let Err(err) = GrpoModelLoader::load(&loader, "Qwen/Qwen2.5-Coder-1.5B", None).await else {
+            return Err(AntumbraError::other("the stub GRPO loader loaded a model"));
+        };
         assert!(matches!(err, AntumbraError::Unimplemented(_)));
+        Ok(())
     }
 }

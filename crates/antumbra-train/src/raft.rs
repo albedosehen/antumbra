@@ -153,6 +153,7 @@ mod tests {
     use super::*;
     use crate::model::CausalLm;
     use antumbra_core::testing::MarkerVerifier;
+    use antumbra_core::AntumbraError;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -182,7 +183,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raft_lifts_pass_rate_on_verified_winners() {
+    async fn raft_lifts_pass_rate_on_verified_winners() -> Result<()> {
         let mut lm = FakeLm {
             skill: AtomicUsize::new(1),
         };
@@ -204,20 +205,23 @@ mod tests {
             &RunId::new("shadow:g0"),
             &cfg,
         )
-        .await
-        .unwrap();
+        .await?;
 
         assert_eq!(out.reward_curve.len(), 3);
         // pass-rate climbs as the adapter trains on verified winners
-        assert!(out.reward_curve.last().unwrap() > out.reward_curve.first().unwrap());
+        let (Some(first), Some(last)) = (out.reward_curve.first(), out.reward_curve.last()) else {
+            return Err(AntumbraError::other("an empty reward curve"));
+        };
+        assert!(last > first);
         assert!(out.final_fitness > 0.0);
         assert!(out.adapter_uri.ends_with("shadow_g0.safetensors"));
         // capability is learned from the task it provably solved
         assert_eq!(out.capability_exemplars, vec!["complete the function"]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn every_trained_on_pass_of_a_named_verifier_is_counted_as_its_grant() {
+    async fn every_trained_on_pass_of_a_named_verifier_is_counted_as_its_grant() -> Result<()> {
         let mut lm = FakeLm {
             skill: AtomicUsize::new(1),
         };
@@ -243,8 +247,7 @@ mod tests {
             &RunId::new("r"),
             &cfg,
         )
-        .await
-        .unwrap();
+        .await?;
         // One winner in the first round and two in the second, for t1 only:
         // t2's spec is its own, and t3 is measured, never trained on.
         assert_eq!(
@@ -263,10 +266,11 @@ mod tests {
             .all(|j| j.task == "t1" && j.verifier.as_str() == "verifier:a"));
         assert_eq!(out.judged.iter().filter(|j| j.passed).count(), 3);
         assert!(out.judged.iter().all(|j| j.rewarded == j.passed));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn no_winners_means_no_collapse() {
+    async fn no_winners_means_no_collapse() -> Result<()> {
         // skill 0 -> never passes -> winners always empty -> rate stays 0,
         // and sft_step is never called (we don't reinforce nothing).
         let mut lm = FakeLm {
@@ -289,12 +293,12 @@ mod tests {
             &RunId::new("shadow:g1"),
             &cfg,
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(out.final_fitness, 0.0);
         assert!(out.reward_curve.iter().all(|&r| r == 0.0));
         // nothing solved -> no capability exemplars
         assert!(out.capability_exemplars.is_empty());
+        Ok(())
     }
 
     /// Passes every prompt except the ones named, and records what it was
