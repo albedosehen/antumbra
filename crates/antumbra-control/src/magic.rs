@@ -156,19 +156,39 @@ mod tests {
 
     /// Captures the links it would have sent, so a test can follow them.
     struct FakeMailer(Mutex<Vec<String>>);
+
+    impl FakeMailer {
+        /// Every link sent, in order. The fake only ever pushes to the list, so
+        /// a poisoned lock holds a whole list and is read as is.
+        fn links(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+    }
+
     impl Mailer for FakeMailer {
         fn send_link(&self, _to: &str, link: &str) -> Result<()> {
-            self.0.lock().unwrap().push(link.to_string());
+            // Read as `links` is: a push cannot leave the list half-written.
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(link.to_string());
             Ok(())
         }
     }
 
-    fn token_in(link: &str) -> String {
-        link.split("token=").nth(1).unwrap().to_string()
+    /// The one-time token a sent link carries.
+    fn token_in(link: &str) -> Result<String> {
+        link.split("token=")
+            .nth(1)
+            .map(str::to_string)
+            .ok_or_else(|| AntumbraError::other("the link carries no token"))
     }
 
     #[test]
-    fn request_emails_a_link_that_verifies_to_the_email_identity() {
+    fn request_emails_a_link_that_verifies_to_the_email_identity() -> Result<()> {
         let mailer = FakeMailer(Mutex::new(Vec::new()));
         let ml = MagicLink::new(
             b"magic-secret",
@@ -176,11 +196,11 @@ mod tests {
             "https://app.example/",
             &mailer,
         );
-        ml.request("ada@x.com").unwrap();
-        let link = mailer.0.lock().unwrap()[0].clone();
+        ml.request("ada@x.com")?;
+        let link = mailer.links()[0].clone();
         assert!(link.starts_with("https://app.example/magic/verify?token="));
 
-        let verified = ml.verify(&token_in(&link)).unwrap();
+        let verified = ml.verify(&token_in(&link)?)?;
         assert_eq!(verified.identity.subject, "email:ada@x.com");
         assert_eq!(verified.identity.email.as_deref(), Some("ada@x.com"));
         assert_eq!(verified.invite, None, "a login link carries no invite");
@@ -189,33 +209,36 @@ mod tests {
             verified.expires_at > chrono::Utc::now(),
             "expiry decodes to the future"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_signup_link_round_trips_its_invite() {
+    fn a_signup_link_round_trips_its_invite() -> Result<()> {
         let mailer = FakeMailer(Mutex::new(Vec::new()));
         let ml = MagicLink::new(b"s", Duration::from_secs(900), "https://app", &mailer);
-        ml.request_signup("new@x.com", "invite-123").unwrap();
-        let link = mailer.0.lock().unwrap()[0].clone();
-        let verified = ml.verify(&token_in(&link)).unwrap();
+        ml.request_signup("new@x.com", "invite-123")?;
+        let link = mailer.links()[0].clone();
+        let verified = ml.verify(&token_in(&link)?)?;
         assert_eq!(verified.identity.subject, "email:new@x.com");
         assert_eq!(verified.invite.as_deref(), Some("invite-123"));
+        Ok(())
     }
 
     #[test]
-    fn two_links_for_the_same_email_get_distinct_ids() {
+    fn two_links_for_the_same_email_get_distinct_ids() -> Result<()> {
         let mailer = FakeMailer(Mutex::new(Vec::new()));
         let ml = MagicLink::new(b"s", Duration::from_secs(900), "https://app", &mailer);
-        ml.request("ada@x.com").unwrap();
-        ml.request("ada@x.com").unwrap();
-        let links = mailer.0.lock().unwrap().clone();
-        let a = ml.verify(&token_in(&links[0])).unwrap();
-        let b = ml.verify(&token_in(&links[1])).unwrap();
+        ml.request("ada@x.com")?;
+        ml.request("ada@x.com")?;
+        let links = mailer.links();
+        let a = ml.verify(&token_in(&links[0])?)?;
+        let b = ml.verify(&token_in(&links[1])?)?;
         assert_ne!(a.jti, b.jti);
+        Ok(())
     }
 
     #[test]
-    fn a_tampered_or_foreign_token_is_rejected() {
+    fn a_tampered_or_foreign_token_is_rejected() -> Result<()> {
         let mailer = FakeMailer(Mutex::new(Vec::new()));
         let ml = MagicLink::new(
             b"magic-secret",
@@ -232,13 +255,19 @@ mod tests {
             "https://app",
             &mailer,
         );
-        other.request("a@b.com").unwrap();
-        let foreign = token_in(&mailer.0.lock().unwrap().last().unwrap().clone());
+        other.request("a@b.com")?;
+        let sent = mailer
+            .links()
+            .last()
+            .cloned()
+            .ok_or_else(|| AntumbraError::other("no link was sent"))?;
+        let foreign = token_in(&sent)?;
         assert!(ml.verify(&foreign).is_err());
+        Ok(())
     }
 
     #[test]
-    fn a_non_email_request_is_rejected() {
+    fn a_non_email_request_is_rejected() -> Result<()> {
         let mailer = FakeMailer(Mutex::new(Vec::new()));
         let ml = MagicLink::new(b"s", Duration::from_secs(60), "https://app", &mailer);
         for bad in [
@@ -257,5 +286,6 @@ mod tests {
         for good in ["ada@x.com", "a.b+tag@sub.example.org"] {
             assert!(is_plausible_email(good), "{good:?} should pass");
         }
+        Ok(())
     }
 }

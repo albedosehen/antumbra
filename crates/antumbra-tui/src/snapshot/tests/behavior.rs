@@ -8,9 +8,9 @@ use super::*;
 // e2e of the console without a terminal: render a frame and assert on the
 // text grid. The whole layout is exercised (header, graph, detail, gate).
 #[test]
-fn headless_render_shows_the_console() {
+fn headless_render_shows_the_console() -> anyhow::Result<()> {
     let mut app = demo_app();
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+    let buf = render(&mut app, 120, 36, 1600.0)?;
     let text = to_text(&buf);
     assert!(
         text.contains("ANTUMBRA"),
@@ -23,18 +23,20 @@ fn headless_render_shows_the_console() {
     );
     assert!(text.contains("gate"), "gate panel title missing");
     assert!(text.contains("0.90"), "selected expert's fitness rendered");
+    Ok(())
 }
 
 #[test]
-fn empty_population_renders_the_hint() {
+fn empty_population_renders_the_hint() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.experts.clear();
-    let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 30, 1600.0)?);
     assert!(text.contains("no experts yet"), "empty-state hint shown");
+    Ok(())
 }
 
 #[test]
-fn fully_empty_store_shows_the_first_run_card() {
+fn fully_empty_store_shows_the_first_run_card() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.experts.clear();
     app.boundaries.clear();
@@ -44,7 +46,7 @@ fn fully_empty_store_shows_the_first_run_card() {
     app.loop_heads.clear();
     app.evals.clear();
     assert!(app.is_empty(), "a store with nothing in it reads as empty");
-    let text = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 30, 1600.0)?);
     assert!(
         text.contains("store is empty"),
         "the first-run card is shown"
@@ -55,19 +57,20 @@ fn fully_empty_store_shows_the_first_run_card() {
     );
     // The card belongs to the live view only; an open overlay replaces it.
     app.mode = Mode::Help;
-    let over = to_text(&render(&mut app, 100, 30, 1600.0).unwrap());
+    let over = to_text(&render(&mut app, 100, 30, 1600.0)?);
     assert!(
         !over.contains("store is empty"),
         "a modal supersedes the card"
     );
+    Ok(())
 }
 
 #[test]
-fn connect_overlay_guides_agent_wiring() {
+fn connect_overlay_guides_agent_wiring() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_connect();
     assert_eq!(app.mode, Mode::Connect, "the connect panel is open");
-    let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 32, 1600.0)?);
     assert!(
         text.contains("antumbra setup local"),
         "shows the one-command setup"
@@ -85,17 +88,18 @@ fn connect_overlay_guides_agent_wiring() {
     );
 
     app.operator = false;
-    let text = to_text(&render(&mut app, 100, 32, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 32, 1600.0)?);
     assert!(
         text.contains("read-only") && !text.contains("may act on the substrate"),
         "a plain token's console says it is read-only"
     );
+    Ok(())
 }
 
 // The loop runs full-rate while interacting or animating, eases to 60 after
 // an idle spell, and the header marks the eased state.
 #[test]
-fn idle_throttle_eases_the_rate_and_shows_in_header() {
+fn idle_throttle_eases_the_rate_and_shows_in_header() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.target_fps = 244;
     app.power_save = true;
@@ -111,16 +115,17 @@ fn idle_throttle_eases_the_rate_and_shows_in_header() {
     assert_eq!(app.frame_cap(false), 244, "default never throttles");
     // The header reflects the eased state.
     app.idle = true;
-    let text = to_text(&render(&mut app, 130, 12, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 130, 12, 1600.0)?);
     assert!(
         text.contains("idle"),
         "header marks the idle throttle:\n{text}"
     );
+    Ok(())
 }
 
 // Home/End/PageUp/PageDown drive the focused list, clamped to the ends.
 #[test]
-fn page_and_jump_navigation_clamps_to_the_list() {
+fn page_and_jump_navigation_clamps_to_the_list() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = (0..25)
         .map(|i| Shadow {
@@ -147,17 +152,18 @@ fn page_and_jump_navigation_clamps_to_the_list() {
         app.selected_shadow, 24,
         "a big page jump clamps at the bottom"
     );
+    Ok(())
 }
 
 // The dashboard layout shows all three regions at once (umbra, penumbra,
 // antumbra), unlike the focused layout that swaps a single detail panel.
 #[test]
-fn dashboard_layout_shows_every_region_at_once() {
+fn dashboard_layout_shows_every_region_at_once() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = vec![graduated_shadow()];
     app.boundaries = vec![actionable_boundary()];
     app.layout = LayoutMode::Dashboard;
-    let text = to_text(&render(&mut app, 130, 40, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 130, 40, 1600.0)?);
     assert!(
         text.contains("umbra · experts"),
         "umbra panel shown:\n{text}"
@@ -173,12 +179,13 @@ fn dashboard_layout_shows_every_region_at_once() {
     assert!(text.contains("npm install"), "boundary content shown");
     // The header names the active layout.
     assert!(text.contains("dashboard"), "header names the layout");
+    Ok(())
 }
 
 // A list longer than its panel scrolls to keep the selection visible: a high
 // selection shows the tail and hides the head.
 #[test]
-fn long_lists_scroll_to_the_selection() {
+fn long_lists_scroll_to_the_selection() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = (0..20)
         .map(|i| Shadow {
@@ -194,7 +201,7 @@ fn long_lists_scroll_to_the_selection() {
     app.focus = Focus::Shadows;
     app.selected_shadow = 19;
     // A short frame so the list panel is smaller than 20 rows.
-    let text = to_text(&render(&mut app, 120, 18, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 18, 1600.0)?);
     assert!(
         text.contains("shadow:s19"),
         "the selected tail is visible:\n{text}"
@@ -203,32 +210,34 @@ fn long_lists_scroll_to_the_selection() {
         !text.contains("shadow:s0\n") && !text.contains("shadow:s0 "),
         "the head has scrolled out of view:\n{text}"
     );
+    Ok(())
 }
 
 // The graph layout drops the detail column for a full-width population view.
 #[test]
-fn graph_layout_is_full_width() {
+fn graph_layout_is_full_width() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.layout = LayoutMode::Graph;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(text.contains("population"), "graph panel still shown");
     // The expert detail column is gone in graph mode.
     assert!(
         !text.contains("learned exemplars"),
         "no detail column:\n{text}"
     );
+    Ok(())
 }
 
 // The command palette filters its commands by the typed query and marks the
 // selection, so a fuzzy query surfaces the matching action.
 #[test]
-fn command_palette_filters_to_the_query() {
+fn command_palette_filters_to_the_query() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_palette();
     for c in "theme".chars() {
         app.palette_input(c);
     }
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(text.contains("command"), "palette title shown:\n{text}");
     assert!(
         text.contains("› theme"),
@@ -240,12 +249,13 @@ fn command_palette_filters_to_the_query() {
     );
     // The chosen action matches the filtered selection.
     assert_eq!(app.palette_action(), Some(Action::CycleTheme));
+    Ok(())
 }
 
 // The `/` filter fuzzy-narrows the focused list and jumps the selection to
 // the chosen match.
 #[test]
-fn filter_narrows_and_jumps_the_selection() {
+fn filter_narrows_and_jumps_the_selection() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = vec![
         graduated_shadow(),
@@ -265,7 +275,7 @@ fn filter_narrows_and_jumps_the_selection() {
         app.filter_input(c);
     }
     // Only g7 matches; it is shown in the filter modal.
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("filter penumbra"),
         "filter modal titled:\n{text}"
@@ -276,12 +286,13 @@ fn filter_narrows_and_jumps_the_selection() {
     app.filter_apply();
     assert_eq!(app.selected_shadow, 1, "selection jumped to the match");
     assert_eq!(app.mode, Mode::Normal, "filter closed after applying");
+    Ok(())
 }
 
 // The event stream diffs successive reloads: a baseline pass records state
 // silently, then changes (spawn, graduate, boundary) emit events.
 #[test]
-fn event_stream_diffs_store_changes() {
+fn event_stream_diffs_store_changes() -> anyhow::Result<()> {
     use crate::events::EventKind;
     let mut app = demo_app();
     app.shadows = vec![Shadow {
@@ -320,20 +331,21 @@ fn event_stream_diffs_store_changes() {
 
     // The overlay renders the stream.
     app.open_events();
-    let text = to_text(&render(&mut app, 100, 24, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 24, 1600.0)?);
     assert!(text.contains("events"), "events overlay titled:\n{text}");
     assert!(text.contains("graduated"), "an event is listed");
+    Ok(())
 }
 
 // Enter drills into the selected boundary: a full-detail modal with the
 // contrastive contexts the summary panel omits.
 #[test]
-fn drill_down_shows_full_boundary_detail() {
+fn drill_down_shows_full_boundary_detail() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.boundaries = vec![actionable_boundary()];
     app.focus = Focus::Boundaries;
     app.open_detail();
-    let text = to_text(&render(&mut app, 110, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 110, 36, 1600.0)?);
     assert!(text.contains("boundary ·"), "detail modal titled:\n{text}");
     assert!(text.contains("fail context"), "the C context section shown");
     assert!(
@@ -342,12 +354,13 @@ fn drill_down_shows_full_boundary_detail() {
     );
     // The pretty-printed JSON of the contexts is present.
     assert!(text.contains("runtime"), "context json rendered");
+    Ok(())
 }
 
 // The expert drill-down previews how the gate routes that expert's own
 // specialty (probing the router with its capability vector, no embedder).
 #[test]
-fn drill_down_previews_gate_routing() {
+fn drill_down_previews_gate_routing() -> anyhow::Result<()> {
     use antumbra_core::router::{LearnedRouter, RouterExpert};
     let mut app = demo_app();
     let vec = {
@@ -367,7 +380,7 @@ fn drill_down_previews_gate_routing() {
     });
     app.focus = Focus::Experts;
     app.open_detail();
-    let text = to_text(&render(&mut app, 110, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 110, 36, 1600.0)?);
     assert!(
         text.contains("gate routing"),
         "route preview shown:\n{text}"
@@ -377,19 +390,20 @@ fn drill_down_previews_gate_routing() {
         "the sole expert wins its own specialty"
     );
     assert!(text.contains("arith-specialist"), "routed expert named");
+    Ok(())
 }
 
 // The route-ask overlay echoes the query and shows the gate's routing
 // distribution, resolving expert ids to names.
 #[test]
-fn ask_overlay_shows_routing_distribution() {
+fn ask_overlay_shows_routing_distribution() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_ask();
     for c in "arith".chars() {
         app.ask_input(c);
     }
     app.set_ask_result(&[(ExpertId::new("expert:arith"), 0.82)]);
-    let text = to_text(&render(&mut app, 80, 14, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 80, 14, 1600.0)?);
     assert!(text.contains("ask the gate"), "ask modal titled:\n{text}");
     assert!(text.contains("ask › arith"), "query echoed");
     assert!(
@@ -397,18 +411,19 @@ fn ask_overlay_shows_routing_distribution() {
         "routed expert named (id resolved)"
     );
     assert!(text.contains("82%"), "routing probability shown");
+    Ok(())
 }
 
 // `x` on a focused boundary stages a delete behind a confirm prompt; on a
 // shadow it stages a prune. Canceling clears it.
 #[test]
-fn operator_action_stages_a_confirm_prompt() {
+fn operator_action_stages_a_confirm_prompt() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.boundaries = vec![actionable_boundary()];
     app.focus = Focus::Boundaries;
     app.request_action();
     assert_eq!(app.mode, Mode::Confirm, "confirm prompt opened");
-    let text = to_text(&render(&mut app, 90, 24, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 90, 24, 1600.0)?);
     assert!(text.contains("confirm"), "confirm modal titled:\n{text}");
     assert!(text.contains("Delete boundary"), "the delete prompt shown");
     assert!(text.contains("npm install"), "names the boundary");
@@ -420,28 +435,29 @@ fn operator_action_stages_a_confirm_prompt() {
     app.shadows = vec![graduated_shadow()];
     app.focus = Focus::Shadows;
     app.request_action();
-    assert!(
-        app.pending_prompt().unwrap().contains("Prune"),
-        "shadow action is a prune"
-    );
+    let Some(prompt) = app.pending_prompt() else {
+        anyhow::bail!("no action is staged on the shadow");
+    };
+    assert!(prompt.contains("Prune"), "shadow action is a prune");
+    Ok(())
 }
 
 // `K` opens the memory knobs; an operator turns one and applies it behind a
 // confirm, and a console without an operator's token only reads them.
 #[test]
-fn the_knobs_panel_turns_a_knob_behind_a_confirm() {
+fn the_knobs_panel_turns_a_knob_behind_a_confirm() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.operator = true;
     app.open_knobs();
     assert_eq!(app.mode, Mode::Knobs);
-    let text = to_text(&render(&mut app, 100, 26, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 26, 1600.0)?);
     assert!(text.contains("memory knobs"), "knobs modal titled:\n{text}");
     assert!(text.contains("world_half_life_days"), "every knob listed");
 
     app.knob_move(1);
     app.knob_turn(-1);
     assert_eq!(app.knob_draft.world_half_life_days, 165.0);
-    let text = to_text(&render(&mut app, 100, 26, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 26, 1600.0)?);
     assert!(
         text.contains("(was 180)"),
         "the turned knob shows what it was"
@@ -449,8 +465,8 @@ fn the_knobs_panel_turns_a_knob_behind_a_confirm() {
     app.request_knobs();
     assert_eq!(app.mode, Mode::Confirm);
     assert_eq!(
-        app.pending_prompt().unwrap(),
-        "Apply world_half_life_days 180 → 165 ?"
+        app.pending_prompt().as_deref(),
+        Some("Apply world_half_life_days 180 → 165 ?")
     );
     app.cancel_action();
 
@@ -459,18 +475,19 @@ fn the_knobs_panel_turns_a_knob_behind_a_confirm() {
     app.open_knobs();
     app.knob_turn(1);
     assert_eq!(app.knob_draft, app.policy);
-    let text = to_text(&render(&mut app, 100, 26, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 100, 26, 1600.0)?);
     assert!(
         text.contains("Read-only"),
         "says who may turn them:\n{text}"
     );
     app.close_knobs();
     assert_eq!(app.mode, Mode::Normal);
+    Ok(())
 }
 
 // Theme, layout, and focus each cycle through their states and wrap.
 #[test]
-fn theme_layout_focus_cycle_and_wrap() {
+fn theme_layout_focus_cycle_and_wrap() -> anyhow::Result<()> {
     let mut app = demo_app();
     assert_eq!(app.theme().name, "shadow");
     app.cycle_theme();
@@ -497,11 +514,12 @@ fn theme_layout_focus_cycle_and_wrap() {
     assert_eq!(app.focus, Focus::Boundaries);
     app.toggle_focus();
     assert_eq!(app.focus, Focus::Experts, "focus wraps");
+    Ok(())
 }
 
 // List selection wraps both ways and is safe on an empty list.
 #[test]
-fn selection_wraps_and_empty_is_safe() {
+fn selection_wraps_and_empty_is_safe() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = vec![graduated_shadow(), graduated_shadow()];
     app.focus = Focus::Shadows;
@@ -517,11 +535,12 @@ fn selection_wraps_and_empty_is_safe() {
         app.selected_shadow, 0,
         "no panic / no move on an empty list"
     );
+    Ok(())
 }
 
 // Every overlay opener sets its mode, and close/toggle return to Normal.
 #[test]
-fn overlays_open_to_their_modes_and_close() {
+fn overlays_open_to_their_modes_and_close() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_palette();
     assert_eq!(app.mode, Mode::Palette);
@@ -540,11 +559,12 @@ fn overlays_open_to_their_modes_and_close() {
     assert_eq!(app.mode, Mode::Help);
     app.toggle_help();
     assert_eq!(app.mode, Mode::Normal, "help toggles closed");
+    Ok(())
 }
 
 // The event stream caps at MAX_EVENTS and keeps the newest first.
 #[test]
-fn event_stream_is_capped_and_newest_first() {
+fn event_stream_is_capped_and_newest_first() -> anyhow::Result<()> {
     let mut app = demo_app();
     let total = crate::events::MAX_EVENTS + 50;
     for i in 0..total {
@@ -556,11 +576,12 @@ fn event_stream_is_capped_and_newest_first() {
         format!("ev{}", total - 1),
         "newest first"
     );
+    Ok(())
 }
 
 // Typing in the ask invalidates the previous routing result.
 #[test]
-fn ask_input_invalidates_the_stale_result() {
+fn ask_input_invalidates_the_stale_result() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_ask();
     app.set_ask_result(&[(ExpertId::new("expert:arith"), 1.0)]);
@@ -570,11 +591,12 @@ fn ask_input_invalidates_the_stale_result() {
         app.ask_result.is_none(),
         "a new keystroke clears the result"
     );
+    Ok(())
 }
 
 // Palette and filter selections wrap within their match lists.
 #[test]
-fn palette_and_filter_move_wrap() {
+fn palette_and_filter_move_wrap() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_palette();
     let n = app.palette_matches().len();
@@ -593,11 +615,12 @@ fn palette_and_filter_move_wrap() {
     app.filter_selected = 0;
     app.filter_move(-1);
     assert_eq!(app.filter_selected, m - 1, "filter wraps up");
+    Ok(())
 }
 
 // Frame-rate and scroll controls clamp/pin correctly.
 #[test]
-fn fps_and_scroll_controls_clamp() {
+fn fps_and_scroll_controls_clamp() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.auto_fps = true;
     app.target_fps = 144;
@@ -630,34 +653,37 @@ fn fps_and_scroll_controls_clamp() {
         app.events_scroll, 1,
         "event scroll clamps to the last index"
     );
+    Ok(())
 }
 
 // The monitor-follow methods are safe to call (FFI on Windows, no-op elsewhere).
 #[test]
-fn monitor_methods_are_safe_to_call() {
+fn monitor_methods_are_safe_to_call() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.capture_window();
     app.follow_monitor();
     app.poll_monitor();
     assert!(app.auto_fps, "follow_monitor re-enables auto");
+    Ok(())
 }
 
 // An out-of-distribution ask (empty routing) renders the escalate hint.
 #[test]
-fn escalating_ask_renders_the_hint() {
+fn escalating_ask_renders_the_hint() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_ask();
     app.ask_result = Some(Vec::new());
-    let text = to_text(&render(&mut app, 80, 12, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 80, 12, 1600.0)?);
     assert!(text.contains("escalates"), "escalate hint shown:\n{text}");
+    Ok(())
 }
 
 // Pressing `?` opens the help overlay over the live view, listing the keys.
 #[test]
-fn help_overlay_lists_the_keybindings() {
+fn help_overlay_lists_the_keybindings() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.mode = Mode::Help;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(text.contains("help"), "help modal title shown:\n{text}");
     assert!(text.contains("cycle theme"), "theme keybind documented");
     assert!(
@@ -665,16 +691,17 @@ fn help_overlay_lists_the_keybindings() {
         "fps follow keybind documented"
     );
     assert!(text.contains("switch focus"), "focus keybind documented");
+    Ok(())
 }
 
 // Tab into the penumbra focus: the training view shows the selected shadow's
 // status, generation, and reward curve.
 #[test]
-fn shadows_focus_shows_the_penumbra() {
+fn shadows_focus_shows_the_penumbra() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = vec![graduated_shadow()];
     app.focus = Focus::Shadows;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("shadows"),
         "shadows list title missing:\n{text}"
@@ -683,68 +710,72 @@ fn shadows_focus_shows_the_penumbra() {
     assert!(text.contains("shadow:g3"), "the shadow id is shown");
     assert!(text.contains("graduated"), "the shadow status is shown");
     assert!(text.contains("0.93"), "the final reward is shown");
+    Ok(())
 }
 
 // The footer shows the active theme, and `t` cycles to the next palette,
 // which the footer reflects (shadow -> ember).
 #[test]
-fn cycling_theme_updates_the_footer() {
+fn cycling_theme_updates_the_footer() -> anyhow::Result<()> {
     let mut app = demo_app();
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("theme:shadow"),
         "default theme shown:\n{text}"
     );
     app.cycle_theme();
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(text.contains("theme:ember"), "cycled theme shown:\n{text}");
+    Ok(())
 }
 
 // The header shows a live FPS readout and the footer the adjustable cap; the
 // cap steps through common refresh rates (144 -> 165).
 #[test]
-fn header_and_footer_show_the_frame_rate() {
+fn header_and_footer_show_the_frame_rate() -> anyhow::Result<()> {
     let mut app = demo_app();
-    let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
     assert!(
         text.contains("144 fps"),
         "header fps readout shown:\n{text}"
     );
     assert!(text.contains("cap:144"), "footer fps cap shown:\n{text}");
     app.fps_up();
-    let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
     assert!(text.contains("cap:165"), "cap stepped to 165:\n{text}");
+    Ok(())
 }
 
 // Following the active monitor tags the cap "auto"; a manual `+`/`-` pins it
 // and drops the tag. (The flag is set directly to keep the test off real
 // monitor detection.)
 #[test]
-fn auto_follow_tags_the_cap_until_pinned() {
+fn auto_follow_tags_the_cap_until_pinned() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.auto_fps = true;
-    let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
     assert!(
         text.contains("auto"),
         "auto-follow tagged on the cap:\n{text}"
     );
     app.fps_up();
     assert!(!app.auto_fps, "a manual adjust pins the cap");
-    let text = to_text(&render(&mut app, 140, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
     assert!(
         !text.contains("cap:165 auto"),
         "a pinned cap shows no auto tag:\n{text}"
     );
+    Ok(())
 }
 
 // A standing expert's training reads by the scope it trained, its pass rate
 // from the base model's to the trained expert's, and not by its long id.
 #[test]
-fn a_standing_experts_training_reads_by_its_scope() {
+fn a_standing_experts_training_reads_by_its_scope() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = vec![kept_shadow()];
     app.focus = Focus::Shadows;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("✦ code · 0.42 → 0.91"),
         "the list row names the scope and the change:\n{text}"
@@ -760,6 +791,7 @@ fn a_standing_experts_training_reads_by_its_scope() {
         !text.contains("shadow:ws:"),
         "the sixty-character id is not what the panel shows:\n{text}"
     );
+    Ok(())
 }
 
 // A repository's scope is its path, which fills a narrow list's row: the
@@ -767,7 +799,7 @@ fn a_standing_experts_training_reads_by_its_scope() {
 // behaviors one expert missed read apart, where each row had shown the same
 // path and nothing after it.
 #[test]
-fn a_repository_scope_leaves_room_in_the_lists() {
+fn a_repository_scope_leaves_room_in_the_lists() -> anyhow::Result<()> {
     let scope = "github.com/acme/orders-service-backend";
     let mut app = demo_app();
     let mut s = kept_shadow();
@@ -780,7 +812,7 @@ fn a_repository_scope_leaves_room_in_the_lists() {
     s.reward_curve = vec![0.68];
     app.shadows = vec![s];
     app.focus = Focus::Shadows;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("✦ orders-service-backend · 0.68"),
         "the repository's name and the reading fit:\n{text}"
@@ -800,7 +832,7 @@ fn a_repository_scope_leaves_room_in_the_lists() {
         })
         .collect();
     app.focus = Focus::Boundaries;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("○ Before handing back a branch"),
         "one behavior reads:\n{text}"
@@ -809,16 +841,17 @@ fn a_repository_scope_leaves_room_in_the_lists() {
         text.contains("○ Never log an order's"),
         "and the other, apart from it:\n{text}"
     );
+    Ok(())
 }
 
 // An open boundary from a training shows what it was recorded from: the
 // scope, the task the expert missed and its answer, and whose it is.
 #[test]
-fn an_open_boundary_shows_the_task_it_missed() {
+fn an_open_boundary_shows_the_task_it_missed() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.boundaries = vec![missed_boundary()];
     app.focus = Focus::Boundaries;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("○ Run the test suite"),
         "the list row leads with the behavior:\n{text}"
@@ -835,26 +868,28 @@ fn an_open_boundary_shows_the_task_it_missed() {
         !text.contains("feature    -"),
         "no empty feature row for a boundary that has none:\n{text}"
     );
+    Ok(())
 }
 
 // The gate summary lists only boundaries that gate routing: an open one,
 // listed with the stop glyph, would read as a gate.
 #[test]
-fn the_gate_summary_lists_no_open_boundary() {
+fn the_gate_summary_lists_no_open_boundary() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.boundaries = vec![missed_boundary()];
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("1 (0 actionable)"),
         "counted, none actionable:\n{text}"
     );
     assert!(!text.contains('⛔'), "no stop glyph for it:\n{text}");
+    Ok(())
 }
 
 // The console's prune and graduate steer the generational loop; on a standing
 // expert's training, which its keeper settles, they decline and say why.
 #[test]
-fn a_standing_experts_training_is_left_to_its_keeper() {
+fn a_standing_experts_training_is_left_to_its_keeper() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = vec![kept_shadow()];
     app.focus = Focus::Shadows;
@@ -872,16 +907,17 @@ fn a_standing_experts_training_is_left_to_its_keeper() {
     app.shadows[0].status = ShadowStatus::Exploring;
     app.request_action();
     assert!(app.pending.is_some(), "a loop shadow is still pruned");
+    Ok(())
 }
 
 // Tab into the boundaries focus: the inspector replaces the expert detail and
 // shows the selected scope's behavior, actionable status, and governing feature.
 #[test]
-fn boundaries_focus_shows_the_inspector() {
+fn boundaries_focus_shows_the_inspector() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.boundaries = vec![actionable_boundary()];
     app.focus = Focus::Boundaries;
-    let text = to_text(&render(&mut app, 120, 36, 1600.0).unwrap());
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
         text.contains("boundaries"),
         "boundaries list title missing:\n{text}"
@@ -893,4 +929,5 @@ fn boundaries_focus_shows_the_inspector() {
     );
     assert!(text.contains("actionable"), "actionable status is shown");
     assert!(text.contains("runtime"), "the governing feature is shown");
+    Ok(())
 }

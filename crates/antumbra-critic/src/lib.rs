@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-critic: credit assignment
 //!
 //! Verifiable signals are the primary reward; the critic is a secondary
@@ -155,7 +153,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verifier_pass_yields_full_credit() {
+    async fn verifier_pass_yields_full_credit() -> Result<()> {
         let verifier = MarkerVerifier {
             expect: "ok".into(),
         };
@@ -169,10 +167,10 @@ mod tests {
             0.5,
             Utc::now(),
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(critique.total, 1.0);
         assert!(critique.signals.iter().all(RewardSignal::is_verifier));
+        Ok(())
     }
 
     // A misbehaving verifier that reports partial credit on a FAILED step. The
@@ -193,24 +191,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failed_verdict_contributes_zero_despite_a_nonzero_value() {
+    async fn a_failed_verdict_contributes_zero_despite_a_nonzero_value() -> Result<()> {
         let signals = run_verifiers(
             &RunId::new("run:1"),
             &[&PartialCreditOnFail],
             &[request("anything")],
             Utc::now(),
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(signals.len(), 1);
         assert_eq!(
             signals[0].value, 0.0,
             "a failed verdict's partial value is dropped"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn critic_cannot_rescue_a_verified_failure() {
+    async fn critic_cannot_rescue_a_verified_failure() -> Result<()> {
         let verifier = MarkerVerifier {
             expect: "ok".into(),
         };
@@ -226,13 +224,13 @@ mod tests {
             0.9,
             Utc::now(),
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(critique.total, 0.0);
+        Ok(())
     }
 
     #[test]
-    fn a_trace_totals_to_its_weakest_step_not_its_mean() {
+    fn a_trace_totals_to_its_weakest_step_not_its_mean() -> Result<()> {
         let run = RunId::new("run:1");
         let now = Utc::now();
         let signals = vec![
@@ -242,5 +240,6 @@ mod tests {
         ];
         assert_eq!(aggregate(&signals, 0.5).total, 0.2);
         assert_eq!(aggregate(&[], 0.5).total, 0.0);
+        Ok(())
     }
 }

@@ -227,23 +227,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exit_zero_passes_nonzero_fails() {
+    async fn exit_zero_passes_nonzero_fails() -> Result<()> {
         let v = CommandVerifier;
-        assert!(v.verify(&req(spec(0), "x")).await.unwrap().passed);
-        assert!(!v.verify(&req(spec(1), "x")).await.unwrap().passed);
+        assert!(v.verify(&req(spec(0), "x")).await?.passed);
+        assert!(!v.verify(&req(spec(1), "x")).await?.passed);
+        Ok(())
     }
 
     // Untrusted generated code can run forever; the verifier must kill it and
     // report failure, not hang. Waits the full VERIFY_TIMEOUT, so it is opt-in.
     #[tokio::test]
     #[ignore = "exercises the verify timeout (~10s)"]
-    async fn runaway_command_times_out_as_failure() {
+    async fn runaway_command_times_out_as_failure() -> Result<()> {
         let v = CommandVerifier;
-        assert!(!v.verify(&req(runaway(), "x")).await.unwrap().passed);
+        assert!(!v.verify(&req(runaway(), "x")).await?.passed);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn missing_spec_does_not_pass() {
+    async fn missing_spec_does_not_pass() -> Result<()> {
         let v = CommandVerifier;
         let r = VerifyRequest {
             run_id: RunId::new("r"),
@@ -251,17 +253,19 @@ mod tests {
             dimension: "x".into(),
             artifact: serde_json::json!({ "completion": "x" }),
         };
-        assert!(!v.verify(&r).await.unwrap().passed);
+        assert!(!v.verify(&r).await?.passed);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn contains_all_rule_passes_only_when_all_present() {
+    async fn contains_all_rule_passes_only_when_all_present() -> Result<()> {
         let v = CommandVerifier;
         let spec = serde_json::json!({ "contains_all": ["def add", "return a + b"] });
         let good = req(spec.clone(), "def add(a, b):\n    return a + b\n");
         let bad = req(spec, "def sub(a, b):\n    return a - b\n");
-        assert!(v.verify(&good).await.unwrap().passed);
-        assert!(!v.verify(&bad).await.unwrap().passed);
+        assert!(v.verify(&good).await?.passed);
+        assert!(!v.verify(&bad).await?.passed);
+        Ok(())
     }
 
     /// A behavior's check runs in-process, matched as the behavior's examples
@@ -269,37 +273,39 @@ mod tests {
     /// check may use, mean what they meant there. A pattern that does not
     /// compile fails every answer.
     #[tokio::test]
-    async fn a_behavior_check_passes_what_follows_and_refuses_what_breaks_it() {
-        async fn passes(spec: &serde_json::Value, answer: &str) -> bool {
+    async fn a_behavior_check_passes_what_follows_and_refuses_what_breaks_it() -> Result<()> {
+        async fn passes(spec: &serde_json::Value, answer: &str) -> Result<bool> {
             let r = req(spec.clone(), answer);
-            CommandVerifier.verify(&r).await.unwrap().passed
+            Ok(CommandVerifier.verify(&r).await?.passed)
         }
         let spec = serde_json::json!({ "behavior": {
             "must": [r"(?i)git add (?!-A\b)\S"],
             "must_not": ["--force"],
         }});
-        assert!(passes(&spec, "GIT ADD src/lib.rs").await);
-        assert!(!passes(&spec, "git add -A").await, "misses must");
+        assert!(passes(&spec, "GIT ADD src/lib.rs").await?);
+        assert!(!passes(&spec, "git add -A").await?, "misses must");
         assert!(
-            !passes(&spec, "git add src/lib.rs && git push --force").await,
+            !passes(&spec, "git add src/lib.rs && git push --force").await?,
             "matches must_not"
         );
         let broken = serde_json::json!({ "behavior": { "must": ["(unclosed"] } });
-        assert!(!passes(&broken, "anything").await);
+        assert!(!passes(&broken, "anything").await?);
+        Ok(())
     }
 
     #[test]
-    fn extract_code_block_handles_fences_and_plain() {
+    fn extract_code_block_handles_fences_and_plain() -> Result<()> {
         assert_eq!(
             extract_code_block("```python\ndef f():\n    pass\n```"),
             "def f():\n    pass"
         );
         assert_eq!(extract_code_block("no fence here"), "no fence here");
         assert_eq!(extract_code_block("```\nx = 1\n```"), "x = 1");
+        Ok(())
     }
 
     #[test]
-    fn resolve_program_honors_antumbra_python_override() {
+    fn resolve_program_honors_antumbra_python_override() -> Result<()> {
         // No env -> pass through.
         std::env::remove_var("ANTUMBRA_PYTHON");
         assert_eq!(resolve_program("python"), "python");
@@ -314,12 +320,13 @@ mod tests {
         std::env::set_var("ANTUMBRA_PYTHON", "  ");
         assert_eq!(resolve_program("python"), "python");
         std::env::remove_var("ANTUMBRA_PYTHON");
+        Ok(())
     }
 
     // The extract_code path inside verify(): the rule matches the code pulled from
     // a markdown fence, not the surrounding prose.
     #[tokio::test]
-    async fn extract_code_then_contains_all() {
+    async fn extract_code_then_contains_all() -> Result<()> {
         let v = CommandVerifier;
         let spec = serde_json::json!({
             "extract_code": true,
@@ -329,14 +336,16 @@ mod tests {
             spec,
             "Here you go:\n```python\ndef add(a, b):\n    return a + b\n```",
         );
-        assert!(v.verify(&r).await.unwrap().passed);
+        assert!(v.verify(&r).await?.passed);
+        Ok(())
     }
 
     // A spec with neither a rule nor a program cannot earn reward.
     #[tokio::test]
-    async fn spec_without_program_or_rule_fails() {
+    async fn spec_without_program_or_rule_fails() -> Result<()> {
         let v = CommandVerifier;
         let r = req(serde_json::json!({ "extract_code": false }), "x");
-        assert!(!v.verify(&r).await.unwrap().passed);
+        assert!(!v.verify(&r).await?.passed);
+        Ok(())
     }
 }

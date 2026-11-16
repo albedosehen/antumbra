@@ -34,6 +34,8 @@ serde_json.workspace = true
 chrono.workspace = true
 
 [dev-dependencies]
+# `testing` is the shared in-memory store fixture the chunk-index test writes into.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]

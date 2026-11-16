@@ -71,7 +71,7 @@ mod tests {
         "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
 
     #[test]
-    fn the_documented_vector_verifies_and_signs() {
+    fn the_documented_vector_verifies_and_signs() -> anyhow::Result<()> {
         assert_eq!(sign(SECRET, BODY), SIGNATURE);
         assert_eq!(verify(SECRET, BODY, Some(SIGNATURE)), Ok(()));
         assert_eq!(
@@ -79,10 +79,11 @@ mod tests {
             Ok(()),
             "surrounding whitespace is tolerated"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_missing_malformed_or_wrong_signature_is_refused() {
+    fn a_missing_malformed_or_wrong_signature_is_refused() -> anyhow::Result<()> {
         assert_eq!(verify(SECRET, BODY, None), Err(SignatureError::Missing));
         for bad in [
             "",
@@ -107,5 +108,6 @@ mod tests {
             Err(SignatureError::Mismatch),
             "a changed body no longer matches"
         );
+        Ok(())
     }
 }

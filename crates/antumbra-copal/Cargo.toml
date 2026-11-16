@@ -30,6 +30,10 @@ clap = ["dep:clap"]
 
 [dev-dependencies]
 antumbra-http = { path = "../antumbra-http", features = ["testing"] }
+# The tests return `anyhow::Result`: the archive's own errors and the config
+# errors both convert into it, and a fixture that is not what a test expected
+# is a `bail!` with the same words the panic had.
+anyhow.workspace = true
 
 [lints]
 workspace = true

@@ -145,6 +145,7 @@ fn gain(points: &[Point], of: impl Fn(&Point) -> Option<f32> + Copy) -> Option<f
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     /// Ten generations: `search` climbs by `climb` in total, `audit` by
     /// `carried`, measured every `every` generations.
@@ -162,43 +163,47 @@ mod tests {
     }
 
     #[test]
-    fn a_climb_the_audit_slice_does_not_follow_is_the_kill_criterion() {
+    fn a_climb_the_audit_slice_does_not_follow_is_the_kill_criterion() -> Result<()> {
         // Search up 20 points, audit up half a point, audited every other
         // generation: the loop has tuned itself against its own estimate.
         assert_eq!(
             Watch::default().read(&run(0.20, 0.005, 2)),
             Trend::Overtuning
         );
+        Ok(())
     }
 
     #[test]
-    fn a_climb_the_audit_slice_follows_is_a_real_gain() {
+    fn a_climb_the_audit_slice_follows_is_a_real_gain() -> Result<()> {
         assert_eq!(Watch::default().read(&run(0.20, 0.15, 2)), Trend::Carrying);
         // It does not have to follow all the way: the dial asks for a share.
         assert_eq!(Watch::default().read(&run(0.20, 0.06, 2)), Trend::Carrying);
+        Ok(())
     }
 
     #[test]
-    fn a_run_that_is_not_climbing_has_no_gain_to_have_lost() {
+    fn a_run_that_is_not_climbing_has_no_gain_to_have_lost() -> Result<()> {
         assert_eq!(Watch::default().read(&run(0.0, 0.0, 2)), Trend::Flat);
         // Nor does a run drifting down read as overtuning: it is a different
         // problem, and calling it this one would send the operator to the
         // wrong place.
         assert_eq!(Watch::default().read(&run(-0.10, 0.0, 2)), Trend::Flat);
+        Ok(())
     }
 
     #[test]
-    fn too_little_measurement_is_not_a_clean_bill() {
+    fn too_little_measurement_is_not_a_clean_bill() -> Result<()> {
         let watch = Watch::default();
         // Fewer generations than the window.
         assert_eq!(watch.read(&run(0.20, 0.0, 2)[..6]), Trend::Inconclusive);
         // Ten generations, but the audit slice ran twice in them.
         assert_eq!(watch.read(&run(0.20, 0.0, 7)), Trend::Inconclusive);
         assert_eq!(watch.read(&[]), Trend::Inconclusive);
+        Ok(())
     }
 
     #[test]
-    fn only_the_most_recent_window_is_read() {
+    fn only_the_most_recent_window_is_read() -> Result<()> {
         // Twenty generations: overtuned for the first ten, carried for the last
         // ten. The verdict is about where the loop is now.
         let mut points: Vec<Point> = run(0.20, 0.0, 2);
@@ -210,10 +215,11 @@ mod tests {
         }));
         assert_eq!(points.len(), 20);
         assert_eq!(Watch::default().read(&points), Trend::Carrying);
+        Ok(())
     }
 
     #[test]
-    fn the_gain_is_a_trend_and_not_two_samples() {
+    fn the_gain_is_a_trend_and_not_two_samples() -> Result<()> {
         // A single spiking generation at the end does not make a climb: the
         // thirds average it away, where an endpoint difference would not.
         let mut points = run(0.0, 0.0, 2);
@@ -221,5 +227,6 @@ mod tests {
             last.search = 0.90;
         }
         assert_eq!(Watch::default().read(&points), Trend::Flat);
+        Ok(())
     }
 }

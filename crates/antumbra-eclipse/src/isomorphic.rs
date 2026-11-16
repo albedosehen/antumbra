@@ -83,9 +83,10 @@ impl Reverification {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     #[test]
-    fn a_result_that_moves_under_a_rename_disqualifies_the_candidate() {
+    fn a_result_that_moves_under_a_rename_disqualifies_the_candidate() -> Result<()> {
         let found = Reverification::of(&[
             Pair::new("task:1", "rename", true, true),
             Pair::new("task:2", "rename", true, false),
@@ -101,29 +102,32 @@ mod tests {
             vec![("task:2", "rename")],
             "a divergence names the transform it was found under"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_divergence_counts_in_both_directions() {
+    fn a_divergence_counts_in_both_directions() -> Result<()> {
         // Failing the original and passing its twin is the same fact from the
         // other side: the answer turns on something the task does not say.
         let found = Reverification::of(&[Pair::new("task:1", "literals", false, true)]);
         assert!(!found.clears());
         assert_eq!(found.diverged.len(), 1);
+        Ok(())
     }
 
     #[test]
-    fn failing_both_is_incompetence_and_not_a_shortcut() {
+    fn failing_both_is_incompetence_and_not_a_shortcut() -> Result<()> {
         let found = Reverification::of(&[
             Pair::new("task:1", "rename", false, false),
             Pair::new("task:2", "rename", true, true),
         ]);
         assert!(found.clears(), "this instrument measures shortcuts only");
         assert_eq!(found.pairs_checked, 2);
+        Ok(())
     }
 
     #[test]
-    fn a_re_verification_that_did_not_run_is_not_a_pass() {
+    fn a_re_verification_that_did_not_run_is_not_a_pass() -> Result<()> {
         let never = Reverification::of(&[]);
         assert!(
             !never.clears(),
@@ -131,5 +135,6 @@ mod tests {
         );
         assert_eq!(never.pairs_checked, 0);
         assert!(never.diverged.is_empty());
+        Ok(())
     }
 }

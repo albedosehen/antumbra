@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_verifier_that_reads_the_answer_is_sound() {
+    async fn a_verifier_that_reads_the_answer_is_sound() -> Result<()> {
         let exact = record(serde_json::json!({ "contains_all": ["s[::-1]"] }), None);
         let m = measure(
             &CommandVerifier,
@@ -150,15 +150,15 @@ mod tests {
             &TrustPolicy::default(),
             Utc::now(),
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(m.verdict, TrustVerdict::Sound, "{m:?}");
         assert_eq!((m.good, m.good_passed, m.bad, m.bad_passed), (1, 1, 29, 0));
         assert_eq!(m.impossible, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_verifier_that_checks_only_the_signature_passes_what_it_should_not() {
+    async fn a_verifier_that_checks_only_the_signature_passes_what_it_should_not() -> Result<()> {
         let weak = record(serde_json::json!({ "contains_all": ["def swap"] }), None);
         let m = measure(
             &CommandVerifier,
@@ -167,8 +167,7 @@ mod tests {
             &TrustPolicy::default(),
             Utc::now(),
         )
-        .await
-        .unwrap();
+        .await?;
         // The impossible task's artifact has the signature too: a shortcut.
         assert_eq!(
             m.verdict,
@@ -177,10 +176,11 @@ mod tests {
             }
         );
         assert_eq!(m.bad_passed, 29);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_verifier_is_measured_only_on_the_task_it_checks() {
+    async fn a_verifier_is_measured_only_on_the_task_it_checks() -> Result<()> {
         let mut all = cases();
         all.push(case("elsewhere", "u", "anything", Label::Bad));
         let exact = record(
@@ -194,9 +194,9 @@ mod tests {
             &TrustPolicy::default(),
             Utc::now(),
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(m.bad, 29);
+        Ok(())
     }
 
     /// Passes every other time it is asked.
@@ -214,7 +214,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_verifier_that_disagrees_with_itself_is_flaky() {
+    async fn a_verifier_that_disagrees_with_itself_is_flaky() -> Result<()> {
         let any = record(serde_json::json!({}), None);
         let m = measure(
             &Coin(AtomicU32::new(0)),
@@ -223,18 +223,16 @@ mod tests {
             &TrustPolicy::default(),
             Utc::now(),
         )
-        .await
-        .unwrap();
+        .await?;
         assert!(matches!(m.verdict, TrustVerdict::Flaky { .. }), "{m:?}");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_challenge_allows_no_pass_on_a_deliberately_wrong_artifact() {
+    async fn a_challenge_allows_no_pass_on_a_deliberately_wrong_artifact() -> Result<()> {
         let policy = TrustPolicy::default();
         let exact = record(serde_json::json!({ "contains_all": ["s[::-1]"] }), None);
-        let clean = challenge(&CommandVerifier, &exact, &cases(), &policy, Utc::now())
-            .await
-            .unwrap();
+        let clean = challenge(&CommandVerifier, &exact, &cases(), &policy, Utc::now()).await?;
         assert!(!clean.verdict.is_unsound(), "{clean:?}");
         assert_eq!((clean.impossible, clean.adversarial), (1, 29));
         // One wrong artifact it passes is enough.
@@ -245,14 +243,13 @@ mod tests {
             "def swap(s): s[::-1]; return s",
             Label::Bad,
         ));
-        let caught = challenge(&CommandVerifier, &exact, &wrong, &policy, Utc::now())
-            .await
-            .unwrap();
+        let caught = challenge(&CommandVerifier, &exact, &wrong, &policy, Utc::now()).await?;
         assert_eq!(
             caught.verdict,
             TrustVerdict::Shortcut {
                 cases: vec!["sneaky".into()]
             }
         );
+        Ok(())
     }
 }

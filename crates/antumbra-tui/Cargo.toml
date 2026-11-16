@@ -36,6 +36,10 @@ chrono.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 ab_glyph = "0.2"
 
+[dev-dependencies]
+# The embedded store the tui's tests stand up.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
+
 [features]
 # Raster image path (sixel/kitty/iTerm2) as a progressive enhancement over the
 # universal Braille/Canvas tier. Empty until the graphics backend is wired with

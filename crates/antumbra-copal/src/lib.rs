@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The copal document-of-record archive: on ingest, a knowledge document's
 //! ORIGINAL content is uploaded to a copal file service (content-addressed,
 //! versioned, sealed at rest) before its chunks are stored, and every chunk

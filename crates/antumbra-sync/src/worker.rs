@@ -171,41 +171,56 @@ async fn sleep_or_shutdown(dur: Duration, shutdown: &mut watch::Receiver<bool>) 
 mod tests {
     use super::*;
     use crate::config::Endpoint;
+    use antumbra_core::AntumbraError;
+    use tokio::task::JoinHandle;
 
     fn mem_cfg() -> SyncConfig {
         SyncConfig::new(Endpoint::embedded("mem://"), Endpoint::embedded("mem://"))
     }
 
+    /// Signal shutdown and wait up to `within` for the spawned worker to return
+    /// cleanly: not stopping in time, panicking, and failing are each an error.
+    async fn stop_within(
+        tx: &watch::Sender<bool>,
+        handle: JoinHandle<Result<()>>,
+        within: Duration,
+    ) -> Result<()> {
+        tx.send(true).map_err(|e| {
+            AntumbraError::other(format!("the worker dropped its shutdown receiver: {e}"))
+        })?;
+        tokio::time::timeout(within, handle)
+            .await
+            .map_err(|_| AntumbraError::other("the worker did not stop promptly"))?
+            .map_err(|e| AntumbraError::other(format!("the worker task did not finish: {e}")))?
+    }
+
     // A one-shot pass over two fresh (empty) stores connects, reconciles, and
     // moves nothing -- the plumbing end to end without disk.
     #[tokio::test]
-    async fn run_once_over_empty_stores_is_a_noop() {
-        let stats = run_once(&mem_cfg()).await.unwrap();
+    async fn run_once_over_empty_stores_is_a_noop() -> Result<()> {
+        let stats = run_once(&mem_cfg()).await?;
         assert_eq!(stats.total(), 0);
+        Ok(())
     }
 
     // A pre-signaled shutdown returns immediately without attempting to connect.
     #[tokio::test]
-    async fn run_returns_on_shutdown() {
+    async fn run_returns_on_shutdown() -> Result<()> {
         let (tx, rx) = watch::channel(true);
         let _ = tx; // already signaled
-        run(mem_cfg(), rx).await.unwrap();
+        run(mem_cfg(), rx).await?;
+        Ok(())
     }
 
     // The full supervisor path: connect both, reconcile on the cadence, then exit
     // cleanly when shutdown fires mid-cadence.
     #[tokio::test]
-    async fn run_reconciles_on_a_cadence_then_stops() {
+    async fn run_reconciles_on_a_cadence_then_stops() -> Result<()> {
         let cfg = mem_cfg().with_interval(Duration::from_millis(20));
         let (tx, rx) = watch::channel(false);
         let handle = tokio::spawn(run(cfg, rx));
         tokio::time::sleep(Duration::from_millis(70)).await; // a few reconcile cycles
-        tx.send(true).unwrap();
-        tokio::time::timeout(Duration::from_secs(2), handle)
-            .await
-            .expect("worker stops promptly")
-            .unwrap()
-            .unwrap();
+        stop_within(&tx, handle, Duration::from_secs(2)).await
     }
 
     // The GC cadence: every `gc_every` cycles it purges tombstones on both stores
@@ -213,9 +228,9 @@ mod tests {
     // `gc_every == 0` disables it entirely. The default `gc_every` (240) is why the
     // cadence tests above never reach this path.
     #[tokio::test]
-    async fn collect_garbage_honors_the_gc_cadence() {
-        let local = Endpoint::embedded("mem://").connect().await.unwrap();
-        let remote = Endpoint::embedded("mem://").connect().await.unwrap();
+    async fn collect_garbage_honors_the_gc_cadence() -> Result<()> {
+        let local = Endpoint::embedded("mem://").connect().await?;
+        let remote = Endpoint::embedded("mem://").connect().await?;
 
         let on = SyncConfig {
             gc_every: 1,
@@ -234,12 +249,13 @@ mod tests {
             ..mem_cfg()
         };
         collect_garbage(&off, &local, &remote, 1).await; // disabled
+        Ok(())
     }
 
     // A failing remote sends the supervisor into the backoff path; shutdown during
     // backoff still exits cleanly.
     #[tokio::test]
-    async fn run_backs_off_on_connect_failure_then_stops() {
+    async fn run_backs_off_on_connect_failure_then_stops() -> Result<()> {
         let cfg = SyncConfig {
             min_backoff: Duration::from_millis(20),
             max_backoff: Duration::from_millis(40),
@@ -252,11 +268,6 @@ mod tests {
         let (tx, rx) = watch::channel(false);
         let handle = tokio::spawn(run(cfg, rx));
         tokio::time::sleep(Duration::from_millis(120)).await;
-        tx.send(true).unwrap();
-        tokio::time::timeout(Duration::from_secs(5), handle)
-            .await
-            .expect("worker stops promptly after a connect failure")
-            .unwrap()
-            .unwrap();
+        stop_within(&tx, handle, Duration::from_secs(5)).await
     }
 }
