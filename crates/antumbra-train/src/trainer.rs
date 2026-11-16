@@ -452,7 +452,7 @@ mod tests {
     use crate::model::{CausalLm, CorpusTask, SftExample};
     use antumbra_core::slice::{Holdout, Partition};
     use antumbra_core::testing::MarkerVerifier;
-    use antumbra_core::ShadowId;
+    use antumbra_core::{AntumbraError, ShadowId};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct FakeLm {
@@ -519,7 +519,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn train_shadow_runs_raft_end_to_end() {
+    async fn train_shadow_runs_raft_end_to_end() -> Result<()> {
         let trainer = RaftTrainer::new(
             RaftConfig {
                 samples_per_task: 4,
@@ -542,9 +542,13 @@ mod tests {
             parent_adapter: None,
             verifier_only: false,
         };
-        let out = trainer.train_shadow(req).await.unwrap();
+        let out = trainer.train_shadow(req).await?;
         assert!(out.final_fitness > 0.0);
-        assert!(out.reward_curve.last().unwrap() > out.reward_curve.first().unwrap());
+        let (Some(first), Some(last)) = (out.reward_curve.first(), out.reward_curve.last()) else {
+            return Err(AntumbraError::other("an empty reward curve"));
+        };
+        assert!(last > first);
+        Ok(())
     }
 
     /// Counts loads, so a refusal can be shown to come before the model does.
@@ -646,7 +650,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_corpus_with_nothing_to_learn_is_refused_before_the_model_loads() {
+    async fn a_corpus_with_nothing_to_learn_is_refused_before_the_model_loads() -> Result<()> {
         let loads = Arc::new(AtomicUsize::new(0));
         // Both ids of the shipped arithmetic corpus hash into the held-out slice.
         let trainer = RaftTrainer::new(
@@ -664,6 +668,7 @@ mod tests {
             .await
             .is_err());
         assert_eq!(loads.load(Ordering::SeqCst), 0, "no base model for nothing");
+        Ok(())
     }
 
     /// Passes every draw whose seed is even; keeps the seeds it was given.
@@ -756,7 +761,10 @@ mod tests {
         let m = trainer.remeasure(remeasure_request(Some(holdout))).await?;
         assert!(m.held_out);
         assert_eq!(m.tasks, 1, "task:1 is the one held-out task");
-        assert_eq!(*seeds.lock().unwrap(), vec![10, 11, 12]);
+        let seen = seeds
+            .lock()
+            .map_err(|_| AntumbraError::other("the seed log was poisoned"))?;
+        assert_eq!(*seen, vec![10, 11, 12]);
         // Four draws per evaluation (`raft()`), from each seed in turn: seed 10
         // draws 10..14 (two even), seed 11 draws 11..15 (two even), and so on.
         assert_eq!(m.pass_rates, vec![0.5, 0.5, 0.5]);
@@ -781,13 +789,14 @@ mod tests {
     /// A model that cannot seed its draws is refused rather than measured
     /// three times on one stream.
     #[tokio::test]
-    async fn a_model_that_cannot_seed_is_not_remeasured() {
+    async fn a_model_that_cannot_seed_is_not_remeasured() -> Result<()> {
         let trainer = RaftTrainer::new(raft(), FakeLoader, OneTaskCorpus, passing());
         let req = RemeasureRequest {
             adapter_uri: "x".into(),
             ..remeasure_request(None)
         };
         assert!(trainer.remeasure(req).await.is_err());
+        Ok(())
     }
 
     fn recipe_request(recipe: Option<TrainingRecipe>) -> TrainRequest {
@@ -821,7 +830,10 @@ mod tests {
         };
         let out = trainer.train_shadow(recipe_request(Some(asked))).await?;
         assert_eq!(out.recipe, Some(asked));
-        assert_eq!(*seen.lock().unwrap(), vec![Some(asked)]);
+        let loaded = seen
+            .lock()
+            .map_err(|_| AntumbraError::other("the recipe log was poisoned"))?;
+        assert_eq!(*loaded, vec![Some(asked)]);
         Ok(())
     }
 
@@ -844,12 +856,15 @@ mod tests {
         );
         let out = trainer.train_shadow(recipe_request(None)).await?;
         assert_eq!(out.recipe, Some(own));
-        assert_eq!(*seen.lock().unwrap(), vec![Some(own)]);
+        let loaded = seen
+            .lock()
+            .map_err(|_| AntumbraError::other("the recipe log was poisoned"))?;
+        assert_eq!(*loaded, vec![Some(own)]);
         Ok(())
     }
 
     #[tokio::test]
-    async fn an_untrainable_recipe_is_refused_before_the_model_loads() {
+    async fn an_untrainable_recipe_is_refused_before_the_model_loads() -> Result<()> {
         let loads = Arc::new(AtomicUsize::new(0));
         let trainer = RaftTrainer::new(
             raft(),
@@ -867,5 +882,6 @@ mod tests {
             .await
             .is_err());
         assert_eq!(loads.load(Ordering::SeqCst), 0);
+        Ok(())
     }
 }

@@ -10,15 +10,32 @@ struct Recording {
     blends: Mutex<Vec<Vec<String>>>,
 }
 
+impl Recording {
+    /// The experts of every request served so far, in order.
+    fn blended(&self) -> Vec<Vec<String>> {
+        // The fake only pushes under the lock, so a poisoned lock still holds
+        // a whole list.
+        self.blends
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
 #[async_trait::async_trait]
 impl antumbra_core::ports::Serve for Recording {
     async fn act(&self, req: ActRequest) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
-        self.blends.lock().unwrap().push(
-            req.adapters
-                .iter()
-                .map(|e| e.as_str().to_string())
-                .collect(),
-        );
+        // The fake only pushes under the lock, so a poisoned lock still holds
+        // a whole list.
+        self.blends
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(
+                req.adapters
+                    .iter()
+                    .map(|e| e.as_str().to_string())
+                    .collect(),
+            );
         Ok(antumbra_core::ports::ActOutput {
             steps: Vec::new(),
             final_output: req.prompt,
@@ -55,8 +72,8 @@ fn standing(scope: &str) -> serde_json::Value {
 
 /// A store whose router covers any task with `expert:adder`, and a server on
 /// it for `user:test` that records what it serves.
-async fn covered() -> (McpServer, Arc<Recording>) {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn covered() -> anyhow::Result<(McpServer, Arc<Recording>)> {
+    let store = mem_store().await?;
     router::save(
         &store,
         &LearnedRouter {
@@ -69,9 +86,8 @@ async fn covered() -> (McpServer, Arc<Recording>) {
             floor: -1.0,
         },
     )
-    .await
-    .unwrap();
-    serving(store).await
+    .await?;
+    Ok(serving(store).await)
 }
 
 async fn serving(store: Store) -> (McpServer, Arc<Recording>) {
@@ -88,8 +104,8 @@ async fn serving(store: Store) -> (McpServer, Arc<Recording>) {
     (s, rec)
 }
 
-async fn embed(text: &str) -> Vec<f32> {
-    FixedEmbedder::new(EMBED_DIM).embed(text).await.unwrap()
+async fn embed(text: &str) -> anyhow::Result<Vec<f32>> {
+    Ok(FixedEmbedder::new(EMBED_DIM).embed(text).await?)
 }
 
 fn ask(task: &str, repo: Option<&str>) -> Parameters<AnswerParams> {
@@ -101,9 +117,10 @@ fn ask(task: &str, repo: Option<&str>) -> Parameters<AnswerParams> {
 }
 
 #[tokio::test]
-async fn an_answer_composes_the_users_standing_experts_for_everywhere_and_its_repository() {
-    let (s, rec) = covered().await;
-    let elsewhere = embed("nothing like the task").await;
+async fn an_answer_composes_the_users_standing_experts_for_everywhere_and_its_repository(
+) -> anyhow::Result<()> {
+    let (s, rec) = covered().await?;
+    let elsewhere = embed("nothing like the task").await?;
     for e in [
         expert(
             "expert:mine:everywhere",
@@ -144,13 +161,12 @@ async fn an_answer_composes_the_users_standing_experts_for_everywhere_and_its_re
             )
         },
     ] {
-        expert::insert(&s.store, &e).await.unwrap();
+        expert::insert(&s.store, &e).await?;
     }
 
     let out = s
         .answer(ask("add two numbers", Some("github.com/o/r")))
-        .await
-        .unwrap();
+        .await?;
     assert!(!out.0.escalate);
     assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
     assert_eq!(
@@ -158,43 +174,44 @@ async fn an_answer_composes_the_users_standing_experts_for_everywhere_and_its_re
         ["expert:mine:everywhere", "expert:mine:repo"]
     );
 
-    let out = s.answer(ask("add two numbers", None)).await.unwrap();
+    let out = s.answer(ask("add two numbers", None)).await?;
     assert_eq!(out.0.standing, ["expert:mine:everywhere"]);
 
     assert_eq!(
-        *rec.blends.lock().unwrap(),
+        rec.blended(),
         [
             vec!["expert:adder", "expert:mine:everywhere", "expert:mine:repo"],
             vec!["expert:adder", "expert:mine:everywhere"],
         ]
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn with_nothing_routed_a_standing_expert_answers_only_a_task_like_its_own() {
+async fn with_nothing_routed_a_standing_expert_answers_only_a_task_like_its_own(
+) -> anyhow::Result<()> {
     let task = "open a pull request for my branch";
-    let (s, rec) = serving(Store::connect_memory(EMBED_DIM).await.unwrap()).await;
+    let (s, rec) = serving(mem_store().await?).await;
     expert::insert(
         &s.store,
         &expert(
             "expert:mine:everywhere",
             "user:test",
             standing("everywhere"),
-            embed(task).await,
+            embed(task).await?,
         ),
     )
-    .await
-    .unwrap();
-    let out = s.answer(ask(task, None)).await.unwrap();
+    .await?;
+    let out = s.answer(ask(task, None)).await?;
     assert!(!out.0.escalate);
     assert_eq!(out.0.expert_id.as_deref(), Some("expert:mine:everywhere"));
     assert_eq!(out.0.standing, ["expert:mine:everywhere"]);
-    assert_eq!(rec.blends.lock().unwrap().len(), 1);
+    assert_eq!(rec.blended().len(), 1);
 
     // Taught tasks the test embedder places nowhere near this one.
     let mut unlike = vec![0.0; EMBED_DIM];
     unlike[EMBED_DIM - 1] = 1.0;
-    let (s, rec) = serving(Store::connect_memory(EMBED_DIM).await.unwrap()).await;
+    let (s, rec) = serving(mem_store().await?).await;
     expert::insert(
         &s.store,
         &expert(
@@ -204,12 +221,12 @@ async fn with_nothing_routed_a_standing_expert_answers_only_a_task_like_its_own(
             unlike,
         ),
     )
-    .await
-    .unwrap();
-    let out = s.answer(ask(task, None)).await.unwrap();
+    .await?;
+    let out = s.answer(ask(task, None)).await?;
     assert!(out.0.escalate, "a task unlike its own is the generalist's");
     assert!(out.0.standing.is_empty());
-    assert!(rec.blends.lock().unwrap().is_empty());
+    assert!(rec.blended().is_empty());
+    Ok(())
 }
 
 /// Asked for standing experts only, an answer leaves out the routed expert,
@@ -217,7 +234,8 @@ async fn with_nothing_routed_a_standing_expert_answers_only_a_task_like_its_own(
 /// standing experts for everywhere and the repository however unlike their
 /// own the task is. With none in scope it escalates and serves nothing.
 #[tokio::test]
-async fn an_answer_from_standing_experts_only_skips_the_route_and_the_likeness() {
+async fn an_answer_from_standing_experts_only_skips_the_route_and_the_likeness(
+) -> anyhow::Result<()> {
     let only = |repo: Option<&str>| {
         Parameters(AnswerParams {
             task: "add two numbers".into(),
@@ -227,7 +245,7 @@ async fn an_answer_from_standing_experts_only_skips_the_route_and_the_likeness()
     };
     let mut unlike = vec![0.0; EMBED_DIM];
     unlike[EMBED_DIM - 1] = 1.0;
-    let (s, rec) = covered().await;
+    let (s, rec) = covered().await?;
     for e in [
         expert(
             "expert:mine:everywhere",
@@ -242,9 +260,9 @@ async fn an_answer_from_standing_experts_only_skips_the_route_and_the_likeness()
             unlike.clone(),
         ),
     ] {
-        expert::insert(&s.store, &e).await.unwrap();
+        expert::insert(&s.store, &e).await?;
     }
-    let out = s.answer(only(Some("github.com/o/r"))).await.unwrap();
+    let out = s.answer(only(Some("github.com/o/r"))).await?;
     assert!(!out.0.escalate);
     assert_eq!(out.0.expert_id.as_deref(), Some("expert:mine:everywhere"));
     assert_eq!(
@@ -252,21 +270,22 @@ async fn an_answer_from_standing_experts_only_skips_the_route_and_the_likeness()
         ["expert:mine:everywhere", "expert:mine:repo"]
     );
     assert_eq!(
-        *rec.blends.lock().unwrap(),
+        rec.blended(),
         [vec!["expert:mine:everywhere", "expert:mine:repo"]],
         "no routed expert in the blend"
     );
 
-    let (s, rec) = covered().await;
-    let out = s.answer(only(None)).await.unwrap();
+    let (s, rec) = covered().await?;
+    let out = s.answer(only(None)).await?;
     assert!(out.0.escalate, "no standing expert in scope");
-    assert!(rec.blends.lock().unwrap().is_empty());
+    assert!(rec.blended().is_empty());
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_standing_expert_is_never_routed() {
-    let (s, _) = serving(Store::connect_memory(EMBED_DIM).await.unwrap()).await;
-    let cap = embed("my private skill").await;
+async fn a_standing_expert_is_never_routed() -> anyhow::Result<()> {
+    let (s, _) = serving(mem_store().await?).await;
+    let cap = embed("my private skill").await?;
     expert::insert(
         &s.store,
         &expert(
@@ -276,30 +295,28 @@ async fn a_standing_expert_is_never_routed() {
             cap.clone(),
         ),
     )
-    .await
-    .unwrap();
+    .await?;
     expert::insert(
         &s.store,
         &expert("expert:mine", "user:test", serde_json::Value::Null, cap),
     )
-    .await
-    .unwrap();
+    .await?;
     let r = s
         .route(Parameters(RouteParams {
             task: "my private skill".into(),
             top_k: Some(5),
         }))
-        .await
-        .unwrap();
+        .await?;
     let ids: Vec<&str> = r.0.routes.iter().map(|h| h.expert_id.as_str()).collect();
     assert_eq!(ids, ["expert:mine"]);
+    Ok(())
 }
 
 /// An answer with no standing experts, which is every answer for a user
 /// who has accepted no behaviors, has to carry every key its output schema
 /// requires, or a client that checks results refuses the answer.
 #[test]
-fn an_answer_without_standing_experts_matches_the_output_schema() {
+fn an_answer_without_standing_experts_matches_the_output_schema() -> anyhow::Result<()> {
     let out = crate::server::params::AnswerOut {
         answer: "bun add react".into(),
         expert_id: None,
@@ -307,5 +324,6 @@ fn an_answer_without_standing_experts_matches_the_output_schema() {
         note: None,
         standing: Vec::new(),
     };
-    assert_required_keys_present(&out);
+    assert_required_keys_present(&out)?;
+    Ok(())
 }

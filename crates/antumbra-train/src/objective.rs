@@ -79,16 +79,16 @@ mod tests {
     use candle_core::{Device, Tensor};
 
     // logits for (batch=1, seq=3, vocab=4); only positions 0,1 are scored.
-    fn logits(values: Vec<f32>, dev: &Device) -> Tensor {
-        Tensor::from_vec(values, (1, 3, 4), dev).unwrap()
+    fn logits(values: Vec<f32>, dev: &Device) -> Result<Tensor> {
+        Tensor::from_vec(values, (1, 3, 4), dev)
     }
 
     #[test]
-    fn rewards_predicting_the_completion_tokens() {
+    fn rewards_predicting_the_completion_tokens() -> Result<()> {
         let dev = Device::Cpu;
         // input ids: prompt=[1], completion=[2,3]
-        let input_ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &dev).unwrap();
-        let mask = Tensor::from_vec(vec![0f32, 1.0, 1.0], (1, 3), &dev).unwrap();
+        let input_ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &dev)?;
+        let mask = Tensor::from_vec(vec![0f32, 1.0, 1.0], (1, 3), &dev)?;
 
         // GOOD: pos0 favors token 2, pos1 favors token 3 (the realized next tokens).
         let good = logits(
@@ -98,7 +98,7 @@ mod tests {
                 0., 0., 0., 0., // pos2 (unused)
             ],
             &dev,
-        );
+        )?;
         // BAD: predicts the wrong tokens.
         let bad = logits(
             vec![
@@ -107,16 +107,10 @@ mod tests {
                 0., 0., 0., 0.,
             ],
             &dev,
-        );
+        )?;
 
-        let good_loss = causal_lm_loss(&good, &input_ids, &mask)
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
-        let bad_loss = causal_lm_loss(&bad, &input_ids, &mask)
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
+        let good_loss = causal_lm_loss(&good, &input_ids, &mask)?.to_scalar::<f32>()?;
+        let bad_loss = causal_lm_loss(&bad, &input_ids, &mask)?.to_scalar::<f32>()?;
 
         assert!(
             good_loss < 0.01,
@@ -126,16 +120,17 @@ mod tests {
             bad_loss > good_loss,
             "wrong predictions cost more: {bad_loss} vs {good_loss}"
         );
+        Ok(())
     }
 
     #[test]
-    fn prompt_tokens_are_not_supervised() {
+    fn prompt_tokens_are_not_supervised() -> Result<()> {
         let dev = Device::Cpu;
-        let input_ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &dev).unwrap();
+        let input_ids = Tensor::from_vec(vec![1u32, 2, 3], (1, 3), &dev)?;
 
         // mask only the LAST token as completion; pos0's prediction (of token 2)
         // is now prompt and must not contribute.
-        let mask_tail = Tensor::from_vec(vec![0f32, 0.0, 1.0], (1, 3), &dev).unwrap();
+        let mask_tail = Tensor::from_vec(vec![0f32, 0.0, 1.0], (1, 3), &dev)?;
         // pos1 favors token 3 (good for the scored position); pos0 is wrong but unscored.
         let lg = logits(
             vec![
@@ -144,15 +139,13 @@ mod tests {
                 0., 0., 0., 0.,
             ],
             &dev,
-        );
-        let loss = causal_lm_loss(&lg, &input_ids, &mask_tail)
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
+        )?;
+        let loss = causal_lm_loss(&lg, &input_ids, &mask_tail)?.to_scalar::<f32>()?;
         assert!(
             loss < 0.01,
             "only the completion token should be scored: {loss}"
         );
+        Ok(())
     }
 }
 
@@ -165,27 +158,21 @@ mod proper_scoring {
     use super::*;
     use candle_core::{Device, Tensor};
 
-    fn row(values: &[f32], dev: &Device) -> Tensor {
-        Tensor::from_vec(values.to_vec(), (1, values.len()), dev).unwrap()
+    fn row(values: &[f32], dev: &Device) -> Result<Tensor> {
+        Tensor::from_vec(values.to_vec(), (1, values.len()), dev)
     }
 
     /// The expected Brier loss of *reporting* `q` when the world is `p`, which
     /// is what a truthful-reporting argument is actually about. A decision head
     /// does not see one outcome; it sees many draws from `p` and is scored on
     /// all of them, so the question is which `q` minimizes the average.
-    fn expected_loss(q: f32, p: f32, dev: &Device) -> f32 {
-        let reported = row(&[q, 1.0 - q], dev);
+    fn expected_loss(q: f32, p: f32, dev: &Device) -> Result<f32> {
+        let reported = row(&[q, 1.0 - q], dev)?;
         // outcome A, with probability p
-        let a = brier_loss(&reported, &row(&[1.0, 0.0], dev))
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
+        let a = brier_loss(&reported, &row(&[1.0, 0.0], dev)?)?.to_scalar::<f32>()?;
         // outcome B, with probability 1 - p
-        let b = brier_loss(&reported, &row(&[0.0, 1.0], dev))
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
-        p * a + (1.0 - p) * b
+        let b = brier_loss(&reported, &row(&[0.0, 1.0], dev)?)?.to_scalar::<f32>()?;
+        Ok(p * a + (1.0 - p) * b)
     }
 
     /// **Strict properness**: the true report is the unique minimum. Sweep every report
@@ -195,13 +182,13 @@ mod proper_scoring {
     /// not simply accuracy: there is no report that scores better than the truth, so
     /// a head cannot buy a lower loss with confidence it has not earned.
     #[test]
-    fn the_true_report_is_the_unique_minimum() {
+    fn the_true_report_is_the_unique_minimum() -> Result<()> {
         let dev = Device::Cpu;
         let truth = 0.7f32;
         let (mut best_q, mut best) = (0.0f32, f32::MAX);
         for step in 0..=100 {
             let q = step as f32 / 100.0;
-            let loss = expected_loss(q, truth, &dev);
+            let loss = expected_loss(q, truth, &dev)?;
             if loss < best {
                 best = loss;
                 best_q = q;
@@ -211,76 +198,72 @@ mod proper_scoring {
             (best_q - truth).abs() < 0.011,
             "the best report must be the true probability, got {best_q} for a world of {truth}"
         );
+        Ok(())
     }
 
     /// Overconfidence is punished, and so is underconfidence. A rule that only
     /// punished one would be a bias dressed as a loss.
     #[test]
-    fn confidence_beyond_the_evidence_costs_more_than_the_truth() {
+    fn confidence_beyond_the_evidence_costs_more_than_the_truth() -> Result<()> {
         let dev = Device::Cpu;
         let truth = 0.7f32;
-        let truthful = expected_loss(truth, truth, &dev);
+        let truthful = expected_loss(truth, truth, &dev)?;
         assert!(
-            expected_loss(0.95, truth, &dev) > truthful,
+            expected_loss(0.95, truth, &dev)? > truthful,
             "claiming 0.95 when the world is 0.70 must cost more than saying 0.70"
         );
         assert!(
-            expected_loss(0.50, truth, &dev) > truthful,
+            expected_loss(0.50, truth, &dev)? > truthful,
             "hedging to 0.50 when the world is 0.70 must also cost more"
         );
+        Ok(())
     }
 
     /// A perfect call is free and a confident miss is expensive, which is what
     /// makes the number usable as a reward rather than only as a loss.
     #[test]
-    fn a_right_answer_costs_nothing_and_a_confident_miss_costs_most() {
+    fn a_right_answer_costs_nothing_and_a_confident_miss_costs_most() -> Result<()> {
         let dev = Device::Cpu;
-        let certain_right = brier_loss(&row(&[1.0, 0.0], &dev), &row(&[1.0, 0.0], &dev))
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
-        let certain_wrong = brier_loss(&row(&[0.0, 1.0], &dev), &row(&[1.0, 0.0], &dev))
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
+        let certain_right =
+            brier_loss(&row(&[1.0, 0.0], &dev)?, &row(&[1.0, 0.0], &dev)?)?.to_scalar::<f32>()?;
+        let certain_wrong =
+            brier_loss(&row(&[0.0, 1.0], &dev)?, &row(&[1.0, 0.0], &dev)?)?.to_scalar::<f32>()?;
         assert!(certain_right.abs() < 1e-6, "a correct certainty is free");
         // Bounded: two classes, each off by one, so the worst case is exactly 2.
         assert!(
             (certain_wrong - 2.0).abs() < 1e-6,
             "a confident miss is bounded at 2.0, which is why this is safer than a log score"
         );
+        Ok(())
     }
 
     /// Averaged over a batch, so one sample cannot set the scale.
     #[test]
-    fn the_loss_is_a_mean_over_the_batch() {
+    fn the_loss_is_a_mean_over_the_batch() -> Result<()> {
         let dev = Device::Cpu;
-        let probs = Tensor::from_vec(vec![1.0f32, 0.0, 1.0, 0.0], (2, 2), &dev).unwrap();
-        let targets = Tensor::from_vec(vec![1.0f32, 0.0, 0.0, 1.0], (2, 2), &dev).unwrap();
-        let loss = brier_loss(&probs, &targets)
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
+        let probs = Tensor::from_vec(vec![1.0f32, 0.0, 1.0, 0.0], (2, 2), &dev)?;
+        let targets = Tensor::from_vec(vec![1.0f32, 0.0, 0.0, 1.0], (2, 2), &dev)?;
+        let loss = brier_loss(&probs, &targets)?.to_scalar::<f32>()?;
         // One perfect row (0.0) and one confident miss (2.0), averaged.
         assert!(
             (loss - 1.0).abs() < 1e-6,
             "expected the mean 1.0, got {loss}"
         );
+        Ok(())
     }
 
     /// A soft target is a distribution, not a mistake: a verifier that says "this
     /// is right 70% of the time" is exactly what a calibrated head should learn,
     /// and the objective has to accept it without special-casing.
     #[test]
-    fn a_soft_target_is_scored_like_any_other_distribution() {
+    fn a_soft_target_is_scored_like_any_other_distribution() -> Result<()> {
         let dev = Device::Cpu;
-        let matched = brier_loss(&row(&[0.7, 0.3], &dev), &row(&[0.7, 0.3], &dev))
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap();
+        let matched =
+            brier_loss(&row(&[0.7, 0.3], &dev)?, &row(&[0.7, 0.3], &dev)?)?.to_scalar::<f32>()?;
         assert!(
             matched.abs() < 1e-6,
             "matching a soft target exactly is free"
         );
+        Ok(())
     }
 }

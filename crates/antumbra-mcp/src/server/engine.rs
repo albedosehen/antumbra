@@ -723,14 +723,16 @@ mod tests {
     use antumbra_core::AntumbraError;
 
     #[test]
-    fn an_unreadable_router_routes_as_none_and_a_store_fault_still_fails() {
-        let undecodable = serde_json::from_str::<antumbra_core::LearnedRouter>("{}")
-            .expect_err("a router needs its fields");
+    fn an_unreadable_router_routes_as_none_and_a_store_fault_still_fails() -> anyhow::Result<()> {
+        let Err(undecodable) = serde_json::from_str::<antumbra_core::LearnedRouter>("{}") else {
+            anyhow::bail!("a router needs its fields");
+        };
         assert!(matches!(readable(Err(undecodable.into())), Ok(None)));
         assert!(matches!(
             readable(Err(AntumbraError::Store("connection reset".into()))),
             Err(AntumbraError::Store(_))
         ));
         assert!(matches!(readable(Ok(None)), Ok(None)));
+        Ok(())
     }
 }

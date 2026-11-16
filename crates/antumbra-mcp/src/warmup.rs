@@ -164,17 +164,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_embedder_is_warm_when_it_answers_within_the_bound() {
+    async fn the_embedder_is_warm_when_it_answers_within_the_bound() -> anyhow::Result<()> {
         assert!(embedder_now(&FixedEmbedder::new(8), Duration::from_secs(5)).await);
         let refusing = Slow {
             delay: Duration::ZERO,
             refuse: true,
         };
         assert!(!embedder_now(&refusing, Duration::from_secs(5)).await);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_embedder_slower_than_the_bound_does_not_hold_the_server() {
+    async fn an_embedder_slower_than_the_bound_does_not_hold_the_server() -> anyhow::Result<()> {
         let slow = Slow {
             delay: Duration::from_secs(30),
             refuse: false,
@@ -187,5 +188,6 @@ mod tests {
             started.elapsed()
         );
         assert!(EMBED_PATIENCE <= Duration::from_secs(30));
+        Ok(())
     }
 }

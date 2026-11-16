@@ -21,7 +21,7 @@ Isolation is **engine-enforced**, defense-in-depth:
 
 ### Networked MCP
 
-- Per-request **JWT** verification before any DB access; `exp` is **mandatory** (a non-expiring token is a standing key). HS256 (shared secret, self-hosted) or RS256 (against an auth service). Audience is required so a token minted for another verifier is rejected.
+- Per-request **JWT** verification before any DB access; `exp` is **mandatory** (a non-expiring token is a standing key). HS256 (shared secret, self-hosted) or RS256 (against an auth service). The audience check is **deployment-dependent**: a server started with `--jwt-audience` rejects a token minted for another verifier, and the hosted control plane always mints one (the compose stack passes the flag); a self-hosted server started without the flag verifies no audience, so a token minted for another of your servers with the same key is accepted there. Set it wherever two verifiers share a key.
 - The verified token **is** the identity; there is no token→identity table, so a leaked token grants exactly its claimed `(tenant, user)` scope and nothing more.
 - On an embedded store, where every identity shares one connection, each **tool call** signs the connection in as its identity under an auth lock and holds the lock until the tool returns. The signin travels with the call, not with the HTTP request that carried it, because a call over `/mcp` runs after that request is answered. A remote deployment gives each identity its own signed-in connection and holds no lock on the hot path.
 
@@ -42,7 +42,17 @@ Isolation is **engine-enforced**, defense-in-depth:
 
 ## SurrealQL injection
 
-None. Every query goes through the surql-rs builders / `crud` helpers; there is **no hand-authored, string-interpolated SurrealQL** anywhere in antumbra's code (the only exception is the schema `PERMISSIONS` predicates, which are static and contain no user input).
+No value that comes from a request, a tenant or a stored row is ever interpolated into a statement. Most queries go through the surql-rs builders and `crud` helpers. A handful of statements are hand-authored where the builders cannot express them: the dense and full-text recall queries (`antumbra-store/src/repo/memory.rs`, `repo/memory_chunk.rs`, `lexical.rs`), the keyed reads (`store.rs`), the sync reads and the schema's `PERMISSIONS` predicates. What they interpolate is static: table and field names from the code, projection lists the code assembles, and integers the code has already clamped (a page size, a `LIMIT`, a search effort). Every caller-supplied value in them (a key, a tenant, a query vector, the search terms) is bound as a `$variable`, never spliced into the text. A reviewer can find them all with `grep -rn 'format!(' crates/antumbra-store/src | grep -i 'select\|from'`.
+
+## What the operator must configure
+
+The controls above hold for every deployment. These hold only where the operator sets them:
+
+- **The audience** (`antumbra-mcp --jwt-audience`): without it a self-hosted verifier accepts a token minted for any audience under the same key. The compose stack and the hosted mint set it.
+- **HTTPS in front of the networked server**: the server speaks plain HTTP; a token on a cleartext network is a token in the open. `antumbra setup check` reports a cleartext address, and `setup` records an explicit `--allow-http` when one was accepted on purpose.
+- **The PDF renderer's private-address deny list** (`--chromium-deny-private-ips=true` on the Gotenberg service, as the compose profile starts it): the server's own replacement of private references is the second layer, not the first.
+- **The control plane's mail**: a hosted control plane needs real SMTP (`SMTP_HOST`/`PORT`/`USER`/`PASS`/`FROM`) for its sign-in links; `--dev-mailer`, which writes the links to its log, is for a developer's machine only and is refused unless asked for by name.
+- **Secrets from files** where the deployment can mount them (`--jwt-secret-file`, `--db-pass-file`, `--github-webhook-secret-file`, `--magic-secret-file`): an inline flag or an environment variable is readable by whoever can inspect the process or the container.
 
 ## Operational recommendations
 
