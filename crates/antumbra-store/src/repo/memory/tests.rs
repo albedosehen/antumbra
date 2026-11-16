@@ -13,7 +13,7 @@ use crate::schema::EMBED_DIM;
 /// store never needs to embed anything to calibrate.
 #[tokio::test]
 async fn calibrating_the_dense_leg_displaces_a_hub() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let unit = |f: &dyn Fn(usize) -> f32| -> Vec<f32> {
         let raw: Vec<f32> = (0..EMBED_DIM).map(f).collect();
@@ -121,7 +121,7 @@ async fn calibrating_the_dense_leg_displaces_a_hub() -> Result<()> {
 /// `list` reports -- tombstones excluded.
 #[tokio::test]
 async fn count_matches_list_and_excludes_tombstones() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let other = TenantId::new("other");
     assert_eq!(
@@ -194,7 +194,7 @@ async fn seed(store: &Store, tenant: &TenantId, id: &str, content: &str) -> Resu
 /// ranking problem rather than a failure.
 #[tokio::test]
 async fn the_sparse_leg_finds_identifiers_that_carry_punctuation() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     seed(
         &store,
@@ -269,7 +269,7 @@ async fn the_sparse_leg_finds_identifiers_that_carry_punctuation() -> Result<()>
 #[tokio::test]
 #[ignore = "embedded engine does not honor ORDER BY on the score alias; verified against the 3.2.4 server instead"]
 async fn the_sparse_leg_returns_the_best_matches_not_the_first_ones() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     // Six rows that each mention the term once, stored first.
     for i in 1..=6 {
@@ -306,7 +306,7 @@ async fn the_sparse_leg_returns_the_best_matches_not_the_first_ones() -> Result<
 /// out. Stopwords match nothing: "the" is in both memories.
 #[tokio::test]
 async fn the_sparse_leg_matches_any_word_of_a_question() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     seed(
         &store,
@@ -349,7 +349,7 @@ async fn the_sparse_leg_matches_any_word_of_a_question() -> Result<()> {
 /// -- which is the production symptom.
 #[tokio::test]
 async fn hybrid_recall_keeps_what_only_the_lexical_leg_can_find() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     seed(
         &store,
@@ -384,7 +384,7 @@ async fn hybrid_recall_keeps_what_only_the_lexical_leg_can_find() -> Result<()> 
 // removes it for good.
 #[tokio::test]
 async fn soft_delete_hides_the_trace_then_purge_removes_it() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let store = crate::testing::mem_store().await.unwrap();
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
     let m = Memory::new(
@@ -450,7 +450,7 @@ async fn soft_delete_hides_the_trace_then_purge_removes_it() {
 // resurrected.
 #[tokio::test]
 async fn reinforce_is_atomic_and_tombstone_guarded() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let store = crate::testing::mem_store().await.unwrap();
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
     let m = Memory::new(
@@ -503,7 +503,7 @@ async fn reinforce_is_atomic_and_tombstone_guarded() {
 
 #[tokio::test]
 async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let store = crate::testing::mem_store().await.unwrap();
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
     let m = Memory::new(
@@ -563,7 +563,7 @@ async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() {
 // the top-k. This is the whole point of the sparse + dense fusion.
 #[tokio::test]
 async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let store = crate::testing::mem_store().await.unwrap();
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
 
@@ -643,7 +643,7 @@ async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
 /// and never a forgotten one, another tenant's, or a vector.
 #[tokio::test]
 async fn recent_pages_live_memories_newest_first() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let start = chrono::Utc::now() - chrono::Duration::hours(1);
     let put = |id: &str, tenant: &TenantId, network: MemoryNetwork, minutes: i64| {
@@ -696,7 +696,7 @@ async fn recent_pages_live_memories_newest_first() -> Result<()> {
 /// does not fail the query.
 #[tokio::test]
 async fn recent_pages_one_machines_memories() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let user = antumbra_core::UserId::new("u");
     let start = chrono::Utc::now() - chrono::Duration::hours(1);
@@ -748,7 +748,7 @@ async fn recent_pages_one_machines_memories() -> Result<()> {
 /// back, and without their vectors.
 #[tokio::test]
 async fn with_any_evidence_finds_exactly_the_tagged_memories() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
     let tagged = |id: &str, tenant: &TenantId, evidence: &[&str]| {
@@ -806,7 +806,7 @@ async fn with_any_evidence_finds_exactly_the_tagged_memories() -> Result<()> {
 /// whole prompt (`the_sparse_leg_matches_any_word_of_a_question`).
 #[tokio::test]
 async fn each_part_of_a_compound_query_finds_its_own_memory() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let unit = |weights: &[(usize, f32)]| -> Vec<f32> {
         let mut v = vec![0.0f32; EMBED_DIM];

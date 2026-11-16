@@ -87,16 +87,8 @@ async fn ingest_refuses_a_document_past_the_cap_before_embedding_anything() -> a
 }
 
 async fn server() -> McpServer {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-    McpServer::new(
-        store,
-        Arc::new(FixedEmbedder::new(EMBED_DIM)),
-        TenantId::new("ws:test"),
-        UserId::new("user:test"),
-        "test-host".into(),
-        CompartmentId::new("comp:test:default"),
-        None,
-    )
+    let store = antumbra_store::testing::mem_store().await.unwrap();
+    McpServer::for_tests(store)
 }
 
 #[tokio::test]

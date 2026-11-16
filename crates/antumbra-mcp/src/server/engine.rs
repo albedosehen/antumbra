@@ -87,6 +87,41 @@ impl McpServer {
         }
     }
 
+    /// A server over `store` for the test workspace `ws:test`, as `user:test`
+    /// on the host `test-host`, with the stand-in embedder and no serving
+    /// engine: what twenty test modules built by hand.
+    #[cfg(test)]
+    pub(crate) fn for_tests(store: Store) -> Self {
+        Self::new(
+            store,
+            Arc::new(antumbra_core::testing::FixedEmbedder::new(
+                antumbra_store::EMBED_DIM,
+            )),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "test-host".into(),
+            CompartmentId::new("comp:test:default"),
+            None,
+        )
+    }
+
+    /// [`Self::for_tests`] as `user` of `tenant`, with that user's default
+    /// compartment, for the tests that put two members over one store.
+    #[cfg(test)]
+    pub(crate) fn for_tests_as(store: Store, tenant: &str, user: &str) -> Self {
+        Self::new(
+            store,
+            Arc::new(antumbra_core::testing::FixedEmbedder::new(
+                antumbra_store::EMBED_DIM,
+            )),
+            TenantId::new(tenant),
+            UserId::new(user),
+            "test-host".into(),
+            CompartmentId::new(format!("comp:{user}:default")),
+            None,
+        )
+    }
+
     /// This server for one call from `device`, a machine name already checked
     /// by [`super::machine_name`]: what the call writes is stamped as written
     /// from there (#193). A copy, so the server cached per identity keeps no
