@@ -76,7 +76,7 @@ async fn list(s: &McpServer, status: Option<&str>) -> Vec<(String, String, Strin
 
 #[tokio::test]
 async fn a_behavior_is_recorded_only_with_a_check_that_discriminates() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
 
     let mut weak = branch_rule(None, false);
@@ -126,7 +126,7 @@ async fn a_behavior_is_recorded_only_with_a_check_that_discriminates() -> anyhow
 
 #[tokio::test]
 async fn behaviors_are_accepted_retired_and_superseded() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
     let first = s
         .record_behavior(Parameters(branch_rule(None, false)))
@@ -171,7 +171,7 @@ async fn behaviors_are_accepted_retired_and_superseded() -> anyhow::Result<()> {
 #[tokio::test]
 async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not_taught(
 ) -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
     let mut three = branch_rule(None, true);
     three.examples.truncate(3);
@@ -234,7 +234,7 @@ async fn three_examples_are_refused_and_one_stored_with_three_says_why_it_is_not
 
 #[tokio::test]
 async fn a_behavior_lists_how_its_last_training_went() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
     let id = s
         .record_behavior(Parameters(branch_rule(None, true)))
@@ -331,7 +331,7 @@ fn problems_of(out: &serde_json::Value) -> Vec<&str> {
 /// answer, where deserialization named one missing field per call.
 #[tokio::test]
 async fn a_call_that_leaves_parts_out_is_told_everything_it_lacks_at_once() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
     let out = s
         .call_tool(
@@ -370,7 +370,7 @@ async fn a_call_that_leaves_parts_out_is_told_everything_it_lacks_at_once() -> a
 /// is held to it.
 #[tokio::test]
 async fn a_violation_written_as_an_example_is_read_as_its_answer() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
 
     let passed = s
@@ -437,7 +437,7 @@ fn the_schema_still_asks_for_the_rule_the_check_the_examples_and_the_violations(
 
 #[tokio::test]
 async fn the_tools_answer_to_the_names_they_had_before_the_us_spelling() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
     let args = branch_rule_args(serde_json::json!(branch_rule(None, false).violations));
     let recorded = s.call_tool("record_behaviour", args).await.unwrap();
@@ -464,7 +464,7 @@ async fn the_tools_answer_to_the_names_they_had_before_the_us_spelling() -> anyh
 
 #[tokio::test]
 async fn behaviors_are_private_to_the_user_who_recorded_them() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let lily = server_for(&store, "user:lily");
     let oslo = server_for(&store, "user:oslo");
     let id = lily
@@ -517,7 +517,7 @@ async fn candidates_are_what_may_state_a_rule_oldest_first_and_page_by_creation(
     use crate::server::candidates::CandidatesParams;
     use antumbra_core::MemoryNetwork::{Bank, Opinion, World};
 
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
     let tenant = TenantId::new("ws:test");
     let t0 = Utc::now() - chrono::Duration::minutes(10);
@@ -672,7 +672,7 @@ async fn a_behavior_cites_the_memories_it_came_from_and_they_are_no_longer_candi
         .0
     }
 
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = antumbra_store::testing::mem_store().await?;
     let s = server_for(&store, "user:lily");
     let said = antumbra_core::Memory::new(
         "memory:said",

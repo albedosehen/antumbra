@@ -401,17 +401,7 @@ async fn compartment_tools_create_list_store_share() {
 async fn sharing_someone_elses_compartment_is_refused_not_reported_shared() -> anyhow::Result<()> {
     let store = Store::connect_memory(EMBED_DIM).await?;
     let tenant = TenantId::new("ws:test");
-    let server_for = |user: &str| {
-        McpServer::new(
-            store.clone(),
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            tenant.clone(),
-            UserId::new(user),
-            "test-host".into(),
-            CompartmentId::new(format!("comp:{user}:default")),
-            None,
-        )
-    };
+    let server_for = |user: &str| McpServer::for_tests_as(store.clone(), "ws:test", user);
     let a = server_for("user:a");
     let b = server_for("user:b");
     let owned = a

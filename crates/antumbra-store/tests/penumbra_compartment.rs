@@ -12,7 +12,7 @@ use antumbra_core::{
     MemoryNetwork, TenantId, UserId,
 };
 use antumbra_store::repo::{compartment, edge, memory, principal};
-use antumbra_store::Store;
+use antumbra_store::{testing, Store};
 
 fn mem(id: &str, tenant: &str, content: &str, comp: Option<&str>) -> Memory {
     let m = Memory::new(id, tenant, MemoryNetwork::World, content, 0.8, Utc::now());
@@ -33,7 +33,7 @@ async fn visible_ids(store: &Store) -> Vec<String> {
 
 #[tokio::test]
 async fn memory_visibility_follows_compartment_grants() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
@@ -42,8 +42,7 @@ async fn memory_visibility_follows_compartment_grants() {
 
     // Owner provisions both users, creates A's private compartment, and seeds a
     // private memory in it plus an un-compartmentalized (shared-pool) memory.
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await.unwrap();
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A private", now),
@@ -119,7 +118,7 @@ async fn memory_visibility_follows_compartment_grants() {
 // and the deletion is a row that propagates rather than orphaning silently.
 #[tokio::test]
 async fn deleting_a_compartment_hides_its_memories_from_the_owner() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ca = CompartmentId::new("comp:a-private");
@@ -159,15 +158,14 @@ async fn deleting_a_compartment_hides_its_memories_from_the_owner() {
 
 #[tokio::test]
 async fn linking_into_a_compartment_requires_link_capability() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await.unwrap();
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
@@ -257,15 +255,14 @@ async fn linking_into_a_compartment_requires_link_capability() {
 // arbitrary compartment id.)
 #[tokio::test]
 async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await.unwrap();
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
@@ -316,15 +313,14 @@ async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() {
 // sharing (the existing visibility test grants in owner/bypass mode).
 #[tokio::test]
 async fn an_owner_can_share_their_own_compartment_while_scoped() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await.unwrap();
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
@@ -371,15 +367,14 @@ async fn an_owner_can_share_their_own_compartment_while_scoped() {
 // planted by B in their own private space. The owner's own/shared writes still work.
 #[tokio::test]
 async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await.unwrap();
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
@@ -434,7 +429,7 @@ async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() {
 
 #[tokio::test]
 async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let now = Utc::now();
     for (id, tenant, owner, name) in [
         ("comp:ws:a:user:a:behavior", "ws:a", "user:a", "behavior"),
@@ -482,7 +477,7 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
 /// nobody else, and not the owner either once the compartment is deleted.
 #[tokio::test]
 async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await.unwrap();
     let t = TenantId::new("ws:org");
     let owner = UserId::new("user:owner");
     let other = UserId::new("user:other");
@@ -558,7 +553,7 @@ async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
 // table's own permission inside a permission subquery.
 #[tokio::test]
 async fn a_grant_in_another_workspace_opens_nothing_here() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(4).await?;
+    let store = testing::mem_store_of(4).await?;
     let here = TenantId::new("ws:here");
     let elsewhere = TenantId::new("ws:elsewhere");
     let owner = UserId::new("user:owner");
@@ -644,7 +639,7 @@ async fn a_grant_in_another_workspace_opens_nothing_here() -> antumbra_core::Res
 // private against a member who reaches the engine without the app layer.
 #[tokio::test]
 async fn a_member_cannot_rewrite_another_members_compartment() -> anyhow::Result<()> {
-    let store = Store::connect_memory(4).await?;
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let a = UserId::new("user:a");
     let b = UserId::new("user:b");
