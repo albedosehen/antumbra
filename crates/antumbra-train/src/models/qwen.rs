@@ -36,7 +36,7 @@ use crate::model::{CausalLm, SftExample};
 use crate::objective::causal_lm_loss;
 
 fn ce(err: candle_core::Error) -> AntumbraError {
-    AntumbraError::other(format!("candle: {err}"))
+    crate::candle_err("candle")(err)
 }
 
 // --- config ----------------------------------------------------------------
@@ -446,13 +446,7 @@ impl QwenCausalLm {
             })
             .collect::<Result<Vec<_>>>()?;
         let blended = crate::compose::blend(&parts, Some(rank))?;
-        for (name, var) in vars.iter() {
-            let t = blended
-                .get(name)
-                .ok_or_else(|| AntumbraError::other(format!("load blend: no factor {name}")))?;
-            var.set(&t.to_dtype(var.dtype()).map_err(ce)?).map_err(ce)?;
-        }
-        Ok(())
+        crate::compose::set_factors(&vars, &blended, "load blend")
     }
 
     /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so

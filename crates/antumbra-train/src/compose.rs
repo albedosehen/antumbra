@@ -11,13 +11,13 @@
 
 use std::collections::HashMap;
 
-use candle_core::{Device, Tensor};
+use candle_core::{Device, Tensor, Var};
 use candle_nn::VarMap;
 
 use antumbra_core::{AntumbraError, Result};
 
 fn ce(e: candle_core::Error) -> AntumbraError {
-    AntumbraError::other(format!("compose: {e}"))
+    crate::candle_err("compose")(e)
 }
 
 /// Merge `(adapter_path, weight)` specs into one rank-concatenated adapter at
@@ -43,11 +43,9 @@ pub fn compose_adapters(specs: &[(String, f32)], out_path: &str) -> Result<usize
 }
 
 /// Restore one saved adapter into `vars` by name, each factor cast to its
-/// variable's dtype. An expert saved in bf16 on the GPU then loads into a
-/// model held in f32, as every model on the CPU is; candle's own
-/// `VarMap::load` refuses the mismatch.
+/// variable's dtype (see [`set_factors`]).
 pub fn restore_adapter(vars: &VarMap, path: &str) -> Result<()> {
-    let fail = |e: candle_core::Error| AntumbraError::other(format!("load adapter `{path}`: {e}"));
+    let what = format!("load adapter `{path}`");
     // A poisoned lock holds the same map of vars: a panic elsewhere while it
     // was held cannot leave one half-set, so it is taken as it is.
     let vars = vars
@@ -57,11 +55,26 @@ pub fn restore_adapter(vars: &VarMap, path: &str) -> Result<()> {
     let Some(device) = vars.values().next().map(|v| v.device().clone()) else {
         return Ok(());
     };
-    let saved = candle_core::safetensors::load(path, &device).map_err(fail)?;
-    for (name, var) in vars.iter() {
-        let t = saved.get(name).ok_or_else(|| {
-            AntumbraError::other(format!("load adapter `{path}`: no factor {name}"))
-        })?;
+    let saved = candle_core::safetensors::load(path, &device)
+        .map_err(|e| AntumbraError::other(format!("{what}: {e}")))?;
+    set_factors(&vars, &saved, &what)
+}
+
+/// Set each of `vars` from the factor of its name in `factors`, cast to the
+/// variable's dtype: an expert saved in bf16 on the GPU then loads into a
+/// model held in f32, as every model on the CPU is, where candle's own
+/// `VarMap::load` refuses the mismatch. `what` names the load in a refusal,
+/// which a factor missing from `factors` is.
+pub fn set_factors(
+    vars: &HashMap<String, Var>,
+    factors: &HashMap<String, Tensor>,
+    what: &str,
+) -> Result<()> {
+    let fail = |e: candle_core::Error| AntumbraError::other(format!("{what}: {e}"));
+    for (name, var) in vars {
+        let t = factors
+            .get(name)
+            .ok_or_else(|| AntumbraError::other(format!("{what}: no factor {name}")))?;
         var.set(&t.to_dtype(var.dtype()).map_err(fail)?)
             .map_err(fail)?;
     }
@@ -173,6 +186,71 @@ mod tests {
         for p in [p1, p2, pm] {
             std::fs::remove_file(p).ok();
         }
+    }
+
+    #[test]
+    fn set_factors_casts_each_factor_to_its_var_and_names_a_missing_one() -> Result<()> {
+        let device = Device::Cpu;
+        let vars = VarMap::new();
+        vars.get(
+            (1, 2),
+            "p.lora_a",
+            candle_nn::Init::Const(0.0),
+            candle_core::DType::F32,
+            &device,
+        )
+        .map_err(ce)?;
+        vars.get(
+            (1, 1),
+            "p.lora_b",
+            candle_nn::Init::Const(0.0),
+            candle_core::DType::F32,
+            &device,
+        )
+        .map_err(ce)?;
+        let held = vars
+            .data()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Factors saved in bf16, as a GPU-trained expert's are.
+        let mut factors: HashMap<String, Tensor> = HashMap::new();
+        factors.insert(
+            "p.lora_a".into(),
+            Tensor::from_vec(vec![1.0f32, 2.0], (1, 2), &device)
+                .map_err(ce)?
+                .to_dtype(candle_core::DType::BF16)
+                .map_err(ce)?,
+        );
+        let missing_b = set_factors(&held, &factors, "load test");
+        let Err(e) = missing_b else {
+            return Err(AntumbraError::other("a missing factor was accepted"));
+        };
+        if e.to_string() != "load test: no factor p.lora_b" {
+            return Err(AntumbraError::other(format!("the wrong refusal: {e}")));
+        }
+        factors.insert(
+            "p.lora_b".into(),
+            Tensor::from_vec(vec![3.0f32], (1, 1), &device)
+                .map_err(ce)?
+                .to_dtype(candle_core::DType::BF16)
+                .map_err(ce)?,
+        );
+        set_factors(&held, &factors, "load test")?;
+        let Some(a) = held.get("p.lora_a") else {
+            return Err(AntumbraError::other("p.lora_a vanished"));
+        };
+        if a.dtype() != candle_core::DType::F32 {
+            return Err(AntumbraError::other(
+                "the factor was not cast to the var's dtype",
+            ));
+        }
+        let read = a.as_tensor().to_vec2::<f32>().map_err(ce)?;
+        if read != vec![vec![1.0, 2.0]] {
+            return Err(AntumbraError::other(format!(
+                "the factor was not set: {read:?}"
+            )));
+        }
+        Ok(())
     }
 
     #[test]
