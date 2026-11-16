@@ -627,6 +627,8 @@ async fn run() -> Result<()> {
                 "--mint-token needs --jwt-secret (HS256); RS256 tokens are minted by your auth service"
             )
         })?;
+        // A token minted under a weak secret is one anyone can mint.
+        validate_jwt_secret(secret)?;
         let ttl = std::time::Duration::from_secs(cli.token_ttl_days * 24 * 60 * 60);
         let mint = if cli.operator {
             auth::mint_hs256_operator
@@ -860,8 +862,34 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
+/// The `.env.example` placeholder: a secret anyone can read out of the repo,
+/// so refusing it outright beats serving with tokens anyone can mint.
+const PLACEHOLDER_JWT_SECRET: &str = "change-me-base64-32-bytes";
+
+/// The fewest bytes an HS256 secret may have: the key is the only thing between
+/// a token's claims and anyone who wants to write them, and below this an
+/// offline search finds it.
+const MIN_JWT_SECRET_BYTES: usize = 32;
+
+/// Refuse an HS256 secret that is the placeholder or too short, naming the fix.
+fn validate_jwt_secret(secret: &str) -> Result<()> {
+    anyhow::ensure!(
+        secret != PLACEHOLDER_JWT_SECRET,
+        "ANTUMBRA_JWT_SECRET is still the .env.example placeholder; generate a real one: \
+         openssl rand -base64 32"
+    );
+    anyhow::ensure!(
+        secret.len() >= MIN_JWT_SECRET_BYTES,
+        "the HS256 secret (--jwt-secret / ANTUMBRA_JWT_SECRET) is too short ({} bytes, want at \
+         least {MIN_JWT_SECRET_BYTES}); generate one: openssl rand -base64 32",
+        secret.len()
+    );
+    Ok(())
+}
+
 /// Resolve the JWT verifier from the configured key material. RS256 (a PEM
-/// public key) takes precedence over an HS256 secret; one is required.
+/// public key) takes precedence over an HS256 secret; one is required, and an
+/// HS256 secret must be one worth the name ([`validate_jwt_secret`]).
 fn build_verifier(
     secret: &Option<String>,
     public_key: &Option<std::path::PathBuf>,
@@ -872,7 +900,10 @@ fn build_verifier(
             let pem = std::fs::read(pem_path)?;
             auth::JwtVerifier::rs256_pem(&pem)?
         }
-        (None, Some(secret)) => auth::JwtVerifier::hs256(secret.as_bytes()),
+        (None, Some(secret)) => {
+            validate_jwt_secret(secret)?;
+            auth::JwtVerifier::hs256(secret.as_bytes())
+        }
         (None, None) => anyhow::bail!(
             "--http needs a JWT key: pass --jwt-secret (HS256) or --jwt-public-key <pem> (RS256)"
         ),
@@ -886,6 +917,42 @@ fn build_verifier(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The verifier refuses a secret an offline search would find, and the
+    // placeholder anyone can read out of the repository, and says what to do.
+    #[test]
+    fn the_verifier_refuses_a_short_or_placeholder_secret() -> Result<()> {
+        for weak in [
+            "short",
+            "0123456789abcdef0123456789abcde",
+            PLACEHOLDER_JWT_SECRET,
+        ] {
+            let Err(e) = build_verifier(&Some(weak.to_string()), &None, &None) else {
+                anyhow::bail!("{weak:?} was accepted as an HS256 secret");
+            };
+            anyhow::ensure!(e.to_string().contains("openssl rand -base64 32"), "{e}");
+        }
+        let Err(e) = validate_jwt_secret("short") else {
+            anyhow::bail!("a short secret passed validation");
+        };
+        anyhow::ensure!(e.to_string().contains("5 bytes"), "{e}");
+        Ok(())
+    }
+
+    #[test]
+    fn the_verifier_takes_a_secret_of_32_bytes_or_more() -> Result<()> {
+        build_verifier(
+            &Some("0123456789abcdef0123456789abcdef".to_string()),
+            &None,
+            &None,
+        )?;
+        build_verifier(
+            &Some("oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0lMnOpQrStUvWx".to_string()),
+            &None,
+            &Some("antumbra".to_string()),
+        )?;
+        Ok(())
+    }
 
     /// What compose hands over for an unset endpoint is an empty string, and
     /// clap keeps it; the server treats it as no endpoint at all.
