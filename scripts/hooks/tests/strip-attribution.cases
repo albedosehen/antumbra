@@ -1,0 +1,25 @@
+# What strip-attribution.sh and strip-attribution.ps1 must each decide, one
+# case per line: the verdict, a tab, then the hook's stdin exactly as Claude
+# Code sends it (one line of JSON; a quote inside the command is escaped, and
+# the robot emoji may arrive raw or as its JSON surrogate pair). Both test
+# scripts read this file, so the two hooks cannot drift apart unseen.
+#
+# deny: model-vendor attribution in a git or gh command
+deny	{"tool_input":{"command":"git commit -m x --trailer Co-Authored-By:Claude"}}
+deny	{"tool_name":"PowerShell","tool_input":{"command":"gh pr create --body \"x\n\nco-authored-by: GPT-5\""}}
+deny	{"tool_input":{"command":"git commit -m \"fix\" -m \"Co-authored-by: Copilot <copilot@github.com>\""}}
+deny	{"tool_input":{"command":"git commit -m \"🤖 Generated with Claude Code\""}}
+deny	{"tool_input":{"command":"git commit -m \"\\ud83e\\udd16 generated with [Claude Code](https://claude.ai/code)\""}}
+deny	{"tool_input":{"command":"git commit -m \"feat: x\n\nGenerated with [Codex]\""}}
+deny	{"tool_input":{"command":"gh pr create --title t --body \"[Claude Code] opened this\""}}
+deny	{"tool_input":{"command":"git commit --author=\"Bot <noreply@anthropic.com>\" -m x"}}
+#
+# allow: a clean command, a human co-author, the words apart, no command at all
+allow	{"tool_input":{"command":"git commit -m clean"}}
+allow	{"tool_input":{"command":"git commit -m \"plain \\\"quoted\\\" message\"","description":"no Co-Authored-By: Claude here"}}
+allow	{"tool_input":{"command":"gh pr view 12"}}
+allow	{"tool_input":{"command":"git commit -m \"Co-authored-by: Dana Smith <dana@example.com>\""}}
+allow	{"tool_input":{"command":"git log --grep=\"co-authored\""}}
+allow	{"tool_input":{"command":"echo generated with care"}}
+allow	{"tool_input":{"command":"git commit -m \"robot 🤖 at work\""}}
+allow	{"tool_input":{}}
