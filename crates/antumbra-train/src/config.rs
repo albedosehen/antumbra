@@ -74,12 +74,14 @@ impl ServeQuant {
 
     /// How this build serves when nothing says otherwise. A build with no GPU
     /// backend serves on the CPU, where the dense f32 base reads about 6 GB a
-    /// token, so it serves from Q8_0: about a quarter of the bytes. Q8_0 is
-    /// not the dense base: it rewords close to half of an expert's answers.
-    /// On two experts' held-out behavior tasks its answers passed their checks
-    /// about as often as the dense base's (27 of 33 against 28), where Q4_K's
-    /// passed a quarter less often (21). A GPU build keeps the dense base it
-    /// trained on.
+    /// token, so it serves from Q8_0: about a quarter of the bytes. Neither
+    /// quantized form is the dense base. On two experts' held-out behavior
+    /// tasks Q8_0 reworded 58% of the answers and Q4_K 87%, and 82 and 79 of
+    /// 113 answers passed their checks against the dense base's 85: drops too
+    /// small for that many answers to tell from chance. Q8_0 is the default
+    /// because it moves an expert least (it changes the first-ranked token a
+    /// quarter as often as Q4_K) and decodes about as fast. A GPU build keeps
+    /// the dense base it trained on.
     pub fn for_build() -> Option<Self> {
         if cfg!(any(feature = "cuda", feature = "metal")) {
             None
