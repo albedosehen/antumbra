@@ -36,6 +36,7 @@ pub mod memory;
 pub mod merge;
 pub mod model;
 pub mod objective;
+pub mod quant;
 pub mod raft;
 pub mod router;
 pub mod seed;

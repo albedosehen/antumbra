@@ -217,6 +217,31 @@ impl QwenLora {
 
 // --- the trainer-facing wrapper (load + generate + train) ------------------
 
+/// How long a generation's two phases took: reading the prompt in one pass,
+/// which produces the first token, and each token after it. They are bound by
+/// different things on a CPU (the first by compute, the second by how fast the
+/// weights can be read), so one rate over both describes neither.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct GenTiming {
+    pub prompt_tokens: usize,
+    pub prompt_secs: f64,
+    /// Tokens decoded after the first, one forward each.
+    pub decoded: usize,
+    pub decode_secs: f64,
+}
+
+impl GenTiming {
+    fn record(&mut self, index: usize, ctx_len: usize, took: std::time::Duration) {
+        if index == 0 {
+            self.prompt_tokens = ctx_len;
+            self.prompt_secs = took.as_secs_f64();
+        } else {
+            self.decoded += 1;
+            self.decode_secs += took.as_secs_f64();
+        }
+    }
+}
+
 pub struct QwenCausalLm {
     model: QwenLora,
     tokenizer: tokenizers::Tokenizer,
@@ -242,6 +267,8 @@ pub struct QwenCausalLm {
     /// shuffles come from and how many it has taken; otherwise each shuffle
     /// comes from the process-wide nonce.
     train_order: Option<(u64, u64)>,
+    /// The phases of the last generation, for a caller measuring serving.
+    timing: Option<GenTiming>,
 }
 
 /// What a seeded run's two streams are told apart by: the adapter's starting
@@ -390,6 +417,7 @@ impl QwenCausalLm {
             batch_size: cfg.batch_size.max(1),
             draws: None,
             train_order: seeded.map(|s| (s ^ ORDER_STREAM, 0)),
+            timing: None,
         })
     }
 
@@ -400,6 +428,79 @@ impl QwenCausalLm {
     /// into the f32 model the CPU runs.
     pub fn load_adapter(&mut self, path: &str) -> Result<()> {
         crate::compose::restore_adapter(&self.model.varmap, path)
+    }
+
+    /// The phases of the last generation this model ran, if it has run one.
+    pub fn last_timing(&self) -> Option<GenTiming> {
+        self.timing
+    }
+
+    /// Teacher-force `completion` after `prompt` through the adapter, with no
+    /// gradient: for each of the completion's tokens and the end-of-turn after
+    /// it, the log-probability the model gives it and the token the model ranks
+    /// first there. The text is tokenized as training tokenizes an example, so
+    /// the positions are the ones an expert was taught on. A reading of the
+    /// served policy, for comparing one base form against another
+    /// ([`crate::quant`]).
+    pub fn teacher_forced(
+        &mut self,
+        prompt: &str,
+        completion: &str,
+    ) -> Result<Vec<crate::quant::Reading>> {
+        let wrapped = self.wrap_prompt(prompt);
+        let prompt_ids = self.encode(&wrapped)?;
+        let mut ids = self.encode(&format!("{wrapped}{completion}"))?;
+        if ids.len() <= prompt_ids.len() {
+            return Ok(Vec::new());
+        }
+        ids.push(self.eos);
+        // The completion starts where the two tokenizations part, as in
+        // `forward_loss`: the boundary token can merge across the join.
+        let boundary = prompt_ids
+            .iter()
+            .zip(ids.iter())
+            .take_while(|(a, b)| a == b)
+            .count()
+            .max(1);
+        self.model.clear_cache();
+        self.model.set_lora(true);
+        self.model.set_grad(false);
+        let input = Tensor::new(ids.as_slice(), &self.model.device)
+            .map_err(ce)?
+            .unsqueeze(0)
+            .map_err(ce)?;
+        let hidden = self.model.hidden(&input, 0, false).map_err(ce)?;
+        // The logits at position i - 1 predict token i.
+        let logits = self
+            .model
+            .logits(
+                &hidden
+                    .narrow(1, boundary - 1, ids.len() - boundary)
+                    .map_err(ce)?,
+            )
+            .map_err(ce)?
+            .squeeze(0)
+            .map_err(ce)?
+            .to_dtype(DType::F32)
+            .map_err(ce)?;
+        let logprobs = candle_nn::ops::log_softmax(&logits, D::Minus1)
+            .map_err(ce)?
+            .to_vec2::<f32>()
+            .map_err(ce)?;
+        let top1 = logits
+            .argmax(D::Minus1)
+            .map_err(ce)?
+            .to_vec1::<u32>()
+            .map_err(ce)?;
+        Ok(logprobs
+            .iter()
+            .zip(top1)
+            .zip(&ids[boundary..])
+            .map(|((row, top1), &token)| crate::quant::Reading {
+                logprob: row[token as usize],
+                top1,
+            })
+            .collect())
     }
 
     /// Refuse a training step on a model loaded to serve: its quantized base
@@ -493,8 +594,10 @@ impl QwenCausalLm {
             repetition_penalty: self.repetition_penalty,
             no_repeat_ngram_size: self.no_repeat_ngram_size,
         };
+        let mut timing = GenTiming::default();
 
         for index in 0..self.max_new_tokens {
+            let step = std::time::Instant::now();
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
             let start = tokens.len() - ctx_len;
             let input = Tensor::new(&tokens[start..], &self.model.device)
@@ -517,11 +620,13 @@ impl QwenCausalLm {
             let logits_vec: Vec<f32> = logits.to_vec1().map_err(ce)?;
             let next =
                 crate::decode::pick_token(logits_vec, &tokens[prompt_len..], &policy, &mut rng);
+            timing.record(index, ctx_len, step.elapsed());
             if next == self.eos {
                 break;
             }
             tokens.push(next);
         }
+        self.timing = Some(timing);
 
         let text = self
             .tokenizer
@@ -585,8 +690,10 @@ impl QwenCausalLm {
         let mut old_logprobs: Vec<f32> = Vec::new();
         let mut rng = StdRng::seed_from_u64(seed);
         let temp = self.temperature;
+        let mut timing = GenTiming::default();
 
         for index in 0..self.max_new_tokens {
+            let step = std::time::Instant::now();
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
             let start = tokens.len() - ctx_len;
             let input = Tensor::new(&tokens[start..], &self.model.device)
@@ -606,6 +713,7 @@ impl QwenCausalLm {
                 .to_dtype(DType::F32)
                 .map_err(ce)?;
             let next = sample_token(&logits, temp, &mut rng)?;
+            timing.record(index, ctx_len, step.elapsed());
             if next == self.eos {
                 break;
             }
@@ -619,6 +727,7 @@ impl QwenCausalLm {
             gen_tokens.push(next);
             old_logprobs.push(lp);
         }
+        self.timing = Some(timing);
 
         let text = self
             .tokenizer
