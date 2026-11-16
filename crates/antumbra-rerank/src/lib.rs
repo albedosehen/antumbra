@@ -37,9 +37,7 @@ use antumbra_core::{AntumbraError, Result};
 /// The one network operation an [`HttpReranker`] performs: POST a JSON body to a
 /// rerank endpoint and return the parsed JSON response. Behind a trait so the
 /// reranker's logic is testable without a socket.
-pub trait RerankTransport: Send + Sync {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value>;
-}
+pub use antumbra_http::JsonPost as RerankTransport;
 
 /// Default per-request budget for the rerank endpoint, overridable with
 /// `ANTUMBRA_RERANK_TIMEOUT_SECS`. Without a bound a hung or unreachable endpoint
@@ -74,59 +72,14 @@ const RERANK_MAX_BATCH: usize = 32;
 const RERANK_BUDGET_MS: u64 = 2000;
 
 fn max_batch() -> usize {
-    std::env::var("ANTUMBRA_RERANK_BATCH")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(RERANK_MAX_BATCH)
+    antumbra_http::env_positive("ANTUMBRA_RERANK_BATCH", RERANK_MAX_BATCH)
 }
 
 fn budget() -> std::time::Duration {
-    let ms = std::env::var("ANTUMBRA_RERANK_BUDGET_MS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(RERANK_BUDGET_MS);
-    std::time::Duration::from_millis(ms)
-}
-
-/// The production transport: a blocking `ureq` POST over an agent with a bounded
-/// global timeout, so a dead endpoint fails fast instead of hanging the worker.
-struct UreqTransport {
-    agent: ureq::Agent,
-}
-
-impl UreqTransport {
-    fn new() -> Self {
-        let secs = std::env::var("ANTUMBRA_RERANK_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&s| s > 0)
-            .unwrap_or(RERANK_TIMEOUT_SECS);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(secs)))
-            .build()
-            .into();
-        Self { agent }
-    }
-}
-
-impl RerankTransport for UreqTransport {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value> {
-        let mut req = self
-            .agent
-            .post(url)
-            .header("content-type", "application/json");
-        if let Some(key) = api_key {
-            req = req.header("authorization", &format!("Bearer {key}"));
-        }
-        let mut resp = req
-            .send_json(body)
-            .map_err(|e| AntumbraError::other(format!("rerank POST {url} failed: {e}")))?;
-        resp.body_mut()
-            .read_json::<Value>()
-            .map_err(|e| AntumbraError::other(format!("rerank response was not JSON: {e}")))
-    }
+    std::time::Duration::from_millis(antumbra_http::env_positive(
+        "ANTUMBRA_RERANK_BUDGET_MS",
+        RERANK_BUDGET_MS,
+    ))
 }
 
 /// The model a text-embeddings-inference endpoint serves, from its `/info`, if
@@ -134,10 +87,7 @@ impl RerankTransport for UreqTransport {
 /// chosen by. `None` for an endpoint with no `/info` (Cohere, Jina) or one not
 /// up yet.
 pub fn served_model(rerank_url: &str, api_key: Option<&str>) -> Option<String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(2)))
-        .build()
-        .into();
+    let agent = antumbra_http::agent(std::time::Duration::from_secs(2));
     let mut req = agent.get(&info_url(rerank_url));
     if let Some(key) = api_key {
         req = req.header("authorization", &format!("Bearer {key}"));
@@ -183,7 +133,12 @@ impl HttpReranker {
             url,
             model,
             api_key,
-            transport: Arc::new(UreqTransport::new()),
+            // The shared transport: a bounded patience, and a refusal's body
+            // in the error rather than a bare status.
+            transport: Arc::new(antumbra_http::UreqJson::new(
+                "rerank",
+                antumbra_http::patience("ANTUMBRA_RERANK_TIMEOUT_SECS", RERANK_TIMEOUT_SECS),
+            )),
             max_batch: max_batch(),
             budget: budget(),
         }
@@ -309,28 +264,40 @@ impl Reranker for HttpReranker {
 mod tests {
     use super::*;
 
-    /// Returns a canned response, so the request shaping + parsing are tested
-    /// without a socket.
-    struct FakeTransport(Result<Value>);
-
-    impl RerankTransport for FakeTransport {
-        fn post(&self, _url: &str, _api_key: Option<&str>, _body: &Value) -> Result<Value> {
-            self.0
-                .as_ref()
-                .map(Clone::clone)
-                .map_err(|e| AntumbraError::other(e.to_string()))
-        }
-    }
+    use antumbra_http::testing::{serve, Canned};
 
     fn reranker(resp: Result<Value>) -> HttpReranker {
         HttpReranker {
             url: "http://localhost/rerank".into(),
             model: None,
             api_key: None,
-            transport: Arc::new(FakeTransport(resp)),
+            transport: Arc::new(Canned(resp)),
             max_batch: RERANK_MAX_BATCH,
             budget: std::time::Duration::from_millis(RERANK_BUDGET_MS),
         }
+    }
+
+    /// The endpoint's refusal reaches the caller in the endpoint's words: a
+    /// text-embeddings-inference 422 used to become a bare status.
+    #[tokio::test]
+    async fn a_refusals_body_is_surfaced() -> anyhow::Result<()> {
+        let (url, served) = serve(
+            1,
+            422,
+            r#"{"error":"batch size 100 > maximum allowed batch size 32","error_type":"Validation"}"#,
+        )?;
+        let reranker = HttpReranker::new(url, None, None);
+        let Err(e) = reranker.rerank("q", &candidates()).await else {
+            anyhow::bail!("a 422 was accepted");
+        };
+        let shown = e.to_string();
+        anyhow::ensure!(
+            shown.starts_with("rerank POST http://")
+                && shown.contains("answered 422: batch size 100 > maximum allowed batch size 32"),
+            "{shown}"
+        );
+        served.requests()?;
+        Ok(())
     }
 
     fn candidates() -> Vec<(String, String)> {
@@ -611,7 +578,7 @@ mod tests {
             url: "http://localhost/rerank".into(),
             model: Some("rerank-v2".into()),
             api_key: None,
-            transport: Arc::new(FakeTransport(Ok(Value::Null))),
+            transport: Arc::new(Canned(Ok(Value::Null))),
             max_batch: RERANK_MAX_BATCH,
             budget: std::time::Duration::from_millis(RERANK_BUDGET_MS),
         };

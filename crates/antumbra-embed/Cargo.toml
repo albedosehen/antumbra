@@ -9,6 +9,7 @@ description = "Antumbra HTTP embedder: an OpenAI-compatible /embeddings client b
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-http = { path = "../antumbra-http" }
 serde_json.workspace = true
 async-trait.workspace = true
 # `spawn_blocking` offloads the blocking `ureq` POST off the async runtime.
@@ -26,6 +27,7 @@ clap = ["dep:clap", "antumbra-core/testing"]
 
 [dev-dependencies]
 anyhow.workspace = true
+antumbra-http = { path = "../antumbra-http", features = ["testing"] }
 
 [lints]
 workspace = true

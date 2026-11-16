@@ -10,6 +10,7 @@ description = "The copal document-of-record archive client: uploads an ingested 
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
+antumbra-http = { path = "../antumbra-http" }
 serde_json.workspace = true
 # The upload's declared digest, which copal verifies against the bytes.
 sha2 = "0.11"
@@ -26,6 +27,9 @@ clap = { workspace = true, optional = true, features = ["env"] }
 
 [features]
 clap = ["dep:clap"]
+
+[dev-dependencies]
+antumbra-http = { path = "../antumbra-http", features = ["testing"] }
 
 [lints]
 workspace = true

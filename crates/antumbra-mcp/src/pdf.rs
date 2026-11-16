@@ -54,11 +54,7 @@ impl PdfRenderer {
                 "--pdf-renderer must be an http or https URL such as http://pdf:3000, not {base:?}"
             );
         }
-        let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(TIMEOUT_SECS)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent = antumbra_http::agent(Duration::from_secs(TIMEOUT_SECS));
         Ok(Self {
             url: format!("{base}/forms/chromium/convert/html"),
             agent,

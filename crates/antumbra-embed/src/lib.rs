@@ -42,10 +42,9 @@ use antumbra_store::EMBED_DIM;
 
 /// The one network operation an [`HttpEmbedder`] performs: POST a JSON body to an
 /// embeddings endpoint and return the parsed JSON response. Behind a trait so the
-/// embedder's logic is testable without a socket.
-pub trait EmbedTransport: Send + Sync {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value>;
-}
+/// embedder's logic is testable without a socket; the trait, and the `ureq`
+/// transport behind it, are the ones every endpoint client shares.
+pub use antumbra_http::JsonPost as EmbedTransport;
 
 /// Default per-request budget for the embeddings endpoint, overridable with
 /// `ANTUMBRA_EMBED_TIMEOUT_SECS`. Without a bound a hung or unreachable endpoint
@@ -68,52 +67,7 @@ const EMBED_MAX_CHARS: usize = 1200;
 
 fn embed_max_chars() -> usize {
     static CACHE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *CACHE.get_or_init(|| {
-        std::env::var("ANTUMBRA_EMBED_MAX_CHARS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .filter(|&n| n > 0)
-            .unwrap_or(EMBED_MAX_CHARS)
-    })
-}
-
-/// The production transport: a blocking `ureq` POST over an agent with a bounded
-/// global timeout, so a dead endpoint fails fast instead of hanging the worker.
-struct UreqTransport {
-    agent: ureq::Agent,
-}
-
-impl UreqTransport {
-    fn new() -> Self {
-        let secs = std::env::var("ANTUMBRA_EMBED_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&s| s > 0)
-            .unwrap_or(EMBED_TIMEOUT_SECS);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(secs)))
-            .build()
-            .into();
-        Self { agent }
-    }
-}
-
-impl EmbedTransport for UreqTransport {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value> {
-        let mut req = self
-            .agent
-            .post(url)
-            .header("content-type", "application/json");
-        if let Some(key) = api_key {
-            req = req.header("authorization", &format!("Bearer {key}"));
-        }
-        let mut resp = req
-            .send_json(body)
-            .map_err(|e| AntumbraError::other(format!("embed POST {url} failed: {e}")))?;
-        resp.body_mut()
-            .read_json::<Value>()
-            .map_err(|e| AntumbraError::other(format!("embed response was not JSON: {e}")))
-    }
+    *CACHE.get_or_init(|| antumbra_http::env_positive("ANTUMBRA_EMBED_MAX_CHARS", EMBED_MAX_CHARS))
 }
 
 /// Embeds text by calling an OpenAI-compatible `/embeddings` endpoint.
@@ -156,7 +110,12 @@ impl HttpEmbedder {
             model,
             api_key,
             source_dim,
-            transport: Arc::new(UreqTransport::new()),
+            // The shared transport: a bounded patience, and a refusal's body
+            // in the error rather than a bare status.
+            transport: Arc::new(antumbra_http::UreqJson::new(
+                "embed",
+                antumbra_http::patience("ANTUMBRA_EMBED_TIMEOUT_SECS", EMBED_TIMEOUT_SECS),
+            )),
         }
     }
 
@@ -253,18 +212,7 @@ impl Embedder for HttpEmbedder {
 mod tests {
     use super::*;
 
-    /// Returns a canned response, so the request shaping + parsing are tested
-    /// without a socket.
-    struct FakeTransport(Result<Value>);
-
-    impl EmbedTransport for FakeTransport {
-        fn post(&self, _url: &str, _api_key: Option<&str>, _body: &Value) -> Result<Value> {
-            self.0
-                .as_ref()
-                .map(Clone::clone)
-                .map_err(|e| AntumbraError::other(e.to_string()))
-        }
-    }
+    use antumbra_http::testing::{serve, Canned};
 
     fn embedder(resp: Result<Value>) -> HttpEmbedder {
         embedder_with_dim(resp, None)
@@ -276,8 +224,40 @@ mod tests {
             model: "all-MiniLM-L6-v2".into(),
             api_key: None,
             source_dim,
-            transport: Arc::new(FakeTransport(resp)),
+            transport: Arc::new(Canned(resp)),
         }
+    }
+
+    /// The endpoint's refusal reaches the caller in the endpoint's words: a
+    /// llama.cpp or text-embeddings-inference 4xx used to become a bare status.
+    #[tokio::test]
+    async fn a_refusals_body_is_surfaced() -> anyhow::Result<()> {
+        // Three answers: the embedder halves its cap and retries twice.
+        let (url, served) = serve(
+            3,
+            422,
+            r#"{"error":"input is too long for the model","error_type":"Validation"}"#,
+        )?;
+        let embedder = HttpEmbedder::new(url, "all-MiniLM-L6-v2".into(), Some("k3y".into()));
+        let Err(e) = embedder.embed("hello").await else {
+            anyhow::bail!("a 422 was accepted");
+        };
+        let shown = e.to_string();
+        anyhow::ensure!(
+            shown.starts_with("embed POST http://")
+                && shown.contains("answered 422: input is too long for the model"),
+            "{shown}"
+        );
+        let requests = served.requests()?;
+        anyhow::ensure!(requests.len() == 3, "{} requests", requests.len());
+        anyhow::ensure!(
+            requests[0]
+                .to_lowercase()
+                .contains("authorization: bearer k3y"),
+            "{}",
+            requests[0]
+        );
+        Ok(())
     }
 
     #[tokio::test]

@@ -23,19 +23,14 @@ pub(crate) struct UreqTransport {
 
 impl UreqTransport {
     pub(crate) fn new() -> Self {
-        let secs = std::env::var("ANTUMBRA_COPAL_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&s| s > 0)
-            .unwrap_or(COPAL_TIMEOUT_SECS);
-        // A refusal comes back as a response rather than a bare status error,
-        // so the ingest can say what copal said.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(secs)))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        Self { agent }
+        // The shared agent: a refusal comes back as a response rather than a
+        // bare status error, so the ingest can say what copal said.
+        Self {
+            agent: antumbra_http::agent(antumbra_http::patience(
+                "ANTUMBRA_COPAL_TIMEOUT_SECS",
+                COPAL_TIMEOUT_SECS,
+            )),
+        }
     }
 }
 
@@ -45,7 +40,7 @@ impl CopalTransport for UreqTransport {
         let resp = authed(req, credential)
             .send_json(body)
             .map_err(|e| AntumbraError::other(format!("copal POST {url} failed: {e}")))?;
-        answer("POST", url, resp)
+        antumbra_http::read_json_or_refusal(&format!("copal POST {url}"), resp)
     }
 
     fn put_bytes(
@@ -64,7 +59,7 @@ impl CopalTransport for UreqTransport {
         let resp = authed(req, credential)
             .send(body)
             .map_err(|e| AntumbraError::other(format!("copal PUT {url} failed: {e}")))?;
-        answer("PUT", url, resp)
+        antumbra_http::read_json_or_refusal(&format!("copal PUT {url}"), resp)
     }
 
     fn get_bytes(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
@@ -77,7 +72,7 @@ impl CopalTransport for UreqTransport {
             return Err(AntumbraError::other(format!(
                 "copal GET {url} answered {}: {}",
                 status.as_u16(),
-                refusal(&text)
+                antumbra_http::refusal(&text)
             )));
         }
         resp.body_mut()
@@ -85,39 +80,6 @@ impl CopalTransport for UreqTransport {
             .limit(limit)
             .read_to_vec()
             .map_err(|e| AntumbraError::other(format!("copal GET {url} body: {e}")))
-    }
-}
-
-/// A response's JSON, or an error carrying copal's own account of why it
-/// refused the call.
-fn answer(method: &str, url: &str, mut resp: ureq::http::Response<ureq::Body>) -> Result<Value> {
-    let status = resp.status();
-    if status.is_success() {
-        return resp
-            .body_mut()
-            .read_json::<Value>()
-            .map_err(|e| AntumbraError::other(format!("copal response was not JSON: {e}")));
-    }
-    let text = resp.body_mut().read_to_string().unwrap_or_default();
-    Err(AntumbraError::other(format!(
-        "copal {method} {url} answered {}: {}",
-        status.as_u16(),
-        refusal(&text)
-    )))
-}
-
-/// What copal said in a refusal. Its errors are `{"error": {"kind",
-/// "message"}}`; anything else is shown as it came, cut short.
-pub(crate) fn refusal(body: &str) -> String {
-    let parsed: Option<Value> = serde_json::from_str(body).ok();
-    match parsed.as_ref().and_then(|v| v.get("error")) {
-        Some(error) => format!(
-            "{} ({})",
-            error["message"].as_str().unwrap_or("no message"),
-            error["kind"].as_str().unwrap_or("no kind")
-        ),
-        None if body.trim().is_empty() => "no body".to_string(),
-        None => body.chars().take(200).collect(),
     }
 }
 
@@ -136,17 +98,47 @@ fn authed<B>(
 
 #[cfg(test)]
 mod tests {
-    use super::refusal;
+    use serde_json::json;
 
+    use antumbra_http::testing::serve;
+
+    use super::*;
+
+    /// Copal's refusal reaches the ingest in copal's words, through the shared
+    /// reader.
     #[test]
-    fn a_refusal_reads_copal_s_error_body() {
-        let body = r#"{"error":{"kind":"conflict","message":"idempotency key consumed by a deleted file"}}"#;
-        assert_eq!(
-            refusal(body),
-            "idempotency key consumed by a deleted file (conflict)"
+    fn a_refusals_body_is_surfaced() -> std::result::Result<(), String> {
+        let (url, served) = serve(
+            1,
+            409,
+            r#"{"error":{"kind":"conflict","message":"idempotency key consumed by a deleted file"}}"#,
+        )
+        .map_err(|e| e.to_string())?;
+        let answer = UreqTransport::new().post_json(
+            &url,
+            &CopalCredential::Tenant("ws:test".into()),
+            &json!({ "title": "t" }),
         );
-        assert_eq!(refusal(""), "no body");
-        assert_eq!(refusal("upstream timed out"), "upstream timed out");
-        assert_eq!(refusal(&"x".repeat(500)).len(), 200);
+        let Err(e) = answer else {
+            return Err("a 409 was accepted".into());
+        };
+        let shown = e.to_string();
+        if !(shown.starts_with("copal POST http://")
+            && shown
+                .contains("answered 409: idempotency key consumed by a deleted file (conflict)"))
+        {
+            return Err(shown);
+        }
+        let head = served
+            .requests()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .next()
+            .ok_or("one request")?
+            .to_lowercase();
+        if !head.contains("x-copal-tenant: ws:test") {
+            return Err(head);
+        }
+        Ok(())
     }
 }

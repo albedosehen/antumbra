@@ -1,4 +1,5 @@
-//! HTTP as Antumbra's own binaries speak it to the server.
+//! HTTP as Antumbra's own binaries speak it, to the server and to the
+//! endpoints beside it.
 //!
 //! Three doors called `POST /mcp/call` with their own client, and each refused
 //! its own way: one read `401` as a refused token before reading the server's
@@ -6,18 +7,27 @@
 //! "answered 400" where the CLI showed what the server said. The client here
 //! is the one they share; [`SurfaceError`] is the one set of refusals.
 //!
-//! Security: the surface address and the token come from the operator's own
-//! settings or flags, never from the server or from stored data, so this is
-//! not a request-forgery sink. The token rides the `Authorization` header and
-//! appears in no error; [`SurfaceClient`] has no `Debug` impl, so it cannot
-//! leak through `{:?}`.
+//! Four crates built a `ureq` agent with a patience from the environment and
+//! posted JSON, and two of them turned a refusal into a bare status, so an
+//! embedder's or a reranker's `4xx` lost the reason. [`agent`], [`patience`],
+//! [`JsonPost`] with its [`UreqJson`], and [`read_json_or_refusal`] are the one
+//! transport, and every refusal carries the endpoint's own words.
+//!
+//! Security: every address and token here comes from the operator's own
+//! settings or flags, never from the server or from stored data, so none of
+//! this is a request-forgery sink. A token rides the `Authorization` header
+//! and appears in no error; [`SurfaceClient`] and [`UreqJson`] have no `Debug`
+//! impl, so a key cannot leak through `{:?}`.
 
+use std::str::FromStr;
 use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use antumbra_core::{AntumbraError, Result};
+
 /// An agent that waits `patience` for a whole call and hands back a refusal's
-/// body rather than turning its status into an error, so the server's own
+/// body rather than turning its status into an error, so the endpoint's own
 /// words reach whoever asked.
 pub fn agent(patience: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
@@ -25,6 +35,120 @@ pub fn agent(patience: Duration) -> ureq::Agent {
         .http_status_as_error(false)
         .build()
         .into()
+}
+
+/// A positive setting from the environment, else `default`: an unset `name`,
+/// an empty value, one that is not a number and a zero all mean the default,
+/// so an operator cannot set a patience of nothing by mistake.
+pub fn env_positive<T>(name: &str, default: T) -> T
+where
+    T: FromStr + PartialOrd + Default,
+{
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.trim().parse::<T>().ok())
+        .filter(|v| *v > T::default())
+        .unwrap_or(default)
+}
+
+/// How long one call to an endpoint may take: the seconds in `name` when the
+/// operator set them, else `default_secs`. Without a bound a hung endpoint
+/// pins a worker forever, and the server runs a tool's embed under its
+/// per-request lock, so an unbounded call would stall every tenant.
+pub fn patience(name: &str, default_secs: u64) -> Duration {
+    Duration::from_secs(env_positive(name, default_secs))
+}
+
+/// What an endpoint said in a refusal, in one line. Antumbra's own surface and
+/// text-embeddings-inference say `{"error": "text"}`, copal says
+/// `{"error": {"kind", "message"}}`, GitHub says `{"message": "text"}`;
+/// anything else is shown as it came, cut short, and no body is said to be
+/// none.
+pub fn refusal(body: &str) -> String {
+    let parsed: Option<Value> = serde_json::from_str(body).ok();
+    let said = parsed
+        .as_ref()
+        .and_then(|v| v.get("error").or_else(|| v.get("message")));
+    match said {
+        Some(Value::Object(error)) => format!(
+            "{} ({})",
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("no message"),
+            error
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("no kind")
+        ),
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => other.to_string(),
+        None if body.trim().is_empty() => "no body".to_string(),
+        None => body.chars().take(200).collect(),
+    }
+}
+
+/// A response's JSON, or an error carrying the endpoint's own account of why
+/// it refused: `{what} answered {status}: {refusal}`.
+pub fn read_json_or_refusal(
+    what: &str,
+    mut resp: ureq::http::Response<ureq::Body>,
+) -> Result<Value> {
+    let status = resp.status();
+    if status.is_success() {
+        return resp
+            .body_mut()
+            .read_json::<Value>()
+            .map_err(|e| AntumbraError::other(format!("{what}: the answer was not JSON: {e}")));
+    }
+    let text = resp.body_mut().read_to_string().unwrap_or_default();
+    Err(AntumbraError::other(format!(
+        "{what} answered {}: {}",
+        status.as_u16(),
+        refusal(&text)
+    )))
+}
+
+/// The one network operation an embedder or a reranker performs: POST a JSON
+/// body, with a bearer when the endpoint wants one, and read the JSON answer.
+/// Behind a trait so their request shaping and parsing are tested without a
+/// socket.
+pub trait JsonPost: Send + Sync {
+    fn post(&self, url: &str, bearer: Option<&str>, body: &Value) -> Result<Value>;
+}
+
+/// The production [`JsonPost`]: a blocking `ureq` POST over an agent with a
+/// bounded patience, so a dead endpoint fails fast instead of hanging the
+/// worker, and a refusal comes back with the endpoint's words. `what` names
+/// the caller in its errors (`embed`, `rerank`).
+pub struct UreqJson {
+    what: &'static str,
+    agent: ureq::Agent,
+}
+
+impl UreqJson {
+    pub fn new(what: &'static str, patience: Duration) -> Self {
+        Self {
+            what,
+            agent: agent(patience),
+        }
+    }
+}
+
+impl JsonPost for UreqJson {
+    fn post(&self, url: &str, bearer: Option<&str>, body: &Value) -> Result<Value> {
+        let mut req = self
+            .agent
+            .post(url)
+            .header("content-type", "application/json");
+        if let Some(key) = bearer {
+            req = req.header("authorization", &format!("Bearer {key}"));
+        }
+        let resp = req
+            .send_json(body)
+            .map_err(|e| AntumbraError::other(format!("{} POST {url} failed: {e}", self.what)))?;
+        read_json_or_refusal(&format!("{} POST {url}", self.what), resp)
+    }
 }
 
 /// The header a client names its machine in, which the server stamps on what
@@ -153,7 +277,7 @@ impl SurfaceClient {
     /// else one of the [`SurfaceError`]s, in this order: no answer; `401` or
     /// `403`; an `error` in the body, whatever the status; a failing status
     /// with no words; a success that is not JSON.
-    pub fn call(&self, tool: &str, arguments: Value) -> Result<Value, SurfaceError> {
+    pub fn call(&self, tool: &str, arguments: Value) -> std::result::Result<Value, SurfaceError> {
         let endpoint = format!("{}/mcp/call", self.url);
         let mut request = self
             .agent
@@ -210,79 +334,124 @@ impl SurfaceClient {
     }
 }
 
-#[cfg(test)]
-mod tests {
+/// What a crate's tests need to drive a transport without a real endpoint: a
+/// canned [`JsonPost`], and a server on a local port that answers a few
+/// requests with one status and body.
+#[cfg(any(test, feature = "testing"))]
+pub mod testing {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread::JoinHandle;
+    use std::time::Duration;
+
+    use serde_json::Value;
+
+    use antumbra_core::{AntumbraError, Result};
+
+    use super::JsonPost;
+
+    /// A [`JsonPost`] that answers every call with the same canned result, so
+    /// request shaping and parsing are tested without a socket.
+    pub struct Canned(pub Result<Value>);
+
+    impl JsonPost for Canned {
+        fn post(&self, _url: &str, _bearer: Option<&str>, _body: &Value) -> Result<Value> {
+            self.0
+                .as_ref()
+                .map(Clone::clone)
+                .map_err(|e| AntumbraError::other(e.to_string()))
+        }
+    }
+
+    /// How long the server waits for each request before giving up on it.
+    const PATIENCE: Duration = Duration::from_secs(5);
+
+    /// A server on a local port that answers `times` requests with `status`
+    /// and `body` (one connection each), and hands back the requests it read.
+    /// The URL has a trailing slash, so a client's trimming is exercised.
+    pub fn serve(
+        times: usize,
+        status: u16,
+        body: &'static str,
+    ) -> std::io::Result<(String, Served)> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let url = format!("http://{}/", listener.local_addr()?);
+        let thread = std::thread::spawn(move || -> std::io::Result<Vec<String>> {
+            let mut seen = Vec::with_capacity(times);
+            for _ in 0..times {
+                let (mut stream, _) = listener.accept()?;
+                stream.set_read_timeout(Some(PATIENCE))?;
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = stream.read(&mut chunk)?;
+                    if n == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&chunk[..n]);
+                    let Some(head_end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&request[..head_end]).to_lowercase();
+                    let length = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if request.len() >= head_end + 4 + length {
+                        break;
+                    }
+                }
+                let reason = match status {
+                    200 => "OK",
+                    400 => "Bad Request",
+                    401 => "Unauthorized",
+                    403 => "Forbidden",
+                    404 => "Not Found",
+                    409 => "Conflict",
+                    422 => "Unprocessable Entity",
+                    _ => "Error",
+                };
+                let response = format!(
+                    "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes())?;
+                stream.flush()?;
+                seen.push(String::from_utf8_lossy(&request).into_owned());
+            }
+            Ok(seen)
+        });
+        Ok((url, Served(thread)))
+    }
+
+    /// The server's side of a [`serve`], joined for the requests it read.
+    pub struct Served(JoinHandle<std::io::Result<Vec<String>>>);
+
+    impl Served {
+        /// Every request the server read, in order.
+        pub fn requests(self) -> std::io::Result<Vec<String>> {
+            self.0
+                .join()
+                .map_err(|_| std::io::Error::other("the server thread panicked"))?
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::TcpListener;
 
     use anyhow::{anyhow, bail, ensure, Context};
 
+    use super::testing::serve;
     use super::*;
 
     const PATIENCE: Duration = Duration::from_secs(5);
 
     /// What a case asserts of the client's answer.
-    type Holds = fn(&Result<Value, SurfaceError>) -> bool;
-
-    /// A server that answers one request with `status` and `body`, and hands
-    /// back the request it read.
-    fn serve_once(status: u16, body: &'static str) -> anyhow::Result<(String, Served)> {
-        let listener = TcpListener::bind("127.0.0.1:0")?;
-        let url = format!("http://{}/", listener.local_addr()?);
-        let thread = std::thread::spawn(move || -> anyhow::Result<String> {
-            let (mut stream, _) = listener.accept()?;
-            stream.set_read_timeout(Some(PATIENCE))?;
-            let mut request = Vec::new();
-            let mut chunk = [0u8; 4096];
-            loop {
-                let n = stream.read(&mut chunk)?;
-                if n == 0 {
-                    break;
-                }
-                request.extend_from_slice(&chunk[..n]);
-                let Some(head_end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
-                    continue;
-                };
-                let head = String::from_utf8_lossy(&request[..head_end]).to_lowercase();
-                let length = head
-                    .lines()
-                    .find_map(|l| l.strip_prefix("content-length:"))
-                    .and_then(|v| v.trim().parse::<usize>().ok())
-                    .unwrap_or(0);
-                if request.len() >= head_end + 4 + length {
-                    break;
-                }
-            }
-            let reason = match status {
-                200 => "OK",
-                400 => "Bad Request",
-                401 => "Unauthorized",
-                403 => "Forbidden",
-                404 => "Not Found",
-                _ => "Error",
-            };
-            let response = format!(
-                "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\n\
-                 content-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes())?;
-            stream.flush()?;
-            Ok(String::from_utf8_lossy(&request).into_owned())
-        });
-        Ok((url, Served(thread)))
-    }
-
-    struct Served(JoinHandle<anyhow::Result<String>>);
-
-    impl Served {
-        fn request(self) -> anyhow::Result<String> {
-            self.0
-                .join()
-                .map_err(|_| anyhow!("the server thread panicked"))?
-        }
-    }
+    type Holds = fn(&std::result::Result<Value, SurfaceError>) -> bool;
 
     #[test]
     fn every_answer_has_its_one_refusal() -> anyhow::Result<()> {
@@ -355,21 +524,21 @@ mod tests {
             ),
         ];
         for (status, body, holds, what) in cases {
-            let (url, served) = serve_once(status, body)?;
+            let (url, served) = serve(1, status, body)?;
             let client = SurfaceClient::new(&url, Some("t0ken"), PATIENCE);
             let answer = client.call("route", json!({ "task": "add" }));
             ensure!(holds(&answer), "{what}: {answer:?}");
             if let Err(e) = &answer {
                 ensure!(e.to_string().starts_with("route: "), "{what}: {e}");
             }
-            served.request()?;
+            served.requests()?;
         }
         Ok(())
     }
 
     #[test]
     fn the_request_carries_the_token_the_machine_and_the_call() -> anyhow::Result<()> {
-        let (url, served) = serve_once(200, "{}")?;
+        let (url, served) = serve(1, 200, "{}")?;
         let client = SurfaceClient::new(&url, Some("t0ken"), PATIENCE)
             .from_machine(Some("one-device".into()));
         ensure!(
@@ -379,7 +548,11 @@ mod tests {
         client
             .call("devices", json!({}))
             .map_err(|e| anyhow!("{e}"))?;
-        let request = served.request()?;
+        let request = served
+            .requests()?
+            .into_iter()
+            .next()
+            .context("one request")?;
         let (head, body) = request
             .split_once("\r\n\r\n")
             .context("a head and a body")?;
@@ -398,12 +571,17 @@ mod tests {
 
     #[test]
     fn no_token_and_no_machine_send_no_header() -> anyhow::Result<()> {
-        let (url, served) = serve_once(200, "{}")?;
+        let (url, served) = serve(1, 200, "{}")?;
         SurfaceClient::new(&url, None, PATIENCE)
             .from_machine(Some("  ".into()))
             .call("devices", json!({}))
             .map_err(|e| anyhow!("{e}"))?;
-        let head = served.request()?.to_lowercase();
+        let head = served
+            .requests()?
+            .into_iter()
+            .next()
+            .context("one request")?
+            .to_lowercase();
         ensure!(!head.contains("authorization:"), "{head}");
         ensure!(!head.contains("x-antumbra-host:"), "{head}");
         Ok(())
@@ -466,6 +644,102 @@ mod tests {
             }
             .to_string(),
             "route: the server at http://workspace.example answered 404"
+        );
+    }
+
+    #[test]
+    fn a_refusal_reads_every_endpoints_shape() {
+        // copal
+        assert_eq!(
+            refusal(
+                r#"{"error":{"kind":"conflict","message":"idempotency key consumed by a deleted file"}}"#
+            ),
+            "idempotency key consumed by a deleted file (conflict)"
+        );
+        // text-embeddings-inference, and Antumbra's own surface
+        assert_eq!(
+            refusal(
+                r#"{"error":"batch size 100 > maximum allowed batch size 32","error_type":"Validation"}"#
+            ),
+            "batch size 100 > maximum allowed batch size 32"
+        );
+        // GitHub
+        assert_eq!(refusal(r#"{"message":"Not Found"}"#), "Not Found");
+        // an error that is neither text nor an object is shown as JSON
+        assert_eq!(refusal(r#"{"error":[1,2]}"#), "[1,2]");
+        // anything else, as it came and cut short
+        assert_eq!(refusal(""), "no body");
+        assert_eq!(refusal("   "), "no body");
+        assert_eq!(refusal("upstream timed out"), "upstream timed out");
+        assert_eq!(refusal(&"x".repeat(500)).chars().count(), 200);
+    }
+
+    #[test]
+    fn a_json_post_surfaces_a_refusals_body_and_a_successs_json() -> anyhow::Result<()> {
+        let (url, served) = serve(
+            1,
+            422,
+            r#"{"error":"batch size 100 > maximum allowed batch size 32","error_type":"Validation"}"#,
+        )?;
+        let post = UreqJson::new("rerank", PATIENCE);
+        let Err(e) = post.post(&url, Some("k3y"), &json!({ "query": "q" })) else {
+            bail!("a 422 was accepted");
+        };
+        let shown = e.to_string();
+        ensure!(
+            shown.starts_with("rerank POST http://")
+                && shown.contains("answered 422: batch size 100"),
+            "{shown}"
+        );
+        let head = served
+            .requests()?
+            .into_iter()
+            .next()
+            .context("one request")?
+            .to_lowercase();
+        ensure!(head.contains("authorization: bearer k3y"), "{head}");
+
+        let (url, served) = serve(1, 200, r#"{"data":[]}"#)?;
+        let answer = post
+            .post(&url, None, &json!({}))
+            .map_err(|e| anyhow!("{e}"))?;
+        ensure!(answer == json!({ "data": [] }), "{answer}");
+        let head = served
+            .requests()?
+            .into_iter()
+            .next()
+            .context("one request")?
+            .to_lowercase();
+        ensure!(!head.contains("authorization:"), "{head}");
+
+        let (url, _served) = serve(1, 200, "not json")?;
+        let Err(e) = post.post(&url, None, &json!({})) else {
+            bail!("a non-JSON success was accepted");
+        };
+        ensure!(e.to_string().contains("the answer was not JSON"), "{e}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_setting_from_the_environment_must_be_positive() {
+        // Read through a name no test sets, so the default is what comes back;
+        // the parsing rules are exercised on values directly.
+        assert_eq!(env_positive("ANTUMBRA_HTTP_TEST_UNSET_SETTING", 30u64), 30);
+        let parse = |s: &str| {
+            s.trim()
+                .parse::<u64>()
+                .ok()
+                .filter(|v| *v > 0)
+                .unwrap_or(30)
+        };
+        assert_eq!(parse("45"), 45);
+        assert_eq!(parse(" 7 "), 7);
+        assert_eq!(parse("0"), 30);
+        assert_eq!(parse(""), 30);
+        assert_eq!(parse("soon"), 30);
+        assert_eq!(
+            patience("ANTUMBRA_HTTP_TEST_UNSET_SETTING", 20),
+            Duration::from_secs(20)
         );
     }
 }

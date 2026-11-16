@@ -250,6 +250,7 @@ name = "antumbra-copal"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
  "clap",
  "serde_json",
  "sha2 0.11.0",
@@ -297,6 +298,7 @@ name = "antumbra-embed"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
  "antumbra-store",
  "anyhow",
  "async-trait",
@@ -320,6 +322,7 @@ name = "antumbra-github"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
  "chrono",
  "hex",
  "hmac",
@@ -336,6 +339,7 @@ dependencies = [
 name = "antumbra-http"
 version = "0.2.7"
 dependencies = [
+ "antumbra-core",
  "anyhow",
  "serde_json",
  "ureq",
@@ -380,6 +384,7 @@ dependencies = [
  "antumbra-core",
  "antumbra-embed",
  "antumbra-github",
+ "antumbra-http",
  "antumbra-ingest",
  "antumbra-rerank",
  "antumbra-serve",
@@ -413,6 +418,8 @@ name = "antumbra-rerank"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
+ "anyhow",
  "async-trait",
  "serde_json",
  "tokio",
