@@ -227,6 +227,12 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
             }
         }
     }
+    // Left in place: a server started before this may still serve from it.
+    if let Some(old) = &r.superseded {
+        println!(
+            "the adapter it replaces is still at {old}; remove it once no running server serves from it"
+        );
+    }
     Ok(())
 }
 

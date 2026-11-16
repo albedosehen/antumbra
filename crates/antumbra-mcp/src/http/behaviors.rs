@@ -418,6 +418,16 @@ mod keeper {
                             if let Some(serve) = &state.serve {
                                 serve.register_expert(&id, &uri);
                             }
+                            // Only now that nothing here resolves to it: the
+                            // file the expert before this one was served from.
+                            if let Some(old) = &report.superseded {
+                                if let Err(e) = behave::adapter::discard(old, &uri) {
+                                    eprintln!(
+                                        "antumbra-mcp: standing experts, {}: the adapter it replaces was left in place: {e}",
+                                        id.as_str()
+                                    );
+                                }
+                            }
                             failed.remove(&key);
                             tally.trained += 1;
                             let missed = report.verdict.missed();

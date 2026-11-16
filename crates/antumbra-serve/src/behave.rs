@@ -10,7 +10,8 @@
 //!    controls held (`antumbra_train::behave::admit`).
 //!
 //! The expert is the user's own, private, and one per scope: a repository,
-//! or everywhere. A re-run replaces it.
+//! or everywhere. A re-run that is admitted replaces it; one that is refused
+//! leaves it, and the adapter it is served from, as they were ([`adapter`]).
 //!
 //! The work is three phases, so a server can hold its store only for the
 //! first and the last: [`plan`] reads the behaviors, [`train`] runs on the
@@ -33,6 +34,8 @@ use antumbra_train::{
     capture_corrections, eval_pass_rate, CandleModelLoader, CorpusTask, ModelLoader, RaftConfig,
 };
 
+pub mod adapter;
+
 /// What a run did: the expert minted, if admitted, and the scores behind it.
 #[derive(Debug, Clone)]
 pub struct BehaveReport {
@@ -43,6 +46,11 @@ pub struct BehaveReport {
     pub verdict: Verdict,
     /// The minted expert and its adapter, when admitted.
     pub expert: Option<(ExpertId, String)>,
+    /// The file on this host that the expert before this one was served
+    /// from, when the minted expert's adapter is another file. It is left in
+    /// place: whoever serves from it registers the new one first, then
+    /// [`adapter::discard`]s this.
+    pub superseded: Option<String>,
 }
 
 /// The private standing expert for a user's behaviors in `scope`, in
@@ -138,7 +146,11 @@ pub fn seed_of(plan: &Plan) -> u64 {
 pub struct Trained {
     pub verdict: Verdict,
     pub replay: usize,
+    /// Where the adapter rests: admitted, the file named by its content;
+    /// refused, the candidate the training wrote.
     pub adapter_uri: String,
+    /// The admitted adapter's sha256 and size. `None` when refused.
+    pub seal: Option<adapter::Seal>,
     pub base_model: String,
     pub fitness: f32,
     /// The base model's pass rate on the same held-out tasks, before
@@ -157,6 +169,10 @@ pub struct Trained {
 /// Score the base, train beside its own replay, and score again. Touches no
 /// store. `cfg` sets the base model, epochs and learning rate; scoring is
 /// greedy, one answer per task.
+///
+/// The training writes a candidate adapter. Admitted, it is promoted to the
+/// file its content names ([`adapter::place`]); refused, it stays a candidate
+/// and no admitted adapter is written to.
 pub async fn train(
     plan: &Plan,
     embedder: &dyn Embedder,
@@ -179,10 +195,16 @@ pub async fn train(
     // Seeded from the set taught, so the same set trains the same way in any
     // process, whatever was trained before it; the node's generation seed
     // shifts it for measuring how much a training varies.
+    //
+    // It saves into the candidates directory. The path it writes is the same
+    // for every training of this expert, and it writes before admission has
+    // decided, so that path must never be one an expert's row names.
+    let adapter_dir = cfg.adapter_dir.clone();
     let cfg = RaftConfig {
         temperature: 0.0,
         samples_per_task: 1,
         seed: Some(seed_of(plan)),
+        adapter_dir: adapter::candidates(&adapter_dir),
         ..cfg.clone()
     };
     let run = RunId::new(
@@ -214,6 +236,7 @@ pub async fn train(
         &scores.per_task,
         confidence,
     );
+    let (adapter_uri, seal) = adapter::place(&out.adapter_uri, &adapter_dir, verdict.admitted)?;
 
     // The expert routes by the tasks of the behaviors it learned.
     let learned = verdict.learned();
@@ -235,7 +258,8 @@ pub async fn train(
         misses: course::misses(&held, &scores.draws),
         verdict,
         replay: replayed,
-        adapter_uri: out.adapter_uri,
+        adapter_uri,
+        seal,
         base_model: cfg.base_model.clone(),
         fitness: scores.pass_rate,
         base_fitness: base.pass_rate,
@@ -707,7 +731,9 @@ fn card_section<'a>(
 /// Mint the standing expert when `trained` was admitted, replacing the one
 /// before. It holds the behaviors it learned, and its card records the set it
 /// was trained on, so the keeper leaves it be until that set changes. It is
-/// placed on `host`, the machine whose disk holds its adapter.
+/// placed on `host`, the machine whose disk holds its adapter, and its card
+/// records that adapter's sha256 and size. The file the expert before it was
+/// served from is reported, not removed.
 ///
 /// Either way each behavior notes how the training went for it: its held-out
 /// rates, whether it was learned, and whether the expert was admitted; and one
@@ -728,7 +754,8 @@ pub async fn mint(
     let ids = plan.behaviors();
     let id = expert_id(&plan.tenant, &plan.user, &plan.scope);
     // The expert this training would replace: its shadow's parent.
-    let parent = expert::get(store, &id).await?.map(|e| e.id);
+    let before = expert::get(store, &id).await?;
+    let parent = before.as_ref().map(|e| e.id.clone());
     let curve = vec![trained.base_fitness, trained.fitness];
     record_boundaries(store, plan, &trained.verdict, &trained.misses).await?;
     if !trained.verdict.admitted {
@@ -739,6 +766,7 @@ pub async fn mint(
             replay: trained.replay,
             verdict: trained.verdict,
             expert: None,
+            superseded: None,
         });
     }
     let verdict = trained.verdict;
@@ -792,6 +820,14 @@ pub async fn mint(
         })
         .collect();
     card[behavior::CARD_SCORES] = serde_json::Value::Object(scores);
+    if let Some(seal) = &trained.seal {
+        card[adapter::CARD_ADAPTER] = seal.to_card();
+    }
+    // The file the expert before this one is served from, when this host
+    // holds it and it is not the same bytes admitted again.
+    let superseded = before
+        .filter(|e| e.is_placed_on(host) && e.artifact_uri != trained.adapter_uri)
+        .map(|e| e.artifact_uri);
     let e = Expert {
         id: id.clone(),
         name: id.as_str().to_string(),
@@ -835,6 +871,7 @@ pub async fn mint(
         replay: trained.replay,
         verdict,
         expert: Some((e.id, trained.adapter_uri)),
+        superseded,
     })
 }
 
