@@ -71,6 +71,41 @@ impl ServeQuant {
             ServeQuant::Q4K => GgmlDType::Q4K,
         }
     }
+
+    /// How this build serves when nothing says otherwise. A build with no GPU
+    /// backend serves on the CPU, where the dense f32 base reads about 6 GB a
+    /// token, so it serves from Q8_0: about a quarter of the bytes, and the
+    /// form that has answered as the dense base does. A GPU build keeps the
+    /// dense base it trained on.
+    pub fn for_build() -> Option<Self> {
+        if cfg!(any(feature = "cuda", feature = "metal")) {
+            None
+        } else {
+            Some(ServeQuant::Q8_0)
+        }
+    }
+
+    /// What an operator's setting names: `auto` is [`Self::for_build`], `off`
+    /// keeps the base dense, and `q8_0` or `q4_k` name a form on any build.
+    pub fn from_setting(setting: &str) -> Result<Option<Self>, antumbra_core::AntumbraError> {
+        match setting.trim().to_ascii_lowercase().as_str() {
+            "auto" | "" => Ok(Self::for_build()),
+            "off" | "none" | "dense" => Ok(None),
+            other => other.parse().map(Some).map_err(|_| {
+                antumbra_core::AntumbraError::other(format!(
+                    "unknown serving quantization `{other}` (use auto, off, q8_0 or q4_k)"
+                ))
+            }),
+        }
+    }
+
+    /// The name a setting or a log line uses for this form.
+    pub fn name(self) -> &'static str {
+        match self {
+            ServeQuant::Q8_0 => "q8_0",
+            ServeQuant::Q4K => "q4_k",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -217,7 +252,9 @@ impl RaftConfig {
     /// penalty, an n-gram block, and nucleus truncation, so generation is the
     /// learned mode without the degeneration greedy/likelihood decoding is prone
     /// to (Holtzman et al, Keskar et al). Training keeps the defaults (off) so
-    /// best-of-K draws stay faithful to the policy.
+    /// best-of-K draws stay faithful to the policy. The base is held the way
+    /// this build serves ([`ServeQuant::for_build`]): quantized where there is
+    /// no GPU backend, so a model loaded from this config there cannot train.
     pub fn for_serving(max_new_tokens: usize, temperature: f64) -> Self {
         Self {
             max_new_tokens,
@@ -225,6 +262,7 @@ impl RaftConfig {
             top_p: 0.9,
             repetition_penalty: 1.2,
             no_repeat_ngram_size: 3,
+            serve_quant: ServeQuant::for_build(),
             ..Self::default()
         }
     }
@@ -327,6 +365,28 @@ mod tests {
         assert_eq!(RaftConfig::default().serve_quant, None);
     }
 
+    /// A build with no GPU backend serves quantized unless told otherwise, and
+    /// a GPU build serves dense; either can be told.
+    #[test]
+    fn a_setting_names_the_build_default_a_dense_base_or_a_form() {
+        let build = if cfg!(any(feature = "cuda", feature = "metal")) {
+            None
+        } else {
+            Some(ServeQuant::Q8_0)
+        };
+        assert_eq!(ServeQuant::for_build(), build);
+        assert_eq!(ServeQuant::from_setting("auto").unwrap(), build);
+        assert_eq!(ServeQuant::from_setting("").unwrap(), build);
+        for dense in ["off", "none", " Dense "] {
+            assert_eq!(ServeQuant::from_setting(dense).unwrap(), None, "{dense}");
+        }
+        for q in [ServeQuant::Q8_0, ServeQuant::Q4K] {
+            assert_eq!(ServeQuant::from_setting(q.name()).unwrap(), Some(q));
+        }
+        let err = ServeQuant::from_setting("q2_k").unwrap_err().to_string();
+        assert!(err.contains("auto, off, q8_0 or q4_k"), "{err}");
+    }
+
     #[test]
     fn for_serving_turns_the_decode_policy_on() {
         let cfg = RaftConfig::for_serving(48, 0.0);
@@ -335,5 +395,8 @@ mod tests {
         assert_eq!(cfg.top_p, 0.9);
         assert_eq!(cfg.repetition_penalty, 1.2);
         assert_eq!(cfg.no_repeat_ngram_size, 3);
+        // Serving holds the base as the build serves it; training never does.
+        assert_eq!(cfg.serve_quant, ServeQuant::for_build());
+        assert_eq!(RaftConfig::default().serve_quant, None);
     }
 }

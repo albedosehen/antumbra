@@ -43,7 +43,7 @@ pub use antumbra_train::seed::seed_generation;
 /// Re-exported so callers can construct [`MultiAdapterServe`] without depending
 /// on `antumbra-train` directly.
 #[cfg(feature = "models")]
-pub use antumbra_train::RaftConfig;
+pub use antumbra_train::{RaftConfig, ServeQuant};
 
 // --- the real resident multi-adapter engine (models build) ----------------
 

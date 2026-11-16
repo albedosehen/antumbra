@@ -55,7 +55,7 @@ flowchart TB
     CRIT -. "out-of-scope / cold-start only" .-> FLAG["optional flagship<br/>escalation tier (shrinks over time)"]
 ```
 
-- **Serving** - `candle`, through the same model code the trainer uses, so an expert is served by exactly what trained it. One resident base + many adapters, each request's adapter hot-swapped onto the base = **S-LoRA-style multi-adapter serving** on a single GPU. The base comes from the Hugging Face hub as safetensors and every expert is saved as safetensors; no GGUF file is read or written, and nothing is converted to serve. `llama-cpp-2` and `mistral.rs` are not used.
+- **Serving** - `candle`, through the same model code the trainer uses, so an expert is served by exactly what trained it. One resident base + many adapters, each request's adapter hot-swapped onto the base = **S-LoRA-style multi-adapter serving** on a single GPU. The base comes from the Hugging Face hub as safetensors and every expert is saved as safetensors; no GGUF file is read or written, and nothing is converted to serve. `llama-cpp-2` and `mistral.rs` are not used. A node whose build has no GPU backend serves on its CPU from a quantized copy of the base (`Q8_0` by default, made in memory as the model loads; `--serve-quant` picks `q4_k`, or `off` for the dense base), with the experts dense beside it.
 - **Trainer** - `candle` (`burn` fallback) for LoRA adapters _and_ the gate, over a bf16 base, or a 4-bit one (`Q4_K`, dequantized in the forward) when `antumbra train --quantize-base` asks for it. The heaviest Rust ML work.
 - **Substrate** - one SurrealDB instance is every store + the durable flow state.
 

@@ -239,6 +239,7 @@ pub async fn serve(
     github: Option<GithubConfig>,
     recipe: antumbra_core::behavior::Recipe,
     tune_confidence: bool,
+    serve_quant: &str,
 ) -> Result<()> {
     let mut store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -265,7 +266,7 @@ pub async fn serve(
     };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
-    let serve = crate::build_serve(&store, &host, &recipe).await?;
+    let serve = crate::build_serve(&store, &host, &recipe, serve_quant).await?;
     let state = Arc::new(HttpState {
         store,
         serving,

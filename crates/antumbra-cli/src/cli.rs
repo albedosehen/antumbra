@@ -421,7 +421,8 @@ pub enum Command {
     /// a model per call. Reads prompts from stdin (one per line) or a single
     /// --task, routes each via the learned router, and serves the answer from the
     /// resident engine, so a stream of prompts pays the base load only once.
-    /// Needs --features models + a GPU.
+    /// Needs --features models. A build with no GPU backend serves on the CPU,
+    /// from a Q8_0 base.
     Serve {
         /// Answer this one prompt and exit; omit to stream prompts from stdin.
         #[arg(long)]
