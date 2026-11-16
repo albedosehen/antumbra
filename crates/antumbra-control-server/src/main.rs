@@ -248,6 +248,10 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
         magic_ttl: Duration::from_secs(a.magic_ttl_mins * 60),
         mailer: build_mailer(a.dev_mailer)?,
         cooldown: Arc::new(Cooldown::new(Duration::from_secs(a.link_cooldown_secs))),
+        limits: Arc::new(antumbra_core::limit::Limiter::new(
+            crate::http::LINKS_PER_CLIENT,
+            crate::http::LINKS_EVERYONE,
+        )),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(&a.addr).await?;
@@ -255,6 +259,9 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
         "antumbra-control-server: listening on http://{}/ (signup / login / magic)",
         a.addr
     );
+    // With the peer's address on each request, so link requests are budgeted
+    // per client.
+    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -416,6 +423,10 @@ mod tests {
             magic_ttl: Duration::from_secs(60),
             mailer: Arc::new(crate::mailer::StderrMailer),
             cooldown: Arc::new(Cooldown::new(Duration::ZERO)),
+            limits: Arc::new(antumbra_core::limit::Limiter::new(
+                crate::http::LINKS_PER_CLIENT,
+                crate::http::LINKS_EVERYONE,
+            )),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();

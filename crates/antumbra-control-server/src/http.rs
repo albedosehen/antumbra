@@ -7,11 +7,13 @@
 //! per-email cooldown so the endpoint cannot be driven as an email cannon.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::extract::rejection::ExtensionRejection;
+use axum::extract::{ConnectInfo, Query, State};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -19,9 +21,24 @@ use chrono::Utc;
 use serde_json::json;
 
 use antumbra_control::{authenticate, Issuer, MagicLink, Mailer};
+use antumbra_core::limit::{Limiter, Rate};
 use antumbra_core::AntumbraError;
 use antumbra_store::repo::invite;
 use antumbra_store::Store;
+
+/// What one client may ask of `/login` and `/signup`, each an email sent on
+/// request: five at once covers a retry or two, and ten a minute is more than a
+/// person needs.
+pub const LINKS_PER_CLIENT: Rate = Rate {
+    burst: 5,
+    per_minute: 10,
+};
+/// What everyone together may ask: the ceiling on the sending reputation one
+/// server spends in a minute, whatever the number of addresses or clients.
+pub const LINKS_EVERYONE: Rate = Rate {
+    burst: 50,
+    per_minute: 100,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -32,6 +49,33 @@ pub struct AppState {
     pub magic_ttl: Duration,
     pub mailer: Arc<dyn Mailer>,
     pub cooldown: Arc<Cooldown>,
+    /// The per-client and server-wide budgets for link requests, in front of
+    /// the per-address cooldown.
+    pub limits: Arc<Limiter>,
+}
+
+/// The address as the cooldown keys it: trimmed, lowercased, and without a
+/// `+tag` in its local part, so `A@x`, `a@x` and `a+1@x` share one window.
+fn normalized(email: &str) -> String {
+    let email = email.trim().to_ascii_lowercase();
+    match email.split_once('@') {
+        Some((local, domain)) => {
+            let local = local.split('+').next().unwrap_or(local);
+            format!("{local}@{domain}")
+        }
+        None => email,
+    }
+}
+
+/// The client a request comes from, for its bucket: its peer address when the
+/// server was started with connection info, else one shared key, so a request
+/// through `oneshot` in a test, or behind a proxy that hides the peer, still
+/// meets everyone's bound.
+fn client_of(peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>) -> String {
+    match peer {
+        Ok(ConnectInfo(addr)) => addr.ip().to_string(),
+        Err(_) => "unknown".to_string(),
+    }
 }
 
 /// Per-email cooldown on link requests. `/login` deliberately does not reveal
@@ -120,19 +164,24 @@ fn fail(e: AntumbraError) -> Response {
     }
 }
 
-fn too_many() -> Response {
+fn too_many(message: &str) -> Response {
     (
         StatusCode::TOO_MANY_REQUESTS,
-        Json(json!({ "error": "a link was sent for this address moments ago; try again shortly" })),
+        [(header::RETRY_AFTER, "60")],
+        Json(json!({ "error": message })),
     )
         .into_response()
 }
 
 /// Mint a magic link and (try to) email it. The mailer send may block (SMTP), so
-/// it runs off the async runtime.
-async fn send_link(st: &AppState, email: String, invite: Option<String>) -> Response {
-    if !st.cooldown.try_acquire(&email) {
-        return too_many();
+/// it runs off the async runtime. Budgeted before anything is minted or sent:
+/// the client's and everyone's buckets first, then the address's cooldown.
+async fn send_link(st: &AppState, client: &str, email: String, invite: Option<String>) -> Response {
+    if !st.limits.allow(client) {
+        return too_many("too many sign-in requests from here; try again in a minute");
+    }
+    if !st.cooldown.try_acquire(&normalized(&email)) {
+        return too_many("a link was sent for this address moments ago; try again shortly");
     }
     let mailer = st.mailer.clone();
     let secret = st.magic_secret.clone();
@@ -153,7 +202,11 @@ async fn send_link(st: &AppState, email: String, invite: Option<String>) -> Resp
     }
 }
 
-async fn signup_handler(State(st): State<AppState>, Json(req): Json<SignupReq>) -> Response {
+async fn signup_handler(
+    State(st): State<AppState>,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+    Json(req): Json<SignupReq>,
+) -> Response {
     // Fail fast before emailing if the invite is plainly unusable (a race that
     // consumes it before verify is still caught at signup time).
     match invite::get(&st.store, &req.invite).await {
@@ -161,11 +214,15 @@ async fn signup_handler(State(st): State<AppState>, Json(req): Json<SignupReq>) 
         Ok(_) => return bad("unknown, expired, or already-used invite code"),
         Err(e) => return internal(e),
     }
-    send_link(&st, req.email, Some(req.invite)).await
+    send_link(&st, &client_of(peer), req.email, Some(req.invite)).await
 }
 
-async fn login_handler(State(st): State<AppState>, Json(req): Json<LoginReq>) -> Response {
-    send_link(&st, req.email, None).await
+async fn login_handler(
+    State(st): State<AppState>,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+    Json(req): Json<LoginReq>,
+) -> Response {
+    send_link(&st, &client_of(peer), req.email, None).await
 }
 
 async fn verify_handler(State(st): State<AppState>, Query(q): Query<VerifyQuery>) -> Response {
@@ -235,6 +292,7 @@ mod tests {
             magic_ttl: Duration::from_secs(600),
             mailer: capture,
             cooldown: Arc::new(Cooldown::new(cooldown)),
+            limits: Arc::new(Limiter::new(LINKS_PER_CLIENT, LINKS_EVERYONE)),
         }
     }
 
@@ -345,6 +403,74 @@ mod tests {
         let other = app.oneshot(login("cool@x.com")).await.unwrap();
         assert_eq!(other.status(), StatusCode::OK);
         assert_eq!(capture.0.lock().unwrap().len(), 2);
+    }
+
+    // The cooldown keys on the address, not its spelling: case, surrounding
+    // space and a `+tag` are one window.
+    #[tokio::test]
+    async fn link_requests_cool_down_across_an_addresss_spellings() -> anyhow::Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let capture = Arc::new(Capture(Mutex::new(Vec::new())));
+        let app = router(state_with(store, capture.clone(), Duration::from_secs(600)));
+        let login = |email: &str| post_json("/login", &format!(r#"{{"email":"{email}"}}"#));
+        let first = app.clone().oneshot(login("Hot@X.com")).await?;
+        anyhow::ensure!(first.status() == StatusCode::OK);
+        for spelling in ["hot@x.com", "HOT@x.com", "hot+promo@x.com", " hot@x.com "] {
+            let again = app.clone().oneshot(login(spelling)).await?;
+            anyhow::ensure!(
+                again.status() == StatusCode::TOO_MANY_REQUESTS,
+                "{spelling:?} was not the same address"
+            );
+            anyhow::ensure!(again.headers().get(header::RETRY_AFTER).is_some());
+        }
+        let sent = match capture.0.lock() {
+            Ok(sent) => sent.len(),
+            Err(poisoned) => poisoned.into_inner().len(),
+        };
+        anyhow::ensure!(sent == 1, "{sent} links sent for one address");
+        Ok(())
+    }
+
+    // Distinct addresses pass the cooldown, so the client's bucket is what
+    // stops a client cycling through them: its burst, then a refusal.
+    #[tokio::test]
+    async fn link_requests_past_a_clients_burst_are_refused() -> anyhow::Result<()> {
+        let store = Store::connect_memory(EMBED_DIM).await?;
+        let capture = Arc::new(Capture(Mutex::new(Vec::new())));
+        let app = router(state_with(store, capture.clone(), Duration::ZERO));
+        let login = |n: u32| post_json("/login", &format!(r#"{{"email":"person{n}@x.com"}}"#));
+        for n in 0..LINKS_PER_CLIENT.burst {
+            let resp = app.clone().oneshot(login(n)).await?;
+            anyhow::ensure!(resp.status() == StatusCode::OK, "request {n}");
+        }
+        let refused = app.clone().oneshot(login(LINKS_PER_CLIENT.burst)).await?;
+        anyhow::ensure!(refused.status() == StatusCode::TOO_MANY_REQUESTS);
+        let said = body_json(refused).await;
+        anyhow::ensure!(
+            said["error"]
+                .as_str()
+                .is_some_and(|s| s.contains("from here")),
+            "{said}"
+        );
+        let sent = match capture.0.lock() {
+            Ok(sent) => sent.len(),
+            Err(poisoned) => poisoned.into_inner().len(),
+        };
+        anyhow::ensure!(sent as u32 == LINKS_PER_CLIENT.burst, "{sent} links sent");
+        Ok(())
+    }
+
+    #[test]
+    fn an_address_normalizes_to_one_spelling() {
+        for spelling in [
+            " Hot@X.com ",
+            "hot@x.com",
+            "HOT+promo+more@X.COM",
+            "hot+1@x.com",
+        ] {
+            assert_eq!(normalized(spelling), "hot@x.com", "{spelling:?}");
+        }
+        assert_eq!(normalized("no-at-sign"), "no-at-sign");
     }
 
     #[tokio::test]
