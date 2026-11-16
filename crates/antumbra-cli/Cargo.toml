@@ -58,6 +58,11 @@ jsonschema = { version = "0.56.0", default-features = false }
 getrandom = "0.3"
 base64 = "0.22"
 
+[dev-dependencies]
+# Tests stand their stores up through the shared `testing` fixtures rather than
+# by hand.
+antumbra-store = { path = "../antumbra-store", features = ["clap", "testing"] }
+
 [features]
 default = []
 # Enables the `train` command: the real candle Qwen2.5-Coder + LoRA trainer

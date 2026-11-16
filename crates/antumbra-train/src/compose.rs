@@ -134,24 +134,39 @@ pub fn blend(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
-    fn write_adapter(path: &str, a: &[f32], b: &[f32], rank: usize, inn: usize, out: usize) {
+    /// The path as the adapter functions take it.
+    fn utf8(path: &Path) -> Result<&str> {
+        path.to_str()
+            .ok_or_else(|| AntumbraError::other("the temp path is not UTF-8"))
+    }
+
+    fn write_adapter(
+        path: &Path,
+        a: &[f32],
+        b: &[f32],
+        rank: usize,
+        inn: usize,
+        out: usize,
+    ) -> Result<()> {
         let device = Device::Cpu;
         let mut m: HashMap<String, Tensor> = HashMap::new();
         m.insert(
             "p.lora_a".into(),
-            Tensor::from_vec(a.to_vec(), (rank, inn), &device).unwrap(),
+            Tensor::from_vec(a.to_vec(), (rank, inn), &device).map_err(ce)?,
         );
         m.insert(
             "p.lora_b".into(),
-            Tensor::from_vec(b.to_vec(), (out, rank), &device).unwrap(),
+            Tensor::from_vec(b.to_vec(), (out, rank), &device).map_err(ce)?,
         );
-        candle_core::safetensors::save(&m, path).unwrap();
+        candle_core::safetensors::save(&m, path).map_err(ce)
     }
 
     #[test]
-    fn concatenation_realizes_the_weighted_delta_sum() {
+    fn concatenation_realizes_the_weighted_delta_sum() -> Result<()> {
         let dir = std::env::temp_dir();
         let (p1, p2, pm) = (
             dir.join("ant_c1.safetensors"),
@@ -159,33 +174,34 @@ mod tests {
             dir.join("ant_cm.safetensors"),
         );
         // rank 1, in 2, out 1. delta_i = b_i (a_i . x).
-        write_adapter(p1.to_str().unwrap(), &[1.0, 0.0], &[2.0], 1, 2, 1);
-        write_adapter(p2.to_str().unwrap(), &[0.0, 1.0], &[3.0], 1, 2, 1);
+        write_adapter(&p1, &[1.0, 0.0], &[2.0], 1, 2, 1)?;
+        write_adapter(&p2, &[0.0, 1.0], &[3.0], 1, 2, 1)?;
         let (w1, w2) = (0.25f32, 0.75f32);
         let rank = compose_adapters(
-            &[
-                (p1.to_str().unwrap().into(), w1),
-                (p2.to_str().unwrap().into(), w2),
-            ],
-            pm.to_str().unwrap(),
-        )
-        .unwrap();
+            &[(utf8(&p1)?.into(), w1), (utf8(&p2)?.into(), w2)],
+            utf8(&pm)?,
+        )?;
         assert_eq!(rank, 2); // 1 + 1
 
         // Merged delta on x = [x0, x1]: w1*2*x0 + w2*3*x1. Check via B*(A*x).
         let device = Device::Cpu;
-        let m = candle_core::safetensors::load(pm.to_str().unwrap(), &device).unwrap();
+        let m = candle_core::safetensors::load(&pm, &device).map_err(ce)?;
         let a = &m["p.lora_a"]; // (2, 2)
         let b = &m["p.lora_b"]; // (1, 2)
-        let x = Tensor::from_vec(vec![1.0f32, 1.0], (2, 1), &device).unwrap();
-        let delta = b.matmul(&a.matmul(&x).unwrap()).unwrap();
-        let got = delta.flatten_all().unwrap().to_vec1::<f32>().unwrap()[0];
+        let x = Tensor::from_vec(vec![1.0f32, 1.0], (2, 1), &device).map_err(ce)?;
+        let delta = b.matmul(&a.matmul(&x).map_err(ce)?).map_err(ce)?;
+        let got = delta
+            .flatten_all()
+            .map_err(ce)?
+            .to_vec1::<f32>()
+            .map_err(ce)?[0];
         let want = w1 * 2.0 * 1.0 + w2 * 3.0 * 1.0;
         assert!((got - want).abs() < 1e-5, "got {got} want {want}");
 
         for p in [p1, p2, pm] {
             std::fs::remove_file(p).ok();
         }
+        Ok(())
     }
 
     #[test]
@@ -254,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_rank_zero_adapter() {
+    fn rejects_a_rank_zero_adapter() -> Result<()> {
         let dir = std::env::temp_dir();
         let (p, pm) = (
             dir.join("ant_rank0.safetensors"),
@@ -262,8 +278,8 @@ mod tests {
         );
         // lora_a is (0, 2): zero rank rows. A composed rank-0 adapter would scale
         // to a NaN alpha/rank and poison generation, so compose must refuse it.
-        write_adapter(p.to_str().unwrap(), &[], &[], 0, 2, 1);
-        let err = compose_adapters(&[(p.to_str().unwrap().into(), 1.0)], pm.to_str().unwrap());
+        write_adapter(&p, &[], &[], 0, 2, 1)?;
+        let err = compose_adapters(&[(utf8(&p)?.into(), 1.0)], utf8(&pm)?);
         assert!(err.is_err(), "rank-0 compose must be rejected");
         assert!(
             !pm.exists(),
@@ -272,6 +288,7 @@ mod tests {
         for q in [p, pm] {
             std::fs::remove_file(q).ok();
         }
+        Ok(())
     }
 
     fn factors(
@@ -280,105 +297,118 @@ mod tests {
         rank: usize,
         inn: usize,
         out: usize,
-    ) -> HashMap<String, Tensor> {
+    ) -> Result<HashMap<String, Tensor>> {
         let device = Device::Cpu;
-        HashMap::from([
+        Ok(HashMap::from([
             (
                 "p.lora_a".to_string(),
-                Tensor::from_vec(a.to_vec(), (rank, inn), &device).unwrap(),
+                Tensor::from_vec(a.to_vec(), (rank, inn), &device).map_err(ce)?,
             ),
             (
                 "p.lora_b".to_string(),
-                Tensor::from_vec(b.to_vec(), (out, rank), &device).unwrap(),
+                Tensor::from_vec(b.to_vec(), (out, rank), &device).map_err(ce)?,
             ),
-        ])
+        ]))
     }
 
     /// `B (A x)` for `x = [1, 2]`.
-    fn delta(f: &HashMap<String, Tensor>) -> f32 {
-        let x = Tensor::from_vec(vec![1.0f32, 2.0], (2, 1), &Device::Cpu).unwrap();
-        let ax = f["p.lora_a"].matmul(&x).unwrap();
-        f["p.lora_b"]
+    fn delta(f: &HashMap<String, Tensor>) -> Result<f32> {
+        let x = Tensor::from_vec(vec![1.0f32, 2.0], (2, 1), &Device::Cpu).map_err(ce)?;
+        let ax = f["p.lora_a"].matmul(&x).map_err(ce)?;
+        Ok(f["p.lora_b"]
             .matmul(&ax)
-            .unwrap()
+            .map_err(ce)?
             .flatten_all()
-            .unwrap()
+            .map_err(ce)?
             .to_vec1::<f32>()
-            .unwrap()[0]
+            .map_err(ce)?[0])
     }
 
     #[test]
-    fn one_adapter_padded_to_a_higher_rank_serves_the_same_delta() {
-        let one = factors(&[1.0, 3.0], &[2.0], 1, 2, 1);
-        let padded = blend(&[(one.clone(), 1.0)], Some(3)).unwrap();
+    fn one_adapter_padded_to_a_higher_rank_serves_the_same_delta() -> Result<()> {
+        let one = factors(&[1.0, 3.0], &[2.0], 1, 2, 1)?;
+        let padded = blend(&[(one.clone(), 1.0)], Some(3))?;
         assert_eq!(padded["p.lora_a"].dims(), &[3, 2]);
         assert_eq!(padded["p.lora_b"].dims(), &[1, 3]);
         assert_eq!(rank_of(&padded), 3);
-        assert!((delta(&padded) - delta(&one)).abs() < 1e-6);
+        assert!((delta(&padded)? - delta(&one)?).abs() < 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn a_padded_blend_is_the_weighted_sum_and_halves_make_a_whole() {
-        let p = factors(&[1.0, 0.0], &[2.0], 1, 2, 1);
-        let q = factors(&[0.0, 1.0], &[3.0], 1, 2, 1);
-        let mixed = blend(&[(p.clone(), 0.25), (q.clone(), 1.0)], Some(4)).unwrap();
-        assert!((delta(&mixed) - (0.25 * delta(&p) + delta(&q))).abs() < 1e-5);
-        let halves = blend(&[(p.clone(), 0.5), (p.clone(), 0.5)], Some(3)).unwrap();
-        assert!((delta(&halves) - delta(&p)).abs() < 1e-5);
+    fn a_padded_blend_is_the_weighted_sum_and_halves_make_a_whole() -> Result<()> {
+        let p = factors(&[1.0, 0.0], &[2.0], 1, 2, 1)?;
+        let q = factors(&[0.0, 1.0], &[3.0], 1, 2, 1)?;
+        let mixed = blend(&[(p.clone(), 0.25), (q.clone(), 1.0)], Some(4))?;
+        assert!((delta(&mixed)? - (0.25 * delta(&p)? + delta(&q)?)).abs() < 1e-5);
+        let halves = blend(&[(p.clone(), 0.5), (p.clone(), 0.5)], Some(3))?;
+        assert!((delta(&halves)? - delta(&p)?).abs() < 1e-5);
+        Ok(())
     }
 
     #[test]
-    fn a_blend_above_the_model_rank_or_missing_a_factor_is_refused() {
-        let p = factors(&[1.0, 0.0], &[2.0], 1, 2, 1);
+    fn a_blend_above_the_model_rank_or_missing_a_factor_is_refused() -> Result<()> {
+        let p = factors(&[1.0, 0.0], &[2.0], 1, 2, 1)?;
         assert!(blend(&[(p.clone(), 1.0), (p.clone(), 1.0)], Some(1)).is_err());
         let mut partial = p.clone();
         partial.remove("p.lora_b");
         assert!(blend(&[(p, 1.0), (partial, 1.0)], Some(2)).is_err());
         assert!(blend(&[], Some(2)).is_err());
+        Ok(())
     }
 
     /// A model's LoRA factors as the CPU holds them: zeroed f32 `Var`s.
-    fn f32_vars(rank: usize, inn: usize, out: usize) -> VarMap {
+    fn f32_vars(rank: usize, inn: usize, out: usize) -> Result<VarMap> {
         let vars = VarMap::new();
         let vb = candle_nn::VarBuilder::from_varmap(&vars, candle_core::DType::F32, &Device::Cpu);
         vb.get_with_hints((rank, inn), "p.lora_a", candle_nn::init::ZERO)
-            .unwrap();
+            .map_err(ce)?;
         vb.get_with_hints((out, rank), "p.lora_b", candle_nn::init::ZERO)
-            .unwrap();
-        vars
+            .map_err(ce)?;
+        Ok(vars)
     }
 
     #[test]
-    fn a_bf16_adapter_restores_into_f32_factors() {
+    fn a_bf16_adapter_restores_into_f32_factors() -> Result<()> {
         // Every value is exact in bf16, so the cast must reproduce it.
         let path = std::env::temp_dir().join("ant_restore_bf16.safetensors");
-        let saved: HashMap<String, Tensor> = factors(&[0.5, -1.25], &[3.0], 1, 2, 1)
+        let saved = factors(&[0.5, -1.25], &[3.0], 1, 2, 1)?
             .into_iter()
-            .map(|(k, t)| (k, t.to_dtype(candle_core::DType::BF16).unwrap()))
-            .collect();
-        candle_core::safetensors::save(&saved, &path).unwrap();
-        let vars = f32_vars(1, 2, 1);
-        restore_adapter(&vars, path.to_str().unwrap()).unwrap();
-        let data = vars.data().lock().unwrap();
+            .map(|(k, t)| Ok((k, t.to_dtype(candle_core::DType::BF16).map_err(ce)?)))
+            .collect::<Result<HashMap<String, Tensor>>>()?;
+        candle_core::safetensors::save(&saved, &path).map_err(ce)?;
+        let vars = f32_vars(1, 2, 1)?;
+        restore_adapter(&vars, utf8(&path)?)?;
+        let data = vars
+            .data()
+            .lock()
+            .map_err(|_| AntumbraError::other("the varmap lock was poisoned"))?;
         let a = data["p.lora_a"].as_tensor();
         assert_eq!(a.dtype(), candle_core::DType::F32);
         assert_eq!(
-            a.flatten_all().unwrap().to_vec1::<f32>().unwrap(),
+            a.flatten_all().map_err(ce)?.to_vec1::<f32>().map_err(ce)?,
             [0.5, -1.25]
         );
         let b = data["p.lora_b"].as_tensor();
-        assert_eq!(b.flatten_all().unwrap().to_vec1::<f32>().unwrap(), [3.0]);
+        assert_eq!(
+            b.flatten_all().map_err(ce)?.to_vec1::<f32>().map_err(ce)?,
+            [3.0]
+        );
         std::fs::remove_file(path).ok();
+        Ok(())
     }
 
     #[test]
-    fn an_adapter_missing_a_factor_names_it() {
+    fn an_adapter_missing_a_factor_names_it() -> Result<()> {
         let path = std::env::temp_dir().join("ant_restore_partial.safetensors");
-        let mut partial = factors(&[0.5, -1.25], &[3.0], 1, 2, 1);
+        let mut partial = factors(&[0.5, -1.25], &[3.0], 1, 2, 1)?;
         partial.remove("p.lora_b");
-        candle_core::safetensors::save(&partial, &path).unwrap();
-        let err = restore_adapter(&f32_vars(1, 2, 1), path.to_str().unwrap()).unwrap_err();
+        candle_core::safetensors::save(&partial, &path).map_err(ce)?;
+        let Err(err) = restore_adapter(&f32_vars(1, 2, 1)?, utf8(&path)?) else {
+            return Err(AntumbraError::other("a partial adapter was restored"));
+        };
         assert!(err.to_string().contains("p.lora_b"), "{err}");
         std::fs::remove_file(path).ok();
+        Ok(())
     }
 }

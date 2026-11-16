@@ -221,19 +221,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn draws_are_labeled_with_their_tasks_prompt_and_skill() {
+    fn draws_are_labeled_with_their_tasks_prompt_and_skill() -> anyhow::Result<()> {
         let corpus: Vec<serde_json::Value> = serde_json::from_value(serde_json::json!([
             { "id": "s/a", "skill": "strings", "prompt": "do a" },
             { "id": "n/b", "prompt": "do b" }
-        ]))
-        .unwrap();
+        ]))?;
         let draws: Vec<serde_json::Value> = serde_json::from_value(serde_json::json!([
             { "task": "s/a", "completion": "x", "passed": true },
             { "task": "n/b", "completion": "y", "passed": false },
             { "task": "gone", "completion": "z", "passed": true },
             { "task": "s/a", "completion": "w" }
-        ]))
-        .unwrap();
+        ]))?;
         let rows = labeled(&corpus, &draws);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].skill, "strings");
@@ -241,12 +239,14 @@ mod tests {
         assert_eq!(rows[0].prompt, "do a");
         assert_eq!(rows[1].skill, "all");
         assert_eq!(rows[1].completion, "y");
+        Ok(())
     }
 
     #[test]
-    fn the_held_out_split_is_the_default_partitions() {
+    fn the_held_out_split_is_the_default_partitions() -> anyhow::Result<()> {
         let tasks: Vec<String> = (0..200).map(|i| format!("task:{i}")).collect();
         let held = tasks.iter().filter(|t| held_out(t)).count();
         assert!(held > 20 && held < 100, "{held}");
+        Ok(())
     }
 }

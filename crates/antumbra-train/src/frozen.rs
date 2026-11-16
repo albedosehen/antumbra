@@ -117,68 +117,65 @@ mod tests {
     use super::*;
     use candle_core::{DType, Device, Var};
 
-    fn ramp(shape: &[usize], dev: &Device) -> Tensor {
+    fn ramp(shape: &[usize], dev: &Device) -> Result<Tensor> {
         let n: usize = shape.iter().product();
         let values: Vec<f32> = (0..n).map(|i| ((i * 7 % 11) as f32 - 5.0) / 4.0).collect();
-        Tensor::from_vec(values, shape, dev).unwrap()
+        Tensor::from_vec(values, shape, dev)
     }
 
     /// The product as `candle_nn::Linear` computes it, weight gradient and all.
-    fn plain(x: &Tensor, w: &Tensor) -> Tensor {
+    fn plain(x: &Tensor, w: &Tensor) -> Result<Tensor> {
         let batch = &x.dims()[..x.rank() - 2];
-        x.matmul(&w.broadcast_left(Shape::from(batch)).unwrap().t().unwrap())
-            .unwrap()
+        x.matmul(&w.broadcast_left(Shape::from(batch))?.t()?)
     }
 
-    fn max_diff(a: &Tensor, b: &Tensor) -> f32 {
-        (a - b)
-            .unwrap()
-            .abs()
-            .unwrap()
-            .flatten_all()
-            .unwrap()
-            .max(0)
-            .unwrap()
-            .to_scalar::<f32>()
-            .unwrap()
+    fn max_diff(a: &Tensor, b: &Tensor) -> Result<f32> {
+        (a - b)?.abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()
     }
 
     #[test]
-    fn the_product_is_the_linear_one_at_every_rank() {
+    fn the_product_is_the_linear_one_at_every_rank() -> Result<()> {
         let dev = Device::Cpu;
-        let w = ramp(&[5, 4], &dev);
+        let w = ramp(&[5, 4], &dev)?;
         for shape in [&[3, 4][..], &[2, 3, 4], &[2, 2, 3, 4]] {
-            let x = ramp(shape, &dev);
-            let got = frozen_matmul_t(&x, &w).unwrap();
-            assert_eq!(got.dims(), plain(&x, &w).dims());
-            assert!(max_diff(&got, &plain(&x, &w)) < 1e-5, "at {shape:?}");
+            let x = ramp(shape, &dev)?;
+            let got = frozen_matmul_t(&x, &w)?;
+            assert_eq!(got.dims(), plain(&x, &w)?.dims());
+            assert!(max_diff(&got, &plain(&x, &w)?)? < 1e-5, "at {shape:?}");
         }
+        Ok(())
     }
 
     #[test]
-    fn a_strided_input_is_read_through_its_layout() {
+    fn a_strided_input_is_read_through_its_layout() -> Result<()> {
         let dev = Device::Cpu;
-        let w = ramp(&[5, 4], &dev);
-        let x = ramp(&[2, 4, 3], &dev).transpose(1, 2).unwrap();
+        let w = ramp(&[5, 4], &dev)?;
+        let x = ramp(&[2, 4, 3], &dev)?.transpose(1, 2)?;
         assert!(!x.is_contiguous());
-        let got = frozen_matmul_t(&x, &w).unwrap();
-        assert!(max_diff(&got, &plain(&x, &w)) < 1e-5);
+        let got = frozen_matmul_t(&x, &w)?;
+        assert!(max_diff(&got, &plain(&x, &w)?)? < 1e-5);
+        Ok(())
     }
 
     /// The input's gradient is the one the plain product gives, and the store
     /// keeps no gradient of the weight's shape, which the plain product does.
     #[test]
-    fn the_input_gets_its_gradient_and_the_weight_gets_none() {
+    fn the_input_gets_its_gradient_and_the_weight_gets_none() -> Result<()> {
         let dev = Device::Cpu;
-        let w = ramp(&[5, 4], &dev);
-        let x = Var::from_tensor(&ramp(&[2, 3, 4], &dev)).unwrap();
-        let r = ramp(&[2, 3, 5], &dev);
-        let loss = |y: Tensor| (y * &r).unwrap().sum_all().unwrap();
+        let w = ramp(&[5, 4], &dev)?;
+        let x = Var::from_tensor(&ramp(&[2, 3, 4], &dev)?)?;
+        let r = ramp(&[2, 3, 5], &dev)?;
+        let loss = |y: Tensor| -> Result<Tensor> { (y * &r)?.sum_all() };
 
-        let frozen = loss(frozen_matmul_t(&x, &w).unwrap()).backward().unwrap();
-        let reference = loss(plain(&x, &w)).backward().unwrap();
-        let gx = frozen.get(&x).expect("a gradient for the input");
-        assert!(max_diff(gx, reference.get(&x).unwrap()) < 1e-5);
+        let frozen = loss(frozen_matmul_t(&x, &w)?)?.backward()?;
+        let reference = loss(plain(&x, &w)?)?.backward()?;
+        let Some(gx) = frozen.get(&x) else {
+            bail!("no gradient for the input");
+        };
+        let Some(plain_gx) = reference.get(&x) else {
+            bail!("the plain product gave the input no gradient");
+        };
+        assert!(max_diff(gx, plain_gx)? < 1e-5);
 
         let weight_shaped = |store: &candle_core::backprop::GradStore| {
             store
@@ -188,21 +185,24 @@ mod tests {
         };
         assert!(weight_shaped(&reference), "the plain product keeps one");
         assert!(!weight_shaped(&frozen));
+        Ok(())
     }
 
     #[test]
-    fn an_input_of_the_wrong_width_is_refused() {
+    fn an_input_of_the_wrong_width_is_refused() -> Result<()> {
         let dev = Device::Cpu;
-        let w = ramp(&[5, 4], &dev);
-        assert!(frozen_matmul_t(&ramp(&[2, 3, 6], &dev), &w).is_err());
-        assert!(frozen_matmul_t(&ramp(&[4], &dev), &w).is_err());
+        let w = ramp(&[5, 4], &dev)?;
+        assert!(frozen_matmul_t(&ramp(&[2, 3, 6], &dev)?, &w).is_err());
+        assert!(frozen_matmul_t(&ramp(&[4], &dev)?, &w).is_err());
+        Ok(())
     }
 
     #[test]
-    fn an_empty_input_gives_an_empty_product() {
+    fn an_empty_input_gives_an_empty_product() -> Result<()> {
         let dev = Device::Cpu;
-        let w = ramp(&[5, 4], &dev);
-        let x = Tensor::zeros((2, 0, 4), DType::F32, &dev).unwrap();
-        assert_eq!(frozen_matmul_t(&x, &w).unwrap().dims(), [2, 0, 5]);
+        let w = ramp(&[5, 4], &dev)?;
+        let x = Tensor::zeros((2, 0, 4), DType::F32, &dev)?;
+        assert_eq!(frozen_matmul_t(&x, &w)?.dims(), [2, 0, 5]);
+        Ok(())
     }
 }

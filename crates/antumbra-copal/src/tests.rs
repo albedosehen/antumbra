@@ -410,6 +410,8 @@ async fn per_workspace_tenancy_refuses_a_workspace_that_cannot_be_a_header() -> 
 #[test]
 fn a_bare_host_port_gets_http_and_a_full_url_is_used_as_is() -> anyhow::Result<()> {
     assert_eq!(normalize_base("127.0.0.1:9010"), "http://127.0.0.1:9010");
+    assert_eq!(normalize_base("localhost:9010"), "http://localhost:9010");
+    assert_eq!(normalize_base("[::1]:9010"), "http://[::1]:9010");
     assert_eq!(
         normalize_base("https://copal.example/"),
         "https://copal.example"
@@ -419,6 +421,68 @@ fn a_bare_host_port_gets_http_and_a_full_url_is_used_as_is() -> anyhow::Result<(
         "http://copal.example:9010"
     );
     Ok(())
+}
+
+/// A bare address that is not this machine is reached over TLS unless told
+/// otherwise, and an explicit `http://` to one is refused without the flag.
+#[test]
+fn a_bare_remote_address_defaults_to_https() -> std::result::Result<(), String> {
+    assert_eq!(
+        normalize_base("archive.example:9000"),
+        "https://archive.example:9000"
+    );
+    let over_tls =
+        CopalArchive::from_flags(Some("archive.example:9000"), None, None, None, None, false)
+            .map_err(|e| e.to_string())?;
+    if over_tls.map(|a| a.base.clone()) != Some("https://archive.example:9000".into()) {
+        return Err("a bare remote address did not become https".into());
+    }
+    match CopalArchive::from_flags(
+        Some("http://archive.example:9000"),
+        None,
+        None,
+        None,
+        None,
+        false,
+    ) {
+        Err(CopalConfigError::Cleartext(addr)) if addr == "http://archive.example:9000" => {}
+        Err(other) => return Err(format!("the wrong refusal: {other}")),
+        Ok(_) => return Err("cleartext across a network was not refused".into()),
+    }
+    let allowed = CopalArchive::from_flags(
+        Some("http://archive.example:9000"),
+        None,
+        None,
+        None,
+        None,
+        true,
+    )
+    .map_err(|e| e.to_string())?;
+    if allowed.is_none() {
+        return Err("--copal-allow-http did not allow it".into());
+    }
+    let local =
+        CopalArchive::from_flags(Some("http://127.0.0.1:9010"), None, None, None, None, false)
+            .map_err(|e| e.to_string())?;
+    if local.is_none() {
+        return Err("plain HTTP to this machine needs no flag".into());
+    }
+    Ok(())
+}
+
+/// Header-mode tenancies tell the archive the tenant in a header it trusts;
+/// the keyed ones prove it.
+#[test]
+fn header_mode_tenancies_trust_headers_and_keyed_ones_do_not() {
+    let at = |tenancy| CopalArchive::new("127.0.0.1:9010", tenancy);
+    assert!(at(CopalTenancy::PerWorkspace).trusts_headers());
+    assert!(at(CopalTenancy::Shared("one".into())).trusts_headers());
+    assert!(!at(CopalTenancy::SharedKey("ck1_x".into())).trusts_headers());
+    assert!(!at(CopalTenancy::PerWorkspaceKeys(HashMap::from([(
+        "ws:a".to_string(),
+        "ck1_a".to_string()
+    )])))
+    .trusts_headers());
 }
 
 #[test]
@@ -667,6 +731,7 @@ fn a_render_origin_is_an_origin_and_nothing_more() -> anyhow::Result<()> {
         None,
         None,
         Some("http://10.0.0.130:8083/".into()),
+        false,
     )?
     .context("an address and a tenant configured no archive")?;
     assert_eq!(built.render_origin(), Some("http://10.0.0.130:8083"));
@@ -676,8 +741,14 @@ fn a_render_origin_is_an_origin_and_nothing_more() -> anyhow::Result<()> {
         "https://h; frame-src *",
         "ftp://h",
     ] {
-        let refused =
-            CopalArchive::from_flags(Some("127.0.0.1:9010"), None, None, None, Some(bad.into()));
+        let refused = CopalArchive::from_flags(
+            Some("127.0.0.1:9010"),
+            None,
+            None,
+            None,
+            Some(bad.into()),
+            false,
+        );
         assert!(
             matches!(refused, Err(CopalConfigError::RenderOrigin(_))),
             "{bad:?}"

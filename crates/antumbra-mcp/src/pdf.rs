@@ -266,7 +266,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn references_to_private_addresses_become_blank_and_public_ones_stay() {
+    fn references_to_private_addresses_become_blank_and_public_ones_stay() -> anyhow::Result<()> {
         let loopback = Ipv4Addr::LOCALHOST;
         let lan = Ipv4Addr::new(10, 1, 2, 3);
         let metadata = Ipv4Addr::new(169, 254, 169, 254);
@@ -296,17 +296,19 @@ mod tests {
         assert!(out.contains("https://cdn.example/lib.js"), "{out}");
         assert!(out.contains("data:image/png;base64,AAAA"), "{out}");
         assert_eq!(out.matches("about:blank").count(), 7, "{out}");
+        Ok(())
     }
 
     #[test]
-    fn hosts_are_read_once_each_without_port_userinfo_or_brackets() {
+    fn hosts_are_read_once_each_without_port_userinfo_or_brackets() -> anyhow::Result<()> {
         let text = "see http://A.example:8080/x and https://a.example/y, ws://[::1]:1/z, \
                     https://u:p@b.example/w, mailto:someone@c.example, and plain text";
         assert_eq!(hosts_in(text), vec!["::1", "a.example", "b.example"]);
+        Ok(())
     }
 
     #[test]
-    fn the_private_ranges_are_the_ones_a_page_may_not_reach() {
+    fn the_private_ranges_are_the_ones_a_page_may_not_reach() -> anyhow::Result<()> {
         for private in [
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
@@ -329,13 +331,14 @@ mod tests {
         ] {
             assert!(!is_private_ip(public), "{public}");
         }
+        Ok(())
     }
 
     // The whole path a print takes: literal private addresses go without any
     // resolving, and a name that cannot resolve stays, since the renderer
     // cannot reach it either.
     #[tokio::test]
-    async fn a_page_is_scrubbed_before_it_prints() {
+    async fn a_page_is_scrubbed_before_it_prints() -> anyhow::Result<()> {
         let lan = Ipv4Addr::new(192, 168, 7, 7);
         let page = format!(
             r#"<img src="http://{lan}/pixel"> <img src="https://nowhere.invalid/x"> <p>text</p>"#
@@ -347,20 +350,22 @@ mod tests {
         assert!(out.contains("<p>text</p>"), "{out}");
         let plain = b"<p>no references</p>".to_vec();
         assert_eq!(without_private_hosts(plain.clone()).await, plain);
+        Ok(())
     }
 
     #[test]
-    fn the_compose_renderer_is_started_denying_private_addresses() {
+    fn the_compose_renderer_is_started_denying_private_addresses() -> anyhow::Result<()> {
         let compose = include_str!("../../../docker/docker-compose.yml");
         assert!(
             compose.contains("--chromium-deny-private-ips=true"),
             "the pdf service must deny private addresses"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_page_goes_as_index_html_with_the_print_settings() {
-        let body = String::from_utf8(form("b0", b"<h1>Plan</h1>")).unwrap();
+    fn the_page_goes_as_index_html_with_the_print_settings() -> anyhow::Result<()> {
+        let body = String::from_utf8(form("b0", b"<h1>Plan</h1>"))?;
         assert!(body.starts_with(
             "--b0\r\nContent-Disposition: form-data; name=\"files\"; filename=\"index.html\"\r\n\
              Content-Type: text/html; charset=utf-8\r\n\r\n<h1>Plan</h1>\r\n"
@@ -372,15 +377,17 @@ mod tests {
             );
         }
         assert!(body.ends_with("--b0--\r\n"));
+        Ok(())
     }
 
     #[test]
-    fn the_boundary_is_never_in_the_page() {
+    fn the_boundary_is_never_in_the_page() -> anyhow::Result<()> {
         assert_eq!(boundary_for(b"<p>plain</p>"), "antumbra-relic-00000000");
         assert_eq!(
             boundary_for(b"antumbra-relic-00000000 antumbra-relic-00000001"),
             "antumbra-relic-00000002"
         );
+        Ok(())
     }
 
     /// Prints through a real renderer: `ANTUMBRA_TEST_PDF_RENDERER` names it
@@ -389,25 +396,30 @@ mod tests {
     /// `ANTUMBRA_TEST_PDF_OUT` where to keep the result.
     #[tokio::test]
     #[ignore = "needs a running Gotenberg"]
-    async fn prints_through_a_real_renderer() {
-        let url = std::env::var("ANTUMBRA_TEST_PDF_RENDERER").expect("ANTUMBRA_TEST_PDF_RENDERER");
+    async fn prints_through_a_real_renderer() -> anyhow::Result<()> {
+        use anyhow::Context as _;
+
+        let url =
+            std::env::var("ANTUMBRA_TEST_PDF_RENDERER").context("ANTUMBRA_TEST_PDF_RENDERER")?;
         let html = match std::env::var("ANTUMBRA_TEST_PDF_PAGE") {
-            Ok(path) => std::fs::read(path).unwrap(),
+            Ok(path) => std::fs::read(path)?,
             Err(_) => b"<!doctype html><title>t</title><h1>Printed</h1>".to_vec(),
         };
-        let pdf = PdfRenderer::new(&url).unwrap().render(html).await.unwrap();
+        let pdf = PdfRenderer::new(&url)?.render(html).await?;
         assert!(pdf.starts_with(b"%PDF-"), "{:?}", &pdf[..pdf.len().min(16)]);
         if let Ok(out) = std::env::var("ANTUMBRA_TEST_PDF_OUT") {
-            std::fs::write(out, &pdf).unwrap();
+            std::fs::write(out, &pdf)?;
         }
+        Ok(())
     }
 
     #[test]
-    fn the_renderer_is_an_http_url() {
-        let r = PdfRenderer::new("http://pdf:3000/").unwrap();
+    fn the_renderer_is_an_http_url() -> anyhow::Result<()> {
+        let r = PdfRenderer::new("http://pdf:3000/")?;
         assert_eq!(r.url, "http://pdf:3000/forms/chromium/convert/html");
         for bad in ["pdf:3000", "ftp://pdf", "http://pdf 3000", ""] {
             assert!(PdfRenderer::new(bad).is_err(), "{bad:?}");
         }
+        Ok(())
     }
 }

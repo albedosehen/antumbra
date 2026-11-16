@@ -233,24 +233,27 @@ impl RaftConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::Result;
 
     #[test]
-    fn train_dtype_parses_by_name_and_refuses_the_unknown() {
+    fn train_dtype_parses_by_name_and_refuses_the_unknown() -> Result<()> {
         assert_eq!("f32".parse::<TrainDtype>().ok(), Some(TrainDtype::F32));
         assert_eq!(" BF16 ".parse::<TrainDtype>().ok(), Some(TrainDtype::Bf16));
         assert_eq!("f16".parse::<TrainDtype>().ok(), Some(TrainDtype::F16));
         assert!("fp8".parse::<TrainDtype>().is_err());
+        Ok(())
     }
 
     #[test]
-    fn train_dtype_maps_to_candle() {
+    fn train_dtype_maps_to_candle() -> Result<()> {
         assert_eq!(TrainDtype::F16.to_candle(), DType::F16);
         assert_eq!(TrainDtype::Bf16.to_candle(), DType::BF16);
         assert_eq!(TrainDtype::F32.to_candle(), DType::F32);
+        Ok(())
     }
 
     #[test]
-    fn default_is_an_instruct_base_with_decode_off() {
+    fn default_is_an_instruct_base_with_decode_off() -> Result<()> {
         let cfg = RaftConfig::default();
         assert!(cfg.base_model.contains("Instruct"));
         assert_eq!(cfg.top_p, 1.0);
@@ -260,10 +263,11 @@ mod tests {
             cfg.batch_size, 1,
             "one step per example is the validated recipe"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_recipe_replaces_only_the_searched_settings() {
+    fn a_recipe_replaces_only_the_searched_settings() -> Result<()> {
         let base = RaftConfig::default();
         let recipe = TrainingRecipe {
             learning_rate: 3e-4,
@@ -288,20 +292,22 @@ mod tests {
             "rank, alpha and the rest stay as configured"
         );
         assert_eq!(base.with_recipe(&base.recipe()).recipe(), base.recipe());
+        Ok(())
     }
 
     #[test]
-    fn lora_scale_is_alpha_over_rank() {
+    fn lora_scale_is_alpha_over_rank() -> Result<()> {
         let cfg = RaftConfig {
             lora_rank: 16,
             lora_alpha: 32.0,
             ..RaftConfig::default()
         };
         assert_eq!(cfg.lora_scale(), 2.0);
+        Ok(())
     }
 
     #[test]
-    fn lora_scale_is_zero_not_nan_for_a_rank_zero_adapter() {
+    fn lora_scale_is_zero_not_nan_for_a_rank_zero_adapter() -> Result<()> {
         let cfg = RaftConfig {
             lora_rank: 0,
             lora_alpha: 32.0,
@@ -310,30 +316,33 @@ mod tests {
         let scale = cfg.lora_scale();
         assert!(scale.is_finite(), "a rank-0 adapter must not yield NaN");
         assert_eq!(scale, 0.0);
+        Ok(())
     }
 
     #[test]
-    fn a_serving_quantization_parses_by_its_ggml_name() {
+    fn a_serving_quantization_parses_by_its_ggml_name() -> Result<()> {
         for (name, want) in [
             ("q8_0", ServeQuant::Q8_0),
             ("Q8", ServeQuant::Q8_0),
             ("q4_k", ServeQuant::Q4K),
             (" Q4K ", ServeQuant::Q4K),
         ] {
-            assert_eq!(name.parse::<ServeQuant>().unwrap(), want, "{name}");
+            assert_eq!(name.parse::<ServeQuant>()?, want, "{name}");
         }
         assert!("q2_k".parse::<ServeQuant>().is_err());
         assert_eq!(ServeQuant::Q4K.to_ggml(), GgmlDType::Q4K);
         assert_eq!(RaftConfig::default().serve_quant, None);
+        Ok(())
     }
 
     #[test]
-    fn for_serving_turns_the_decode_policy_on() {
+    fn for_serving_turns_the_decode_policy_on() -> Result<()> {
         let cfg = RaftConfig::for_serving(48, 0.0);
         assert_eq!(cfg.max_new_tokens, 48);
         assert_eq!(cfg.temperature, 0.0);
         assert_eq!(cfg.top_p, 0.9);
         assert_eq!(cfg.repetition_penalty, 1.2);
         assert_eq!(cfg.no_repeat_ngram_size, 3);
+        Ok(())
     }
 }

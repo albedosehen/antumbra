@@ -51,6 +51,18 @@ pub struct CopalArgs {
     /// than landing in another tenant.
     #[arg(long, global = true, env = "ANTUMBRA_COPAL_KEYS")]
     pub copal_keys: Option<std::path::PathBuf>,
+    /// Allow a plain `http://` archive address that is not this machine: the
+    /// network between this process and the archive is trusted (a compose
+    /// stack's own network). Without it such an address is refused, and a bare
+    /// `host:port` away from this machine gets `https://`.
+    #[arg(
+        long,
+        global = true,
+        env = "ANTUMBRA_COPAL_ALLOW_HTTP",
+        default_value_t = false,
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    pub copal_allow_http: bool,
 }
 
 impl CopalArgs {
@@ -81,6 +93,7 @@ impl CopalArgs {
             self.copal_key.clone(),
             self.copal_keys.as_deref(),
             render_origin,
+            self.copal_allow_http,
         )
     }
 }
@@ -136,6 +149,32 @@ mod tests {
 
     // (clap itself refuses an empty path on the command line; the filter on
     // `--copal-keys` is for the environment, where compose hands one over.)
+    /// Plain HTTP across a network is the operator's to allow, by name.
+    #[test]
+    fn plain_http_across_a_network_needs_the_flag() -> Result<(), String> {
+        let refused = parsed(&["probe", "--copal-addr", "http://archive.example:9000"])
+            .map_err(|e| e.to_string())?;
+        if !refused.copal_allow_http {
+            match refused.archive(None) {
+                Err(CopalConfigError::Cleartext(_)) => {}
+                Err(other) => return Err(format!("the wrong refusal: {other}")),
+                Ok(_) => return Err("plain HTTP across a network was accepted".into()),
+            }
+        }
+        let allowed = parsed(&[
+            "probe",
+            "--copal-addr",
+            "http://archive.example:9000",
+            "--copal-allow-http",
+        ])
+        .map_err(|e| e.to_string())?;
+        if !allowed.copal_allow_http || allowed.archive(None).map_err(|e| e.to_string())?.is_none()
+        {
+            return Err("--copal-allow-http did not allow it".into());
+        }
+        Ok(())
+    }
+
     #[test]
     fn an_empty_setting_is_an_unset_one() -> anyhow::Result<()> {
         let args = parsed(&[

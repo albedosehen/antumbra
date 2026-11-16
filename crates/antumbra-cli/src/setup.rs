@@ -1823,11 +1823,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_hook_setup_writes_is_bundled() {
+    fn every_hook_setup_writes_is_bundled() -> anyhow::Result<()> {
         for (_, script, _) in platform_hooks() {
             assert!(hooks::bundled(script).is_some(), "{script}");
         }
         assert!(hooks::bundled(headers_helper_name()).is_some());
+        Ok(())
     }
 
     #[test]
@@ -1886,16 +1887,17 @@ mod tests {
     }
 
     #[test]
-    fn a_path_with_spaces_is_quoted_in_the_command() {
+    fn a_path_with_spaces_is_quoted_in_the_command() -> anyhow::Result<()> {
         let cmd = script_command(Path::new("/home/a b/.antumbra/hooks/antumbra-capture.sh"));
         assert!(
             cmd.ends_with("\"/home/a b/.antumbra/hooks/antumbra-capture.sh\""),
             "{cmd}"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_machine_is_registered_under_the_name_its_hooks_report() {
+    fn the_machine_is_registered_under_the_name_its_hooks_report() -> anyhow::Result<()> {
         // A name pinned in the settings before setup is the one the hooks
         // report, so it is the one registered.
         let pinned = json!({ "env": { "ANTUMBRA_HOST_ID": " mac " } });
@@ -1904,11 +1906,15 @@ mod tests {
         let blank = json!({ "env": { "ANTUMBRA_HOST_ID": "  " } });
         assert!(!session_host(&blank).trim().is_empty());
         assert!(!session_host(&Value::Null).trim().is_empty());
+        Ok(())
     }
 
     #[test]
-    fn the_check_tells_a_helper_that_names_the_machine_from_one_that_does_not() {
-        let bundled = hooks::bundled(headers_helper_name()).unwrap();
+    fn the_check_tells_a_helper_that_names_the_machine_from_one_that_does_not() -> anyhow::Result<()>
+    {
+        let Some(bundled) = hooks::bundled(headers_helper_name()) else {
+            anyhow::bail!("the headers helper is not bundled");
+        };
         assert!(
             bundled.contains(DEVICE_HEADER),
             "this build's names the machine"
@@ -1927,10 +1933,11 @@ mod tests {
         let before = "@{ Authorization = \"Bearer $token\" } | ConvertTo-Json -Compress";
         assert_eq!(helper_state(Some(before)), Helper::Unnamed);
         assert_eq!(helper_state(None), Helper::Missing);
+        Ok(())
     }
 
     #[test]
-    fn the_check_reads_what_the_server_stamps_this_machines_writes_with() {
+    fn the_check_reads_what_the_server_stamps_this_machines_writes_with() -> anyhow::Result<()> {
         let said = |stamped: &str| json!({ "devices": [], "this_device": stamped });
         assert_eq!(stamp_of(&said("windows"), "windows"), Stamp::Named);
         assert_eq!(stamp_of(&said("windows"), " Windows "), Stamp::Named);
@@ -1943,21 +1950,25 @@ mod tests {
             stamp_of(&json!({ "devices": [] }), "windows"),
             Stamp::Unsaid
         );
+        Ok(())
     }
 
     #[test]
-    fn the_repository_is_found_from_inside_it() {
+    fn the_repository_is_found_from_inside_it() -> anyhow::Result<()> {
         let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let repo = find_repo(Some(here)).unwrap().unwrap();
+        let Some(repo) = find_repo(Some(here))? else {
+            anyhow::bail!("the crate's own directory is not seen as inside the repository");
+        };
         assert!(repo.join("docker").join("docker-compose.yml").is_file());
         assert!(
             find_repo(Some(&std::env::temp_dir())).is_err(),
             "a directory given that is not a clone is an error, not the published image"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_stack_without_a_clone_runs_the_image_setup_names() {
+    fn the_stack_without_a_clone_runs_the_image_setup_names() -> anyhow::Result<()> {
         assert!(STACK_COMPOSE.contains("image: ${ANTUMBRA_IMAGE:-antumbra-mcp:local}"));
         for name in [
             "SURREAL_PASS=",
@@ -1966,10 +1977,11 @@ mod tests {
         ] {
             assert!(STACK_ENV_EXAMPLE.contains(name), "{name}");
         }
+        Ok(())
     }
 
     #[test]
-    fn an_upgrade_moves_a_release_image_and_keeps_one_named_by_hand() {
+    fn an_upgrade_moves_a_release_image_and_keeps_one_named_by_hand() -> anyhow::Result<()> {
         assert!(release_image_moves(None));
         assert!(release_image_moves(Some("")));
         assert!(release_image_moves(Some(
@@ -1982,30 +1994,30 @@ mod tests {
         assert!(!release_image_moves(Some(
             "ghcr.io/albedosehen/antumbra-mcp-gpu:0.2.0"
         )));
+        Ok(())
     }
 
     #[test]
-    fn an_earlier_clone_setup_lends_its_env_to_the_stack() {
+    fn an_earlier_clone_setup_lends_its_env_to_the_stack() -> anyhow::Result<()> {
         let dir = std::env::temp_dir().join(format!("antumbra-earlier-{}", std::process::id()));
         let clone = dir.join("clone");
-        std::fs::create_dir_all(clone.join("docker")).unwrap();
-        std::fs::write(clone.join("docker").join(".env"), "SURREAL_PASS=old\n").unwrap();
+        std::fs::create_dir_all(clone.join("docker"))?;
+        std::fs::write(clone.join("docker").join(".env"), "SURREAL_PASS=old\n")?;
         std::fs::write(
             dir.join("setup.json"),
-            serde_json::to_string(&json!({ "mode": "local", "repo": clone })).unwrap(),
-        )
-        .unwrap();
+            serde_json::to_string(&json!({ "mode": "local", "repo": clone }))?,
+        )?;
         assert_eq!(earlier_env(&dir), Some(clone.join("docker").join(".env")));
         std::fs::write(
             dir.join("setup.json"),
-            serde_json::to_string(&json!({ "mode": "local", "repo": null })).unwrap(),
-        )
-        .unwrap();
+            serde_json::to_string(&json!({ "mode": "local", "repo": null }))?,
+        )?;
         assert_eq!(
             earlier_env(&dir),
             None,
             "a pulled stack has no clone to lend"
         );
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 }
