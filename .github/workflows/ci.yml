@@ -129,6 +129,11 @@ jobs:
       # RUSTSEC-XXXX` (or move it into an audit.toml) rather than dropping the gate.
       - name: cargo audit
         run: cargo audit
+      # The control server is its own cargo workspace with its own lockfile, so
+      # the scan above never sees it. Run from the root so `.cargo/audit.toml`
+      # applies to both.
+      - name: cargo audit (control server)
+        run: cargo audit --file crates/antumbra-control-server/Cargo.lock
 
   control-server:
     name: control server (own workspace, contract gate)
