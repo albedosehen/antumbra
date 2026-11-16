@@ -555,7 +555,10 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ("select", memory_select_rule()),
                 ("create", MEMORY_WRITE_RULE.to_string()),
                 ("update", MEMORY_WRITE_RULE.to_string()),
-                ("delete", "tenant_id = $auth.tenant".to_string()),
+                // A session may delete what it may write, and no more: the
+                // tenant filter alone let a member hard-delete any memory of
+                // the workspace, private compartments included.
+                ("delete", MEMORY_WRITE_RULE.to_string()),
             ])
             .with_indexes([
                 unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
@@ -630,7 +633,8 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ("select", "tenant_id = $auth.tenant"),
                 ("create", EDGE_LINK_RULE),
                 ("update", EDGE_LINK_RULE),
-                ("delete", "tenant_id = $auth.tenant"),
+                // Unlinking is writing the graph: the same rule as linking.
+                ("delete", EDGE_LINK_RULE),
             ])
             .with_indexes([
                 index("memory_edge_from_idx", ["tenant_id", "from_id"]),
@@ -838,6 +842,88 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The edge delete rule is the edge write rule: a member may unlink only
+    /// an edge whose target they may write, so an edge into another member's
+    /// private memory survives their `DELETE` and goes under its owner's.
+    #[tokio::test]
+    async fn a_member_cannot_delete_an_edge_into_a_memory_they_cannot_write() -> Result<()> {
+        use crate::repo::{compartment, edge, memory, principal};
+        use antumbra_core::{
+            Compartment, CompartmentId, EdgeType, Memory, MemoryEdge, MemoryNetwork, TenantId,
+            UserId,
+        };
+
+        let store = crate::Store::connect_memory(4).await?;
+        let tenant = TenantId::new("ws:org");
+        let (lily, oslo) = (UserId::new("user:lily"), UserId::new("user:oslo"));
+        principal::provision(&store, &tenant, &lily).await?;
+        principal::provision(&store, &tenant, &oslo).await?;
+        let now = chrono::Utc::now();
+        let private = CompartmentId::new("comp:lily-private");
+        compartment::create(
+            &store,
+            &Compartment::new(
+                private.clone(),
+                tenant.clone(),
+                lily.clone(),
+                "lily private",
+                now,
+            ),
+        )
+        .await?;
+        for (id, comp) in [("memory:shared", None), ("memory:salary", Some(private))] {
+            let mut m = Memory::new(id, tenant.clone(), MemoryNetwork::World, id, 0.9, now);
+            m.compartment = comp;
+            m.embedding = Some(vec![1.0, 0.0, 0.0, 0.0]);
+            memory::upsert(&store, &m).await?;
+        }
+        edge::relate(
+            &store,
+            &MemoryEdge::new(
+                tenant.clone(),
+                "memory:shared",
+                "memory:salary",
+                EdgeType::References,
+                1.0,
+                now,
+            ),
+        )
+        .await?;
+        let edges = |store: &crate::Store| {
+            let store = store.clone();
+            async move { edge::all_unscoped(&store).await.map(|e| e.len()) }
+        };
+        assert_eq!(edges(&store).await?, 1);
+
+        // oslo may not write lily's private memory, so may not unlink an edge
+        // into it: the engine leaves the row, without an error.
+        store.signin(&tenant, &oslo).await?;
+        store
+            .query_rows::<serde_json::Value>(
+                "DELETE memory_edge",
+                std::collections::BTreeMap::new(),
+            )
+            .await?;
+        store.invalidate().await?;
+        assert_eq!(
+            edges(&store).await?,
+            1,
+            "the edge survived a member's delete"
+        );
+
+        // lily, who may write the target, may unlink it.
+        store.signin(&tenant, &lily).await?;
+        store
+            .query_rows::<serde_json::Value>(
+                "DELETE memory_edge",
+                std::collections::BTreeMap::new(),
+            )
+            .await?;
+        store.invalidate().await?;
+        assert_eq!(edges(&store).await?, 0, "the owner's delete lands");
+        Ok(())
     }
 
     #[test]
