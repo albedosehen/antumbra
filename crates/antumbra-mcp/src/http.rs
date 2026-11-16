@@ -74,7 +74,6 @@ mod chunker;
 mod console;
 mod dashboard;
 mod github;
-mod limit;
 mod relics;
 pub(crate) use github::GithubConfig;
 
@@ -109,14 +108,6 @@ impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
 
     fn get(&self, key: &K) -> Option<&V> {
         self.map.get(key)
-    }
-
-    fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
-    where
-        K: std::borrow::Borrow<Q>,
-        Q: ?Sized + Eq + std::hash::Hash,
-    {
-        self.map.get_mut(key)
     }
 
     fn insert(&mut self, key: K, value: V) {

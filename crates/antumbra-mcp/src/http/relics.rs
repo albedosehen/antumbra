@@ -37,7 +37,9 @@ use antumbra_core::relic::{html_to_markdown, is_valid_slug};
 use antumbra_core::{Relic, Visibility};
 use antumbra_store::repo::relic as store_relic;
 
-use super::{limit, Bounded, HttpState, Serving};
+use antumbra_core::limit;
+
+use super::{Bounded, HttpState, Serving};
 use crate::auth::Identity;
 
 const GALLERY: &str = include_str!("dashboard/relics.html");
@@ -184,7 +186,7 @@ async fn public_relic(
     Path(slug): Path<String>,
     peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
 ) -> Response {
-    if !state.relics.public_reads.allow(&client_of(peer)).await {
+    if !state.relics.public_reads.allow(&client_of(peer)) {
         return too_many();
     }
     let not_found = || {
@@ -315,7 +317,7 @@ async fn export(
     };
     // A print is the costly export, so it is the budgeted one, before any
     // other work is done for it.
-    if format == Format::Pdf && !state.relics.exports.allow(&client_of(peer)).await {
+    if format == Format::Pdf && !state.relics.exports.allow(&client_of(peer)) {
         return too_many();
     }
     if format == Format::Pdf && state.pdf.is_none() {
