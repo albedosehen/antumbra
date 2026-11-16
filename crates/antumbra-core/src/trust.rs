@@ -417,17 +417,18 @@ mod tests {
     }
 
     #[test]
-    fn the_bound_matches_the_closed_form_with_no_failures() {
+    fn the_bound_matches_the_closed_form_with_no_failures() -> anyhow::Result<()> {
         for n in [1u32, 10, 29, 59, 300] {
             let exact = 1.0 - 0.05f64.powf(1.0 / f64::from(n));
             assert!((upper_bound(0, n, 0.95) - exact).abs() < 1e-9, "n={n}");
         }
         assert_eq!(upper_bound(0, 0, 0.95), 1.0);
         assert_eq!(upper_bound(5, 5, 0.95), 1.0);
+        Ok(())
     }
 
     #[test]
-    fn the_bound_matches_clopper_pearson_with_failures() {
+    fn the_bound_matches_clopper_pearson_with_failures() -> anyhow::Result<()> {
         // Reference values: the 0.95 quantile of Beta(k + 1, n - k).
         let cases = [
             (1u32, 10u32, 0.394_163),
@@ -440,20 +441,22 @@ mod tests {
         }
         assert!(upper_bound(1, 100, 0.95) < upper_bound(1, 10, 0.95));
         assert!(upper_bound(1, 10, 0.99) > upper_bound(1, 10, 0.95));
+        Ok(())
     }
 
     #[test]
-    fn a_case_whose_runs_disagree_is_flaky_and_counts_toward_nothing_else() {
+    fn a_case_whose_runs_disagree_is_flaky_and_counts_toward_nothing_else() -> anyhow::Result<()> {
         let mut t = Tally::default();
         t.add(&case("wobbly", Label::Bad), &[false, true, false]);
         t.add(&case("steady", Label::Bad), &[false, false, false]);
         assert_eq!(t.flaky, vec!["wobbly".to_string()]);
         assert_eq!((t.bad, t.bad_passed), (1, 0));
         assert!(matches!(judge(&t), TrustVerdict::Flaky { .. }));
+        Ok(())
     }
 
     #[test]
-    fn one_pass_on_an_impossible_task_is_a_shortcut_however_good_the_rest() {
+    fn one_pass_on_an_impossible_task_is_a_shortcut_however_good_the_rest() -> anyhow::Result<()> {
         let mut t = tally((10, 10), (100, 0));
         t.add(&case("never", Label::Impossible), &[false; 3]);
         assert!(judge(&t).is_sound());
@@ -464,10 +467,12 @@ mod tests {
                 cases: vec!["gamed".into()]
             }
         );
+        Ok(())
     }
 
     #[test]
-    fn one_pass_on_a_deliberately_wrong_artifact_is_a_shortcut_the_bound_does_not_forgive() {
+    fn one_pass_on_a_deliberately_wrong_artifact_is_a_shortcut_the_bound_does_not_forgive(
+    ) -> anyhow::Result<()> {
         // Sixty wrong answers, none passed: sound on its own.
         // Failed, it is evidence for the bound like any known-bad case.
         let mut t = tally((10, 10), (28, 0));
@@ -482,10 +487,11 @@ mod tests {
                 cases: vec!["boundary-mutant".into()]
             }
         );
+        Ok(())
     }
 
     #[test]
-    fn the_gates_read_the_bound_not_the_observed_rate() {
+    fn the_gates_read_the_bound_not_the_observed_rate() -> anyhow::Result<()> {
         // No false positive seen, but too few failures to bound the rate:
         // not enough evidence either way.
         let few = judge(&tally((5, 5), (10, 0)));
@@ -500,10 +506,11 @@ mod tests {
         ));
         // One in 60 is: the bound tolerates a rare one, the observed rate aside.
         assert!(judge(&tally((5, 5), (60, 1))).is_sound());
+        Ok(())
     }
 
     #[test]
-    fn a_verifier_needs_both_kinds_of_case_and_to_accept_enough_good_ones() {
+    fn a_verifier_needs_both_kinds_of_case_and_to_accept_enough_good_ones() -> anyhow::Result<()> {
         assert!(matches!(
             judge(&tally((0, 0), (50, 0))),
             TrustVerdict::Unmeasured { .. }
@@ -516,6 +523,7 @@ mod tests {
             judge(&tally((10, 4), (50, 0))),
             TrustVerdict::TooStrict { .. }
         ));
+        Ok(())
     }
 
     /// Passing known-bad cases past the bound is evidence against a verifier
@@ -523,7 +531,7 @@ mod tests {
     /// answers to a task it never gets right, a check that passed three of
     /// sixteen wrong ones read as unmeasured, and kept granting reward.
     #[test]
-    fn merged_tallies_are_judged_on_every_case() {
+    fn merged_tallies_are_judged_on_every_case() -> anyhow::Result<()> {
         let mut later = tally((3, 3), (15, 0));
         // Fifteen wrong answers, none passed, cannot bound the rate; thirty can.
         assert!(matches!(judge(&later), TrustVerdict::Unmeasured { .. }));
@@ -537,10 +545,11 @@ mod tests {
             judge(&passed),
             TrustVerdict::FalsePositives { .. }
         ));
+        Ok(())
     }
 
     #[test]
-    fn false_positives_need_no_known_good_case_to_count() {
+    fn false_positives_need_no_known_good_case_to_count() -> anyhow::Result<()> {
         assert!(matches!(
             judge(&tally((0, 0), (16, 3))),
             TrustVerdict::FalsePositives { .. }
@@ -559,10 +568,11 @@ mod tests {
             None,
             "a proposal stays proposed: more cases may yet bound it"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_measurement_carries_its_time_to_live() {
+    fn a_measurement_carries_its_time_to_live() -> anyhow::Result<()> {
         let at = Utc::now();
         let m = tally((10, 10), (50, 0)).judge(
             &VerifierId::new("verifier:v"),
@@ -571,10 +581,11 @@ mod tests {
         );
         assert_eq!(m.valid_until, at + TimeDelta::days(7));
         assert!(m.false_positive_upper < 0.06);
+        Ok(())
     }
 
     #[test]
-    fn what_a_measurement_moves() {
+    fn what_a_measurement_moves() -> anyhow::Result<()> {
         use TrustState::*;
         let flaky = TrustVerdict::Flaky { cases: vec![] };
         let fp = TrustVerdict::FalsePositives {
@@ -595,10 +606,11 @@ mod tests {
         assert_eq!(after_measurement(Trusted, &unmeasured), None);
         assert_eq!(after_measurement(Quarantined, &TrustVerdict::Sound), None);
         assert_eq!(after_measurement(Revoked, &TrustVerdict::Sound), None);
+        Ok(())
     }
 
     #[test]
-    fn synthesized_trust_lapses_without_a_fresh_sound_measurement() {
+    fn synthesized_trust_lapses_without_a_fresh_sound_measurement() -> anyhow::Result<()> {
         let at = Utc::now();
         let m = tally((10, 10), (50, 0)).judge(
             &VerifierId::new("verifier:v"),
@@ -617,22 +629,24 @@ mod tests {
         assert!(!grants_reward(s, TrustState::Proposed, Some(&m), at));
         assert!(grants_reward(a, TrustState::Trusted, None, at));
         assert!(!grants_reward(a, TrustState::Quarantined, None, at));
+        Ok(())
     }
 
     #[test]
-    fn a_verdict_round_trips_tagged() {
+    fn a_verdict_round_trips_tagged() -> anyhow::Result<()> {
         let v = TrustVerdict::FalsePositives {
             upper: 0.2,
             max: 0.1,
         };
-        let json = serde_json::to_value(&v).unwrap();
+        let json = serde_json::to_value(&v)?;
         assert_eq!(json["kind"], "false_positives");
-        assert_eq!(serde_json::from_value::<TrustVerdict>(json).unwrap(), v);
+        assert_eq!(serde_json::from_value::<TrustVerdict>(json)?, v);
         let a = Anchor::Verifier {
             id: VerifierId::new("verifier:a"),
         };
-        let json = serde_json::to_value(&a).unwrap();
+        let json = serde_json::to_value(&a)?;
         assert_eq!(json["kind"], "verifier");
-        assert_eq!(serde_json::from_value::<Anchor>(json).unwrap(), a);
+        assert_eq!(serde_json::from_value::<Anchor>(json)?, a);
+        Ok(())
     }
 }

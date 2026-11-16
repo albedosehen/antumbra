@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context as _;
 
 use chrono::Duration;
 
@@ -6,7 +7,13 @@ use crate::ids::TenantId;
 use crate::memory::MemoryNetwork;
 
 /// A claim stored as its memory would be, last seen `days_ago`.
-fn edge(from: &str, to: &str, source: Source, days_ago: i64, now: DateTime<Utc>) -> Edge {
+fn edge(
+    from: &str,
+    to: &str,
+    source: Source,
+    days_ago: i64,
+    now: DateTime<Utc>,
+) -> anyhow::Result<Edge> {
     let claim = Claim::new(from, to, source, "test evidence");
     let mut m = Memory::new(
         claim.memory_id(&TenantId::new("ws:t")),
@@ -18,11 +25,11 @@ fn edge(from: &str, to: &str, source: Source, days_ago: i64, now: DateTime<Utc>)
     )
     .with_evidence(claim.evidence(None));
     m.updated_at = now - Duration::days(days_ago);
-    Edge::of(&m).expect("a dependency memory reads back as an edge")
+    Edge::of(&m).context("a dependency memory reads back as an edge")
 }
 
 #[test]
-fn a_claim_round_trips_through_its_memory() {
+fn a_claim_round_trips_through_its_memory() -> anyhow::Result<()> {
     let now = Utc::now();
     let anchor = GitProvenance::new("github.com/acme/web", "abc1234").at_path("package.json");
     let claim = Claim::new(
@@ -50,7 +57,7 @@ fn a_claim_round_trips_through_its_memory() {
         now,
     )
     .with_evidence(claim.evidence(Some(&anchor)));
-    let e = Edge::of(&m).unwrap();
+    let e = Edge::of(&m).context("a dependency memory reads back as an edge")?;
     assert_eq!(
         (e.from.as_str(), e.to.as_str()),
         ("github.com/acme/web", "github.com/acme/orders")
@@ -60,7 +67,10 @@ fn a_claim_round_trips_through_its_memory() {
         e.detail.as_deref(),
         Some("package.json names @acme/orders-client")
     );
-    assert_eq!(e.anchor.unwrap().path.as_deref(), Some("package.json"));
+    assert_eq!(
+        e.anchor.context("an anchor")?.path.as_deref(),
+        Some("package.json")
+    );
 
     let plain = Memory::new(
         "memory:x",
@@ -71,10 +81,11 @@ fn a_claim_round_trips_through_its_memory() {
         now,
     );
     assert_eq!(Edge::of(&plain), None, "not a dependency");
+    Ok(())
 }
 
 #[test]
-fn each_source_has_its_own_identity_so_they_reinforce_separately() {
+fn each_source_has_its_own_identity_so_they_reinforce_separately() -> anyhow::Result<()> {
     let declared = Claim::new("a", "b", Source::Declared, "");
     let observed = Claim::new("a", "b", Source::Observed, "");
     let t = TenantId::new("ws:t");
@@ -90,32 +101,34 @@ fn each_source_has_its_own_identity_so_they_reinforce_separately() {
     );
     assert_eq!(Source::parse("observed"), Some(Source::Observed));
     assert_eq!(Source::parse("rumor"), None);
+    Ok(())
 }
 
 #[test]
-fn an_edge_nobody_sees_again_fades_by_its_source() {
+fn an_edge_nobody_sees_again_fades_by_its_source() -> anyhow::Result<()> {
     let now = Utc::now();
-    let fresh = edge("a", "b", Source::Observed, 0, now);
-    let month = edge("a", "b", Source::Observed, 30, now);
+    let fresh = edge("a", "b", Source::Observed, 0, now)?;
+    let month = edge("a", "b", Source::Observed, 30, now)?;
     assert!((fresh.weight(now) - 0.85).abs() < 1e-3);
     assert!((month.weight(now) - 0.425).abs() < 1e-2, "one half-life");
-    let declared_month = edge("a", "b", Source::Declared, 30, now);
+    let declared_month = edge("a", "b", Source::Declared, 30, now)?;
     assert!(
         declared_month.weight(now) > month.weight(now),
         "a declaration fades slower"
     );
+    Ok(())
 }
 
 /// web -> checkout -> orders, and billing -> orders. Who breaks if orders
 /// does: checkout and billing directly, web through checkout.
 #[test]
-fn dependents_are_reached_through_the_strongest_path_with_evidence() {
+fn dependents_are_reached_through_the_strongest_path_with_evidence() -> anyhow::Result<()> {
     let now = Utc::now();
     let edges = vec![
-        edge("web", "checkout", Source::Declared, 0, now),
-        edge("checkout", "orders", Source::Declared, 0, now),
-        edge("checkout", "orders", Source::Observed, 0, now),
-        edge("billing", "orders", Source::Learned, 0, now),
+        edge("web", "checkout", Source::Declared, 0, now)?,
+        edge("checkout", "orders", Source::Declared, 0, now)?,
+        edge("checkout", "orders", Source::Observed, 0, now)?,
+        edge("billing", "orders", Source::Learned, 0, now)?,
     ];
     let reached = blast_radius(&edges, "orders", Direction::Dependents, 3, 0.3, now);
     let order: Vec<(&str, u32)> = reached
@@ -143,17 +156,18 @@ fn dependents_are_reached_through_the_strongest_path_with_evidence() {
     let needs = blast_radius(&edges, "web", Direction::Dependencies, 3, 0.3, now);
     let needed: Vec<&str> = needs.iter().map(|r| r.service.as_str()).collect();
     assert_eq!(needed, ["checkout", "orders"]);
+    Ok(())
 }
 
 /// A model's claim alone stays under the floor; a declaration of the same
 /// edge lifts it, and the claim's evidence comes along.
 #[test]
-fn a_claim_alone_stays_under_the_floor_until_corroborated() {
+fn a_claim_alone_stays_under_the_floor_until_corroborated() -> anyhow::Result<()> {
     let now = Utc::now();
-    let claimed = vec![edge("web", "search", Source::Claimed, 0, now)];
+    let claimed = vec![edge("web", "search", Source::Claimed, 0, now)?];
     assert!(blast_radius(&claimed, "search", Direction::Dependents, 3, 0.4, now).is_empty());
     let mut corroborated = claimed.clone();
-    corroborated.push(edge("web", "search", Source::Declared, 0, now));
+    corroborated.push(edge("web", "search", Source::Declared, 0, now)?);
     let reached = blast_radius(&corroborated, "search", Direction::Dependents, 3, 0.4, now);
     assert_eq!(reached.len(), 1);
     let sources: Vec<Source> = reached[0].path[0].edges.iter().map(|e| e.source).collect();
@@ -162,18 +176,19 @@ fn a_claim_alone_stays_under_the_floor_until_corroborated() {
         [Source::Declared, Source::Claimed],
         "strongest first"
     );
+    Ok(())
 }
 
 /// Depth bounds the walk, and a cycle neither loops nor reaches back to the
 /// start.
 #[test]
-fn depth_bounds_the_walk_and_cycles_do_not_loop() {
+fn depth_bounds_the_walk_and_cycles_do_not_loop() -> anyhow::Result<()> {
     let now = Utc::now();
     let edges = vec![
-        edge("b", "a", Source::Declared, 0, now),
-        edge("c", "b", Source::Declared, 0, now),
-        edge("a", "c", Source::Declared, 0, now),
-        edge("d", "c", Source::Declared, 0, now),
+        edge("b", "a", Source::Declared, 0, now)?,
+        edge("c", "b", Source::Declared, 0, now)?,
+        edge("a", "c", Source::Declared, 0, now)?,
+        edge("d", "c", Source::Declared, 0, now)?,
     ];
     let one = blast_radius(&edges, "a", Direction::Dependents, 1, 0.1, now);
     assert_eq!(
@@ -185,12 +200,13 @@ fn depth_bounds_the_walk_and_cycles_do_not_loop() {
     names.sort_unstable();
     assert_eq!(names, ["b", "c", "d"], "the start is never reached again");
     assert!(blast_radius(&edges, "nowhere", Direction::Dependents, 6, 0.1, now).is_empty());
+    Ok(())
 }
 
 /// The pair list keeps every pair, weak ones too, strongest first, and a
 /// service's filter keeps the pairs it is on either end of.
 #[test]
-fn every_pair_is_listed_strongest_first_and_filtered_by_either_end() {
+fn every_pair_is_listed_strongest_first_and_filtered_by_either_end() -> anyhow::Result<()> {
     let now = Utc::now();
     let edges = [
         edge(
@@ -199,28 +215,28 @@ fn every_pair_is_listed_strongest_first_and_filtered_by_either_end() {
             Source::Declared,
             0,
             now,
-        ),
+        )?,
         edge(
             "github.com/a/web",
             "github.com/a/orders",
             Source::Observed,
             0,
             now,
-        ),
+        )?,
         edge(
             "github.com/a/orders",
             "github.com/a/db",
             Source::Claimed,
             0,
             now,
-        ),
+        )?,
         edge(
             "github.com/a/billing",
             "github.com/a/ledger",
             Source::Learned,
             0,
             now,
-        ),
+        )?,
     ];
     let all: Vec<(String, String, usize)> = hops(&edges, None, now)
         .into_iter()
@@ -250,4 +266,5 @@ fn every_pair_is_listed_strongest_first_and_filtered_by_either_end() {
             ("github.com/a/orders".into(), "github.com/a/db".into()),
         ]
     );
+    Ok(())
 }

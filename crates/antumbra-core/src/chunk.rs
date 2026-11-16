@@ -61,9 +61,10 @@ pub fn cut_hash(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn pieces_cover_the_text_overlapping_and_move_forward() {
+    fn pieces_cover_the_text_overlapping_and_move_forward() -> anyhow::Result<()> {
         let text = (0..200)
             .map(|i| format!("w{i:03}"))
             .collect::<Vec<_>>()
@@ -72,19 +73,20 @@ mod tests {
         assert!(pieces.len() > 20, "{pieces:?}");
         assert!(pieces.iter().all(|p| p.len() <= 44), "{pieces:?}");
         assert!(pieces[0].starts_with("w000"));
-        assert!(pieces.last().unwrap().ends_with("w199"));
+        assert!(pieces.last().context("a last piece")?.ends_with("w199"));
         for pair in pieces.windows(2) {
-            let last = pair[0].split(' ').next_back().unwrap();
+            let last = pair[0].split(' ').next_back().context("a last word")?;
             assert!(
                 pair[1].contains(last),
                 "consecutive pieces overlap: {pair:?}"
             );
             assert_ne!(pair[0], pair[1]);
         }
+        Ok(())
     }
 
     #[test]
-    fn a_short_text_is_one_piece_and_a_long_word_is_its_own() {
+    fn a_short_text_is_one_piece_and_a_long_word_is_its_own() -> anyhow::Result<()> {
         assert_eq!(
             split("a short memory", MEMORY_CHUNK_CHARS),
             ["a short memory"]
@@ -93,11 +95,12 @@ mod tests {
         let long = "x".repeat(100);
         let pieces = split(&format!("{long} tail words here"), 40);
         assert_eq!(pieces[0], long);
-        assert!(pieces.last().unwrap().ends_with("here"));
+        assert!(pieces.last().context("a last piece")?.ends_with("here"));
+        Ok(())
     }
 
     #[test]
-    fn the_hash_is_stable_and_follows_the_content() {
+    fn the_hash_is_stable_and_follows_the_content() -> anyhow::Result<()> {
         assert_eq!(content_hash("abc"), content_hash("abc"));
         assert_ne!(content_hash("abc"), content_hash("abd"));
         assert_eq!(content_hash("abc").len(), 32);
@@ -108,5 +111,6 @@ mod tests {
             "the size is part of it"
         );
         assert_eq!(cut_hash("abc"), cut_hash("abc"));
+        Ok(())
     }
 }

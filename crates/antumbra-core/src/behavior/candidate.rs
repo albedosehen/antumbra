@@ -297,6 +297,7 @@ mod tests {
     use super::*;
     use crate::behavior::{self, Status};
     use crate::ids::{TenantId, UserId};
+    use anyhow::Context as _;
 
     fn tenant() -> TenantId {
         TenantId::new("ws:test")
@@ -311,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn a_sentence_opens_like_a_rule_with_a_negation_or_a_conditioned_verb() {
+    fn a_sentence_opens_like_a_rule_with_a_negation_or_a_conditioned_verb() -> anyhow::Result<()> {
         assert_eq!(
             opener("Never stack a pull request on an unmerged branch"),
             Some("never")
@@ -355,10 +356,11 @@ mod tests {
         assert_eq!(opener("Stop p95 1"), None, "numbers are not words");
         let long = format!("Never {}", "x ".repeat(100));
         assert_eq!(opener(&long), None, "a paragraph is not a rule");
+        Ok(())
     }
 
     #[test]
-    fn rule_sentences_are_cut_at_sentence_ends_and_keep_their_order() {
+    fn rule_sentences_are_cut_at_sentence_ends_and_keep_their_order() -> anyhow::Result<()> {
         let note = "Deploy: kuskokwim at 42bf9b7. Shon said: never stack pull requests; \
                     always open them against main. The gate never fires.\n\
                     - Use `pdftotext -layout` for every PDF";
@@ -368,10 +370,11 @@ mod tests {
         assert_eq!(hits[0].1, "never stack pull requests");
         assert_eq!(hits[1].1, "always open them against main");
         assert_eq!(hits[2].1, "Use `pdftotext -layout` for every PDF");
+        Ok(())
     }
 
     #[test]
-    fn a_tag_and_a_phrase_pick_a_memory_whatever_its_shape() {
+    fn a_tag_and_a_phrase_pick_a_memory_whatever_its_shape() -> anyhow::Result<()> {
         assert_eq!(
             tag("[feedback] the invitation email should be branded"),
             Some("feedback")
@@ -403,12 +406,13 @@ mod tests {
             phrases("The ruler is 30 cm; it corrects nothing."),
             Vec::<&str>::new()
         );
+        Ok(())
     }
 
     #[test]
-    fn an_opinion_is_picked_and_a_fact_without_a_rules_shape_is_not() {
+    fn an_opinion_is_picked_and_a_fact_without_a_rules_shape_is_not() -> anyhow::Result<()> {
         let opinion = memory("memory:o", MemoryNetwork::Opinion, "I like short PRs.");
-        let picked = candidate(&opinion, &nobody()).expect("picked");
+        let picked = candidate(&opinion, &nobody()).context("picked")?;
         assert_eq!(picked.reasons, [OPINION]);
         assert!(picked.hits.is_empty());
         assert_eq!(picked.excerpt, "I like short PRs.");
@@ -419,7 +423,7 @@ mod tests {
             "Branch naming in this repository. Never name a branch feature/anything; \
              use feat/{issue}-{slug} instead.",
         );
-        let picked = candidate(&rule, &nobody()).expect("picked");
+        let picked = candidate(&rule, &nobody()).context("picked")?;
         assert_eq!(picked.reasons, ["opens:never", "opens:use"]);
         assert_eq!(
             picked.hits,
@@ -439,10 +443,11 @@ mod tests {
             candidate(&fact, &nobody()).is_none(),
             "cue words mid-sentence are facts"
         );
+        Ok(())
     }
 
     #[test]
-    fn records_volatile_memories_and_cited_memories_are_passed_over() {
+    fn records_volatile_memories_and_cited_memories_are_passed_over() -> anyhow::Result<()> {
         let mut behavior = memory("memory:b", MemoryNetwork::Opinion, "Never stack.");
         behavior
             .evidence
@@ -468,10 +473,11 @@ mod tests {
         let cited: HashSet<String> = ["memory:r".to_string()].into_iter().collect();
         assert!(candidate(&rule, &cited).is_none(), "cited by a behavior");
         assert!(candidate(&rule, &nobody()).is_some());
+        Ok(())
     }
 
     #[test]
-    fn a_candidate_carries_its_repository_and_a_bounded_excerpt() {
+    fn a_candidate_carries_its_repository_and_a_bounded_excerpt() -> anyhow::Result<()> {
         let long = format!("[feedback] {}", "word ".repeat(200));
         let mut m = memory("memory:l", MemoryNetwork::Bank, &long);
         m.evidence.push(
@@ -479,11 +485,12 @@ mod tests {
                 .on_branch("main")
                 .to_evidence(),
         );
-        let c = candidate(&m, &nobody()).expect("picked");
+        let c = candidate(&m, &nobody()).context("picked")?;
         assert_eq!(c.reasons, ["tag:feedback"]);
         assert_eq!(c.repo.as_deref(), Some("github.com/acme/api"));
         assert_eq!(c.excerpt.chars().count(), EXCERPT_CHARS);
         assert_eq!(c.network, MemoryNetwork::Bank);
+        Ok(())
     }
 
     /// Runs the filter over a dump of a real store and prints what it picks,
@@ -493,20 +500,28 @@ mod tests {
     /// as `list_memories` returns them, and run with `--ignored --nocapture`.
     #[test]
     #[ignore = "reads a store dump; set ANTUMBRA_SWEEP_DIR"]
-    fn measure_on_a_sweep() {
+    fn measure_on_a_sweep() -> anyhow::Result<()> {
         let Ok(dir) = std::env::var("ANTUMBRA_SWEEP_DIR") else {
             println!("ANTUMBRA_SWEEP_DIR unset -- skipped");
-            return;
+            return Ok(());
         };
         let mut rows = Vec::new();
-        for entry in std::fs::read_dir(&dir).expect("the sweep directory") {
-            let path = entry.expect("an entry").path();
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
+        for entry in
+            std::fs::read_dir(&dir).with_context(|| format!("the sweep directory {dir}"))?
+        {
+            let path = entry.context("an entry of the sweep directory")?.path();
+            let name = path
+                .file_name()
+                .with_context(|| format!("{} has no file name", path.display()))?
+                .to_string_lossy()
+                .to_string();
             if !(name.starts_with("page-") && name.ends_with(".json")) {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).expect("a page");
-            let page: serde_json::Value = serde_json::from_str(&text).expect("json");
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("a page at {}", path.display()))?;
+            let page: serde_json::Value = serde_json::from_str(&text)
+                .with_context(|| format!("json in {}", path.display()))?;
             for v in page["memories"].as_array().cloned().unwrap_or_default() {
                 rows.push(v);
             }
@@ -560,5 +575,6 @@ mod tests {
         for s in samples {
             println!("  {s}");
         }
+        Ok(())
     }
 }

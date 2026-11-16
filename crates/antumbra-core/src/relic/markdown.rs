@@ -800,7 +800,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_page_reads_as_its_markdown() {
+    fn a_page_reads_as_its_markdown() -> anyhow::Result<()> {
         let page = r##"<!doctype html><html><head><title>Plan</title>
             <style>h1 { color: red }</style></head><body>
             <h1>ACE right-sizing</h1>
@@ -825,10 +825,11 @@ mod tests {
              Run `kubectl get ir` first.  \nThen wait.\n\n\
              ---\n"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_table_keeps_its_rows_and_numeric_columns_align_right() {
+    fn a_table_keeps_its_rows_and_numeric_columns_align_right() -> anyhow::Result<()> {
         let page = r#"<table><caption>Prod runtimes</caption>
             <thead><tr><th>Runtime</th><th class="num">Limit</th></tr></thead>
             <tbody><tr><td>ir-01-bidtools<td class="num">4000m
@@ -841,10 +842,11 @@ mod tests {
              | ir-01-bidtools | 4000m |  |\n\
              | a\\|b | wide |  |\n"
         );
+        Ok(())
     }
 
     #[test]
-    fn code_keeps_its_spacing_and_names_its_language() {
+    fn code_keeps_its_spacing_and_names_its_language() -> anyhow::Result<()> {
         let page = "<pre class=\"language-yaml\">\nspec:\n  limits: { cpu: 500m }\n</pre>\
                     <pre><code>a &lt; b &amp;&amp; ```fence```</code></pre>";
         assert_eq!(
@@ -852,18 +854,20 @@ mod tests {
             "```yaml\nspec:\n  limits: { cpu: 500m }\n```\n\n\
              ````\na < b && ```fence```\n````\n"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_title_heads_a_page_without_an_h1() {
+    fn the_title_heads_a_page_without_an_h1() -> anyhow::Result<()> {
         assert_eq!(
             html_to_markdown("<title>The &amp; Plan</title><h2>Summary</h2><p>Text</p>"),
             "# The & Plan\n\n## Summary\n\nText\n"
         );
+        Ok(())
     }
 
     #[test]
-    fn elements_set_apart_by_styles_keep_their_words_apart() {
+    fn elements_set_apart_by_styles_keep_their_words_apart() -> anyhow::Result<()> {
         assert_eq!(
             html_to_markdown(
                 "<ul><li><span>Kevin</span><span>Approve the limits.</span></li></ul>\
@@ -871,10 +875,11 @@ mod tests {
             ),
             "- Kevin Approve the limits.\n\n**Phase 1** Weeks 1–2, x2 and [a](/a).\n"
         );
+        Ok(())
     }
 
     #[test]
-    fn broken_markup_still_reads() {
+    fn broken_markup_still_reads() -> anyhow::Result<()> {
         assert_eq!(
             html_to_markdown("<p>one<p>two</div></span><div>three < four * 2"),
             "one\n\ntwo\n\nthree \\< four \\* 2\n"
@@ -890,5 +895,6 @@ mod tests {
             ),
             "[link](<https://x.test/a b>) <https://x.test>\n"
         );
+        Ok(())
     }
 }

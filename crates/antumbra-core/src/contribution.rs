@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn unused_is_not_useless() {
+    fn unused_is_not_useless() -> anyhow::Result<()> {
         let unused = record(0, None, None);
         assert!(unused.is_unused() && unused.delta().is_none());
         let useless = record(4, Some(0.5), Some(0.5));
@@ -156,10 +156,11 @@ mod tests {
         assert_eq!(useless.delta(), Some(0.0));
         assert_eq!(useless.share(), 0.5);
         assert_eq!(record(2, Some(0.75), Some(0.25)).delta(), Some(0.5));
+        Ok(())
     }
 
     #[test]
-    fn headroom_is_the_oracle_over_the_population() {
+    fn headroom_is_the_oracle_over_the_population() -> anyhow::Result<()> {
         let mut b = BaselineRecord {
             run_id: RunId::new("run"),
             generation: Generation(1),
@@ -176,5 +177,6 @@ mod tests {
         assert_eq!(b.headroom(), Some(0.125));
         b.oracle = None;
         assert_eq!(b.headroom(), None);
+        Ok(())
     }
 }

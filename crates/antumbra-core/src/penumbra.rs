@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_two_coherent_regions() {
+    fn groups_two_coherent_regions() -> anyhow::Result<()> {
         // Two tight clusters along orthogonal axes, plus one outlier singleton.
         let memories = vec![
             mem("m:1", "deno run typescript", vec![1.0, 0.0, 0.0], None),
@@ -221,10 +221,11 @@ mod tests {
             assert_eq!(p.members.len(), 3);
             assert!(p.cohesion > 0.9);
         }
+        Ok(())
     }
 
     #[test]
-    fn clustering_is_policy_free_over_the_given_pool() {
+    fn clustering_is_policy_free_over_the_given_pool() -> anyhow::Result<()> {
         // The core clusters whatever it is handed; pool selection (skipping
         // already-filed memory) is the caller's job, not this function's.
         let memories = vec![
@@ -234,20 +235,22 @@ mod tests {
         ];
         let out = propose_compartments(&memories, &ClusterConfig::default());
         assert_eq!(out.len(), 1, "core clusters the pool it is given");
+        Ok(())
     }
 
     #[test]
-    fn drops_clusters_below_min_size() {
+    fn drops_clusters_below_min_size() -> anyhow::Result<()> {
         let memories = vec![
             mem("m:1", "lonely pair one", vec![1.0, 0.0], None),
             mem("m:2", "lonely pair two", vec![0.99, 0.0], None),
         ];
         let out = propose_compartments(&memories, &ClusterConfig::default());
         assert!(out.is_empty(), "a pair is below the default min_size of 3");
+        Ok(())
     }
 
     #[test]
-    fn ignores_memories_without_embeddings() {
+    fn ignores_memories_without_embeddings() -> anyhow::Result<()> {
         let mut m = Memory::new(
             MemoryId::new("m:1"),
             TenantId::new("ws:1"),
@@ -259,10 +262,11 @@ mod tests {
         m.embedding = None;
         let out = propose_compartments(&[m], &ClusterConfig::default());
         assert!(out.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn label_is_a_slug_of_the_medoid() {
+    fn label_is_a_slug_of_the_medoid() -> anyhow::Result<()> {
         let memories = vec![
             mem("m:1", "Deno Run TypeScript!", vec![1.0, 0.0, 0.0], None),
             mem("m:2", "deno test", vec![0.99, 0.02, 0.0], None),
@@ -276,10 +280,11 @@ mod tests {
             out[0].label
         );
         assert!(!out[0].label.contains('!'), "punctuation stripped");
+        Ok(())
     }
 
     #[test]
-    fn proposals_sorted_by_cohesion() {
+    fn proposals_sorted_by_cohesion() -> anyhow::Result<()> {
         let memories = vec![
             // Tight cluster (cohesion ~1.0).
             mem("m:1", "tight a", vec![1.0, 0.0, 0.0], None),
@@ -298,5 +303,6 @@ mod tests {
             out[0].cohesion,
             out[1].cohesion
         );
+        Ok(())
     }
 }

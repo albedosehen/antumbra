@@ -148,12 +148,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cosine_handles_degenerate_inputs() {
+    fn cosine_handles_degenerate_inputs() -> anyhow::Result<()> {
         assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), 1.0);
         assert_eq!(cosine_similarity(&[0.0, 0.0], &[1.0, 1.0]), 0.0);
         assert_eq!(cosine_similarity(&[1.0], &[1.0, 0.0]), 0.0);
         let orth = cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]);
         assert!(orth.abs() < 1e-6);
+        Ok(())
     }
 
     fn placement_expert(placed_on: Option<&str>) -> Expert {
@@ -177,38 +178,41 @@ mod tests {
     /// The row travels and the weights do not. Once a user's nodes reconcile,
     /// every node learns about every expert while exactly one holds each file.
     #[test]
-    fn an_expert_is_servable_only_where_its_adapter_actually_is() {
+    fn an_expert_is_servable_only_where_its_adapter_actually_is() -> anyhow::Result<()> {
         let on_the_rig = placement_expert(Some("the-rig"));
         assert!(on_the_rig.is_placed_on("the-rig"));
         assert!(
             !on_the_rig.is_placed_on("her-laptop"),
             "the laptop would route to a path it cannot open"
         );
+        Ok(())
     }
 
     /// Every expert minted before placement was recorded. There was one machine
     /// then, so "unknown" and "here" were the same answer, and reading it any
     /// other way would un-serve a population that works today.
     #[test]
-    fn an_unplaced_expert_is_servable_anywhere() {
+    fn an_unplaced_expert_is_servable_anywhere() -> anyhow::Result<()> {
         let old = placement_expert(None);
         assert!(old.is_placed_on("the-rig"));
         assert!(old.is_placed_on("her-laptop"));
         assert!(old.is_placed_on("anywhere-at-all"));
+        Ok(())
     }
 
     /// The host name is compared whole. A node is not "the same machine" as one
     /// whose name it happens to start with.
     #[test]
-    fn exemplars_are_read_from_the_card() {
+    fn exemplars_are_read_from_the_card() -> anyhow::Result<()> {
         let mut e = placement_expert(None);
         assert!(e.exemplars().is_empty());
         e.capability_card = serde_json::json!({"exemplars": ["a", 1, "b"]});
         assert_eq!(e.exemplars(), vec!["a".to_string(), "b".to_string()]);
+        Ok(())
     }
 
     #[test]
-    fn only_a_card_marked_standing_has_a_standing_scope() {
+    fn only_a_card_marked_standing_has_a_standing_scope() -> anyhow::Result<()> {
         let mut e = placement_expert(None);
         assert_eq!(e.standing_scope(), None);
         e.capability_card = serde_json::json!({"scope": "everywhere"});
@@ -217,14 +221,16 @@ mod tests {
         assert_eq!(e.standing_scope(), Some("github.com/a/b"));
         e.capability_card = serde_json::json!({"standing": true});
         assert_eq!(e.standing_scope(), None);
+        Ok(())
     }
 
     #[test]
-    fn placement_is_not_a_prefix_match() {
+    fn placement_is_not_a_prefix_match() -> anyhow::Result<()> {
         let node = placement_expert(Some("rig"));
         assert!(node.is_placed_on("rig"));
         assert!(!node.is_placed_on("rig-2"));
         assert!(!node.is_placed_on("the-rig"));
         assert!(!node.is_placed_on(""));
+        Ok(())
     }
 }

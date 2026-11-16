@@ -263,6 +263,7 @@ dependencies = [
 name = "antumbra-core"
 version = "0.2.7"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "fancy-regex 0.17.0",
