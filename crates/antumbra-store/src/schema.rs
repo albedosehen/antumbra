@@ -79,6 +79,17 @@ const TENANT_PERMS: [(&str, &str); 4] = [
     ("delete", "tenant_id = $auth.tenant"),
 ];
 
+/// Permissions for a row only the owner view touches: a member's record
+/// session neither reads nor writes it. The owner view (root, or the database
+/// user) is not subject to table permissions, so the server's own reads and
+/// the operator's writes go through as before.
+const OWNER_VIEW_PERMS: [(&str, &str); 4] = [
+    ("select", "false"),
+    ("create", "false"),
+    ("update", "false"),
+    ("delete", "false"),
+];
+
 /// Compartment permissions: any member may read a row, since the memory rule's
 /// subqueries resolve through it, but only its owner may create, update or
 /// delete it. The memory rule trusts the row live (`OWN_COMPARTMENT.owner =
@@ -713,10 +724,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("principal_user_idx", ["user"]),
             ]),
         // Per-workspace embedder endpoint (hosted multi-tenant): one row per
-        // tenant, tenant-scoped so a workspace sets only its own.
+        // tenant. The server reads it as the owner when it builds a workspace's
+        // session, and the operator's CLI writes it as the owner; it holds the
+        // endpoint's key, so no member session reads or writes it.
         table_schema("embedder_config")
             .with_mode(TableMode::Schemaless)
-            .with_permissions(TENANT_PERMS)
+            .with_permissions(OWNER_VIEW_PERMS)
             .with_indexes([unique_index("embedder_config_tenant_uq", ["tenant_id"])]),
         // The loop's readings of a workspace's behavior audits against the
         // regression confidence admission is held to: one row per reading,
