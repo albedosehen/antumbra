@@ -36,7 +36,7 @@ use crate::knn::{candidate_pool, search_effort};
 use crate::repo::sync::{ChangeAction, ChangeEvent};
 use crate::store::Store;
 
-const TABLE: &str = "memory";
+const TABLE: &str = crate::tables::MEMORY;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct MemoryRow {

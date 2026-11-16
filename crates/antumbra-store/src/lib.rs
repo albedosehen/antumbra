@@ -17,6 +17,7 @@ mod lexical;
 pub mod repo;
 pub mod schema;
 pub mod store;
+pub mod tables;
 
 pub use schema::{EMBED_DIM, TENANT_SESSION};
 pub use store::Store;

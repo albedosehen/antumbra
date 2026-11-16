@@ -2,6 +2,8 @@
 //! version (the last-write-wins tiebreaker), and what a user-scoped collector
 //! carries from it.
 
+use antumbra_store::tables;
+
 use crate::scope::{Replicate, Scope};
 
 /// A table to replicate and the row field whose RFC3339 timestamp orders writes
@@ -35,23 +37,23 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
     // compartment carries `updated_at` (bumped on delete) so a deletion
     // out-versions a stale live row and propagates under LWW.
     TableSpec::new(
-        "compartment",
+        tables::COMPARTMENT,
         "updated_at",
         Replicate::Owned(|scope: &Scope, row| scope.owns_compartment(row)),
     ),
     // grant carries `updated_at` (bumped on revoke) so a revocation out-versions a
     // stale live grant and propagates under LWW.
     TableSpec::new(
-        "grant",
+        tables::GRANT,
         "updated_at",
         Replicate::Owned(|scope: &Scope, row| scope.grants_own_compartment(row)),
     ),
     TableSpec::new(
-        "memory",
+        tables::MEMORY,
         "updated_at",
         Replicate::Owned(|scope: &Scope, row| scope.holds_memory(row)),
     ),
-    TableSpec::new("memory_edge", "created_at", Replicate::EngineDecides),
+    TableSpec::new(tables::MEMORY_EDGE, "created_at", Replicate::EngineDecides),
     // The fabric itself. These two are what make a user's nodes
     // more than a set of machines that happen to share a database.
     //
@@ -70,13 +72,37 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
     // wins has to order them. A claim that lost to a stale pending row would
     // hand the same run to a second trainer.
     TableSpec::new(
-        "device_profile",
+        tables::DEVICE_PROFILE,
         "updated_at",
         Replicate::Owned(|scope: &Scope, row| scope.is_own_user(row)),
     ),
     TableSpec::new(
-        "genesis_request",
+        tables::GENESIS_REQUEST,
         "updated_at",
         Replicate::Owned(|scope: &Scope, row| scope.is_own_user(row)),
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every table the sync replicates is one the schema defines: a renamed
+    /// store table fails here by name rather than silently stopping its
+    /// replication.
+    #[test]
+    fn every_replicated_table_is_one_the_schema_defines() {
+        let defined: Vec<String> = antumbra_store::schema::tables(antumbra_store::EMBED_DIM as u32)
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
+        for spec in PENUMBRA_TABLES {
+            assert!(
+                defined.iter().any(|d| d == spec.name),
+                "{} is replicated but not defined",
+                spec.name
+            );
+        }
+        assert!(PENUMBRA_TABLES.len() >= 6);
+    }
+}

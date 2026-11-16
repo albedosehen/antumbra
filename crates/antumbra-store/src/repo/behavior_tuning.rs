@@ -14,7 +14,7 @@ use antumbra_core::{Result, TenantId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "behavior_tuning";
+const TABLE: &str = crate::tables::BEHAVIOR_TUNING;
 
 /// One reading, as stored.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -19,7 +19,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const GENESIS_REQUEST: &str = "genesis_request";
+const GENESIS_REQUEST: &str = crate::tables::GENESIS_REQUEST;
 
 #[derive(Serialize, Deserialize)]
 struct RequestRow {

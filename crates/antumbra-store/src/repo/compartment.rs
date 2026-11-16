@@ -19,8 +19,8 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const COMPARTMENT: &str = "compartment";
-const GRANT: &str = "grant";
+const COMPARTMENT: &str = crate::tables::COMPARTMENT;
+const GRANT: &str = crate::tables::GRANT;
 
 #[derive(Serialize, Deserialize)]
 struct CompartmentRow {

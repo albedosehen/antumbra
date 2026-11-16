@@ -12,7 +12,7 @@ use antumbra_core::{ExpertId, Generation, Result, Shadow, ShadowId, ShadowStatus
 use crate::dto::parse_dt;
 use crate::store::Store;
 
-const TABLE: &str = "shadow";
+const TABLE: &str = crate::tables::SHADOW;
 
 #[derive(Serialize, Deserialize)]
 struct ShadowRow {

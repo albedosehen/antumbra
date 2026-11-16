@@ -22,7 +22,7 @@ pub(super) fn resource() -> Resource {
     // claims.
     read_only(
         "shadows",
-        "shadow",
+        antumbra_store::tables::SHADOW,
         "key",
         vec![
             FieldExposure::column("key"),

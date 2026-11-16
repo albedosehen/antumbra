@@ -13,7 +13,7 @@ use antumbra_core::Result;
 
 use crate::store::Store;
 
-const TABLE: &str = "account";
+const TABLE: &str = crate::tables::ACCOUNT;
 
 /// A hosted account: a login identity bound to the workspace it owns.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -10,7 +10,7 @@ use antumbra_core::{LearnedRouter, Result};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "learned_router";
+const TABLE: &str = crate::tables::LEARNED_ROUTER;
 const KEY: &str = "active";
 
 fn record_id() -> Result<RecordID> {

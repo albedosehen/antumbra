@@ -18,7 +18,7 @@ use crate::error::map;
 use crate::knn::search_effort;
 use crate::store::Store;
 
-const TABLE: &str = "failure_boundary";
+const TABLE: &str = crate::tables::FAILURE_BOUNDARY;
 
 #[derive(Serialize, Deserialize)]
 struct BoundaryRow {

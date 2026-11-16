@@ -10,7 +10,7 @@ use antumbra_core::{Result, RewardSignal, RunId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "reward_signal";
+const TABLE: &str = crate::tables::REWARD_SIGNAL;
 
 /// Append a batch of signals in one round-trip (one row each, source-tagged).
 pub async fn insert_many(store: &Store, signals: &[RewardSignal]) -> Result<()> {

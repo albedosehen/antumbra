@@ -22,7 +22,7 @@ use crate::fusion::{rrf_fuse, DEFAULT_RRF_K};
 use crate::knn::{candidate_pool, search_effort};
 use crate::store::Store;
 
-const TABLE: &str = "document_chunk";
+const TABLE: &str = crate::tables::DOCUMENT_CHUNK;
 
 /// Candidate-pool sizing for [`recall_hybrid`] (see the `memory` repo for the
 /// rationale): each leg fetches `k * POOL_MULTIPLIER`, clamped, so fusion can

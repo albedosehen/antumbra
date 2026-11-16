@@ -12,8 +12,8 @@ use antumbra_core::{Generation, GrowRecord, RegionCensus, Result, RunId};
 use crate::error::map;
 use crate::store::Store;
 
-const CENSUS: &str = "region_census";
-const GROW: &str = "grow";
+const CENSUS: &str = crate::tables::REGION_CENSUS;
+const GROW: &str = crate::tables::GROW;
 
 /// Record one region's census in one generation.
 pub async fn upsert_census(store: &Store, census: &RegionCensus) -> Result<()> {

@@ -16,7 +16,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "memory_edge";
+const TABLE: &str = crate::tables::MEMORY_EDGE;
 
 /// Cap on edges returned for one node, so a heavily-connected memory can't
 /// return an unbounded result set into a traversal or the operator console.
