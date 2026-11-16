@@ -17,8 +17,7 @@ use surql::schema::table::{
     TableDefinition, TableMode,
 };
 use surql::schema::{
-    generate_access_sql_with_options, generate_analyzer_sql_with_options, generate_table_sql,
-    standard_analyzer, AnalyzerDefinition,
+    generate_analyzer_sql_with_options, generate_table_sql, standard_analyzer, AnalyzerDefinition,
 };
 
 use antumbra_core::Result;
@@ -787,9 +786,13 @@ pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
     // `DEFINE TABLE` statement alone (mode, permissions), not its fields or
     // indexes, so no index is rebuilt and no row is touched.
     out.extend(tables.iter().map(TableDefinition::to_surql_overwrite));
-    // The tenant record-access method (binds $auth.tenant), idempotent so a
-    // persistent store can re-apply the schema on every connect.
-    out.extend(generate_access_sql_with_options(&tenant_access(), true).map_err(map)?);
+    // The tenant record-access method (binds $auth.tenant), re-asserted like
+    // the tables: `IF NOT EXISTS` kept the first definition for good, so a
+    // tightened SIGNIN or a shorter session reached new stores only. A
+    // redefinition leaves the principal rows alone; the live record sessions
+    // of other connections keep their authenticated state, and every
+    // connection of this process signs in afresh after the schema is applied.
+    out.push(tenant_access().to_surql_overwrite().map_err(map)?);
     Ok(out)
 }
 
@@ -799,9 +802,66 @@ mod tests {
 
     #[test]
     fn the_tenant_access_renders_its_session_duration() {
-        let sql = generate_access_sql_with_options(&tenant_access(), true).unwrap();
-        let rendered = sql.join("\n");
+        let rendered = tenant_access().to_surql_overwrite().unwrap();
         assert!(rendered.contains("FOR SESSION 3600s"), "{rendered}");
+    }
+
+    /// The access method is re-asserted with every schema apply, like the
+    /// tables, so a changed definition reaches a store that already has one.
+    #[tokio::test]
+    async fn the_access_method_is_overwritten_on_reapply() -> Result<()> {
+        let statements = schema_statements(4)?;
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("DEFINE ACCESS OVERWRITE tenant ")),
+            "the access method is defined with OVERWRITE"
+        );
+        assert!(
+            !statements
+                .iter()
+                .any(|s| s.contains("DEFINE ACCESS IF NOT EXISTS")),
+            "no access method is defined IF NOT EXISTS"
+        );
+
+        /// The access method's definition as the store holds it.
+        async fn defined(store: &crate::Store) -> Result<String> {
+            let rows: Vec<serde_json::Value> = store
+                .query_rows(
+                    "RETURN [(INFO FOR DB).accesses.tenant]",
+                    std::collections::BTreeMap::new(),
+                )
+                .await?;
+            let Some(definition) = rows.first().and_then(|v| v.as_str()) else {
+                return Err(antumbra_core::AntumbraError::other(format!(
+                    "no tenant access in INFO FOR DB: {rows:?}"
+                )));
+            };
+            Ok(definition.to_string())
+        }
+        let store = crate::Store::connect_memory(4).await?;
+        let first = defined(&store).await?;
+        assert!(first.contains("SIGNIN"), "{first}");
+
+        // A shorter session, applied over the one the connect left behind.
+        let shorter = tenant_access()
+            .with_session("60s")
+            .to_surql_overwrite()
+            .map_err(map)?;
+        store
+            .query_rows::<serde_json::Value>(&shorter, std::collections::BTreeMap::new())
+            .await?;
+        let changed = defined(&store).await?;
+        assert_ne!(changed, first, "the redefinition reached the store");
+
+        // The schema's own definition, applied again, restores it.
+        for statement in schema_statements(4)? {
+            store
+                .query_rows::<serde_json::Value>(&statement, std::collections::BTreeMap::new())
+                .await?;
+        }
+        assert_eq!(defined(&store).await?, first);
+        Ok(())
     }
 
     /// The read rule is built from the subqueries the readable-compartment
