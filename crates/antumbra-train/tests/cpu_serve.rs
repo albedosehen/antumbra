@@ -26,6 +26,8 @@ use antumbra_train::models::{GenTiming, QwenCausalLm};
 use antumbra_train::RaftConfig;
 use candle_core::Device;
 
+type Outcome<T> = Result<T, Box<dyn std::error::Error>>;
+
 // The last two ask for long answers, so the decode rate is over enough tokens
 // to mean something.
 const PROMPTS: [&str; 4] = [
@@ -54,15 +56,16 @@ impl Run {
 }
 
 /// Greedy generation over every prompt.
-async fn generate_all(model: &mut QwenCausalLm) -> Run {
+async fn generate_all(model: &mut QwenCausalLm) -> Outcome<Run> {
     let (mut timing, mut first) = (GenTiming::default(), String::new());
     for p in PROMPTS {
         let sample = model
             .sample_group(p, 1)
-            .await
-            .expect("generates on the CPU")
-            .remove(0);
-        let t = model.last_timing().expect("a generation was timed");
+            .await?
+            .into_iter()
+            .next()
+            .ok_or("one sample was asked for and none came back")?;
+        let t = model.last_timing().ok_or("the generation was not timed")?;
         timing.prompt_tokens += t.prompt_tokens;
         timing.prompt_secs += t.prompt_secs;
         timing.decoded += t.decoded;
@@ -71,12 +74,12 @@ async fn generate_all(model: &mut QwenCausalLm) -> Run {
             first = sample.completion;
         }
     }
-    Run { timing, first }
+    Ok(Run { timing, first })
 }
 
 #[tokio::test]
 #[ignore = "live CPU: set ANTUMBRA_CPU_SERVE=1 and run with --release --ignored"]
-async fn an_expert_serves_on_the_cpu() {
+async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
     assert!(
         std::env::var("ANTUMBRA_CPU_SERVE").is_ok(),
         "ANTUMBRA_CPU_SERVE=1 must be set to run this ignored live CPU test"
@@ -91,7 +94,7 @@ async fn an_expert_serves_on_the_cpu() {
         cfg.base_model = base;
     }
     if let Ok(quant) = std::env::var("ANTUMBRA_CPU_QUANT") {
-        cfg.serve_quant = Some(quant.parse().expect("ANTUMBRA_CPU_QUANT is q8_0 or q4_k"));
+        cfg.serve_quant = Some(quant.parse()?);
     }
     let form = cfg
         .serve_quant
@@ -102,15 +105,15 @@ async fn an_expert_serves_on_the_cpu() {
         adapter.as_deref().unwrap_or("none (fresh)")
     );
 
-    // One expert, at the rank it was trained at, through load_adapter.
+    // One expert, at the rank it was trained at, through load_adapter: a bf16
+    // expert into the f32 model the CPU holds.
     let start = Instant::now();
-    let mut one = QwenCausalLm::load(Device::Cpu, cfg.clone()).expect("the base loads");
+    let mut one = QwenCausalLm::load(Device::Cpu, cfg.clone())?;
     if let Some(a) = &adapter {
-        one.load_adapter(a)
-            .expect("a bf16 expert loads into the f32 model");
+        one.load_adapter(a)?;
     }
     let load_secs = start.elapsed().as_secs_f64();
-    let own = generate_all(&mut one).await;
+    let own = generate_all(&mut one).await?;
     drop(one);
     eprintln!("rank {}: {:?}", cfg.lora_rank, own.first);
     assert!(own.timing.decoded > 0, "the expert decoded no tokens");
@@ -123,12 +126,12 @@ async fn an_expert_serves_on_the_cpu() {
         lora_alpha: cfg.lora_alpha * 4.0,
         ..cfg.clone()
     };
-    let mut four = QwenCausalLm::load(Device::Cpu, blend_cfg).expect("the base loads");
+    let mut four = QwenCausalLm::load(Device::Cpu, blend_cfg)?;
     if let Some(a) = &adapter {
         let specs = vec![(a.clone(), 0.25f32); 4];
-        four.load_blend(&specs).expect("the blend loads");
+        four.load_blend(&specs)?;
     }
-    let blend = generate_all(&mut four).await;
+    let blend = generate_all(&mut four).await?;
     eprintln!("rank {blend_rank}: {:?}", blend.first);
     assert!(blend.timing.decoded > 0, "the blend decoded no tokens");
 
@@ -145,4 +148,5 @@ async fn an_expert_serves_on_the_cpu() {
         blend.decode(),
         blend.timing.decoded,
     );
+    Ok(())
 }

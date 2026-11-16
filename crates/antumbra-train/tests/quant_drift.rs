@@ -30,6 +30,8 @@ use antumbra_train::quant::{Drift, Reading};
 use antumbra_train::{RaftConfig, ServeQuant};
 use candle_core::Device;
 
+type Outcome<T> = Result<T, Box<dyn std::error::Error>>;
+
 /// One held-out example of a behavior.
 struct Held {
     behavior: usize,
@@ -47,72 +49,78 @@ struct Pass {
     answers: Vec<Option<String>>,
 }
 
-async fn pass(form: Option<ServeQuant>, adapter: &str, held: &[Held], cfg: &RaftConfig) -> Pass {
+async fn pass(
+    form: Option<ServeQuant>,
+    adapter: &str,
+    held: &[Held],
+    cfg: &RaftConfig,
+) -> Outcome<Pass> {
     let mut model = QwenCausalLm::load(
         Device::Cpu,
         RaftConfig {
             serve_quant: form,
             ..cfg.clone()
         },
-    )
-    .expect("the base loads");
-    model.load_adapter(adapter).expect("the expert loads");
+    )?;
+    model.load_adapter(adapter)?;
     let (mut readings, mut answers) = (Vec::new(), Vec::new());
     for h in held {
-        readings.push(
-            model
-                .teacher_forced(&h.prompt, &h.answer)
-                .expect("teacher-forces an example"),
-        );
+        readings.push(model.teacher_forced(&h.prompt, &h.answer)?);
         answers.push(if h.generate {
             let sample = model
                 .sample_group(&h.prompt, 1)
-                .await
-                .expect("answers a task")
-                .remove(0);
+                .await?
+                .into_iter()
+                .next()
+                .ok_or("one sample was asked for and none came back")?;
             Some(sample.completion)
         } else {
             None
         });
     }
-    Pass {
+    Ok(Pass {
         form: form.map_or("f32", ServeQuant::name),
         readings,
         answers,
+    })
+}
+
+/// The corpus's behaviors, by id, keeping one scope's when a scope is named.
+fn behaviors(corpus: &str, scope: Option<&str>) -> Outcome<Vec<(String, Spec)>> {
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(corpus)?)?;
+    let mut found = Vec::new();
+    for row in rows {
+        if scope.is_some_and(|s| row.get("scope").and_then(|v| v.as_str()) != Some(s)) {
+            continue;
+        }
+        let id = row
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("a behavior in the corpus has no id")?
+            .to_string();
+        found.push((id, serde_json::from_value(row)?));
     }
+    Ok(found)
 }
 
 #[tokio::test]
 #[ignore = "live CPU: set ANTUMBRA_QUANT_DRIFT=1, a corpus and an adapter; run with --release --ignored"]
-async fn a_quantized_base_is_measured_against_the_dense_one() {
+async fn a_quantized_base_is_measured_against_the_dense_one() -> Outcome<()> {
     assert!(
         std::env::var("ANTUMBRA_QUANT_DRIFT").is_ok(),
         "ANTUMBRA_QUANT_DRIFT=1 must be set to run this ignored live measurement"
     );
-    let corpus = std::env::var("ANTUMBRA_QUANT_CORPUS").expect("ANTUMBRA_QUANT_CORPUS");
-    let adapter = std::env::var("ANTUMBRA_CPU_ADAPTER").expect("ANTUMBRA_CPU_ADAPTER");
+    let corpus = std::env::var("ANTUMBRA_QUANT_CORPUS")
+        .map_err(|_| "ANTUMBRA_QUANT_CORPUS names the behaviors to measure on")?;
+    let adapter = std::env::var("ANTUMBRA_CPU_ADAPTER")
+        .map_err(|_| "ANTUMBRA_CPU_ADAPTER names the expert to measure")?;
     let scope = std::env::var("ANTUMBRA_QUANT_SCOPE").ok();
-    let per_behavior: usize = std::env::var("ANTUMBRA_QUANT_GENERATE")
-        .ok()
-        .map_or(1, |n| {
-            n.parse().expect("ANTUMBRA_QUANT_GENERATE is a count")
-        });
+    let per_behavior: usize = match std::env::var("ANTUMBRA_QUANT_GENERATE") {
+        Ok(n) => n.parse()?,
+        Err(_) => 1,
+    };
 
-    let rows: Vec<serde_json::Value> =
-        serde_json::from_str(&std::fs::read_to_string(&corpus).expect("the corpus reads"))
-            .expect("the corpus is a JSON array");
-    let behaviors: Vec<(String, Spec)> = rows
-        .into_iter()
-        .filter(|r| {
-            scope
-                .as_deref()
-                .is_none_or(|s| r.get("scope").and_then(|v| v.as_str()) == Some(s))
-        })
-        .map(|r| {
-            let id = r["id"].as_str().expect("a behavior has an id").to_string();
-            (id, serde_json::from_value(r).expect("a behavior's spec"))
-        })
-        .collect();
+    let behaviors = behaviors(&corpus, scope.as_deref())?;
     assert!(
         !behaviors.is_empty(),
         "no behaviors in the corpus for that scope"
@@ -146,7 +154,7 @@ async fn a_quantized_base_is_measured_against_the_dense_one() {
         max_new_tokens: 64,
         ..RaftConfig::default()
     };
-    let dense = pass(None, &adapter, &held, &cfg).await;
+    let dense = pass(None, &adapter, &held, &cfg).await?;
     let follows = |b: usize, answer: &str| behaviors[b].1.follows(answer) == Some(true);
     let passed = |p: &Pass| {
         held.iter()
@@ -161,7 +169,7 @@ async fn a_quantized_base_is_measured_against_the_dense_one() {
     );
 
     for form in [ServeQuant::Q8_0, ServeQuant::Q4K] {
-        let quant = pass(Some(form), &adapter, &held, &cfg).await;
+        let quant = pass(Some(form), &adapter, &held, &cfg).await?;
         let mut drift = Drift::default();
         let mut flipped = vec![0usize; behaviors.len()];
         for ((h, d), q) in held.iter().zip(&dense.readings).zip(&quant.readings) {
@@ -206,4 +214,5 @@ async fn a_quantized_base_is_measured_against_the_dense_one() {
         }
         assert!(drift.positions() > 0, "nothing was compared");
     }
+    Ok(())
 }
