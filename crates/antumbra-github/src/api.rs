@@ -305,8 +305,9 @@ impl GithubApi {
             serde_json::from_slice(&resp.body).map_err(|e| ApiError::Shape(e.to_string()))?;
         v.pointer("/commit/sha")
             .and_then(Value::as_str)
+            .filter(|sha| antumbra_core::provenance::is_commit_sha(sha))
             .map(str::to_string)
-            .ok_or_else(|| ApiError::Shape("branch without commit.sha".into()))
+            .ok_or_else(|| ApiError::Shape("branch without a commit sha".into()))
     }
 
     /// Every file path in the tree at `commit`.

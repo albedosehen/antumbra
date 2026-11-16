@@ -305,6 +305,27 @@ async fn a_branch_delete_orphans_its_memories_but_not_reanchored_ones() {
     assert_eq!(out.orphaned, 0);
 }
 
+// A merge commit that is not a commit sha, as only a sender holding the webhook
+// secret could send one, is reported as ignored: never sliced, never fetched.
+#[tokio::test]
+async fn a_merge_with_a_non_hex_sha_is_ignored() -> anyhow::Result<()> {
+    let st = state(Some(plain())).await;
+    for odd in ["ééééééé", "not-a-sha", "abc"] {
+        let mut pr = merged_pr();
+        pr["pull_request"]["merge_commit_sha"] = json!(odd);
+        let out = deliver(&st, "pull_request", &pr).await;
+        anyhow::ensure!(out.reanchored == 0 && out.stored.is_empty(), "{odd:?}");
+        anyhow::ensure!(
+            out.ignored
+                .as_deref()
+                .is_some_and(|why| why.contains("commit sha")),
+            "{odd:?}: {:?}",
+            out.ignored
+        );
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn pings_unhandled_events_and_unmapped_repositories_are_acknowledged() {
     let repos = RepoMap::from_json(r#"{"github.com/acme/billing": "ws:acme"}"#).unwrap();

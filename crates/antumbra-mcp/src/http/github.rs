@@ -330,7 +330,7 @@ async fn apply_pull_request(state: &Arc<HttpState>, event: &PullRequestEvent) ->
         return Ok(Outcome::ignored(
             KIND,
             repo,
-            "merged without a merge commit, or the repository has no slug",
+            "merged without a commit sha for the merge, or the repository has no slug",
         ));
     };
     let Some(tenant) = cfg.repos.tenant_for(&merge.repo) else {
