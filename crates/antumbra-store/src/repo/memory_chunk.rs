@@ -516,7 +516,7 @@ pub(crate) async fn readable_compartments(
     let surql = format!(
         "RETURN array::union(array::union(({}), ({})), ({}))",
         schema::owned_compartments("$tenant", "$user"),
-        schema::granted_compartments("$user"),
+        schema::granted_compartments("$tenant", "$user"),
         schema::hive_compartments("$tenant"),
     );
     let vars = BTreeMap::from([

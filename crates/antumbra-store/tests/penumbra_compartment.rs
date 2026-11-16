@@ -550,6 +550,91 @@ async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
     );
 }
 
+// A grant names its workspace, and the rule's subquery asks for the workspace
+// too: a grant row in another workspace, for the same user and the same
+// compartment key, opens nothing here, whatever the engine does with the grant
+// table's own permission inside a permission subquery.
+#[tokio::test]
+async fn a_grant_in_another_workspace_opens_nothing_here() -> antumbra_core::Result<()> {
+    let store = Store::connect_memory(4).await?;
+    let here = TenantId::new("ws:here");
+    let elsewhere = TenantId::new("ws:elsewhere");
+    let owner = UserId::new("user:owner");
+    let member = UserId::new("user:member");
+    let key = CompartmentId::new("comp:shared-key");
+    let now = Utc::now();
+    principal::provision(&store, &here, &owner).await?;
+    principal::provision(&store, &here, &member).await?;
+    compartment::create(
+        &store,
+        &Compartment::new(
+            key.clone(),
+            here.clone(),
+            owner.clone(),
+            "private here",
+            now,
+        ),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem(
+            "memory:here-private",
+            "ws:here",
+            "private here",
+            Some("comp:shared-key"),
+        ),
+    )
+    .await?;
+    // The owner view writes a grant in the other workspace: same key, same grantee.
+    compartment::grant(
+        &store,
+        &Grant::new(
+            elsewhere.clone(),
+            key.clone(),
+            member.clone(),
+            Capability::Reference,
+            UserId::new("user:someone-else"),
+            now,
+        ),
+    )
+    .await?;
+
+    store.signin(&here, &member).await?;
+    if visible_ids(&store)
+        .await
+        .contains(&"memory:here-private".to_string())
+    {
+        return Err(antumbra_core::AntumbraError::other(
+            "a grant in another workspace opened a private compartment here",
+        ));
+    }
+    // A grant in this workspace still does.
+    store.invalidate().await?;
+    compartment::grant(
+        &store,
+        &Grant::new(
+            here.clone(),
+            key.clone(),
+            member.clone(),
+            Capability::Reference,
+            owner.clone(),
+            now,
+        ),
+    )
+    .await?;
+    store.signin(&here, &member).await?;
+    if !visible_ids(&store)
+        .await
+        .contains(&"memory:here-private".to_string())
+    {
+        return Err(antumbra_core::AntumbraError::other(
+            "a grant in this workspace did not open the compartment",
+        ));
+    }
+    Ok(())
+}
+
 // The compartment table's write rules are the owner's alone: another member of
 // the workspace can neither take a compartment over by rewriting its owner,
 // tombstone it, nor create one in someone else's name. The memory rule trusts
