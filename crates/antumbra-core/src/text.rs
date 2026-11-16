@@ -32,7 +32,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_chars_counts_characters_not_bytes_and_keeps_short_input_whole() {
+    fn first_chars_counts_characters_not_bytes_and_keeps_short_input_whole() -> anyhow::Result<()> {
         // Multi-byte text: the cap is a character count and the cut cannot
         // split a codepoint (a byte-indexed slice here would panic).
         let s = "é".repeat(10);
@@ -40,10 +40,11 @@ mod tests {
         assert_eq!(first_chars("short", 1200), "short");
         assert_eq!(first_chars("short", 0), "");
         assert_eq!(first_chars("", 3), "");
+        Ok(())
     }
 
     #[test]
-    fn clipped_fits_in_max_ellipsis_included() {
+    fn clipped_fits_in_max_ellipsis_included() -> anyhow::Result<()> {
         assert_eq!(clipped("fits", 4), "fits");
         assert!(matches!(clipped("fits", 4), Cow::Borrowed(_)));
         assert_eq!(clipped("too long", 4), "too…");
@@ -54,5 +55,6 @@ mod tests {
         assert_eq!(clipped("ab", 1), "…");
         assert_eq!(clipped("ab", 0), "…");
         assert_eq!(clipped("", 0), "");
+        Ok(())
     }
 }

@@ -120,6 +120,12 @@ services:
       - ANTUMBRA_COPAL_ADDR=${ANTUMBRA_COPAL_ADDR:-}
       - ANTUMBRA_COPAL_TENANT=${ANTUMBRA_COPAL_TENANT:-}
       - ANTUMBRA_COPAL_KEY=${ANTUMBRA_COPAL_KEY:-}
+      # The archive sits on this stack's own network, which only this server
+      # reaches: plain http:// to it is allowed, and the header-named tenancy
+      # above is trusted. An archive elsewhere wants https:// and a keyed
+      # tenancy (ANTUMBRA_COPAL_KEY or --copal-keys) instead of these two.
+      - ANTUMBRA_COPAL_ALLOW_HTTP=${ANTUMBRA_COPAL_ALLOW_HTTP:-true}
+      - ANTUMBRA_COPAL_TRUST_HEADERS=${ANTUMBRA_COPAL_TRUST_HEADERS:-true}
       # Where copal displays pages (its COPAL_RENDER_ORIGIN), which relics need:
       # the gallery at /relics frames that origin and nothing else. Unset, no
       # relic can be published. Give copal COPAL_RENDER_FRAME_ANCESTORS naming
@@ -198,6 +204,8 @@ services:
       # variable here would stop `up` of the local stack too. The server
       # refuses to start on an empty or placeholder secret itself.
       - ANTUMBRA_MAGIC_SECRET=${ANTUMBRA_MAGIC_SECRET:-}
+      # A deployment that mounts secrets as files passes --magic-secret-file and
+      # --db-pass-file instead (see docker/README.md).
       - ANTUMBRA_DB_PASS=${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
       # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email. For
       # development only, ANTUMBRA_DEV_MAILER=1 logs each link to this

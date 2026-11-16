@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! A residual filter thins what the index returned, so a recall that
 //! asked for exactly `k` would come back short.
 //!
@@ -16,11 +14,12 @@
 //! at all — is a unit test in `store.rs`, where the client is
 //! reachable.
 
+use anyhow::Result;
 use chrono::Utc;
 
 use antumbra_core::{Memory, MemoryId, MemoryNetwork, TenantId};
 use antumbra_store::repo::memory;
-use antumbra_store::{Store, EMBED_DIM};
+use antumbra_store::{testing, EMBED_DIM};
 
 fn unit(axis: usize) -> Vec<f32> {
     let mut v = vec![0.0f32; EMBED_DIM];
@@ -54,8 +53,8 @@ fn trace(id: &str, tenant: &TenantId, embedding: Vec<f32>) -> Memory {
 /// nobody's nearest neighbor until every closer row has been filtered
 /// away. Asking the index for `k = 1` directly would find nothing.
 #[tokio::test]
-async fn a_tenant_with_a_thin_share_still_recalls() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn a_tenant_with_a_thin_share_still_recalls() -> Result<()> {
+    let store = testing::mem_store().await?;
     let crowd = TenantId::new("tenant:crowd");
     let thin = TenantId::new("tenant:thin");
 
@@ -64,16 +63,11 @@ async fn a_tenant_with_a_thin_share_still_recalls() {
             &store,
             &trace(&format!("memory:crowd-{n}"), &crowd, unit(0)),
         )
-        .await
-        .unwrap();
+        .await?;
     }
-    memory::upsert(&store, &trace("memory:thin-1", &thin, unit(1)))
-        .await
-        .unwrap();
+    memory::upsert(&store, &trace("memory:thin-1", &thin, unit(1))).await?;
 
-    let found = memory::recall(&store, &thin, &unit(0), 1, None)
-        .await
-        .unwrap();
+    let found = memory::recall(&store, &thin, &unit(0), 1, None).await?;
     assert_eq!(
         found.len(),
         1,
@@ -83,17 +77,16 @@ async fn a_tenant_with_a_thin_share_still_recalls() {
 
     // And the crowd gets what it asked for, truncated rather than
     // handed the whole pool.
-    let crowded = memory::recall(&store, &crowd, &unit(0), 3, None)
-        .await
-        .unwrap();
+    let crowded = memory::recall(&store, &crowd, &unit(0), 3, None).await?;
     assert_eq!(crowded.len(), 3, "the pool is truncated back to k");
+    Ok(())
 }
 
 /// Tombstones are the second residual, and they thin the pool after
 /// the tenant filter has already thinned it.
 #[tokio::test]
-async fn tombstones_do_not_eat_a_recall() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn tombstones_do_not_eat_a_recall() -> Result<()> {
+    let store = testing::mem_store().await?;
     let tenant = TenantId::new("tenant:t");
 
     // Ten forgotten traces sitting exactly on the query axis, and one
@@ -101,17 +94,14 @@ async fn tombstones_do_not_eat_a_recall() {
     for n in 0..10 {
         let mut dead = trace(&format!("memory:dead-{n}"), &tenant, unit(0));
         dead.deleted_at = Some(Utc::now());
-        memory::upsert(&store, &dead).await.unwrap();
+        memory::upsert(&store, &dead).await?;
     }
     let mut near = unit(0);
     near[1] = 0.5;
-    memory::upsert(&store, &trace("memory:live", &tenant, near))
-        .await
-        .unwrap();
+    memory::upsert(&store, &trace("memory:live", &tenant, near)).await?;
 
-    let found = memory::recall(&store, &tenant, &unit(0), 1, None)
-        .await
-        .unwrap();
+    let found = memory::recall(&store, &tenant, &unit(0), 1, None).await?;
     assert_eq!(found.len(), 1, "the live trace is behind ten tombstones");
     assert_eq!(found[0].id.as_str(), "memory:live");
+    Ok(())
 }

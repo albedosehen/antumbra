@@ -179,7 +179,7 @@ pub async fn get_public(store: &Store, slug: &str) -> Result<Option<Relic>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use chrono::Utc;
 
     fn relic(slug: &str, tenant: &str, visibility: Visibility) -> Relic {
@@ -206,7 +206,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_relic_round_trips_and_a_new_version_replaces_its_row() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let mut r = relic("ceiling", "ws:t", Visibility::Private);
         assert!(put(&s, &r).await?);
@@ -220,7 +220,11 @@ mod tests {
             author_host: None,
         });
         assert!(put(&s, &r).await?);
-        let back = get(&s, &tenant, "ceiling").await?.unwrap();
+        let Some(back) = get(&s, &tenant, "ceiling").await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the relic did not read back",
+            ));
+        };
         assert_eq!(back.current().map(|v| v.number), Some(2));
         assert_eq!(back.next_version(), 3);
         assert_eq!(list(&s, &tenant).await?.len(), 1, "one relic, one row");
@@ -229,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn listings_are_per_tenant_and_newest_first() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let mut older = relic("older", "ws:t", Visibility::Private);
         older.updated_at = Utc::now() - chrono::Duration::hours(1);
         put(&s, &older).await?;
@@ -250,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_public_relics_resolve_without_a_tenant() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         put(&s, &relic("open", "ws:a", Visibility::Public)).await?;
         put(&s, &relic("closed", "ws:b", Visibility::Private)).await?;
         assert_eq!(

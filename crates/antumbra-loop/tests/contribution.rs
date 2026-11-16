@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Leave-one-out contribution through the loop: mask each shared
 //! expert, route the live tasks again, score both ways, record the difference.
 
@@ -13,9 +11,12 @@ use antumbra_core::ports::{
 };
 use antumbra_core::slice::Holdout;
 use antumbra_core::testing::ScriptedTrainer;
-use antumbra_core::{Expert, ExpertId, ExpertStatus, Generation, Result, RunId, TransitionCause};
+use antumbra_core::{
+    AntumbraError, Expert, ExpertId, ExpertStatus, Generation, Result, RunId, TransitionCause,
+};
 use antumbra_loop::{ContributionPolicy, GenerationLoop, LoopConfig};
 use antumbra_store::repo::{contribution, expert, lifecycle};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 const DIM: usize = 4;
@@ -72,6 +73,18 @@ struct Scorer {
     asked: Mutex<Vec<EvaluateRequest>>,
 }
 
+impl Scorer {
+    /// Every request it was asked to score, in order. The fake only ever
+    /// pushes to the list, so a poisoned lock holds a whole list and is read
+    /// as is.
+    fn asked(&self) -> Vec<EvaluateRequest> {
+        self.asked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
 #[async_trait]
 impl Trainer for Scorer {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
@@ -109,7 +122,7 @@ impl Trainer for Scorer {
 }
 
 async fn population() -> Result<Store> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(&store, &shared("expert:alpha", axis(0))).await?;
     expert::insert(&store, &shared("expert:beta", axis(1))).await?;
     expert::insert(&store, &shared("expert:unused", axis(3))).await?;
@@ -152,7 +165,8 @@ async fn each_expert_is_measured_against_the_population_without_it() -> Result<(
             .find(|c| c.expert.as_str() == id)
             .cloned()
     };
-    let alpha = found("expert:alpha").expect("measured");
+    let alpha =
+        found("expert:alpha").ok_or_else(|| AntumbraError::other("alpha was not measured"))?;
     assert_eq!((alpha.routed, alpha.tasks), (2, 4));
     assert_eq!((alpha.with, alpha.without), (Some(1.0), Some(0.5)));
     assert_eq!(
@@ -160,13 +174,14 @@ async fn each_expert_is_measured_against_the_population_without_it() -> Result<(
         Some(0.5),
         "it beats the base it falls back to"
     );
-    let beta = found("expert:beta").expect("measured");
+    let beta = found("expert:beta").ok_or_else(|| AntumbraError::other("beta was not measured"))?;
     assert_eq!(
         (beta.routed, beta.delta()),
         (1, Some(0.0)),
         "routed to, adds nothing"
     );
-    let unused = found("expert:unused").expect("measured");
+    let unused = found("expert:unused")
+        .ok_or_else(|| AntumbraError::other("the unused expert was not measured"))?;
     assert!(unused.is_unused() && unused.delta().is_none());
     assert!(
         found("expert:gamma").is_none(),
@@ -175,7 +190,7 @@ async fn each_expert_is_measured_against_the_population_without_it() -> Result<(
 
     // Each adapter was scored once, the base alone included, under one set of
     // seeds for both sides.
-    let asked = trainer.asked.lock().unwrap().clone();
+    let asked = trainer.asked();
     assert_eq!(asked.len(), 3, "{asked:?}");
     assert!(asked
         .iter()
@@ -183,7 +198,7 @@ async fn each_expert_is_measured_against_the_population_without_it() -> Result<(
     let base = asked
         .iter()
         .find(|r| r.adapter_uri.is_none())
-        .expect("the base");
+        .ok_or_else(|| AntumbraError::other("the base alone was not scored"))?;
     assert_eq!(base.task_ids, ["alpha-one", "alpha-two", "beta-one"]);
 
     let stored = contribution::history(&store, &ExpertId::new("expert:alpha")).await?;
@@ -210,7 +225,10 @@ async fn the_population_is_compared_with_its_best_single_expert() -> Result<()> 
     let reports = GenerationLoop::new(&store, &trainer, &Axes, cfg)
         .run_until(&RunId::new("run:base"), 1)
         .await?;
-    let b = reports[0].baseline.clone().expect("compared");
+    let b = reports[0]
+        .baseline
+        .clone()
+        .ok_or_else(|| AntumbraError::other("the population was not compared"))?;
     assert_eq!(b.tasks, 4);
     assert_eq!(b.population, 0.75, "alpha 1, 1; beta 0.5; the base 0.5");
     assert_eq!(b.best, Some(ExpertId::new("expert:alpha")));
@@ -221,7 +239,7 @@ async fn the_population_is_compared_with_its_best_single_expert() -> Result<()> 
     assert!(b.oracle_cross_fitted);
     let kept = contribution::baselines_for_run(&store, &RunId::new("run:base")).await?;
     assert_eq!(kept, vec![b]);
-    let asked = trainer.asked.lock().unwrap().clone();
+    let asked = trainer.asked();
     assert_eq!(
         asked.len(),
         8,
@@ -254,7 +272,7 @@ async fn contribution_is_measured_on_its_schedule_and_off_by_default() -> Result
         .run_until(&RunId::new("run:off"), 1)
         .await?;
     assert!(reports[0].contribution.is_empty());
-    assert!(trainer.asked.lock().unwrap().is_empty());
+    assert!(trainer.asked().is_empty());
     Ok(())
 }
 
@@ -269,7 +287,7 @@ async fn every_generation_is_measured_under_the_same_seeds() -> Result<()> {
     let reports = GenerationLoop::new(&store, &trainer, &Axes, every(1))
         .run_until(&RunId::new("run:paired"), 2)
         .await?;
-    let asked = trainer.asked.lock().unwrap().clone();
+    let asked = trainer.asked();
     assert_eq!(asked.len(), 3, "the first generation only: {asked:?}");
     assert!(asked.iter().all(|r| r.seeds == asked[0].seeds));
 

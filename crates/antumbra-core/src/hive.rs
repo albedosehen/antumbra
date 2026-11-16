@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn neither_gate_alone_opens_the_hive() {
+    fn neither_gate_alone_opens_the_hive() -> anyhow::Result<()> {
         let on = Hive::new(tenant(), true, at());
         let off = Hive::new(tenant(), false, at());
         let joined = HiveMembership::new(tenant(), UserId::new("user:lily"), true, at());
@@ -231,20 +231,22 @@ mod tests {
             "a member cannot publish into a hive the owner has not opened"
         );
         assert!(!is_open(Some(&off), Some(&out)));
+        Ok(())
     }
 
     /// The absence of a decision is not consent.
     #[test]
-    fn a_missing_gate_reads_as_closed() {
+    fn a_missing_gate_reads_as_closed() -> anyhow::Result<()> {
         let on = Hive::new(tenant(), true, at());
         let joined = HiveMembership::new(tenant(), UserId::new("user:lily"), true, at());
         assert!(!is_open(None, Some(&joined)), "no tenant decision");
         assert!(!is_open(Some(&on), None), "no member decision");
         assert!(!is_open(None, None));
+        Ok(())
     }
 
     #[test]
-    fn only_an_accepted_offer_is_in_the_hive() {
+    fn only_an_accepted_offer_is_in_the_hive() -> anyhow::Result<()> {
         let now = at();
         let offer = HiveOffer::new(
             tenant(),
@@ -265,11 +267,12 @@ mod tests {
             .with_status(OfferStatus::Declined, now)
             .status
             .is_active());
+        Ok(())
     }
 
     /// One subject is one decision for the owner, whoever offered it.
     #[test]
-    fn an_offer_is_keyed_on_its_subject_and_not_its_offerer() {
+    fn an_offer_is_keyed_on_its_subject_and_not_its_offerer() -> anyhow::Result<()> {
         let now = at();
         let lily = HiveOffer::new(
             tenant(),
@@ -310,6 +313,7 @@ mod tests {
             .id,
             lily.id
         );
+        Ok(())
     }
 
     #[test]

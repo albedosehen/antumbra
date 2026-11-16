@@ -435,19 +435,15 @@ pub async fn list_grants(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::Capability;
-
-    async fn store() -> Store {
-        Store::connect_memory(EMBED_DIM).await.unwrap()
-    }
 
     /// `memory`'s read rule finds a row's compartment record with
     /// `schema::OWN_COMPARTMENT`, the SurrealQL twin of [`sanitize`]; were they
     /// to disagree, owners would lose sight of their own memories.
     #[tokio::test]
-    async fn the_read_rule_maps_a_key_to_the_id_sanitize_gives_it() {
-        let s = store().await;
+    async fn the_read_rule_maps_a_key_to_the_id_sanitize_gives_it() -> anyhow::Result<()> {
+        let s = mem_store().await?;
         for key in [
             "comp:ws:default:user:default:default",
             "comp:a/b\\c|d e",
@@ -460,60 +456,61 @@ mod tests {
             );
             let vars =
                 std::collections::BTreeMap::from([("key".to_string(), serde_json::json!(key))]);
-            let raw = s.client().query_with_vars(&surql, vars).await.unwrap();
-            let id = raw.as_array().and_then(|r| r.last()).cloned().unwrap();
+            let raw = s
+                .client()
+                .query_with_vars(&surql, vars)
+                .await
+                .map_err(map)?;
+            let Some(id) = raw.as_array().and_then(|r| r.last()).cloned() else {
+                anyhow::bail!("the query returned no result for {key}: {raw}");
+            };
             assert_eq!(id, serde_json::json!([sanitize(key)]), "{key}");
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn compartment_create_get_list_delete() {
-        let s = store().await;
+    async fn compartment_create_get_list_delete() -> anyhow::Result<()> {
+        let s = mem_store().await?;
         let t = TenantId::new("t");
         let alice = UserId::new("alice");
         let now = chrono::Utc::now();
         let c = Compartment::new("comp:1", t.clone(), alice.clone(), "c", now);
 
-        create(&s, &c).await.unwrap();
-        assert_eq!(get(&s, &t, &c.id).await.unwrap().unwrap().owner, alice);
-        assert_eq!(list_owned(&s, &t, &alice).await.unwrap().len(), 1);
+        create(&s, &c).await?;
+        let Some(created) = get(&s, &t, &c.id).await? else {
+            anyhow::bail!("the compartment did not read back");
+        };
+        assert_eq!(created.owner, alice);
+        assert_eq!(list_owned(&s, &t, &alice).await?.len(), 1);
         // A different tenant cannot see it.
-        assert!(get(&s, &TenantId::new("other"), &c.id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(get(&s, &TenantId::new("other"), &c.id).await?.is_none());
 
         // Delete is a tombstone: hidden from get/list_owned, but the row remains
         // (so the deletion can propagate), then a past-grace purge removes it.
-        delete(&s, &t, &c.id, now).await.unwrap();
-        assert!(get(&s, &t, &c.id).await.unwrap().is_none());
-        assert!(list_owned(&s, &t, &alice).await.unwrap().is_empty());
+        delete(&s, &t, &c.id, now).await?;
+        assert!(get(&s, &t, &c.id).await?.is_none());
+        assert!(list_owned(&s, &t, &alice).await?.is_empty());
         assert_eq!(
-            crate::repo::sync::list_rows(&s, "compartment")
-                .await
-                .unwrap()
-                .len(),
+            crate::repo::sync::list_rows(&s, "compartment").await?.len(),
             1,
             "tombstone row retained for propagation"
         );
-        delete(&s, &t, &c.id, now).await.unwrap(); // re-delete is a no-op
+        delete(&s, &t, &c.id, now).await?; // re-delete is a no-op
         assert_eq!(
-            purge_compartments(&s, now - chrono::Duration::days(1))
-                .await
-                .unwrap(),
+            purge_compartments(&s, now - chrono::Duration::days(1)).await?,
             0
         );
         assert_eq!(
-            purge_compartments(&s, now + chrono::Duration::seconds(1))
-                .await
-                .unwrap(),
+            purge_compartments(&s, now + chrono::Duration::seconds(1)).await?,
             1
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn grant_revoke_is_a_tombstone_then_purges() {
-        let s = store().await;
+    async fn grant_revoke_is_a_tombstone_then_purges() -> Result<()> {
+        let s = mem_store().await?;
         let t = TenantId::new("t");
         let comp = CompartmentId::new("comp:1");
         let bob = UserId::new("bob");
@@ -527,19 +524,19 @@ mod tests {
             now,
         );
 
-        grant(&s, &g).await.unwrap();
-        assert_eq!(list_grants(&s, &t, &comp).await.unwrap().len(), 1);
-        assert_eq!(list_for_grantee(&s, &t, &bob).await.unwrap().len(), 1);
+        grant(&s, &g).await?;
+        assert_eq!(list_grants(&s, &t, &comp).await?.len(), 1);
+        assert_eq!(list_for_grantee(&s, &t, &bob).await?.len(), 1);
 
         // Revoke: the live grant is hidden, but the tombstone row remains.
-        revoke(&s, &t, &comp, &bob, now).await.unwrap();
+        revoke(&s, &t, &comp, &bob, now).await?;
         assert!(
-            list_grants(&s, &t, &comp).await.unwrap().is_empty(),
+            list_grants(&s, &t, &comp).await?.is_empty(),
             "revoked grant hidden"
         );
-        assert!(list_for_grantee(&s, &t, &bob).await.unwrap().is_empty());
+        assert!(list_for_grantee(&s, &t, &bob).await?.is_empty());
         // Re-revoke is a no-op (no live grant to revoke).
-        revoke(&s, &t, &comp, &bob, now).await.unwrap();
+        revoke(&s, &t, &comp, &bob, now).await?;
 
         // Re-granting un-revokes (a fresh, newer grant overwrites the tombstone).
         let g2 = Grant::new(
@@ -550,27 +547,24 @@ mod tests {
             UserId::new("alice"),
             now,
         );
-        grant(&s, &g2).await.unwrap();
+        grant(&s, &g2).await?;
         assert_eq!(
-            list_grants(&s, &t, &comp).await.unwrap()[0].capability,
+            list_grants(&s, &t, &comp).await?[0].capability,
             Capability::Link
         );
 
         // Revoke again, then purge past the grace window removes the tombstone.
-        revoke(&s, &t, &comp, &bob, now).await.unwrap();
+        revoke(&s, &t, &comp, &bob, now).await?;
         assert_eq!(
-            purge_grants(&s, now - chrono::Duration::days(1))
-                .await
-                .unwrap(),
+            purge_grants(&s, now - chrono::Duration::days(1)).await?,
             0,
             "within grace"
         );
         assert_eq!(
-            purge_grants(&s, now + chrono::Duration::seconds(1))
-                .await
-                .unwrap(),
+            purge_grants(&s, now + chrono::Duration::seconds(1)).await?,
             1,
             "past grace"
         );
+        Ok(())
     }
 }

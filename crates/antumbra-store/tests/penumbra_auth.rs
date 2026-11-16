@@ -1,10 +1,9 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced tenant isolation (Stage 2): with a per-tenant record-access
 //! session bound (`$auth.tenant`), the SurrealDB engine itself refuses another
 //! tenant's rows, even on an unfiltered `SELECT` with no app-side WHERE. This
 //! is the structural guarantee the app-side filter only approximates.
 
+use anyhow::Result;
 use chrono::Utc;
 
 use antumbra_core::router::{LearnedRouter, RouterExpert};
@@ -13,21 +12,19 @@ use antumbra_core::{
     MemoryNetwork, TenantId, UserId,
 };
 use antumbra_store::repo::{boundary, compartment, expert, memory, principal, router};
-use antumbra_store::Store;
+use antumbra_store::testing;
 
 fn trace(id: &str, tenant: &str, content: &str, embed: Vec<f32>) -> Memory {
     Memory::new(id, tenant, MemoryNetwork::World, content, 0.8, Utc::now()).with_embedding(embed)
 }
 
 #[tokio::test]
-async fn shared_population_is_readable_under_tenant_auth() {
+async fn shared_population_is_readable_under_tenant_auth() -> Result<()> {
     // The umbra (experts + learned router) is shared: a tenant-authenticated
     // session can READ it (to route), while the per-tenant memory stays private.
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await?;
     let alpha = TenantId::new("ws:alpha");
-    principal::provision(&store, &alpha, &UserId::new("user:a"))
-        .await
-        .unwrap();
+    principal::provision(&store, &alpha, &UserId::new("user:a")).await?;
 
     let now = Utc::now();
     expert::insert(
@@ -48,8 +45,7 @@ async fn shared_population_is_readable_under_tenant_auth() {
             created_at: now,
         },
     )
-    .await
-    .unwrap();
+    .await?;
     // A PRIVATE expert owned by a different user must not be visible to user:a.
     expert::insert(
         &store,
@@ -69,8 +65,7 @@ async fn shared_population_is_readable_under_tenant_auth() {
             created_at: now,
         },
     )
-    .await
-    .unwrap();
+    .await?;
     router::save(
         &store,
         &LearnedRouter {
@@ -83,20 +78,20 @@ async fn shared_population_is_readable_under_tenant_auth() {
             floor: -1.0,
         },
     )
-    .await
-    .unwrap();
+    .await?;
 
     // As user:a: the shared expert + router read through, but another user's
     // private expert is hidden by the engine (owner-scoped select).
-    store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
-    let seen = expert::list(&store).await.unwrap();
+    store.signin(&alpha, &UserId::new("user:a")).await?;
+    let seen = expert::list(&store).await?;
     assert_eq!(
         seen.len(),
         1,
         "private expert of another user must be hidden"
     );
     assert_eq!(seen[0].id, ExpertId::new("expert:adder"));
-    assert!(router::load(&store).await.unwrap().is_some());
+    assert!(router::load(&store).await?.is_some());
+    Ok(())
 }
 
 fn boundary(id: &str, owner: Option<&str>) -> FailureBoundary {
@@ -117,28 +112,20 @@ fn boundary(id: &str, owner: Option<&str>) -> FailureBoundary {
 }
 
 #[tokio::test]
-async fn a_private_boundary_is_read_only_by_its_owner() {
+async fn a_private_boundary_is_read_only_by_its_owner() -> Result<()> {
     // A boundary recorded from training a user's behaviors holds the rule, so
     // it is as private as their standing expert: a shared boundary reads
     // through to every session, a private one only to its owner.
-    let store = Store::connect_memory(4).await.unwrap();
+    let store = testing::mem_store_of(4).await?;
     let alpha = TenantId::new("ws:alpha");
-    for u in ["user:a", "user:other"] {
-        principal::provision(&store, &alpha, &UserId::new(u))
-            .await
-            .unwrap();
-    }
-    boundary::upsert(&store, &boundary("boundary:shared", None))
-        .await
-        .unwrap();
-    boundary::upsert(&store, &boundary("boundary:private", Some("user:other")))
-        .await
-        .unwrap();
+    let (a, other) = (UserId::new("user:a"), UserId::new("user:other"));
+    testing::members(&store, &alpha, &[&a, &other]).await?;
+    boundary::upsert(&store, &boundary("boundary:shared", None)).await?;
+    boundary::upsert(&store, &boundary("boundary:private", Some("user:other"))).await?;
 
-    store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
+    store.signin(&alpha, &a).await?;
     let seen: Vec<BoundaryId> = boundary::list(&store)
-        .await
-        .unwrap()
+        .await?
         .into_iter()
         .map(|b| b.id)
         .collect();
@@ -148,54 +135,48 @@ async fn a_private_boundary_is_read_only_by_its_owner() {
         "another user's private boundary must be hidden"
     );
 
-    store
-        .signin(&alpha, &UserId::new("user:other"))
-        .await
-        .unwrap();
-    let mine = boundary::list(&store).await.unwrap();
+    store.signin(&alpha, &other).await?;
+    let mine = boundary::list(&store).await?;
     assert_eq!(mine.len(), 2, "the owner reads their own and the shared");
-    let private = mine
+    let Some(private) = mine
         .iter()
         .find(|b| b.id == BoundaryId::new("boundary:private"))
-        .unwrap();
+    else {
+        anyhow::bail!("the owner does not read their private boundary");
+    };
     assert_eq!(private.owner, Some(UserId::new("user:other")));
+    Ok(())
 }
 
 #[tokio::test]
-async fn engine_enforces_tenant_isolation_under_record_auth() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn engine_enforces_tenant_isolation_under_record_auth() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let alpha = TenantId::new("ws:alpha");
     let beta = TenantId::new("ws:beta");
 
     // Owner/root provisions principals and seeds both tenants' memories.
-    principal::provision(&store, &alpha, &UserId::new("user:a"))
-        .await
-        .unwrap();
-    principal::provision(&store, &beta, &UserId::new("user:b"))
-        .await
-        .unwrap();
+    principal::provision(&store, &alpha, &UserId::new("user:a")).await?;
+    principal::provision(&store, &beta, &UserId::new("user:b")).await?;
     memory::upsert(
         &store,
         &trace("memory:a", "ws:alpha", "alpha", vec![1.0, 0.0, 0.0, 0.0]),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &trace("memory:b", "ws:beta", "beta", vec![0.0, 1.0, 0.0, 0.0]),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // Owner view: the unfiltered query spans both tenants (cross-tenant read).
-    assert_eq!(memory::all_unscoped(&store).await.unwrap().len(), 2);
+    assert_eq!(memory::all_unscoped(&store).await?.len(), 2);
 
     // Bind a tenant session: $auth.tenant = ws:alpha, engine PERMISSIONS active.
-    store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
+    store.signin(&alpha, &UserId::new("user:a")).await?;
 
     // The SAME unfiltered query now returns ONLY alpha's row; the engine hides
     // beta's, with no app-side WHERE involved. This is the structural guarantee.
-    let seen = memory::all_unscoped(&store).await.unwrap();
+    let seen = memory::all_unscoped(&store).await?;
     assert_eq!(
         seen.len(),
         1,
@@ -204,24 +185,23 @@ async fn engine_enforces_tenant_isolation_under_record_auth() {
     assert_eq!(seen[0].tenant, alpha);
 
     // Even an explicit WHERE-filtered read for beta yields nothing this session.
-    assert!(memory::list(&store, &beta).await.unwrap().is_empty());
+    assert!(memory::list(&store, &beta).await?.is_empty());
 
     // Drop auth → owner view restored, both tenants visible again.
-    store.invalidate().await.unwrap();
-    assert_eq!(memory::all_unscoped(&store).await.unwrap().len(), 2);
+    store.invalidate().await?;
+    assert_eq!(memory::all_unscoped(&store).await?.len(), 2);
+    Ok(())
 }
 
 /// The delete rule is the write rule: a member may hard-delete only what
 /// they may write, so a memory in another member's private compartment, which
 /// they cannot even read, survives their `DELETE`. Its owner's does not.
 #[tokio::test]
-async fn a_member_cannot_hard_delete_a_private_memory_they_cannot_read() -> antumbra_core::Result<()>
-{
-    let store = Store::connect_memory(4).await?;
+async fn a_member_cannot_hard_delete_a_private_memory_they_cannot_read() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let tenant = TenantId::new("ws:org");
     let (lily, oslo) = (UserId::new("user:lily"), UserId::new("user:oslo"));
-    principal::provision(&store, &tenant, &lily).await?;
-    principal::provision(&store, &tenant, &oslo).await?;
+    testing::members(&store, &tenant, &[&lily, &oslo]).await?;
     let now = Utc::now();
     let private = CompartmentId::new("comp:lily-private");
     compartment::create(

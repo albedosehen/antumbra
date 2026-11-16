@@ -196,7 +196,7 @@ mod tests {
     /// Each task the candidate reroutes is scored both ways, the base model
     /// wherever the gate would escalate, over the tasks scored both ways.
     #[test]
-    fn the_population_is_compared_with_and_without_the_candidate() {
+    fn the_population_is_compared_with_and_without_the_candidate() -> Result<()> {
         let (c, g) = (ExpertId::new("c"), ExpertId::new("g"));
         let changed = vec![
             ("mine".to_string(), Some(c.clone()), Some(g.clone())),
@@ -212,5 +212,6 @@ mod tests {
         .collect();
         assert_eq!(with_and_without(&changed, &by), Some((2, 0.625, 0.625)));
         assert_eq!(with_and_without(&[], &by), None);
+        Ok(())
     }
 }

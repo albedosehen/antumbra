@@ -40,6 +40,16 @@ pub struct DbAuthArgs {
     /// The password that goes with `--db-user`.
     #[arg(long, global = true, env = "ANTUMBRA_DB_PASS", hide_env_values = true)]
     pub db_pass: Option<String>,
+    /// Read the password from this file instead (a Docker secret, a Kubernetes
+    /// secret, a Key Vault mount): it then appears in neither the process
+    /// arguments nor the environment.
+    #[arg(
+        long,
+        global = true,
+        env = "ANTUMBRA_DB_PASS_FILE",
+        conflicts_with = "db_pass"
+    )]
+    pub db_pass_file: Option<std::path::PathBuf>,
     /// The authentication level of `--db-user` / `--db-pass`.
     #[arg(
         long,
@@ -52,6 +62,26 @@ pub struct DbAuthArgs {
 }
 
 impl DbAuthArgs {
+    /// The password, from the flag or its file, whichever was given.
+    pub fn password(&self) -> Result<Option<String>> {
+        antumbra_core::secrets::resolve(
+            self.db_pass.clone(),
+            self.db_pass_file.as_deref(),
+            "database password",
+        )
+    }
+
+    /// These flags with the password resolved into `db_pass` and the file
+    /// forgotten, for a caller that reads the credentials themselves (the MCP
+    /// server chooses its serving mode by whether there are any).
+    pub fn resolved(&self) -> Result<Self> {
+        Ok(Self {
+            db_pass: self.password()?,
+            db_pass_file: None,
+            ..self.clone()
+        })
+    }
+
     /// Connect to `url` with these credentials and apply the schema: as root
     /// when both are given (none for an embedded or unauthenticated store), or
     /// as the database user when `--db-auth database`, which needs both.
@@ -60,9 +90,10 @@ impl DbAuthArgs {
             .url(url)
             .namespace("antumbra")
             .database("main");
+        let password = self.password()?;
         match self.db_auth {
             DbAuth::Database => {
-                let (Some(user), Some(pass)) = (self.db_user.as_deref(), self.db_pass.as_deref())
+                let (Some(user), Some(pass)) = (self.db_user.as_deref(), password.as_deref())
                 else {
                     return Err(antumbra_core::AntumbraError::other(
                         "--db-auth database requires --db-user and --db-pass",
@@ -77,7 +108,7 @@ impl DbAuthArgs {
                 .await
             }
             DbAuth::Root => {
-                let builder = match (self.db_user.as_deref(), self.db_pass.as_deref()) {
+                let builder = match (self.db_user.as_deref(), password.as_deref()) {
                     (Some(user), Some(pass)) => builder.username(user).password(pass),
                     _ => builder,
                 };
@@ -136,6 +167,38 @@ mod tests {
         if !hidden {
             return Err(antumbra_core::AntumbraError::other(
                 "--db-pass must read the environment and hide its value in --help",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The password's file is the flag's twin: read and trimmed, and never
+    /// given beside the flag.
+    #[test]
+    fn the_password_may_come_from_a_file_but_not_from_both() -> Result<()> {
+        let path = std::env::temp_dir().join(format!("antumbra-db-pass-{}", std::process::id()));
+        std::fs::write(&path, "pw-from-file\n")
+            .map_err(|e| antumbra_core::AntumbraError::other(e.to_string()))?;
+        let probe = Probe::try_parse_from([
+            "probe",
+            "--db-user",
+            "svc",
+            "--db-pass-file",
+            &path.to_string_lossy(),
+        ])
+        .map_err(|e| antumbra_core::AntumbraError::other(format!("{e}")))?;
+        let resolved = probe.db.resolved()?;
+        // The file is read once the flags are parsed; the guard below removes
+        // it whatever the assertions say.
+        let _ = std::fs::remove_file(&path);
+        if resolved.db_pass.as_deref() != Some("pw-from-file") || resolved.db_pass_file.is_some() {
+            return Err(antumbra_core::AntumbraError::other(format!(
+                "the password was not resolved from its file: {resolved:?}"
+            )));
+        }
+        if Probe::try_parse_from(["probe", "--db-pass", "x", "--db-pass-file", "f"]).is_ok() {
+            return Err(antumbra_core::AntumbraError::other(
+                "the flag and its file were accepted together",
             ));
         }
         Ok(())

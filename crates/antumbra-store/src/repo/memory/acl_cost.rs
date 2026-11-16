@@ -160,12 +160,12 @@ fn with_subquery_owner_branch(rule: &str) -> String {
 async fn install(store: &Store, definition: &str, rule: &str) -> Result<()> {
     let start = definition
         .find("FOR select WHERE ")
-        .expect("a select permission")
+        .ok_or_else(|| antumbra_core::AntumbraError::other("no select permission to swap"))?
         + 17;
     let end = start
         + definition[start..]
             .find(", FOR create")
-            .expect("a create permission");
+            .ok_or_else(|| antumbra_core::AntumbraError::other("no create permission after it"))?;
     let ddl = format!(
         "{}{}{}",
         definition[..start].replacen("DEFINE TABLE memory", "DEFINE TABLE OVERWRITE memory", 1),
@@ -193,7 +193,7 @@ async fn read_rule_cost() -> Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(7000);
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:bench");
     let user = UserId::new("user:bench");
     principal::provision(&store, &tenant, &user).await?;
@@ -326,7 +326,7 @@ async fn compartment_list_cost() -> Result<()> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(7000);
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:bench");
     let user = UserId::new("user:bench");
     principal::provision(&store, &tenant, &user).await?;

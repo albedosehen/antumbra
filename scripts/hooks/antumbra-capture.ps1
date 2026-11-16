@@ -19,8 +19,19 @@ $sessionId   = if ($json.session_id) { $json.session_id } else { 'default' }
 $event       = if ($json.hook_event_name) { $json.hook_event_name } else { 'Stop' }
 $workspace   = if ($env:ANTUMBRA_WORKSPACE_ID) { $env:ANTUMBRA_WORKSPACE_ID } else { '<workspace>' }
 
-$tmp = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
-$sentinel = Join-Path $tmp "antumbra-capture-$event-$sessionId"
+# The sentinel's name is built from two fields of the hook's input, so both are
+# cut to [A-Za-z0-9_-] before they name a file, and it lives under a directory
+# only this user writes (the session runtime directory, else the per-user local
+# data, else one under the home), not a shared temp directory.
+$safeSession = [string]$sessionId -replace '[^A-Za-z0-9_-]', ''
+if (-not $safeSession) { $safeSession = 'default' }
+$safeEvent = [string]$event -replace '[^A-Za-z0-9_-]', ''
+if (-not $safeEvent) { $safeEvent = 'Stop' }
+$runDir = if ($env:XDG_RUNTIME_DIR) { $env:XDG_RUNTIME_DIR }
+          elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'antumbra' 'run' }
+          else { Join-Path $HOME '.antumbra' 'run' }
+New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+$sentinel = Join-Path $runDir "antumbra-capture-$safeEvent-$safeSession"
 if (Test-Path $sentinel) { Remove-Item $sentinel -Force; exit 0 }
 New-Item -ItemType File -Path $sentinel -Force | Out-Null
 

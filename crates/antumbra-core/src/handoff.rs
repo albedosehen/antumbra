@@ -167,6 +167,7 @@ pub fn announcement(waiting: &[&Memory], host: &str, now: DateTime<Utc>) -> Opti
 mod tests {
     use super::*;
     use crate::memory::MemoryNetwork;
+    use anyhow::Context as _;
     use chrono::Duration;
 
     fn handoff(id: &str, content: &str, evidence: &[String], at: DateTime<Utc>) -> Memory {
@@ -184,29 +185,34 @@ mod tests {
     }
 
     #[test]
-    fn hosts_compare_trimmed_and_lowercased_and_empty_is_any() {
+    fn hosts_compare_trimmed_and_lowercased_and_empty_is_any() -> anyhow::Result<()> {
         assert_eq!(normalize_host(" Kuskokwim "), "kuskokwim");
         assert_eq!(normalize_host(""), ANY);
         assert_eq!(for_evidence("Shaman"), "handoff-for:shaman");
+        Ok(())
     }
 
     #[test]
-    fn state_reads_back_from_evidence() {
+    fn state_reads_back_from_evidence() -> anyhow::Result<()> {
         let now = Utc::now();
-        let waiting = HandoffState::of(&[for_evidence("kuskokwim")]).unwrap();
+        let waiting = HandoffState::of(&[for_evidence("kuskokwim")]).context("a handoff")?;
         assert!(waiting.waits_for("KUSKOKWIM") && !waiting.waits_for("windows"));
-        let any = HandoffState::of(&[for_evidence(ANY)]).unwrap();
+        let any = HandoffState::of(&[for_evidence(ANY)]).context("a handoff")?;
         assert!(any.waits_for("windows") && any.waits_for("kuskokwim"));
-        let done = HandoffState::of(&[for_evidence(ANY), done_evidence("windows", now)]).unwrap();
+        let done = HandoffState::of(&[for_evidence(ANY), done_evidence("windows", now)])
+            .context("a handoff")?;
         assert!(!done.waits_for("windows"));
-        let (at, by) = done.done.unwrap();
+        let Some((at, by)) = done.done else {
+            anyhow::bail!("a done handoff records when and by whom");
+        };
         assert_eq!(by, "windows");
         assert_eq!(at.timestamp(), now.timestamp());
         assert_eq!(HandoffState::of(&["git:x".into()]), None, "not a handoff");
+        Ok(())
     }
 
     #[test]
-    fn a_title_is_the_first_line_cut_at_a_word() {
+    fn a_title_is_the_first_line_cut_at_a_word() -> anyhow::Result<()> {
         assert_eq!(
             title("\n  Deploy the dashboard \nthen check it"),
             "Deploy the dashboard"
@@ -219,20 +225,22 @@ mod tests {
         );
         assert!(!t.contains("wor..."), "cut at a word: {t}");
         assert_eq!(title("   "), "(empty)");
+        Ok(())
     }
 
     #[test]
-    fn ages_read_in_minutes_hours_or_days() {
+    fn ages_read_in_minutes_hours_or_days() -> anyhow::Result<()> {
         let now = Utc::now();
         assert_eq!(age(now - Duration::minutes(5), now), "5m ago");
         assert_eq!(age(now - Duration::hours(3), now), "3h ago");
         assert_eq!(age(now - Duration::days(4), now), "4d ago");
+        Ok(())
     }
 
     /// Only handoffs for this machine or any, not done, newest first; nothing
     /// waiting announces nothing.
     #[test]
-    fn the_announcement_lists_what_waits_here_newest_first() {
+    fn the_announcement_lists_what_waits_here_newest_first() -> anyhow::Result<()> {
         let now = Utc::now();
         let memories = vec![
             handoff(
@@ -264,7 +272,8 @@ mod tests {
         let waiting = waiting_for(&memories, "Kuskokwim");
         let ids: Vec<&str> = waiting.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["memory:b", "memory:a"]);
-        let text = announcement(&waiting, "Kuskokwim", now).unwrap();
+        let text =
+            announcement(&waiting, "Kuskokwim", now).context("two handoffs are announced")?;
         assert!(
             text.starts_with("2 handoffs waiting for this machine (kuskokwim):"),
             "{text}"
@@ -281,5 +290,6 @@ mod tests {
         assert_eq!(elsewhere.len(), 1);
         assert_eq!(elsewhere[0].id.as_str(), "memory:b");
         assert_eq!(announcement(&[], "nowhere", now), None);
+        Ok(())
     }
 }

@@ -37,7 +37,6 @@ mod http;
 mod notify;
 mod pdf;
 mod profile;
-mod secrets;
 mod server;
 mod session;
 mod telemetry;
@@ -94,9 +93,6 @@ struct Cli {
     jwt_audience: Option<String>,
     #[command(flatten)]
     db: antumbra_store::args::DbAuthArgs,
-    /// Read the root password from this file instead (see --jwt-secret-file).
-    #[arg(long, env = "ANTUMBRA_DB_PASS_FILE", conflicts_with = "db_pass")]
-    db_pass_file: Option<std::path::PathBuf>,
     /// Enable the autonomous propose trigger: once a user's unorganized inbox
     /// reaches this many memories, a write auto-clusters it into proposed
     /// compartments (reversible; the user curates). Off when unset.
@@ -191,6 +187,18 @@ struct Cli {
     /// refused and the gallery is empty.
     #[arg(long, env = "ANTUMBRA_COPAL_RENDER_ORIGIN")]
     copal_render_origin: Option<String>,
+    /// Let the networked server name copal tenants in a request header the
+    /// archive trusts as given (copal's header auth mode, the tenancy default).
+    /// Many identities write through one networked server, so isolation at the
+    /// archive then rests on the network between them alone; say so, or use
+    /// --copal-key or --copal-keys, which prove the tenant with a credential.
+    #[arg(
+        long,
+        env = "ANTUMBRA_COPAL_TRUST_HEADERS",
+        default_value_t = false,
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    copal_trust_headers: bool,
     /// A Gotenberg service (gotenberg.dev) that prints relics as PDF for the
     /// viewer's download, e.g. `http://pdf:3000` with the Compose `pdf`
     /// profile. Without one, relics still download as HTML and Markdown.
@@ -512,6 +520,28 @@ fn main() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("antumbra-mcp worker thread panicked"))?
 }
 
+/// Header-mode tenancy tells the archive the tenant in a request header it
+/// trusts as given, so isolation between workspaces at the archive rests on
+/// the network path alone. On the networked surface, where many identities
+/// write through one server, that trust has to be stated (`--copal-trust-
+/// headers`); the keyed tenancies prove the tenant and need nothing. A stdio
+/// server serves one identity and is trusted as that identity already.
+fn copal_headers_allowed(
+    networked: bool,
+    copal: Option<&antumbra_copal::CopalArchive>,
+    trusted: bool,
+) -> Result<()> {
+    match copal {
+        Some(archive) if networked && archive.trusts_headers() && !trusted => anyhow::bail!(
+            "the copal archive is told each workspace's tenant in a header it trusts as given, \
+             which on a networked server leaves isolation at the archive to the network between \
+             them; pass --copal-trust-headers if that network is yours alone, or use --copal-key \
+             or --copal-keys, which prove the tenant with a credential"
+        ),
+        _ => Ok(()),
+    }
+}
+
 impl Cli {
     /// The optional endpoints as the operator meant them. docker compose
     /// passes an unset variable through as an empty one (`${VAR:-}`), and
@@ -536,20 +566,12 @@ async fn run() -> Result<()> {
     antumbra_serve::seed_generation(cli.generation_seed);
     // Secrets resolve once, from the inline flag or its file, and only the
     // resolved value is used from here on.
-    let jwt_secret = secrets::resolve(
+    let jwt_secret = antumbra_core::secrets::resolve(
         cli.jwt_secret.clone(),
         cli.jwt_secret_file.as_deref(),
         "JWT secret",
     )?;
-    let db_pass = secrets::resolve(
-        cli.db.db_pass.clone(),
-        cli.db_pass_file.as_deref(),
-        "database password",
-    )?;
-    let db = antumbra_store::args::DbAuthArgs {
-        db_pass,
-        ..cli.db.clone()
-    };
+    let db = cli.db.resolved()?;
 
     // Mint a hook token and exit -- no DB or embedder needed. HS256 only: the
     // server holds the symmetric secret; an RS256 deployment mints via its auth
@@ -676,6 +698,11 @@ async fn run() -> Result<()> {
     // Optional copal document-of-record archive. Operator-configured; absent,
     // ingest keeps only the chunks (the v0 behavior, unchanged).
     let copal = cli.copal.archive(cli.copal_render_origin)?;
+    copal_headers_allowed(
+        cli.http.is_some(),
+        copal.as_deref(),
+        cli.copal_trust_headers,
+    )?;
     // The relic viewer's PDF download, printed by a renderer beside the
     // server; only the networked surface has a viewer.
     let pdf = cli
@@ -691,7 +718,7 @@ async fn run() -> Result<()> {
     // The GitHub App webhook receiver: its secret resolves like every other
     // secret, and a repository must map to a workspace before an event can
     // touch anything. Webhooks arrive over the network, so HTTP only.
-    let github_secret = secrets::resolve(
+    let github_secret = antumbra_core::secrets::resolve(
         cli.github_webhook_secret.clone(),
         cli.github_webhook_secret_file.as_deref(),
         "GitHub webhook secret",
@@ -938,6 +965,24 @@ mod tests {
         .without_empty_settings();
         assert_eq!(cli.rerank_url.as_deref(), Some("http://rerank/rerank"));
         assert_eq!(cli.copal.copal_addr.as_deref(), Some("http://copal:8080"));
+        Ok(())
+    }
+
+    /// Header-mode tenancy on the networked surface is the operator's to
+    /// trust, by name; the keyed modes and the stdio server need nothing.
+    #[test]
+    fn header_mode_with_http_needs_the_flag() -> anyhow::Result<()> {
+        use antumbra_copal::{CopalArchive, CopalTenancy};
+        let header_mode = CopalArchive::new("127.0.0.1:9010", CopalTenancy::PerWorkspace);
+        let keyed = CopalArchive::new("127.0.0.1:9010", CopalTenancy::SharedKey("ck1_x".into()));
+        anyhow::ensure!(
+            copal_headers_allowed(true, Some(&header_mode), false).is_err(),
+            "header mode on the networked server without the flag is refused"
+        );
+        copal_headers_allowed(true, Some(&header_mode), true)?;
+        copal_headers_allowed(true, Some(&keyed), false)?;
+        copal_headers_allowed(false, Some(&header_mode), false)?;
+        copal_headers_allowed(true, None, false)?;
         Ok(())
     }
 

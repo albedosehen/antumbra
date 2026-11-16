@@ -15,7 +15,7 @@
 use std::time::Instant;
 
 use super::*;
-use crate::repo::{compartment, memory, principal};
+use crate::repo::{compartment, memory};
 use crate::schema::EMBED_DIM;
 use antumbra_core::{Compartment, CompartmentId, UserId};
 
@@ -62,12 +62,11 @@ async fn corpus() -> Result<Corpus> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(3000);
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:bench");
     let owner = UserId::new("user:owner");
     let member = UserId::new("user:member");
-    principal::provision(&store, &tenant, &owner).await?;
-    principal::provision(&store, &tenant, &member).await?;
+    crate::testing::members(&store, &tenant, &[&owner, &member]).await?;
     let now = Utc::now();
     let mine = CompartmentId::new("comp:ws:bench:user:owner:default");
     compartment::create(

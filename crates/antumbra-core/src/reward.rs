@@ -155,31 +155,35 @@ mod tests {
     }
 
     #[test]
-    fn verifier_only_is_ground_truth() {
+    fn verifier_only_is_ground_truth() -> anyhow::Result<()> {
         let signals = vec![
             r(RewardSource::Verifier, 1.0),
             r(RewardSource::Verifier, 0.0),
         ];
         assert_eq!(fold_step(&signals, 0.5), 0.5);
+        Ok(())
     }
 
     #[test]
-    fn critic_cannot_rescue_a_verified_failure() {
+    fn critic_cannot_rescue_a_verified_failure() -> anyhow::Result<()> {
         // verifier failed (0.0); a glowing critic must not lift the step above 0.
         let signals = vec![r(RewardSource::Verifier, 0.0), r(RewardSource::Critic, 1.0)];
         assert_eq!(fold_step(&signals, 0.9), 0.0);
+        Ok(())
     }
 
     #[test]
-    fn critic_densifies_within_a_passing_step() {
+    fn critic_densifies_within_a_passing_step() -> anyhow::Result<()> {
         let signals = vec![r(RewardSource::Verifier, 1.0), r(RewardSource::Critic, 0.5)];
         let folded = fold_step(&signals, 0.5);
         assert!((folded - 0.75).abs() < 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn pure_critic_when_no_verifier() {
+    fn pure_critic_when_no_verifier() -> anyhow::Result<()> {
         let signals = vec![r(RewardSource::Critic, 0.4), r(RewardSource::Critic, 0.6)];
         assert!((fold_step(&signals, 0.5) - 0.5).abs() < 1e-6);
+        Ok(())
     }
 }

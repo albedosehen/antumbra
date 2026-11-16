@@ -4,7 +4,7 @@ use serde_json::json;
 /// The shape this lint is about: rows of prose nobody bounded. It is the
 /// shape `recall_memories` itself had before its answers were bounded.
 #[test]
-fn rows_of_unbounded_prose_are_flagged_with_the_path() {
+fn rows_of_unbounded_prose_are_flagged_with_the_path() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -37,13 +37,14 @@ fn rows_of_unbounded_prose_are_flagged_with_the_path() {
         !found[0].is_failure(),
         "shape costs context; it never fails a request, so it must not fail the command"
     );
+    Ok(())
 }
 
 /// A description counts as a bound, because Antumbra's rule is that a bound
 /// may be lifted by one documented call and no schema can express "900
 /// unless you asked for full". This is how `MemoryView::content` passes.
 #[test]
-fn a_field_that_says_what_bounds_it_passes() {
+fn a_field_that_says_what_bounds_it_passes() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -64,11 +65,12 @@ fn a_field_that_says_what_bounds_it_passes() {
         }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// A collection that never says how many it returns.
 #[test]
-fn a_collection_with_no_stated_size_is_flagged() {
+fn a_collection_with_no_stated_size_is_flagged() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -83,13 +85,14 @@ fn a_collection_with_no_stated_size_is_flagged() {
         shape_problems(&schema),
         vec![Problem::UnboundedCollection(".rows".into())]
     );
+    Ok(())
 }
 
 /// Generated schemas put the row type in `$defs` and point at it, so a walk
 /// that does not follow `$ref` sees nothing at all. This is the shape
 /// `recall_memories` actually publishes.
 #[test]
-fn a_row_behind_a_ref_is_still_walked() {
+fn a_row_behind_a_ref_is_still_walked() -> anyhow::Result<()> {
     let schema = json!({
         "$defs": {
             "Row": {
@@ -112,6 +115,7 @@ fn a_row_behind_a_ref_is_still_walked() {
         vec![Problem::UnboundedText(".rows[].prose".into())],
         "the walk follows a local $ref or it checks nothing a generator emits"
     );
+    Ok(())
 }
 
 /// The lint's third rule, recall's rule for an empty answer applied to any
@@ -119,7 +123,7 @@ fn a_row_behind_a_ref_is_still_walked() {
 /// the agent cannot tell a query that matched nothing from one whose matches a
 /// floor removed.
 #[test]
-fn a_collection_with_nothing_to_explain_an_empty_one_is_flagged() {
+fn a_collection_with_nothing_to_explain_an_empty_one_is_flagged() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -134,13 +138,14 @@ fn a_collection_with_nothing_to_explain_an_empty_one_is_flagged() {
         shape_problems(&schema),
         vec![Problem::IndistinguishableEmpty(".memories".into())]
     );
+    Ok(())
 }
 
 /// The shape recall's relevance floor actually landed in `antumbra-mcp` as: a
 /// boolean beside the rows that is true exactly when something was retrieved
 /// and then floored. This is the fixture that says what the rule is asking for.
 #[test]
-fn a_boolean_beside_the_rows_passes() {
+fn a_boolean_beside_the_rows_passes() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -153,12 +158,13 @@ fn a_boolean_beside_the_rows_passes() {
         }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// An enumerated status carries the same news as a boolean, and is how a
 /// server with more than two outcomes would say it.
 #[test]
-fn an_enumerated_status_passes() {
+fn an_enumerated_status_passes() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -171,12 +177,13 @@ fn an_enumerated_status_passes() {
         }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// The documented escape hatch, matching the posture of the rules beside
 /// this one: a server may say in prose what a schema cannot express.
 #[test]
-fn a_description_that_says_what_empty_means_passes() {
+fn a_description_that_says_what_empty_means_passes() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -189,13 +196,14 @@ fn a_description_that_says_what_empty_means_passes() {
         }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// A server says absence in its own vocabulary. This is `store_memory`'s
 /// `auto_proposed` verbatim, which explains itself completely and which the
 /// first version of this rule flagged for not using the word "empty".
 #[test]
-fn a_field_that_explains_its_absence_in_other_words_passes() {
+fn a_field_that_explains_its_absence_in_other_words_passes() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -208,13 +216,14 @@ fn a_field_that_explains_its_absence_in_other_words_passes() {
         }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// A description that says HOW MANY must not silence a rule about WHY NONE.
 /// The two rules share a keyword and ask different questions, so they read
 /// the description differently on purpose.
 #[test]
-fn a_description_about_size_does_not_answer_the_empty_question() {
+fn a_description_about_size_does_not_answer_the_empty_question() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -230,13 +239,14 @@ fn a_description_about_size_does_not_answer_the_empty_question() {
         vec![Problem::IndistinguishableEmpty(".rows".into())],
         "the size description satisfies the bound rule and not this one"
     );
+    Ok(())
 }
 
 /// The converse, and the reason each rule reads the description for its own
 /// question: saying what an empty result means must not pass off as saying
 /// how many a full one returns, or one sentence quiets the whole report.
 #[test]
-fn a_description_about_emptiness_does_not_answer_the_size_question() {
+fn a_description_about_emptiness_does_not_answer_the_size_question() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -252,13 +262,14 @@ fn a_description_about_emptiness_does_not_answer_the_size_question() {
         vec![Problem::UnboundedCollection(".rows".into())],
         "the empty-state description satisfies that rule and not the bound"
     );
+    Ok(())
 }
 
 /// Only RESULT collections. An empty `tags` inside a row is an ordinary
 /// absence rather than an ambiguous answer, and flagging every one of them
 /// would bury the case that matters under noise.
 #[test]
-fn an_empty_collection_inside_a_row_is_not_flagged() {
+fn an_empty_collection_inside_a_row_is_not_flagged() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -280,11 +291,12 @@ fn an_empty_collection_inside_a_row_is_not_flagged() {
         }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// A collection that cannot be empty has no empty state to describe.
 #[test]
-fn a_collection_with_a_minimum_is_not_flagged() {
+fn a_collection_with_a_minimum_is_not_flagged() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -297,22 +309,24 @@ fn a_collection_with_a_minimum_is_not_flagged() {
         }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// A string OUTSIDE a collection is one field once, not one per row, so it
 /// is not the hazard this rule is about and must not be reported.
 #[test]
-fn a_scalar_string_outside_a_row_is_not_flagged() {
+fn a_scalar_string_outside_a_row_is_not_flagged() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": { "title": { "type": "string" } }
     });
     assert!(shape_problems(&schema).is_empty());
+    Ok(())
 }
 
 /// A schema that refers to itself must not spin the walk.
 #[test]
-fn a_self_referential_schema_terminates() {
+fn a_self_referential_schema_terminates() -> anyhow::Result<()> {
     let schema = json!({
         "$defs": {
             "Node": {
@@ -324,16 +338,18 @@ fn a_self_referential_schema_terminates() {
         "properties": { "root": { "$ref": "#/$defs/Node" } }
     });
     let _ = shape_problems(&schema);
+    Ok(())
 }
 
 /// A server that publishes no output schema is not linted for shape: a
 /// shape nobody declared cannot be checked without calling the tool.
 #[test]
-fn a_tool_without_an_output_schema_is_left_alone() {
+fn a_tool_without_an_output_schema_is_left_alone() -> anyhow::Result<()> {
     let tools = [Tool {
         name: "quiet".into(),
         input_schema: json!({ "type": "object" }),
         output_schema: None,
     }];
     assert!(lint(&tools).is_empty());
+    Ok(())
 }

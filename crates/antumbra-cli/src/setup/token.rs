@@ -68,16 +68,17 @@ mod tests {
     }
 
     #[test]
-    fn the_workspace_comes_from_the_tenant_claim() {
+    fn the_workspace_comes_from_the_tenant_claim() -> anyhow::Result<()> {
         let t = token(r#"{"tenant":"ws:acme","user":"user:dana","exp":1893456000}"#);
         assert!(looks_like_jwt(&t));
         assert_eq!(workspace(&t).as_deref(), Some("ws:acme"));
         assert_eq!(expires(&t), Some(1_893_456_000));
         assert_eq!(workspace("a.b.c"), None);
+        Ok(())
     }
 
     #[test]
-    fn only_a_token_that_says_so_is_an_operators() {
+    fn only_a_token_that_says_so_is_an_operators() -> anyhow::Result<()> {
         assert!(is_operator(&token(
             r#"{"tenant":"ws:acme","user":"user:dana","operator":true}"#
         )));
@@ -85,30 +86,29 @@ mod tests {
             r#"{"tenant":"ws:acme","user":"user:dana"}"#
         )));
         assert!(!is_operator("a.b.c"));
+        Ok(())
     }
 
     #[test]
-    fn pasted_text_is_a_token_or_a_link() {
+    fn pasted_text_is_a_token_or_a_link() -> anyhow::Result<()> {
         let t = token(r#"{"tenant":"ws:x"}"#);
+        assert_eq!(read_pasted(&format!("  {t}\n"))?, Pasted::Token(t.clone()));
         assert_eq!(
-            read_pasted(&format!("  {t}\n")).unwrap(),
+            read_pasted(&format!("Bearer {t}"))?,
             Pasted::Token(t.clone())
         );
         assert_eq!(
-            read_pasted(&format!("Bearer {t}")).unwrap(),
-            Pasted::Token(t.clone())
-        );
-        assert_eq!(
-            read_pasted("https://control.example.com/magic/verify?token=abc").unwrap(),
+            read_pasted("https://control.example.com/magic/verify?token=abc")?,
             Pasted::Link("https://control.example.com/magic/verify?token=abc".into())
         );
         assert!(read_pasted("hunter2").is_err());
         assert!(!looks_like_jwt("a.b"));
         assert!(!looks_like_jwt("a..c"));
+        Ok(())
     }
 
     #[test]
-    fn a_signin_answer_carries_the_token() {
+    fn a_signin_answer_carries_the_token() -> anyhow::Result<()> {
         let t = token(r#"{"tenant":"ws:x"}"#);
         assert_eq!(from_signin(&serde_json::json!({ "token": t })), Some(t));
         assert_eq!(
@@ -116,5 +116,6 @@ mod tests {
             None
         );
         assert_eq!(from_signin(&serde_json::json!({ "token": "nope" })), None);
+        Ok(())
     }
 }

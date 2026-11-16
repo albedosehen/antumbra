@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-loop: the durable generational loop
 //!
 //! The durable generational loop as a resumable state-machine-in-DB:

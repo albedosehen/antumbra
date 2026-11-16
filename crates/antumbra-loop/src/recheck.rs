@@ -338,15 +338,16 @@ mod tests {
     }
 
     #[test]
-    fn the_spread_keeps_every_answer_up_to_the_cap_then_spaces_them() {
+    fn the_spread_keeps_every_answer_up_to_the_cap_then_spaces_them() -> Result<()> {
         let xs: Vec<u32> = (0..10).collect();
         assert_eq!(spread(&xs, 20), xs);
         assert_eq!(spread(&xs, 5), vec![0, 2, 4, 6, 8]);
         assert!(spread(&xs, 0).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn a_task_anchor_is_preferred_and_the_domain_must_match() {
+    fn a_task_anchor_is_preferred_and_the_domain_must_match() -> Result<()> {
         let checked = record("strings", Some("swap"), "checked");
         let domain = record("strings", None, "domain");
         let task = record("strings", Some("swap"), "task");
@@ -355,5 +356,6 @@ mod tests {
         assert_eq!(anchor_for(&anchors, &checked, "swap"), Some(&task));
         assert_eq!(anchor_for(&anchors, &checked, "caesar"), Some(&domain));
         assert_eq!(anchor_for(&anchors[2..], &checked, "swap"), None);
+        Ok(())
     }
 }
