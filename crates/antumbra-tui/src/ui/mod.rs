@@ -235,12 +235,7 @@ fn shadow_color(t: &Theme, status: &str) -> Color {
 
 /// Clip `s` to `max` columns, ending in an ellipsis when cut.
 fn clip(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
+    antumbra_core::text::clipped(s, max).into_owned()
 }
 
 /// A shadow's name: a standing expert's training by the scope it trained,

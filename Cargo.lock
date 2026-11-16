@@ -170,8 +170,10 @@ name = "antumbra-auth"
 version = "0.2.7"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "jsonwebtoken 11.0.0",
  "serde",
+ "serde_json",
  "uuid",
 ]
 
@@ -203,6 +205,7 @@ dependencies = [
 name = "antumbra-cli"
 version = "0.2.7"
 dependencies = [
+ "antumbra-auth",
  "antumbra-boundary",
  "antumbra-copal",
  "antumbra-core",
@@ -500,6 +503,7 @@ name = "antumbra-tui"
 version = "0.2.7"
 dependencies = [
  "ab_glyph",
+ "antumbra-auth",
  "antumbra-core",
  "antumbra-http",
  "antumbra-store",

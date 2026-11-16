@@ -48,6 +48,8 @@ pub mod reward;
 pub mod router;
 pub mod shadow;
 pub mod slice;
+pub mod stats;
+pub mod text;
 pub mod trust;
 pub mod usage;
 pub mod vector;

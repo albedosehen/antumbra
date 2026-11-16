@@ -18,6 +18,8 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod unverified;
+
 /// The verified identity carried by a request's bearer token: what becomes
 /// `$auth.tenant` / `$auth.user` for the session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

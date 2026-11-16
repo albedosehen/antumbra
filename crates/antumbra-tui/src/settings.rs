@@ -17,8 +17,9 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
-use base64::Engine;
 use serde_json::Value;
+
+pub use antumbra_auth::unverified::is_operator;
 
 /// The server when nothing names one: a stack on this machine.
 pub const DEFAULT_SURFACE: &str = "http://127.0.0.1:8081";
@@ -155,22 +156,6 @@ pub fn token(given: Option<String>, places: &Places) -> Result<Found> {
         .position(|f| is_operator(&f.value))
         .unwrap_or(0);
     Ok(found.swap_remove(pick))
-}
-
-/// Whether `token` says it is an operator's. Read, not verified: it only
-/// chooses among the tokens on hand, and the server decides what each may do.
-pub fn is_operator(token: &str) -> bool {
-    token
-        .split('.')
-        .nth(1)
-        .and_then(|payload| {
-            base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .decode(payload.trim_end_matches('='))
-                .ok()
-        })
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .and_then(|claims| claims.get("operator")?.as_bool())
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

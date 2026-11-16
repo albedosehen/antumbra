@@ -24,6 +24,7 @@
 //! Only measurements since the expert last became active count, so a
 //! person's revive starts its stream afresh.
 
+use antumbra_core::stats::mean;
 use antumbra_core::{
     ContributionRecord, ExpertId, ExpertStatus, ExpertTransition, Generation, Result,
     TransitionCause,
@@ -68,11 +69,6 @@ pub enum Warning {
 
 /// How far a mean affinity may fall before it warns.
 const DRIFT: f32 = 0.1;
-
-fn mean(values: impl Iterator<Item = f32>) -> Option<f32> {
-    let (n, sum) = values.fold((0u32, 0.0f32), |(n, s), v| (n + 1, s + v));
-    (n > 0).then(|| sum / n as f32)
-}
 
 /// The early warnings in a contribution stream, oldest first, about its last
 /// measurement against those before it.
