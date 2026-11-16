@@ -294,6 +294,18 @@ pub async fn revoke(
     Ok(())
 }
 
+/// The live grant `grantee` holds on `compartment`, or `None` when there is
+/// none: what a caller reads back after a write, since the engine refuses a
+/// grant it does not permit by persisting nothing rather than with an error.
+pub async fn granted(
+    store: &Store,
+    tenant: &TenantId,
+    compartment: &CompartmentId,
+    grantee: &UserId,
+) -> Result<Option<Grant>> {
+    live_grant(store, tenant, compartment, grantee).await
+}
+
 /// The single **live** grant for (tenant, compartment, grantee), or `None` if
 /// absent or already revoked.
 async fn live_grant(
