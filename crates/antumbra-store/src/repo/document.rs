@@ -10,10 +10,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_records, query_records, upsert_record};
+use surql::query::crud::{delete_records, query_records};
 use surql::query::expressions::{as_, count_all, count_if, field};
 use surql::types::operators::{and_, eq, is_none};
-use surql::types::RecordID;
 
 use antumbra_core::{CompartmentId, DocumentChunk, DocumentChunkId, Result, TenantId};
 
@@ -96,11 +95,9 @@ impl ChunkRow {
 /// Insert a document's chunks (addressed by their globally-unique ids).
 pub async fn insert_chunks(store: &Store, chunks: &[DocumentChunk]) -> Result<()> {
     for c in chunks {
-        let id = RecordID::<()>::new(TABLE, c.id.as_str()).map_err(map)?;
-        let data = serde_json::to_value(ChunkRow::from_domain(c))?;
-        upsert_record(store.client(), &id, data)
-            .await
-            .map_err(map)?;
+        store
+            .put(TABLE, c.id.as_str(), &ChunkRow::from_domain(c))
+            .await?;
     }
     Ok(())
 }

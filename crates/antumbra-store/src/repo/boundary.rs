@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_record, query_records, upsert_record};
+use surql::query::crud::{delete_record, query_records};
 use surql::types::RecordID;
 
 use antumbra_core::{BoundaryId, FailureBoundary, Generation, Grain, Result, UserId};
@@ -83,12 +83,13 @@ impl BoundaryRow {
 
 /// Insert or replace a boundary.
 pub async fn upsert(store: &Store, boundary: &FailureBoundary) -> Result<()> {
-    let id = RecordID::<()>::new(TABLE, boundary.id.as_str()).map_err(map)?;
-    let data = serde_json::to_value(BoundaryRow::from_domain(boundary))?;
-    upsert_record(store.client(), &id, data)
+    store
+        .put(
+            TABLE,
+            boundary.id.as_str(),
+            &BoundaryRow::from_domain(boundary),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Remove a boundary, e.g. retired once a captured expert resolves its region.

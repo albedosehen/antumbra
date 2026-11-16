@@ -13,9 +13,8 @@
 //! surql-rs builders; the table is tenant-scoped by engine PERMISSIONS.
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_records, first, upsert_record};
+use surql::query::crud::{delete_records, first};
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{Result, TenantId};
 
@@ -68,11 +67,7 @@ fn key(tenant: &str) -> String {
 
 /// Set (or replace) the workspace's embedder. Idempotent.
 pub async fn upsert(store: &Store, cfg: &EmbedderConfig) -> Result<()> {
-    let rid = RecordID::<()>::new(TABLE, key(&cfg.tenant_id).as_str()).map_err(map)?;
-    upsert_record(store.client(), &rid, serde_json::to_value(cfg)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(TABLE, key(&cfg.tenant_id).as_str(), cfg).await
 }
 
 /// The workspace's embedder, or `None` to fall back to the server default.

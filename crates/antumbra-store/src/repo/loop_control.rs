@@ -5,7 +5,7 @@
 
 use chrono::Utc;
 
-use surql::query::crud::{delete_record, get_record, upsert_record};
+use surql::query::crud::delete_record;
 use surql::types::RecordID;
 
 use antumbra_core::generational::{LoopCommand, LoopControl};
@@ -23,29 +23,18 @@ fn record_id(run_id: &RunId) -> Result<RecordID> {
 /// Set the control command for a run (upsert): what an operator writes to ask a
 /// running loop to stop.
 pub async fn set(store: &Store, run_id: &RunId, command: LoopCommand) -> Result<()> {
-    let id = record_id(run_id)?;
     let control = LoopControl {
         run_id: run_id.clone(),
         command,
         updated_at: Utc::now(),
     };
-    let data = serde_json::to_value(&control)?;
-    upsert_record(store.client(), &id, data)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(TABLE, run_id.as_str(), &control).await
 }
 
 /// The current command for a run, [`LoopCommand::Run`] when no control is set.
 pub async fn load(store: &Store, run_id: &RunId) -> Result<LoopCommand> {
-    let id = record_id(run_id)?;
-    match get_record(store.client(), &id).await.map_err(map)? {
-        Some(value) => {
-            let control: LoopControl = serde_json::from_value(value)?;
-            Ok(control.command)
-        }
-        None => Ok(LoopCommand::Run),
-    }
+    let control = store.get_row::<LoopControl>(TABLE, run_id.as_str()).await?;
+    Ok(control.map_or(LoopCommand::Run, |c| c.command))
 }
 
 /// Clear any control for a run (back to the default `Run`); the runner calls

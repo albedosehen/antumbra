@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{get_record, query_records, upsert_record};
+use surql::query::crud::{query_records, upsert_record};
 use surql::types::operators::{and_, eq};
 use surql::types::RecordID;
 
@@ -129,10 +129,9 @@ pub async fn put(store: &Store, relic: &Relic) -> Result<bool> {
 /// exist, belongs to another tenant, or is outside the session's audience,
 /// indistinguishably.
 pub async fn get(store: &Store, tenant: &TenantId, slug: &str) -> Result<Option<Relic>> {
-    let Some(row) = get_record(store.client(), &rid(slug)?).await.map_err(map)? else {
+    let Some(row) = store.get_row::<RelicRow>(TABLE, slug).await? else {
         return Ok(None);
     };
-    let row: RelicRow = serde_json::from_value(row)?;
     if row.tenant_id != tenant.as_str() {
         return Ok(None);
     }

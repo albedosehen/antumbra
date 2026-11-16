@@ -8,9 +8,8 @@
 //! builders; no raw SurrealQL.
 
 use surql::query::builder::Query;
-use surql::query::crud::{first, upsert_record};
+use surql::query::crud::first;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{MemoryPolicy, Result, TenantId};
 
@@ -46,14 +45,11 @@ pub async fn get(store: &Store, tenant: &TenantId) -> Result<MemoryPolicy> {
 /// connection.
 pub async fn set(store: &Store, tenant: &TenantId, policy: &MemoryPolicy) -> Result<MemoryPolicy> {
     let policy = policy.clone().clamped();
-    let rid = RecordID::<()>::new(TABLE, key(tenant).as_str()).map_err(map)?;
     let row = PolicyRow {
         tenant_id: tenant.as_str().to_string(),
         policy: policy.clone(),
     };
-    upsert_record(store.client(), &rid, serde_json::to_value(row)?)
-        .await
-        .map_err(map)?;
+    store.put(TABLE, key(tenant).as_str(), &row).await?;
     Ok(policy)
 }
 

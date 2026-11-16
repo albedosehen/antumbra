@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_record, get_record, query_records, upsert_record};
+use surql::query::crud::{delete_record, query_records};
 use surql::types::RecordID;
 
 use antumbra_core::{AntumbraError, Result};
@@ -35,32 +35,27 @@ impl Invite {
     }
 }
 
+fn key(code: &str) -> String {
+    code.replace([':', '/', '\\', '|', ' '], "_")
+}
+
 fn record_id(code: &str) -> Result<RecordID> {
-    let key = code.replace([':', '/', '\\', '|', ' '], "_");
-    RecordID::<()>::new(TABLE, key.as_str()).map_err(map)
+    RecordID::<()>::new(TABLE, key(code).as_str()).map_err(map)
 }
 
 /// Mint an invite (operator action). Idempotent on the code.
 pub async fn mint(store: &Store, code: &str, expires_at: Option<DateTime<Utc>>) -> Result<()> {
-    let rid = record_id(code)?;
     let invite = Invite {
         code: code.to_string(),
         expires_at,
         created_at: Utc::now(),
     };
-    upsert_record(store.client(), &rid, serde_json::to_value(&invite)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(TABLE, key(code).as_str(), &invite).await
 }
 
 /// Read an invite by code, if it exists.
 pub async fn get(store: &Store, code: &str) -> Result<Option<Invite>> {
-    let rid = record_id(code)?;
-    match get_record(store.client(), &rid).await.map_err(map)? {
-        Some(value) => Ok(Some(serde_json::from_value(value)?)),
-        None => Ok(None),
-    }
+    store.get_row(TABLE, key(code).as_str()).await
 }
 
 /// Every outstanding (un-redeemed) invite: the operator's audit view.

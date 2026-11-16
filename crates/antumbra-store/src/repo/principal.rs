@@ -8,9 +8,8 @@ use serde::Deserialize;
 use serde_json::json;
 
 use surql::query::builder::Query;
-use surql::query::crud::{get_record, query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{AntumbraError, Result, TenantId, UserId};
 
@@ -19,9 +18,8 @@ use crate::store::Store;
 
 const TABLE: &str = "principal";
 
-fn record(tenant: &TenantId, user: &UserId) -> Result<RecordID<()>> {
-    let key = format!("{}|{}", tenant.as_str(), user.as_str()).replace([':', '/', '\\', '|'], "_");
-    RecordID::<()>::new(TABLE, key.as_str()).map_err(map)
+fn key(tenant: &TenantId, user: &UserId) -> String {
+    format!("{}|{}", tenant.as_str(), user.as_str()).replace([':', '/', '\\', '|'], "_")
 }
 
 /// The workspaces `user` already belongs to.
@@ -49,9 +47,8 @@ pub async fn workspaces_of(store: &Store, user: &UserId) -> Result<Vec<TenantId>
 /// principal that already exists is left as it is, refused or not, so a pair
 /// provisioned before this rule keeps working.
 pub async fn provision(store: &Store, tenant: &TenantId, user: &UserId) -> Result<()> {
-    let rid = record(tenant, user)?;
-    let existing: Option<serde_json::Value> =
-        get_record(store.client(), &rid).await.map_err(map)?;
+    let key = key(tenant, user);
+    let existing: Option<serde_json::Value> = store.get_row(TABLE, key.as_str()).await?;
     if existing.is_some() {
         return Ok(());
     }
@@ -68,14 +65,13 @@ pub async fn provision(store: &Store, tenant: &TenantId, user: &UserId) -> Resul
             )));
         }
     }
-    upsert_record(
-        store.client(),
-        &rid,
-        json!({ "tenant": tenant.as_str(), "user": user.as_str() }),
-    )
-    .await
-    .map_err(map)?;
-    Ok(())
+    store
+        .put(
+            TABLE,
+            key.as_str(),
+            &json!({ "tenant": tenant.as_str(), "user": user.as_str() }),
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -119,13 +115,13 @@ mod tests {
         let owner = UserId::new("user:owner");
         for tenant in ["ws:one", "ws:two"] {
             let tenant = TenantId::new(tenant);
-            upsert_record(
-                store.client(),
-                &record(&tenant, &owner)?,
-                json!({ "tenant": tenant.as_str(), "user": owner.as_str() }),
-            )
-            .await
-            .map_err(map)?;
+            store
+                .put(
+                    TABLE,
+                    key(&tenant, &owner).as_str(),
+                    &json!({ "tenant": tenant.as_str(), "user": owner.as_str() }),
+                )
+                .await?;
         }
         provision(&store, &TenantId::new("ws:one"), &owner).await?;
         provision(&store, &TenantId::new("ws:two"), &owner).await?;

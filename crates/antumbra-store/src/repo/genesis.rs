@@ -8,12 +8,10 @@
 //! because the compartment has moved on since.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::{and_, eq};
-use surql::types::RecordID;
 
 use antumbra_core::{CompartmentId, GenesisRequest, GenesisStatus, Result, TenantId, UserId};
 
@@ -82,12 +80,13 @@ fn record_key(request: &GenesisRequest) -> &str {
 }
 
 async fn put(store: &Store, request: &GenesisRequest) -> Result<()> {
-    let rid = RecordID::<()>::new(GENESIS_REQUEST, record_key(request)).map_err(map)?;
-    let data: Value = serde_json::to_value(RequestRow::from_domain(request))?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            GENESIS_REQUEST,
+            record_key(request),
+            &RequestRow::from_domain(request),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Ask for a compartment to be trained somewhere else. Returns the request as

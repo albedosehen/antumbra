@@ -7,12 +7,10 @@
 //! evaluations, and which recipe it descends from. No raw SurrealQL.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{get_record, query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{Generation, RecipeRecord, Result, RunId, ShadowId, TrainingRecipe};
 
@@ -73,23 +71,22 @@ impl RecipeRow {
 
 /// Record a run of a recipe, replacing any row the same shadow left before.
 pub async fn upsert(store: &Store, record: &RecipeRecord) -> Result<()> {
-    let id = RecordID::<()>::new(TABLE, record.shadow.as_str()).map_err(map)?;
-    let data: Value = serde_json::to_value(RecipeRow::from_domain(record))?;
-    upsert_record(store.client(), &id, data)
+    store
+        .put(
+            TABLE,
+            record.shadow.as_str(),
+            &RecipeRow::from_domain(record),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// The row a shadow left, if it trained under a recorded recipe.
 pub async fn get(store: &Store, shadow: &ShadowId) -> Result<Option<RecipeRecord>> {
-    let rid = RecordID::<()>::new(TABLE, shadow.as_str()).map_err(map)?;
-    match get_record(store.client(), &rid).await.map_err(map)? {
-        Some(value) => Ok(Some(
-            serde_json::from_value::<RecipeRow>(value)?.into_domain()?,
-        )),
-        None => Ok(None),
-    }
+    store
+        .get_row::<RecipeRow>(TABLE, shadow.as_str())
+        .await?
+        .map(RecipeRow::into_domain)
+        .transpose()
 }
 
 /// Every recipe one run trained under, in generation order: the search's

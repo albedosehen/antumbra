@@ -6,12 +6,10 @@
 //! provide tenant-scoped CRUD. No raw SurrealQL; surql-rs builders only.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_records, query_records, upsert_record};
+use surql::query::crud::{delete_records, query_records};
 use surql::types::operators::{and_, eq};
-use surql::types::RecordID;
 
 use antumbra_core::{
     Capability, Compartment, CompartmentId, Grant, Origin, Result, TenantId, UserId,
@@ -84,13 +82,13 @@ pub(crate) fn sanitize(s: &str) -> String {
 
 /// Create or update a compartment (addressed by its id).
 pub async fn create(store: &Store, compartment: &Compartment) -> Result<()> {
-    let rid = RecordID::<()>::new(COMPARTMENT, sanitize(compartment.id.as_str()).as_str())
-        .map_err(map)?;
-    let data: Value = serde_json::to_value(CompartmentRow::from_domain(compartment))?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            COMPARTMENT,
+            sanitize(compartment.id.as_str()).as_str(),
+            &CompartmentRow::from_domain(compartment),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// The compartments a user owns in a tenant.
@@ -267,12 +265,13 @@ fn grant_key(g: &Grant) -> String {
 /// Grant (or update) a capability on a compartment to a user. Idempotent per
 /// (tenant, compartment, grantee).
 pub async fn grant(store: &Store, grant: &Grant) -> Result<()> {
-    let rid = RecordID::<()>::new(GRANT, grant_key(grant).as_str()).map_err(map)?;
-    let data: Value = serde_json::to_value(GrantRow::from_domain(grant))?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            GRANT,
+            grant_key(grant).as_str(),
+            &GrantRow::from_domain(grant),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Revoke a user's grant on a compartment as a **tombstone** (not a hard delete),

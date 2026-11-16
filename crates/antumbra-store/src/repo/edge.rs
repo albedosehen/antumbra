@@ -5,12 +5,10 @@
 //! `(tenant, from, to, type)` so re-relating the same pair is idempotent.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::{and_, eq};
-use surql::types::RecordID;
 
 use antumbra_core::{EdgeType, MemoryEdge, MemoryId, Result, TenantId};
 
@@ -73,12 +71,9 @@ fn edge_key(e: &MemoryEdge) -> String {
 
 /// Create or update a directed edge (idempotent per from/to/type).
 pub async fn relate(store: &Store, edge: &MemoryEdge) -> Result<()> {
-    let rid = RecordID::<()>::new(TABLE, edge_key(edge).as_str()).map_err(map)?;
-    let data: Value = serde_json::to_value(EdgeRow::from_domain(edge))?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(TABLE, edge_key(edge).as_str(), &EdgeRow::from_domain(edge))
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Every edge across all tenants: the owner/console view of the whole Penumbra

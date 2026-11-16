@@ -4,9 +4,8 @@
 //! replaces its rows rather than adding second ones.
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{Generation, GrowRecord, RegionCensus, Result, RunId};
 
@@ -22,11 +21,7 @@ pub async fn upsert_census(store: &Store, census: &RegionCensus) -> Result<()> {
         "{}@g{}@{}",
         census.run_id, census.generation.0, census.region
     );
-    let id = RecordID::<()>::new(CENSUS, key.as_str()).map_err(map)?;
-    upsert_record(store.client(), &id, serde_json::to_value(census)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(CENSUS, key.as_str(), census).await
 }
 
 /// The latest census a run took before `generation`: every region of the
@@ -63,11 +58,7 @@ pub async fn census_before(
 /// Record the grow step's decision for a generation.
 pub async fn upsert(store: &Store, record: &GrowRecord) -> Result<()> {
     let key = format!("{}@g{}", record.run_id, record.generation.0);
-    let id = RecordID::<()>::new(GROW, key.as_str()).map_err(map)?;
-    upsert_record(store.client(), &id, serde_json::to_value(record)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(GROW, key.as_str(), record).await
 }
 
 /// Every decision a run's grow step made, oldest first.

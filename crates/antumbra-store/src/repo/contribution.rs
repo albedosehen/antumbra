@@ -7,7 +7,7 @@
 //! freeze baseline the byte-identity tripwire checks against.
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_record, query_records, upsert_record};
+use surql::query::crud::{delete_record, query_records};
 use surql::types::operators::eq;
 use surql::types::RecordID;
 
@@ -30,11 +30,7 @@ fn key(record: &ContributionRecord) -> String {
 /// Record one expert's contribution in one generation, replacing what the same
 /// generation recorded for it before.
 pub async fn upsert(store: &Store, record: &ContributionRecord) -> Result<()> {
-    let id = RecordID::<()>::new(TABLE, key(record).as_str()).map_err(map)?;
-    upsert_record(store.client(), &id, serde_json::to_value(record)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(TABLE, key(record).as_str(), record).await
 }
 
 /// Every contribution recorded for an expert, oldest generation first.
@@ -65,11 +61,7 @@ pub async fn list_for_run(store: &Store, run_id: &RunId) -> Result<Vec<Contribut
 /// before: the latest measurement is the one that describes the population as
 /// it now is.
 pub async fn upsert_outcome(store: &Store, outcome: &RoutingOutcome) -> Result<()> {
-    let id = RecordID::<()>::new(OUTCOME, outcome.task.as_str()).map_err(map)?;
-    upsert_record(store.client(), &id, serde_json::to_value(outcome)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(OUTCOME, outcome.task.as_str(), outcome).await
 }
 
 /// Forget a task's clear winner: the latest measurement found none.
@@ -94,11 +86,7 @@ pub async fn outcomes(store: &Store) -> Result<Vec<RoutingOutcome>> {
 /// replacing what the same generation recorded before.
 pub async fn upsert_baseline(store: &Store, record: &BaselineRecord) -> Result<()> {
     let key = format!("{}@g{}", record.run_id, record.generation.0);
-    let id = RecordID::<()>::new(BASELINE, key.as_str()).map_err(map)?;
-    upsert_record(store.client(), &id, serde_json::to_value(record)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(BASELINE, key.as_str(), record).await
 }
 
 /// Every comparison one run recorded, oldest generation first: the rolling

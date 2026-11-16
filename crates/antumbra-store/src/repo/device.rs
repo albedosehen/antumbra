@@ -11,12 +11,10 @@
 //! trainer and have genesis routed to it.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::{and_, eq};
-use surql::types::RecordID;
 
 use antumbra_core::{DeviceProfile, DeviceRole, Result, TenantId, UserId};
 
@@ -90,12 +88,13 @@ fn record_key(profile: &DeviceProfile) -> &str {
 /// Register a node, or update what it can do. Idempotent per (tenant, user,
 /// host): the same machine coming back keeps its row.
 pub async fn upsert(store: &Store, profile: &DeviceProfile) -> Result<()> {
-    let rid = RecordID::<()>::new(DEVICE, record_key(profile)).map_err(map)?;
-    let data: Value = serde_json::to_value(DeviceRow::from_domain(profile))?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            DEVICE,
+            record_key(profile),
+            &DeviceRow::from_domain(profile),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Every machine a user has registered in a tenant, newest registration first.
