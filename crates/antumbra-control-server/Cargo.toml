@@ -27,7 +27,7 @@ dist = false
 
 [dependencies]
 antumbra-control = { path = "../antumbra-control" }
-antumbra-store = { path = "../antumbra-store" }
+antumbra-store = { path = "../antumbra-store", features = ["clap"] }
 antumbra-core = { path = "../antumbra-core" }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
 anyhow = "1"
