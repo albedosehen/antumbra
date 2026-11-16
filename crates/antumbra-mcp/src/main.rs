@@ -39,7 +39,6 @@ mod http;
 mod notify;
 mod pdf;
 mod profile;
-mod secrets;
 mod server;
 mod session;
 mod telemetry;
@@ -96,9 +95,6 @@ struct Cli {
     jwt_audience: Option<String>,
     #[command(flatten)]
     db: antumbra_store::args::DbAuthArgs,
-    /// Read the root password from this file instead (see --jwt-secret-file).
-    #[arg(long, env = "ANTUMBRA_DB_PASS_FILE", conflicts_with = "db_pass")]
-    db_pass_file: Option<std::path::PathBuf>,
     /// Enable the autonomous propose trigger: once a user's unorganized inbox
     /// reaches this many memories, a write auto-clusters it into proposed
     /// compartments (reversible; the user curates). Off when unset.
@@ -538,20 +534,12 @@ async fn run() -> Result<()> {
     antumbra_serve::seed_generation(cli.generation_seed);
     // Secrets resolve once, from the inline flag or its file, and only the
     // resolved value is used from here on.
-    let jwt_secret = secrets::resolve(
+    let jwt_secret = antumbra_core::secrets::resolve(
         cli.jwt_secret.clone(),
         cli.jwt_secret_file.as_deref(),
         "JWT secret",
     )?;
-    let db_pass = secrets::resolve(
-        cli.db.db_pass.clone(),
-        cli.db_pass_file.as_deref(),
-        "database password",
-    )?;
-    let db = antumbra_store::args::DbAuthArgs {
-        db_pass,
-        ..cli.db.clone()
-    };
+    let db = cli.db.resolved()?;
 
     // Mint a hook token and exit -- no DB or embedder needed. HS256 only: the
     // server holds the symmetric secret; an RS256 deployment mints via its auth
@@ -693,7 +681,7 @@ async fn run() -> Result<()> {
     // The GitHub App webhook receiver: its secret resolves like every other
     // secret, and a repository must map to a workspace before an event can
     // touch anything. Webhooks arrive over the network, so HTTP only.
-    let github_secret = secrets::resolve(
+    let github_secret = antumbra_core::secrets::resolve(
         cli.github_webhook_secret.clone(),
         cli.github_webhook_secret_file.as_deref(),
         "GitHub webhook secret",
