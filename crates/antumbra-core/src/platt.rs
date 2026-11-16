@@ -132,10 +132,11 @@ pub fn expected_calibration_error(samples: &[(f32, bool)], bins: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     /// A separable signal is fitted to probabilities on the right sides of 0.5.
     #[test]
-    fn a_separable_signal_calibrates() {
+    fn a_separable_signal_calibrates() -> anyhow::Result<()> {
         // The two bands must NOT overlap, or the probe points sit on the
         // boundary where 0.5 is the correct answer and the assertion is testing
         // the fixture rather than the fit.
@@ -156,6 +157,7 @@ mod tests {
             "a score inside the negative band reads as probably not, got {}",
             p.probability(5e-6)
         );
+        Ok(())
     }
 
     /// The slope comes out POSITIVE, which is the one thing known about this
@@ -163,7 +165,7 @@ mod tests {
     /// negative slope would mean the fit had inverted the signal, which is the
     /// failure that would silently empty every recall.
     #[test]
-    fn the_fitted_slope_is_positive() {
+    fn the_fitted_slope_is_positive() -> anyhow::Result<()> {
         let samples: Vec<(f32, bool)> = (0..200)
             .map(|i| {
                 let relevant = i % 2 == 0;
@@ -172,13 +174,14 @@ mod tests {
             .collect();
         let p = Platt::fit(&samples, 4000, 2.0);
         assert!(p.a > 0.0, "slope must be positive, got {}", p.a);
+        Ok(())
     }
 
     /// Perfectly calibrated predictions have no calibration error, and confident
     /// wrong ones have a lot. The metric has to separate those or it says
     /// nothing.
     #[test]
-    fn calibration_error_separates_calibrated_from_overconfident() {
+    fn calibration_error_separates_calibrated_from_overconfident() -> anyhow::Result<()> {
         // Half the samples at p=1.0 and true, half at p=0.0 and false.
         let calibrated: Vec<(f32, bool)> = (0..100)
             .map(|i| {
@@ -205,6 +208,7 @@ mod tests {
             expected_calibration_error(&wrong, 10) > 0.9,
             "confident and wrong must score near 1.0"
         );
+        Ok(())
     }
 
     /// The question the first study left open, answered against the real signal: can
@@ -226,12 +230,13 @@ mod tests {
     /// head's test avoids by splitting on memories.
     #[test]
     #[ignore = "needs ANTUMBRA_D2_SCORES, the output of d2-relevance-baseline.sh"]
-    fn calibrating_the_reranker() {
+    fn calibrating_the_reranker() -> anyhow::Result<()> {
         let Ok(path) = std::env::var("ANTUMBRA_D2_SCORES") else {
             println!("ANTUMBRA_D2_SCORES unset -- skipped");
-            return;
+            return Ok(());
         };
-        let raw = std::fs::read_to_string(&path).expect("read scores");
+        let raw =
+            std::fs::read_to_string(&path).with_context(|| format!("read scores from {path}"))?;
         let rows: Vec<(f32, bool)> = raw
             .lines()
             .filter_map(|l| {
@@ -355,15 +360,17 @@ mod tests {
                 (mean_p - actual).abs()
             );
         }
+        Ok(())
     }
 
     /// A score of zero has no logarithm, and a reranker can emit one. The floor
     /// keeps it finite rather than poisoning the fit with a NaN.
     #[test]
-    fn a_zero_score_does_not_poison_the_fit() {
+    fn a_zero_score_does_not_poison_the_fit() -> anyhow::Result<()> {
         let samples = vec![(0.0f32, false), (1e-3, true), (0.0, false), (2e-3, true)];
         let p = Platt::fit(&samples, 1000, 1.0);
         assert!(p.a.is_finite() && p.b.is_finite());
         assert!(p.probability(0.0).is_finite());
+        Ok(())
     }
 }

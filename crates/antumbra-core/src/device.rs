@@ -276,7 +276,8 @@ mod tests {
     }
 
     #[test]
-    fn a_machine_re_registering_keeps_its_row_and_two_users_on_it_do_not_share_one() {
+    fn a_machine_re_registering_keeps_its_row_and_two_users_on_it_do_not_share_one(
+    ) -> anyhow::Result<()> {
         let again = profile("ws:t", "user:a", "laptop");
         assert_eq!(profile("ws:t", "user:a", "laptop").id, again.id);
         // The row is the user's, not the host's.
@@ -285,6 +286,7 @@ mod tests {
         assert_ne!(profile("ws:other", "user:a", "laptop").id, again.id);
         // One user, several machines, several rows.
         assert_ne!(profile("ws:t", "user:a", "workstation").id, again.id);
+        Ok(())
     }
 
     #[test]
@@ -302,7 +304,8 @@ mod tests {
     }
 
     #[test]
-    fn a_role_is_earned_by_a_backend_that_can_train_and_memory_enough_to_do_it() {
+    fn a_role_is_earned_by_a_backend_that_can_train_and_memory_enough_to_do_it(
+    ) -> anyhow::Result<()> {
         // The reference fleet, as each machine would report itself.
         assert_eq!(role_for("cuda", Some(24_576)), DeviceRole::Genesis); // 3090 Ti
         assert_eq!(role_for("metal", Some(49_152)), DeviceRole::Genesis); // M4 Pro
@@ -317,10 +320,12 @@ mod tests {
         assert_eq!(role_for("cpu", None), DeviceRole::Memory);
         // What a node reports is what it found, however it spelled it.
         assert_eq!(role_for("CUDA", None), DeviceRole::Genesis);
+        Ok(())
     }
 
     #[test]
-    fn a_detected_node_takes_the_role_its_hardware_earns_rather_than_one_it_is_told() {
+    fn a_detected_node_takes_the_role_its_hardware_earns_rather_than_one_it_is_told(
+    ) -> anyhow::Result<()> {
         let at = at();
         let laptop = DeviceProfile::detected(
             TenantId::new("ws:t"),
@@ -344,10 +349,11 @@ mod tests {
         assert!(rig.is_genesis());
         // The same machine keeps the same row whichever constructor found it.
         assert_eq!(rig.id, profile("ws:t", "user:a", "rig").id);
+        Ok(())
     }
 
     #[test]
-    fn work_escalates_only_when_this_node_cannot_do_it_and_another_can() {
+    fn work_escalates_only_when_this_node_cannot_do_it_and_another_can() -> anyhow::Result<()> {
         let rig = DeviceProfile::detected(
             TenantId::new("ws:t"),
             UserId::new("user:a"),
@@ -383,10 +389,11 @@ mod tests {
             GenesisPlacement::Here
         );
         assert_eq!(genesis_placement("rig", true, None), GenesisPlacement::Here);
+        Ok(())
     }
 
     #[test]
-    fn a_machine_a_session_names_is_a_memory_node_and_keeps_one_row() {
+    fn a_machine_a_session_names_is_a_memory_node_and_keeps_one_row() -> anyhow::Result<()> {
         let laptop =
             DeviceProfile::client(TenantId::new("ws:t"), UserId::new("user:a"), "mac", at());
         assert_eq!(laptop.role, DeviceRole::Memory);
@@ -397,13 +404,15 @@ mod tests {
         assert_eq!(laptop.id, profile("ws:t", "user:a", "mac").id);
         // A server registering itself is not a client.
         assert!(!profile("ws:t", "user:a", "rig").is_client());
+        Ok(())
     }
 
     #[test]
-    fn not_knowing_the_vram_is_not_the_same_as_having_none() {
+    fn not_knowing_the_vram_is_not_the_same_as_having_none() -> anyhow::Result<()> {
         let unknown = profile("ws:t", "user:a", "laptop");
         assert_eq!(unknown.vram_mib, None);
         assert_eq!(unknown.clone().with_vram(0).vram_mib, Some(0));
         assert!(!unknown.is_genesis());
+        Ok(())
     }
 }

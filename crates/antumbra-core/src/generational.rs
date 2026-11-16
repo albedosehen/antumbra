@@ -147,35 +147,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn one_full_cycle_bumps_generation_once() {
+    fn one_full_cycle_bumps_generation_once() -> anyhow::Result<()> {
         let mut head = GenerationHead::new(RunId::new("run:loop"), Utc::now());
         assert_eq!(head.generation, Generation::ZERO);
         let mut s = head.state;
         for _ in 0..5 {
             let to = s.forward();
-            head.advance_to(to, Utc::now()).unwrap();
+            head.advance_to(to, Utc::now())?;
             s = to;
         }
         // grow->explore->score->decide->consolidate->grow == one generation
         assert_eq!(head.state, LoopState::Grow);
         assert_eq!(head.generation, Generation(1));
+        Ok(())
     }
 
     #[test]
-    fn pause_and_resume_is_lossless() {
+    fn pause_and_resume_is_lossless() -> anyhow::Result<()> {
         let mut head = GenerationHead::new(RunId::new("run:loop"), Utc::now());
-        head.advance_to(LoopState::Explore, Utc::now()).unwrap();
-        head.pause(Utc::now()).unwrap();
+        head.advance_to(LoopState::Explore, Utc::now())?;
+        head.pause(Utc::now())?;
         assert_eq!(head.state, LoopState::Paused);
         // resume
-        head.advance_to(LoopState::Grow, Utc::now()).unwrap();
+        head.advance_to(LoopState::Grow, Utc::now())?;
         assert_eq!(head.state, LoopState::Grow);
         // pausing did not spuriously bump the generation
         assert_eq!(head.generation, Generation::ZERO);
+        Ok(())
     }
 
     #[test]
-    fn illegal_jumps_rejected() {
+    fn illegal_jumps_rejected() -> anyhow::Result<()> {
         assert!(LoopState::Grow.transition(LoopState::Decide).is_err());
+        Ok(())
     }
 }

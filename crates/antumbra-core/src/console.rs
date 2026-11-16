@@ -86,20 +86,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_action_reads_as_its_name_and_target() {
+    fn an_action_reads_as_its_name_and_target() -> anyhow::Result<()> {
         let wire = serde_json::json!({ "action": "freeze_expert", "expert": "expert:a" });
-        let action: Action = serde_json::from_value(wire.clone()).unwrap();
+        let action: Action = serde_json::from_value(wire.clone())?;
         assert_eq!(
             action,
             Action::FreezeExpert {
                 expert: ExpertId::new("expert:a")
             }
         );
-        assert_eq!(serde_json::to_value(&action).unwrap(), wire);
+        assert_eq!(serde_json::to_value(&action)?, wire);
+        Ok(())
     }
 
     #[test]
-    fn a_snapshot_round_trips() {
+    fn a_snapshot_round_trips() -> anyhow::Result<()> {
         let now = chrono::Utc::now();
         let snapshot = Snapshot {
             memories: vec![crate::Memory::new(
@@ -113,35 +114,36 @@ mod tests {
             operator: true,
             ..Snapshot::default()
         };
-        let back: Snapshot =
-            serde_json::from_str(&serde_json::to_string(&snapshot).unwrap()).unwrap();
+        let back: Snapshot = serde_json::from_str(&serde_json::to_string(&snapshot)?)?;
         assert_eq!(back.memories, snapshot.memories);
         assert!(back.operator);
+        Ok(())
     }
 
     #[test]
-    fn a_snapshot_from_an_older_server_reads_with_the_default_knobs() {
+    fn a_snapshot_from_an_older_server_reads_with_the_default_knobs() -> anyhow::Result<()> {
         let back: Snapshot = serde_json::from_value(serde_json::json!({
             "experts": [], "memories": [], "edges": [], "boundaries": [], "shadows": [],
             "loop_heads": [], "loop_halt_pending": false, "evals": [], "router": null,
             "operator": false
-        }))
-        .unwrap();
+        }))?;
         assert!(back.usage.is_empty());
         assert_eq!(back.policy, MemoryPolicy::default());
+        Ok(())
     }
 
     #[test]
-    fn setting_the_knobs_reads_as_its_name_and_policy() {
+    fn setting_the_knobs_reads_as_its_name_and_policy() -> anyhow::Result<()> {
         let wire = serde_json::json!({
             "action": "set_memory_policy",
             "policy": { "auto": false, "strength_weight": 0.5 }
         });
-        let Action::SetMemoryPolicy { policy } = serde_json::from_value(wire).unwrap() else {
-            panic!("not a policy action");
+        let Action::SetMemoryPolicy { policy } = serde_json::from_value(wire)? else {
+            anyhow::bail!("not a policy action");
         };
         assert!(!policy.auto);
         assert_eq!(policy.strength_weight, 0.5);
         assert_eq!(policy.max_links, MemoryPolicy::default().max_links);
+        Ok(())
     }
 }

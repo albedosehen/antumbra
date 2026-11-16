@@ -407,19 +407,20 @@ pub fn derived_allowed(fresh: usize, floor: f64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     fn group() -> Vec<bool> {
         vec![true, true, true, false, false, false]
     }
 
     #[test]
-    fn a_watch_reads_the_critic_against_the_verifier_and_its_twin() {
+    fn a_watch_reads_the_critic_against_the_verifier_and_its_twin() -> anyhow::Result<()> {
         let scores = [0.9, 0.8, 0.7, 0.3, 0.2, 0.1];
         let passed = [true, true, true, false, false, false];
         let agreeing = [0.95, 0.85, 0.6, 0.4, 0.25, 0.05];
         let w = watch(&scores, &passed, Some(&agreeing));
         assert_eq!(w.n, 6);
-        assert!(w.correlation.unwrap() > 0.8);
+        assert!(w.correlation.context("a correlation")? > 0.8);
         assert_eq!(w.twin_agreement, Some(1.0));
         assert!(w.ece.is_some() && w.recalibrated_ece.is_some());
         // A twin that ranks the answers the other way round disagrees.
@@ -432,20 +433,23 @@ mod tests {
         // Nothing scored reads nothing.
         let empty = watch(&[], &[], None);
         assert_eq!((empty.n, empty.correlation), (0, None));
+        Ok(())
     }
 
     #[test]
-    fn spearman_handles_ties_and_constants() {
+    fn spearman_handles_ties_and_constants() -> anyhow::Result<()> {
         assert_eq!(spearman(&[1.0, 2.0, 3.0], &[10.0, 20.0, 30.0]), Some(1.0));
         assert_eq!(spearman(&[1.0, 2.0, 3.0], &[3.0, 2.0, 1.0]), Some(-1.0));
         assert_eq!(spearman(&[1.0, 1.0, 1.0], &[1.0, 2.0, 3.0]), None);
         assert_eq!(spearman(&[1.0], &[1.0]), None);
-        let tied = spearman(&[0.9, 0.8, 0.2, 0.1], &[1.0, 1.0, 0.0, 0.0]).unwrap();
+        let tied =
+            spearman(&[0.9, 0.8, 0.2, 0.1], &[1.0, 1.0, 0.0, 0.0]).context("ties still rank")?;
         assert!((tied - 0.894_427).abs() < 1e-5, "{tied}");
+        Ok(())
     }
 
     #[test]
-    fn a_critic_never_lifts_a_failed_sample_over_a_passed_one() {
+    fn a_critic_never_lifts_a_failed_sample_over_a_passed_one() -> anyhow::Result<()> {
         let passed = group();
         for critic in [
             vec![0.9, 0.8, 0.7, 0.3, 0.2, 0.1],
@@ -459,10 +463,11 @@ mod tests {
                 assert!(worst_pass > best_fail, "{critic:?} x{weight}: {adv:?}");
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn a_tracking_critic_shapes_within_parts_and_an_inverted_one_flips() {
+    fn a_tracking_critic_shapes_within_parts_and_an_inverted_one_flips() -> anyhow::Result<()> {
         let passed = group();
         let base = shaped_advantages(&passed, &[0.0; 6], 1.0);
         // Tracks the verifier across the group, and orders each part.
@@ -481,10 +486,11 @@ mod tests {
         let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
         assert!((mean(&adv[..3]) - base[0]).abs() < 1e-5);
         assert!((mean(&adv[3..]) - base[3]).abs() < 1e-5);
+        Ok(())
     }
 
     #[test]
-    fn a_critic_that_says_nothing_about_the_verifier_adds_nothing() {
+    fn a_critic_that_says_nothing_about_the_verifier_adds_nothing() -> anyhow::Result<()> {
         let passed = group();
         let base = shaped_advantages(&passed, &[0.0; 6], 1.0);
         // Constant critic: no correlation to scale by.
@@ -497,10 +503,11 @@ mod tests {
         // A group the verifier did not split stays flat whatever the critic says.
         let flat = shaped_advantages(&[true; 4], &[0.1, 0.9, 0.5, 0.3], 1.0);
         assert_eq!(flat, vec![0.0; 4]);
+        Ok(())
     }
 
     #[test]
-    fn a_trace_scores_as_its_weakest_step() {
+    fn a_trace_scores_as_its_weakest_step() -> anyhow::Result<()> {
         let step = |i: u32, value: f32| CriticScore {
             step_idx: i,
             dimension: "critic".into(),
@@ -511,10 +518,11 @@ mod tests {
             Some(0.2)
         );
         assert_eq!(weakest_step(&[]), None);
+        Ok(())
     }
 
     #[test]
-    fn calibration_is_reported_per_slice() {
+    fn calibration_is_reported_per_slice() -> anyhow::Result<()> {
         let s = |slice: &str, predicted: f32, passed: bool| Scored {
             slice: slice.into(),
             predicted,
@@ -534,14 +542,15 @@ mod tests {
         // The broken slice is visible as itself.
         assert!((report[1].ece - 0.85).abs() < 1e-6);
         assert_eq!(report[1].agreement, 0.0);
+        Ok(())
     }
 
     #[test]
-    fn isotonic_recalibration_is_monotone_and_corrects_overconfidence() {
+    fn isotonic_recalibration_is_monotone_and_corrects_overconfidence() -> anyhow::Result<()> {
         // Scores high across the board, but only the top ones pass.
         let scores = [0.9, 0.91, 0.92, 0.95, 0.97, 0.99];
         let passed = [false, false, true, false, true, true];
-        let map = Isotonic::fit(&scores, &passed).unwrap();
+        let map = Isotonic::fit(&scores, &passed).context("a fit")?;
         let fitted: Vec<f32> = scores.iter().map(|&s| map.apply(s)).collect();
         assert!(fitted.windows(2).all(|w| w[0] <= w[1]), "{fitted:?}");
         assert_eq!(map.apply(0.9), 0.0);
@@ -552,21 +561,24 @@ mod tests {
         assert_eq!(map.apply(0.1), 0.0);
         assert_eq!(map.apply(2.0), 1.0);
         assert!(Isotonic::fit(&[], &[]).is_none());
+        Ok(())
     }
 
     #[test]
-    fn twins_agree_by_rank() {
+    fn twins_agree_by_rank() -> anyhow::Result<()> {
         assert_eq!(agreement(&[0.1, 0.5, 0.9], &[0.2, 0.3, 0.8]), Some(1.0));
         assert_eq!(agreement(&[0.1, 0.5, 0.9], &[0.8, 0.3, 0.2]), Some(-1.0));
+        Ok(())
     }
 
     #[test]
-    fn the_floor_caps_derived_labels_and_never_decays() {
+    fn the_floor_caps_derived_labels_and_never_decays() -> anyhow::Result<()> {
         assert_eq!(derived_allowed(30, 0.25), 90);
         assert_eq!(derived_allowed(30, 0.5), 30);
         assert_eq!(derived_allowed(30, 1.0), 0);
         assert_eq!(derived_allowed(0, 0.5), 0);
         assert_eq!(derived_allowed(7, 0.0), usize::MAX);
+        Ok(())
     }
 
     fn read(correlation: Option<f32>, twin: Option<f32>) -> CriticWatch {
@@ -580,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn the_fallback_fires_on_a_correlation_that_is_not_positive() {
+    fn the_fallback_fires_on_a_correlation_that_is_not_positive() -> anyhow::Result<()> {
         let run = [read(Some(0.4), Some(0.9)), read(Some(-0.1), Some(0.9))];
         assert_eq!(
             fallback(&run),
@@ -589,10 +601,11 @@ mod tests {
         // Too few answers to read leaves the last reading standing.
         let run = [read(Some(0.4), None), read(None, None)];
         assert_eq!(fallback(&run), None);
+        Ok(())
     }
 
     #[test]
-    fn the_fallback_fires_on_a_sustained_fall_in_twin_agreement() {
+    fn the_fallback_fires_on_a_sustained_fall_in_twin_agreement() -> anyhow::Result<()> {
         let twin = |a: &[f32]| -> Vec<CriticWatch> {
             a.iter().map(|&t| read(Some(0.4), Some(t))).collect()
         };
@@ -615,5 +628,6 @@ mod tests {
         run.push(read(Some(0.4), None));
         run.push(read(Some(0.4), Some(0.90)));
         assert!(fallback(&run).is_some());
+        Ok(())
     }
 }

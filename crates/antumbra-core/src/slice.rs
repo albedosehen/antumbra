@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_lands_in_the_same_slice_every_time_it_is_asked() {
+    fn a_task_lands_in_the_same_slice_every_time_it_is_asked() -> anyhow::Result<()> {
         let p = Partition::default();
         for id in ids(200) {
             assert_eq!(p.of(&id), p.of(&id));
@@ -232,13 +232,14 @@ mod tests {
         let before: Vec<Slice> = ids(50).iter().map(|id| p.of(id)).collect();
         let after: Vec<Slice> = ids(5000).iter().take(50).map(|id| p.of(id)).collect();
         assert_eq!(before, after);
+        Ok(())
     }
 
     /// The number that decides which measurements mean anything is pinned, so a
     /// toolchain or release that quietly changed it would fail here rather than
     /// move tasks across the anchor in silence.
     #[test]
-    fn the_split_is_the_same_number_next_release() {
+    fn the_split_is_the_same_number_next_release() -> anyhow::Result<()> {
         let p = Partition::default();
         assert_eq!(p.of("task:0"), Slice::Visible);
         assert_eq!(p.of("task:1"), Slice::HeldOut);
@@ -254,10 +255,11 @@ mod tests {
             .filter(|id| p.of(id) != other.of(id))
             .count();
         assert!(moved > 40, "a reseed repartitions, it does not nudge");
+        Ok(())
     }
 
     #[test]
-    fn the_shares_come_out_roughly_where_they_were_asked_for() {
+    fn the_shares_come_out_roughly_where_they_were_asked_for() -> anyhow::Result<()> {
         let p = Partition::default();
         let corpus = ids(4000);
         let share = |s: Slice| {
@@ -274,10 +276,11 @@ mod tests {
                 .count(),
             0
         );
+        Ok(())
     }
 
     #[test]
-    fn only_the_visible_slice_is_something_a_decision_may_read() {
+    fn only_the_visible_slice_is_something_a_decision_may_read() -> anyhow::Result<()> {
         assert!(Slice::Visible.selection_may_read());
         for closed in [Slice::HeldOut, Slice::Audit, Slice::Impossible] {
             assert!(
@@ -286,10 +289,11 @@ mod tests {
                 closed.as_str()
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn a_holdout_learns_only_from_what_selection_may_read() {
+    fn a_holdout_learns_only_from_what_selection_may_read() -> anyhow::Result<()> {
         let due = Holdout {
             partition: Partition::default(),
             audit: true,
@@ -309,6 +313,7 @@ mod tests {
             !due.learns_from("task:19"),
             "being measured is not being learned from"
         );
+        Ok(())
     }
 
     #[test]

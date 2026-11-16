@@ -33,19 +33,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_key_is_read_back_as_it_was_written() {
+    fn a_key_is_read_back_as_it_was_written() -> anyhow::Result<()> {
         for family in [CLAUDE_CODE_RULE, SKILL_USE] {
             let content = format!("{} and the rest", key(family, "agents-md"));
             assert_eq!(name_in(&content, family), Some("agents-md"));
         }
+        Ok(())
     }
 
     #[test]
-    fn only_the_front_of_the_text_is_a_key_and_only_of_its_own_family() {
+    fn only_the_front_of_the_text_is_a_key_and_only_of_its_own_family() -> anyhow::Result<()> {
         assert_eq!(name_in("see [skill-use:deploy] above", SKILL_USE), None);
         assert_eq!(name_in("[skill-use:deploy] deploy", CLAUDE_CODE_RULE), None);
         assert_eq!(name_in("[skill-use:] nameless", SKILL_USE), None);
         assert_eq!(name_in("[skill-use:unclosed", SKILL_USE), None);
         assert_eq!(name_in("", SKILL_USE), None);
+        Ok(())
     }
 }
