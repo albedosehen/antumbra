@@ -130,6 +130,12 @@ struct ServeArgs {
     /// cannon brake); `0` disables the cooldown.
     #[arg(long, default_value_t = 60)]
     link_cooldown_secs: u64,
+    /// Log sign-in links to stderr instead of emailing them, for development:
+    /// anyone who reads the logs can sign in. Ignored when `SMTP_HOST` is set
+    /// (then it is email, or the server refuses to start), and required when
+    /// it is not.
+    #[arg(long, env = "ANTUMBRA_DEV_MAILER")]
+    dev_mailer: bool,
 }
 
 async fn connect(s: &StoreArgs) -> anyhow::Result<Store> {
@@ -234,7 +240,7 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
         magic_secret: Arc::new(a.magic_secret.into_bytes()),
         base_url: Arc::new(a.base_url),
         magic_ttl: Duration::from_secs(a.magic_ttl_mins * 60),
-        mailer: build_mailer(),
+        mailer: build_mailer(a.dev_mailer)?,
         cooldown: Arc::new(Cooldown::new(Duration::from_secs(a.link_cooldown_secs))),
     };
     let app = router(state);
@@ -318,6 +324,30 @@ async fn run() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dev_mailer_is_a_flag_that_is_off_unless_given() -> anyhow::Result<()> {
+        let base = [
+            "antumbra-control-server",
+            "serve",
+            "--base-url",
+            "https://control.example",
+            "--signing-key",
+            "signing.pem",
+            "--magic-secret",
+            "0123456789abcdef0123456789abcdef",
+        ];
+        let Command::Serve(off) = Cli::try_parse_from(base)?.cmd else {
+            anyhow::bail!("not the serve command");
+        };
+        anyhow::ensure!(!off.dev_mailer, "off unless asked for");
+        let with_flag = base.iter().copied().chain(["--dev-mailer"]);
+        let Command::Serve(on) = Cli::try_parse_from(with_flag)?.cmd else {
+            anyhow::bail!("not the serve command");
+        };
+        anyhow::ensure!(on.dev_mailer);
+        Ok(())
+    }
 
     #[test]
     fn the_placeholder_and_short_magic_secrets_are_refused() {
