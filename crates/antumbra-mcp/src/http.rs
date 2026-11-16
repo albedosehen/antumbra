@@ -74,6 +74,7 @@ mod chunker;
 mod console;
 mod dashboard;
 mod github;
+mod limit;
 mod relics;
 pub(crate) use github::GithubConfig;
 
@@ -108,6 +109,14 @@ impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
 
     fn get(&self, key: &K) -> Option<&V> {
         self.map.get(key)
+    }
+
+    fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: ?Sized + Eq + std::hash::Hash,
+    {
+        self.map.get_mut(key)
     }
 
     fn insert(&mut self, key: K, value: V) {
@@ -198,6 +207,10 @@ struct HttpState {
     /// What prints a relic as PDF for the viewer's download, when the operator
     /// runs one; without it a relic downloads as HTML and Markdown only.
     pdf: Option<Arc<crate::pdf::PdfRenderer>>,
+    /// What bounds the relic routes that answer without a token: the public
+    /// lookup's and the export's budgets, and the printed PDFs kept for a
+    /// repeat request of the same version.
+    relics: relics::Guards,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     /// The GitHub App webhook receiver (`POST /github/webhook`), when the
     /// operator configured its secret and the repository-to-workspace map.
@@ -286,6 +299,7 @@ pub async fn serve(
         decider,
         copal,
         pdf,
+        relics: relics::Guards::new(),
         profile,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -320,6 +334,9 @@ async fn serve_until(
     drain: std::time::Duration,
 ) -> Result<()> {
     let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
+    // With the peer's address on each request, so the routes that answer
+    // without a token can budget each client ([`limit`]).
+    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     let serving = axum::serve(listener, app).with_graceful_shutdown(async move {
         stop.await;
         eprintln!(

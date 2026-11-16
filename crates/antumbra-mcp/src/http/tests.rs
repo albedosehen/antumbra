@@ -25,8 +25,47 @@ pub(super) async fn state_archived(
     embedder: Arc<dyn Embedder>,
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
 ) -> Arc<HttpState> {
+    state_serving(store, embedder, copal, None, false).await
+}
+
+/// As [`state_archived`], with a PDF renderer.
+pub(super) async fn state_printing(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    pdf: Arc<crate::pdf::PdfRenderer>,
+) -> Arc<HttpState> {
+    state_serving(store, embedder, copal, Some(pdf), false).await
+}
+
+/// As [`state_archived`], serving each identity on a connection of its own, as
+/// a remote deployment does, with `store` the owner connection alone. No
+/// identity connects in these tests, so the address is never dialed.
+pub(super) async fn state_per_identity(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+) -> Arc<HttpState> {
+    state_serving(store, embedder, copal, None, true).await
+}
+
+async fn state_serving(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    pdf: Option<Arc<crate::pdf::PdfRenderer>>,
+    per_identity: bool,
+) -> Arc<HttpState> {
+    let serving = if per_identity {
+        Serving::PerIdentity {
+            url: "ws://never-dialed.example:8000".into(),
+            conns: Mutex::new(Bounded::new(MAX_SESSIONS)),
+        }
+    } else {
+        Serving::Shared(store.clone())
+    };
     Arc::new(HttpState {
-        serving: Serving::Shared(store.clone()),
+        serving,
         store,
         host: "test".into(),
         verifier: JwtVerifier::hs256(b"test-secret"),
@@ -40,7 +79,8 @@ pub(super) async fn state_archived(
         reranker: None,
         decider: None,
         copal,
-        pdf: None,
+        pdf,
+        relics: crate::http::relics::Guards::new(),
         profile: None,
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
