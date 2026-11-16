@@ -16,7 +16,7 @@
 //! nothing more. Writes stay on the MCP tools, where the engine's
 //! compartment/grant ACL does the reasoning a bare POST could not.
 
-use kayak::{Contract, ContractLimits};
+use kayak::{Contract, ContractLimits, FieldExposure, Identity, Resource, ResourceFaces};
 use surql::schema::{FieldBuilder, FieldDefinition, TableDefinition};
 
 mod compartments;
@@ -114,6 +114,60 @@ pub fn schema() -> Vec<TableDefinition> {
         table.fields = columns;
     }
     tables
+}
+
+/// A read-only, browsable collection: paged and reachable by its `key`
+/// column, filterable and sortable only where an index serves the claim,
+/// and nothing more. Every resource in this slice is one of these or a
+/// [`listing`]; what differs between them is what each file states, and the
+/// eleven defaults that never differ are stated once, here. Writes stay on
+/// the MCP tools, which carry the compartment and grant reasoning the engine
+/// ACL expects.
+fn read_only(
+    name: &str,
+    table: &str,
+    key: &str,
+    fields: Vec<FieldExposure>,
+    filterable: &[&str],
+    sortable: &[&str],
+) -> Resource {
+    Resource {
+        faces: ResourceFaces::ALL,
+        identity: Identity::Column(key.into()),
+        ..listing(name, table, fields, filterable, sortable)
+    }
+}
+
+/// A read-only listing with no identity of its own: rows reached only
+/// through the list, filterable and sortable only where an index serves the
+/// claim.
+fn listing(
+    name: &str,
+    table: &str,
+    fields: Vec<FieldExposure>,
+    filterable: &[&str],
+    sortable: &[&str],
+) -> Resource {
+    Resource {
+        name: name.into(),
+        table: table.into(),
+        faces: ResourceFaces::LIST_ONLY,
+        identity: Identity::Absent,
+        fields,
+        pinned: vec![],
+        pinned_either: vec![],
+        filterable: filterable.iter().map(|s| (*s).to_owned()).collect(),
+        filter_options: Default::default(),
+        sortable: sortable.iter().map(|s| (*s).to_owned()).collect(),
+        max_page_size: 100,
+        graphql: None,
+        watchable: false,
+        reads_require: vec![],
+        rate_class: None,
+        sub_resources: vec![],
+        content: None,
+        actions: vec![],
+    }
 }
 
 /// Finalize a field builder. The names in this module are static and valid,
