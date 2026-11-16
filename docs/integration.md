@@ -286,10 +286,12 @@ Before this, every document in a workspace was recallable by every member. Docum
 The address, on the server's usual clap/env conventions:
 
 ```
-ANTUMBRA_COPAL_ADDR=127.0.0.1:9010    # --copal-addr: bare host:port (http:// assumed) or a full URL base
+ANTUMBRA_COPAL_ADDR=127.0.0.1:9010    # --copal-addr: bare host:port (http:// for this machine, https:// elsewhere) or a full URL base
 ```
 
-Tenancy is the deployment's second choice: *which Copal tenant does a workspace's document land in, and how does the call prove it?* Copal's `header` auth mode (its default until 1.0) trusts the `x-copal-tenant` header as the identity; its deployed `keys` mode binds the tenant to a `ck1` credential. One knob per shape, at most one of the three (two together refuse at startup):
+An explicit `http://` address that is not this machine is refused unless `--copal-allow-http` (`ANTUMBRA_COPAL_ALLOW_HTTP`) says the network between the server and the archive is trusted, as the compose stack's own is.
+
+Tenancy is the deployment's second choice: *which Copal tenant does a workspace's document land in, and how does the call prove it?* Copal's `header` auth mode (its default until 1.0) trusts the `x-copal-tenant` header as the identity; its deployed `keys` mode binds the tenant to a `ck1` credential. On the networked server (`--http`), where many identities write through one process, a header-named tenancy leaves isolation at the archive to that network alone, so the server refuses to start with one unless `--copal-trust-headers` (`ANTUMBRA_COPAL_TRUST_HEADERS`) says the network is yours; the compose stack says so for its own network, and a hosted deployment should prefer the keyed modes. One knob per shape, at most one of the three (two together refuse at startup):
 
 |                           | Copal `header` auth (dev default)                             | Copal `keys` auth (deployed)                                        |
 | ------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
