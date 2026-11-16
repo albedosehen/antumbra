@@ -578,10 +578,12 @@ pub(crate) fn deliberate_answers(path: &str) -> anyhow::Result<Vec<(String, Stri
 
 #[cfg(test)]
 mod tests {
+    use antumbra_store::testing::mem_store_of;
+
     use super::*;
 
     #[test]
-    fn only_the_deliberate_completions_are_read_as_built_to_be_wrong() {
+    fn only_the_deliberate_completions_are_read_as_built_to_be_wrong() -> anyhow::Result<()> {
         let path = std::env::temp_dir().join(format!("deliberate-{}.json", std::process::id()));
         std::fs::write(
             &path,
@@ -592,21 +594,21 @@ mod tests {
                 { "task": "pad", "deliberate": true },
             ])
             .to_string(),
-        )
-        .unwrap();
-        let got = deliberate_answers(path.to_str().unwrap()).unwrap();
+        )?;
+        let got = deliberate_answers(path.to_str().context("the temp path is not UTF-8")?);
         std::fs::remove_file(&path).ok();
         assert_eq!(
-            got,
+            got?,
             [
                 ("swap".to_string(), "mutant".to_string()),
                 ("pad".to_string(), "forgery".to_string()),
             ]
         );
+        Ok(())
     }
 
-    fn corpus() -> Vec<serde_json::Value> {
-        serde_json::from_value(serde_json::json!([
+    fn corpus() -> anyhow::Result<Vec<serde_json::Value>> {
+        Ok(serde_json::from_value(serde_json::json!([
             {
                 "id": "s/rev",
                 "skill": "strings",
@@ -620,27 +622,25 @@ mod tests {
                 "verify": { "contains_all": ["x"] }
             },
             { "id": "n/add", "skill": "numbers", "verify": { "contains_all": ["+"] } }
-        ]))
-        .unwrap()
+        ]))?)
     }
 
-    fn given() -> Vec<serde_json::Value> {
-        serde_json::from_value(serde_json::json!([
+    fn given() -> anyhow::Result<Vec<serde_json::Value>> {
+        Ok(serde_json::from_value(serde_json::json!([
             { "task": "s/rev", "completion": "def rev(s): return s" },
             { "task": "s/rev", "completion": "def rev(s): return ''.join(s[::-1])" },
             { "task": "s/never", "completion": "def never(): return 1" },
             { "task": "n/add", "completion": "a - b" }
-        ]))
-        .unwrap()
+        ]))?)
     }
 
     #[test]
-    fn a_batch_is_proposed_as_synthesized_whatever_it_claims() {
+    fn a_batch_is_proposed_as_synthesized_whatever_it_claims() -> anyhow::Result<()> {
         let batch = serde_json::json!([
             { "domain": "strings", "task": "s/rev", "spec": { "contains_all": ["x"] }, "by": "m" },
             { "domain": "strings", "tier": "partial", "spec": { "contains_all": ["y"] }, "origin": "authored" }
         ]);
-        let records = batch_records(&batch).unwrap();
+        let records = batch_records(&batch)?;
         assert_eq!(records.len(), 2);
         assert!(records
             .iter()
@@ -654,19 +654,21 @@ mod tests {
         )
         .is_err());
         assert!(batch_records(&serde_json::json!({})).is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_domain_measurement_takes_the_proposed_and_trusted_synthesized_ones() {
-        let store = Store::connect_memory(4).await.unwrap();
+    async fn a_domain_measurement_takes_the_proposed_and_trusted_synthesized_ones(
+    ) -> anyhow::Result<()> {
+        let store = mem_store_of(4).await?;
         let batch = serde_json::json!([
             { "domain": "strings", "spec": { "contains_all": ["a"] } },
             { "domain": "strings", "spec": { "contains_all": ["b"] } },
             { "domain": "lists", "spec": { "contains_all": ["c"] } }
         ]);
         let mut ids = Vec::new();
-        for record in batch_records(&batch).unwrap() {
-            ids.push(verifier::propose(&store, &record).await.unwrap().id);
+        for record in batch_records(&batch)? {
+            ids.push(verifier::propose(&store, &record).await?.id);
         }
         let authored = VerifierRecord::new(
             "strings",
@@ -676,34 +678,31 @@ mod tests {
             serde_json::json!({ "contains_all": ["z"] }),
             Utc::now(),
         );
-        verifier::propose(&store, &authored).await.unwrap();
-        verifier::transition(&store, &ids[1], TrustState::Revoked, None)
-            .await
-            .unwrap();
+        verifier::propose(&store, &authored).await?;
+        verifier::transition(&store, &ids[1], TrustState::Revoked, None).await?;
         let picked: Vec<VerifierId> = measurable(&store, "strings")
-            .await
-            .unwrap()
+            .await?
             .into_iter()
             .map(|r| r.id)
             .collect();
         assert_eq!(picked, vec![ids[0].clone()]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn cases_carry_the_reference_and_the_authored_verdicts() {
-        let store = Store::connect_memory(4).await.unwrap();
+    async fn cases_carry_the_reference_and_the_authored_verdicts() -> anyhow::Result<()> {
+        let store = mem_store_of(4).await?;
         let cases = build_cases(
             &store,
-            &corpus(),
+            &corpus()?,
             "c",
             Only {
                 skill: Some("strings"),
                 ..Only::default()
             },
-            &given(),
+            &given()?,
         )
-        .await
-        .unwrap();
+        .await?;
         let labels: Vec<(&str, Label)> = cases.iter().map(|c| (c.id.as_str(), c.label)).collect();
         assert_eq!(
             labels,
@@ -716,43 +715,44 @@ mod tests {
         );
         // The authored verifier that labeled them is in the namespace, as authored.
         let Anchor::Verifier { id } = &cases[1].anchor else {
-            panic!("{:?}", cases[1].anchor);
+            bail!("{:?}", cases[1].anchor);
         };
-        let anchor = verifier::get(&store, id).await.unwrap().unwrap();
+        let Some(anchor) = verifier::get(&store, id).await? else {
+            bail!("the authored verifier {id} is not in the namespace");
+        };
         assert_eq!(anchor.origin, VerifierOrigin::Authored);
         assert_eq!(anchor.task.as_deref(), Some("s/rev"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_deliberate_artifact_the_authored_verifier_fails_is_adversarial() {
-        let store = Store::connect_memory(4).await.unwrap();
+    async fn a_deliberate_artifact_the_authored_verifier_fails_is_adversarial() -> anyhow::Result<()>
+    {
+        let store = mem_store_of(4).await?;
         let given: Vec<serde_json::Value> = serde_json::from_value(serde_json::json!([
             { "task": "s/rev", "completion": "def rev(s): return s", "deliberate": true },
             { "task": "s/rev", "completion": "def rev(s): return s[::-1]", "deliberate": true },
             { "task": "s/rev", "completion": "def rev(s): return None" }
-        ]))
-        .unwrap();
+        ]))?;
         let only = Only {
             task: Some("s/rev"),
             ..Only::default()
         };
-        let cases = build_cases(&store, &corpus(), "c", only, &given)
-            .await
-            .unwrap();
+        let cases = build_cases(&store, &corpus()?, "c", only, &given).await?;
         let labels: Vec<Label> = cases.iter().map(|c| c.label).collect();
         // The reference, a failed mutant, an equivalent one, a plain failure.
         assert_eq!(
             labels,
             vec![Label::Good, Label::Adversarial, Label::Good, Label::Bad]
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_label_never_comes_from_a_synthesized_verifier_or_from_the_one_measured() {
-        let store = Store::connect_memory(4).await.unwrap();
-        let cases = build_cases(&store, &corpus(), "c", Only::default(), &given())
-            .await
-            .unwrap();
+    async fn a_label_never_comes_from_a_synthesized_verifier_or_from_the_one_measured(
+    ) -> anyhow::Result<()> {
+        let store = mem_store_of(4).await?;
+        let cases = build_cases(&store, &corpus()?, "c", Only::default(), &given()?).await?;
         let spec = serde_json::json!({ "contains_all": ["[::-1]"] });
         let proposed = VerifierRecord::new(
             "strings",
@@ -762,8 +762,8 @@ mod tests {
             spec,
             Utc::now(),
         );
-        let proposed = verifier::propose(&store, &proposed).await.unwrap();
-        check_anchors(&store, &proposed, &cases).await.unwrap();
+        let proposed = verifier::propose(&store, &proposed).await?;
+        check_anchors(&store, &proposed, &cases).await?;
 
         let mut laundered = cases.clone();
         laundered[1].anchor = Anchor::Verifier {
@@ -777,33 +777,34 @@ mod tests {
             serde_json::json!({ "contains_all": ["rev"] }),
             Utc::now(),
         );
-        let other = verifier::propose(&store, &other).await.unwrap();
-        let refused = check_anchors(&store, &other, &laundered).await.unwrap_err();
+        let other = verifier::propose(&store, &other).await?;
+        let Err(refused) = check_anchors(&store, &other, &laundered).await else {
+            bail!("an anchor on a synthesized verifier was accepted");
+        };
         assert!(refused.to_string().contains("synthesized"), "{refused}");
-        let own = check_anchors(&store, &proposed, &laundered)
-            .await
-            .unwrap_err();
+        let Err(own) = check_anchors(&store, &proposed, &laundered).await else {
+            bail!("a verifier's anchor on itself was accepted");
+        };
         assert!(own.to_string().contains("its own"), "{own}");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_proposal_is_trusted_by_measurement_and_quarantined_by_a_challenge() {
-        let store = Store::connect_memory(4).await.unwrap();
+    async fn a_proposal_is_trusted_by_measurement_and_quarantined_by_a_challenge(
+    ) -> anyhow::Result<()> {
+        let store = mem_store_of(4).await?;
         let tasks: Vec<serde_json::Value> = serde_json::from_value(serde_json::json!([{
             "id": "s/rev",
             "skill": "strings",
             "completion": "return s[::-1]",
             "verify": { "contains_all": ["s[::-1]"] }
-        }]))
-        .unwrap();
+        }]))?;
         // Thirty wrong answers the authored verifier fails, and one it passes.
         let mut given: Vec<serde_json::Value> = (0..30)
             .map(|i| serde_json::json!({ "task": "s/rev", "completion": format!("return {i}") }))
             .collect();
         given.push(serde_json::json!({ "task": "s/rev", "completion": "return s[::-1] or s" }));
-        let cases = build_cases(&store, &tasks, "c", Only::default(), &given)
-            .await
-            .unwrap();
+        let cases = build_cases(&store, &tasks, "c", Only::default(), &given).await?;
         let proposed = verifier::propose(
             &store,
             &VerifierRecord::new(
@@ -815,18 +816,13 @@ mod tests {
                 Utc::now(),
             ),
         )
-        .await
-        .unwrap();
-        check_anchors(&store, &proposed, &cases).await.unwrap();
+        .await?;
+        check_anchors(&store, &proposed, &cases).await?;
         let policy = TrustPolicy::default();
-        let m = measure(&CommandVerifier, &proposed, &cases, &policy, Utc::now())
-            .await
-            .unwrap();
+        let m = measure(&CommandVerifier, &proposed, &cases, &policy, Utc::now()).await?;
         assert_eq!(m.verdict, TrustVerdict::Sound, "{m:?}");
-        report(&store, &proposed, &m).await.unwrap();
-        assert!(verifier::grants(&store, &proposed, Utc::now())
-            .await
-            .unwrap());
+        report(&store, &proposed, &m).await?;
+        assert!(verifier::grants(&store, &proposed, Utc::now()).await?);
 
         // A deliberately wrong artifact the authored verifier fails and the
         // synthesized one passes: the challenge quarantines it.
@@ -838,20 +834,17 @@ mod tests {
             label: Label::Bad,
             anchor: Anchor::Constructed,
         });
-        let caught = challenge(&CommandVerifier, &proposed, &wrong, &policy, Utc::now())
-            .await
-            .unwrap();
+        let caught = challenge(&CommandVerifier, &proposed, &wrong, &policy, Utc::now()).await?;
         assert!(
             matches!(caught.verdict, TrustVerdict::Shortcut { .. }),
             "{caught:?}"
         );
-        report(&store, &proposed, &caught).await.unwrap();
+        report(&store, &proposed, &caught).await?;
         assert_eq!(
-            verifier::state_of(&store, &proposed).await.unwrap(),
+            verifier::state_of(&store, &proposed).await?,
             TrustState::Quarantined
         );
-        assert!(!verifier::grants(&store, &proposed, Utc::now())
-            .await
-            .unwrap());
+        assert!(!verifier::grants(&store, &proposed, Utc::now()).await?);
+        Ok(())
     }
 }
