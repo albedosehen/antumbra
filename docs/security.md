@@ -35,8 +35,8 @@ Isolation is **engine-enforced**, defense-in-depth:
 
 ## Secrets handling
 
-- The DB root credentials, the JWT signing secret, and the embeddings bearer key are **operator-configured** (env/CLI) and never persisted to the store.
-- No secret-bearing struct derives a leaky `Debug`: `HttpEmbedder` has no `Debug` impl; the JWT `TokenVerifier` holds an opaque `DecodingKey`; `AuthError` is deliberately coarse so wire responses don't leak detail. The signing secret is used transiently (`&[u8]`).
+- The DB root credentials, the JWT signing secret, and the server default embedder's bearer key are **operator-configured** (env/CLI) and never persisted to the store. The one secret the store holds is a workspace's own embedder key (`embedder_config.api_key`, set by the operator's CLI for a hosted workspace that brings its own endpoint): its row is readable and writable by the owner view alone, never by a member's record session.
+- No secret-bearing struct derives a leaky `Debug`: `HttpEmbedder` has no `Debug` impl; `EmbedderConfig`'s hand-written `Debug` says whether a key is set and never what it is; the JWT `TokenVerifier` holds an opaque `DecodingKey`; `AuthError` is deliberately coarse so wire responses don't leak detail. The signing secret is used transiently (`&[u8]`).
 - Error messages carry only non-secret context (e.g. the embeddings URL, never the key, which rides the `Authorization` header).
 
 ## SurrealQL injection
