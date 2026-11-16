@@ -23,6 +23,69 @@ fn next_id_is_unique_under_a_burst() {
     );
 }
 
+/// An embedder that counts what it was asked to embed.
+struct Counting {
+    inner: FixedEmbedder,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl antumbra_core::ports::Embedder for Counting {
+    async fn embed(&self, text: &str) -> antumbra_core::Result<Vec<f32>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.embed(text).await
+    }
+
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+}
+
+// A document past the cap is refused as the caller's fault before anything is
+// embedded or stored; one at the cap goes through, inside the chunk bound.
+#[tokio::test]
+async fn ingest_refuses_a_document_past_the_cap_before_embedding_anything() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let embedder = Arc::new(Counting {
+        inner: FixedEmbedder::new(EMBED_DIM),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let s = McpServer::new(
+        store,
+        embedder.clone(),
+        TenantId::new("ws:test"),
+        UserId::new("user:test"),
+        "test-host".into(),
+        CompartmentId::new("comp:test:default"),
+        None,
+    );
+    let doc = |title: &str, content: String| IngestDocumentParams {
+        compartment: None,
+        provenance: None,
+        title: title.into(),
+        source: None,
+        content,
+    };
+    let past = "x".repeat(antumbra_ingest::MAX_DOCUMENT_BYTES + 1);
+    let Err(e) = s.ingest_document(Parameters(doc("too big", past))).await else {
+        anyhow::bail!("a document past the cap was ingested");
+    };
+    anyhow::ensure!(e.code == rmcp::model::ErrorCode::INVALID_PARAMS, "{e:?}");
+    anyhow::ensure!(e.message.contains("512 KiB"), "{}", e.message);
+    anyhow::ensure!(
+        embedder.calls.load(std::sync::atomic::Ordering::SeqCst) == 0,
+        "the embedder was asked for a document that was refused"
+    );
+    let at = "x".repeat(antumbra_ingest::MAX_DOCUMENT_BYTES);
+    let out = s.ingest_document(Parameters(doc("at the cap", at))).await?;
+    anyhow::ensure!(
+        out.0.chunks > 0 && out.0.chunks as usize <= antumbra_ingest::MAX_CHUNKS,
+        "{} chunks",
+        out.0.chunks
+    );
+    Ok(())
+}
+
 async fn server() -> McpServer {
     let store = Store::connect_memory(EMBED_DIM).await.unwrap();
     McpServer::new(
