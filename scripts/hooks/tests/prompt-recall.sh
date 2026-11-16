@@ -18,11 +18,13 @@ cat > "$WORK/bin/curl" <<'CURL'
 #!/usr/bin/env bash
 touch "$CURL_CALLED"
 printf '%s\n' "$@" > "$CURL_ARGS"
+# What `--config -` would read: curl always drains its stdin for it.
+cat > "${CURL_CONFIG:-/dev/null}"
 cat "$CURL_ANSWER"
 CURL
 chmod +x "$WORK/bin/curl"
 printf '%s' '{"memories":[{"id":"memory:a","network":"world","content":"keep it plain"}]}' > "$WORK/answer.json"
-export CURL_ANSWER="$WORK/answer.json" CURL_CALLED="$WORK/called" CURL_ARGS="$WORK/args" ANTUMBRA_TOKEN=test-token
+export CURL_ANSWER="$WORK/answer.json" CURL_CALLED="$WORK/called" CURL_ARGS="$WORK/args" CURL_CONFIG="$WORK/config" ANTUMBRA_TOKEN=test-token
 
 run() {
     rm -f "$CURL_CALLED"
@@ -38,6 +40,10 @@ printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | contains("me
 check 'names each memory, so an agent can judge it' $?
 grep -q '"session":"session-1"' "$CURL_ARGS"
 check 'names its session on the recall' $?
+! grep -q 'Bearer' "$CURL_ARGS"
+check "keeps the bearer off curl's command line" $?
+grep -qx 'header = "Authorization: Bearer test-token"' "$CURL_CONFIG"
+check 'and hands it to curl through its config on stdin' $?
 
 # A background task's notification reaches the hook as a prompt too. A recall
 # on its wording finds memories about notifications, every time.
