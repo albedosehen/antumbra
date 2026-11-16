@@ -199,6 +199,9 @@ fn menu() -> anyhow::Result<()> {
                 token: None,
                 token_file: None,
                 signin_link: None,
+                // The interactive path is for the address one was given, so
+                // the lab exception is a flag, not a question.
+                allow_http: false,
                 common: LocalDefaults::parse_from(["local"]).args.common,
             })
         }
