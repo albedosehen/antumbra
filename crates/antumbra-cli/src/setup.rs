@@ -128,6 +128,10 @@ pub struct HostedArgs {
     /// The sign-in link from your email; setup trades it for the token.
     #[arg(long)]
     pub signin_link: Option<String>,
+    /// Accept a plain http:// address for a server that is not this machine's
+    /// own, for a lab. The token then travels in cleartext, and you said so.
+    #[arg(long)]
+    pub allow_http: bool,
     #[command(flatten)]
     pub common: Common,
 }
@@ -195,6 +199,9 @@ fn menu() -> anyhow::Result<()> {
                 token: None,
                 token_file: None,
                 signin_link: None,
+                // The interactive path is for the address one was given, so
+                // the lab exception is a flag, not a question.
+                allow_http: false,
                 common: LocalDefaults::parse_from(["local"]).args.common,
             })
         }
@@ -901,9 +908,7 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
         .trim_end_matches('/')
         .trim_end_matches("/mcp")
         .to_string();
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        anyhow::bail!("the workspace's address starts with https:// (got {url:?})");
-    }
+    may_carry_the_token(&url, args.allow_http)?;
     println!("Connecting this machine to the hosted workspace at {url}.\n");
 
     let pasted = if let Some(t) = &args.token {
@@ -922,6 +927,8 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
     let token = match pasted {
         token::Pasted::Token(t) => t,
         token::Pasted::Link(link) => {
+            // The link's answer is the token itself.
+            may_carry_the_token(&link, args.allow_http)?;
             let mut response = agent(Duration::from_secs(30))
                 .get(&link)
                 .call()
@@ -960,6 +967,7 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
         "url": url,
         "workspace": workspace,
         "token_file": token_path,
+        "allow_http": args.allow_http,
     });
     finish(
         &home,
@@ -970,6 +978,60 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
         &state,
         &steps,
     )
+}
+
+/// Refuse `address` unless the token may travel over it: `https://` anywhere,
+/// plain `http://` to this machine alone, or plain `http://` anywhere when the
+/// operator said so with `--allow-http`.
+fn may_carry_the_token(address: &str, allow_http: bool) -> anyhow::Result<()> {
+    match cleartext_problem(address, allow_http) {
+        None => Ok(()),
+        Some(problem) => Err(anyhow::anyhow!("{problem}")),
+    }
+}
+
+/// What is wrong with the token travelling to `address`, if anything: no
+/// scheme, or plain `http://` to a machine other than this one without
+/// `allow_http`. `None` when the address is fine.
+fn cleartext_problem(address: &str, allow_http: bool) -> Option<String> {
+    if address.starts_with("https://") {
+        return None;
+    }
+    let Some(rest) = address.strip_prefix("http://") else {
+        return Some(format!(
+            "the address must start with https:// (got {address:?})"
+        ));
+    };
+    if allow_http || is_this_machine(host_of(rest)) {
+        return None;
+    }
+    Some(format!(
+        "{address:?} is a plain http:// address, so the token would travel in cleartext. \
+         Use the https:// address, or pass --allow-http if this is a lab where that is accepted"
+    ))
+}
+
+/// The host in what follows a URL's scheme: the authority up to the first
+/// `/`, `?` or `#`, without userinfo or a port, and a bracketed IPv6 address
+/// without its brackets.
+fn host_of(rest: &str) -> &str {
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        return bracketed.split(']').next().unwrap_or(bracketed);
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => host,
+        _ => authority,
+    }
+}
+
+/// Whether `host` names this machine: `localhost`, or a loopback address.
+fn is_this_machine(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 // ---------------------------------------------------------------- both
@@ -1560,6 +1622,19 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
             "run setup again".into(),
         ),
     }
+    // A plain http:// address to another machine carries the token in
+    // cleartext; setup refuses it unless told --allow-http, which it records.
+    let allow_http = state
+        .get("allow_http")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if let Some(problem) = cleartext_problem(&url, allow_http) {
+        fail(
+            problem,
+            "use the https:// address, or run setup again with --allow-http if this is a lab"
+                .into(),
+        );
+    }
     match find_program("claude") {
         Some(claude) => {
             let registered = Command::new(claude)
@@ -1796,6 +1871,49 @@ mod tests {
             assert!(hooks::bundled(script).is_some(), "{script}");
         }
         assert!(hooks::bundled(headers_helper_name()).is_some());
+    }
+
+    #[test]
+    fn the_token_travels_only_over_https_or_to_this_machine() -> anyhow::Result<()> {
+        for fine in [
+            "https://workspace.example",
+            "https://workspace.example:8443/mcp",
+            "http://127.0.0.1:8081",
+            "http://127.5.6.7",
+            "http://localhost:8081",
+            "http://LOCALHOST/mcp",
+            "http://[::1]:8081/mcp",
+            "http://user@localhost:1",
+        ] {
+            anyhow::ensure!(cleartext_problem(fine, false).is_none(), "{fine}");
+        }
+        for elsewhere in [
+            "http://workspace.example:8081",
+            "http://localhost.example",
+            "http://127.0.0.1.example",
+            "http://user@workspace.example",
+        ] {
+            let Some(said) = cleartext_problem(elsewhere, false) else {
+                anyhow::bail!("{elsewhere} was accepted");
+            };
+            anyhow::ensure!(
+                said.contains("cleartext") && said.contains("--allow-http"),
+                "{elsewhere}: {said}"
+            );
+            anyhow::ensure!(
+                cleartext_problem(elsewhere, true).is_none(),
+                "{elsewhere} with --allow-http"
+            );
+        }
+        let Some(said) = cleartext_problem("workspace.example", false) else {
+            anyhow::bail!("an address without a scheme was accepted");
+        };
+        anyhow::ensure!(said.contains("https://"), "{said}");
+        anyhow::ensure!(
+            cleartext_problem("workspace.example", true).is_some(),
+            "--allow-http does not excuse a missing scheme"
+        );
+        Ok(())
     }
 
     #[test]
