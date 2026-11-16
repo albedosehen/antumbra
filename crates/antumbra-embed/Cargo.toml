@@ -17,6 +17,13 @@ tokio = { workspace = true }
 # Outbound HTTP for the runtime-configured embeddings endpoint. Pure-Rust TLS so
 # it needs no system OpenSSL; `json` for send_json/read_json.
 ureq = { version = "3", features = ["json"] }
+# The embedder flags the binaries share (`args`), behind the `clap` feature so
+# the library stays flag-free for everyone else; the stand-in it can name lives
+# in core's testing module.
+clap = { workspace = true, optional = true, features = ["env"] }
+
+[features]
+clap = ["dep:clap", "antumbra-core/testing"]
 
 [dev-dependencies]
 anyhow.workspace = true
