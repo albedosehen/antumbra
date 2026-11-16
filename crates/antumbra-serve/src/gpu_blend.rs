@@ -10,6 +10,8 @@
 //!     -v "$ADAPTER:/adapter.safetensors:ro" -e ANTUMBRA_GPU_BLEND_ADAPTER=/adapter.safetensors \
 //!     --entrypoint /usr/local/bin/antumbra-d2 antumbra-d2 --ignored --nocapture gpu_blend
 
+use anyhow::Context as _;
+
 use antumbra_core::ports::{ActRequest, Serve};
 use antumbra_core::ExpertId;
 use antumbra_train::{CandleModelLoader, CausalLm, ModelLoader, RaftConfig};
@@ -28,9 +30,9 @@ const PROMPTS: [&str; 6] = [
 // MultiAdapterServe generates under block_in_place: a multi-threaded runtime.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "live GPU: set ANTUMBRA_GPU_BLEND_ADAPTER and run with --ignored"]
-async fn gpu_blend_serves_an_expert_as_its_own_rank_does() {
+async fn gpu_blend_serves_an_expert_as_its_own_rank_does() -> anyhow::Result<()> {
     let adapter = std::env::var("ANTUMBRA_GPU_BLEND_ADAPTER")
-        .expect("ANTUMBRA_GPU_BLEND_ADAPTER names the adapter to serve");
+        .context("ANTUMBRA_GPU_BLEND_ADAPTER names the adapter to serve")?;
     let cfg = RaftConfig {
         temperature: 0.0,
         max_new_tokens: 48,
@@ -40,11 +42,20 @@ async fn gpu_blend_serves_an_expert_as_its_own_rank_does() {
 
     let mut own = ModelLoader::load(&CandleModelLoader::new(cfg.clone()), &base, None)
         .await
-        .expect("the base loads at the trained rank");
-    own.load_adapter(&adapter).expect("the adapter loads");
+        .context("the base loads at the trained rank")?;
+    own.load_adapter(&adapter).context("the adapter loads")?;
     let mut want = Vec::new();
     for p in PROMPTS {
-        want.push(own.generate(p, 1).await.expect("generates").remove(0));
+        let Some(answer) = own
+            .generate(p, 1)
+            .await
+            .context("generates")?
+            .into_iter()
+            .next()
+        else {
+            anyhow::bail!("nothing generated for {p:?}");
+        };
+        want.push(answer);
     }
     drop(own);
 
@@ -55,14 +66,14 @@ async fn gpu_blend_serves_an_expert_as_its_own_rank_does() {
         let one = engine
             .act(ActRequest::new("one", *p, vec![expert.clone()]))
             .await
-            .expect("serves one expert")
+            .context("serves one expert")?
             .final_output;
         let mut halves = ActRequest::new("halves", *p, vec![expert.clone(), expert.clone()]);
         halves.weights = vec![0.5, 0.5];
         let two = engine
             .act(halves)
             .await
-            .expect("serves a blend")
+            .context("serves a blend")?
             .final_output;
         eprintln!("PROMPT {p}\n  own rank: {w:?}\n  blend rank: {one:?}\n  halves: {two:?}");
         same += usize::from(one == *w);
@@ -73,4 +84,5 @@ async fn gpu_blend_serves_an_expert_as_its_own_rank_does() {
         n = PROMPTS.len()
     );
     assert_eq!(same, PROMPTS.len(), "the blend rank changed an answer");
+    Ok(())
 }

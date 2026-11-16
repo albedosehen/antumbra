@@ -179,6 +179,8 @@ impl Embedder for BertEmbedder {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context as _;
+
     use super::*;
 
     fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -202,13 +204,13 @@ mod tests {
     /// worth making. It is skipped, not failed, when the sample file is absent.
     #[tokio::test]
     #[ignore = "needs ANTUMBRA_CALIB_SAMPLE and downloads model weights"]
-    async fn calibrated_ranking_beats_raw_cosine_on_the_real_corpus() {
+    async fn calibrated_ranking_beats_raw_cosine_on_the_real_corpus() -> anyhow::Result<()> {
         let Ok(path) = std::env::var("ANTUMBRA_CALIB_SAMPLE") else {
             println!("ANTUMBRA_CALIB_SAMPLE unset -- skipped");
-            return;
+            return Ok(());
         };
-        let raw = std::fs::read_to_string(&path).expect("read sample");
-        let texts: Vec<String> = serde_json::from_str(&raw).expect("parse sample");
+        let raw = std::fs::read_to_string(&path).context("read sample")?;
+        let texts: Vec<String> = serde_json::from_str(&raw).context("parse sample")?;
         assert!(texts.len() >= 5, "need a few memories to rank against");
 
         let baseline_queries = [
@@ -220,15 +222,15 @@ mod tests {
             "the offside rule explained simply",
         ];
 
-        let e = BertEmbedder::load().expect("load model");
+        let e = BertEmbedder::load().context("load model")?;
         let mut vecs = Vec::new();
         let mut base = Vec::new(); // (mean, sd) per memory
         let mut probes = Vec::new();
         for q in baseline_queries {
-            probes.push(e.embed(q).await.expect("probe"));
+            probes.push(e.embed(q).await.context("probe")?);
         }
         for t in &texts {
-            let v = e.embed(t).await.expect("memory");
+            let v = e.embed(t).await.context("memory")?;
             let sims: Vec<f32> = probes.iter().map(|p| cosine(p, &v)).collect();
             let n = sims.len() as f32;
             let mean = sims.iter().sum::<f32>() / n;
@@ -253,7 +255,7 @@ mod tests {
             if q.split_whitespace().count() < 6 {
                 continue;
             }
-            let qv = e.embed(&q).await.expect("query");
+            let qv = e.embed(&q).await.context("query")?;
             let mut by_raw: Vec<(usize, f32)> = vecs
                 .iter()
                 .enumerate()
@@ -292,6 +294,7 @@ mod tests {
             texts.len(),
             cal_mrr / n
         );
+        Ok(())
     }
 
     /// Is the length bias PREDICTABLE enough to subtract?
@@ -310,7 +313,7 @@ mod tests {
     /// passage's z must beat the stub's z, even though its raw cosine is far lower.
     #[tokio::test]
     #[ignore = "downloads model weights"]
-    async fn is_the_length_bias_predictable_enough_to_subtract() {
+    async fn is_the_length_bias_predictable_enough_to_subtract() -> anyhow::Result<()> {
         let stub = "[Project] data-core-hub-parent - Part of WTS-Paradigm organization";
         let medium = "The sparse leg of hybrid recall must order by relevance. Without ORDER BY \
                       the engine returns matches in record order and the limit truncates to an \
@@ -336,11 +339,11 @@ mod tests {
         ];
         let topical = "reciprocal rank fusion dense and lexical retrieval legs";
 
-        let e = BertEmbedder::load().expect("load model");
-        let q_top = e.embed(topical).await.expect("topical");
+        let e = BertEmbedder::load().context("load model")?;
+        let q_top = e.embed(topical).await.context("topical")?;
         let mut baselines = Vec::new();
         for q in baseline_queries {
-            baselines.push(e.embed(q).await.expect("baseline query"));
+            baselines.push(e.embed(q).await.context("baseline query")?);
         }
 
         println!("\n  text      len    raw_topical  baseline_mean  sd      z-score");
@@ -349,7 +352,7 @@ mod tests {
             ("medium", medium),
             ("long  ", long.as_str()),
         ] {
-            let v = e.embed(text).await.expect("passage");
+            let v = e.embed(text).await.context("passage")?;
             let sims: Vec<f32> = baselines.iter().map(|b| cosine(b, &v)).collect();
             let n = sims.len() as f32;
             let mean = sims.iter().sum::<f32>() / n;
@@ -364,6 +367,7 @@ mod tests {
             );
         }
         println!("\n  calibration works if `long` has the highest z despite the lowest raw score.");
+        Ok(())
     }
 
     /// Does chunk-and-max-pool lift a long passage over a short off-topic stub,
@@ -380,7 +384,7 @@ mod tests {
     /// the curve so the size is chosen from evidence rather than inherited.
     #[tokio::test]
     #[ignore = "downloads model weights"]
-    async fn chunk_and_max_pool_across_chunk_sizes() {
+    async fn chunk_and_max_pool_across_chunk_sizes() -> anyhow::Result<()> {
         let long = format!(
             "Antumbra recall fuses a dense HNSW leg and a BM25 lexical leg with reciprocal \
              rank fusion. {} The lexical leg is what rescues identifiers and error codes that \
@@ -391,18 +395,21 @@ mod tests {
                 .repeat(4),
             "Provenance is stored as a git evidence entry and judged at recall time. ".repeat(6)
         );
-        let e = BertEmbedder::load().expect("load model");
+        let e = BertEmbedder::load().context("load model")?;
         let q_top = e
             .embed("reciprocal rank fusion dense and lexical legs")
             .await
-            .expect("q");
-        let q_non = e.embed("banana bread recipe").await.expect("q");
+            .context("topical query")?;
+        let q_non = e
+            .embed("banana bread recipe")
+            .await
+            .context("nonsense query")?;
 
         // The score to beat: the short stub against a query about nothing.
         let stub = e
             .embed("[Project] data-core-hub-parent - Part of WTS-Paradigm organization")
             .await
-            .expect("stub");
+            .context("stub")?;
         let bar = cosine(&q_non, &stub);
         println!("\nbar to beat (66-char stub vs nonsense query): {bar:.3}");
         println!("whole passage as one vector: len={}", long.len());
@@ -415,7 +422,7 @@ mod tests {
                 .collect();
             let (mut best_top, mut best_non) = (f32::MIN, f32::MIN);
             for c in &chunks {
-                let v = e.embed(c).await.expect("chunk");
+                let v = e.embed(c).await.context("chunk")?;
                 best_top = best_top.max(cosine(&q_top, &v));
                 best_non = best_non.max(cosine(&q_non, &v));
             }
@@ -426,6 +433,7 @@ mod tests {
                 best_top > bar
             );
         }
+        Ok(())
     }
 
     /// Does a model trained for query-to-passage retrieval flatten the length
@@ -446,7 +454,7 @@ mod tests {
     /// builds it.
     #[tokio::test]
     #[ignore = "downloads two models (~180 MB)"]
-    async fn length_curve_across_models() {
+    async fn length_curve_across_models() -> anyhow::Result<()> {
         let short = "[Project] data-core-hub-parent - Part of WTS-Paradigm organization";
         let medium = "The sparse leg of hybrid recall must order by relevance. Without ORDER BY \
                       the engine returns matches in record order and the limit truncates to an \
@@ -475,15 +483,15 @@ mod tests {
                     continue;
                 }
             };
-            let q_non = e.embed(nonsense).await.expect("embed nonsense");
-            let q_top = e.embed(topical).await.expect("embed topical");
+            let q_non = e.embed(nonsense).await.context("embed nonsense")?;
+            let q_top = e.embed(topical).await.context("embed topical")?;
             println!("\n=== {model} ===");
             for (label, text) in [
                 ("short  ", short),
                 ("medium ", medium),
                 ("long   ", long.as_str()),
             ] {
-                let v = e.embed(text).await.expect("embed passage");
+                let v = e.embed(text).await.context("embed passage")?;
                 println!(
                     "  {label} len={:<5} nonsense={:.3}  topical={:.3}",
                     text.len(),
@@ -492,6 +500,7 @@ mod tests {
                 );
             }
         }
+        Ok(())
     }
 
     // Downloads ~90 MB of weights, so it is opt-in: `cargo test -p antumbra-serve
@@ -499,23 +508,18 @@ mod tests {
     // an arithmetic query sits closer to the arithmetic card than the string one.
     #[tokio::test]
     #[ignore = "downloads model weights"]
-    async fn embeddings_are_semantic() {
-        let embedder = BertEmbedder::load().expect("load model");
+    async fn embeddings_are_semantic() -> anyhow::Result<()> {
+        let embedder = BertEmbedder::load().context("load model")?;
         assert_eq!(embedder.dim(), 384);
-        let query = embedder.embed("sum two integers together").await.unwrap();
-        let arith = embedder
-            .embed("integer arithmetic and addition")
-            .await
-            .unwrap();
-        let string = embedder
-            .embed("reverse and format text strings")
-            .await
-            .unwrap();
+        let query = embedder.embed("sum two integers together").await?;
+        let arith = embedder.embed("integer arithmetic and addition").await?;
+        let string = embedder.embed("reverse and format text strings").await?;
         assert!(
             cosine(&query, &arith) > cosine(&query, &string),
             "arith {} should beat string {}",
             cosine(&query, &arith),
             cosine(&query, &string)
         );
+        Ok(())
     }
 }
