@@ -9,12 +9,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use surql::query::crud::{get_record, upsert_record};
-use surql::types::RecordID;
-
 use antumbra_core::Result;
 
-use crate::error::map;
 use crate::store::Store;
 
 const TABLE: &str = "account";
@@ -33,27 +29,20 @@ pub struct Account {
     pub created_at: DateTime<Utc>,
 }
 
-fn record_id(subject: &str) -> Result<RecordID> {
-    let key = subject.replace([':', '/', '\\', '|', ' ', '@'], "_");
-    RecordID::<()>::new(TABLE, key.as_str()).map_err(map)
+fn key(subject: &str) -> String {
+    subject.replace([':', '/', '\\', '|', ' ', '@'], "_")
 }
 
 /// Persist a new account (signup). Keyed by subject; idempotent on it.
 pub async fn create(store: &Store, account: &Account) -> Result<()> {
-    let rid = record_id(&account.subject)?;
-    upsert_record(store.client(), &rid, serde_json::to_value(account)?)
+    store
+        .put(TABLE, key(&account.subject).as_str(), account)
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Look up the account for a verified login subject (login).
 pub async fn get_by_subject(store: &Store, subject: &str) -> Result<Option<Account>> {
-    let rid = record_id(subject)?;
-    match get_record(store.client(), &rid).await.map_err(map)? {
-        Some(value) => Ok(Some(serde_json::from_value(value)?)),
-        None => Ok(None),
-    }
+    store.get_row(TABLE, key(subject).as_str()).await
 }
 
 #[cfg(test)]

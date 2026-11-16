@@ -5,8 +5,7 @@
 //! SurrealQL.
 
 use surql::query::builder::Query;
-use surql::query::crud::{get_record, query_records, upsert_record};
-use surql::types::RecordID;
+use surql::query::crud::query_records;
 
 use antumbra_core::generational::GenerationHead;
 use antumbra_core::{Result, RunId};
@@ -16,27 +15,14 @@ use crate::store::Store;
 
 const TABLE: &str = "generation_head";
 
-fn record_id(run_id: &RunId) -> Result<RecordID> {
-    RecordID::<()>::new(TABLE, run_id.as_str()).map_err(map)
-}
-
 /// Upsert the loop head; this single write IS the checkpoint.
 pub async fn save_head(store: &Store, head: &GenerationHead) -> Result<()> {
-    let id = record_id(&head.run_id)?;
-    let data = serde_json::to_value(head)?;
-    upsert_record(store.client(), &id, data)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(TABLE, head.run_id.as_str(), head).await
 }
 
 /// Load the loop head for a run, if one has been checkpointed.
 pub async fn load_head(store: &Store, run_id: &RunId) -> Result<Option<GenerationHead>> {
-    let id = record_id(run_id)?;
-    match get_record(store.client(), &id).await.map_err(map)? {
-        Some(value) => Ok(Some(serde_json::from_value(value)?)),
-        None => Ok(None),
-    }
+    store.get_row(TABLE, run_id.as_str()).await
 }
 
 /// Every loop head across all runs: the owner/console view (parallels
@@ -69,5 +55,22 @@ mod tests {
         // The single-run load still resolves a specific checkpoint.
         let loaded = load_head(&s, &RunId::new("run:a")).await.unwrap().unwrap();
         assert_eq!(loaded.state, LoopState::Explore);
+    }
+
+    /// The point write and point read every repository is built on: a row
+    /// put under a key reads back as itself, and a key never written reads as
+    /// `None` rather than an error.
+    #[tokio::test]
+    async fn put_then_get_row_round_trips_and_an_absent_key_is_none() -> Result<()> {
+        let s = Store::connect_memory(EMBED_DIM).await?;
+        let now = Utc::now();
+        let head = GenerationHead::new(RunId::new("run:a"), now);
+        s.put(TABLE, "run:a", &head).await?;
+
+        let back: Option<GenerationHead> = s.get_row(TABLE, "run:a").await?;
+        assert_eq!(back.map(|h| h.run_id), Some(RunId::new("run:a")));
+        let absent: Option<GenerationHead> = s.get_row(TABLE, "run:never").await?;
+        assert!(absent.is_none());
+        Ok(())
     }
 }

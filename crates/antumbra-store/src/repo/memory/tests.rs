@@ -496,9 +496,7 @@ async fn reinforce_is_atomic_and_tombstone_guarded() {
             .is_none(),
         "reinforcing a forgotten trace is a no-op"
     );
-    let rid = RecordID::<()>::new(TABLE, m.id.as_str()).unwrap();
-    let row: MemoryRow =
-        serde_json::from_value(get_record(store.client(), &rid).await.unwrap().unwrap()).unwrap();
+    let row: MemoryRow = store.get_row(TABLE, m.id.as_str()).await.unwrap().unwrap();
     assert!(row.deleted_at.is_some(), "tombstone survives");
     assert_eq!(row.reinforcement, 2, "no phantom increment after forget");
 }

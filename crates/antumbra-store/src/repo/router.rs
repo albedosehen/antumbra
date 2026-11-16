@@ -2,7 +2,7 @@
 //! trained metric + centroids, retrained whenever the population changes. No
 //! raw SurrealQL; surql-rs `crud` helpers only.
 
-use surql::query::crud::{delete_record, get_record, upsert_record};
+use surql::query::crud::{delete_record, get_record};
 use surql::types::RecordID;
 
 use antumbra_core::{LearnedRouter, Result};
@@ -19,12 +19,7 @@ fn record_id() -> Result<RecordID> {
 
 /// Persist (replace) the active learned router for this population.
 pub async fn save(store: &Store, router: &LearnedRouter) -> Result<()> {
-    let id = record_id()?;
-    let data = serde_json::to_value(router)?;
-    upsert_record(store.client(), &id, data)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(TABLE, KEY, router).await
 }
 
 /// Remove the active learned router, so routing falls back to the heuristic
@@ -101,13 +96,14 @@ mod tests {
         // What a server older than the router's format reads: the caller can
         // tell it from a store fault and degrade instead of failing.
         let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        upsert_record(
-            store.client(),
-            &record_id().unwrap(),
-            serde_json::json!({ "weights": "not a vector" }),
-        )
-        .await
-        .unwrap();
+        store
+            .put(
+                TABLE,
+                KEY,
+                &serde_json::json!({ "weights": "not a vector" }),
+            )
+            .await
+            .unwrap();
         assert!(matches!(
             load(&store).await,
             Err(antumbra_core::AntumbraError::Serde(_))

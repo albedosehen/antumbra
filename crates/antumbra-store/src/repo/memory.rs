@@ -18,7 +18,7 @@ use serde_json::Value;
 use tracing::Instrument as _;
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_records, get_record, merge_record, query_records, upsert_record};
+use surql::query::crud::{delete_records, merge_record, query_records};
 use surql::query::expressions::{field, value};
 use surql::types::operators::{and_, contains_any, eq, is_none, is_not_none, lt};
 use surql::types::RecordID;
@@ -125,14 +125,12 @@ impl MemoryRow {
 
 /// Insert or replace a memory (addressed by its globally-unique id).
 pub async fn upsert(store: &Store, memory: &Memory) -> Result<()> {
-    let id = RecordID::<()>::new(TABLE, memory.id.as_str()).map_err(map)?;
     // Whether this write creates the memory, read only to announce it.
     let created =
         store.announcing() && matches!(get(store, &memory.tenant, &memory.id).await, Ok(None));
-    let data: Value = serde_json::to_value(MemoryRow::from_domain(memory))?;
-    upsert_record(store.client(), &id, data)
-        .await
-        .map_err(map)?;
+    store
+        .put(TABLE, memory.id.as_str(), &MemoryRow::from_domain(memory))
+        .await?;
     let action = if created {
         ChangeAction::Create
     } else {
@@ -145,18 +143,14 @@ pub async fn upsert(store: &Store, memory: &Memory) -> Result<()> {
 /// Fetch one memory by id, but only if it belongs to `tenant`; a trace owned by
 /// another tenant reads as absent (the defensive isolation re-check).
 pub async fn get(store: &Store, tenant: &TenantId, id: &MemoryId) -> Result<Option<Memory>> {
-    let rid = RecordID::<()>::new(TABLE, id.as_str()).map_err(map)?;
-    match get_record(store.client(), &rid).await.map_err(map)? {
-        Some(value) => {
-            let row: MemoryRow = serde_json::from_value(value)?;
-            // Another tenant's trace, or a tombstone, reads as absent.
-            if row.tenant_id != tenant.as_str() || row.deleted_at.is_some() {
-                return Ok(None);
-            }
-            Ok(Some(row.into_domain()?))
-        }
-        None => Ok(None),
+    let Some(row) = store.get_row::<MemoryRow>(TABLE, id.as_str()).await? else {
+        return Ok(None);
+    };
+    // Another tenant's trace, or a tombstone, reads as absent.
+    if row.tenant_id != tenant.as_str() || row.deleted_at.is_some() {
+        return Ok(None);
     }
+    Ok(Some(row.into_domain()?))
 }
 
 /// All of a tenant's memories (tenant-filtered).

@@ -6,8 +6,9 @@ use serde::de::DeserializeOwned;
 use surql::connection::auth::{DatabaseCredentials, RootCredentials, ScopeCredentials};
 use surql::connection::ConnectionConfig;
 use surql::query::builder::Query;
-use surql::query::crud::query_records;
+use surql::query::crud::{get_record, query_records, upsert_record};
 use surql::types::operators::Operator;
+use surql::types::RecordID;
 use surql::DatabaseClient;
 
 use antumbra_core::{AntumbraError, Result, TenantId, UserId};
@@ -272,6 +273,35 @@ impl Store {
             ("tenant".to_string(), serde_json::json!(tenant.as_str())),
         ]);
         self.query_rows(&surql, vars).await
+    }
+
+    /// Write `row` as the record `key` of `table`, creating or replacing it:
+    /// the one shape of every repository's upsert (the record id, the row as
+    /// JSON, the write, the error mapped), which thirty of them spelled out.
+    pub(crate) async fn put<T: serde::Serialize>(
+        &self,
+        table: &str,
+        key: &str,
+        row: &T,
+    ) -> Result<()> {
+        let rid = RecordID::<()>::new(table, key).map_err(map)?;
+        let data: serde_json::Value = serde_json::to_value(row)?;
+        upsert_record(&self.client, &rid, data).await.map_err(map)?;
+        Ok(())
+    }
+
+    /// The record `key` of `table` as `T`, `None` when there is none: the one
+    /// shape of every repository's point read.
+    pub(crate) async fn get_row<T: DeserializeOwned>(
+        &self,
+        table: &str,
+        key: &str,
+    ) -> Result<Option<T>> {
+        let rid = RecordID::<()>::new(table, key).map_err(map)?;
+        match get_record(&self.client, &rid).await.map_err(map)? {
+            Some(value) => Ok(Some(serde_json::from_value(value)?)),
+            None => Ok(None),
+        }
     }
 
     /// The rows of a one-statement raw query, with its variables bound, as

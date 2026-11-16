@@ -7,12 +7,10 @@
 //! open the tenant gate or opt another member in.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::{and_, eq};
-use surql::types::RecordID;
 
 use antumbra_core::{
     Hive, HiveMembership, HiveOffer, OfferStatus, OfferedKind, Result, TenantId, UserId,
@@ -64,16 +62,17 @@ struct OfferRow {
 /// every write to a record session, so a member calling this gets a refusal
 /// from the engine rather than a decision.
 pub async fn set_enabled(store: &Store, hive: &Hive) -> Result<()> {
-    let rid = RecordID::<()>::new(HIVE, sanitize(hive.tenant_id.as_str()).as_str()).map_err(map)?;
-    let data: Value = serde_json::to_value(HiveRow {
-        tenant_id: hive.tenant_id.as_str().to_string(),
-        enabled: hive.enabled,
-        updated_at: hive.updated_at.to_rfc3339(),
-    })?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            HIVE,
+            sanitize(hive.tenant_id.as_str()).as_str(),
+            &HiveRow {
+                tenant_id: hive.tenant_id.as_str().to_string(),
+                enabled: hive.enabled,
+                updated_at: hive.updated_at.to_rfc3339(),
+            },
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// The tenant's gate, or `None` if the owner has never ruled on it -- which
@@ -105,17 +104,18 @@ pub async fn set_membership(store: &Store, membership: &HiveMembership) -> Resul
         membership.tenant_id.as_str(),
         membership.user.as_str()
     ));
-    let rid = RecordID::<()>::new(MEMBERSHIP, key.as_str()).map_err(map)?;
-    let data: Value = serde_json::to_value(MembershipRow {
-        tenant_id: membership.tenant_id.as_str().to_string(),
-        user: membership.user.as_str().to_string(),
-        opted_in: membership.opted_in,
-        updated_at: membership.updated_at.to_rfc3339(),
-    })?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            MEMBERSHIP,
+            key.as_str(),
+            &MembershipRow {
+                tenant_id: membership.tenant_id.as_str().to_string(),
+                user: membership.user.as_str().to_string(),
+                opted_in: membership.opted_in,
+                updated_at: membership.updated_at.to_rfc3339(),
+            },
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// One member's gate, or `None` if they have never ruled -- which reads as out.
@@ -171,21 +171,22 @@ async fn put_offer(store: &Store, offer: &HiveOffer) -> Result<()> {
         .split_once(':')
         .map(|(_, k)| k)
         .unwrap_or(offer.id.as_str());
-    let rid = RecordID::<()>::new(OFFER, key).map_err(map)?;
-    let data: Value = serde_json::to_value(OfferRow {
-        key: offer.id.clone(),
-        tenant_id: offer.tenant_id.as_str().to_string(),
-        subject_kind: offer.subject_kind.as_str().to_string(),
-        subject_id: offer.subject_id.clone(),
-        offered_by: offer.offered_by.as_str().to_string(),
-        status: offer.status.as_str().to_string(),
-        created_at: offer.created_at.to_rfc3339(),
-        updated_at: offer.updated_at.to_rfc3339(),
-    })?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            OFFER,
+            key,
+            &OfferRow {
+                key: offer.id.clone(),
+                tenant_id: offer.tenant_id.as_str().to_string(),
+                subject_kind: offer.subject_kind.as_str().to_string(),
+                subject_id: offer.subject_id.clone(),
+                offered_by: offer.offered_by.as_str().to_string(),
+                status: offer.status.as_str().to_string(),
+                created_at: offer.created_at.to_rfc3339(),
+                updated_at: offer.updated_at.to_rfc3339(),
+            },
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Every offer in the tenant, newest first. The whole offered set is readable by
