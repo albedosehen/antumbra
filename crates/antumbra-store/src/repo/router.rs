@@ -51,6 +51,7 @@ pub async fn load(store: &Store) -> Result<Option<LearnedRouter>> {
 mod tests {
     use super::*;
     use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::router::{LearnedRouter, RouterExpert};
     use antumbra_core::ExpertId;
 
@@ -67,18 +68,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_before_save_is_none() {
+    async fn load_before_save_is_none() -> Result<()> {
         // The singleton table does not exist until the first save (gate-train);
         // load returns None, not an error.
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        assert!(load(&store).await.unwrap().is_none());
+        let store = mem_store().await?;
+        assert!(load(&store).await?.is_none());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn save_then_load_round_trips_and_upserts() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        save(&store, &router()).await.unwrap();
-        let loaded = load(&store).await.unwrap().expect("a router was saved");
+    async fn save_then_load_round_trips_and_upserts() -> Result<()> {
+        let store = mem_store().await?;
+        save(&store, &router()).await?;
+        let Some(loaded) = load(&store).await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the saved router did not load",
+            ));
+        };
         assert_eq!(loaded.experts.len(), 1);
         assert_eq!(loaded.experts[0].id.as_str(), "expert:a");
         assert_eq!(loaded.temperature, 0.2);
@@ -87,26 +93,27 @@ mod tests {
         // Saving again replaces the single active router (upsert, not append).
         let mut next = router();
         next.floor = 0.5;
-        save(&store, &next).await.unwrap();
-        assert_eq!(load(&store).await.unwrap().unwrap().floor, 0.5);
+        save(&store, &next).await?;
+        assert_eq!(load(&store).await?.map(|r| r.floor), Some(0.5));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_router_that_cannot_be_decoded_is_a_serde_error() {
+    async fn a_router_that_cannot_be_decoded_is_a_serde_error() -> Result<()> {
         // What a server older than the router's format reads: the caller can
         // tell it from a store fault and degrade instead of failing.
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let store = mem_store().await?;
         store
             .put(
                 TABLE,
                 KEY,
                 &serde_json::json!({ "weights": "not a vector" }),
             )
-            .await
-            .unwrap();
+            .await?;
         assert!(matches!(
             load(&store).await,
             Err(antumbra_core::AntumbraError::Serde(_))
         ));
+        Ok(())
     }
 }

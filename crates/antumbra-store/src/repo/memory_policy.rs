@@ -56,28 +56,29 @@ pub async fn set(store: &Store, tenant: &TenantId, policy: &MemoryPolicy) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
 
     #[tokio::test]
-    async fn a_workspace_runs_on_the_defaults_until_its_knobs_are_set() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_workspace_runs_on_the_defaults_until_its_knobs_are_set() -> Result<()> {
+        let s = mem_store().await?;
         let ws = TenantId::new("ws:a");
-        assert_eq!(get(&s, &ws).await.unwrap(), MemoryPolicy::default());
+        assert_eq!(get(&s, &ws).await?, MemoryPolicy::default());
 
         let turned = MemoryPolicy {
             bank_half_life_days: 30.0,
             strength_weight: 7.0,
             ..MemoryPolicy::default()
         };
-        let stored = set(&s, &ws, &turned).await.unwrap();
+        let stored = set(&s, &ws, &turned).await?;
         assert_eq!(stored.strength_weight, 1.0, "stored clamped");
-        let back = get(&s, &ws).await.unwrap();
+        let back = get(&s, &ws).await?;
         assert_eq!(back.bank_half_life_days, 30.0);
         assert_eq!(back, stored);
         // Another workspace keeps its own.
         assert_eq!(
-            get(&s, &TenantId::new("ws:b")).await.unwrap(),
+            get(&s, &TenantId::new("ws:b")).await?,
             MemoryPolicy::default()
         );
+        Ok(())
     }
 }

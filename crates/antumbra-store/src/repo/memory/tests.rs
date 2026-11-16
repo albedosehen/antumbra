@@ -383,8 +383,8 @@ async fn hybrid_recall_keeps_what_only_the_lexical_leg_can_find() -> Result<()> 
 // a tombstone (so sync can carry the deletion); a grace-windowed purge then
 // removes it for good.
 #[tokio::test]
-async fn soft_delete_hides_the_trace_then_purge_removes_it() {
-    let store = crate::testing::mem_store().await.unwrap();
+async fn soft_delete_hides_the_trace_then_purge_removes_it() -> Result<()> {
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
     let m = Memory::new(
@@ -395,53 +395,41 @@ async fn soft_delete_hides_the_trace_then_purge_removes_it() {
         0.8,
         now,
     );
-    upsert(&store, &m).await.unwrap();
-    assert_eq!(list(&store, &tenant).await.unwrap().len(), 1);
+    upsert(&store, &m).await?;
+    assert_eq!(list(&store, &tenant).await?.len(), 1);
 
     // Forget: hidden from list + get, but the raw row stays (for propagation).
-    assert!(soft_delete(&store, &tenant, &m.id, now)
-        .await
-        .unwrap()
-        .is_some());
+    assert!(soft_delete(&store, &tenant, &m.id, now).await?.is_some());
+    assert!(list(&store, &tenant).await?.is_empty(), "hidden from list");
     assert!(
-        list(&store, &tenant).await.unwrap().is_empty(),
-        "hidden from list"
-    );
-    assert!(
-        get(&store, &tenant, &m.id).await.unwrap().is_none(),
+        get(&store, &tenant, &m.id).await?.is_none(),
         "hidden from get"
     );
     assert_eq!(
-        rows::list_rows(&store, "memory").await.unwrap().len(),
+        rows::list_rows(&store, "memory").await?.len(),
         1,
         "tombstone row retained so the deletion can propagate"
     );
 
     // Re-forget is a no-op (already a tombstone).
-    assert!(soft_delete(&store, &tenant, &m.id, now)
-        .await
-        .unwrap()
-        .is_none());
+    assert!(soft_delete(&store, &tenant, &m.id, now).await?.is_none());
 
     // Purge with a cutoff after the deletion removes it for good.
-    let purged = purge(&store, now + chrono::Duration::seconds(1))
-        .await
-        .unwrap();
+    let purged = purge(&store, now + chrono::Duration::seconds(1)).await?;
     assert_eq!(purged, 1);
     assert!(
-        rows::list_rows(&store, "memory").await.unwrap().is_empty(),
+        rows::list_rows(&store, "memory").await?.is_empty(),
         "purged"
     );
     // A purge before the cutoff leaves live-window tombstones alone.
-    upsert(&store, &m).await.unwrap();
-    soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+    upsert(&store, &m).await?;
+    soft_delete(&store, &tenant, &m.id, now).await?;
     assert_eq!(
-        purge(&store, now - chrono::Duration::days(1))
-            .await
-            .unwrap(),
+        purge(&store, now - chrono::Duration::days(1)).await?,
         0,
         "within the grace window: not purged"
     );
+    Ok(())
 }
 
 // Reinforcement is one atomic, tombstone-guarded statement: the increment is
@@ -449,8 +437,8 @@ async fn soft_delete_hides_the_trace_then_purge_removes_it() {
 // forgotten trace is refused by the `deleted_at IS NONE` guard rather than
 // resurrected.
 #[tokio::test]
-async fn reinforce_is_atomic_and_tombstone_guarded() {
-    let store = crate::testing::mem_store().await.unwrap();
+async fn reinforce_is_atomic_and_tombstone_guarded() -> anyhow::Result<()> {
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
     let m = Memory::new(
@@ -461,49 +449,46 @@ async fn reinforce_is_atomic_and_tombstone_guarded() {
         0.5,
         now,
     );
-    upsert(&store, &m).await.unwrap();
+    upsert(&store, &m).await?;
 
     // The increment + confidence bump (0.5 -> 0.625) happen in the engine.
-    let r1 = reinforce(&store, &tenant, &m.id, now)
-        .await
-        .unwrap()
-        .expect("a live trace reinforces");
+    let Some(r1) = reinforce(&store, &tenant, &m.id, now).await? else {
+        anyhow::bail!("a live trace reinforces");
+    };
     assert_eq!(r1.reinforcement, 1);
     assert!((r1.confidence - 0.625).abs() < 1e-4, "confidence bumped");
     // Increments compose -- no lost update.
-    let r2 = reinforce(&store, &tenant, &m.id, now)
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(r2) = reinforce(&store, &tenant, &m.id, now).await? else {
+        anyhow::bail!("a live trace reinforces a second time");
+    };
     assert_eq!(r2.reinforcement, 2);
 
     // A live trace owned by another tenant is not reinforceable (the tenant
     // guard, isolated here while the row is still live).
     assert!(
         reinforce(&store, &TenantId::new("other"), &m.id, now)
-            .await
-            .unwrap()
+            .await?
             .is_none(),
         "cross-tenant reinforce is refused"
     );
 
     // Forget, then a reinforcement is refused and does NOT resurrect.
-    soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+    soft_delete(&store, &tenant, &m.id, now).await?;
     assert!(
-        reinforce(&store, &tenant, &m.id, now)
-            .await
-            .unwrap()
-            .is_none(),
+        reinforce(&store, &tenant, &m.id, now).await?.is_none(),
         "reinforcing a forgotten trace is a no-op"
     );
-    let row: MemoryRow = store.get_row(TABLE, m.id.as_str()).await.unwrap().unwrap();
+    let Some(row) = store.get_row::<MemoryRow>(TABLE, m.id.as_str()).await? else {
+        anyhow::bail!("the tombstone row is there");
+    };
     assert!(row.deleted_at.is_some(), "tombstone survives");
     assert_eq!(row.reinforcement, 2, "no phantom increment after forget");
+    Ok(())
 }
 
 #[tokio::test]
-async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() {
-    let store = crate::testing::mem_store().await.unwrap();
+async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() -> anyhow::Result<()> {
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
     let m = Memory::new(
@@ -514,13 +499,12 @@ async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() {
         0.8,
         now,
     );
-    upsert(&store, &m).await.unwrap();
+    upsert(&store, &m).await?;
 
     // confidence 0.8 -> 0.8 * 0.75 = 0.6; recurrence (reinforcement) is untouched.
-    let p1 = penalize(&store, &tenant, &m.id, now)
-        .await
-        .unwrap()
-        .expect("a live trace penalizes");
+    let Some(p1) = penalize(&store, &tenant, &m.id, now).await? else {
+        anyhow::bail!("a live trace penalizes");
+    };
     assert!(
         (p1.confidence - 0.6).abs() < 1e-4,
         "confidence decayed toward 0: {}",
@@ -531,30 +515,26 @@ async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() {
         "a penalty lowers confidence, not recurrence"
     );
     // Penalties compose (no lost update): 0.6 -> 0.45.
-    let p2 = penalize(&store, &tenant, &m.id, now)
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(p2) = penalize(&store, &tenant, &m.id, now).await? else {
+        anyhow::bail!("a live trace penalizes a second time");
+    };
     assert!((p2.confidence - 0.45).abs() < 1e-4);
 
     // A live trace owned by another tenant is not penalizable (the tenant guard).
     assert!(
         penalize(&store, &TenantId::new("other"), &m.id, now)
-            .await
-            .unwrap()
+            .await?
             .is_none(),
         "cross-tenant penalize is refused"
     );
 
     // Forget, then a penalty is refused and does NOT resurrect the tombstone.
-    soft_delete(&store, &tenant, &m.id, now).await.unwrap();
+    soft_delete(&store, &tenant, &m.id, now).await?;
     assert!(
-        penalize(&store, &tenant, &m.id, now)
-            .await
-            .unwrap()
-            .is_none(),
+        penalize(&store, &tenant, &m.id, now).await?.is_none(),
         "penalizing a forgotten trace is a no-op"
     );
+    Ok(())
 }
 
 // Hybrid recall surfaces a memory that the dense (vector) leg alone would
@@ -562,8 +542,8 @@ async fn penalize_decays_confidence_and_is_tenant_and_tombstone_guarded() {
 // carries a rare exact token the BM25 sparse leg finds, and RRF lifts it into
 // the top-k. This is the whole point of the sparse + dense fusion.
 #[tokio::test]
-async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
-    let store = crate::testing::mem_store().await.unwrap();
+async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() -> Result<()> {
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("t");
     let now = chrono::Utc::now();
 
@@ -592,7 +572,7 @@ async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
             now,
         )
         .with_embedding(e);
-        upsert(&store, &m).await.unwrap();
+        upsert(&store, &m).await?;
     }
 
     // The target: embedding orthogonal to the query (axis 5), but its content
@@ -608,10 +588,10 @@ async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
         now,
     )
     .with_embedding(tvec);
-    upsert(&store, &target).await.unwrap();
+    upsert(&store, &target).await?;
 
     // Dense-only top-3 misses the target (its vector is orthogonal).
-    let dense_only = recall(&store, &tenant, &qvec, 3, None).await.unwrap();
+    let dense_only = recall(&store, &tenant, &qvec, 3, None).await?;
     assert!(
         !dense_only
             .iter()
@@ -625,9 +605,7 @@ async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
 
     // Hybrid recall with the rare token as query text: the BM25 sparse leg
     // finds it by exact token, and RRF lifts it into the top-3.
-    let hybrid = recall_hybrid(&store, &tenant, "florbnugget", &qvec, 3, None, &[])
-        .await
-        .unwrap();
+    let hybrid = recall_hybrid(&store, &tenant, "florbnugget", &qvec, 3, None, &[]).await?;
     assert!(
         hybrid.iter().any(|m| m.id.as_str() == target.id.as_str()),
         "hybrid top-3 should surface the exact-token target: {:?}",
@@ -636,6 +614,7 @@ async fn recall_hybrid_surfaces_exact_token_the_dense_leg_misses() {
             .map(|m| m.id.as_str().to_string())
             .collect::<Vec<_>>()
     );
+    Ok(())
 }
 
 /// A page is the most recently updated live memories, cut by the engine:

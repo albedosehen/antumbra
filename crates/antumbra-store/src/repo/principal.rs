@@ -77,17 +77,22 @@ pub async fn provision(store: &Store, tenant: &TenantId, user: &UserId) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::ids::GITHUB_SYSTEM_USER;
 
     #[tokio::test]
     async fn a_user_id_belongs_to_one_workspace_and_a_system_identity_to_many() -> Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = mem_store().await?;
         let (a, b) = (TenantId::new("ws:a"), TenantId::new("ws:b"));
         let ada = UserId::new("user:ada");
         provision(&store, &a, &ada).await?;
         provision(&store, &a, &ada).await?;
-        let refused = provision(&store, &b, &ada).await.unwrap_err().to_string();
+        let Err(refused) = provision(&store, &b, &ada).await else {
+            return Err(AntumbraError::other(
+                "a user id was provisioned into a second workspace",
+            ));
+        };
+        let refused = refused.to_string();
         assert!(
             refused.contains("already belongs to another workspace"),
             "{refused}"
@@ -111,7 +116,7 @@ mod tests {
     /// both: provisioning an existing pair again is left as it is.
     #[tokio::test]
     async fn a_pair_provisioned_before_the_rule_keeps_working() -> Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = mem_store().await?;
         let owner = UserId::new("user:owner");
         for tenant in ["ws:one", "ws:two"] {
             let tenant = TenantId::new(tenant);

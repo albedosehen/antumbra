@@ -1,8 +1,7 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Round-trip the shadow, reward, boundary, and evaluation repositories
 //! against an embedded SurrealDB.
 
+use anyhow::Result;
 use chrono::{Duration, Utc};
 
 use antumbra_core::{
@@ -11,57 +10,59 @@ use antumbra_core::{
     SubjectKind,
 };
 use antumbra_store::repo::{boundary, evaluation, expert, generation, reward, shadow};
-use antumbra_store::Store;
+use antumbra_store::testing;
 
 #[tokio::test]
-async fn shadow_lifecycle_persists() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn shadow_lifecycle_persists() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let mut s = Shadow::spawn(
         ShadowId::new("shadow:g0"),
         Generation::ZERO,
         Some(ExpertId::new("expert:a")),
         Utc::now(),
     );
-    shadow::upsert(&store, &s).await.unwrap();
+    shadow::upsert(&store, &s).await?;
 
-    let got = shadow::get(&store, &s.id).await.unwrap().unwrap();
+    let Some(got) = shadow::get(&store, &s.id).await? else {
+        anyhow::bail!("the shadow does not read back");
+    };
     assert_eq!(got.status, ShadowStatus::Spawning);
     assert_eq!(got.parent_expert, Some(ExpertId::new("expert:a")));
 
-    s.advance_to(ShadowStatus::Exploring).unwrap();
-    shadow::upsert(&store, &s).await.unwrap();
+    s.advance_to(ShadowStatus::Exploring)?;
+    shadow::upsert(&store, &s).await?;
     assert_eq!(
         shadow::list_by_status(&store, ShadowStatus::Exploring)
-            .await
-            .unwrap()
+            .await?
             .len(),
         1
     );
     assert!(shadow::list_by_status(&store, ShadowStatus::Spawning)
-        .await
-        .unwrap()
+        .await?
         .is_empty());
+    Ok(())
 }
 
 #[tokio::test]
-async fn reward_signals_persist_per_run() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn reward_signals_persist_per_run() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let run = RunId::new("run:1");
     let now = Utc::now();
     let signals = vec![
         RewardSignal::verifier(run.clone(), 0, "tests", 1.0, now),
         RewardSignal::critic(run.clone(), 0, "critic", 0.5, now),
     ];
-    reward::insert_many(&store, &signals).await.unwrap();
+    reward::insert_many(&store, &signals).await?;
 
-    let loaded = reward::list_by_run(&store, &run).await.unwrap();
+    let loaded = reward::list_by_run(&store, &run).await?;
     assert_eq!(loaded.len(), 2);
     assert_eq!(loaded.iter().filter(|s| s.is_verifier()).count(), 1);
+    Ok(())
 }
 
 #[tokio::test]
-async fn boundary_persists_and_recalls_by_context() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn boundary_persists_and_recalls_by_context() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let b = FailureBoundary {
         id: BoundaryId::new("b:1"),
         behavior: "npm install".into(),
@@ -76,19 +77,18 @@ async fn boundary_persists_and_recalls_by_context() {
         owner: None,
         created_at: Utc::now(),
     };
-    boundary::upsert(&store, &b).await.unwrap();
+    boundary::upsert(&store, &b).await?;
 
-    assert_eq!(boundary::list(&store).await.unwrap().len(), 1);
-    let near = boundary::knn_by_context(&store, &[0.9, 0.1, 0.0, 0.0], 1)
-        .await
-        .unwrap();
+    assert_eq!(boundary::list(&store).await?.len(), 1);
+    let near = boundary::knn_by_context(&store, &[0.9, 0.1, 0.0, 0.0], 1).await?;
     assert_eq!(near.len(), 1);
     assert!(near[0].is_actionable());
+    Ok(())
 }
 
 #[tokio::test]
-async fn evaluation_runs_track_latest() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn evaluation_runs_track_latest() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let earlier = Utc::now() - Duration::seconds(10);
     let later = Utc::now();
 
@@ -106,24 +106,23 @@ async fn evaluation_runs_track_latest() {
                 created_at: ts,
             },
         )
-        .await
-        .unwrap();
+        .await?;
     }
 
-    let all = evaluation::list_for_subject(&store, SubjectKind::Expert, "expert:a")
-        .await
-        .unwrap();
+    let all = evaluation::list_for_subject(&store, SubjectKind::Expert, "expert:a").await?;
     assert_eq!(all.len(), 2);
-    let latest = evaluation::latest_for_subject(&store, SubjectKind::Expert, "expert:a")
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(latest) =
+        evaluation::latest_for_subject(&store, SubjectKind::Expert, "expert:a").await?
+    else {
+        anyhow::bail!("no latest evaluation for the subject");
+    };
     assert_eq!(latest.regression_fingerprint.as_deref(), Some("bbb"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn expert_population_crud_and_knn() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn expert_population_crud_and_knn() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let now = Utc::now();
     let mk = |key: &str, vec: Vec<f32>| Expert {
         id: ExpertId::new(key),
@@ -140,43 +139,39 @@ async fn expert_population_crud_and_knn() {
         placed_on: None,
         created_at: now,
     };
-    expert::insert(&store, &mk("expert:a", vec![1.0, 0.0, 0.0, 0.0]))
-        .await
-        .unwrap();
-    expert::insert(&store, &mk("expert:b", vec![0.0, 1.0, 0.0, 0.0]))
-        .await
-        .unwrap();
+    expert::insert(&store, &mk("expert:a", vec![1.0, 0.0, 0.0, 0.0])).await?;
+    expert::insert(&store, &mk("expert:b", vec![0.0, 1.0, 0.0, 0.0])).await?;
 
-    assert_eq!(expert::list(&store).await.unwrap().len(), 2);
-    let got = expert::get(&store, &ExpertId::new("expert:a"))
-        .await
-        .unwrap()
-        .unwrap();
+    assert_eq!(expert::list(&store).await?.len(), 2);
+    let Some(got) = expert::get(&store, &ExpertId::new("expert:a")).await? else {
+        anyhow::bail!("expert:a does not read back");
+    };
     assert_eq!(got.name, "expert:a");
     assert!(expert::get(&store, &ExpertId::new("expert:missing"))
-        .await
-        .unwrap()
+        .await?
         .is_none());
 
-    let near = expert::knn_by_capability(&store, &[0.9, 0.1, 0.0, 0.0], 1)
-        .await
-        .unwrap();
+    let near = expert::knn_by_capability(&store, &[0.9, 0.1, 0.0, 0.0], 1).await?;
     assert_eq!(near.len(), 1);
     assert_eq!(near[0].id, ExpertId::new("expert:a"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn generation_head_round_trips_and_resumes() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn generation_head_round_trips_and_resumes() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let run = RunId::new("run:head");
-    assert!(generation::load_head(&store, &run).await.unwrap().is_none());
+    assert!(generation::load_head(&store, &run).await?.is_none());
 
     let mut head = GenerationHead::new(run.clone(), Utc::now());
-    generation::save_head(&store, &head).await.unwrap();
-    head.advance_to(LoopState::Explore, Utc::now()).unwrap();
-    generation::save_head(&store, &head).await.unwrap();
+    generation::save_head(&store, &head).await?;
+    head.advance_to(LoopState::Explore, Utc::now())?;
+    generation::save_head(&store, &head).await?;
 
-    let loaded = generation::load_head(&store, &run).await.unwrap().unwrap();
+    let Some(loaded) = generation::load_head(&store, &run).await? else {
+        anyhow::bail!("the generation head does not read back");
+    };
     assert_eq!(loaded.state, LoopState::Explore);
     assert_eq!(loaded.generation, Generation::ZERO);
+    Ok(())
 }

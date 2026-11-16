@@ -84,7 +84,7 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<ManifestSet>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::manifest;
 
     fn set(repo: &str, commit: &str, text: &str) -> ManifestSet {
@@ -100,7 +100,7 @@ mod tests {
     /// workspace never sees another's rows.
     #[tokio::test]
     async fn the_latest_reading_replaces_the_last_and_stays_in_its_workspace() -> Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = mem_store().await?;
         let acme = TenantId::new("ws:acme");
         let other = TenantId::new("ws:other");
         let now = chrono::Utc::now();

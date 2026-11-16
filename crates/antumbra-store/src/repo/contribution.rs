@@ -105,7 +105,7 @@ pub async fn baselines_for_run(store: &Store, run_id: &RunId) -> Result<Vec<Base
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::Generation;
     use chrono::Utc;
 
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_generation_measured_again_replaces_its_row() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         upsert(&s, &record("expert:a", 0, 0.5)).await?;
         upsert(&s, &record("expert:a", 1, 0.6)).await?;
         upsert(&s, &record("expert:a", 1, 0.7)).await?;
@@ -140,7 +140,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_baseline_is_kept_per_generation_and_replaced_when_measured_again() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let at = |generation: u32, population: f32| BaselineRecord {
             run_id: RunId::new("run:b"),
             generation: Generation(generation),

@@ -143,11 +143,7 @@ pub async fn genesis_for_user(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
-
-    async fn store() -> Result<Store> {
-        Store::connect_memory(EMBED_DIM).await
-    }
+    use crate::testing::mem_store;
 
     fn profile(user: &str, host: &str, role: DeviceRole) -> DeviceProfile {
         DeviceProfile::new(
@@ -162,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_node_re_registering_updates_its_row_rather_than_adding_one() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
 
@@ -179,7 +175,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_genesis_node_is_the_one_that_can_train_and_only_that_users() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let alice = UserId::new("user:alice");
         let bob = UserId::new("user:bob");
@@ -215,7 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_role_this_build_cannot_route_to_is_skipped_not_fatal() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
 

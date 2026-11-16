@@ -48,17 +48,18 @@ pub async fn clear(store: &Store, run_id: &RunId) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
 
     #[tokio::test]
-    async fn set_load_clear_round_trips_with_a_run_default() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn set_load_clear_round_trips_with_a_run_default() -> Result<()> {
+        let s = mem_store().await?;
         let run = RunId::new("run:c");
         // An absent control reads as the default Run.
-        assert_eq!(load(&s, &run).await.unwrap(), LoopCommand::Run);
-        set(&s, &run, LoopCommand::Halt).await.unwrap();
-        assert_eq!(load(&s, &run).await.unwrap(), LoopCommand::Halt);
-        clear(&s, &run).await.unwrap();
-        assert_eq!(load(&s, &run).await.unwrap(), LoopCommand::Run);
+        assert_eq!(load(&s, &run).await?, LoopCommand::Run);
+        set(&s, &run, LoopCommand::Halt).await?;
+        assert_eq!(load(&s, &run).await?, LoopCommand::Halt);
+        clear(&s, &run).await?;
+        assert_eq!(load(&s, &run).await?, LoopCommand::Run);
+        Ok(())
     }
 }

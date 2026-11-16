@@ -121,7 +121,7 @@ mod tests {
     // persists nothing, while the owner view reads and writes as before.
     #[tokio::test]
     async fn a_member_session_neither_reads_nor_writes_the_row() -> Result<()> {
-        let store = Store::connect_memory(4).await?;
+        let store = crate::testing::mem_store_of(4).await?;
         let tenant = TenantId::new("ws:org");
         let member = UserId::new("user:m");
         principal::provision(&store, &tenant, &member).await?;

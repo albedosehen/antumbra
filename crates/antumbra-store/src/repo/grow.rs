@@ -76,7 +76,7 @@ pub async fn history(store: &Store, run_id: &RunId) -> Result<Vec<GrowRecord>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use chrono::Utc;
 
     fn census(generation: u32, region: &str, acceptability: f32) -> RegionCensus {
@@ -93,7 +93,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_latest_census_before_a_generation_is_the_one_read() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         upsert_census(&s, &census(0, "lists", 0.2)).await?;
         upsert_census(&s, &census(0, "dates", 0.9)).await?;
         upsert_census(&s, &census(2, "lists", 0.4)).await?;
@@ -111,7 +111,7 @@ mod tests {
 
     #[tokio::test]
     async fn decisions_are_kept_per_generation() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let run = RunId::new("run:g");
         for (g, chosen) in [(0, None), (1, Some("lists")), (1, Some("dates"))] {
             upsert(

@@ -71,23 +71,25 @@ mod tests {
     /// The pool is never smaller than what was asked for, which is the
     /// property the truncation downstream depends on.
     #[test]
-    fn the_pool_is_never_narrower_than_k() {
+    fn the_pool_is_never_narrower_than_k() -> antumbra_core::Result<()> {
         for k in [1, 5, 20, 41, 199, 200, 1_000] {
             assert!(candidate_pool(k) >= k.min(MAX_POOL), "k = {k}");
         }
+        Ok(())
     }
 
     #[test]
-    fn the_pool_holds_its_floor_and_its_ceiling() {
+    fn the_pool_holds_its_floor_and_its_ceiling() -> antumbra_core::Result<()> {
         assert_eq!(candidate_pool(1), MIN_POOL);
         assert_eq!(candidate_pool(10), 50);
         assert_eq!(candidate_pool(10_000), MAX_POOL);
+        Ok(())
     }
 
     /// An `ef` below `k` cannot return `k` neighbors, so the floor has
     /// to hold for every `k` the ceiling still covers.
     #[test]
-    fn the_effort_is_never_below_k() {
+    fn the_effort_is_never_below_k() -> antumbra_core::Result<()> {
         for k in [1, 16, 64, 128, 512] {
             assert!(search_effort(k) >= k as i64, "k = {k}");
         }
@@ -95,13 +97,15 @@ mod tests {
         // deliberate trade: an enormous k is a paging problem, not a
         // recall-quality one.
         assert_eq!(search_effort(10_000), MAX_EFFORT as i64);
+        Ok(())
     }
 
     /// Saturating arithmetic, not a panic, on a k no caller should
     /// ever send.
     #[test]
-    fn an_absurd_k_saturates() {
+    fn an_absurd_k_saturates() -> antumbra_core::Result<()> {
         assert_eq!(candidate_pool(usize::MAX), MAX_POOL);
         assert_eq!(search_effort(usize::MAX), MAX_EFFORT as i64);
+        Ok(())
     }
 }

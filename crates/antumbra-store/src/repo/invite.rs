@@ -96,53 +96,54 @@ pub async fn redeem(store: &Store, code: &str, now: DateTime<Utc>) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
 
     #[tokio::test]
-    async fn mint_then_redeem_is_single_use() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
-        mint(&s, "code-abc", None).await.unwrap();
-        assert!(get(&s, "code-abc").await.unwrap().is_some());
-        redeem(&s, "code-abc", Utc::now()).await.unwrap();
+    async fn mint_then_redeem_is_single_use() -> Result<()> {
+        let s = mem_store().await?;
+        mint(&s, "code-abc", None).await?;
+        assert!(get(&s, "code-abc").await?.is_some());
+        redeem(&s, "code-abc", Utc::now()).await?;
         // Consumed: gone, and a second redeem fails.
-        assert!(get(&s, "code-abc").await.unwrap().is_none());
+        assert!(get(&s, "code-abc").await?.is_none());
         assert!(redeem(&s, "code-abc", Utc::now()).await.is_err());
         // An unknown code is rejected.
         assert!(redeem(&s, "never-minted", Utc::now()).await.is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_expired_invite_is_rejected() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn an_expired_invite_is_rejected() -> Result<()> {
+        let s = mem_store().await?;
         let now = Utc::now();
-        mint(&s, "code-exp", Some(now - chrono::Duration::minutes(1)))
-            .await
-            .unwrap();
-        let err = redeem(&s, "code-exp", now).await.unwrap_err();
+        mint(&s, "code-exp", Some(now - chrono::Duration::minutes(1))).await?;
+        let Err(err) = redeem(&s, "code-exp", now).await else {
+            return Err(AntumbraError::other("an expired invite was redeemed"));
+        };
         assert!(err.is_rejection(), "a caller fault, not an internal one");
         // And `is_usable_at` reports the same verdict without consuming.
-        mint(&s, "code-live", Some(now + chrono::Duration::minutes(5)))
-            .await
-            .unwrap();
-        let live = get(&s, "code-live").await.unwrap().unwrap();
+        mint(&s, "code-live", Some(now + chrono::Duration::minutes(5))).await?;
+        let Some(live) = get(&s, "code-live").await? else {
+            return Err(AntumbraError::other("the live invite did not read back"));
+        };
         assert!(live.is_usable_at(now));
         assert!(!live.is_usable_at(now + chrono::Duration::minutes(6)));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn list_and_revoke_manage_outstanding_invites() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
-        mint(&s, "a", None).await.unwrap();
-        mint(&s, "b", Some(Utc::now() + chrono::Duration::days(7)))
-            .await
-            .unwrap();
-        let mut codes: Vec<String> = all(&s).await.unwrap().into_iter().map(|i| i.code).collect();
+    async fn list_and_revoke_manage_outstanding_invites() -> Result<()> {
+        let s = mem_store().await?;
+        mint(&s, "a", None).await?;
+        mint(&s, "b", Some(Utc::now() + chrono::Duration::days(7))).await?;
+        let mut codes: Vec<String> = all(&s).await?.into_iter().map(|i| i.code).collect();
         codes.sort();
         assert_eq!(codes, ["a", "b"]);
 
-        assert!(revoke(&s, "a").await.unwrap(), "revoked");
-        assert!(!revoke(&s, "a").await.unwrap(), "second revoke is a no-op");
+        assert!(revoke(&s, "a").await?, "revoked");
+        assert!(!revoke(&s, "a").await?, "second revoke is a no-op");
         assert!(redeem(&s, "a", Utc::now()).await.is_err(), "a is dead");
-        assert_eq!(all(&s).await.unwrap().len(), 1);
+        assert_eq!(all(&s).await?.len(), 1);
+        Ok(())
     }
 }

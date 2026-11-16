@@ -178,11 +178,7 @@ pub async fn set_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
-
-    async fn store() -> Result<Store> {
-        Store::connect_memory(EMBED_DIM).await
-    }
+    use crate::testing::mem_store;
 
     fn request(compartment: &str, at: chrono::DateTime<chrono::Utc>) -> GenesisRequest {
         GenesisRequest::new(
@@ -197,7 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_compartment_asked_about_twice_waits_once() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
         let first = chrono::Utc::now();
@@ -227,7 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_run_that_has_waited_longest_is_the_next_one() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
         let now = chrono::Utc::now();
@@ -254,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_status_this_build_cannot_reason_about_is_skipped() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
         ask(&s, &request("comp:rust", chrono::Utc::now())).await?;

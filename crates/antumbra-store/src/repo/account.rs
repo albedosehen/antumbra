@@ -48,12 +48,12 @@ pub async fn get_by_subject(store: &Store, subject: &str) -> Result<Option<Accou
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
 
     #[tokio::test]
-    async fn create_then_lookup_by_subject() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
-        assert!(get_by_subject(&s, "github:1").await.unwrap().is_none());
+    async fn create_then_lookup_by_subject() -> Result<()> {
+        let s = mem_store().await?;
+        assert!(get_by_subject(&s, "github:1").await?.is_none());
         create(
             &s,
             &Account {
@@ -65,11 +65,15 @@ mod tests {
                 created_at: Utc::now(),
             },
         )
-        .await
-        .unwrap();
-        let got = get_by_subject(&s, "github:1").await.unwrap().unwrap();
+        .await?;
+        let Some(got) = get_by_subject(&s, "github:1").await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the account did not read back",
+            ));
+        };
         assert_eq!(got.tenant, "ws:abc");
         assert_eq!(got.user, "user:owner");
         assert_eq!(got.email.as_deref(), Some("a@b.com"));
+        Ok(())
     }
 }
