@@ -30,7 +30,45 @@ pub(super) fn served_matmul(w: &QMatMul, x: &Tensor) -> CResult<Tensor> {
         .to_dtype(dtype)
 }
 
-/// GQA: repeat each KV head `n_rep` times to match the query heads.
+/// Grouped-query attention: `q` is `(b, heads, q_len, head_dim)`, `k` and `v`
+/// are `(b, kv_heads, kv_len, head_dim)`, and each KV head serves `n_rep`
+/// query heads in order. Returns `(b, heads, q_len, head_dim)`.
+///
+/// The query heads that share a KV head are stacked as rows against it, so
+/// every product is the one a K or V repeated `n_rep` times would give, and
+/// nothing of the cache's length is copied to make it. Repeating them copied
+/// the whole cache, six times over on this base, in every layer for every
+/// token: most of what a decoded token cost on a CPU.
+pub(super) fn grouped_attention(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    mask: Option<&Tensor>,
+    n_rep: usize,
+) -> CResult<Tensor> {
+    let (b, heads, q_len, head_dim) = q.dims4()?;
+    let (_, kv_heads, kv_len, _) = k.dims4()?;
+    let rows = n_rep * q_len;
+    let q = q.contiguous()?.reshape((b, kv_heads, rows, head_dim))?;
+    let scale = 1f64 / (head_dim as f64).sqrt();
+    let attn = (q.matmul(&k.transpose(2, 3)?.contiguous()?)? * scale)?;
+    let attn = match mask {
+        // The mask is per query position, so it is added with the stacked
+        // heads set apart again.
+        Some(m) => attn
+            .reshape((b, kv_heads, n_rep, q_len, kv_len))?
+            .broadcast_add(m)?
+            .reshape((b, kv_heads, rows, kv_len))?,
+        None => attn,
+    };
+    let attn = candle_nn::ops::softmax_last_dim(&attn)?;
+    attn.matmul(&v.contiguous()?)?
+        .reshape((b, heads, q_len, head_dim))
+}
+
+/// GQA by repeating each KV head `n_rep` times to match the query heads: what
+/// [`grouped_attention`] replaced, kept as the reference it is tested against.
+#[cfg(test)]
 pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
     if n_rep == 1 {
         return Ok(x);
@@ -390,17 +428,7 @@ impl Attention {
             self.kv_cache = Some((k.clone(), v.clone()));
         }
 
-        let k = repeat_kv(k, self.num_kv_groups)?.contiguous()?;
-        let v = repeat_kv(v, self.num_kv_groups)?.contiguous()?;
-
-        let scale = 1f64 / (self.head_dim as f64).sqrt();
-        let attn = (q.contiguous()?.matmul(&k.transpose(2, 3)?.contiguous()?)? * scale)?;
-        let attn = match mask {
-            Some(m) => attn.broadcast_add(m)?,
-            None => attn,
-        };
-        let attn = candle_nn::ops::softmax_last_dim(&attn)?;
-        let out = attn.matmul(&v)?;
+        let out = grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?;
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
         self.o_proj.forward(&out)
     }
@@ -627,6 +655,68 @@ mod tests {
             .flatten_all()?
             .max(0)?
             .to_scalar::<f32>()
+    }
+
+    /// Attention as it was computed before: K and V repeated to the query
+    /// heads' count, one product per head.
+    fn repeated_attention(
+        q: &Tensor,
+        k: &Tensor,
+        v: &Tensor,
+        mask: Option<&Tensor>,
+        n_rep: usize,
+    ) -> CResult<Tensor> {
+        let head_dim = q.dim(3)?;
+        let k = repeat_kv(k.clone(), n_rep)?.contiguous()?;
+        let v = repeat_kv(v.clone(), n_rep)?.contiguous()?;
+        let scale = 1f64 / (head_dim as f64).sqrt();
+        let attn = (q.contiguous()?.matmul(&k.transpose(2, 3)?.contiguous()?)? * scale)?;
+        let attn = match mask {
+            Some(m) => attn.broadcast_add(m)?,
+            None => attn,
+        };
+        candle_nn::ops::softmax_last_dim(&attn)?.matmul(&v)
+    }
+
+    /// Stacking the query heads that share a KV head gives what repeating K
+    /// and V gives: one decoded token against a cache, and a whole prompt
+    /// under its causal mask.
+    #[test]
+    fn grouped_attention_is_attention_over_repeated_keys_and_values() -> CResult<()> {
+        let dev = Device::Cpu;
+        let (kv_heads, n_rep, head_dim) = (2, 3, 8);
+        let draw =
+            |heads: usize, len: usize| Tensor::randn(0f32, 1.0, (1, heads, len, head_dim), &dev);
+
+        // A decode step: one new position, five in the cache.
+        let (q, k, v) = (
+            draw(kv_heads * n_rep, 1)?,
+            draw(kv_heads, 5)?,
+            draw(kv_heads, 5)?,
+        );
+        let grouped = grouped_attention(&q, &k, &v, None, n_rep)?;
+        assert_eq!(grouped.dims(), &[1, kv_heads * n_rep, 1, head_dim]);
+        let gap = largest_gap(&grouped, &repeated_attention(&q, &k, &v, None, n_rep)?)?;
+        assert!(gap < 1e-5, "a decode step differs by {gap}");
+
+        // A prompt of four positions after one cached, under the causal mask:
+        // position i sees the cached one and positions up to its own.
+        let (q, k, v) = (
+            draw(kv_heads * n_rep, 4)?,
+            draw(kv_heads, 5)?,
+            draw(kv_heads, 5)?,
+        );
+        let mask: Vec<f32> = (0..4)
+            .flat_map(|i| (0..5).map(move |j| if j > i + 1 { f32::NEG_INFINITY } else { 0.0 }))
+            .collect();
+        let mask = Tensor::from_vec(mask, (4, 5), &dev)?;
+        let grouped = grouped_attention(&q, &k, &v, Some(&mask), n_rep)?;
+        let gap = largest_gap(
+            &grouped,
+            &repeated_attention(&q, &k, &v, Some(&mask), n_rep)?,
+        )?;
+        assert!(gap < 1e-5, "a masked prompt differs by {gap}");
+        Ok(())
     }
 
     /// A fresh adapter's factors, as a layer registers them, on the CPU.
