@@ -13,17 +13,12 @@ use super::{
     reanchor, render, repository_root, skills, Inputs, Standing,
 };
 use crate::cli::ClaudeAction;
+use crate::machine::home;
 
 const SURFACE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A hook has seconds, not a minute, and is not worth waiting on.
 const HOOK_TIMEOUT: Duration = Duration::from_secs(5);
-
-fn home() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-}
 
 fn project(dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     match dir {

@@ -238,8 +238,7 @@ impl Remeasurement {
     /// The mean pass rate over the seeds, which the graduation threshold is
     /// applied to. `None` with no evaluations.
     pub fn mean(&self) -> Option<f32> {
-        (!self.pass_rates.is_empty())
-            .then(|| self.pass_rates.iter().sum::<f32>() / self.pass_rates.len() as f32)
+        crate::stats::mean(self.pass_rates.iter().copied())
     }
 }
 

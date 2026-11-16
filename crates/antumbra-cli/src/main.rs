@@ -33,6 +33,7 @@ mod gitctx;
 mod gitfacts;
 #[cfg(feature = "models")]
 mod learned_gate;
+mod machine;
 mod models;
 mod ops;
 mod setup;

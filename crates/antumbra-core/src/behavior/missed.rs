@@ -35,11 +35,9 @@ impl Missed {
     }
 }
 
+/// The first [`MISSED_CHARS`] characters and an ellipsis when cut.
 fn clip(text: &str) -> String {
-    match text.char_indices().nth(MISSED_CHARS) {
-        Some((end, _)) => format!("{}…", &text[..end]),
-        None => text.to_string(),
-    }
+    crate::text::clipped(text, MISSED_CHARS + 1).into_owned()
 }
 
 /// Note the task and answer `missed` was missed on, replacing the note
