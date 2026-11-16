@@ -35,3 +35,6 @@ chrono.workspace = true
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-boundary = { path = "../antumbra-boundary" }
 antumbra-gate = { path = "../antumbra-gate" }
+
+[lints]
+workspace = true

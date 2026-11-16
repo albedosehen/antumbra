@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Admission gating through the loop: a graduate that
 //! duplicates an active shared expert joins only by beating it head to head,
 //! and then replaces it; one that cannot is not admitted.

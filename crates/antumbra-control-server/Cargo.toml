@@ -65,3 +65,10 @@ smtp = ["dep:lettre"]
 # The kayak wire contract, its drift gate (tests/contract.rs), and the artifact
 # generation. The four routes this server actually serves do not need it.
 contract = ["dep:oneiriq-kayak", "dep:oneiriq-surql"]
+
+# Its own workspace, so the root's [workspace.lints] does not reach it: the
+# same rule, stated here.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"

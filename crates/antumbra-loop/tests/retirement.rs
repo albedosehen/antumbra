@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Retirement as the loop's job, through the loop: an expert
 //! whose leave-one-out contribution stays at nothing is demoted once that
 //! persists, with its measurements as the evidence; one that contributes is

@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The active hive as a read layer, and the three conditions that have to
 //! hold together for it.
 //!

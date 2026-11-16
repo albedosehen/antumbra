@@ -59,3 +59,6 @@ anyhow.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 # Counterfactual search drives the real probe in tests (depends only on core).
 antumbra-boundary = { path = "../antumbra-boundary" }
+
+[lints]
+workspace = true

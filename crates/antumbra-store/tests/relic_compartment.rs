@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced relic privacy: a relic in a private compartment is seen by
 //! its owner, and by another member only once the compartment is granted; the
 //! slug, title and versions are the owner's to change alone, even for a member

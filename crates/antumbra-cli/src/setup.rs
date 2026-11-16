@@ -323,11 +323,11 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     let wants = vec![
         env_file::Want {
             name: "SURREAL_PASS",
-            value: secret(24, true),
+            value: secret(24, true)?,
         },
         env_file::Want {
             name: "ANTUMBRA_JWT_SECRET",
-            value: secret(32, false),
+            value: secret(32, false)?,
         },
         env_file::Want {
             name: "ANTUMBRA_SURREAL_DATA",
@@ -1746,15 +1746,19 @@ fn host_id() -> String {
 }
 
 /// `n` random bytes as base64 (URL-safe and unpadded for a password, so it
-/// needs no quoting anywhere).
-fn secret(n: usize, url_safe: bool) -> String {
+/// needs no quoting anywhere). Without the OS random source there is no
+/// secret worth the name, so that failure is setup's to report, not to paper
+/// over.
+fn secret(n: usize, url_safe: bool) -> anyhow::Result<String> {
     let mut bytes = vec![0u8; n];
-    getrandom::fill(&mut bytes).expect("the OS random source");
-    if url_safe {
+    getrandom::fill(&mut bytes).map_err(|e| {
+        anyhow::anyhow!("the OS random source failed ({e}); the stack's secrets cannot be made")
+    })?;
+    Ok(if url_safe {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
     } else {
         base64::engine::general_purpose::STANDARD.encode(bytes)
-    }
+    })
 }
 
 /// A program on the PATH. On Windows, `.exe`, `.cmd` and `.bat` count, and
@@ -1917,14 +1921,15 @@ mod tests {
     }
 
     #[test]
-    fn secrets_are_long_and_need_no_quoting() {
-        let pass = secret(24, true);
+    fn secrets_are_long_and_need_no_quoting() -> anyhow::Result<()> {
+        let pass = secret(24, true)?;
         assert_eq!(pass.len(), 32);
         assert!(pass
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
-        assert_ne!(pass, secret(24, true));
-        assert_eq!(secret(32, false).len(), 44);
+        assert_ne!(pass, secret(24, true)?);
+        assert_eq!(secret(32, false)?.len(), 44);
+        Ok(())
     }
 
     #[test]

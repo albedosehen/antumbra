@@ -48,7 +48,12 @@ pub fn compose_adapters(specs: &[(String, f32)], out_path: &str) -> Result<usize
 /// `VarMap::load` refuses the mismatch.
 pub fn restore_adapter(vars: &VarMap, path: &str) -> Result<()> {
     let fail = |e: candle_core::Error| AntumbraError::other(format!("load adapter `{path}`: {e}"));
-    let vars = vars.data().lock().expect("varmap lock");
+    // A poisoned lock holds the same map of vars: a panic elsewhere while it
+    // was held cannot leave one half-set, so it is taken as it is.
+    let vars = vars
+        .data()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(device) = vars.values().next().map(|v| v.device().clone()) else {
         return Ok(());
     };

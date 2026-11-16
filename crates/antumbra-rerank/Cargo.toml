@@ -15,3 +15,6 @@ tokio = { workspace = true }
 # Outbound HTTP for the runtime-configured rerank endpoint. Pure-Rust TLS so it
 # needs no system OpenSSL; `json` for send_json/read_json.
 ureq = { version = "3", features = ["json"] }
+
+[lints]
+workspace = true

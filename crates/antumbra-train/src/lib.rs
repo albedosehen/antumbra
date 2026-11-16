@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-train (shadow models hold the plasticity; the candle QLoRA trainer)
 //!
 //! The DIY `candle` path that trains shadow adapters from **verified outcomes**

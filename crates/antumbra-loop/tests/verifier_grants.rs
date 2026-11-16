@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Reward attribution through the loop: what a named verifier
 //! granted a run lands on the reward rows and on the expert it graduates,
 //! and quarantining the verifier archives that expert.

@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The byte-identity tripwire through retirement: a demoted or
 //! archived expert keeps its weights, and they are still held to their
 //! freeze; only a deleted expert, whose weights may be gone, is not checked.

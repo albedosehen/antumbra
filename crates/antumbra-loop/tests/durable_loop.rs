@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Durable generational loop validation: the loop grows the population across generations,
 //! survives a simulated kill/restart by resuming from the persisted head,
 //! prunes (does not grow) when shadows collapse, and writes its full lineage

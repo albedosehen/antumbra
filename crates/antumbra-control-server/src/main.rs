@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The hosted **control plane** HTTP server: invite-gated signup, magic-link
 //! login, and RS256 token issuance, run as its own service (separate from the
 //! data-plane MCP server, which only *verifies* the tokens this server signs).
@@ -187,19 +189,29 @@ fn validate_magic_secret(secret: &str) -> anyhow::Result<()> {
 }
 
 /// Resolve on SIGTERM (what `docker stop` sends PID 1) or ctrl-c, so axum can
-/// stop accepting and drain in-flight requests instead of dropping them.
+/// stop accepting and drain in-flight requests instead of dropping them. A
+/// handler the OS refuses to install is said on stderr, and that signal then
+/// never resolves this: the server runs until the other one, or a kill.
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("install ctrl-c handler");
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            eprintln!("antumbra-control-server: no ctrl-c handler ({e}); it will not stop on one");
+            std::future::pending::<()>().await;
+        }
     };
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut term) => {
+                term.recv().await;
+            }
+            Err(e) => {
+                eprintln!(
+                    "antumbra-control-server: no SIGTERM handler ({e}); it will not stop on one"
+                );
+                std::future::pending::<()>().await;
+            }
+        }
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();

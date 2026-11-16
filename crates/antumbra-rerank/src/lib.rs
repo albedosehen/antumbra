@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! A runtime-configured **HTTP reranker**: the cross-encoder precision
 //! stage that re-scores the wide hybrid-recall pool. Rather than baking a
 //! reranker model into each binary, point at a TEI/Cohere-style `/rerank`

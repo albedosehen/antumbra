@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The kayak contract gate.
 //!
 //! THE contract lives in `antumbra_control_server::contract` and is validated

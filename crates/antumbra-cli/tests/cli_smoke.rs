@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Drive the actual `antumbra` binary through its no-GPU commands. The bin
 //! modules (`main` dispatch, `commands`, `ops`) are exercised end to end against
 //! an ephemeral `mem://` store -- each command runs its handler, which is what the

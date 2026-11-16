@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! Antumbra operator CLI (`antumbra`). v0 surface: apply the schema, print the
 //! generated DDL, inspect the population, and drive the generational loop.
 //!

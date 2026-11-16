@@ -305,16 +305,18 @@ async fn apply(state: &Arc<HttpState>, event: Event) -> Result<Outcome> {
     }
 }
 
-fn config(state: &HttpState) -> &GithubConfig {
+/// The integration's configuration. The route answers 404 before any of this
+/// runs when there is none, so a miss here is a wiring fault, reported as one.
+fn config(state: &HttpState) -> Result<&GithubConfig> {
     state
         .github
-        .as_ref()
-        .expect("the route is only reachable when the integration is configured")
+        .as_deref()
+        .context("the GitHub integration is not configured, yet its route ran")
 }
 
 async fn apply_pull_request(state: &Arc<HttpState>, event: &PullRequestEvent) -> Result<Outcome> {
     const KIND: &str = "pull_request";
-    let cfg = config(state);
+    let cfg = config(state)?;
     let repo = event.repository.slug();
     if knowledge::answers(event) {
         return Ok(knowledge::queue(state, event));
@@ -384,7 +386,7 @@ async fn apply_pull_request(state: &Arc<HttpState>, event: &PullRequestEvent) ->
 
 async fn apply_delete(state: &Arc<HttpState>, event: &DeleteEvent) -> Result<Outcome> {
     const KIND: &str = "delete";
-    let cfg = config(state);
+    let cfg = config(state)?;
     let Some(repo) = event.repository.slug() else {
         return Ok(Outcome::ignored(KIND, None, "the repository has no slug"));
     };
@@ -427,7 +429,7 @@ async fn apply_delete(state: &Arc<HttpState>, event: &DeleteEvent) -> Result<Out
 /// knowledge documents ingested at the head of its default branch.
 async fn apply_installation(state: &Arc<HttpState>, event: &InstallationEvent) -> Result<Outcome> {
     const KIND: &str = "installation";
-    let cfg = config(state);
+    let cfg = config(state)?;
     if !event.is_cold_start() {
         return Ok(Outcome::ignored(
             KIND,

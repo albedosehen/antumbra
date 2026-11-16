@@ -72,3 +72,6 @@ models = [
 # antumbra-serve, whose `cuda`/`metal` likewise pull in `models`.
 cuda = ["models", "antumbra-train/cuda"]
 metal = ["models", "antumbra-train/metal"]
+
+[lints]
+workspace = true

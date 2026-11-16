@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! `antumbra-mcp`: the Model Context Protocol server that exposes Antumbra's
 //! Penumbra memory to an agent. The runtime surface that lets a client (Claude
 //! Code, any MCP host) talk to Antumbra instead of a separate memory service.
