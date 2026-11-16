@@ -16,6 +16,13 @@ use async_trait::async_trait;
 
 use antumbra_core::{AntumbraError, Result, TrainingRecipe};
 
+/// The one shape every candle error takes on its way out, `what: error`, with
+/// `what` the stage that failed; three stages each wrapped candle their own
+/// way before.
+pub(crate) fn candle_err(what: &'static str) -> impl Fn(candle_core::Error) -> AntumbraError {
+    move |e| AntumbraError::other(format!("{what}: {e}"))
+}
+
 pub mod accumulate;
 pub mod behave;
 pub mod compose;

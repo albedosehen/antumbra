@@ -22,7 +22,7 @@ use candle_core::{DType, Device, Tensor};
 use antumbra_core::{AntumbraError, Result};
 
 fn ce(e: candle_core::Error) -> AntumbraError {
-    AntumbraError::other(format!("merge: {e}"))
+    crate::candle_err("merge")(e)
 }
 
 /// What a merge kept.
