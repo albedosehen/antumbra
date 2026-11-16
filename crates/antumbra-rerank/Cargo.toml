@@ -8,6 +8,7 @@ description = "Antumbra HTTP reranker: a TEI/Cohere-style cross-encoder /rerank 
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
+antumbra-http = { path = "../antumbra-http" }
 serde_json.workspace = true
 async-trait.workspace = true
 # `spawn_blocking` offloads the blocking `ureq` POST off the async runtime.
@@ -15,6 +16,10 @@ tokio = { workspace = true }
 # Outbound HTTP for the runtime-configured rerank endpoint. Pure-Rust TLS so it
 # needs no system OpenSSL; `json` for send_json/read_json.
 ureq = { version = "3", features = ["json"] }
+
+[dev-dependencies]
+anyhow.workspace = true
+antumbra-http = { path = "../antumbra-http", features = ["testing"] }
 
 [lints]
 workspace = true

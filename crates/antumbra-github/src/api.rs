@@ -404,17 +404,12 @@ struct UreqTransport {
 
 impl UreqTransport {
     fn new() -> Self {
-        let secs = std::env::var("ANTUMBRA_GITHUB_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&s| s > 0)
-            .unwrap_or(TIMEOUT_SECS);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(secs)))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        Self { agent }
+        Self {
+            agent: antumbra_http::agent(antumbra_http::patience(
+                "ANTUMBRA_GITHUB_TIMEOUT_SECS",
+                TIMEOUT_SECS,
+            )),
+        }
     }
 }
 
@@ -462,6 +457,33 @@ mod tests {
     use serde_json::json;
 
     const FULL: &str = "Acme/Orders";
+
+    /// A failing status keeps its body, so a caller can read GitHub's words
+    /// (and tell a 404 "absent" from a refusal).
+    #[test]
+    fn a_refusals_body_is_surfaced() -> Result<(), String> {
+        let (url, served) = antumbra_http::testing::serve(1, 404, r#"{"message":"Not Found"}"#)
+            .map_err(|e| e.to_string())?;
+        let answer = UreqTransport::new()
+            .get(&url, "t0ken", ACCEPT_JSON)
+            .map_err(|e| e.to_string())?;
+        if answer.status != 404 || !String::from_utf8_lossy(&answer.body).contains("Not Found") {
+            return Err(format!("{} {:?}", answer.status, answer.body));
+        }
+        let head = served
+            .requests()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .next()
+            .ok_or("one request")?
+            .to_lowercase();
+        if !(head.contains("authorization: bearer t0ken")
+            && head.contains("user-agent: antumbra-github"))
+        {
+            return Err(head);
+        }
+        Ok(())
+    }
 
     fn api(fake: FakeTransport) -> (GithubApi, Arc<FakeTransport>) {
         let fake = Arc::new(fake);

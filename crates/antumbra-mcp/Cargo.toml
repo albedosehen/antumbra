@@ -28,6 +28,7 @@ antumbra-embed = { path = "../antumbra-embed" }
 antumbra-rerank = { path = "../antumbra-rerank" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-copal = { path = "../antumbra-copal" }
+antumbra-http = { path = "../antumbra-http" }
 antumbra-github = { path = "../antumbra-github" }
 antumbra-ingest = { path = "../antumbra-ingest" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }

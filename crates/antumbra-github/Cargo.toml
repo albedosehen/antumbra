@@ -10,6 +10,7 @@ description = "The native GitHub integration: webhook signature verification, th
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
+antumbra-http = { path = "../antumbra-http" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
@@ -30,6 +31,9 @@ tokio = { workspace = true }
 # Test seams: a canned transport and a throwaway App key pair, for this crate's
 # tests and for any crate that drives the integration in its own.
 testing = []
+
+[dev-dependencies]
+antumbra-http = { path = "../antumbra-http", features = ["testing"] }
 
 [lints]
 workspace = true
