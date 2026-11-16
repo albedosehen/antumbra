@@ -4,10 +4,10 @@
 //! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Resource};
 use surql::schema::{datetime_field, string_field, FieldDefinition};
 
-use super::built;
+use super::{built, listing};
 
 /// Capability grants: compartment sharing, intra-tenant and user-to-user.
 /// List-only, because a grant row carries no identity on the wire -- like an
@@ -17,32 +17,22 @@ use super::built;
 /// forgery closed.
 pub(super) fn resource() -> Resource {
     Resource {
-        name: "grants".into(),
-        table: "grant".into(),
-        faces: ResourceFaces::LIST_ONLY,
-        identity: Identity::Absent,
-        fields: vec![
-            FieldExposure::column("grantee"),
-            FieldExposure::column("compartment"),
-            FieldExposure::column("capability"),
-            FieldExposure::column("created_at"),
-            FieldExposure::column("updated_at"),
-        ],
         // tenant_id rides every read; grant_grantee_idx and
         // grant_compartment_idx both lead with it, crediting both filters.
         pinned: vec!["tenant_id".into()],
-        pinned_either: vec![],
-        filterable: vec!["grantee".into(), "compartment".into()],
-        filter_options: Default::default(),
-        sortable: vec!["updated_at".into()],
-        max_page_size: 100,
-        graphql: None,
-        watchable: false,
-        reads_require: vec![],
-        rate_class: None,
-        sub_resources: vec![],
-        content: None,
-        actions: vec![],
+        ..listing(
+            "grants",
+            "grant",
+            vec![
+                FieldExposure::column("grantee"),
+                FieldExposure::column("compartment"),
+                FieldExposure::column("capability"),
+                FieldExposure::column("created_at"),
+                FieldExposure::column("updated_at"),
+            ],
+            &["grantee", "compartment"],
+            &["updated_at"],
+        )
     }
 }
 

@@ -4,10 +4,10 @@
 //! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Resource};
 use surql::schema::{int_field, string_field, FieldDefinition};
 
-use super::built;
+use super::{built, read_only};
 
 /// The penumbra's training side: shadow models hold the plasticity while the
 /// frozen population holds the competence. The exposure is deliberately the
@@ -15,35 +15,23 @@ use super::built;
 /// operator watches; the artifact URIs and reward curves stay operational
 /// until something outside the store needs them.
 pub(super) fn resource() -> Resource {
-    Resource {
-        name: "shadows".into(),
-        table: "shadow".into(),
-        faces: ResourceFaces::ALL,
-        // The domain ShadowId persists as `key` (shadow_key_uq).
-        identity: Identity::Column("key".into()),
-        fields: vec![
+    // The domain ShadowId persists as `key` (shadow_key_uq). shadow_key_uq
+    // covers key; shadow_status_idx is (status, generation), covering both.
+    // key and status each lead an index, so both sorts hold; generation is
+    // filterable but sits behind status, so it is not a sort this contract
+    // claims.
+    read_only(
+        "shadows",
+        "shadow",
+        "key",
+        vec![
             FieldExposure::column("key"),
             FieldExposure::column("status"),
             FieldExposure::column("generation"),
         ],
-        pinned: vec![],
-        pinned_either: vec![],
-        // shadow_key_uq covers key; shadow_status_idx is (status,
-        // generation), covering both. key and status each lead an index, so
-        // both sorts hold; generation is filterable but sits behind status,
-        // so it is not a sort this contract claims.
-        filterable: vec!["key".into(), "status".into(), "generation".into()],
-        filter_options: Default::default(),
-        sortable: vec!["key".into(), "status".into()],
-        max_page_size: 100,
-        graphql: None,
-        watchable: false,
-        reads_require: vec![],
-        rate_class: None,
-        sub_resources: vec![],
-        content: None,
-        actions: vec![],
-    }
+        &["key", "status", "generation"],
+        &["key", "status"],
+    )
 }
 
 /// The wire columns of the `shadow` table, typed for kayak. A subset of

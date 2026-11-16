@@ -4,25 +4,26 @@
 //! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Resource};
 use surql::schema::{
     datetime_field, field, float_field, int_field, string_field, FieldDefinition, FieldType,
 };
 
-use super::built;
+use super::{built, read_only};
 
 /// The umbra: the population of small frozen experts. Shared experts have no
 /// owner; private ones consolidated from a compartment carry one, and the
 /// engine's read rule decides which a session sees. No tenant pin -- the
 /// population is shared across tenants by design.
 pub(super) fn resource() -> Resource {
-    Resource {
-        name: "experts".into(),
-        table: "expert".into(),
-        faces: ResourceFaces::ALL,
-        // The domain ExpertId persists as `key` (expert_key_uq).
-        identity: Identity::Column("key".into()),
-        fields: vec![
+    // The domain ExpertId persists as `key` (expert_key_uq), the only
+    // ordering index, so key is the one indexed filter and the one indexed
+    // sort.
+    read_only(
+        "experts",
+        "expert",
+        "key",
+        vec![
             FieldExposure::column("key"),
             FieldExposure::column("name"),
             FieldExposure::column("base_model"),
@@ -38,22 +39,9 @@ pub(super) fn resource() -> Resource {
             // floats of gate machinery, and the HNSW index that reads it
             // never leaves the store.
         ],
-        pinned: vec![],
-        pinned_either: vec![],
-        // expert_key_uq is the only ordering index, so key is the one indexed
-        // filter and the one indexed sort.
-        filterable: vec!["key".into()],
-        filter_options: Default::default(),
-        sortable: vec!["key".into()],
-        max_page_size: 100,
-        graphql: None,
-        watchable: false,
-        reads_require: vec![],
-        rate_class: None,
-        sub_resources: vec![],
-        content: None,
-        actions: vec![],
-    }
+        &["key"],
+        &["key"],
+    )
 }
 
 /// The wire columns of the `expert` table, typed for kayak. Mirrors

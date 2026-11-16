@@ -4,10 +4,10 @@
 //! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Resource};
 use surql::schema::{datetime_field, field, string_field, FieldDefinition, FieldType};
 
-use super::built;
+use super::{built, listing};
 
 /// The validation harness: one row per measured run. List-only, because the
 /// repo reads are all listings (per subject, latest, recent) and the rows
@@ -15,12 +15,14 @@ use super::built;
 /// was measured, not the measurement row, and no by-instance read exists to
 /// promise.
 pub(super) fn resource() -> Resource {
-    Resource {
-        name: "evaluation_runs".into(),
-        table: "evaluation_run".into(),
-        faces: ResourceFaces::LIST_ONLY,
-        identity: Identity::Absent,
-        fields: vec![
+    // eval_subject_idx is (subject_kind, subject_id): both are indexed
+    // filters, and subject_kind -- the leading column -- the one indexed
+    // sort. created_at is claimed by no index, so the repo's newest-first
+    // reads stay its own business rather than a sort this contract promises.
+    listing(
+        "evaluation_runs",
+        "evaluation_run",
+        vec![
             FieldExposure::column("run_id"),
             FieldExposure::column("subject_kind"),
             FieldExposure::column("subject_id"),
@@ -30,25 +32,9 @@ pub(super) fn resource() -> Resource {
             FieldExposure::column("regression_fingerprint"),
             FieldExposure::column("created_at"),
         ],
-        pinned: vec![],
-        pinned_either: vec![],
-        // eval_subject_idx is (subject_kind, subject_id): both are indexed
-        // filters, and subject_kind -- the leading column -- the one indexed
-        // sort. created_at is claimed by no index, so the repo's
-        // newest-first reads stay its own business rather than a sort this
-        // contract promises.
-        filterable: vec!["subject_kind".into(), "subject_id".into()],
-        filter_options: Default::default(),
-        sortable: vec!["subject_kind".into()],
-        max_page_size: 100,
-        graphql: None,
-        watchable: false,
-        reads_require: vec![],
-        rate_class: None,
-        sub_resources: vec![],
-        content: None,
-        actions: vec![],
-    }
+        &["subject_kind", "subject_id"],
+        &["subject_kind"],
+    )
 }
 
 /// The wire columns of the `evaluation_run` table, typed for kayak. The

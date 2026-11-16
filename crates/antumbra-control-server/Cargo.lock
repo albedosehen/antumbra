@@ -130,8 +130,10 @@ name = "antumbra-auth"
 version = "0.2.7"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "jsonwebtoken 11.1.0",
  "serde",
+ "serde_json",
  "uuid",
 ]
 
