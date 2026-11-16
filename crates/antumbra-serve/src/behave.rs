@@ -643,26 +643,65 @@ pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result
         memory::upsert(store, &m).await?;
     }
     if let Some(mut e) = expert::get(store, &audited.expert).await? {
-        let card = &mut e.capability_card;
+        // A card is a JSON object, or nothing yet. Anything else is a row this
+        // code never wrote, and it is reported rather than indexed into, since
+        // `Value`'s index panics on it, in the keeper's task.
+        if e.capability_card.is_null() {
+            e.capability_card = serde_json::Value::Object(Default::default());
+        }
+        let Some(card) = e.capability_card.as_object_mut() else {
+            return Err(antumbra_core::AntumbraError::other(format!(
+                "expert {} has a capability card that is not an object; its audit was not noted",
+                e.id.as_str()
+            )));
+        };
         for (id, earlier) in &lineage {
             for key in [behavior::CARD_EXAMPLES, behavior::CARD_AUDITED] {
-                if card[key].get(id.as_str()).is_none() {
-                    if let Some(known) = card[key].get(earlier.as_str()).cloned() {
-                        card[key][id.as_str()] = known;
-                    }
+                let present = card.get(key).and_then(|s| s.get(id.as_str())).is_some();
+                let known = card.get(key).and_then(|s| s.get(earlier.as_str())).cloned();
+                if let (false, Some(known)) = (present, known) {
+                    card_section(card, key, &e.id)?.insert(id.clone(), known);
                 }
             }
         }
-        for (id, _, prints) in &audited.behaviors {
-            let slot = &mut card[behavior::CARD_AUDITED][id.as_str()];
-            let mut list = slot.as_array().cloned().unwrap_or_default();
-            list.extend(prints.iter().map(|p| serde_json::Value::String(p.clone())));
-            *slot = serde_json::Value::Array(list);
+        if !audited.behaviors.is_empty() {
+            let section = card_section(card, behavior::CARD_AUDITED, &e.id)?;
+            for (id, _, prints) in &audited.behaviors {
+                let slot = section
+                    .entry(id.clone())
+                    .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+                let mut list = slot.as_array().cloned().unwrap_or_default();
+                list.extend(prints.iter().map(|p| serde_json::Value::String(p.clone())));
+                *slot = serde_json::Value::Array(list);
+            }
         }
         expert::delete(store, &e.id).await?;
         expert::insert(store, &e).await?;
     }
     Ok(())
+}
+
+/// The object under `key` on a card, made when absent or null: the sections
+/// `note_audit` writes are objects of behavior id to entry. A section of any
+/// other shape is a card this code never wrote, reported rather than indexed
+/// into.
+fn card_section<'a>(
+    card: &'a mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    expert: &ExpertId,
+) -> Result<&'a mut serde_json::Map<String, serde_json::Value>> {
+    let slot = card
+        .entry(key)
+        .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    if slot.is_null() {
+        *slot = serde_json::Value::Object(Default::default());
+    }
+    slot.as_object_mut().ok_or_else(|| {
+        antumbra_core::AntumbraError::other(format!(
+            "expert {} has a card section {key:?} that is not an object; its audit was not noted",
+            expert.as_str()
+        ))
+    })
 }
 
 /// Mint the standing expert when `trained` was admitted, replacing the one
