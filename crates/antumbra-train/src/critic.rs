@@ -202,6 +202,7 @@ impl Critic for ModelCritic {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::AntumbraError;
 
     fn labeled(completion: &str, passed: bool, slice: &str) -> Labeled {
         Labeled {
@@ -241,14 +242,15 @@ mod tests {
     }
 
     #[test]
-    fn softmax_sums_to_one_and_survives_large_logits() {
+    fn softmax_sums_to_one_and_survives_large_logits() -> Result<()> {
         let p = softmax(&[1000.0, 999.0]);
         assert!((p.iter().sum::<f32>() - 1.0).abs() < 1e-6);
         assert!(p[0] > p[1]);
+        Ok(())
     }
 
     #[test]
-    fn examples_are_balanced_and_carry_the_verifiers_answer() {
+    fn examples_are_balanced_and_carry_the_verifiers_answer() -> Result<()> {
         let data = vec![
             labeled("a", true, "s"),
             labeled("b", false, "s"),
@@ -260,10 +262,11 @@ mod tests {
         assert_eq!(ex.iter().filter(|e| e.completion == YES).count(), 3);
         assert!(ex[0].prompt.contains("Answer:\nb"));
         assert!(examples(&[labeled("x", false, "s")]).len() == 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_critic_is_trained_on_verdicts_and_read_per_slice() {
+    async fn a_critic_is_trained_on_verdicts_and_read_per_slice() -> Result<()> {
         let mut model = Reader { trained_on: 0 };
         let data = vec![
             labeled("PASS 1", true, "strings"),
@@ -271,26 +274,30 @@ mod tests {
             labeled("PASS 2", false, "dates"),
             labeled("FAIL 2", false, "dates"),
         ];
-        let losses = train_critic(&mut model, &data, 2).await.unwrap();
+        let losses = train_critic(&mut model, &data, 2).await?;
         assert_eq!(losses, vec![0.5, 0.5]);
         assert_eq!(model.trained_on, 2 * 6);
-        let reading = measure_critic(&mut model, &data).await.unwrap();
+        let reading = measure_critic(&mut model, &data).await?;
         assert_eq!(reading.n, 4);
-        let dates = reading.slices.iter().find(|s| s.slice == "dates").unwrap();
-        let strings = reading
-            .slices
-            .iter()
-            .find(|s| s.slice == "strings")
-            .unwrap();
+        let Some(dates) = reading.slices.iter().find(|s| s.slice == "dates") else {
+            return Err(AntumbraError::other("no dates slice was read"));
+        };
+        let Some(strings) = reading.slices.iter().find(|s| s.slice == "strings") else {
+            return Err(AntumbraError::other("no strings slice was read"));
+        };
         // It says yes to a PASS that failed: the dates slice shows it, the
         // strings slice does not.
         assert_eq!(dates.agreement, 0.5);
         assert_eq!(strings.agreement, 1.0);
-        assert!(reading.correlation.unwrap() > 0.0);
+        let Some(correlation) = reading.correlation else {
+            return Err(AntumbraError::other("no correlation was read"));
+        };
+        assert!(correlation > 0.0);
+        Ok(())
     }
 
     #[test]
-    fn a_recalibration_fitted_on_one_reading_corrects_another() {
+    fn a_recalibration_fitted_on_one_reading_corrects_another() -> Result<()> {
         let s = |predicted: f32, passed: bool| Scored {
             slice: "s".into(),
             predicted,
@@ -305,20 +312,29 @@ mod tests {
             )
         };
         let (fit, evaluate) = (overconfident(40), overconfident(40));
-        let raw = evaluate.overall.clone().unwrap().ece;
-        let fixed = recalibrate(&fit, &evaluate).unwrap().overall.unwrap().ece;
+        let Some(raw) = evaluate.overall.as_ref().map(|o| o.ece) else {
+            return Err(AntumbraError::other("no overall reading to correct"));
+        };
+        let Some(fixed) = recalibrate(&fit, &evaluate).and_then(|r| r.overall.map(|o| o.ece))
+        else {
+            return Err(AntumbraError::other(
+                "the recalibration gave no overall reading",
+            ));
+        };
         assert!(fixed < raw, "{fixed} !< {raw}");
         assert!(recalibrate(&read(Vec::new()), &evaluate).is_none());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn behind_the_port_it_scores_with_the_task_and_nothing_without_it() {
+    async fn behind_the_port_it_scores_with_the_task_and_nothing_without_it() -> Result<()> {
         let critic = ModelCritic::new(Box::new(Reader { trained_on: 0 }));
-        assert_eq!(critic.score("task", "PASS").await.unwrap(), Some(0.9));
+        assert_eq!(critic.score("task", "PASS").await?, Some(0.9));
         let trace = ActOutput {
             steps: Vec::new(),
             final_output: "PASS".into(),
         };
-        assert!(critic.densify(&trace).await.unwrap().is_empty());
+        assert!(critic.densify(&trace).await?.is_empty());
+        Ok(())
     }
 }

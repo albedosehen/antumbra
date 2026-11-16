@@ -84,10 +84,22 @@ impl Corpus for JsonCorpus {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
+    /// The path as `from_file` takes it.
+    fn utf8(path: &Path) -> Result<&str> {
+        path.to_str()
+            .ok_or_else(|| AntumbraError::other("the temp path is not UTF-8"))
+    }
+
+    fn write(path: &Path, json: &str) -> Result<()> {
+        std::fs::write(path, json).map_err(|e| AntumbraError::other(e.to_string()))
+    }
+
     #[test]
-    fn empty_ids_select_all_and_filter_works() {
+    fn empty_ids_select_all_and_filter_works() -> Result<()> {
         let corpus = JsonCorpus::from_tasks(vec![
             CorpusTask::new("a", "pa"),
             CorpusTask::new("b", "pb").with_verify(serde_json::json!({ "program": "true" })),
@@ -97,38 +109,37 @@ mod tests {
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].id, "b");
         assert_eq!(one[0].verify["program"], "true");
+        Ok(())
     }
 
     #[test]
-    fn an_impossible_marker_is_read_and_defaults_to_false() {
+    fn an_impossible_marker_is_read_and_defaults_to_false() -> Result<()> {
         let path = std::env::temp_dir().join("antumbra_corpus_impossible_test.json");
-        std::fs::write(
+        write(
             &path,
             r#"[{"id":"a","prompt":"p"},{"id":"b","prompt":"p","impossible":true}]"#,
-        )
-        .unwrap();
-        let tasks = JsonCorpus::from_file(path.to_str().unwrap())
-            .unwrap()
-            .tasks(&[]);
+        )?;
+        let tasks = JsonCorpus::from_file(utf8(&path)?)?.tasks(&[]);
         std::fs::remove_file(&path).ok();
         assert!(!tasks[0].impossible);
         assert!(tasks[1].impossible);
+        Ok(())
     }
 
     #[test]
-    fn loads_from_json_file() {
+    fn loads_from_json_file() -> Result<()> {
         let dir = std::env::temp_dir();
         let path = dir.join("antumbra_corpus_test.json");
-        std::fs::write(
+        write(
             &path,
             r#"[{"id":"t1","prompt":"do","verify":{"program":"sh","args":["-c","exit 0"]}}]"#,
-        )
-        .unwrap();
-        let corpus = JsonCorpus::from_file(path.to_str().unwrap()).unwrap();
+        )?;
+        let corpus = JsonCorpus::from_file(utf8(&path)?)?;
         let tasks = corpus.tasks(&[]);
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, "t1");
         assert_eq!(tasks[0].verify["program"], "sh");
         std::fs::remove_file(&path).ok();
+        Ok(())
     }
 }

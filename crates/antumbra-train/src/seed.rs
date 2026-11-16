@@ -28,19 +28,22 @@ pub fn shifted(stream: u64, seed: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::Result;
 
     #[test]
-    fn seed_zero_is_the_stream_runs_drew_before_it() {
+    fn seed_zero_is_the_stream_runs_drew_before_it() -> Result<()> {
         for stream in [0u64, 1, 0xA17, u64::MAX] {
             assert_eq!(shifted(stream, 0), stream);
         }
+        Ok(())
     }
 
     #[test]
-    fn another_seed_is_another_stream_and_the_same_seed_the_same() {
+    fn another_seed_is_another_stream_and_the_same_seed_the_same() -> Result<()> {
         let (a, b) = (shifted(0xA17, 1), shifted(0xA17, 2));
         assert_ne!(a, 0xA17);
         assert_ne!(a, b);
         assert_eq!(shifted(0xA17, 1), a);
+        Ok(())
     }
 }

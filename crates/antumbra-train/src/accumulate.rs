@@ -83,24 +83,19 @@ mod tests {
     use candle_core::Device;
     use candle_nn::{AdamW, ParamsAdamW, SGD};
 
-    fn var(values: &[f32]) -> Var {
-        Var::from_slice(values, values.len(), &Device::Cpu).unwrap()
+    fn var(values: &[f32]) -> Result<Var> {
+        Var::from_slice(values, values.len(), &Device::Cpu)
     }
 
-    fn values(v: &Var) -> Vec<f32> {
-        v.as_tensor().to_vec1().unwrap()
+    fn values(v: &Var) -> Result<Vec<f32>> {
+        v.as_tensor().to_vec1()
     }
 
     /// `sum((w * x - y)^2)`.
-    fn loss(w: &Var, x: &[f32], y: &[f32]) -> Tensor {
-        let x = Tensor::new(x, &Device::Cpu).unwrap();
-        let y = Tensor::new(y, &Device::Cpu).unwrap();
-        ((w.as_tensor() * x).unwrap() - y)
-            .unwrap()
-            .sqr()
-            .unwrap()
-            .sum_all()
-            .unwrap()
+    fn loss(w: &Var, x: &[f32], y: &[f32]) -> Result<Tensor> {
+        let x = Tensor::new(x, &Device::Cpu)?;
+        let y = Tensor::new(y, &Device::Cpu)?;
+        ((w.as_tensor() * x)? - y)?.sqr()?.sum_all()
     }
 
     const EXAMPLES: [([f32; 3], [f32; 3]); 3] = [
@@ -115,68 +110,60 @@ mod tests {
 
     /// The accumulated step is the step on the mean loss.
     #[test]
-    fn the_step_is_the_mean_losss_step() {
+    fn the_step_is_the_mean_losss_step() -> Result<()> {
         let start = [0.3f32, -0.2, 0.7];
 
-        let a = var(&start);
-        let mut opt = SGD::new(vec![a.clone()], 0.1).unwrap();
-        let mean = EXAMPLES
-            .iter()
-            .map(|(x, y)| loss(&a, x, y))
-            .reduce(|p, q| (p + q).unwrap())
-            .unwrap()
-            .affine(1.0 / EXAMPLES.len() as f64, 0.0)
-            .unwrap();
-        opt.backward_step(&mean).unwrap();
+        let a = var(&start)?;
+        let mut opt = SGD::new(vec![a.clone()], 0.1)?;
+        let mut total = loss(&a, &EXAMPLES[0].0, &EXAMPLES[0].1)?;
+        for (x, y) in &EXAMPLES[1..] {
+            total = (total + loss(&a, x, y)?)?;
+        }
+        let mean = total.affine(1.0 / EXAMPLES.len() as f64, 0.0)?;
+        opt.backward_step(&mean)?;
 
-        let b = var(&start);
+        let b = var(&start)?;
         let vars = vec![b.clone()];
-        let mut opt = SGD::new(vars.clone(), 0.1).unwrap();
+        let mut opt = SGD::new(vars.clone(), 0.1)?;
         let mut sum = GradSum::new();
         for (x, y) in &EXAMPLES {
-            sum.add(&loss(&b, x, y), &vars).unwrap();
+            sum.add(&loss(&b, x, y)?, &vars)?;
         }
         assert_eq!(sum.len(), 3);
-        assert!(sum.step(&mut opt, &vars).unwrap());
+        assert!(sum.step(&mut opt, &vars)?);
 
-        assert!(!close(&values(&a), &start), "the reference moved");
+        assert!(!close(&values(&a)?, &start), "the reference moved");
         assert!(
-            close(&values(&a), &values(&b)),
+            close(&values(&a)?, &values(&b)?),
             "{:?} vs {:?}",
-            values(&a),
-            values(&b)
+            values(&a)?,
+            values(&b)?
         );
+        Ok(())
     }
 
     /// A variable one loss does not reach still gets the others' gradients,
     /// averaged over every loss added.
     #[test]
-    fn a_variable_missing_from_the_first_loss_is_still_summed() {
-        let (a, b) = (var(&[1.0]), var(&[1.0]));
+    fn a_variable_missing_from_the_first_loss_is_still_summed() -> Result<()> {
+        let (a, b) = (var(&[1.0])?, var(&[1.0])?);
         let vars = vec![a.clone(), b.clone()];
-        let mut opt = SGD::new(vars.clone(), 1.0).unwrap();
+        let mut opt = SGD::new(vars.clone(), 1.0)?;
         let mut sum = GradSum::new();
         // d/da (2a) = 2 in the first, d/db (4b) = 4 in the second.
-        sum.add(
-            &a.as_tensor().affine(2.0, 0.0).unwrap().sum_all().unwrap(),
-            &vars,
-        )
-        .unwrap();
-        sum.add(
-            &b.as_tensor().affine(4.0, 0.0).unwrap().sum_all().unwrap(),
-            &vars,
-        )
-        .unwrap();
-        sum.step(&mut opt, &vars).unwrap();
-        assert!(close(&values(&a), &[0.0]), "{:?}", values(&a));
-        assert!(close(&values(&b), &[-1.0]), "{:?}", values(&b));
+        sum.add(&a.as_tensor().affine(2.0, 0.0)?.sum_all()?, &vars)?;
+        sum.add(&b.as_tensor().affine(4.0, 0.0)?.sum_all()?, &vars)?;
+        sum.step(&mut opt, &vars)?;
+        assert!(close(&values(&a)?, &[0.0]), "{:?}", values(&a)?);
+        assert!(close(&values(&b)?, &[-1.0]), "{:?}", values(&b)?);
+        Ok(())
     }
 
     /// Under the trainer's optimizer too, the step reaches the variables.
     #[test]
-    fn an_adamw_step_moves_the_variables() {
+    fn an_adamw_step_moves_the_variables() -> Result<()> {
         let start = [0.3f32, -0.2, 0.7];
-        let w = var(&start);
+        let w = var(&start)?;
         let vars = vec![w.clone()];
         let mut opt = AdamW::new(
             vars.clone(),
@@ -184,27 +171,28 @@ mod tests {
                 lr: 0.01,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        )?;
         let mut sum = GradSum::new();
         for (x, y) in &EXAMPLES[..2] {
-            sum.add(&loss(&w, x, y), &vars).unwrap();
+            sum.add(&loss(&w, x, y)?, &vars)?;
         }
-        sum.step(&mut opt, &vars).unwrap();
-        assert!(values(&w)
+        sum.step(&mut opt, &vars)?;
+        assert!(values(&w)?
             .iter()
             .zip(start)
             .all(|(v, s)| (v - s).abs() > 1e-4));
+        Ok(())
     }
 
     #[test]
-    fn an_empty_sum_steps_nothing() {
-        let w = var(&[0.5]);
+    fn an_empty_sum_steps_nothing() -> Result<()> {
+        let w = var(&[0.5])?;
         let vars = vec![w.clone()];
-        let mut opt = SGD::new(vars.clone(), 1.0).unwrap();
+        let mut opt = SGD::new(vars.clone(), 1.0)?;
         let sum = GradSum::new();
         assert!(sum.is_empty());
-        assert!(!sum.step(&mut opt, &vars).unwrap());
-        assert_eq!(values(&w), [0.5]);
+        assert!(!sum.step(&mut opt, &vars)?);
+        assert_eq!(values(&w)?, [0.5]);
+        Ok(())
     }
 }

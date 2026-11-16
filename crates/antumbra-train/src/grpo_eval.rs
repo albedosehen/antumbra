@@ -194,12 +194,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_model_that_cannot_seed_still_refuses_and_nothing_trains() {
+    async fn a_model_that_cannot_seed_still_refuses_and_nothing_trains() -> Result<()> {
         let mut lm = Evaluating(Sampler {
             seedable: false,
             next: 0,
         });
         assert!(lm.seed_draws(1).is_err());
         assert!(lm.sft_step(&[]).await.is_err());
+        Ok(())
     }
 }
