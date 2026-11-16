@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! Knowledge-document ingest: the one path every door into the store takes,
 //! so the MCP `ingest_document` tool, the CLI `ingest`, and the GitHub
 //! integration write the same shape and keep the same promises.
@@ -244,6 +242,7 @@ mod tests {
     use super::*;
     use antumbra_copal::{CopalCredential, CopalTenancy, CopalTransport};
     use antumbra_core::testing::FixedEmbedder;
+    use antumbra_store::testing::mem_store;
     use antumbra_store::EMBED_DIM;
     use serde_json::{json, Value};
     use std::sync::Arc;
@@ -355,8 +354,8 @@ mod tests {
     /// second ingest of the same title replaces them, even when the document
     /// shrank from several chunks to one.
     #[tokio::test]
-    async fn reingest_replaces_the_title_in_place() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn reingest_replaces_the_title_in_place() -> anyhow::Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let embedder = FixedEmbedder::new(EMBED_DIM);
         let anchor = GitProvenance::new("github.com/o/r", "b697da7").on_branch("main");
@@ -368,8 +367,7 @@ mod tests {
             None,
             &doc("routes", &long, Some(anchor.clone())),
         )
-        .await
-        .unwrap();
+        .await?;
         assert!(first.chunks > 1, "{} chunks", first.chunks);
         assert!(first.archived.is_none());
         let again = ingest_text(
@@ -379,23 +377,17 @@ mod tests {
             None,
             &doc("routes", "GET /health\nDELETE /orders/{id}\n", Some(anchor)),
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(again.chunks, 1);
         assert_eq!(
-            document::list_titles(&store, &tenant).await.unwrap(),
+            document::list_titles(&store, &tenant).await?,
             vec!["routes".to_string()]
         );
-        let hits = document::recall(
-            &store,
-            &tenant,
-            &embedder.embed("orders").await.unwrap(),
-            50,
-        )
-        .await
-        .unwrap();
+        let hits = document::recall(&store, &tenant, &embedder.embed("orders").await?, 50).await?;
         assert_eq!(hits.len(), 1, "the old generation's tail is gone");
-        let source = hits[0].source.as_deref().unwrap();
+        let Some(source) = hits[0].source.as_deref() else {
+            anyhow::bail!("the chunk has no source");
+        };
         assert!(
             source.starts_with("$ deno task routes @ git:github.com/o/r@b697da7#main"),
             "{source}"
@@ -404,13 +396,14 @@ mod tests {
             hits[0].content.contains("DELETE /orders"),
             "the newer content won"
         );
+        Ok(())
     }
 
     /// With an archive configured the original lands in copal first and every
     /// chunk names it.
     #[tokio::test]
-    async fn archives_to_copal_and_stamps_every_chunk() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn archives_to_copal_and_stamps_every_chunk() -> anyhow::Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let embedder = FixedEmbedder::new(EMBED_DIM);
         let out = ingest_text(
@@ -420,9 +413,10 @@ mod tests {
             Some(&archive(true)),
             &doc("routes", "GET /health\n", None),
         )
-        .await
-        .unwrap();
-        let archived = out.archived.expect("archived");
+        .await?;
+        let Some(archived) = out.archived else {
+            anyhow::bail!("nothing was archived");
+        };
         assert_eq!(
             (archived.file_id.as_str(), archived.digest.as_str()),
             (
@@ -430,9 +424,7 @@ mod tests {
                 "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
             )
         );
-        let hits = document::recall(&store, &tenant, &embedder.embed("health").await.unwrap(), 5)
-            .await
-            .unwrap();
+        let hits = document::recall(&store, &tenant, &embedder.embed("health").await?, 5).await?;
         assert_eq!(hits.len(), 1);
         assert_eq!(
             hits[0].copal_file.as_deref(),
@@ -443,16 +435,17 @@ mod tests {
             Some("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")
         );
         assert_eq!(hits[0].source.as_deref(), Some("$ deno task routes"));
+        Ok(())
     }
 
     /// A configured archive that is unreachable fails the ingest and stores
     /// nothing: no chunks whose original was silently dropped.
     #[tokio::test]
-    async fn fails_closed_when_copal_is_down() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn fails_closed_when_copal_is_down() -> anyhow::Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let embedder = FixedEmbedder::new(EMBED_DIM);
-        let err = ingest_text(
+        let Err(err) = ingest_text(
             &store,
             &embedder,
             &tenant,
@@ -460,17 +453,17 @@ mod tests {
             &doc("routes", "GET /health\n", None),
         )
         .await
-        .unwrap_err()
-        .to_string();
+        else {
+            anyhow::bail!("the ingest went through with copal down");
+        };
+        let err = err.to_string();
         assert!(err.contains("nothing was ingested"), "{err}");
-        assert!(document::list_titles(&store, &tenant)
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(document::list_titles(&store, &tenant).await?.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn source_joins_the_anchor_and_ids_are_stable() {
+    fn source_joins_the_anchor_and_ids_are_stable() -> anyhow::Result<()> {
         let anchor = GitProvenance::new("github.com/o/r", "b697da7").at_path("README.md");
         let both = Document {
             title: "t".into(),
@@ -510,6 +503,7 @@ mod tests {
             chunk_id(&t, None, "routes", 0),
             chunk_id(&TenantId::new("ws:u"), None, "routes", 0)
         );
+        Ok(())
     }
 
     /// Every document ingested before documents had compartments is a shared-pool
@@ -517,7 +511,7 @@ mod tests {
     /// same archived file. If either identity moved, that re-ingest would leave
     /// the old generation behind as a duplicate.
     #[test]
-    fn a_shared_pool_document_keeps_the_identity_it_always_had() {
+    fn a_shared_pool_document_keeps_the_identity_it_always_had() -> anyhow::Result<()> {
         use std::hash::{Hash, Hasher};
         let t = TenantId::new("ws:t");
         // The id formula as it was before the compartment joined it.
@@ -528,13 +522,14 @@ mod tests {
         let before = format!("docchunk:{:x}", hasher.finish());
         assert_eq!(chunk_id(&t, None, "routes", 3), before);
         assert_eq!(archive_title(&doc("routes", "", None)), "routes");
+        Ok(())
     }
 
     /// Two members each keep a private document under one title. Neither ingest
     /// reaches the other's chunks, and each has its own archived original.
     #[tokio::test]
     async fn private_documents_of_one_title_never_touch_each_other() -> anyhow::Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let embedder = FixedEmbedder::new(EMBED_DIM);
         let (archive, copal) = recording_archive(true);

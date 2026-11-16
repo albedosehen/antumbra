@@ -57,6 +57,8 @@ oneiriq-surql = { version = "0.34.2", default-features = false, features = ["cli
 [dev-dependencies]
 # `oneshot` drives the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
+# The embedded store the route tests serve from; `clap` stays, as the normal dependency has it.
+antumbra-store = { path = "../antumbra-store", features = ["clap", "testing"] }
 
 [features]
 default = []

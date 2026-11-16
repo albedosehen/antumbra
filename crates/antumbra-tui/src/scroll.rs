@@ -67,7 +67,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_visible_keeps_the_selection_in_view() {
+    fn first_visible_keeps_the_selection_in_view() -> anyhow::Result<()> {
         // Everything fits: start at the top, no scrolling.
         assert_eq!(first_visible(5, 10, 3), 0);
         // Overflow: the selected row stays within the [start, start+height) window.
@@ -85,5 +85,6 @@ mod tests {
         assert_eq!(first_visible(20, 10, 19), 10);
         // A zero-height panel never panics.
         assert_eq!(first_visible(20, 0, 5), 0);
+        Ok(())
     }
 }

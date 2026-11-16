@@ -602,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn the_refusals_read_as_one_set() {
+    fn the_refusals_read_as_one_set() -> anyhow::Result<()> {
         let tool = || "route".to_string();
         let url = || "http://workspace.example".to_string();
         assert_eq!(
@@ -645,10 +645,11 @@ mod tests {
             .to_string(),
             "route: the server at http://workspace.example answered 404"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_refusal_reads_every_endpoints_shape() {
+    fn a_refusal_reads_every_endpoints_shape() -> anyhow::Result<()> {
         // copal
         assert_eq!(
             refusal(
@@ -672,6 +673,7 @@ mod tests {
         assert_eq!(refusal("   "), "no body");
         assert_eq!(refusal("upstream timed out"), "upstream timed out");
         assert_eq!(refusal(&"x".repeat(500)).chars().count(), 200);
+        Ok(())
     }
 
     #[test]
@@ -721,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn a_setting_from_the_environment_must_be_positive() {
+    fn a_setting_from_the_environment_must_be_positive() -> anyhow::Result<()> {
         // Read through a name no test sets, so the default is what comes back;
         // the parsing rules are exercised on values directly.
         assert_eq!(env_positive("ANTUMBRA_HTTP_TEST_UNSET_SETTING", 30u64), 30);
@@ -741,5 +743,6 @@ mod tests {
             patience("ANTUMBRA_HTTP_TEST_UNSET_SETTING", 20),
             Duration::from_secs(20)
         );
+        Ok(())
     }
 }

@@ -241,10 +241,26 @@ mod tests {
     /// Records what it was asked, and scores every text the same.
     struct Recording(std::sync::Mutex<Vec<(String, Vec<String>)>>);
 
+    impl Recording {
+        /// Every query and the memories it was asked about, in order. The fake
+        /// only ever pushes to the list, so a poisoned lock holds a whole list
+        /// and is read as is.
+        fn asked(&self) -> Vec<(String, Vec<String>)> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+    }
+
     #[async_trait]
     impl RelevanceScorer for Recording {
         async fn relevance(&self, q: &str, t: &[String]) -> Result<Vec<f32>> {
-            self.0.lock().unwrap().push((q.to_string(), t.to_vec()));
+            // Read as `asked` is: a push cannot leave the list half-written.
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((q.to_string(), t.to_vec()));
             Ok(vec![5e-3; t.len()])
         }
     }
@@ -254,31 +270,30 @@ mod tests {
     /// and a memory with a markdown rule in it, broke the text join this
     /// replaced, and every such recall went out unfloored.
     #[tokio::test]
-    async fn the_scorer_sees_the_query_and_memories_that_went_in() {
+    async fn the_scorer_sees_the_query_and_memories_that_went_in() -> anyhow::Result<()> {
         let scorer = Arc::new(Recording(std::sync::Mutex::new(Vec::new())));
         let floor = CalibratedFloor::new(scorer.clone());
         let query = "why does recall\nskip the floor\n\nQUERY: on long prompts";
         let memories = ["first\n---\nsecond", "MEMORY: plain", ""];
         let answers = floor
             .decide(&state(query, &memories), &vec![Question::Noul; 3])
-            .await
-            .expect("decide");
+            .await?;
         assert_eq!(answers.len(), 3);
-        let asked = scorer.0.lock().unwrap().clone();
         assert_eq!(
-            asked,
+            scorer.asked(),
             [(
                 query.to_string(),
                 memories.iter().map(|m| m.to_string()).collect::<Vec<_>>()
             )]
         );
+        Ok(())
     }
 
     /// A high score reads as relevant and a low one does not, through the
     /// calibration actually shipped. This pins the fitted constants against an
     /// accidental sign flip, which would empty every recall.
     #[tokio::test]
-    async fn the_shipped_calibration_separates_the_measured_bands() {
+    async fn the_shipped_calibration_separates_the_measured_bands() -> anyhow::Result<()> {
         // 7.8e-4 is the threshold the same data supports; 3.7e-5 is the score a
         // memory got against a query about nothing, both from earlier
         // measurements: the threshold study and the relevance labels.
@@ -286,21 +301,23 @@ mod tests {
         let floor = CalibratedFloor::new(scorer);
         let answers = floor
             .decide(&state("q", &["relevant", "not"]), &vec![Question::Noul; 2])
-            .await
-            .expect("decide");
+            .await?;
         let p = |a: &Answer| match a {
-            Answer::Noul { probability } => *probability,
-            _ => panic!("wrong variant"),
+            Answer::Noul { probability } => Ok(*probability),
+            _ => Err(anyhow::anyhow!("wrong variant")),
         };
-        assert!(p(&answers[0]) > 0.5, "got {}", p(&answers[0]));
-        assert!(p(&answers[1]) < 0.5, "got {}", p(&answers[1]));
+        let relevant = p(&answers[0])?;
+        let not = p(&answers[1])?;
+        assert!(relevant > 0.5, "got {relevant}");
+        assert!(not < 0.5, "got {not}");
+        Ok(())
     }
 
     /// A question this decider cannot answer is refused, not guessed. Returning
     /// the wrong variant would make `above_floor` keep the row and the floor
     /// would quietly do nothing.
     #[tokio::test]
-    async fn a_question_it_cannot_answer_is_refused() {
+    async fn a_question_it_cannot_answer_is_refused() -> anyhow::Result<()> {
         let floor = CalibratedFloor::new(Arc::new(FixedScorer(vec![1.0])));
         let err = floor
             .decide(
@@ -312,13 +329,14 @@ mod tests {
             )
             .await;
         assert!(err.is_err(), "a Score question must be refused");
+        Ok(())
     }
 
     /// The fit follows the model that scores: the endpoint's own answer over
     /// the configuration, a hand-fitted one over both, and no floor for a model
     /// nobody has fitted.
     #[test]
-    fn the_calibration_follows_the_model_that_scores() {
+    fn the_calibration_follows_the_model_that_scores() -> anyhow::Result<()> {
         let gte = "Alibaba-NLP/gte-reranker-modernbert-base";
         let bge = "BAAI/bge-reranker-base";
         let fit = |c: FloorChoice| match c {
@@ -341,18 +359,19 @@ mod tests {
             Some(mine)
         );
         let FloorChoice::Calibrated { because, .. } = choose(None, Some(gte), Some(bge)) else {
-            panic!("calibrated");
+            anyhow::bail!("a served gte model is calibrated");
         };
         assert!(
             because.contains("configured as BAAI/bge-reranker-base"),
             "{because}"
         );
+        Ok(())
     }
 
     /// Checked against what the endpoint turns out to serve: quiet when the fit
     /// is that model's, a warning for every way it can be wrong.
     #[test]
-    fn the_running_calibration_is_checked_against_the_served_model() {
+    fn the_running_calibration_is_checked_against_the_served_model() -> anyhow::Result<()> {
         let gte = "Alibaba-NLP/gte-reranker-modernbert-base";
         assert_eq!(recheck(gte, Some(FITTED_GTE_MODERNBERT)), None);
         assert_eq!(recheck("acme/reranker", None), None);
@@ -361,10 +380,11 @@ mod tests {
         assert!(warned(gte, Some(FITTED)).contains("another model's calibration"));
         assert!(warned(gte, None).contains("the relevance floor is off"));
         assert!(warned("acme/reranker", Some(FITTED)).contains("mean nothing"));
+        Ok(())
     }
 
     #[test]
-    fn a_hand_fitted_calibration_parses_or_is_refused() {
+    fn a_hand_fitted_calibration_parses_or_is_refused() -> anyhow::Result<()> {
         assert_eq!(
             parse_calibration(" 31.361, 5.233"),
             Some(FITTED_GTE_MODERNBERT)
@@ -376,25 +396,28 @@ mod tests {
             "a higher score must read as more likely"
         );
         assert_eq!(parse_calibration("a,b"), None);
+        Ok(())
     }
 
     /// Each fit separates its own model's bands: a relevant and an irrelevant
     /// score from the gte measurement fall on either side of 0.5.
     #[test]
-    fn the_gte_calibration_separates_its_own_scores() {
+    fn the_gte_calibration_separates_its_own_scores() -> anyhow::Result<()> {
         assert!(FITTED_GTE_MODERNBERT.probability(0.9) > 0.9);
         assert!(FITTED_GTE_MODERNBERT.probability(0.2) < 0.5);
+        Ok(())
     }
 
     /// A malformed state is an error rather than a silent short answer: returning
     /// fewer answers than questions makes `above_floor` skip the floor, which is
     /// the safe direction but must be reported.
     #[tokio::test]
-    async fn a_state_that_does_not_parse_is_reported() {
+    async fn a_state_that_does_not_parse_is_reported() -> anyhow::Result<()> {
         let floor = CalibratedFloor::new(Arc::new(FixedScorer(vec![1.0, 1.0])));
         let err = floor
             .decide("not a state at all", &vec![Question::Noul; 2])
             .await;
         assert!(err.is_err());
+        Ok(())
     }
 }

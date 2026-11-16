@@ -7,19 +7,23 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// An empty home of its own under the temp directory.
-fn home(name: &str) -> PathBuf {
+fn home(name: &str) -> anyhow::Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!(
         "antumbra-tui-settings-{name}-{}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
-fn write(path: &Path, text: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, text).unwrap();
+fn write(path: &Path, text: &str) -> anyhow::Result<()> {
+    let Some(dir) = path.parent() else {
+        anyhow::bail!("{} has no parent directory", path.display());
+    };
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(path, text)?;
+    Ok(())
 }
 
 fn places(home: &Path, env: &[(&str, &str)]) -> Places {
@@ -44,8 +48,8 @@ fn token(claims: &str) -> String {
 }
 
 #[test]
-fn the_server_is_the_one_the_agent_uses_unless_one_is_named() {
-    let h = home("surface");
+fn the_server_is_the_one_the_agent_uses_unless_one_is_named() -> anyhow::Result<()> {
+    let h = home("surface")?;
     let p = places(&h, &[]);
     assert_eq!(surface(None, &p).value, DEFAULT_SURFACE);
     assert_eq!(surface(None, &p).from, DEFAULT_FROM);
@@ -53,7 +57,7 @@ fn the_server_is_the_one_the_agent_uses_unless_one_is_named() {
     write(
         &h.join(".antumbra").join("setup.json"),
         r#"{"mode":"hosted","url":"https://ant.example.com/"}"#,
-    );
+    )?;
     let found = surface(None, &p);
     assert_eq!(
         (found.value.as_str(), found.from.as_str()),
@@ -63,7 +67,7 @@ fn the_server_is_the_one_the_agent_uses_unless_one_is_named() {
     write(
         &h.join(".claude").join("settings.json"),
         r#"{"env":{"ANTUMBRA_URL":"http://10.0.0.132:8081"}}"#,
-    );
+    )?;
     let found = surface(None, &p);
     assert_eq!(
         (found.value.as_str(), found.from.as_str()),
@@ -76,23 +80,28 @@ fn the_server_is_the_one_the_agent_uses_unless_one_is_named() {
         surface(Some("http://flag:8081".into()), &with_env).from,
         "--surface"
     );
+    Ok(())
 }
 
 #[test]
-fn claude_codes_settings_are_read_where_it_keeps_them() {
-    let h = home("config-dir");
+fn claude_codes_settings_are_read_where_it_keeps_them() -> anyhow::Result<()> {
+    let h = home("config-dir")?;
     let elsewhere = h.join("elsewhere");
     write(
         &elsewhere.join("settings.json"),
         r#"{"env":{"ANTUMBRA_URL":"http://moved:8081"}}"#,
-    );
-    let p = places(&h, &[("CLAUDE_CONFIG_DIR", elsewhere.to_str().unwrap())]);
+    )?;
+    let Some(elsewhere) = elsewhere.to_str() else {
+        anyhow::bail!("the test home's path is not UTF-8");
+    };
+    let p = places(&h, &[("CLAUDE_CONFIG_DIR", elsewhere)]);
     assert_eq!(surface(None, &p).value, "http://moved:8081");
+    Ok(())
 }
 
 #[test]
-fn an_operators_token_on_hand_is_preferred() {
-    let h = home("operator");
+fn an_operators_token_on_hand_is_preferred() -> anyhow::Result<()> {
+    let h = home("operator")?;
     let plain = token(r#"{"tenant":"ws:a","user":"user:a"}"#);
     let operator = token(r#"{"tenant":"ws:a","user":"user:a","operator":true}"#);
     assert!(is_operator(&operator) && !is_operator(&plain));
@@ -102,43 +111,47 @@ fn an_operators_token_on_hand_is_preferred() {
     write(
         &h.join(".antumbra").join("token.txt"),
         &format!("{operator}\n"),
-    );
+    )?;
     let p = places(&h, &[("ANTUMBRA_TOKEN", &plain)]);
-    let found = token_of(&p, None);
+    let found = token_of(&p, None)?;
     assert_eq!(found.value, operator);
     assert_eq!(found.from, "~/.antumbra/token.txt");
 
     // A token given on the command line is used as given.
-    assert_eq!(token_of(&p, Some(&plain)).from, "--token");
+    assert_eq!(token_of(&p, Some(&plain))?.from, "--token");
+    Ok(())
 }
 
 #[test]
-fn with_no_operators_token_the_first_one_found_is_used() {
-    let h = home("plain");
+fn with_no_operators_token_the_first_one_found_is_used() -> anyhow::Result<()> {
+    let h = home("plain")?;
     let env_token = token(r#"{"tenant":"ws:a","user":"user:a"}"#);
     let file_token = token(r#"{"tenant":"ws:a","user":"user:b"}"#);
-    write(&h.join(".antumbra").join("token.txt"), &file_token);
+    write(&h.join(".antumbra").join("token.txt"), &file_token)?;
     let p = places(&h, &[("ANTUMBRA_TOKEN", &env_token)]);
-    assert_eq!(token_of(&p, None).from, "ANTUMBRA_TOKEN");
+    assert_eq!(token_of(&p, None)?.from, "ANTUMBRA_TOKEN");
 
-    let from_settings = home("settings-token");
+    let from_settings = home("settings-token")?;
     write(
         &from_settings.join(".claude").join("settings.json"),
         &format!(r#"{{"env":{{"ANTUMBRA_TOKEN":"{env_token}"}}}}"#),
-    );
-    let found = token_of(&places(&from_settings, &[]), None);
+    )?;
+    let found = token_of(&places(&from_settings, &[]), None)?;
     assert_eq!(found.from, "ANTUMBRA_TOKEN in Claude Code's settings");
+    Ok(())
 }
 
 #[test]
-fn no_token_anywhere_says_how_to_get_one() {
-    let h = home("none");
-    let err = super::token(None, &places(&h, &[]))
-        .unwrap_err()
-        .to_string();
+fn no_token_anywhere_says_how_to_get_one() -> anyhow::Result<()> {
+    let h = home("none")?;
+    let Err(err) = super::token(None, &places(&h, &[])) else {
+        anyhow::bail!("a token was found in an empty home");
+    };
+    let err = err.to_string();
     assert!(err.contains("antumbra setup"), "{err}");
+    Ok(())
 }
 
-fn token_of(p: &Places, given: Option<&str>) -> Found {
-    super::token(given.map(str::to_string), p).unwrap()
+fn token_of(p: &Places, given: Option<&str>) -> anyhow::Result<Found> {
+    super::token(given.map(str::to_string), p)
 }

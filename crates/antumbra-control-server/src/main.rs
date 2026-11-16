@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The hosted **control plane** HTTP server: invite-gated signup, magic-link
 //! login, and RS256 token issuance, run as its own service (separate from the
 //! data-plane MCP server, which only *verifies* the tokens this server signs).
@@ -504,23 +502,22 @@ mod tests {
     }
 
     #[test]
-    fn the_placeholder_and_short_magic_secrets_are_refused() {
+    fn the_placeholder_and_short_magic_secrets_are_refused() -> anyhow::Result<()> {
         assert!(validate_magic_secret(PLACEHOLDER_SECRET).is_err());
         assert!(validate_magic_secret("short").is_err());
         assert!(validate_magic_secret("oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l").is_ok());
+        Ok(())
     }
 
     // The probe round-trip against a real listener: healthy store -> exit Ok,
     // and a refused connection -> Err.
     #[tokio::test]
-    async fn probe_round_trips_against_a_live_server() {
+    async fn probe_round_trips_against_a_live_server() -> anyhow::Result<()> {
         use crate::http::{router, AppState, Cooldown};
         use std::sync::Arc;
 
         const RS_PRIV: &[u8] = include_bytes!("../../antumbra-control/tests/test_jwt_priv.pem");
-        let store = antumbra_store::Store::connect_memory(EMBED_DIM)
-            .await
-            .unwrap();
+        let store = antumbra_store::testing::mem_store().await?;
         let state = AppState {
             store,
             issuer: Arc::new(Issuer::new(
@@ -538,21 +535,22 @@ mod tests {
                 crate::http::LINKS_EVERYONE,
             )),
         };
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap().to_string();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?.to_string();
         tokio::spawn(async move {
-            axum::serve(listener, router(state)).await.unwrap();
+            // The server outlives the test, so a failure to serve is only
+            // said here; it shows as a probe that does not round-trip.
+            if let Err(e) = axum::serve(listener, router(state)).await {
+                eprintln!("test server: {e}");
+            }
         });
 
-        let probed = tokio::task::spawn_blocking(move || probe(&addr))
-            .await
-            .unwrap();
+        let probed = tokio::task::spawn_blocking(move || probe(&addr)).await?;
         assert!(probed.is_ok(), "healthy server probes ok: {probed:?}");
 
         // Nothing listens on this port: the probe must fail, not hang.
-        let dead = tokio::task::spawn_blocking(|| probe("127.0.0.1:9"))
-            .await
-            .unwrap();
+        let dead = tokio::task::spawn_blocking(|| probe("127.0.0.1:9")).await?;
         assert!(dead.is_err());
+        Ok(())
     }
 }

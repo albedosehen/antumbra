@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn the_flags_read_the_same_in_every_binary() -> Result<(), String> {
+    fn the_flags_read_the_same_in_every_binary() -> anyhow::Result<()> {
         Probe::command().debug_assert();
         let cmd = Probe::command();
         let flag = |id: &str| {
@@ -141,7 +141,7 @@ mod tests {
         ] {
             let want = Some((Some(long.to_owned()), Some(env.to_owned()), hidden));
             if flag(id) != want {
-                return Err(format!("{id}: {:?} != {want:?}", flag(id)));
+                anyhow::bail!("{id}: {:?} != {want:?}", flag(id));
             }
         }
         Ok(())
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_setting_is_an_unset_one() -> Result<(), String> {
+    fn an_empty_setting_is_an_unset_one() -> anyhow::Result<()> {
         let args = parsed(&[
             "probe",
             "--copal-addr",
@@ -185,30 +185,28 @@ mod tests {
             "",
             "--copal-key",
             "",
-        ])
-        .map_err(|e| e.to_string())?
+        ])?
         .without_empty_settings();
         if args.copal_addr.is_some()
             || args.copal_tenant.is_some()
             || args.copal_key.is_some()
             || args.copal_keys.is_some()
         {
-            return Err(format!("blank settings kept: {args:?}"));
+            anyhow::bail!("blank settings kept: {args:?}");
         }
-        let args = parsed(&["probe", "--copal-addr", "http://copal.example:8080"])
-            .map_err(|e| e.to_string())?
+        let args = parsed(&["probe", "--copal-addr", "http://copal.example:8080"])?
             .without_empty_settings();
         if args.copal_addr.as_deref() != Some("http://copal.example:8080") {
-            return Err(format!("a set address was dropped: {args:?}"));
+            anyhow::bail!("a set address was dropped: {args:?}");
         }
         Ok(())
     }
 
     #[test]
-    fn no_address_is_no_archive_and_two_tenancies_are_refused() -> Result<(), String> {
-        let none = parsed(&["probe"]).map_err(|e| e.to_string())?;
-        if none.archive(None).map_err(|e| e.to_string())?.is_some() {
-            return Err("an archive from no address".into());
+    fn no_address_is_no_archive_and_two_tenancies_are_refused() -> anyhow::Result<()> {
+        let none = parsed(&["probe"])?;
+        if none.archive(None)?.is_some() {
+            anyhow::bail!("an archive from no address");
         }
         let two = parsed(&[
             "probe",
@@ -218,29 +216,27 @@ mod tests {
             "ws:acme",
             "--copal-key",
             "ck1_test",
-        ])
-        .map_err(|e| e.to_string())?;
+        ])?;
         match two.archive(None) {
             Err(CopalConfigError::ConflictingTenancy) => Ok(()),
-            Err(other) => Err(format!("the wrong refusal: {other}")),
-            Ok(_) => Err("two tenancies were accepted".into()),
+            Err(other) => anyhow::bail!("the wrong refusal: {other}"),
+            Ok(_) => anyhow::bail!("two tenancies were accepted"),
         }
     }
 
     #[test]
-    fn one_tenancy_configures_an_archive() -> Result<(), String> {
+    fn one_tenancy_configures_an_archive() -> anyhow::Result<()> {
         let one = parsed(&[
             "probe",
             "--copal-addr",
             "copal.example:8080",
             "--copal-tenant",
             "ws:acme",
-        ])
-        .map_err(|e| e.to_string())?;
+        ])?;
         match one.archive(Some("https://render.example".into())) {
             Ok(Some(_)) => Ok(()),
-            Ok(None) => Err("an address configured no archive".into()),
-            Err(e) => Err(format!("refused: {e}")),
+            Ok(None) => anyhow::bail!("an address configured no archive"),
+            Err(e) => anyhow::bail!("refused: {e}"),
         }
     }
 }

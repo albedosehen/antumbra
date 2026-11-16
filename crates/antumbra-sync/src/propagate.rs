@@ -101,16 +101,16 @@ pub async fn resolve_change(store: &Store, event: &ChangeEvent) -> Option<Memory
 mod tests {
     use super::*;
     use antumbra_core::{
-        Capability, Compartment, CompartmentId, Grant, Memory, MemoryNetwork, Origin, TenantId,
-        UserId,
+        AntumbraError, Capability, Compartment, CompartmentId, Grant, Memory, MemoryNetwork,
+        Origin, TenantId, UserId,
     };
     use antumbra_store::repo::memory;
-    use antumbra_store::EMBED_DIM;
+    use antumbra_store::testing::mem_store;
 
     // A write into a shared compartment is routed to the owner and every grantee.
     #[tokio::test]
-    async fn a_shared_write_reaches_owner_and_grantees() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_shared_write_reaches_owner_and_grantees() -> Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("t");
         let comp = CompartmentId::new("comp-1");
         let now = chrono::Utc::now();
@@ -129,8 +129,7 @@ mod tests {
                 deleted_at: None,
             },
         )
-        .await
-        .unwrap();
+        .await?;
         compartment::grant(
             &store,
             &Grant {
@@ -144,10 +143,9 @@ mod tests {
                 deleted_at: None,
             },
         )
-        .await
-        .unwrap();
+        .await?;
 
-        let mut rx = watch_shared_memories(&store).await.unwrap();
+        let mut rx = watch_shared_memories(&store).await?;
 
         let m = Memory::new(
             "aaaaaaaa-0000-0000-0000-00000000000a",
@@ -158,25 +156,26 @@ mod tests {
             now,
         )
         .in_compartment(comp.clone());
-        memory::upsert(&store, &m).await.unwrap();
+        memory::upsert(&store, &m).await?;
 
         let change = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
             .await
-            .expect("a change arrives")
-            .expect("channel open");
+            .map_err(|_| AntumbraError::other("no change arrived before the timeout"))?
+            .ok_or_else(|| AntumbraError::other("the change channel closed"))?;
         assert_eq!(change.action, ChangeAction::Create);
         assert_eq!(change.compartment.as_str(), "comp-1");
         let names: Vec<&str> = change.recipients.iter().map(UserId::as_str).collect();
         assert!(names.contains(&"alice"), "owner notified: {names:?}");
         assert!(names.contains(&"bob"), "grantee notified: {names:?}");
+        Ok(())
     }
 
     // A forget on a shared memory routes a *Delete* change to the audience -- the
     // tombstone update still carries the compartment, so unlike a hard delete it
     // is routable.
     #[tokio::test]
-    async fn a_forget_routes_a_delete_to_the_audience() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_forget_routes_a_delete_to_the_audience() -> Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("t");
         let comp = CompartmentId::new("comp-2");
         let now = chrono::Utc::now();
@@ -193,8 +192,7 @@ mod tests {
                 deleted_at: None,
             },
         )
-        .await
-        .unwrap();
+        .await?;
         compartment::grant(
             &store,
             &Grant {
@@ -208,10 +206,9 @@ mod tests {
                 deleted_at: None,
             },
         )
-        .await
-        .unwrap();
+        .await?;
 
-        let mut rx = watch_shared_memories(&store).await.unwrap();
+        let mut rx = watch_shared_memories(&store).await?;
         let m = Memory::new(
             "eeeeeeee-0000-0000-0000-00000000000e",
             tenant.clone(),
@@ -221,10 +218,8 @@ mod tests {
             now,
         )
         .in_compartment(comp.clone());
-        memory::upsert(&store, &m).await.unwrap();
-        memory::soft_delete(&store, &tenant, &m.id, now)
-            .await
-            .unwrap();
+        memory::upsert(&store, &m).await?;
+        memory::soft_delete(&store, &tenant, &m.id, now).await?;
 
         // The create then the delete arrive; read until the Delete is seen.
         let deleted = tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -236,8 +231,8 @@ mod tests {
             None
         })
         .await
-        .expect("a change arrives before timeout")
-        .expect("a delete change is routed");
+        .map_err(|_| AntumbraError::other("no change arrived before the timeout"))?
+        .ok_or_else(|| AntumbraError::other("no delete change was routed"))?;
         assert_eq!(
             deleted.memory.as_str(),
             "eeeeeeee-0000-0000-0000-00000000000e"
@@ -247,5 +242,6 @@ mod tests {
             names.contains(&"alice") && names.contains(&"bob"),
             "{names:?}"
         );
+        Ok(())
     }
 }

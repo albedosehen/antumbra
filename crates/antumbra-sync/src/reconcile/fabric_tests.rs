@@ -3,13 +3,14 @@ use antumbra_core::{
     CompartmentId, DeviceProfile, DeviceRole, GenesisRequest, GenesisStatus, TenantId, UserId,
 };
 use antumbra_store::repo::{device, genesis};
-use antumbra_store::EMBED_DIM;
+use antumbra_store::testing::mem_store;
 use chrono::Duration as ChronoDuration;
 
 use crate::table::PENUMBRA_TABLES;
 
+/// One machine of the fabric: its own embedded store.
 async fn node() -> Result<Store> {
-    Store::connect_memory(EMBED_DIM).await
+    mem_store().await
 }
 
 fn tenant() -> TenantId {

@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! Counterfactual scope search. The behavior **B** is held fixed; the context
 //! is varied along candidate governing dimensions; the frozen population is
 //! re-probed (via the [`AcceptabilityProbe`] port) until B's acceptability
@@ -196,7 +194,7 @@ mod tests {
     use antumbra_core::testing::FeatureProbe;
 
     #[tokio::test]
-    async fn recovers_the_governing_feature_and_c_prime() {
+    async fn recovers_the_governing_feature_and_c_prime() -> Result<()> {
         // `npm install` is wrong in a Deno repo (C), right in a node repo (C').
         let probe = FeatureProbe {
             feature: "runtime".into(),
@@ -206,9 +204,8 @@ mod tests {
         let candidates = vec![("runtime".to_string(), vec![serde_json::json!("node")])];
 
         let finding = find_scope("npm install", &fail, &candidates, &probe)
-            .await
-            .unwrap()
-            .expect("scope recovered");
+            .await?
+            .ok_or_else(|| AntumbraError::other("no scope was recovered"))?;
 
         assert_eq!(finding.governing_feature, "runtime");
         assert_eq!(
@@ -228,10 +225,11 @@ mod tests {
         );
         assert!(boundary.is_actionable());
         assert_eq!(boundary.governing_features, vec!["runtime".to_string()]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn returns_none_when_no_change_flips_acceptability() {
+    async fn returns_none_when_no_change_flips_acceptability() -> Result<()> {
         let probe = FeatureProbe {
             feature: "runtime".into(),
             ok_value: serde_json::json!("node"),
@@ -239,10 +237,9 @@ mod tests {
         let fail = serde_json::json!({ "runtime": "deno" });
         // we only offer values that never satisfy the probe
         let candidates = vec![("runtime".to_string(), vec![serde_json::json!("bun")])];
-        let finding = find_scope("npm install", &fail, &candidates, &probe)
-            .await
-            .unwrap();
+        let finding = find_scope("npm install", &fail, &candidates, &probe).await?;
         assert!(finding.is_none());
+        Ok(())
     }
 
     // A failing context that is not an object is refused in words, where
@@ -272,7 +269,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn over_contexts_returns_first_acceptable_context() {
+    async fn over_contexts_returns_first_acceptable_context() -> Result<()> {
         // Maps an expert's competence: it fails the "multiply" task and passes
         // the "add" task; the recovered C' is the first acceptable context.
         let probe = FeatureProbe {
@@ -286,16 +283,16 @@ mod tests {
         ];
         let finding =
             find_scope_over_contexts("implement the op", "op", &fail, &candidates, &probe)
-                .await
-                .unwrap()
-                .expect("an in-scope context exists");
+                .await?
+                .ok_or_else(|| AntumbraError::other("no in-scope context was found"))?;
         assert_eq!(finding.governing_feature, "op");
         assert_eq!(finding.near_ok_context["op"], serde_json::json!("add"));
         assert_eq!(finding.fail_context["op"], serde_json::json!("multiply"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn discover_infers_the_governing_feature_from_pass_fail() {
+    async fn discover_infers_the_governing_feature_from_pass_fail() -> Result<()> {
         // The probe is told nothing; it infers that `op` (not the incidental
         // `note`) governs, from which contexts pass vs fail.
         let probe = FeatureProbe {
@@ -308,15 +305,15 @@ mod tests {
             serde_json::json!({ "op": "reverse", "note": "x" }),
         ];
         let finding = discover_boundary("implement the op", &contexts, &probe)
-            .await
-            .unwrap()
-            .expect("a governing feature is discoverable");
+            .await?
+            .ok_or_else(|| AntumbraError::other("no governing feature was discovered"))?;
         assert_eq!(finding.governing_feature, "op");
         assert_eq!(finding.near_ok_context["op"], serde_json::json!("add"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn discover_returns_none_when_no_single_feature_separates() {
+    async fn discover_returns_none_when_no_single_feature_separates() -> Result<()> {
         // Acceptable iff a==1 AND b==1, so neither `a` nor `b` alone splits
         // pass from fail -> no single governing feature can be named.
         struct AndProbe;
@@ -332,13 +329,13 @@ mod tests {
             serde_json::json!({ "a": 0, "b": 1 }),
         ];
         assert!(discover_boundary("do it", &contexts, &AndProbe)
-            .await
-            .unwrap()
+            .await?
             .is_none());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn discover_returns_none_when_everything_passes() {
+    async fn discover_returns_none_when_everything_passes() -> Result<()> {
         let probe = FeatureProbe {
             feature: "op".into(),
             ok_value: serde_json::json!("add"),
@@ -348,8 +345,8 @@ mod tests {
             serde_json::json!({ "op": "add", "x": 1 }),
         ];
         assert!(discover_boundary("do it", &contexts, &probe)
-            .await
-            .unwrap()
+            .await?
             .is_none());
+        Ok(())
     }
 }
