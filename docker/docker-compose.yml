@@ -198,6 +198,8 @@ services:
       # variable here would stop `up` of the local stack too. The server
       # refuses to start on an empty or placeholder secret itself.
       - ANTUMBRA_MAGIC_SECRET=${ANTUMBRA_MAGIC_SECRET:-}
+      # A deployment that mounts secrets as files passes --magic-secret-file and
+      # --db-pass-file instead (see docker/README.md).
       - ANTUMBRA_DB_PASS=${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
       # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email. For
       # development only, ANTUMBRA_DEV_MAILER=1 logs each link to this

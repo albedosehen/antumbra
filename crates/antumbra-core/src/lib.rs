@@ -46,6 +46,7 @@ pub mod recipe;
 pub mod relic;
 pub mod reward;
 pub mod router;
+pub mod secrets;
 pub mod shadow;
 pub mod slice;
 pub mod stats;

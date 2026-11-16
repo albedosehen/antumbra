@@ -120,14 +120,16 @@ pub struct HostedArgs {
     /// The workspace's address, as you were given it: https://...
     #[arg(value_name = "URL")]
     pub server: String,
-    /// The token. Prefer --token-file, or ANTUMBRA_TOKEN, so it stays out of
-    /// your shell history.
+    /// The token, for scripts. Prefer --token-file, or ANTUMBRA_TOKEN, so it
+    /// stays out of your shell history.
     #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true, conflicts_with_all = ["token_file", "signin_link"])]
     pub token: Option<String>,
     /// A file holding the token.
     #[arg(long, conflicts_with = "signin_link")]
     pub token_file: Option<PathBuf>,
-    /// The sign-in link from your email; setup trades it for the token.
+    /// The sign-in link from your email; setup trades it for the token. For
+    /// scripts: run without it and setup asks, so the link stays out of your
+    /// shell history.
     #[arg(long)]
     pub signin_link: Option<String>,
     /// Accept a plain http:// address for a server that is not this machine's
