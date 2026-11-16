@@ -209,6 +209,7 @@ dependencies = [
  "antumbra-critic",
  "antumbra-embed",
  "antumbra-gate",
+ "antumbra-http",
  "antumbra-ingest",
  "antumbra-loop",
  "antumbra-serve",
@@ -322,6 +323,15 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
+ "ureq",
+]
+
+[[package]]
+name = "antumbra-http"
+version = "0.2.7"
+dependencies = [
+ "anyhow",
+ "serde_json",
  "ureq",
 ]
 
@@ -483,6 +493,7 @@ version = "0.2.7"
 dependencies = [
  "ab_glyph",
  "antumbra-core",
+ "antumbra-http",
  "antumbra-store",
  "anyhow",
  "base64 0.22.1",

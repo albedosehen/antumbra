@@ -36,6 +36,8 @@ use base64::Engine;
 use clap::{Args, Parser, Subcommand};
 use serde_json::{json, Value};
 
+use antumbra_http::{SurfaceClient, DEVICE_HEADER};
+
 use crate::claude::hooks;
 
 /// Where the store's vectors come from: ollama's default address.
@@ -630,7 +632,7 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
         steps.info(format!(
             "pulling the {MODEL} embedding model (about 46 MB)..."
         ));
-        let mut response = agent_within(Duration::from_secs(1800))
+        let mut response = antumbra_http::agent(Duration::from_secs(1800))
             .post(&format!("{base}/api/pull"))
             .send_json(json!({ "model": MODEL, "stream": false }))
             .map_err(|e| anyhow::anyhow!("pulling {MODEL}: {e}"))?;
@@ -640,7 +642,7 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
         }
     }
     // The first embedding loads the model into memory, which takes a while.
-    let mut response = agent_within(Duration::from_secs(120))
+    let mut response = antumbra_http::agent(Duration::from_secs(120))
         .post(&format!("{base}/v1/embeddings"))
         .send_json(json!({ "model": MODEL, "input": "antumbra" }))
         .map_err(|e| anyhow::anyhow!("embedding a test sentence: {e}"))?;
@@ -1292,27 +1294,15 @@ fn verify(url: &str, token: &str) -> anyhow::Result<()> {
         token,
         "recall_memories",
         json!({ "query": "antumbra setup", "top_k": 1 }),
-        "recall",
     )
     .map(|_| ())
 }
 
-/// One tool call through the server's REST shim, its answer on success. `what`
-/// names the call in the error the server's refusal becomes.
-fn call_tool(
-    url: &str,
-    token: &str,
-    tool: &str,
-    arguments: Value,
-    what: &str,
-) -> anyhow::Result<Value> {
-    call_tool_from(url, token, None, tool, arguments, what)
+/// One tool call through the server's REST shim, its answer on success; a
+/// refusal is the server's own words, as every door shows them.
+fn call_tool(url: &str, token: &str, tool: &str, arguments: Value) -> anyhow::Result<Value> {
+    call_tool_from(url, token, None, tool, arguments)
 }
-
-/// The header a client names its machine in, which the server stamps on what
-/// that machine writes (#193). The MCP headers helper sends it from
-/// `ANTUMBRA_HOST_ID`.
-const DEVICE_HEADER: &str = "X-Antumbra-Host";
 
 /// [`call_tool`] from the machine `device` names, as the agent's connection
 /// calls once the headers helper names it.
@@ -1322,35 +1312,12 @@ fn call_tool_from(
     device: Option<&str>,
     tool: &str,
     arguments: Value,
-    what: &str,
 ) -> anyhow::Result<Value> {
-    let mut request = agent(Duration::from_secs(30))
-        .post(&format!("{url}/mcp/call"))
-        .header("authorization", &format!("Bearer {token}"));
-    if let Some(device) = device {
-        request = request.header(DEVICE_HEADER, device);
-    }
-    let mut response = request
-        .send_json(json!({ "tool": tool, "arguments": arguments }))
-        .map_err(|e| anyhow::anyhow!("could not reach {url}: {e}"))?;
-    let status = response.status();
-    let body: Value = response.body_mut().read_json().unwrap_or(Value::Null);
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        anyhow::bail!(
-            "the server at {url} refused the token; it may have expired, or be for another server"
-        );
-    }
-    if let Some(said) = body.get("error") {
-        anyhow::bail!(
-            "{what} failed: {}",
-            said.as_str()
-                .map_or_else(|| said.to_string(), str::to_string)
-        );
-    }
-    if !status.is_success() {
-        anyhow::bail!("the server at {url} answered {status}");
-    }
-    Ok(body)
+    Ok(
+        SurfaceClient::new(url, Some(token), Duration::from_secs(30))
+            .from_machine(device.map(str::to_owned))
+            .call(tool, arguments)?,
+    )
 }
 
 /// The name this machine's sessions report, which the hooks read from
@@ -1384,7 +1351,6 @@ fn register_machine(url: &str, token: &str, host: &str, steps: &Steps) {
         token,
         "register_device",
         json!({ "host": host }),
-        "registering this machine",
     ) {
         Ok(said) if said["registered"] == true => steps.ok(format!(
             "this machine is listed among your devices as {} (a {} node)",
@@ -1663,14 +1629,7 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         // its headers helper names it, so the answer says what the server
         // stamps that connection's writes with. Whether the helper names it is
         // the helper line above; the two together are what the agent gets.
-        match call_tool_from(
-            &url,
-            &token,
-            Some(&host),
-            "devices",
-            json!({}),
-            "listing your devices",
-        ) {
+        match call_tool_from(&url, &token, Some(&host), "devices", json!({})) {
             Ok(said) => {
                 match stamp_of(&said, &host) {
                     Stamp::Named => ok(format!(
@@ -1803,16 +1762,10 @@ fn output(program: &str, args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// The agent every call setup makes is made with: a refusal's body comes back
+/// rather than becoming a bare status.
 fn agent(timeout: Duration) -> ureq::Agent {
-    agent_within(timeout)
-}
-
-fn agent_within(timeout: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .http_status_as_error(false)
-        .build()
-        .into()
+    antumbra_http::agent(timeout)
 }
 
 /// Writes a file only its owner can read (a token, the stack's secrets).

@@ -15,6 +15,7 @@ dist = false
 [dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-http = { path = "../antumbra-http" }
 # The server's console routes are plain HTTP; a blocking request run off the
 # async runtime, as the CLI and the embedder do.
 ureq = { version = "3", features = ["json"] }
