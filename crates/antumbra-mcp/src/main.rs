@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! `antumbra-mcp`: the Model Context Protocol server that exposes Antumbra's
 //! Penumbra memory to an agent. The runtime surface that lets a client (Claude
 //! Code, any MCP host) talk to Antumbra instead of a separate memory service.
@@ -53,7 +55,11 @@ use server::McpServer;
 struct Cli {
     /// SurrealDB url: `surrealkv://./data/antumbra.skv` (persistent),
     /// `mem://` (ephemeral), or `ws://host:8000/rpc`.
-    #[arg(long, default_value = "surrealkv://./data/antumbra.skv")]
+    #[arg(
+        long,
+        env = "ANTUMBRA_DB_URL",
+        default_value = "surrealkv://./data/antumbra.skv"
+    )]
     url: String,
     /// The workspace (tenant) this stdio server serves. Ignored with `--http`,
     /// where the tenant comes from each request's verified JWT.
@@ -88,15 +94,8 @@ struct Cli {
     /// Required JWT audience claim (this server's identifier), if set.
     #[arg(long)]
     jwt_audience: Option<String>,
-    /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
-    /// embedded store or an unauthenticated server. The DB credential is the
-    /// server's *own* login (it then signs in per request as each tenant); it is
-    /// distinct from the JWTs that authenticate clients.
-    #[arg(long, env = "ANTUMBRA_DB_USER")]
-    db_user: Option<String>,
-    /// Root password for the remote SurrealDB.
-    #[arg(long, env = "ANTUMBRA_DB_PASS", hide_env_values = true)]
-    db_pass: Option<String>,
+    #[command(flatten)]
+    db: antumbra_store::args::DbAuthArgs,
     /// Read the root password from this file instead (see --jwt-secret-file).
     #[arg(long, env = "ANTUMBRA_DB_PASS_FILE", conflicts_with = "db_pass")]
     db_pass_file: Option<std::path::PathBuf>,
@@ -257,18 +256,10 @@ struct Cli {
     github_knowledge_diff: bool,
 }
 
-async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
-    let mut builder = ConnectionConfig::builder()
-        .url(url)
-        .namespace("antumbra")
-        .database("main");
-    // Root login for an authenticated remote (`ws://`); embedded/unauthenticated
-    // stores need none. The server signs in per request as each tenant on top.
-    if let (Some(user), Some(pass)) = (db_user, db_pass) {
-        builder = builder.username(user).password(pass);
-    }
-    let config = builder.build()?;
-    Ok(Store::connect(config, EMBED_DIM).await?)
+/// The owner connection, with the schema applied: the credentials are the
+/// server's own login, and it signs in per request as each tenant on top.
+async fn connect(url: &str, db: &antumbra_store::args::DbAuthArgs) -> Result<Store> {
+    Ok(db.connect(url, EMBED_DIM).await?)
 }
 
 /// A credential-less **serving** connection to an already-provisioned remote: it
@@ -377,15 +368,14 @@ pub(crate) async fn register_node(store: &Store, tenant: &TenantId, user: &UserI
 #[allow(clippy::too_many_arguments)]
 async fn build_session(
     url: &str,
-    db_user: Option<&str>,
-    db_pass: Option<&str>,
+    db: &antumbra_store::args::DbAuthArgs,
     tenant: TenantId,
     user: UserId,
     host: String,
     embedder: Arc<dyn Embedder>,
     recipe: antumbra_core::behavior::Recipe,
 ) -> Result<McpServer> {
-    let store = connect(url, db_user, db_pass).await?;
+    let store = connect(url, db).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
     register_node(&store, &tenant, &user, &host).await;
@@ -554,10 +544,14 @@ async fn run() -> Result<()> {
         "JWT secret",
     )?;
     let db_pass = secrets::resolve(
-        cli.db_pass.clone(),
+        cli.db.db_pass.clone(),
         cli.db_pass_file.as_deref(),
         "database password",
     )?;
+    let db = antumbra_store::args::DbAuthArgs {
+        db_pass,
+        ..cli.db.clone()
+    };
 
     // Mint a hook token and exit -- no DB or embedder needed. HS256 only: the
     // server holds the symmetric secret; an RS256 deployment mints via its auth
@@ -740,8 +734,7 @@ async fn run() -> Result<()> {
         return http::serve(
             addr,
             cli.url,
-            cli.db_user,
-            db_pass,
+            db,
             host,
             embedder,
             verifier,
@@ -762,8 +755,7 @@ async fn run() -> Result<()> {
     // stdio: one fixed identity for the life of the process.
     let mut service = build_session(
         &cli.url,
-        cli.db_user.as_deref(),
-        db_pass.as_deref(),
+        &db,
         TenantId::new(cli.tenant),
         UserId::new(cli.user),
         host,
@@ -848,6 +840,32 @@ fn build_verifier(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The store flags are the shared ones (#303): the password's environment
+    // value is hidden in --help, and the url reads its variable, as in every
+    // binary; --db-pass-file still excludes --db-pass across the flatten.
+    #[test]
+    fn the_store_flags_read_as_in_every_binary() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        let flag = |id: &str| {
+            cmd.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                (
+                    a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                    a.is_hide_env_values_set(),
+                )
+            })
+        };
+        assert_eq!(
+            flag("db_pass"),
+            Some((Some("ANTUMBRA_DB_PASS".into()), true))
+        );
+        assert_eq!(flag("url"), Some((Some("ANTUMBRA_DB_URL".into()), false)));
+        assert!(
+            Cli::try_parse_from(["antumbra-mcp", "--db-pass", "x", "--db-pass-file", "f"]).is_err()
+        );
+    }
 
     // The verifier refuses a secret an offline search would find, and the
     // placeholder anyone can read out of the repository, and says what to do.

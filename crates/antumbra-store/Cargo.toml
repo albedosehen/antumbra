@@ -24,6 +24,12 @@ futures = "0.3"
 # Spans around recall's retrieval legs, exported by antumbra-mcp when it
 # traces (see its `telemetry::TRACE_FILTER`). No subscriber here.
 tracing = "0.1"
+# The credential flags the binaries share (`args`), behind the `clap` feature
+# so the library stays flag-free for everyone else.
+clap = { workspace = true, optional = true, features = ["env"] }
+
+[features]
+clap = ["dep:clap"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
@@ -35,3 +41,6 @@ chrono.workspace = true
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-boundary = { path = "../antumbra-boundary" }
 antumbra-gate = { path = "../antumbra-gate" }
+
+[lints]
+workspace = true

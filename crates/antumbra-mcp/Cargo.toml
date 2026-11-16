@@ -23,7 +23,7 @@ path = "src/main.rs"
 # runs without a GPU; the real BERT embedder lands under `models`.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-auth = { path = "../antumbra-auth" }
-antumbra-store = { path = "../antumbra-store" }
+antumbra-store = { path = "../antumbra-store", features = ["clap"] }
 antumbra-embed = { path = "../antumbra-embed", features = ["clap"] }
 antumbra-rerank = { path = "../antumbra-rerank" }
 antumbra-sync = { path = "../antumbra-sync" }
@@ -85,3 +85,6 @@ models = ["dep:antumbra-serve", "antumbra-serve/models"]
 # networked server can actually serve through experts on a CUDA box).
 cuda = ["models", "antumbra-serve/cuda"]
 metal = ["models", "antumbra-serve/metal"]
+
+[lints]
+workspace = true

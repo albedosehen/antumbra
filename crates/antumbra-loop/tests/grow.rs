@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The grow step through the loop: each generation learns from
 //! the region the latest census makes most learnable, gated, discounted for
 //! redundancy with recent choices, with an unfiltered share of the whole

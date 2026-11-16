@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The hosted-onboarding control plane: the **issuer** side of the
 //! `antumbra-auth` token contract. It gates signup behind invite codes,
 //! provisions a fresh tenant for each new account, and issues the RS256 JWT the

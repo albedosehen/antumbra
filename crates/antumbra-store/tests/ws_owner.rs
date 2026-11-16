@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Live, over-`ws://` validation of the owner/root session path: `signin_root`'s
 //! RootCredentials branch, which the embedded suite cannot reach. On `mem://`
 //! anonymous *is* the owner, so `signin_root` takes the `invalidate` fallback;

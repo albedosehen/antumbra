@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! An expert's moves are visible exactly where the expert is.
 //! A tenant session reads shared experts and its own private ones; if it could
 //! read those experts but not their moves, a demoted expert would look active

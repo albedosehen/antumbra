@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Drive the actual `antumbra claude ...` commands, with the machine they read
 //! pinned down: an empty home, a project made for the test, and every variable
 //! that decides sovereign mode removed or set on purpose.

@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! How multi-tenant isolation works on an **embedded** SurrealDB engine: the
 //! edge/IoT case where there is no separate database server.
 //!

@@ -12,3 +12,6 @@ antumbra-core = { path = "../antumbra-core" }
 [dev-dependencies]
 serde_json.workspace = true
 chrono.workspace = true
+
+[lints]
+workspace = true

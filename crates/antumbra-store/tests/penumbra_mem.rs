@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Penumbra memory tenant-isolation regression (mirrors the data-plane POC's
 //! `test_regression_tenant_isolation`): no workspace may recall, list, read by
 //! id, or delete another workspace's traces, even when the other tenant's

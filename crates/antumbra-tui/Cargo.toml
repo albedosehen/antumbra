@@ -40,3 +40,6 @@ ab_glyph = "0.2"
 # the first raster-worthy visual; declaring it keeps `cfg(feature = "raster")`
 # from tripping the unexpected-cfg lint. The default build stays raster-free.
 raster = []
+
+[lints]
+workspace = true

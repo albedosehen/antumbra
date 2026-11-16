@@ -133,7 +133,12 @@ impl SimpleBackend for Checkpoint {
                 stored.shape()
             )
         }
-        let mut vars = self.varmap.data().lock().expect("var map lock");
+        // A poisoned lock holds the same map of vars, none half-set: taken as is.
+        let mut vars = self
+            .varmap
+            .data()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(var) = vars.get(name) {
             return Ok(var.as_tensor().clone());
         }

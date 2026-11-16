@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The shipped corpora, judged by the verifier the trainer actually uses.
 //!
 //! The generator checks every workbench task through a Python mirror of this

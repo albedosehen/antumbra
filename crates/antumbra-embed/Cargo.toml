@@ -26,3 +26,6 @@ clap = ["dep:clap", "antumbra-core/testing"]
 
 [dev-dependencies]
 anyhow.workspace = true
+
+[lints]
+workspace = true

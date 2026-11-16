@@ -10,15 +10,15 @@ pub struct Cli {
     /// across commands. Use `mem://` for an ephemeral run, or
     /// `ws://host:8000/rpc` for a remote server. (`antumbra tui` reads the
     /// Antumbra server instead.)
-    #[arg(long, global = true, default_value = "surrealkv://./data/antumbra.skv")]
+    #[arg(
+        long,
+        global = true,
+        env = "ANTUMBRA_DB_URL",
+        default_value = "surrealkv://./data/antumbra.skv"
+    )]
     pub url: String,
-    /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
-    /// embedded store or an unauthenticated server.
-    #[arg(long, global = true, env = "ANTUMBRA_DB_USER")]
-    pub db_user: Option<String>,
-    /// Root password for the remote SurrealDB.
-    #[arg(long, global = true, env = "ANTUMBRA_DB_PASS")]
-    pub db_pass: Option<String>,
+    #[command(flatten)]
+    pub db: antumbra_store::args::DbAuthArgs,
     #[command(flatten)]
     pub embedder: antumbra_embed::args::EmbedderArgs,
     #[command(flatten)]

@@ -420,7 +420,13 @@ impl QwenCausalLm {
     /// trained rank, with alpha raised in step, serves one adapter exactly as a
     /// model at the trained rank would, and a blend without a rebuild.
     pub fn load_blend(&mut self, specs: &[(String, f32)]) -> Result<()> {
-        let vars = self.model.varmap.data().lock().expect("varmap lock");
+        // A poisoned lock holds the same map of vars, none half-set: taken as is.
+        let vars = self
+            .model
+            .varmap
+            .data()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(device) = vars.values().next().map(|v| v.device().clone()) else {
             return Err(AntumbraError::other(
                 "load blend: the model has no LoRA factors",

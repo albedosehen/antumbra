@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! A searched generation (the recipe search, run as a cohort): the search
 //! proposes a recipe per cohort member, every member trains from the base
 //! under its own, the best is carried forward, and only its recipe propagates.

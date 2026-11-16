@@ -30,3 +30,6 @@ tokio = { workspace = true }
 # Test seams: a canned transport and a throwaway App key pair, for this crate's
 # tests and for any crate that drives the integration in its own.
 testing = []
+
+[lints]
+workspace = true

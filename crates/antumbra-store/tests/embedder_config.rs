@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Per-workspace embedder config: one row per tenant, upsert/get/delete, with
 //! independent workspaces (a tenant with no row falls back to the server default).
 

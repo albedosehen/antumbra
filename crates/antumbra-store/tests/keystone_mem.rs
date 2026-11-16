@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The counterfactual boundary of competence, end-to-end.
 //! Counterfactual search recovers C', the
 //! boundary persists as actionable through surql-rs, and the gate inhibits

@@ -574,6 +574,9 @@ pub struct RelevanceState {
 }
 
 impl RelevanceState {
+    /// Two strings and a list of strings always serialize; an error here would
+    /// be serde_json's, not a state this code can reach, so the expect stays.
+    #[allow(clippy::expect_used)]
     pub fn encode(&self) -> String {
         serde_json::to_string(self).expect("two strings and a list of them serialize")
     }

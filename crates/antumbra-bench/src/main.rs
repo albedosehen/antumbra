@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-bench — multi-domain retrieval-quality benchmark
 //!
 //! A small evaluation harness (a binary, **not** a criterion micro-bench) that

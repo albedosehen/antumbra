@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The hosted **control plane** HTTP server: invite-gated signup, magic-link
 //! login, and RS256 token issuance, run as its own service (separate from the
 //! data-plane MCP server, which only *verifies* the tokens this server signs).
@@ -14,11 +16,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 
 use antumbra_control::Issuer;
 use antumbra_store::repo::invite;
-use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
+use antumbra_store::{Store, EMBED_DIM};
 
 use crate::http::{router, AppState, Cooldown};
 use crate::mailer::build_mailer;
@@ -49,32 +51,18 @@ enum Command {
     Probe(ProbeArgs),
 }
 
-/// How the service authenticates to SurrealDB.
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum DbAuth {
-    /// `--db-user`/`--db-pass` are instance-root credentials.
-    Root,
-    /// They are a `DEFINE USER ... ON DATABASE ... ROLES OWNER` user: least
-    /// privilege, containing a compromise of this internet-adjacent service to
-    /// the one database it works in.
-    Database,
-}
-
 #[derive(Args)]
 struct StoreArgs {
+    /// The SurrealDB this service works in: a server beside it, by default.
     #[arg(
         long,
         env = "ANTUMBRA_DB_URL",
         default_value = "ws://127.0.0.1:8000/rpc"
     )]
     url: String,
-    #[arg(long, env = "ANTUMBRA_DB_USER")]
-    db_user: Option<String>,
-    #[arg(long, env = "ANTUMBRA_DB_PASS")]
-    db_pass: Option<String>,
-    /// The authentication level of `--db-user` / `--db-pass`.
-    #[arg(long, env = "ANTUMBRA_DB_AUTH", value_enum, default_value = "root")]
-    db_auth: DbAuth,
+    /// The credentials, as every Antumbra binary takes them.
+    #[command(flatten)]
+    auth: antumbra_store::args::DbAuthArgs,
 }
 
 #[derive(Args)]
@@ -146,25 +134,7 @@ struct ServeArgs {
 }
 
 async fn connect(s: &StoreArgs) -> anyhow::Result<Store> {
-    let builder = ConnectionConfig::builder()
-        .url(&s.url)
-        .namespace("antumbra")
-        .database("main");
-    match s.db_auth {
-        DbAuth::Database => {
-            let (Some(user), Some(pass)) = (s.db_user.as_deref(), s.db_pass.as_deref()) else {
-                anyhow::bail!("--db-auth database requires --db-user and --db-pass");
-            };
-            Ok(Store::connect_with_db_user(builder.build()?, user, pass, EMBED_DIM).await?)
-        }
-        DbAuth::Root => {
-            let builder = match (s.db_user.as_deref(), s.db_pass.as_deref()) {
-                (Some(user), Some(pass)) => builder.username(user).password(pass),
-                _ => builder,
-            };
-            Ok(Store::connect(builder.build()?, EMBED_DIM).await?)
-        }
-    }
+    Ok(s.auth.connect(&s.url, EMBED_DIM).await?)
 }
 
 /// The `.env.example` placeholder: a magic secret anyone can read out of the
@@ -187,19 +157,29 @@ fn validate_magic_secret(secret: &str) -> anyhow::Result<()> {
 }
 
 /// Resolve on SIGTERM (what `docker stop` sends PID 1) or ctrl-c, so axum can
-/// stop accepting and drain in-flight requests instead of dropping them.
+/// stop accepting and drain in-flight requests instead of dropping them. A
+/// handler the OS refuses to install is said on stderr, and that signal then
+/// never resolves this: the server runs until the other one, or a kill.
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("install ctrl-c handler");
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            eprintln!("antumbra-control-server: no ctrl-c handler ({e}); it will not stop on one");
+            std::future::pending::<()>().await;
+        }
     };
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut term) => {
+                term.recv().await;
+            }
+            Err(e) => {
+                eprintln!(
+                    "antumbra-control-server: no SIGTERM handler ({e}); it will not stop on one"
+                );
+                std::future::pending::<()>().await;
+            }
+        }
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
@@ -408,6 +388,42 @@ mod tests {
         anyhow::ensure!(mint("-1").is_err(), "a negative ttl was accepted");
         mint("0")?;
         mint("36500")?;
+        Ok(())
+    }
+
+    // The store flags are the shared ones (#303), on every subcommand that
+    // reaches the store: the password's environment value is hidden in --help
+    // and the url reads its variable, as in every binary.
+    #[test]
+    fn the_store_flags_read_as_in_every_binary() -> anyhow::Result<()> {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        for name in ["serve", "mint-invite", "list-invites", "revoke-invite"] {
+            let sub = cmd
+                .find_subcommand(name)
+                .ok_or_else(|| anyhow::anyhow!("no subcommand {name}"))?;
+            let flag = |id: &str| {
+                sub.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                    (
+                        a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                        a.is_hide_env_values_set(),
+                    )
+                })
+            };
+            anyhow::ensure!(
+                flag("db_pass") == Some((Some("ANTUMBRA_DB_PASS".into()), true)),
+                "{name}: --db-pass"
+            );
+            anyhow::ensure!(
+                flag("url") == Some((Some("ANTUMBRA_DB_URL".into()), false)),
+                "{name}: --url"
+            );
+            anyhow::ensure!(
+                flag("db_auth").map(|f| f.0) == Some(Some("ANTUMBRA_DB_AUTH".into())),
+                "{name}: --db-auth"
+            );
+        }
         Ok(())
     }
 

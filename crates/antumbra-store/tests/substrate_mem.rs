@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! End-to-end substrate test against an embedded in-memory SurrealDB:
 //! schema apply, expert insert/get/list, capability KNN recall, and the
 //! durable generation-head checkpoint of the generational loop.

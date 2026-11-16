@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Conservative merging through the loop: the most similar pair
 //! of active shared experts is merged only when their adapters are siblings and
 //! the merge scores at least as well as the better of them; both are then

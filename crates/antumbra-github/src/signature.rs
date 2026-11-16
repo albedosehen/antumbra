@@ -53,8 +53,10 @@ pub fn sign(secret: &[u8], body: &[u8]) -> String {
     format!("{PREFIX}{}", hex::encode(mac.finalize().into_bytes()))
 }
 
+/// HMAC accepts a key of any length, so the one error path is unreachable and
+/// the expect stays.
+#[allow(clippy::expect_used)]
 fn mac(secret: &[u8]) -> Hmac<Sha256> {
-    // HMAC accepts a key of any length, so this cannot fail.
     Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts any key length")
 }
 

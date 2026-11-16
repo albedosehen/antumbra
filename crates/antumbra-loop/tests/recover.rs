@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! A run the process left mid-generation goes on. Found by the first GPU run
 //! of the recipe search: a cohort member ran out of GPU memory in `Explore`,
 //! and the run could never be resumed, because every generation opens by

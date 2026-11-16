@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Live CPU check of the serving path: load the Qwen2.5-Coder base on the CPU,
 //! restore an expert trained in bf16 on the GPU, and generate, reporting tokens
 //! per second at one expert's rank and at a four-expert blend's.

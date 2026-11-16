@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced compartment ACL (Phase 1b): a memory in a private
 //! compartment is invisible to another user until its compartment is granted,
 //! and hidden again on revoke, enforced by the engine via the memory rule's
