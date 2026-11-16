@@ -10,21 +10,23 @@
 //! An embedded SurrealDB (`surrealkv://`, the edge/IoT case) is **single-writer**:
 //! only one connection may open the datastore. So the server holds **one** shared
 //! connection and multiplexes tenants over it; it does *not* open a connection
-//! per identity. Because `signin` binds the whole connection, each request takes
-//! a lock, signs the shared connection in as its identity, runs, and releases;
-//! the next request re-signs-in. The engine then hides other tenants' rows even
-//! on an unfiltered query (proven in `antumbra-store`'s embedded tests). The cost
-//! is serialization of the authenticated section: fine for an edge device; a
+//! per identity. Because `signin` binds the whole connection, each **tool call**
+//! takes a lock, signs the shared connection in as its identity, runs, and
+//! releases ([`McpServer::bound`]); the next call re-signs-in. The signin
+//! travels with the call, not with the HTTP request that carried it, because a
+//! call over `/mcp` runs on the session's task after that request has been
+//! answered. The engine then hides other tenants' rows even on an unfiltered
+//! query (proven in `antumbra-store`'s embedded tests). The cost is
+//! serialization of the authenticated section: fine for an edge device; a
 //! high-concurrency deployment points `--url` at a real `ws://` server.
 //!
 //! ## Stateful (SSE) mode for live propagation
 //!
 //! The transport runs in rmcp's stateful mode so a client can hold an open
 //! GET/SSE stream that carries **server-initiated** notifications: the only
-//! channel the MCP spec defines for push. That does not reintroduce the lock
-//! concern: the auth lock is held only while `handle` *builds* a response, and an
-//! SSE stream is MCP transport state (a channel + cache) that does no DB work and
-//! streams *after* the handler returns; it never holds the DB connection. Live
+//! channel the MCP spec defines for push. An SSE stream is MCP transport state
+//! (a channel + cache) that does no DB work of its own; the tool call it
+//! carries binds the connection for itself when it runs. Live
 //! delivery is wired in [`spawn_live_propagation`]: one owner-mode `LIVE`
 //! subscription (registered at startup) feeds the change watcher, audience is
 //! resolved under the auth lock in owner mode, and the change is pushed to each
@@ -72,6 +74,7 @@ mod chunker;
 mod console;
 mod dashboard;
 mod github;
+mod limit;
 mod relics;
 pub(crate) use github::GithubConfig;
 
@@ -108,6 +111,14 @@ impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
         self.map.get(key)
     }
 
+    fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: std::borrow::Borrow<Q>,
+        Q: ?Sized + Eq + std::hash::Hash,
+    {
+        self.map.get_mut(key)
+    }
+
     fn insert(&mut self, key: K, value: V) {
         // A brand-new key extends the order ring and may evict the oldest; an
         // update to an existing key just replaces the value (no reorder).
@@ -127,9 +138,9 @@ impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
 /// by deployment.
 enum Serving {
     /// Embedded (no DB credentials): the single connection, the same as `store`.
-    /// A request signs it in as its record under `auth` for the call; with one
-    /// writer, serializing is fine, and embedded mem:// / surrealkv expose only
-    /// one connection anyway.
+    /// A tool call signs it in as its record under `auth` and holds the lock
+    /// until it returns ([`McpServer::bound`]); with one writer, serializing is
+    /// fine, and embedded mem:// / surrealkv expose only one connection anyway.
     Shared(Store),
     /// Remote (authenticated): a *dedicated, credential-less* connection per
     /// identity, signed in as its record and reused across that identity's
@@ -159,11 +170,13 @@ struct HttpState {
     /// Per-tenant resolved embedders: a workspace's own configured
     /// endpoint when set, else `embedder`. Resolved once per tenant and cached.
     embedders: Mutex<Bounded<String, Arc<dyn Embedder>>>,
-    /// Serializes the brief owner-side work on the shared connections: the
-    /// `signin_root` + provision on `store`, and (embedded only) a request's
-    /// record signin on the shared serving connection. On a remote the per-request
-    /// hot path holds NO lock -- each identity has its own serving connection.
-    auth: Mutex<()>,
+    /// Serializes the owner-side work on the shared connections (the
+    /// `signin_root` + provision on `store`, the keepers, the public relic
+    /// read) and, embedded only, every tool call's record signin on the shared
+    /// serving connection, held for the whole tool ([`McpServer::bound`]
+    /// holds a clone of it). On a remote the per-request hot path holds NO lock
+    /// -- each identity has its own serving connection.
+    auth: Arc<Mutex<()>>,
     /// Autonomous propose threshold, applied to every per-identity server.
     auto_propose: Option<usize>,
     /// The training every standing expert on this node gets; the serving
@@ -194,6 +207,10 @@ struct HttpState {
     /// What prints a relic as PDF for the viewer's download, when the operator
     /// runs one; without it a relic downloads as HTML and Markdown only.
     pdf: Option<Arc<crate::pdf::PdfRenderer>>,
+    /// What bounds the relic routes that answer without a token: the public
+    /// lookup's and the export's budgets, and the printed PDFs kept for a
+    /// repeat request of the same version.
+    relics: relics::Guards,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     /// The GitHub App webhook receiver (`POST /github/webhook`), when the
     /// operator configured its secret and the repository-to-workspace map.
@@ -273,7 +290,7 @@ pub async fn serve(
         verifier,
         embedder,
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
-        auth: Mutex::new(()),
+        auth: Arc::new(Mutex::new(())),
         auto_propose,
         recipe,
         tune_confidence,
@@ -282,6 +299,7 @@ pub async fn serve(
         decider,
         copal,
         pdf,
+        relics: relics::Guards::new(),
         profile,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -316,6 +334,9 @@ async fn serve_until(
     drain: std::time::Duration,
 ) -> Result<()> {
     let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
+    // With the peer's address on each request, so the routes that answer
+    // without a token can budget each client ([`limit`]).
+    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     let serving = axum::serve(listener, app).with_graceful_shutdown(async move {
         stop.await;
         eprintln!(
@@ -480,19 +501,11 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
         }
     };
 
-    // Bind the scoped connection to this identity. On a remote each identity has
-    // its own already-signed-in serving connection, so this is a no-op and the
-    // request runs with NO lock; on embedded it signs the shared connection in
-    // under `auth`, held across the exchange.
-    let _guard = match state.bind(&identity).await {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("antumbra-mcp: signin failed for {}: {e}", identity.tenant);
-            return internal_error();
-        }
-    };
-    // A tool call this request carries runs on the session's task, outside
-    // this request's span; the trace rides along so the call's span joins it.
+    // A tool call this request carries runs on the session's task, after this
+    // request has been answered, so a bind of the shared connection here would
+    // not cover it: the call binds the connection for itself when it runs
+    // ([`McpServer::bound`]). The trace rides along so the call's span joins
+    // this request's.
     req.extensions_mut()
         .insert(crate::telemetry::RequestTrace::current());
     // rmcp returns its own boxed body; rewrap it as an axum body.
@@ -605,6 +618,11 @@ impl HttpState {
         if let Some(keeper) = keeper {
             mcp = mcp.with_session_keeper(keeper);
         }
+        // Embedded: the tools share one connection with every other identity
+        // and the owner-side work, so each call binds it under the same lock.
+        if matches!(self.serving, Serving::Shared(_)) {
+            mcp = mcp.with_shared_bind(self.auth.clone());
+        }
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
         }
@@ -663,10 +681,13 @@ impl HttpState {
         Ok((conn, Some(keeper)))
     }
 
-    /// Bind the scoped serving connection to `identity` for a request. Embedded:
-    /// sign the shared connection in under `auth` and return the guard to hold
-    /// across the exchange. Remote: the identity's own connection is already
-    /// signed in, so return `None` -- the request runs with no lock.
+    /// Bind the scoped serving connection to `identity` for work a handler does
+    /// inline, in the request's own span (the console's snapshot, a relic
+    /// export). Embedded: sign the shared connection in under `auth` and return
+    /// the guard to hold across that work. Remote: the identity's own
+    /// connection is already signed in, so return `None` -- the work runs with
+    /// no lock. A tool call does not use this: it runs after its request has
+    /// been answered, and binds for itself ([`McpServer::bound`]).
     async fn bind(&self, identity: &Identity) -> Result<Option<tokio::sync::MutexGuard<'_, ()>>> {
         match &self.serving {
             Serving::Shared(conn) => {
@@ -873,22 +894,11 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         Some(device) => mcp.called_from(device),
         None => mcp,
     };
-    // Bind the scoped connection, then dispatch. Embedded: lock + signin the
-    // shared connection, held across the call. Remote: a no-op (the identity's
-    // own connection is already signed in), so the call runs with no lock.
-    let result = {
-        let _guard = match state.bind(&identity).await {
-            Ok(g) => g,
-            Err(e) => {
-                eprintln!(
-                    "antumbra-mcp: /mcp/call signin failed for {}: {e}",
-                    identity.tenant
-                );
-                return internal_error();
-            }
-        };
-        mcp.call_tool(&call.tool, call.arguments).await
-    };
+    // Dispatch. The call binds its connection for itself: embedded, it takes
+    // the lock and signs the shared connection in, held across the call;
+    // remote, the identity's own connection is already signed in and the call
+    // runs with no lock ([`McpServer::bound`]).
+    let result = mcp.call_tool(&call.tool, call.arguments).await;
 
     match result {
         Ok(value) => Json(value).into_response(),

@@ -17,12 +17,14 @@ mkdir -p "$WORK/bin" "$WORK/tmp"
 cat > "$WORK/bin/curl" <<'CURL'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$CURL_ARGS"
+# What `--config -` would read: curl always drains its stdin for it.
+cat > "${CURL_CONFIG:-/dev/null}"
 CURL
 chmod +x "$WORK/bin/curl"
-export CURL_ARGS="$WORK/args" ANTUMBRA_TOKEN=test-token TMPDIR="$WORK/tmp"
+export CURL_ARGS="$WORK/args" CURL_CONFIG="$WORK/config" ANTUMBRA_TOKEN=test-token TMPDIR="$WORK/tmp"
 
 run() {
-    rm -f "$CURL_ARGS"
+    rm -f "$CURL_ARGS" "$CURL_CONFIG"
     printf '%s' "$1" | PATH="$WORK/bin:$PATH" bash "$HOOK"
 }
 
@@ -35,6 +37,10 @@ printf '%s' "$body" | jq -e '.tool == "observe_turn"' > /dev/null
 check 'reports the turn to the server' $?
 printf '%s' "$body" | jq -e '.arguments == {session: "s1", text: "deployed it blue green", turn: "p1"}' > /dev/null
 check 'with its session, turn and answer' $?
+! grep -q 'Bearer' "$CURL_ARGS"
+check "keeps the bearer off curl's command line" $?
+grep -qx 'header = "Authorization: Bearer test-token"' "$CURL_CONFIG"
+check 'and hands it to curl through its config on stdin' $?
 
 echo 'the end of a turn on a named machine'
 out="$(ANTUMBRA_HOST_ID=windows run '{"session_id":"s4","prompt_id":"p4","hook_event_name":"Stop","last_assistant_message":"done"}')"

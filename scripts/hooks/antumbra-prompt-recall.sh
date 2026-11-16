@@ -74,9 +74,12 @@ BODY="$(jq -nc --arg q "$QUERY" --arg repo "$REPO" --arg branch "$BRANCH" --arg 
                   + (if $repo    == "" then {} else { repo: $repo }       end)
                   + (if $branch  == "" then {} else { branch: $branch }   end)) }')"
 
-RESP="$(curl -s -X POST "$URL/mcp/call" \
+# The bearer reaches curl as a config line on its stdin, never as an argument:
+# an argument sits in the process list, readable by every other user of the
+# machine, for as long as the request lasts.
+RESP="$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -s -X POST "$URL/mcp/call" \
     -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $TOKEN" \
+    --config - \
     --max-time "$BUDGET" --data-binary "$BODY" 2>/dev/null || true)"
 [ -z "$RESP" ] && exit 0
 

@@ -25,14 +25,53 @@ pub(super) async fn state_archived(
     embedder: Arc<dyn Embedder>,
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
 ) -> Arc<HttpState> {
+    state_serving(store, embedder, copal, None, false).await
+}
+
+/// As [`state_archived`], with a PDF renderer.
+pub(super) async fn state_printing(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    pdf: Arc<crate::pdf::PdfRenderer>,
+) -> Arc<HttpState> {
+    state_serving(store, embedder, copal, Some(pdf), false).await
+}
+
+/// As [`state_archived`], serving each identity on a connection of its own, as
+/// a remote deployment does, with `store` the owner connection alone. No
+/// identity connects in these tests, so the address is never dialed.
+pub(super) async fn state_per_identity(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+) -> Arc<HttpState> {
+    state_serving(store, embedder, copal, None, true).await
+}
+
+async fn state_serving(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    pdf: Option<Arc<crate::pdf::PdfRenderer>>,
+    per_identity: bool,
+) -> Arc<HttpState> {
+    let serving = if per_identity {
+        Serving::PerIdentity {
+            url: "ws://never-dialed.example:8000".into(),
+            conns: Mutex::new(Bounded::new(MAX_SESSIONS)),
+        }
+    } else {
+        Serving::Shared(store.clone())
+    };
     Arc::new(HttpState {
-        serving: Serving::Shared(store.clone()),
+        serving,
         store,
         host: "test".into(),
         verifier: JwtVerifier::hs256(b"test-secret"),
         embedder,
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
-        auth: Mutex::new(()),
+        auth: Arc::new(Mutex::new(())),
         auto_propose: None,
         recipe: antumbra_core::behavior::Recipe::default(),
         tune_confidence: false,
@@ -40,7 +79,8 @@ pub(super) async fn state_archived(
         reranker: None,
         decider: None,
         copal,
-        pdf: None,
+        pdf,
+        relics: crate::http::relics::Guards::new(),
         profile: None,
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -187,6 +227,188 @@ async fn rest_call_dispatches_a_tool_then_reads_it_back() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// The owner-side pattern the public relic read, the keepers and the
+/// propagation watcher share: return the shared connection to the owner view
+/// under the lock.
+async fn owner_signin(st: &HttpState) -> anyhow::Result<()> {
+    let _guard = st.auth.lock().await;
+    st.store.signin_root().await?;
+    Ok(())
+}
+
+/// What a `list_memories` answer must and must not carry for one caller.
+fn only_own_rows(text: &str, mine: &str, theirs: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(text.contains(mine), "a caller's own row is missing: {text}");
+    anyhow::ensure!(
+        !text.contains(theirs),
+        "a row of another caller's came back: {text}"
+    );
+    Ok(())
+}
+
+// On the shared (embedded) connection a tool call runs as its own caller for
+// the whole call, while another identity's calls and owner-side signins take
+// the same connection between calls: every answer carries only the caller's
+// own rows. Through the servers directly, as the REST shim drives them.
+//
+// Two users of ONE workspace, each reading their private compartment: the
+// repos filter by tenant themselves, so two tenants would stay apart even on
+// an unbound connection, while a user's private compartment is hidden by the
+// engine's row rule alone. A call that ran under the owner view, or under the
+// other user's session, would show the other user's row or lose its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_call_on_the_shared_connection_runs_as_its_own_caller() -> anyhow::Result<()> {
+    let st = state().await;
+    let a = Identity {
+        tenant: "ws:shared".into(),
+        user: "user:a".into(),
+    };
+    let b = Identity {
+        tenant: "ws:shared".into(),
+        user: "user:b".into(),
+    };
+    let server_a = st.rest_server_for(&a).await?;
+    let server_b = st.rest_server_for(&b).await?;
+    server_a
+        .call_tool("store_memory", serde_json::json!({"content": "alpha only"}))
+        .await?;
+    server_b
+        .call_tool("store_memory", serde_json::json!({"content": "beta only"}))
+        .await?;
+
+    const ROUNDS: usize = 40;
+    let reads = |server: McpServer, mine: &'static str, theirs: &'static str| {
+        tokio::spawn(async move {
+            for _ in 0..ROUNDS {
+                let out = server
+                    .call_tool("list_memories", serde_json::json!({}))
+                    .await?;
+                only_own_rows(&out.to_string(), mine, theirs)?;
+                tokio::task::yield_now().await;
+            }
+            anyhow::Ok(())
+        })
+    };
+    let owner = {
+        let st = st.clone();
+        tokio::spawn(async move {
+            for _ in 0..ROUNDS {
+                owner_signin(&st).await?;
+                tokio::task::yield_now().await;
+            }
+            anyhow::Ok(())
+        })
+    };
+    let (ra, rb, ro) = tokio::join!(
+        reads(server_a, "alpha only", "beta only"),
+        reads(server_b, "beta only", "alpha only"),
+        owner
+    );
+    ra??;
+    rb??;
+    ro??;
+    Ok(())
+}
+
+/// A `/mcp` request for `session_id` (none for the first), as a client sends it.
+fn mcp_request(jwt: &str, session_id: Option<&str>, body: String) -> anyhow::Result<Request<Body>> {
+    let mut b = Request::builder()
+        .method("POST")
+        .uri("/mcp")
+        .header(header::HOST, "localhost")
+        .header(header::AUTHORIZATION, jwt)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json, text/event-stream");
+    if let Some(id) = session_id {
+        b = b.header("mcp-session-id", id);
+    }
+    Ok(b.body(Body::from(body))?)
+}
+
+/// The whole body of a response as text.
+async fn body_text(resp: Response) -> anyhow::Result<String> {
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+// The streamed path end to end: a `tools/call` carried by `POST /mcp` runs on
+// the session's task after that request has been answered, so only a bind
+// taken by the call itself can cover it. With another user's REST calls and
+// owner-side signins racing it on the shared connection, each user still
+// reads back only their own private row (two users of one workspace, for
+// the reason the test above gives).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_streamed_call_on_the_shared_connection_runs_as_its_own_caller() -> anyhow::Result<()> {
+    let st = state().await;
+    let app = router(st.clone());
+    let a_tok = token("ws:stream", "user:a");
+    let a_jwt = format!("Bearer {a_tok}");
+    let b_tok = token("ws:stream", "user:b");
+
+    // One row each, over the REST shim.
+    for (tok, content) in [(&a_tok, "alpha only"), (&b_tok, "beta only")] {
+        let body = serde_json::json!({"tool": "store_memory", "arguments": {"content": content}});
+        let resp = app
+            .clone()
+            .oneshot(call_request(Some(tok), &body.to_string()))
+            .await?;
+        anyhow::ensure!(resp.status() == StatusCode::OK, "seeding {content}");
+    }
+
+    // A's session: initialize, then initialized.
+    let init = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": { "protocolVersion": "2025-06-18", "capabilities": {},
+                    "clientInfo": { "name": "a", "version": "0" } }
+    });
+    let resp = app
+        .clone()
+        .oneshot(mcp_request(&a_jwt, None, init.to_string())?)
+        .await?;
+    anyhow::ensure!(resp.status() == StatusCode::OK, "initialize");
+    let Some(session_id) = resp
+        .headers()
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+    else {
+        anyhow::bail!("stateful mode returns a session id");
+    };
+    let initialized = serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+    let resp = app
+        .clone()
+        .oneshot(mcp_request(
+            &a_jwt,
+            Some(&session_id),
+            initialized.to_string(),
+        )?)
+        .await?;
+    anyhow::ensure!(resp.status() == StatusCode::ACCEPTED, "initialized");
+
+    for round in 0..12u32 {
+        let call = serde_json::json!({
+            "jsonrpc": "2.0", "id": 10 + round, "method": "tools/call",
+            "params": { "name": "list_memories", "arguments": {} }
+        });
+        let a_read = app
+            .clone()
+            .oneshot(mcp_request(&a_jwt, Some(&session_id), call.to_string())?);
+        let b_read = app.clone().oneshot(call_request(
+            Some(&b_tok),
+            r#"{"tool":"list_memories","arguments":{}}"#,
+        ));
+        let (a_resp, b_resp, owner) = tokio::join!(a_read, b_read, owner_signin(&st));
+        owner?;
+        let a_resp = a_resp?;
+        anyhow::ensure!(a_resp.status() == StatusCode::OK, "round {round}: A's call");
+        only_own_rows(&body_text(a_resp).await?, "alpha only", "beta only")?;
+        let b_resp = b_resp?;
+        anyhow::ensure!(b_resp.status() == StatusCode::OK, "round {round}: B's call");
+        only_own_rows(&body_text(b_resp).await?, "beta only", "alpha only")?;
+    }
+    Ok(())
 }
 
 /// The REST shim takes a body the size of a real page: a knowledge document or

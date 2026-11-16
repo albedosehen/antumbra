@@ -549,3 +549,88 @@ async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
         "a deleted compartment no longer shows its memories to its owner"
     );
 }
+
+// The compartment table's write rules are the owner's alone: another member of
+// the workspace can neither take a compartment over by rewriting its owner,
+// tombstone it, nor create one in someone else's name. The memory rule trusts
+// the compartment row live, so this is what keeps a private compartment
+// private against a member who reaches the engine without the app layer.
+#[tokio::test]
+async fn a_member_cannot_rewrite_another_members_compartment() -> anyhow::Result<()> {
+    let store = Store::connect_memory(4).await?;
+    let t = TenantId::new("ws:org");
+    let a = UserId::new("user:a");
+    let b = UserId::new("user:b");
+    let ca = CompartmentId::new("comp:a-private");
+    let now = Utc::now();
+    principal::provision(&store, &t, &a).await?;
+    principal::provision(&store, &t, &b).await?;
+    compartment::create(
+        &store,
+        &Compartment::new(ca.clone(), t.clone(), a.clone(), "A private", now),
+    )
+    .await?;
+    memory::upsert(
+        &store,
+        &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
+    )
+    .await?;
+
+    // B, as a member, writes A's compartment as B's own, tombstones it, and
+    // creates one in A's name. The engine refuses each either by persisting
+    // nothing (the writes are upserts) or with an error, so the results are
+    // not what is checked; the rows are.
+    store.signin(&t, &b).await?;
+    let taken = Compartment::new(ca.clone(), t.clone(), b.clone(), "mine now", now);
+    compartment::create(&store, &taken).await.ok();
+    compartment::delete(&store, &t, &ca, now).await.ok();
+    let forged = Compartment::new(
+        CompartmentId::new("comp:forged"),
+        t.clone(),
+        a.clone(),
+        "in A's name",
+        now,
+    );
+    compartment::create(&store, &forged).await.ok();
+    anyhow::ensure!(
+        !visible_ids(&store)
+            .await
+            .contains(&"memory:priv".to_string()),
+        "B reads A's private memory"
+    );
+
+    store.invalidate().await?;
+    let Some(row) = compartment::get(&store, &t, &ca).await? else {
+        anyhow::bail!("A's compartment is gone");
+    };
+    anyhow::ensure!(
+        row.owner == a && row.name == "A private" && row.deleted_at.is_none(),
+        "A's compartment changed: owner {}, name {:?}, deleted {:?}",
+        row.owner.as_str(),
+        row.name,
+        row.deleted_at
+    );
+    anyhow::ensure!(
+        compartment::get(&store, &t, &CompartmentId::new("comp:forged"))
+            .await?
+            .is_none(),
+        "a compartment was created in A's name"
+    );
+
+    // The owner still can.
+    store.signin(&t, &a).await?;
+    compartment::create(
+        &store,
+        &Compartment::new(ca.clone(), t.clone(), a.clone(), "A renamed", now),
+    )
+    .await?;
+    store.invalidate().await?;
+    let Some(row) = compartment::get(&store, &t, &ca).await? else {
+        anyhow::bail!("A's compartment is gone after A renamed it");
+    };
+    anyhow::ensure!(
+        row.name == "A renamed",
+        "the owner's own write did not land"
+    );
+    Ok(())
+}
