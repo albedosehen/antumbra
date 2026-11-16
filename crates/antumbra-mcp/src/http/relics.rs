@@ -100,7 +100,7 @@ impl Guards {
 /// server was started with connection info, else one shared key, so a request
 /// through `oneshot` in a test, or behind a proxy that hides the peer, still
 /// meets everyone's bound.
-fn client_of(peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>) -> String {
+pub(super) fn client_of(peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>) -> String {
     match peer {
         Ok(ConnectInfo(addr)) => addr.ip().to_string(),
         Err(_) => "unknown".to_string(),
@@ -108,7 +108,7 @@ fn client_of(peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>) -> Strin
 }
 
 /// The answer to a request past its budget.
-fn too_many() -> Response {
+pub(super) fn too_many() -> Response {
     (
         StatusCode::TOO_MANY_REQUESTS,
         [
@@ -288,7 +288,7 @@ impl Format {
 }
 
 /// An error an export answers with, as the viewer reads it.
-fn problem(status: StatusCode, message: &str) -> Response {
+pub(super) fn problem(status: StatusCode, message: &str) -> Response {
     (
         status,
         [(header::CACHE_CONTROL, "no-store")],

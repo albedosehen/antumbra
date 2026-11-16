@@ -11,6 +11,7 @@
 //! - **penumbra** = shadows-in-training ([`shadow`])
 //! - **antumbra** = the counterfactual boundary, the ([`boundary`])
 
+pub mod adapter;
 pub mod behavior;
 pub mod boundary;
 pub mod calibrate;

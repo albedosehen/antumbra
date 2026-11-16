@@ -81,6 +81,8 @@ async fn state_serving(
         copal,
         pdf,
         relics: crate::http::relics::Guards::new(),
+        experts: crate::http::experts::Guards::new(),
+        source: None,
         profile: None,
         github: None,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -729,6 +731,7 @@ async fn live_notification_reaches_a_grantees_stream() {
     assert!(found, "grantee's SSE stream got the change; saw: {seen}");
 }
 
+mod experts;
 mod relics;
 mod shutdown;
 mod telemetry;

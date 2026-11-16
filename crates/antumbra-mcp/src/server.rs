@@ -58,6 +58,10 @@ pub struct McpServer {
     /// The serving engine the `answer` tool drives (route → serve through the
     /// expert's adapter). `None` = serving not configured (route-only surface).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
+    /// The server an expert placed on another machine has its adapter pulled
+    /// from, when `answer` routes to one. `None` = such an expert is not
+    /// served here.
+    source: Option<Arc<pull::ExpertSource>>,
     /// Where this session registers its peer on initialize, so live propagation
     /// can push shared-memory changes to it. `None` = no live delivery
     /// (stdio, route-only, or tests).
@@ -269,6 +273,7 @@ pub(crate) mod heavy;
 mod listing;
 mod params;
 mod provenance;
+pub(crate) mod pull;
 mod relics;
 mod rerank_cache;
 mod steward;
