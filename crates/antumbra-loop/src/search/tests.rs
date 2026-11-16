@@ -1,6 +1,6 @@
 use chrono::Utc;
 
-use antumbra_core::{Generation, RunId, ShadowId};
+use antumbra_core::{AntumbraError, Generation, Result, RunId, ShadowId};
 
 use super::*;
 
@@ -28,16 +28,17 @@ fn row(generation: u32, index: usize, r: TrainingRecipe, fitness: f32, evals: u3
 }
 
 #[test]
-fn the_learning_rate_is_placed_on_a_log_scale() {
+fn the_learning_rate_is_placed_on_a_log_scale() -> Result<()> {
     let space = RecipeSpace::default();
     let at = |lr: f64| space.to_unit(&recipe(lr, 1))[0];
     assert!((at(1e-5) - 0.0).abs() < 1e-12);
     assert!((at(1e-3) - 1.0).abs() < 1e-12);
     assert!((at(1e-4) - 0.5).abs() < 1e-12, "the log midpoint");
+    Ok(())
 }
 
 #[test]
-fn batch_sizes_snap_to_an_allowed_one_and_fixed_axes_are_not_searched() {
+fn batch_sizes_snap_to_an_allowed_one_and_fixed_axes_are_not_searched() -> Result<()> {
     let space = RecipeSpace::default();
     assert_eq!(space.dims(), 2, "the KL weight is fixed by default");
     assert_eq!(space.from_unit(&[0.5, 0.4]).batch_size, 2);
@@ -47,32 +48,35 @@ fn batch_sizes_snap_to_an_allowed_one_and_fixed_axes_are_not_searched() {
     let back = space.from_unit(&space.to_unit(&r));
     assert!((back.learning_rate - r.learning_rate).abs() < 1e-12);
     assert_eq!((back.batch_size, back.kl_beta), (4, 0.04));
+    Ok(())
 }
 
 /// One lucky evaluation does not beat a well-measured recipe that scored a
 /// little lower: the optimizer's curse, answered by shrinkage.
 #[test]
-fn a_lucky_single_evaluation_does_not_win() {
+fn a_lucky_single_evaluation_does_not_win() -> Result<()> {
     let lucky = row(0, 0, recipe(1e-3, 1), 0.9, 1);
     let measured = row(0, 1, recipe(1e-4, 2), 0.8, 4);
     let middling = row(0, 2, recipe(1e-5, 1), 0.2, 1);
     let history = [lucky, measured.clone(), middling];
-    let best = incumbent(&history, 1.0).expect("one of them");
+    let best = incumbent(&history, 1.0).ok_or_else(|| AntumbraError::other("no incumbent"))?;
     assert_eq!(best.shadow, measured.shadow);
+    Ok(())
 }
 
 #[test]
-fn the_first_member_is_the_incumbent_or_the_anchor() {
+fn the_first_member_is_the_incumbent_or_the_anchor() -> Result<()> {
     let policy = SearchPolicy::default();
     let anchor = recipe(1e-4, 1);
     assert_eq!(propose(&policy, &[], 0, anchor, &[])[0], Some(anchor));
     let good = recipe(3e-4, 4);
     let history = [row(0, 0, anchor, 0.3, 1), row(0, 1, good, 0.9, 1)];
     assert_eq!(propose(&policy, &history, 1, anchor, &[])[0], Some(good));
+    Ok(())
 }
 
 #[test]
-fn a_cohort_is_all_different_inside_the_space_and_reproducible() {
+fn a_cohort_is_all_different_inside_the_space_and_reproducible() -> Result<()> {
     let policy = SearchPolicy {
         cohort: 6,
         ..SearchPolicy::default()
@@ -96,10 +100,11 @@ fn a_cohort_is_all_different_inside_the_space_and_reproducible() {
         propose(&policy, &history, 1, recipe(1e-4, 1), &[]),
         "the same history and seed propose the same cohort"
     );
+    Ok(())
 }
 
 #[test]
-fn nothing_to_search_or_no_room_proposes_accordingly() {
+fn nothing_to_search_or_no_room_proposes_accordingly() -> Result<()> {
     let fixed = SearchPolicy {
         space: RecipeSpace {
             learning_rate: (1e-4, 1e-4),
@@ -114,6 +119,7 @@ fn nothing_to_search_or_no_room_proposes_accordingly() {
         ..SearchPolicy::default()
     };
     assert!(propose(&none, &[], 0, recipe(1e-4, 1), &[]).is_empty());
+    Ok(())
 }
 
 /// A landscape with one good region: learning rate near 3e-4, and larger
@@ -155,7 +161,7 @@ fn slots_before(history: &[RecipeRecord], generation: u32, cohort: usize) -> Vec
 
 /// `generations` of `policy`, observed with noise, and the recipe the search
 /// would take forward judged by its true fitness.
-fn searched_under(policy: &SearchPolicy, generations: u32, noise_width: f32) -> f32 {
+fn searched_under(policy: &SearchPolicy, generations: u32, noise_width: f32) -> Result<f32> {
     let mut noise = SplitMix(policy.seed.wrapping_add(1000));
     let mut history = Vec::new();
     for generation in 0..generations {
@@ -167,16 +173,14 @@ fn searched_under(policy: &SearchPolicy, generations: u32, noise_width: f32) -> 
             history.push(row(generation, i, r, observed, 1));
         }
     }
-    true_fitness(
-        &incumbent(&history, policy.prior_weight)
-            .expect("history")
-            .recipe,
-    )
+    let best = incumbent(&history, policy.prior_weight)
+        .ok_or_else(|| AntumbraError::other("no history to search"))?;
+    Ok(true_fitness(&best.recipe))
 }
 
 /// Six generations of four, observed with noise, and the recipe each method
 /// would take forward judged by its true fitness.
-fn searched(seed: u64) -> f32 {
+fn searched(seed: u64) -> Result<f32> {
     let policy = SearchPolicy {
         seed,
         ..SearchPolicy::default()
@@ -205,10 +209,10 @@ fn random(seed: u64) -> f32 {
 /// seeds: 0.898 against 0.882 on average, 0.891 against 0.840 at worst, with
 /// the true optimum at 0.900.
 #[test]
-fn the_search_beats_random_search_on_the_same_budget() {
+fn the_search_beats_random_search_on_the_same_budget() -> Result<()> {
     let seeds = 0..12u64;
     let n = seeds.clone().count() as f32;
-    let searched_runs: Vec<f32> = seeds.clone().map(searched).collect();
+    let searched_runs: Vec<f32> = seeds.clone().map(searched).collect::<Result<_>>()?;
     let random_runs: Vec<f32> = seeds.map(random).collect();
     let mean = |runs: &[f32]| runs.iter().sum::<f32>() / n;
     let worst = |runs: &[f32]| runs.iter().copied().fold(f32::MAX, f32::min);
@@ -220,13 +224,14 @@ fn the_search_beats_random_search_on_the_same_budget() {
         worst(&searched_runs) > worst(&random_runs),
         "searched {searched_runs:?} vs random {random_runs:?}"
     );
+    Ok(())
 }
 
 /// A recipe run in three generations is ranked on all three runs, so a
 /// newcomer's single run a little higher does not displace it. Ranked row by
 /// row, the newcomer would have won.
 #[test]
-fn a_recipe_run_again_is_ranked_on_all_its_runs() {
+fn a_recipe_run_again_is_ranked_on_all_its_runs() -> Result<()> {
     let steady = recipe(1e-4, 1);
     let newcomer = recipe(3e-4, 2);
     let history = [
@@ -238,7 +243,7 @@ fn a_recipe_run_again_is_ranked_on_all_its_runs() {
         row(2, 1, newcomer, 0.83, 1),
         row(2, 2, recipe(5e-5, 4), 0.37, 1),
     ];
-    let best = incumbent(&history, 1.0).expect("one of them");
+    let best = incumbent(&history, 1.0).ok_or_else(|| AntumbraError::other("no incumbent"))?;
     assert_eq!(best.recipe, steady);
     assert_eq!(best.generation.0, 2, "as its latest row");
     let newest = &history[5];
@@ -246,10 +251,11 @@ fn a_recipe_run_again_is_ranked_on_all_its_runs() {
     assert!((pooled_fitness(&history, &newcomer, 1.0) - alone).abs() < 1e-6);
     let row_by_row = |r: &RecipeRecord| shrunk_fitness(r, 2.0 / 3.0, 1.0);
     assert!(row_by_row(newest) > row_by_row(&history[4]));
+    Ok(())
 }
 
 #[test]
-fn slow_members_are_the_last_and_never_the_first() {
+fn slow_members_are_the_last_and_never_the_first() -> Result<()> {
     let policy = |cohort, slow| SearchPolicy {
         cohort,
         slow,
@@ -264,10 +270,11 @@ fn slow_members_are_the_last_and_never_the_first() {
         [1, 2, 3],
         "the first carries the incumbent"
     );
+    Ok(())
 }
 
 #[test]
-fn the_fast_interval_lengthens_over_the_run_and_stays_short_of_the_slow() {
+fn the_fast_interval_lengthens_over_the_run_and_stays_short_of_the_slow() -> Result<()> {
     let policy = SearchPolicy {
         slow_interval: 3,
         anneal: 8,
@@ -288,6 +295,7 @@ fn the_fast_interval_lengthens_over_the_run_and_stays_short_of_the_slow() {
         ..policy
     };
     assert_eq!(one.fast_interval(100), 1);
+    Ok(())
 }
 
 fn slow_policy() -> SearchPolicy {
@@ -303,7 +311,7 @@ fn slow_policy() -> SearchPolicy {
 /// much better the incumbent is: the fast members cannot truncate it. The fast
 /// member is proposed afresh.
 #[test]
-fn a_slow_member_keeps_its_recipe_until_its_interval_has_passed() {
+fn a_slow_member_keeps_its_recipe_until_its_interval_has_passed() -> Result<()> {
     let policy = slow_policy();
     let (good, fast, poor) = (recipe(3e-4, 4), recipe(1e-5, 2), recipe(1e-3, 1));
     let history = [
@@ -330,12 +338,13 @@ fn a_slow_member_keeps_its_recipe_until_its_interval_has_passed() {
     assert!(kept[1].is_some_and(|r| r != fast), "{kept:?}");
     let due = propose(&policy, &history, 3, recipe(1e-4, 1), &slots(3));
     assert!(due[2].is_some_and(|r| r != poor), "{due:?}");
+    Ok(())
 }
 
 /// When a slow member's recipe has become the incumbent, it is not run twice:
 /// the slow member keeps it, and the first member is proposed another.
 #[test]
-fn an_incumbent_a_slow_member_holds_is_not_run_twice() {
+fn an_incumbent_a_slow_member_holds_is_not_run_twice() -> Result<()> {
     let policy = slow_policy();
     let (held, other) = (recipe(3e-4, 4), recipe(1e-5, 1));
     let history = [
@@ -363,19 +372,22 @@ fn an_incumbent_a_slow_member_holds_is_not_run_twice() {
         1,
         "{cohort:?}"
     );
+    Ok(())
 }
 
 /// Held members are read back from the rows, and a run of the full policy
 /// keeps the slow member's recipe for exactly its interval.
 #[test]
-fn a_run_holds_the_slow_members_recipe_for_its_interval() {
+fn a_run_holds_the_slow_members_recipe_for_its_interval() -> Result<()> {
     let policy = slow_policy();
     let mut history = Vec::new();
     for generation in 0..7 {
         let slots = slots_before(&history, generation, policy.cohort);
         let cohort = propose(&policy, &history, generation, recipe(1e-4, 1), &slots);
         for (i, r) in cohort.into_iter().enumerate() {
-            let r = r.expect("room in the space");
+            let Some(r) = r else {
+                return Err(AntumbraError::other("no room in the space"));
+            };
             history.push(row(generation, i, r, true_fitness(&r), 1));
         }
     }
@@ -388,6 +400,7 @@ fn a_run_holds_the_slow_members_recipe_for_its_interval() {
     assert!(slow[0] == slow[1] && slow[1] == slow[2], "{slow:?}");
     assert!(slow[3] == slow[4] && slow[4] == slow[5], "{slow:?}");
     assert!(slow[2] != slow[3] && slow[5] != slow[6], "{slow:?}");
+    Ok(())
 }
 
 /// With a slow member and the fast interval annealed, the search still earns
@@ -396,7 +409,7 @@ fn a_run_holds_the_slow_members_recipe_for_its_interval() {
 /// alone at every noise tried (0.1, 0.3 and 0.5 wide): this landscape does not
 /// move between generations, which is where greed would cost.
 #[test]
-fn the_search_with_a_slow_cohort_still_beats_random_search() {
+fn the_search_with_a_slow_cohort_still_beats_random_search() -> Result<()> {
     let runs: Vec<f32> = (0..12u64)
         .map(|seed| {
             let policy = SearchPolicy {
@@ -407,7 +420,7 @@ fn the_search_with_a_slow_cohort_still_beats_random_search() {
             };
             searched_under(&policy, 6, 0.06)
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let random_runs: Vec<f32> = (0..12u64).map(random).collect();
     let mean = |r: &[f32]| r.iter().sum::<f32>() / r.len() as f32;
     let worst = |r: &[f32]| r.iter().copied().fold(f32::MAX, f32::min);
@@ -419,4 +432,5 @@ fn the_search_with_a_slow_cohort_still_beats_random_search() {
         worst(&runs) > worst(&random_runs),
         "{runs:?} vs {random_runs:?}"
     );
+    Ok(())
 }

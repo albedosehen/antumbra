@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! A run the process left mid-generation goes on. Found by the first GPU run
 //! of the recipe search: a cohort member ran out of GPU memory in `Explore`,
 //! and the run could never be resumed, because every generation opens by
@@ -9,9 +7,10 @@ use chrono::Utc;
 
 use antumbra_core::generational::LoopState;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
-use antumbra_core::{ExpertId, Generation, Result, RunId};
+use antumbra_core::{AntumbraError, ExpertId, Generation, Result, RunId};
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{expert, generation};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 /// Leave `run`'s head in `state` at `generation`, as a process killed there
@@ -25,7 +24,7 @@ async fn interrupted(store: &Store, run: &RunId, at: u32, state: LoopState) -> R
 
 #[tokio::test]
 async fn a_generation_interrupted_while_training_is_run_again() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let run = RunId::new("run:explore");
     interrupted(&store, &run, 0, LoopState::Explore).await?;
     let trainer = ScriptedTrainer::graduating();
@@ -39,7 +38,9 @@ async fn a_generation_interrupted_while_training_is_run_again() -> Result<()> {
         Generation(0),
         "generation 0 ran again"
     );
-    let head = generation::load_head(&store, &run).await?.expect("a head");
+    let head = generation::load_head(&store, &run)
+        .await?
+        .ok_or_else(|| AntumbraError::other("the run has no head"))?;
     assert_eq!(
         (head.generation, head.state),
         (Generation(1), LoopState::Grow)
@@ -51,7 +52,7 @@ async fn a_generation_interrupted_while_training_is_run_again() -> Result<()> {
 /// interrupted there is finished, not trained again.
 #[tokio::test]
 async fn a_generation_interrupted_after_its_decision_is_finished() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let run = RunId::new("run:consolidate");
     interrupted(&store, &run, 0, LoopState::Consolidate).await?;
     let trainer = ScriptedTrainer::graduating();
@@ -60,7 +61,9 @@ async fn a_generation_interrupted_after_its_decision_is_finished() -> Result<()>
         .run_until(&run, 1)
         .await?;
     assert!(reports.is_empty(), "nothing was trained again");
-    let head = generation::load_head(&store, &run).await?.expect("a head");
+    let head = generation::load_head(&store, &run)
+        .await?
+        .ok_or_else(|| AntumbraError::other("the run has no head"))?;
     assert_eq!(head.generation, Generation(1));
     Ok(())
 }
@@ -70,7 +73,7 @@ async fn a_generation_interrupted_after_its_decision_is_finished() -> Result<()>
 /// expert for it, not two.
 #[tokio::test]
 async fn a_generation_run_again_after_graduating_leaves_one_expert() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let run = RunId::new("run:twice");
     let trainer = ScriptedTrainer::graduating();
     let embedder = FixedEmbedder::new(8);

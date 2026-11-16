@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Leave-one-in admission through the loop: a candidate that
 //! beats the generalist on its own tasks is still turned away when adding it
 //! makes the gate escalate others, because the population does worse on the
@@ -16,10 +14,12 @@ use antumbra_core::ports::{
 use antumbra_core::slice::Holdout;
 use antumbra_core::testing::ScriptedTrainer;
 use antumbra_core::{
-    cosine_similarity, Expert, ExpertId, Generation, LearnedRouter, Result, RouterExpert, RunId,
+    cosine_similarity, AntumbraError, Expert, ExpertId, Generation, LearnedRouter, Result,
+    RouterExpert, RunId,
 };
 use antumbra_loop::{Admission, AdmissionPolicy, GenerationLoop, LoopConfig};
 use antumbra_store::repo::{expert, router};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 const DIM: usize = 4;
@@ -136,7 +136,7 @@ impl Trainer for Routing {
 }
 
 async fn population(card: serde_json::Value) -> Result<Store> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(
         &store,
         &Expert {
@@ -207,12 +207,14 @@ async fn under_a_retrained_router_the_tasks_between_the_two_are_routed() -> Resu
             assert_eq!(id, &generalist);
             assert!((s - similarity).abs() < 1e-4, "{s} vs {similarity}");
         }
-        other => panic!("not admitted: {other:?}"),
+        other => return Err(AntumbraError::other(format!("not admitted: {other:?}"))),
     }
     assert!(reports[0].graduated);
     // Serving routes under the router admission was judged with, stored as
     // soon as the specialist joined.
-    let stored = router::load(&store).await?.expect("the gate was retrained");
+    let stored = router::load(&store)
+        .await?
+        .ok_or_else(|| AntumbraError::other("the gate was not retrained"))?;
     assert_eq!(stored.experts.len(), 2);
     assert!(stored.experts.iter().any(|e| e.id == generalist));
     Ok(())

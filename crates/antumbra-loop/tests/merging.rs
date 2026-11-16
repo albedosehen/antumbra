@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Conservative merging through the loop: the most similar pair
 //! of active shared experts is merged only when their adapters are siblings and
 //! the merge scores at least as well as the better of them; both are then
@@ -14,9 +12,12 @@ use antumbra_core::ports::{
 };
 use antumbra_core::slice::Holdout;
 use antumbra_core::testing::ScriptedTrainer;
-use antumbra_core::{Expert, ExpertId, ExpertStatus, Generation, Result, RunId, TransitionCause};
+use antumbra_core::{
+    AntumbraError, Expert, ExpertId, ExpertStatus, Generation, Result, RunId, TransitionCause,
+};
 use antumbra_loop::{GenerationLoop, LoopConfig, Merge, MergePolicy};
 use antumbra_store::repo::{expert, lifecycle};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 const DIM: usize = 4;
@@ -97,7 +98,7 @@ fn shared(id: &str, capability: Vec<f32>) -> Expert {
 }
 
 async fn siblings() -> Result<Store> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(&store, &shared("expert:one", vec![1.0, 0.0, 0.0, 0.0])).await?;
     expert::insert(&store, &shared("expert:two", vec![0.95, 0.31, 0.0, 0.0])).await?;
     Ok(store)
@@ -138,7 +139,7 @@ async fn siblings_that_merge_at_no_cost_become_one_and_are_archived() -> Result<
         ..
     }) = merge
     else {
-        panic!("merged, got {merge:?}");
+        return Err(AntumbraError::other(format!("merged, got {merge:?}")));
     };
     assert_eq!(into, ExpertId::new("expert:run:merge:g0:merged"));
     assert_eq!(
@@ -162,7 +163,7 @@ async fn siblings_that_merge_at_no_cost_become_one_and_are_archived() -> Result<
     assert_eq!(routable, std::slice::from_ref(&into));
     let card = expert::get(&store, &into)
         .await?
-        .expect("the merged expert");
+        .ok_or_else(|| AntumbraError::other("the merged expert is not in the population"))?;
     assert_eq!(card.capability_card["merged_from"][1], "expert:two");
     assert_eq!(
         card.capability_card["exemplars"].as_array().map(Vec::len),
@@ -204,7 +205,7 @@ async fn a_merge_that_scores_below_the_better_original_is_not_made() -> Result<(
     )
     .await?;
     let Some(Merge::Costly { merged, better, .. }) = merge else {
-        panic!("costly, got {merge:?}");
+        return Err(AntumbraError::other(format!("costly, got {merge:?}")));
     };
     assert_eq!((merged, better), (0.55, 0.6));
     assert_eq!(lifecycle::routable(&store).await?.len(), 2);
