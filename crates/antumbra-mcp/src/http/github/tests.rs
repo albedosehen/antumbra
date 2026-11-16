@@ -44,6 +44,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         decider: None,
         copal: None,
         pdf: None,
+        relics: crate::http::relics::Guards::new(),
         profile: None,
         github: github.map(Arc::new),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),

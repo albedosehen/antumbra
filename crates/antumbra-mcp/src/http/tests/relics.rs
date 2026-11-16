@@ -5,10 +5,15 @@
 
 use super::*;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
 use antumbra_core::{CompartmentId, Relic, RelicVersion, Visibility};
 use antumbra_store::repo::relic;
 
-const ORIGIN: &str = "http://10.0.0.130:8083";
+use crate::http::relics::{public_row, EXPORTS_PER_CLIENT, PUBLIC_READS_PER_CLIENT};
+
+const ORIGIN: &str = "http://render.example:8083";
 
 fn page(slug: &str, visibility: Visibility) -> Relic {
     let now = chrono::Utc::now();
@@ -125,6 +130,171 @@ async fn the_pages_are_served_to_anyone_and_frame_only_the_render_origin() {
     }
 }
 
+// On a per-identity state the owner connection is no one else's, so the public
+// lookup reads it without the auth lock: it answers while another task holds
+// the lock. On the shared-connection state it must wait, since that connection
+// is every identity's.
+#[tokio::test]
+async fn a_public_lookup_waits_on_the_lock_only_where_the_connection_is_shared(
+) -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    relic::put(&store, &page("open", Visibility::Public)).await?;
+    let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
+    let wait = Duration::from_millis(300);
+
+    let st = state_per_identity(store.clone(), embedder.clone(), None).await;
+    let _held = st.auth.lock().await;
+    let found = tokio::time::timeout(wait, public_row(&st, "open")).await;
+    anyhow::ensure!(
+        matches!(found, Ok(Some(_))),
+        "a per-identity lookup answered neither in time nor with the relic"
+    );
+
+    let st = state_archived(store, embedder, None).await;
+    let _held = st.auth.lock().await;
+    let found = tokio::time::timeout(wait, public_row(&st, "open")).await;
+    anyhow::ensure!(
+        found.is_err(),
+        "a shared-connection lookup must wait for the lock"
+    );
+    Ok(())
+}
+
+// One client may read the public lookup its burst's worth at once; the next
+// request is refused with a retry hint, before the lookup does any work.
+#[tokio::test]
+async fn public_lookups_past_a_clients_burst_are_refused() -> anyhow::Result<()> {
+    let app = app().await;
+    for n in 0..PUBLIC_READS_PER_CLIENT.burst {
+        let res = get(&app, "/relic/open/public").await;
+        anyhow::ensure!(res.status() == StatusCode::OK, "request {n}");
+    }
+    let refused = get(&app, "/relic/open/public").await;
+    anyhow::ensure!(refused.status() == StatusCode::TOO_MANY_REQUESTS);
+    anyhow::ensure!(refused.headers().get(header::RETRY_AFTER).is_some());
+    anyhow::ensure!(refused.headers()[header::CACHE_CONTROL] == "no-store");
+    Ok(())
+}
+
+/// A renderer that prints every page as the same few bytes and counts the
+/// pages it was sent: a socket answering the one POST the renderer makes.
+async fn fake_renderer() -> anyhow::Result<(String, Arc<AtomicUsize>)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let base = format!("http://{}", listener.local_addr()?);
+    let prints = Arc::new(AtomicUsize::new(0));
+    let counted = prints.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let counted = counted.clone();
+            tokio::spawn(async move {
+                // Read the head, then as much body as it declares, so the
+                // client is not cut off mid-upload.
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let (head_end, declared) = loop {
+                    let Ok(n) = socket.read(&mut chunk).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(at) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..at]).to_ascii_lowercase();
+                        let declared = head
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        break (at + 4, declared);
+                    }
+                };
+                while buf.len() < head_end + declared {
+                    match socket.read(&mut chunk).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                counted.fetch_add(1, Ordering::SeqCst);
+                let body = b"%PDF-1.4 printed";
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/pdf\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                if socket.write_all(head.as_bytes()).await.is_err()
+                    || socket.write_all(body).await.is_err()
+                {
+                    return;
+                }
+                // The client may have gone already; there is nothing left to
+                // do about it either way.
+                socket.shutdown().await.ok();
+            });
+        }
+    });
+    Ok((base, prints))
+}
+
+// A version is printed once. The second request for it is answered from the
+// copy kept, with no second print and no second read from copal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pdf_is_printed_once_per_version() -> anyhow::Result<()> {
+    let (base, prints) = fake_renderer().await?;
+    let renderer = Arc::new(crate::pdf::PdfRenderer::new(&base)?);
+    let (app, pages) = exporting_with(Some(renderer)).await?;
+    for n in 0..2 {
+        let res = get_as(&app, "/relic/open/export?format=pdf", None).await;
+        anyhow::ensure!(res.status() == StatusCode::OK, "export {n}");
+        anyhow::ensure!(
+            res.headers()[header::CONTENT_TYPE] == "application/pdf",
+            "export {n}"
+        );
+        anyhow::ensure!(
+            res.headers()[header::CONTENT_DISPOSITION]
+                .to_str()?
+                .contains("open-v1.pdf"),
+            "export {n}"
+        );
+        let body = text_of(res).await;
+        anyhow::ensure!(body.starts_with("%PDF"), "export {n}: {body}");
+    }
+    anyhow::ensure!(prints.load(Ordering::SeqCst) == 1, "printed once");
+    let reads = match pages.reads.lock() {
+        Ok(reads) => reads.len(),
+        Err(poisoned) => poisoned.into_inner().len(),
+    };
+    anyhow::ensure!(reads == 1, "copal read once, got {reads}");
+    Ok(())
+}
+
+// A print is refused past a client's burst before any work is done for it:
+// here, before the renderer is even looked for.
+#[tokio::test]
+async fn pdf_exports_past_a_clients_burst_are_refused_before_any_work() -> anyhow::Result<()> {
+    let (app, pages) = exporting().await;
+    for n in 0..EXPORTS_PER_CLIENT.burst {
+        let res = get_as(&app, "/relic/open/export?format=pdf", None).await;
+        anyhow::ensure!(res.status() == StatusCode::NOT_IMPLEMENTED, "export {n}");
+    }
+    let refused = get_as(&app, "/relic/open/export?format=pdf", None).await;
+    anyhow::ensure!(refused.status() == StatusCode::TOO_MANY_REQUESTS);
+    let reads = match pages.reads.lock() {
+        Ok(reads) => reads.len(),
+        Err(poisoned) => poisoned.into_inner().len(),
+    };
+    anyhow::ensure!(reads == 0, "nothing was read from copal");
+    // The other formats are not budgeted.
+    let html = get_as(&app, "/relic/open/export?format=html", None).await;
+    anyhow::ensure!(html.status() == StatusCode::OK);
+    Ok(())
+}
+
 const PAGE: &str = "<!doctype html><title>Plan</title><h1>The plan</h1>\
     <p>Cut <strong>65</strong> to 22.</p><script>steal()</script>";
 
@@ -173,14 +343,21 @@ impl antumbra_copal::CopalTransport for Pages {
 /// A public relic `open`, and a private relic `closed` in lily's own
 /// compartment, over a copal that serves [`PAGE`].
 async fn exporting() -> (Router, Arc<Pages>) {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    match exporting_with(None).await {
+        Ok(ready) => ready,
+        Err(e) => panic!("the exporting fixture failed: {e}"),
+    }
+}
+
+/// As [`exporting`], printing through `pdf` when one is given.
+async fn exporting_with(
+    pdf: Option<Arc<crate::pdf::PdfRenderer>>,
+) -> anyhow::Result<(Router, Arc<Pages>)> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
     let compartment =
         crate::provision_identity(&store, &TenantId::new("ws:org"), &UserId::new("user:lily"))
-            .await
-            .unwrap();
-    relic::put(&store, &page("open", Visibility::Public))
-        .await
-        .unwrap();
+            .await?;
+    relic::put(&store, &page("open", Visibility::Public)).await?;
     relic::put(
         &store,
         &Relic {
@@ -188,24 +365,22 @@ async fn exporting() -> (Router, Arc<Pages>) {
             ..page("closed", Visibility::Private)
         },
     )
-    .await
-    .unwrap();
+    .await?;
     let pages = Arc::new(Pages::default());
-    let copal = antumbra_copal::CopalArchive::with_transport(
-        "127.0.0.1:9",
-        antumbra_copal::CopalTenancy::Shared("antumbra".into()),
-        pages.clone(),
-    )
-    .with_render_origin(Some(ORIGIN.into()));
-    let app = router(
-        state_archived(
-            store,
-            Arc::new(FixedEmbedder::new(EMBED_DIM)),
-            Some(Arc::new(copal)),
+    let copal = Arc::new(
+        antumbra_copal::CopalArchive::with_transport(
+            "127.0.0.1:9",
+            antumbra_copal::CopalTenancy::Shared("antumbra".into()),
+            pages.clone(),
         )
-        .await,
+        .with_render_origin(Some(ORIGIN.into())),
     );
-    (app, pages)
+    let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
+    let state = match pdf {
+        Some(pdf) => state_printing(store, embedder, Some(copal), pdf).await,
+        None => state_archived(store, embedder, Some(copal)).await,
+    };
+    Ok((router(state), pages))
 }
 
 async fn get_as(app: &Router, uri: &str, auth: Option<&str>) -> Response {
