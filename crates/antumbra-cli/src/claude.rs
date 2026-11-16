@@ -27,6 +27,7 @@ pub mod mcp_stdio;
 pub mod reanchor;
 pub mod run;
 pub mod skills;
+pub mod surface_args;
 pub mod version;
 
 /// The Claude Code release the rules below were verified against, the day, and
