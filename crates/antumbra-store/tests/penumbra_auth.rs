@@ -9,10 +9,10 @@ use chrono::Utc;
 
 use antumbra_core::router::{LearnedRouter, RouterExpert};
 use antumbra_core::{
-    BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Memory, MemoryNetwork, TenantId,
-    UserId,
+    BoundaryId, Compartment, CompartmentId, Expert, ExpertId, FailureBoundary, Generation, Memory,
+    MemoryNetwork, TenantId, UserId,
 };
-use antumbra_store::repo::{boundary, expert, memory, principal, router};
+use antumbra_store::repo::{boundary, compartment, expert, memory, principal, router};
 use antumbra_store::Store;
 
 fn trace(id: &str, tenant: &str, content: &str, embed: Vec<f32>) -> Memory {
@@ -209,4 +209,65 @@ async fn engine_enforces_tenant_isolation_under_record_auth() {
     // Drop auth → owner view restored, both tenants visible again.
     store.invalidate().await.unwrap();
     assert_eq!(memory::all_unscoped(&store).await.unwrap().len(), 2);
+}
+
+/// The delete rule is the write rule: a member may hard-delete only what
+/// they may write, so a memory in another member's private compartment, which
+/// they cannot even read, survives their `DELETE`. Its owner's does not.
+#[tokio::test]
+async fn a_member_cannot_hard_delete_a_private_memory_they_cannot_read() -> antumbra_core::Result<()>
+{
+    let store = Store::connect_memory(4).await?;
+    let tenant = TenantId::new("ws:org");
+    let (lily, oslo) = (UserId::new("user:lily"), UserId::new("user:oslo"));
+    principal::provision(&store, &tenant, &lily).await?;
+    principal::provision(&store, &tenant, &oslo).await?;
+    let now = Utc::now();
+    let private = CompartmentId::new("comp:lily-private");
+    compartment::create(
+        &store,
+        &Compartment::new(
+            private.clone(),
+            tenant.clone(),
+            lily.clone(),
+            "lily private",
+            now,
+        ),
+    )
+    .await?;
+    let mut salary = Memory::new(
+        "memory:salary",
+        tenant.clone(),
+        MemoryNetwork::World,
+        "lily's salary review",
+        0.9,
+        now,
+    );
+    salary.compartment = Some(private);
+    salary.embedding = Some(vec![1.0, 0.0, 0.0, 0.0]);
+    memory::upsert(&store, &salary).await?;
+
+    // oslo cannot read it, and a hard delete under oslo's session removes
+    // nothing: the engine leaves the rows the rule excludes, without an error.
+    store.signin(&tenant, &oslo).await?;
+    assert!(
+        memory::get(&store, &tenant, &salary.id).await?.is_none(),
+        "oslo cannot read lily's private memory"
+    );
+    memory::delete(&store, &tenant, &salary.id).await?;
+    store.invalidate().await?;
+    assert!(
+        memory::get(&store, &tenant, &salary.id).await?.is_some(),
+        "the memory survived a member's hard delete"
+    );
+
+    // lily, who may write it, may delete it.
+    store.signin(&tenant, &lily).await?;
+    memory::delete(&store, &tenant, &salary.id).await?;
+    store.invalidate().await?;
+    assert!(
+        memory::get(&store, &tenant, &salary.id).await?.is_none(),
+        "the owner's hard delete lands"
+    );
+    Ok(())
 }
