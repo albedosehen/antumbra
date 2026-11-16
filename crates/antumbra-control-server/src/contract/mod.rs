@@ -89,6 +89,9 @@ pub fn contract() -> Contract {
 /// demoted in the store still fails the gate here. Only the field lists are
 /// contract-side, and they can drift only in the direction the gate cannot
 /// see anyway on a schemaless table: a column the repo stopped writing.
+// The panic is the gate: this runs only in the drift test, and a missing
+// table must stop it by name rather than pass as a silently thinner schema.
+#[allow(clippy::panic)]
 pub fn schema() -> Vec<TableDefinition> {
     let mut tables = antumbra_store::schema::tables(antumbra_store::EMBED_DIM as u32);
     for (name, columns) in [
@@ -116,6 +119,7 @@ pub fn schema() -> Vec<TableDefinition> {
 /// Finalize a field builder. The names in this module are static and valid,
 /// so a refusal is a typo in a sibling file, worth stopping the build over;
 /// reserved-word warnings are the schema layer's concern, not the wire's.
+#[allow(clippy::expect_used)]
 fn built(field: FieldBuilder) -> FieldDefinition {
     field
         .build_unchecked()
