@@ -81,6 +81,7 @@ impl McpServer {
             copal: None,
             profile: None,
             session: None,
+            shared_bind: None,
             decider: None,
             steward: Arc::new(Steward::default()),
         }
@@ -144,6 +145,36 @@ impl McpServer {
     pub fn with_session_keeper(mut self, keeper: Arc<crate::session::SessionKeeper>) -> Self {
         self.session = Some(keeper);
         self
+    }
+
+    /// Make `store` a connection shared with other identities, serialized by
+    /// `lock`: every tool call signs it in as this session's identity under
+    /// the lock and holds the lock until the tool returns ([`Self::bound`]).
+    #[must_use]
+    pub fn with_shared_bind(mut self, lock: Arc<tokio::sync::Mutex<()>>) -> Self {
+        self.shared_bind = Some(lock);
+        self
+    }
+
+    /// Bind a shared store to this session's identity for one tool call. On a
+    /// connection of the session's own there is nothing to do. On a shared one
+    /// the lock is taken, the connection signed in as `(tenant, user)`, and the
+    /// guard handed back for the caller to hold across the tool, so the
+    /// signin travels with the call rather than with the HTTP request that
+    /// carried it: rmcp runs a streamed call on the session's task after that
+    /// request has been answered, when a request-level bind is already gone.
+    pub(crate) async fn bound(
+        &self,
+    ) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>, ErrorData> {
+        let Some(lock) = &self.shared_bind else {
+            return Ok(None);
+        };
+        let guard = lock.clone().lock_owned().await;
+        self.store
+            .signin(&self.tenant, &self.user)
+            .await
+            .map_err(|e| ErrorData::internal_error(format!("signin failed: {e}"), None))?;
+        Ok(Some(guard))
     }
 
     /// Refresh the record session when it is about to expire, before a tool
@@ -452,6 +483,9 @@ impl McpServer {
             self.check_profile(name)?;
         }
         self.keep_session().await?;
+        // Held to the end of the dispatch: a shared connection stays this
+        // caller's for the whole tool.
+        let _bound = self.bound().await?;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
         macro_rules! dispatch {
@@ -590,6 +624,9 @@ impl ServerHandler for McpServer {
         let result = async {
             server.check_profile(&request.name)?;
             server.keep_session().await?;
+            // Held until the router returns: a shared connection stays this
+            // caller's for the whole tool.
+            let _bound = server.bound().await?;
             let tcc = rmcp::handler::server::tool::ToolCallContext::new(server, request, context);
             Self::tool_router().call(tcc).await
         }
@@ -620,14 +657,20 @@ impl ServerHandler for McpServer {
         // happen here -- the HTTP layer's signin runs on a different handle and a
         // cloned remote connection does not share it. Signing in as the record
         // scopes the engine ACL for every tool call in this session.
-        if let Err(e) = self.store.signin(&self.tenant, &self.user).await {
-            eprintln!(
-                "antumbra-mcp: session signin failed for {}/{}: {e}",
-                self.tenant.as_str(),
-                self.user.as_str()
-            );
-        } else if let Some(keeper) = &self.session {
-            keeper.mark_signed_in().await;
+        //
+        // Not on a shared connection: there each tool call binds it for itself
+        // ([`Self::bound`]), and a signin here, off the lock, could land
+        // between another identity's signin and its tool.
+        if self.shared_bind.is_none() {
+            if let Err(e) = self.store.signin(&self.tenant, &self.user).await {
+                eprintln!(
+                    "antumbra-mcp: session signin failed for {}/{}: {e}",
+                    self.tenant.as_str(),
+                    self.user.as_str()
+                );
+            } else if let Some(keeper) = &self.session {
+                keeper.mark_signed_in().await;
+            }
         }
         if let Some(registry) = &self.registry {
             let identity = crate::auth::Identity {
