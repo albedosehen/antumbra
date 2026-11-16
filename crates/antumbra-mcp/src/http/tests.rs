@@ -84,6 +84,7 @@ async fn state_serving(
         relics: crate::http::relics::Guards::new(),
         profile: None,
         github: None,
+        revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
@@ -707,3 +708,71 @@ mod relics;
 mod shutdown;
 mod telemetry;
 mod written_from;
+
+/// A token the operator revoked is refused like an expired one, on every
+/// route that takes a token, once the denylist has been read; the same token
+/// passed before.
+#[tokio::test]
+async fn a_revoked_token_is_refused_like_an_expired_one() -> anyhow::Result<()> {
+    use antumbra_store::repo::revocation;
+    let st = state().await?;
+    // The real mint, not the tests' bare helper: a revocation names the id a
+    // minted token carries.
+    let tok = antumbra_auth::mint_hs256(
+        b"test-secret",
+        "ws:rev",
+        "user:rev",
+        std::time::Duration::from_secs(3600),
+    )?;
+    let Some(jti) = antumbra_auth::unverified::jti(&tok) else {
+        anyhow::bail!("a minted token carries an id");
+    };
+    let list = r#"{"tool":"list_memories","arguments":{}}"#;
+    let before = router(st.clone())
+        .oneshot(call_request(Some(&tok), list)?)
+        .await?
+        .status();
+    anyhow::ensure!(
+        before != StatusCode::UNAUTHORIZED,
+        "the token passed before: {before}"
+    );
+
+    {
+        let _guard = st.auth.lock().await;
+        st.store.signin_root().await?;
+        revocation::revoke(
+            &st.store,
+            &jti,
+            chrono::Utc::now() + chrono::Duration::days(1),
+            Some("laptop lost".into()),
+        )
+        .await?;
+    }
+    anyhow::ensure!(super::revocation::refresh(&st).await? == 1);
+
+    let rest = router(st.clone())
+        .oneshot(call_request(Some(&tok), list)?)
+        .await?
+        .status();
+    anyhow::ensure!(rest == StatusCode::UNAUTHORIZED, "/mcp/call: {rest}");
+    let stream = router(st.clone())
+        .oneshot(mcp_request(&tok, None, "{}".into())?)
+        .await?
+        .status();
+    anyhow::ensure!(stream == StatusCode::UNAUTHORIZED, "/mcp: {stream}");
+    let console = router(st.clone())
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/console/snapshot")
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"))
+                .body(Body::empty())?,
+        )
+        .await?
+        .status();
+    anyhow::ensure!(
+        console == StatusCode::UNAUTHORIZED,
+        "/console/snapshot: {console}"
+    );
+    Ok(())
+}

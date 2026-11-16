@@ -332,7 +332,7 @@ async fn export(
     };
     let relic = match headers.get(header::AUTHORIZATION) {
         Some(value) => {
-            let Ok(identity) = state.verifier.verify_header(value.to_str().ok()) else {
+            let Ok(identity) = state.identity_of(value.to_str().ok()) else {
                 return problem(StatusCode::UNAUTHORIZED, "the token was refused");
             };
             match signed_in_row(&state, &identity, &slug).await {

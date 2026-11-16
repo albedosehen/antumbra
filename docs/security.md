@@ -56,6 +56,6 @@ The controls above hold for every deployment. These hold only where the operator
 
 ## Operational recommendations
 
-- Mint short-TTL, scope-bound JWTs for sensitive tenants; rotate the RS256 key at the auth service and restart to revoke.
+- Tokens are short-lived by default: a hosted token lives seven days (`antumbra-control-server --token-ttl-days`), a hook token a year (`antumbra-mcp --mint-token --token-ttl-days`). `antumbra revoke-token` (the token saved on this machine, `--token-file`, or `--jti`) ends one before then: its id goes on the store's `revoked_token` list, and every networked server refuses it within thirty seconds. Rotating the RS256 key at the auth service still ends every token at once. `antumbra setup check` says when the saved token is about to expire.
 - Only run `--corpus` files you trust (they are executable config); sandbox the verifier if a corpus may come from an untrusted source.
 - Keep the embeddings endpoint operator-controlled; if it ever becomes request-selectable, add egress validation.

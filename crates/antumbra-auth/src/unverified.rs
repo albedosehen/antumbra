@@ -29,6 +29,14 @@ pub fn tenant(token: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The token's own id (`jti`), which a revocation names.
+pub fn jti(token: &str) -> Option<String> {
+    claims(token)?
+        .get("jti")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 /// When the token expires, as seconds since the epoch.
 pub fn expires(token: &str) -> Option<i64> {
     claims(token)?.get("exp").and_then(Value::as_i64)

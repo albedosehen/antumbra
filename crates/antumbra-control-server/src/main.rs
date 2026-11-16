@@ -116,8 +116,11 @@ struct ServeArgs {
     /// Audience claim on issued tokens (must match the MCP server's verifier).
     #[arg(long, env = "ANTUMBRA_AUDIENCE", default_value = "antumbra")]
     audience: String,
-    /// Issued bearer-token lifetime, in days.
-    #[arg(long, default_value_t = 30)]
+    /// Issued bearer-token lifetime, in days. A week: a token saved on a lost
+    /// machine stays valid at most that long, and `antumbra revoke-token`
+    /// ends one sooner; `antumbra setup check` says when a token is about to
+    /// expire.
+    #[arg(long, default_value_t = 7)]
     token_ttl_days: u64,
     /// Magic-link lifetime, in minutes.
     #[arg(long, default_value_t = 15)]

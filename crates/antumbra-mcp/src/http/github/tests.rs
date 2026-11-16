@@ -48,6 +48,7 @@ async fn state(github: Option<GithubConfig>) -> anyhow::Result<Arc<HttpState>> {
         relics: crate::http::relics::Guards::new(),
         profile: None,
         github: github.map(Arc::new),
+        revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),

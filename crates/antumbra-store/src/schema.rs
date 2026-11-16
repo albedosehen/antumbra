@@ -435,6 +435,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // rows self-expire out at the next sweep. Owner-only, like the rest of
         // the control-plane tables.
         table_schema(tables::MAGIC_LINK_USE).with_mode(TableMode::Schemaless),
+        // Revoked token ids (keyed by `jti`), each kept until the token it
+        // names would have expired: the denylist every networked server reads
+        // in the owner view. Owner-only, like the rest of the control-plane
+        // tables.
+        table_schema(tables::REVOKED_TOKEN).with_mode(TableMode::Schemaless),
         // Expert lifecycle: every status change, appended and
         // numbered per expert. Readable where its expert is, through the same
         // owner rule, so no session sees an expert without its moves.

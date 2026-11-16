@@ -422,6 +422,11 @@ pub enum Command {
         #[arg(long)]
         note: Option<String>,
     },
+    /// End a token before it expires: the one saved on this machine, a token
+    /// file, or an id. Every networked server refuses it within half a minute.
+    /// For a token on a lost or shared machine; rotating the signing key ends
+    /// every token at once instead.
+    RevokeToken(crate::ops::RevokeTokenArgs),
     /// Seed a memory into a user's compartment from the CLI (the owner/admin
     /// path; agents write via the MCP `store_memory` tool). No embedding is
     /// attached; consolidation gathers a compartment by membership. Pair with
