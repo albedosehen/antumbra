@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! Antumbra operator CLI (`antumbra`). v0 surface: apply the schema, print the
 //! generated DDL, inspect the population, and drive the generational loop.
 //!
@@ -523,16 +521,16 @@ mod tests {
     use super::*;
     use clap::Parser;
 
-    fn parsed(argv: &[&str]) -> Command {
+    fn parsed(argv: &[&str]) -> anyhow::Result<Command> {
         let argv = argv.iter().map(std::ffi::OsString::from);
-        Cli::try_parse_from(tui_alias(argv)).unwrap().command
+        Ok(Cli::try_parse_from(tui_alias(argv))?.command)
     }
 
     // The store flags are the shared ones (#303): the password's environment
     // value is hidden in --help, the url reads its variable, and both reach
     // every subcommand, as in every binary.
     #[test]
-    fn the_store_flags_read_as_in_every_binary() {
+    fn the_store_flags_read_as_in_every_binary() -> anyhow::Result<()> {
         use clap::CommandFactory;
         let cmd = Cli::command();
         cmd.clone().debug_assert();
@@ -557,6 +555,7 @@ mod tests {
             flag("db_auth").map(|f| f.0),
             Some(Some("ANTUMBRA_DB_AUTH".into()))
         );
+        Ok(())
     }
 
     /// What clap says against `argv`, or nothing when it parses.
@@ -568,7 +567,7 @@ mod tests {
     // A day count is bounded at the parser, so the date arithmetic behind it
     // cannot overflow on a typo: a usage error naming the range, not a panic.
     #[test]
-    fn a_day_count_past_a_century_is_a_usage_error() {
+    fn a_day_count_past_a_century_is_a_usage_error() -> anyhow::Result<()> {
         let huge = "999999999999999";
         for argv in [
             ["antumbra", "claude", "skills", "--days", huge],
@@ -585,13 +584,14 @@ mod tests {
         assert!(!refusal(&["antumbra", "claude", "reanchor", "--days", "-1"]).is_empty());
         assert!(refusal(&["antumbra", "claude", "skills", "--days", "45"]).is_empty());
         assert!(refusal(&["antumbra", "claude", "reanchor", "--days", "3"]).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn the_console_is_tui_or_a_leading_tui_flag() {
-        assert!(matches!(parsed(&["antumbra", "tui"]), Command::Tui(_)));
+    fn the_console_is_tui_or_a_leading_tui_flag() -> anyhow::Result<()> {
+        assert!(matches!(parsed(&["antumbra", "tui"])?, Command::Tui(_)));
         assert!(matches!(
-            parsed(&["antumbra", "--tui", "--demo"]),
+            parsed(&["antumbra", "--tui", "--demo"])?,
             Command::Tui(_)
         ));
         let elsewhere = tui_alias(
@@ -600,13 +600,14 @@ mod tests {
                 .map(std::ffi::OsString::from),
         );
         assert_eq!(elsewhere[2], "--tui", "only a leading --tui is the console");
+        Ok(())
     }
 
     // The embedder and copal flags are the shared ones (#304): the model reads
     // its variable, the keys hide their environment values in --help, every
     // flag keeps its name and default and reaches every subcommand.
     #[test]
-    fn the_embedder_and_copal_flags_read_as_in_every_binary() {
+    fn the_embedder_and_copal_flags_read_as_in_every_binary() -> anyhow::Result<()> {
         use clap::CommandFactory;
         let cmd = Cli::command();
         cmd.clone().debug_assert();
@@ -643,7 +644,9 @@ mod tests {
             ("copal_key", "copal-key", "ANTUMBRA_COPAL_KEY"),
             ("copal_keys", "copal-keys", "ANTUMBRA_COPAL_KEYS"),
         ] {
-            let got = flag(id).unwrap_or_else(|| panic!("{id} is a flag"));
+            let Some(got) = flag(id) else {
+                anyhow::bail!("{id} is a flag");
+            };
             assert_eq!(got.0.as_deref(), Some(long), "{id}");
             assert_eq!(got.1.as_deref(), Some(env), "{id}");
             assert!(got.3, "{id} is global");
@@ -653,12 +656,13 @@ mod tests {
                 "{id} hides its value iff a key"
             );
         }
+        Ok(())
     }
 
     /// What a command that captures parsed: its own `--run` and the shared
     /// capture-SFT block.
     fn captured(argv: &[&str]) -> anyhow::Result<(String, capture_args::CaptureSftArgs)> {
-        match parsed(argv) {
+        match parsed(argv)? {
             Command::Teach(a) => Ok((a.run, a.capture)),
             Command::MemoryImport(a) => Ok((a.run, a.capture)),
             Command::Consolidate(a) => Ok((a.run, a.capture)),
@@ -728,7 +732,7 @@ mod tests {
     /// The surface pair as a `claude` command parsed it.
     fn surface_of(argv: &[&str]) -> anyhow::Result<claude::surface_args::SurfaceArgs> {
         use cli::ClaudeAction;
-        let Command::Claude { action } = parsed(argv) else {
+        let Command::Claude { action } = parsed(argv)? else {
             anyhow::bail!("{argv:?} is not a claude command");
         };
         match action {
@@ -811,7 +815,7 @@ mod tests {
     #[test]
     fn every_subcommand_handed_over_whole_parses_with_its_required_flags_alone(
     ) -> anyhow::Result<()> {
-        let Command::Ask(a) = parsed(&["antumbra", "ask", "add two numbers"]) else {
+        let Command::Ask(a) = parsed(&["antumbra", "ask", "add two numbers"])? else {
             anyhow::bail!("ask");
         };
         assert_eq!(
@@ -822,14 +826,14 @@ mod tests {
             (a.threshold, a.self_weight, a.temperature),
             (0.08, 0.4, 0.0)
         );
-        let Command::Serve(a) = parsed(&["antumbra", "serve"]) else {
+        let Command::Serve(a) = parsed(&["antumbra", "serve"])? else {
             anyhow::bail!("serve");
         };
         assert_eq!(
             (a.task, a.max_new_tokens, a.threshold, a.temperature),
             (None, 128, 0.08, 0.0)
         );
-        let Command::Scope(a) = parsed(&["antumbra", "scope", "--spec", "s.json"]) else {
+        let Command::Scope(a) = parsed(&["antumbra", "scope", "--spec", "s.json"])? else {
             anyhow::bail!("scope");
         };
         assert_eq!(
@@ -840,14 +844,14 @@ mod tests {
             (a.max_new_tokens, a.samples, a.temperature, a.confidence),
             (96, 8, 0.8, 0.7)
         );
-        let Command::Teach(a) = parsed(&["antumbra", "teach", "--corpus", "c.json"]) else {
+        let Command::Teach(a) = parsed(&["antumbra", "teach", "--corpus", "c.json"])? else {
             anyhow::bail!("teach");
         };
         assert_eq!(
             (a.corpus.as_str(), a.generations, a.parent),
             ("c.json", 1, None)
         );
-        let Command::Evolve(a) = parsed(&["antumbra", "evolve", "--corpus", "c.json"]) else {
+        let Command::Evolve(a) = parsed(&["antumbra", "evolve", "--corpus", "c.json"])? else {
             anyhow::bail!("evolve");
         };
         assert_eq!(
@@ -855,7 +859,7 @@ mod tests {
             ("run:evolve", 0.9, 3)
         );
         assert_eq!((a.samples, a.rounds, a.max_new_tokens), (6, 2, 32));
-        let Command::Populate(a) = parsed(&["antumbra", "populate", "--corpus", "c.json"]) else {
+        let Command::Populate(a) = parsed(&["antumbra", "populate", "--corpus", "c.json"])? else {
             anyhow::bail!("populate");
         };
         assert_eq!(
@@ -863,7 +867,8 @@ mod tests {
             ("grown", 0.9, 3)
         );
         assert_eq!((a.samples, a.rounds, a.max_new_tokens), (8, 3, 32));
-        let Command::MemoryImport(a) = parsed(&["antumbra", "memory-import", "--source", "m.json"])
+        let Command::MemoryImport(a) =
+            parsed(&["antumbra", "memory-import", "--source", "m.json"])?
         else {
             anyhow::bail!("memory-import");
         };
@@ -871,7 +876,7 @@ mod tests {
             (a.out.as_str(), a.capture_threshold, a.train),
             ("corpora/_imported.json", 0.5, false)
         );
-        let Command::Consolidate(a) = parsed(&["antumbra", "consolidate", "--source", "m.json"])
+        let Command::Consolidate(a) = parsed(&["antumbra", "consolidate", "--source", "m.json"])?
         else {
             anyhow::bail!("consolidate");
         };
@@ -892,14 +897,14 @@ mod tests {
             "--content",
             "x",
         ];
-        let Command::Remember(a) = parsed(&remember) else {
+        let Command::Remember(a) = parsed(&remember)? else {
             anyhow::bail!("remember");
         };
         assert_eq!((a.network.as_str(), a.confidence), ("world", 1.0));
         let ingest = [
             "antumbra", "ingest", "--tenant", "t", "--user", "u", "--title", "routes",
         ];
-        let Command::Ingest(a) = parsed(&ingest) else {
+        let Command::Ingest(a) = parsed(&ingest)? else {
             anyhow::bail!("ingest");
         };
         assert_eq!(
@@ -908,7 +913,7 @@ mod tests {
         );
         assert!(a.run.is_empty());
         let with_command = [&ingest[..], &["--", "deno", "task", "routes"]].concat();
-        let Command::Ingest(a) = parsed(&with_command) else {
+        let Command::Ingest(a) = parsed(&with_command)? else {
             anyhow::bail!("ingest with a command");
         };
         assert_eq!(a.run, ["deno", "task", "routes"]);
@@ -924,11 +929,11 @@ mod tests {
             "--compartment",
             "c",
         ];
-        let Command::GitFacts(a) = parsed(&git_facts) else {
+        let Command::GitFacts(a) = parsed(&git_facts)? else {
             anyhow::bail!("git-facts");
         };
         assert_eq!((a.days, a.top, a.dry_run), (90, 10, false));
-        let Command::Metabolize(a) = parsed(&["antumbra", "metabolize", "--source", "t.json"])
+        let Command::Metabolize(a) = parsed(&["antumbra", "metabolize", "--source", "t.json"])?
         else {
             anyhow::bail!("metabolize");
         };
@@ -944,7 +949,8 @@ mod tests {
             "t",
             "--user",
             "u",
-        ]) else {
+        ])?
+        else {
             anyhow::bail!("propose-compartments");
         };
         assert_eq!(

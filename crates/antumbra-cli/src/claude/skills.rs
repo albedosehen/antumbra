@@ -203,7 +203,7 @@ mod tests {
     use std::cell::RefCell;
 
     #[test]
-    fn both_ways_of_using_a_skill_are_read_and_nothing_else_is() {
+    fn both_ways_of_using_a_skill_are_read_and_nothing_else_is() -> anyhow::Result<()> {
         let tool = json!({ "hook_event_name": "PostToolUse", "tool_name": "Skill", "tool_input": { "skill": "elegant-design" } });
         let typed = json!({ "hook_event_name": "UserPromptExpansion", "expansion_type": "slash_command", "command_name": "elegant-design", "prompt": "/elegant-design now" });
         assert_eq!(skill_in(&tool), Some("elegant-design".to_string()));
@@ -220,10 +220,11 @@ mod tests {
         for input in not_uses {
             assert_eq!(skill_in(&input), None, "{input}");
         }
+        Ok(())
     }
 
     #[test]
-    fn a_name_is_kept_only_if_it_could_be_one() {
+    fn a_name_is_kept_only_if_it_could_be_one() -> anyhow::Result<()> {
         let named = |name: &str| {
             skill_in(
                 &json!({ "hook_event_name": "PostToolUse", "tool_name": "Skill", "tool_input": { "skill": name } }),
@@ -243,6 +244,7 @@ mod tests {
         assert_eq!(named("line\nbreak"), None);
         assert_eq!(named("] forged key [skill-use:other"), None);
         assert_eq!(named(&"x".repeat(129)), None);
+        Ok(())
     }
 
     /// A surface that keeps memories the way the real one does, as far as this
@@ -345,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn a_name_that_could_not_be_one_is_refused_before_anything_is_asked() {
+    fn a_name_that_could_not_be_one_is_refused_before_anything_is_asked() -> anyhow::Result<()> {
         let asked = RefCell::new(0);
         let call = |_: &str, _: Value| -> anyhow::Result<Value> {
             *asked.borrow_mut() += 1;
@@ -353,6 +355,7 @@ mod tests {
         };
         assert!(record(&call, "two words").is_err());
         assert_eq!(*asked.borrow(), 0);
+        Ok(())
     }
 
     #[test]
@@ -398,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn a_skill_is_known_by_the_name_it_declares() {
+    fn a_skill_is_known_by_the_name_it_declares() -> anyhow::Result<()> {
         assert_eq!(
             declared_name("---\nname: elegant-design\ndescription: x\n---\nbody"),
             Some("elegant-design".to_string())
@@ -413,6 +416,7 @@ mod tests {
         );
         assert_eq!(declared_name("no front matter\nname: x"), None);
         assert_eq!(declared_name(""), None);
+        Ok(())
     }
 
     #[test]

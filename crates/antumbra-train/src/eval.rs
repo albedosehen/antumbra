@@ -176,6 +176,7 @@ mod tests {
     use super::*;
     use crate::model::SftExample;
     use antumbra_core::testing::MarkerVerifier;
+    use antumbra_core::AntumbraError;
     use async_trait::async_trait;
 
     /// Emits `skill` passing draws out of `n`; never trains (eval is read-only).
@@ -200,30 +201,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pass_rate_is_passed_over_total() {
+    async fn pass_rate_is_passed_over_total() -> Result<()> {
         let mut lm = FixedLm { skill: 3 };
         let verifier = MarkerVerifier {
             expect: "PASS".into(),
         };
         let tasks = vec![CorpusTask::new("t1", "p1"), CorpusTask::new("t2", "p2")];
-        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 4)
-            .await
-            .unwrap();
+        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 4).await?;
         // 3 of every 4 draws pass, across both tasks: 6 / 8.
         assert_eq!((out.passed, out.total), (6, 8));
         assert!((out.pass_rate - 0.75).abs() < 1e-6);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn every_draw_is_kept_with_its_task_and_verdict() {
+    async fn every_draw_is_kept_with_its_task_and_verdict() -> Result<()> {
         let mut lm = FixedLm { skill: 1 };
         let verifier = MarkerVerifier {
             expect: "PASS".into(),
         };
         let tasks = vec![CorpusTask::new("t1", "p1"), CorpusTask::new("t2", "p2")];
-        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 2)
-            .await
-            .unwrap();
+        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 2).await?;
         let kept: Vec<(&str, &str, bool)> = out
             .draws
             .iter()
@@ -238,30 +236,34 @@ mod tests {
                 ("t2", "FAIL", false)
             ]
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn the_report_keeps_every_task_and_what_was_scored() {
+    async fn the_report_keeps_every_task_and_what_was_scored() -> Result<()> {
         let mut lm = FixedLm { skill: 1 };
         let verifier = MarkerVerifier {
             expect: "PASS".into(),
         };
         let tasks = vec![CorpusTask::new("t1", "p1"), CorpusTask::new("t2", "p2")];
-        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 2)
-            .await
-            .unwrap();
+        let out = eval_pass_rate(&mut lm, &verifier, &tasks, &RunId::new("eval"), 2).await?;
         let record = report("c.json", "base", None, 2, 256, &out);
         assert_eq!(record["base_model"], "base");
         assert_eq!(record["adapter"], serde_json::Value::Null);
         assert_eq!(record["max_new_tokens"], 256);
-        let ids: Vec<&str> = record["tasks"]
-            .as_array()
-            .unwrap()
+        let Some(reported) = record["tasks"].as_array() else {
+            return Err(AntumbraError::other("the report's tasks are not an array"));
+        };
+        let Some(ids) = reported
             .iter()
-            .map(|t| t["id"].as_str().unwrap())
-            .collect();
+            .map(|t| t["id"].as_str())
+            .collect::<Option<Vec<&str>>>()
+        else {
+            return Err(AntumbraError::other("a reported task has no id"));
+        };
         assert_eq!(ids, ["t1", "t2"]);
         assert_eq!(record["tasks"][0]["passed"], 1);
         assert_eq!(record["tasks"][0]["total"], 2);
+        Ok(())
     }
 }

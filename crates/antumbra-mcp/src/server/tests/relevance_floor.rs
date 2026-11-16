@@ -1,8 +1,8 @@
 use super::*;
 use antumbra_core::testing::ScriptedDecider;
 
-async fn seeded() -> McpServer {
-    let s = server().await;
+async fn seeded() -> anyhow::Result<McpServer> {
+    let s = server().await?;
     for content in [
         "the deploy runbook for the orders service",
         "how the billing reconciliation job retries",
@@ -16,14 +16,13 @@ async fn seeded() -> McpServer {
             volatile: None,
             compartment: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     }
-    s
+    Ok(s)
 }
 
-async fn recall(s: &McpServer, query: &str, floor: Option<f32>) -> MemoriesOut {
-    s.recall_memories(Parameters(RecallParams {
+async fn recall(s: &McpServer, query: &str, floor: Option<f32>) -> anyhow::Result<MemoriesOut> {
+    Ok(s.recall_memories(Parameters(RecallParams {
         host: None,
         repo: None,
         branch: None,
@@ -34,82 +33,85 @@ async fn recall(s: &McpServer, query: &str, floor: Option<f32>) -> MemoriesOut {
         floor,
         session: None,
     }))
-    .await
-    .unwrap()
-    .0
+    .await?
+    .0)
 }
 
 /// With no decider there is no floor, and the field must stay absent. A
 /// deployment without a head keeps exactly the behavior it had.
 #[tokio::test]
-async fn without_a_decider_nothing_is_filtered_and_nothing_is_claimed() {
-    let s = seeded().await;
-    let out = recall(&s, "deploy runbook", None).await;
+async fn without_a_decider_nothing_is_filtered_and_nothing_is_claimed() -> anyhow::Result<()> {
+    let s = seeded().await?;
+    let out = recall(&s, "deploy runbook", None).await?;
     assert!(!out.memories.is_empty(), "rows come back as before");
     assert!(
         !out.nothing_cleared_the_floor,
         "no floor ran, so the field must not claim one did"
     );
+    Ok(())
 }
 
 /// The floor rejects everything: an EMPTY list plus the field, which is the
 /// answer an agent can branch on without re-running the query.
 #[tokio::test]
-async fn when_nothing_clears_the_floor_the_answer_says_so() {
+async fn when_nothing_clears_the_floor_the_answer_says_so() -> anyhow::Result<()> {
     // The decider judges nothing relevant, because no state contains the token.
     let s = seeded()
-        .await
+        .await?
         .with_decider(Arc::new(ScriptedDecider::on_substring("zzz-absent", 0.9)));
-    let out = recall(&s, "something unrelated", None).await;
+    let out = recall(&s, "something unrelated", None).await?;
     assert!(out.memories.is_empty(), "the floor rejected every row");
     assert!(
         out.nothing_cleared_the_floor,
         "and the answer says so, by a field rather than by inference"
     );
+    Ok(())
 }
 
 /// Rows that clear the floor come back, and the field stays absent. This is
 /// the case that must NOT look like the one above.
 #[tokio::test]
-async fn when_something_clears_the_floor_the_rows_come_back() {
+async fn when_something_clears_the_floor_the_rows_come_back() -> anyhow::Result<()> {
     let s = seeded()
-        .await
+        .await?
         .with_decider(Arc::new(ScriptedDecider::on_substring(
             "deploy runbook",
             0.9,
         )));
-    let out = recall(&s, "deploy runbook", None).await;
+    let out = recall(&s, "deploy runbook", None).await?;
     assert!(!out.memories.is_empty(), "relevant rows survive the floor");
     assert!(
         !out.nothing_cleared_the_floor,
         "a recall that returned rows must not claim the floor emptied it"
     );
+    Ok(())
 }
 
 /// The floor is a default the caller may move. Raising it past what the
 /// decider reports empties the result; lowering it takes the rows back.
 #[tokio::test]
-async fn the_caller_can_move_the_floor() {
+async fn the_caller_can_move_the_floor() -> anyhow::Result<()> {
     let s = seeded()
-        .await
+        .await?
         .with_decider(Arc::new(ScriptedDecider::on_substring(
             "deploy runbook",
             0.6,
         )));
     assert!(
         recall(&s, "deploy runbook", Some(0.95))
-            .await
+            .await?
             .memories
             .is_empty(),
         "a floor above the decider's confidence rejects everything"
     );
     assert!(
         !recall(&s, "deploy runbook", Some(0.1))
-            .await
+            .await?
             .memories
             .is_empty(),
         "and lowering it takes the rows back -- the best of a bad lot is a choice"
     );
+    Ok(())
 }
 
 /// The floor holds for a query of several lines, which is what a pasted
@@ -118,7 +120,7 @@ async fn the_caller_can_move_the_floor() {
 /// carried as JSON, the floor could not parse such a query and every one went
 /// out unfiltered.
 #[tokio::test]
-async fn the_floor_holds_for_a_query_of_several_lines() {
+async fn the_floor_holds_for_a_query_of_several_lines() -> anyhow::Result<()> {
     struct RunbookOnly;
     #[async_trait::async_trait]
     impl antumbra_core::ports::RelevanceScorer for RunbookOnly {
@@ -130,22 +132,23 @@ async fn the_floor_holds_for_a_query_of_several_lines() {
         }
     }
     let floor = antumbra_rerank::floor::CalibratedFloor::new(Arc::new(RunbookOnly));
-    let s = seeded().await.with_decider(Arc::new(floor));
+    let s = seeded().await?.with_decider(Arc::new(floor));
     let out = recall(
         &s,
         "where is the deploy\nrunbook for orders?\n\n---\nthanks",
         None,
     )
-    .await;
+    .await?;
     let kept: Vec<&str> = out.memories.iter().map(|m| m.content.as_str()).collect();
     assert_eq!(kept, ["the deploy runbook for the orders service"]);
+    Ok(())
 }
 
 /// The floor judges the whole memory, as the reranker read it, and only then is
 /// the view cut to its prefix. A long memory whose answer sits past the cut is
 /// kept; judged on the prefix, it was dropped though it ranked first.
 #[tokio::test]
-async fn the_floor_judges_the_whole_memory_not_the_prefix_it_returns() {
+async fn the_floor_judges_the_whole_memory_not_the_prefix_it_returns() -> anyhow::Result<()> {
     struct RunbookOnly;
     #[async_trait::async_trait]
     impl antumbra_core::ports::RelevanceScorer for RunbookOnly {
@@ -156,7 +159,7 @@ async fn the_floor_judges_the_whole_memory_not_the_prefix_it_returns() {
                 .collect())
         }
     }
-    let s = server().await;
+    let s = server().await?;
     let preamble = "notes on the orders service and its history ".repeat(40);
     assert!(preamble.chars().count() > params::RECALL_CONTENT_CHARS);
     for content in [
@@ -172,12 +175,11 @@ async fn the_floor_judges_the_whole_memory_not_the_prefix_it_returns() {
             volatile: None,
             compartment: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     }
     let floor = antumbra_rerank::floor::CalibratedFloor::new(Arc::new(RunbookOnly));
     let s = s.with_decider(Arc::new(floor));
-    let out = recall(&s, "the deploy runbook", None).await;
+    let out = recall(&s, "the deploy runbook", None).await?;
     assert_eq!(out.memories.len(), 1, "the long memory cleared the floor");
     let kept = &out.memories[0];
     assert!(kept.truncated, "and came back bounded");
@@ -186,35 +188,38 @@ async fn the_floor_judges_the_whole_memory_not_the_prefix_it_returns() {
         !kept.content.contains("runbook"),
         "its answer is past the cut"
     );
+    Ok(())
 }
 
 /// A floor that cannot be computed must not be enforced: the rows come back
 /// unfiltered, and nothing claims they were judged. Every typed head is held to
 /// this: one that fails degrades to the path it replaced rather than to nothing.
 #[tokio::test]
-async fn a_failing_decider_returns_rows_rather_than_swallowing_them() {
+async fn a_failing_decider_returns_rows_rather_than_swallowing_them() -> anyhow::Result<()> {
     let s = seeded()
-        .await
+        .await?
         .with_decider(Arc::new(ScriptedDecider::failing()));
-    let out = recall(&s, "deploy runbook", None).await;
+    let out = recall(&s, "deploy runbook", None).await?;
     assert!(
         !out.memories.is_empty(),
         "a floor that cannot be computed must not be enforced"
     );
     assert!(!out.nothing_cleared_the_floor);
+    Ok(())
 }
 
 /// An empty store is not the same answer as a floor that rejected
 /// everything, and the field must not blur them.
 #[tokio::test]
-async fn an_empty_store_does_not_claim_the_floor_emptied_it() {
+async fn an_empty_store_does_not_claim_the_floor_emptied_it() -> anyhow::Result<()> {
     let s = server()
-        .await
+        .await?
         .with_decider(Arc::new(ScriptedDecider::on_substring("zzz-absent", 0.9)));
-    let out = recall(&s, "anything at all", None).await;
+    let out = recall(&s, "anything at all", None).await?;
     assert!(out.memories.is_empty());
     assert!(
         !out.nothing_cleared_the_floor,
         "there was nothing to reject, which is a different answer"
     );
+    Ok(())
 }

@@ -361,7 +361,7 @@ pub fn metabolize(traces: &[HarnessTrace], policy: &MetabolizePolicy) -> Vec<Cor
 mod tests {
     use super::*;
 
-    fn traces() -> Vec<HarnessTrace> {
+    fn traces() -> Result<Vec<HarnessTrace>> {
         parse_traces(
             br#"[
               {"id":"t1","goal":"reverse a string","solution":"return s[::-1]","kind":"task","recurrence":4,"success":true},
@@ -370,11 +370,10 @@ mod tests {
               {"goal":"","solution":"no goal","kind":"task"}
             ]"#,
         )
-        .unwrap()
     }
 
     #[test]
-    fn parses_goal_and_solution_with_fallbacks() {
+    fn parses_goal_and_solution_with_fallbacks() -> Result<()> {
         let t = HarnessTrace::from_value(&serde_json::json!({
             "prompt": "g", "outcome": "o"
         }));
@@ -382,24 +381,26 @@ mod tests {
         assert_eq!(t.solution, "o");
         assert!(t.success.is_none() && t.recurrence.is_none());
         assert!(t.steps.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn only_successful_nonempty_traces_metabolize() {
-        let out = metabolize(&traces(), &MetabolizePolicy::default());
+    fn only_successful_nonempty_traces_metabolize() -> Result<()> {
+        let out = metabolize(&traces()?, &MetabolizePolicy::default());
         // t1 (success) + add (default success) metabolize; the failed and the
         // empty-goal traces are dropped. Neither carries steps, so two tasks.
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|t| t.completion.is_some()));
         assert_eq!(out[0].skill.as_deref(), Some("task"));
         assert_eq!(out[1].skill.as_deref(), Some("loop"));
+        Ok(())
     }
 
     #[test]
-    fn recurrence_floor_requires_a_repeated_pattern() {
+    fn recurrence_floor_requires_a_repeated_pattern() -> Result<()> {
         // min_recurrence 2 keeps only t1 (recurrence 4); the recurrence-1 trace drops.
         let out = metabolize(
-            &traces(),
+            &traces()?,
             &MetabolizePolicy {
                 min_recurrence: 2,
                 include_steps: true,
@@ -407,10 +408,11 @@ mod tests {
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "t1");
+        Ok(())
     }
 
     #[test]
-    fn marker_check_targets_the_solution() {
+    fn marker_check_targets_the_solution() -> Result<()> {
         let out = metabolize(
             &[HarnessTrace {
                 goal: "g".into(),
@@ -421,12 +423,13 @@ mod tests {
         );
         let verify = out[0].verify.to_string();
         assert!(verify.contains("python"), "a runnable verifier is attached");
+        Ok(())
     }
 
     // Structure-aware: a behavior graph carries its decomposition; the whole AND
     // each step metabolize, so the expert learns the process, not just the outcome.
     #[test]
-    fn a_graph_metabolizes_its_decomposition_as_steps() {
+    fn a_graph_metabolizes_its_decomposition_as_steps() -> Result<()> {
         let trace = HarnessTrace::from_value(&serde_json::json!({
             "id": "g1",
             "goal": "fetch, parse, and summarize a page",
@@ -455,11 +458,12 @@ mod tests {
         assert!(out.iter().all(|t| t.skill.as_deref() == Some("graph")));
         assert_eq!(out[1].completion.as_deref(), Some("html bytes"));
         assert_eq!(out[2].prompt, "parse the html");
+        Ok(())
     }
 
     // Turning steps off learns only the one-shot collapse (outcome supervision).
     #[test]
-    fn include_steps_off_drops_the_decomposition() {
+    fn include_steps_off_drops_the_decomposition() -> Result<()> {
         let trace = HarnessTrace::from_value(&serde_json::json!({
             "id": "g1", "goal": "g", "solution": "s", "kind": "graph",
             "steps": [{"goal": "sub", "solution": "out"}]
@@ -473,21 +477,23 @@ mod tests {
         );
         assert_eq!(out.len(), 1, "only the collapsed whole");
         assert_eq!(out[0].id, "g1");
+        Ok(())
     }
 
     // A failed trace contributes nothing; neither its whole nor its steps are
     // frozen (you don't internalize the decomposition of a broken orchestration).
     #[test]
-    fn a_failed_trace_metabolizes_neither_whole_nor_steps() {
+    fn a_failed_trace_metabolizes_neither_whole_nor_steps() -> Result<()> {
         let trace = HarnessTrace::from_value(&serde_json::json!({
             "goal": "g", "solution": "s", "kind": "graph", "success": false,
             "steps": [{"goal": "sub", "solution": "out"}]
         }));
         assert!(metabolize(&[trace], &MetabolizePolicy::default()).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn edges_metabolize_into_transition_tasks() {
+    fn edges_metabolize_into_transition_tasks() -> Result<()> {
         let trace = HarnessTrace::from_value(&serde_json::json!({
             "goal": "fetch then summarize", "solution": "pipeline", "kind": "graph",
             "success": true, "recurrence": 5,
@@ -499,10 +505,11 @@ mod tests {
         }));
         let tasks = metabolize(&[trace], &MetabolizePolicy::default());
         assert_eq!(tasks.len(), 4, "whole + 2 steps + 1 edge transition");
-        let edge = tasks
-            .iter()
-            .find(|t| t.id.contains("#edge:step0->step1"))
-            .expect("an edge transition task is metabolized");
+        let Some(edge) = tasks.iter().find(|t| t.id.contains("#edge:step0->step1")) else {
+            return Err(AntumbraError::other(
+                "no edge transition task was metabolized",
+            ));
+        };
         assert!(edge.prompt.contains("Next: summarize text"));
         assert!(
             edge.prompt.contains("when fetch ok"),
@@ -510,10 +517,11 @@ mod tests {
         );
         assert_eq!(edge.completion.as_deref(), Some("text[:280]"));
         assert_eq!(edge.skill.as_deref(), Some("graph"));
+        Ok(())
     }
 
     #[test]
-    fn an_edge_to_a_dropped_or_missing_step_is_skipped() {
+    fn an_edge_to_a_dropped_or_missing_step_is_skipped() -> Result<()> {
         let trace = HarnessTrace::from_value(&serde_json::json!({
             "goal": "g", "solution": "s", "kind": "graph", "success": true, "recurrence": 5,
             "nodes": [{"goal": "a", "solution": "out_a"}],
@@ -526,11 +534,12 @@ mod tests {
             "whole + 1 step; the edge to a missing step is dropped"
         );
         assert!(!tasks.iter().any(|t| t.id.contains("#edge")));
+        Ok(())
     }
 
     // A status string stands in for an explicit success bool (a harness task state).
     #[test]
-    fn status_string_maps_to_success() {
+    fn status_string_maps_to_success() -> Result<()> {
         let done = HarnessTrace::from_value(&serde_json::json!({
             "goal": "g", "solution": "s", "status": "completed"
         }));
@@ -543,12 +552,13 @@ mod tests {
             metabolize(&[done, failed], &MetabolizePolicy::default()).len(),
             1
         );
+        Ok(())
     }
 
     // The normalizer accepts every harness-tool envelope: a bare array, an object
     // wrapping the list under a tool-specific key, or one trace object.
     #[test]
-    fn normalizer_tolerates_each_tool_envelope() {
+    fn normalizer_tolerates_each_tool_envelope() -> Result<()> {
         // list_tasks-style: { tasks: [...] }
         let tasks = normalize_traces(&serde_json::json!({
             "count": 2,
@@ -577,5 +587,6 @@ mod tests {
         assert!(normalize_traces(&serde_json::json!({})).len() == 1); // self as one
         assert!(normalize_traces(&serde_json::json!([])).is_empty());
         assert!(normalize_traces(&serde_json::json!("nope")).is_empty());
+        Ok(())
     }
 }

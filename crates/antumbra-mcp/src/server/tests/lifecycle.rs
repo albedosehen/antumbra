@@ -26,11 +26,9 @@ fn shared(id: &str) -> Expert {
 }
 
 #[tokio::test]
-async fn a_dormant_expert_is_not_routed_to_and_population_says_so() {
-    let s = server().await;
-    expert::insert(&s.store, &shared("expert:adder"))
-        .await
-        .unwrap();
+async fn a_dormant_expert_is_not_routed_to_and_population_says_so() -> anyhow::Result<()> {
+    let s = server().await?;
+    expert::insert(&s.store, &shared("expert:adder")).await?;
     router::save(
         &s.store,
         &LearnedRouter {
@@ -43,15 +41,14 @@ async fn a_dormant_expert_is_not_routed_to_and_population_says_so() {
             floor: -1.0,
         },
     )
-    .await
-    .unwrap();
+    .await?;
     let route = || {
         s.route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: Some(3),
         }))
     };
-    assert_eq!(route().await.unwrap().0.routes.len(), 1);
+    assert_eq!(route().await?.0.routes.len(), 1);
 
     lifecycle::transition(
         &s.store,
@@ -60,9 +57,8 @@ async fn a_dormant_expert_is_not_routed_to_and_population_says_so() {
         TransitionCause::Operator { note: None },
         None,
     )
-    .await
-    .unwrap();
-    let r = route().await.unwrap();
+    .await?;
+    let r = route().await?;
     assert!(
         r.0.escalate && r.0.routes.is_empty(),
         "the router still holds it, but masked"
@@ -76,7 +72,8 @@ async fn a_dormant_expert_is_not_routed_to_and_population_says_so() {
         r.0.reason
     );
 
-    let population = s.population().await.unwrap().0.experts;
+    let population = s.population().await?.0.experts;
     assert_eq!(population.len(), 1);
     assert_eq!(population[0].status, "dormant");
+    Ok(())
 }

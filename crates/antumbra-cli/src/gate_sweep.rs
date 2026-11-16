@@ -302,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sweep_trades_coverage_for_risk() {
+    fn the_sweep_trades_coverage_for_risk() -> anyhow::Result<()> {
         // Confident routes are good, marginal ones worse than the base.
         let outcomes = vec![
             o(0.30, 1.0, 0.2),
@@ -315,21 +315,27 @@ mod tests {
         let all = points[0];
         assert_eq!(all.routed, 1.0);
         assert!((all.accuracy - 0.475).abs() < 1e-6);
-        let none = *points.last().unwrap();
+        let Some(none) = points.last().copied() else {
+            anyhow::bail!("the sweep has no points");
+        };
         assert_eq!((none.routed, none.risk), (0.0, 0.0));
         assert!((none.accuracy - 0.4).abs() < 1e-6);
         // The best routes the two confident tasks and escalates the rest.
-        let b = best(&points).unwrap();
+        let Some(b) = best(&points) else {
+            anyhow::bail!("no point is best of {}", points.len());
+        };
         assert_eq!(b.threshold, 0.20);
         assert_eq!(b.routed, 0.5);
         assert!((b.risk - 0.1).abs() < 1e-6);
         assert!((b.accuracy - 0.725).abs() < 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn of_equally_accurate_points_the_best_routes_more() {
+    fn of_equally_accurate_points_the_best_routes_more() -> anyhow::Result<()> {
         let outcomes = vec![o(0.5, 0.5, 0.5), o(0.1, 0.5, 0.5)];
-        assert_eq!(best(&sweep(&outcomes)).unwrap().routed, 1.0);
+        assert_eq!(best(&sweep(&outcomes)).map(|p| p.routed), Some(1.0));
         assert!(best(&[]).is_none());
+        Ok(())
     }
 }

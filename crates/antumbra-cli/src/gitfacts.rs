@@ -231,7 +231,7 @@ ddddddd4\tAda
 ";
 
     #[test]
-    fn parse_reads_commits_and_their_files() {
+    fn parse_reads_commits_and_their_files() -> anyhow::Result<()> {
         let touches = parse_log(LOG);
         assert_eq!(touches.len(), 4);
         assert_eq!(touches[0].author, "Ada");
@@ -245,10 +245,11 @@ ddddddd4\tAda
         );
         assert!(parse_log("").is_empty());
         assert!(parse_log("not a log\n\tat all\n").is_empty());
+        Ok(())
     }
 
     #[test]
-    fn derive_ranks_ownership_hotspots_and_pairs() {
+    fn derive_ranks_ownership_hotspots_and_pairs() -> anyhow::Result<()> {
         let facts = derive(&parse_log(LOG), 5);
         assert_eq!(facts.commits, 4);
         assert_eq!(
@@ -256,12 +257,14 @@ ddddddd4\tAda
             Some(("ddddddd4".to_string(), "aaaaaaa1".to_string())),
             "oldest..newest, as git log lists newest first"
         );
-        let crates = facts
+        let Some(crates) = facts
             .ownership
             .iter()
             .find(|(area, _)| area == "crates")
             .map(|(_, a)| a.clone())
-            .unwrap();
+        else {
+            anyhow::bail!("no ownership was derived for `crates`");
+        };
         assert_eq!(crates, vec![("Ada".to_string(), 2), ("Ben".to_string(), 1)]);
         assert_eq!(
             facts.hotspots[0],
@@ -281,10 +284,11 @@ ddddddd4\tAda
             facts.co_changes.iter().all(|(_, n)| *n >= 2),
             "a pair seen once is not a pattern"
         );
+        Ok(())
     }
 
     #[test]
-    fn render_and_evidence_name_the_window() {
+    fn render_and_evidence_name_the_window() -> anyhow::Result<()> {
         let facts = derive(&parse_log(LOG), 1);
         let lines = render(&facts, 30);
         assert!(
@@ -304,5 +308,6 @@ ddddddd4\tAda
         assert_eq!(ev[0], "git:github.com/o/r@aaaaaaa1#main");
         assert_eq!(ev[1], "range:ddddddd4..aaaaaaa1 (30 days, 4 commits)");
         assert!(evidence(None, &Facts::default(), 30).is_empty());
+        Ok(())
     }
 }
