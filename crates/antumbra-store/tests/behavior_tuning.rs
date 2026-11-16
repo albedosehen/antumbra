@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The loop's readings of a workspace's audits: appended per tenant, the
 //! latest in force, listed newest first, and one workspace blind to another's.
 

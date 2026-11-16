@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! A runtime-configured **HTTP embedder**: rather than baking an embedding
 //! model into each binary, point at an OpenAI-compatible `/embeddings` endpoint
 //! the operator runs (Ollama, llama.cpp, text-embeddings-inference, …). Shared by

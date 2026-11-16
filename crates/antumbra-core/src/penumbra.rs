@@ -92,12 +92,15 @@ impl Cluster {
 pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<ProposedCompartment> {
     // Embedded candidates in a stable id order so the greedy pass (and thus the
     // proposals) is reproducible run to run.
-    let mut candidates: Vec<&Memory> = memories.iter().filter(|m| m.embedding.is_some()).collect();
-    candidates.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+    // Each memory with its embedding, so no step below has to ask for one.
+    let mut candidates: Vec<(&Memory, &[f32])> = memories
+        .iter()
+        .filter_map(|m| m.embedding.as_deref().map(|e| (m, e)))
+        .collect();
+    candidates.sort_by(|(a, _), (b, _)| a.id.as_str().cmp(b.id.as_str()));
 
     let mut clusters: Vec<Cluster> = Vec::new();
-    for (idx, m) in candidates.iter().enumerate() {
-        let emb = m.embedding.as_deref().expect("filtered to Some above");
+    for (idx, (_, emb)) in candidates.iter().enumerate() {
         // Best existing cluster by centroid cosine.
         let best = clusters
             .iter()
@@ -121,12 +124,7 @@ pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<Pro
             let sims: Vec<f32> = c
                 .members
                 .iter()
-                .map(|&i| {
-                    cosine_similarity(
-                        &c.centroid,
-                        candidates[i].embedding.as_deref().expect("embedded"),
-                    )
-                })
+                .map(|&i| cosine_similarity(&c.centroid, candidates[i].1))
                 .collect();
             let medoid_pos = sims
                 .iter()
@@ -135,11 +133,14 @@ pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<Pro
                 .map(|(p, _)| p)
                 .unwrap_or(0);
             let cohesion = sims.iter().sum::<f32>() / sims.len() as f32;
-            let label = label_from(&candidates[c.members[medoid_pos]].content, cfg.label_words);
+            let label = label_from(
+                &candidates[c.members[medoid_pos]].0.content,
+                cfg.label_words,
+            );
             let members: Vec<MemoryId> = c
                 .members
                 .iter()
-                .map(|&i| candidates[i].id.clone())
+                .map(|&i| candidates[i].0.id.clone())
                 .collect();
             ProposedCompartment {
                 label,

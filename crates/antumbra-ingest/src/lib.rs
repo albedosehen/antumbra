@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! Knowledge-document ingest: the one path every door into the store takes,
 //! so the MCP `ingest_document` tool, the CLI `ingest`, and the GitHub
 //! integration write the same shape and keep the same promises.

@@ -813,11 +813,12 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
             } else if tasks.is_empty() {
                 println!("nothing to train: no trace cleared the metabolization gate");
             } else {
-                let store = store.as_ref().expect("store built when train");
-                let embedder = embedder
-                    .as_ref()
-                    .expect("embedder built when train")
-                    .as_ref();
+                // Both are built above whenever `train` is; a miss is this
+                // command's own wiring, reported rather than unwound.
+                let (Some(store), Some(embedder)) = (store.as_ref(), embedder.as_ref()) else {
+                    anyhow::bail!("--train without a store and an embedder to train with");
+                };
+                let embedder = embedder.as_ref();
                 let cfg = RaftConfig {
                     samples_per_task: samples,
                     rounds,

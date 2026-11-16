@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! A residual filter thins what the index returned, so a recall that
 //! asked for exactly `k` would come back short.
 //!

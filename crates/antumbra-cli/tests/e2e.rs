@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! End-to-end with fakes: the loop grows a population, the gate routes a task
 //! to a graduated expert, and the serve seam answers for it -- the whole v0
 //! spine (train -> graduate -> route -> serve) wired together, no GPU.

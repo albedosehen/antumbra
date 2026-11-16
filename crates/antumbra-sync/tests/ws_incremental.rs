@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Live, over-`ws://` validation that incremental cursors preserve convergence
 //! against a real SurrealDB v3 engine. The unknown the embedded tests can't
 //! cover is the engine's own string `>` comparison on the RFC3339 version field

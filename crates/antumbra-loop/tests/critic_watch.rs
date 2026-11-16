@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The critic's per-generation reading reaches the generation's report: what
 //! the trainer saw of its critic against the verifier and the twin, every
 //! generation, rather than once at training time. Once the reading says the

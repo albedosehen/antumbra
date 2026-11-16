@@ -45,11 +45,19 @@ pub fn train_learned_router(
     if exemplars.is_empty() {
         return Err(AntumbraError::other("router: no exemplars to train on"));
     }
+    // Each exemplar's class, numbered as its expert is first met, so the class
+    // of an exemplar is known the moment its expert is.
     let mut ids: Vec<ExpertId> = Vec::new();
+    let mut labels: Vec<u32> = Vec::with_capacity(exemplars.len());
     for (id, _) in exemplars {
-        if !ids.contains(id) {
-            ids.push(id.clone());
-        }
+        let class = match ids.iter().position(|c| c == id) {
+            Some(class) => class,
+            None => {
+                ids.push(id.clone());
+                ids.len() - 1
+            }
+        };
+        labels.push(class as u32);
     }
     let (n_experts, dim, n) = (ids.len(), exemplars[0].1.len(), exemplars.len());
     let device = Device::Cpu;
@@ -59,10 +67,6 @@ pub fn train_learned_router(
         .flat_map(|(_, e)| e.iter().copied())
         .collect();
     let x = Tensor::from_vec(xs, (n, dim), &device).map_err(rce)?;
-    let labels: Vec<u32> = exemplars
-        .iter()
-        .map(|(id, _)| ids.iter().position(|c| c == id).unwrap() as u32)
-        .collect();
     let y = Tensor::from_vec(labels.clone(), (n,), &device).map_err(rce)?;
     let class_rows: Vec<Vec<u32>> = (0..n_experts)
         .map(|c| {

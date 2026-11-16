@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced document privacy: a document kept in a private
 //! compartment is invisible to another member of the same tenant until the
 //! compartment is granted, and hidden again on revoke, on reads that carry no

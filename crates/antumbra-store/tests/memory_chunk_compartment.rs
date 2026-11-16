@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The chunk index keeps its memory's privacy: a piece of a memory
 //! in a private compartment is invisible to another member of the workspace,
 //! by the chunk search and by the recall it feeds, until the memory moves to

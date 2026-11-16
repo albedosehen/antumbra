@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The gate learns where each live task should have gone: a
 //! contribution measurement that scores every expert on every live task keeps
 //! each task's clear winner, and the learned router is retrained with the won

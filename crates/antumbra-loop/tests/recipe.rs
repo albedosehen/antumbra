@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The recipe ledger: every generation records the recipe its
 //! shadow trained under, as the trainer reported it, descending from the one
 //! before, and measured under the partition the trainer confirmed.

@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced ownership of the device registry: a node writes
 //! only the row of the user running it. The table used to be owner-only, under
 //! which no node could register at all; opening it for registration is what

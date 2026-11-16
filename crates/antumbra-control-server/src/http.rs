@@ -105,7 +105,11 @@ impl Cooldown {
     /// cooling down, refuse the request.
     fn try_acquire(&self, email: &str) -> bool {
         let now = Instant::now();
-        let mut map = self.last_sent.lock().expect("cooldown lock");
+        // A poisoned lock holds the same map of instants: taken as it is.
+        let mut map = self
+            .last_sent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(&at) = map.get(email) {
             if now.duration_since(at) < self.window {
                 return false;

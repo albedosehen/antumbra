@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced tenant isolation (Stage 2): with a per-tenant record-access
 //! session bound (`$auth.tenant`), the SurrealDB engine itself refuses another
 //! tenant's rows, even on an unfiltered `SELECT` with no app-side WHERE. This

@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! An embedded store announces its memory writes in-process, which is how it
 //! propagates live without a LIVE query: each write's row, with the action a
 //! LIVE watch would report, from the store and from every clone made after

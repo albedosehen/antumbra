@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The verifier namespace against a real in-memory store: a
 //! synthesized verifier grants reward only once a sound measurement has
 //! trusted it, only for what it checks, and stops the moment it is

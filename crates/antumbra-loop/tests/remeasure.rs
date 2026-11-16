@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Graduation on a re-measurement, a constraint of the recipe search: the
 //! carried-forward shadow is evaluated again under fresh seeds, on the
 //! held-out slice its trainer confirmed withholding, and the threshold applies

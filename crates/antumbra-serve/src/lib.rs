@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-serve (hardware-adaptive serving)
 //!
 //! S-LoRA-style serving: one shared base resident on a single device plus a
@@ -107,10 +109,13 @@ impl MultiAdapterServe {
 
     /// Map an expert to its adapter file (its `artifact_uri`). Routes naming this
     /// expert hot-swap that file onto the resident base.
+    ///
+    /// The registry is a map of names to paths, and a poisoned lock holds the
+    /// same map, so every lock on it here is taken as it is.
     pub fn register(&mut self, expert: antumbra_core::ExpertId, adapter_path: impl Into<String>) {
         self.registry
             .get_mut()
-            .expect("registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(expert, adapter_path.into());
     }
 
@@ -128,12 +133,18 @@ impl MultiAdapterServe {
 
     /// How many adapters are registered.
     pub fn len(&self) -> usize {
-        self.registry.read().expect("registry lock").len()
+        self.registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     /// Whether no adapter is registered.
     pub fn is_empty(&self) -> bool {
-        self.registry.read().expect("registry lock").is_empty()
+        self.registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 }
 
@@ -145,7 +156,7 @@ impl Serve for MultiAdapterServe {
     fn can_serve(&self, expert: &antumbra_core::ExpertId) -> bool {
         self.registry
             .read()
-            .expect("registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(expert)
     }
 
@@ -154,7 +165,7 @@ impl Serve for MultiAdapterServe {
     fn register_expert(&self, expert: &antumbra_core::ExpertId, adapter_uri: &str) {
         self.registry
             .write()
-            .expect("registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(expert.clone(), adapter_uri.to_string());
     }
 
@@ -182,7 +193,10 @@ impl Serve for MultiAdapterServe {
         // Resolve before touching the device: an unknown expert is a config
         // error, not a generation failure, and must not pay a model load.
         let specs: Vec<(String, f32)> = {
-            let registry = self.registry.read().expect("registry lock");
+            let registry = self
+                .registry
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             blend
                 .iter()
                 .map(|(e, w)| {
@@ -224,18 +238,20 @@ impl Serve for MultiAdapterServe {
                     // A failed load can leave the factors half-written: forget
                     // what was resident before trying.
                     st.current = None;
-                    st.model
-                        .as_mut()
-                        .expect("base loaded above")
-                        .load_blend(&specs)?;
+                    let Some(model) = st.model.as_mut() else {
+                        return Err(AntumbraError::other(
+                            "the base model is not resident after loading",
+                        ));
+                    };
+                    model.load_blend(&specs)?;
                     st.current = Some(key);
                 }
-                let outputs = st
-                    .model
-                    .as_mut()
-                    .expect("base loaded above")
-                    .generate(&req.prompt, 1)
-                    .await?;
+                let Some(model) = st.model.as_mut() else {
+                    return Err(AntumbraError::other(
+                        "the base model is not resident after loading",
+                    ));
+                };
+                let outputs = model.generate(&req.prompt, 1).await?;
                 antumbra_core::Result::Ok(outputs.into_iter().next().unwrap_or_default())
             })
         })?;

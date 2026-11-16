@@ -11,3 +11,6 @@ jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 serde = { workspace = true }
 anyhow.workspace = true
 uuid = { version = "1", features = ["v4"] }
+
+[lints]
+workspace = true

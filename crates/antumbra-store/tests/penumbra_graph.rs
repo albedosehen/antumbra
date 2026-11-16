@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Penumbra graph: tenant-isolated typed edges between memories.
 
 use chrono::Utc;

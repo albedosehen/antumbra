@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Live GPU end-to-end validation of the real resident `MultiAdapterServe`:
 //! load the shared Qwen2.5-Coder-1.5B-Instruct base once, hot-swap a trained LoRA
 //! adapter onto it, and run a real generation -- the path the MCP `answer` tool

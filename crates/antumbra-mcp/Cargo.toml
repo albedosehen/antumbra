@@ -85,3 +85,6 @@ models = ["dep:antumbra-serve", "antumbra-serve/models"]
 # networked server can actually serve through experts on a CUDA box).
 cuda = ["models", "antumbra-serve/cuda"]
 metal = ["models", "antumbra-serve/metal"]
+
+[lints]
+workspace = true

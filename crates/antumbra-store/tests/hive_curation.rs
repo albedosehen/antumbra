@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced curation: contribution is the member's and
 //! curation is the owner's, and neither is a convention the app remembers.
 //!

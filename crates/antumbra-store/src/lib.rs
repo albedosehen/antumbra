@@ -1,3 +1,5 @@
+// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-store
 //!
 //! SurrealDB persistence for Antumbra via surql-rs (`oneiriq-surql`). The store
