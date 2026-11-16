@@ -137,3 +137,4 @@ Then restore the settings backup over `~/.claude/settings.json` and delete `~/.a
 | `the server ... refused the token` | The token expired or is for another server; ask for a new one. |
 | `the claude command is not on your PATH` | Claude Code is not installed where setup can find it; setup prints the one `claude mcp add-json` command to run once it is. |
 | `settings.json is not valid JSON` | The file was already broken; show the person and fix it together. |
+| `is a plain http:// address, so the token would travel in cleartext` | Use the workspace's `https://` address. Only for a lab the person vouches for, run setup again with `--allow-http`; `setup check` then reports the address as accepted. |
