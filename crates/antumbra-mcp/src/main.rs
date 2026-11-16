@@ -150,9 +150,10 @@ struct Cli {
     /// How the base model is held to serve experts: `auto`, `off`, `q8_0` or
     /// `q4_k`. `auto` serves from a Q8_0 base on a build with no GPU backend,
     /// where the dense base is too slow to answer with, and from the dense
-    /// base on a GPU build. `q4_k` is about a third faster on a CPU and moves
-    /// an expert's answers further from the dense base's; `off` keeps the
-    /// base dense anywhere. Experts are never quantized.
+    /// base on a GPU build. `q8_0` rewords some answers and has kept what an
+    /// expert learned; `q4_k` loads a smaller base and loses more of it (on
+    /// held-out behavior tasks its answers passed a quarter less often).
+    /// `off` keeps the base dense anywhere. Experts are never quantized.
     #[arg(long, env = "ANTUMBRA_SERVE_QUANT", default_value = "auto")]
     serve_quant: String,
     /// Shift every seeded stream a training draws from: the same set trained
