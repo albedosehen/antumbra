@@ -230,8 +230,7 @@ struct HttpState {
 pub async fn serve(
     addr: String,
     url: String,
-    db_user: Option<String>,
-    db_pass: Option<String>,
+    db: antumbra_store::args::DbAuthArgs,
     host: String,
     embedder: Arc<dyn Embedder>,
     verifier: JwtVerifier,
@@ -248,7 +247,7 @@ pub async fn serve(
     recipe: antumbra_core::behavior::Recipe,
     tune_confidence: bool,
 ) -> Result<()> {
-    let mut store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
+    let mut store = crate::connect(&url, &db).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
     // on NON-root connections or the engine ACL is bypassed: give each
     // identity its own credential-less connection (schema already applied by
@@ -258,7 +257,7 @@ pub async fn serve(
     // Embedded, the one connection is signed in per request, which drops a LIVE
     // query, so live propagation follows the store's own announced writes
     // instead. Asked for before `store` is cloned, so every clone announces.
-    let (serving, announced) = match (db_user.as_deref(), db_pass.as_deref()) {
+    let (serving, announced) = match (db.db_user.as_deref(), db.db_pass.as_deref()) {
         (Some(_), Some(_)) => (
             Serving::PerIdentity {
                 url: url.clone(),

@@ -15,7 +15,7 @@ use antumbra_embed::HttpEmbedder;
 use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, expert, lifecycle, shadow};
-use antumbra_store::{schema, ConnectionConfig, Store, EMBED_DIM};
+use antumbra_store::{schema, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::Parser;
 
@@ -53,22 +53,14 @@ use antumbra_serve::CandleServe;
 #[cfg(feature = "models")]
 use antumbra_train::RaftConfig;
 
-/// Root DB credentials for an authenticated remote, captured once from the global
-/// `--db-user`/`--db-pass` so `connect` (called from many handlers that only carry
-/// the url) can apply them without threading them through every call site.
-static DB_CREDS: std::sync::OnceLock<(Option<String>, Option<String>)> = std::sync::OnceLock::new();
+/// The DB credentials, captured once from the global flags so `connect` (called
+/// from many handlers that only carry the url) can apply them without threading
+/// them through every call site.
+static DB_CREDS: std::sync::OnceLock<antumbra_store::args::DbAuthArgs> = std::sync::OnceLock::new();
 
 async fn connect(url: &str) -> anyhow::Result<Store> {
-    let mut builder = ConnectionConfig::builder()
-        .url(url)
-        .namespace("antumbra")
-        .database("main");
-    // Root login for an authenticated remote (`ws://`); embedded stores need none.
-    if let Some((Some(user), Some(pass))) = DB_CREDS.get() {
-        builder = builder.username(user.as_str()).password(pass.as_str());
-    }
-    let config = builder.build()?;
-    Ok(Store::connect(config, EMBED_DIM).await?)
+    let db = DB_CREDS.get().cloned().unwrap_or_default();
+    Ok(db.connect(url, EMBED_DIM).await?)
 }
 
 /// The embedder choice from the global `--embedder-url` / `--fake-embedder`
@@ -181,7 +173,7 @@ fn tui_alias(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::Os
 
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse_from(tui_alias(std::env::args_os()));
-    let _ = DB_CREDS.set((cli.db_user.clone(), cli.db_pass.clone()));
+    let _ = DB_CREDS.set(cli.db.clone());
     let _ = EMBEDDER.set(EmbedderChoice {
         url: cli.embedder_url.clone(),
         model: cli.embedder_model.clone(),
@@ -900,6 +892,37 @@ mod tests {
     fn parsed(argv: &[&str]) -> Command {
         let argv = argv.iter().map(std::ffi::OsString::from);
         Cli::try_parse_from(tui_alias(argv)).unwrap().command
+    }
+
+    // The store flags are the shared ones (#303): the password's environment
+    // value is hidden in --help, the url reads its variable, and both reach
+    // every subcommand, as in every binary.
+    #[test]
+    fn the_store_flags_read_as_in_every_binary() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        let flag = |id: &str| {
+            cmd.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                (
+                    a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                    a.is_hide_env_values_set(),
+                    a.is_global_set(),
+                )
+            })
+        };
+        assert_eq!(
+            flag("db_pass"),
+            Some((Some("ANTUMBRA_DB_PASS".into()), true, true))
+        );
+        assert_eq!(
+            flag("url"),
+            Some((Some("ANTUMBRA_DB_URL".into()), false, true))
+        );
+        assert_eq!(
+            flag("db_auth").map(|f| f.0),
+            Some(Some("ANTUMBRA_DB_AUTH".into()))
+        );
     }
 
     /// What clap says against `argv`, or nothing when it parses.

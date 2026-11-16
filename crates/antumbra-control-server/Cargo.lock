@@ -188,6 +188,7 @@ dependencies = [
  "antumbra-core",
  "async-trait",
  "chrono",
+ "clap",
  "futures",
  "oneiriq-surql",
  "serde",

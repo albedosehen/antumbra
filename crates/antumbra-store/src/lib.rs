@@ -9,6 +9,8 @@
 mod dto;
 mod error;
 
+#[cfg(feature = "clap")]
+pub mod args;
 pub mod fusion;
 pub mod knn;
 mod lexical;
