@@ -3,9 +3,11 @@
 //! worth of rows at once (prefill), with no model around it.
 //!
 //! A decoded token is 28 layers of seven projections and one head: 197 calls.
-//! Summing what each call costs here, and setting that beside what a token
-//! costs in the whole model, says how much of a token is candle's kernels and
-//! how much is the loop around them.
+//! Summing what each call costs here gives a floor for the kernels, not what
+//! they cost in the model: each weight is multiplied by many times in a row
+//! here and stays in the CPU's cache, where a decoded token reads each of the
+//! 197 once, cold. Measured inside the model on the same laptop, the same
+//! multiplies took 48 ms a token against the 33 this reports.
 //!
 //! Ignored, and asserts `ANTUMBRA_CPU_SERVE` is set. Run it in release:
 //!
@@ -83,8 +85,9 @@ fn the_quantized_kernels_are_timed_on_the_base_shapes() -> Outcome<()> {
         let head = call_ms(&weight(VOCAB, HIDDEN, GgmlDType::Q8_0)?, HIDDEN, 1, 20)?;
         eprintln!("{dtype:?} head ({VOCAB}x{HIDDEN}, Q8_0): {head:.3} ms a row");
         eprintln!(
-            "RESULT {dtype:?}: a decoded token is {:.1} ms of kernels ({:.1} body + {head:.1} head), \
-             {:.1} tok/s if nothing else cost anything; a prompt token is {:.2} ms of body",
+            "RESULT {dtype:?}: a decoded token is at least {:.1} ms of kernels \
+             ({:.1} body + {head:.1} head, weights hot in cache), {:.1} tok/s at most; \
+             a prompt token is {:.2} ms of body",
             decode + head,
             decode,
             1000.0 / (decode + head),
