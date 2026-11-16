@@ -83,7 +83,7 @@ const TENANT_PERMS: [(&str, &str); 4] = [
 /// compartment table is tenant-readable, so the subquery resolves for any session,
 /// but it returns the compartment id only when `$auth.user` owns it.
 const COMPARTMENT_OWNER_RULE: &str = "tenant_id = $auth.tenant AND compartment IN \
-    (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE)";
+    (SELECT VALUE key FROM compartment WHERE tenant_id = $auth.tenant AND owner = $auth.user AND deleted_at IS NONE)";
 
 /// Grant-table permissions. Any tenant member may **read** grants (so the memory
 /// rule's `grantee = $auth.user` subquery resolves), but only the **owner of the
@@ -139,11 +139,15 @@ pub(crate) fn hive_compartments(tenant: &str) -> String {
     )
 }
 
-/// The compartments granted to `user`, as a list: the grant branch of the read
-/// rule. `user` is a SurrealQL expression, as `tenant` is for
-/// [`hive_compartments`].
-pub(crate) fn granted_compartments(user: &str) -> String {
-    format!("SELECT VALUE compartment FROM grant WHERE grantee = {user} AND deleted_at IS NONE")
+/// The compartments granted to `user` in `tenant`, as a list: the grant branch
+/// of the read rule. Both are SurrealQL expressions, as for
+/// [`hive_compartments`]. The tenant is named here and not left to the grant
+/// table's own permission, which a permission subquery may not apply.
+pub(crate) fn granted_compartments(tenant: &str, user: &str) -> String {
+    format!(
+        "SELECT VALUE compartment FROM grant \
+         WHERE tenant_id = {tenant} AND grantee = {user} AND deleted_at IS NONE"
+    )
 }
 
 /// The compartments `user` owns in `tenant`, live, as a list: the owner
@@ -181,7 +185,7 @@ fn memory_select_without_hive() -> String {
         "tenant_id = $auth.tenant AND (compartment = NONE \
          OR ({OWN_COMPARTMENT}.owner = $auth.user AND {OWN_COMPARTMENT}.deleted_at IS NONE) \
          OR compartment IN ({})",
-        granted_compartments("$auth.user")
+        granted_compartments("$auth.tenant", "$auth.user")
     )
 }
 
@@ -208,8 +212,8 @@ pub(crate) fn memory_select_rule() -> String {
 /// private compartment (which the owner would then see as their own). This mirrors
 /// `EDGE_LINK_RULE` for the write side of the graph (the dual of `GRANT_PERMS`).
 const MEMORY_WRITE_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
-     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
+     OR compartment IN (SELECT VALUE key FROM compartment WHERE tenant_id = $auth.tenant AND owner = $auth.user AND deleted_at IS NONE) \
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE tenant_id = $auth.tenant AND grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
 
 /// `document_chunk` follows the compartment rules a memory does, because a
 /// document is shared the way a memory is: through its compartment. It used to
@@ -333,9 +337,9 @@ const HIVE_OFFER_PERMS: [(&str, &str); 4] = [
 /// to you with the `link` capability (not mere `reference`). Read visibility of
 /// the target is already enforced when an edge is resolved back to a memory.
 const EDGE_LINK_RULE: &str = "tenant_id = $auth.tenant AND to_id IN (SELECT VALUE key FROM memory \
-     WHERE compartment = NONE \
-     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
+     WHERE tenant_id = $auth.tenant AND (compartment = NONE \
+     OR compartment IN (SELECT VALUE key FROM compartment WHERE tenant_id = $auth.tenant AND owner = $auth.user AND deleted_at IS NONE) \
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE tenant_id = $auth.tenant AND grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE)))";
 
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
@@ -778,14 +782,36 @@ mod tests {
     /// lists share with it, and reads exactly as it did written out whole.
     #[test]
     fn the_read_rule_is_unchanged_by_sharing_its_subqueries() {
-        let before = r"tenant_id = $auth.tenant AND (compartment = NONE OR (type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).owner = $auth.user AND type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).deleted_at IS NONE) OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE) OR compartment IN (SELECT VALUE subject_id FROM hive_offer WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true)))";
+        let before = r"tenant_id = $auth.tenant AND (compartment = NONE OR (type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).owner = $auth.user AND type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).deleted_at IS NONE) OR compartment IN (SELECT VALUE compartment FROM grant WHERE tenant_id = $auth.tenant AND grantee = $auth.user AND deleted_at IS NONE) OR compartment IN (SELECT VALUE subject_id FROM hive_offer WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true)))";
         assert_eq!(memory_select_rule(), before);
-        assert!(before.contains(&granted_compartments("$auth.user")));
+        assert!(before.contains(&granted_compartments("$auth.tenant", "$auth.user")));
         assert!(before.contains(&hive_compartments("$auth.tenant")));
         assert_eq!(
             owned_compartments("$t", "$u"),
             "SELECT VALUE key FROM compartment WHERE tenant_id = $t AND owner = $u AND deleted_at IS NONE"
         );
+    }
+
+    /// Every subquery a rule asks of the grant, compartment or memory table
+    /// names the tenant itself, so no rule leans on the inner table's own
+    /// permission to keep another tenant's rows out of the answer.
+    #[test]
+    fn every_rule_subquery_names_the_tenant() {
+        let rules = [
+            memory_select_rule(),
+            MEMORY_WRITE_RULE.to_string(),
+            EDGE_LINK_RULE.to_string(),
+            COMPARTMENT_OWNER_RULE.to_string(),
+        ];
+        for rule in &rules {
+            for (n, fragment) in rule.split("(SELECT VALUE").enumerate().skip(1) {
+                let body = fragment.split(')').next().unwrap_or(fragment);
+                assert!(
+                    body.contains("tenant_id"),
+                    "subquery {n} of `{rule}` names no tenant: {body}"
+                );
+            }
+        }
     }
 
     #[test]
