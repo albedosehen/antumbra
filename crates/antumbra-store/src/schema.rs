@@ -23,6 +23,7 @@ use surql::schema::{
 use antumbra_core::Result;
 
 use crate::error::map;
+use crate::tables;
 
 /// Default embedding dimension (all-MiniLM-L6-v2).
 pub const EMBED_DIM: usize = 384;
@@ -369,7 +370,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
     vec![
         // Expert population (umbra), the population of small frozen experts, with multi-tenant isolation across compartments. Shared experts read by
         // all; private experts read only by their owner; owner writes.
-        table_schema("expert")
+        table_schema(tables::EXPERT)
             .with_mode(TableMode::Schemaless)
             .with_permissions(EXPERT_PERMS)
             .with_indexes([
@@ -385,19 +386,19 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ),
             ]),
         // Shadow lifecycle (penumbra): shadow models hold the plasticity.
-        table_schema("shadow")
+        table_schema(tables::SHADOW)
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("shadow_key_uq", ["key"]),
                 index("shadow_status_idx", ["status", "generation"]),
             ]),
         // Critic signal (verifier-first): the critic for credit assignment.
-        table_schema("reward_signal")
+        table_schema(tables::REWARD_SIGNAL)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("reward_run_idx", ["run_id", "step_idx"])]),
         // Inhibitory store (antumbra): the counterfactual boundary of competence.
         // Shared, but for the boundaries a user's own training recorded.
-        table_schema("failure_boundary")
+        table_schema(tables::FAILURE_BOUNDARY)
             .with_mode(TableMode::Schemaless)
             .with_permissions(BOUNDARY_PERMS)
             .with_indexes([
@@ -413,89 +414,89 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ),
             ]),
         // Durable orchestration (the boundary-conditioned gate, routing-as-retrieval).
-        table_schema("orchestration_run")
+        table_schema(tables::ORCHESTRATION_RUN)
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("orun_key_uq", ["key"]),
                 index("orun_status_idx", ["status", "updated_at"]),
             ]),
         // Durable generational loop head (the generation_head checkpoint).
-        table_schema("generation_head").with_mode(TableMode::Schemaless),
+        table_schema(tables::GENERATION_HEAD).with_mode(TableMode::Schemaless),
         // Out-of-band loop control (operator graceful-stop signal) for the durable generational loop.
-        table_schema("loop_control").with_mode(TableMode::Schemaless),
+        table_schema(tables::LOOP_CONTROL).with_mode(TableMode::Schemaless),
         // Hosted-onboarding control plane and product surface. No PERMISSIONS clause, so
         // both default to deny for record/tenant sessions; only the control
         // plane's owner connection reads/writes them (an account row maps a login
         // to a tenant and must never be tenant-readable).
-        table_schema("invite_code").with_mode(TableMode::Schemaless),
-        table_schema("account").with_mode(TableMode::Schemaless),
+        table_schema(tables::INVITE_CODE).with_mode(TableMode::Schemaless),
+        table_schema(tables::ACCOUNT).with_mode(TableMode::Schemaless),
         // Consumed magic-link ids (keyed by `jti`): the single-use ledger a
         // verify writes through, with an `expires_at` matching the link's so
         // rows self-expire out at the next sweep. Owner-only, like the rest of
         // the control-plane tables.
-        table_schema("magic_link_use").with_mode(TableMode::Schemaless),
+        table_schema(tables::MAGIC_LINK_USE).with_mode(TableMode::Schemaless),
         // Expert lifecycle: every status change, appended and
         // numbered per expert. Readable where its expert is, through the same
         // owner rule, so no session sees an expert without its moves.
-        table_schema("expert_transition")
+        table_schema(tables::EXPERT_TRANSITION)
             .with_mode(TableMode::Schemaless)
             .with_permissions(EXPERT_PERMS)
             .with_indexes([unique_index("xtrans_seq_uq", ["expert", "seq"])]),
         // Each shared expert's leave-one-out contribution per measured
         // generation, the history retirement reads. Readable
         // like the shared population it measures.
-        table_schema("contribution")
+        table_schema(tables::CONTRIBUTION)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("contribution_expert_idx", ["expert", "generation"])]),
         // The population against its single best expert, per measured
         // generation of a run: the rolling comparison that is
         // reported whether or not it flatters the architecture.
-        table_schema("population_baseline")
+        table_schema(tables::POPULATION_BASELINE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("baseline_run_idx", ["run_id", "generation"])]),
         // Each live task's clear winner among the experts, from the latest
         // contribution measurement that scored them all: what
         // the learned router trains on beside the capability exemplars.
-        table_schema("routing_outcome")
+        table_schema(tables::ROUTING_OUTCOME)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("routing_outcome_winner_idx", ["winner"])]),
         // The grow step: the region census each contribution
         // measurement takes, and the decision each generation made from it.
-        table_schema("region_census")
+        table_schema(tables::REGION_CENSUS)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("census_run_idx", ["run_id", "generation"])]),
-        table_schema("grow")
+        table_schema(tables::GROW)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("grow_run_idx", ["run_id", "generation"])]),
         // The verifier namespace: verifiers keyed by content
         // address, and the append-only measurements and state changes that
         // decide whether each may grant reward. No permissions clause: owner
         // only, so no tenant session and nothing that trains can write one.
-        table_schema("verifier")
+        table_schema(tables::VERIFIER)
             .with_mode(TableMode::Schemaless)
             .with_indexes([unique_index("verifier_key_uq", ["key"])]),
-        table_schema("verifier_transition")
+        table_schema(tables::VERIFIER_TRANSITION)
             .with_mode(TableMode::Schemaless)
             .with_indexes([unique_index("vtrans_seq_uq", ["verifier", "seq"])]),
-        table_schema("verifier_measurement")
+        table_schema(tables::VERIFIER_MEASUREMENT)
             .with_mode(TableMode::Schemaless)
             .with_indexes([unique_index("vmeasure_seq_uq", ["verifier", "seq"])]),
         // Validation harness.
-        table_schema("evaluation_run")
+        table_schema(tables::EVALUATION_RUN)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("eval_subject_idx", ["subject_kind", "subject_id"])]),
         // The recipe search: one row per shadow's training
         // recipe, read back by run in generation order.
-        table_schema("recipe")
+        table_schema(tables::RECIPE)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("recipe_run_idx", ["run_id", "generation"])]),
         // A user's fabric: which of their machines an agent is running on, and
         // which one of them can train. Keyed per (tenant, user, host),
         // so the user index is what dispatch looks their genesis node up by.
-        table_schema("device_profile")
+        table_schema(tables::DEVICE_PROFILE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(DEVICE_PERMS)
             .with_indexes([
@@ -504,15 +505,15 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             ]),
         // The tenant hive: two gates and an offer ledger. One hive
         // row per tenant, so the gate cannot be ambiguous.
-        table_schema("hive")
+        table_schema(tables::HIVE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(HIVE_PERMS)
             .with_indexes([unique_index("hive_tenant_uq", ["tenant_id"])]),
-        table_schema("hive_membership")
+        table_schema(tables::HIVE_MEMBERSHIP)
             .with_mode(TableMode::Schemaless)
             .with_permissions(HIVE_MEMBERSHIP_PERMS)
             .with_indexes([unique_index("hive_member_uq", ["tenant_id", "user"])]),
-        table_schema("hive_offer")
+        table_schema(tables::HIVE_OFFER)
             .with_mode(TableMode::Schemaless)
             .with_permissions(HIVE_OFFER_PERMS)
             .with_indexes([index(
@@ -521,7 +522,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             )]),
         // What a node could not run itself, left where the machine that can will
         // find it. Indexed by the pair a trainer looks it up on.
-        table_schema("genesis_request")
+        table_schema(tables::GENESIS_REQUEST)
             .with_mode(TableMode::Schemaless)
             .with_permissions(GENESIS_REQUEST_PERMS)
             .with_indexes([index("genesis_user_idx", ["user", "status"])]),
@@ -529,7 +530,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // row per (tenant, repository), so the declared edges into and out of
         // one repository can be worked out again from every other's last
         // reading.
-        table_schema("manifest_set")
+        table_schema(tables::MANIFEST_SET)
             .with_mode(TableMode::Schemaless)
             .with_permissions(MANIFEST_SET_PERMS)
             .with_indexes([index("manifest_set_tenant_idx", ["tenant_id"])]),
@@ -537,7 +538,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // it to route a task across the shared experts; the owner trains/writes
         // it. Previously auto-created (which defaulted to deny for record
         // sessions); defined here so the read permission is explicit.
-        table_schema("learned_router")
+        table_schema(tables::LEARNED_ROUTER)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS),
         // Penumbra memory (the soft, editable consolidation source). Tenant-
@@ -548,7 +549,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // `WHERE tenant_id = ...` as the documented second layer. The clause
         // becomes load-bearing once a per-tenant `ScopeCredentials` session binds
         // `$auth.tenant`; a rootful schema/migration session bypasses it.
-        table_schema("memory")
+        table_schema(tables::MEMORY)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", memory_select_rule()),
@@ -594,7 +595,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // memory can find it. It carries the memory's workspace and
         // compartment, so its select rule is the memory's own and a chunk is
         // visible exactly when its memory is. Only the server writes it.
-        table_schema("memory_chunk")
+        table_schema(tables::MEMORY_CHUNK)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", memory_select_rule()),
@@ -626,7 +627,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // like `memory` (engine-enforced PERMISSIONS + the repo's explicit
         // filter). A plain table keyed by from/to/type, queried by clean
         // equality (native N-hop RELATION traversal is a later enhancement).
-        table_schema("memory_edge")
+        table_schema(tables::MEMORY_EDGE)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", "tenant_id = $auth.tenant"),
@@ -644,7 +645,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // (tenant, memory), counted by the server as it watches recall and the
         // work after it. Apart from `memory` so a count never rewrites the
         // memory (its `updated_at` drives replication); not replicated.
-        table_schema("memory_use")
+        table_schema(tables::MEMORY_USE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(TENANT_PERMS)
             .with_indexes([unique_index(
@@ -653,7 +654,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             )]),
         // A workspace's memory knobs: one row per tenant. Its own sessions
         // read it; only the owner (an operator's console action) writes it.
-        table_schema("memory_policy")
+        table_schema(tables::MEMORY_POLICY)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", "tenant_id = $auth.tenant"),
@@ -666,7 +667,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // from episodic `memory` but isolated the same way (the compartment rule
         // in the engine + the repo's tenant filter). HNSW-indexed for semantic
         // recall over reference material.
-        table_schema("document_chunk")
+        table_schema(tables::DOCUMENT_CHUNK)
             .with_mode(TableMode::Schemaless)
             .with_permissions(document_perms())
             .with_indexes([
@@ -688,7 +689,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // its slug (unique across the server, since a public relic is found by
         // slug alone), each version's copal file listed inside it. Read through
         // the compartment like a document; written by its owner only.
-        table_schema("relic")
+        table_schema(tables::RELIC)
             .with_mode(TableMode::Schemaless)
             .with_permissions(relic_perms())
             .with_indexes([
@@ -699,7 +700,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
         // subqueries resolve; written by their owner alone, since the memory
         // rule trusts the row's owner live (COMPARTMENT_PERMS).
-        table_schema("compartment")
+        table_schema(tables::COMPARTMENT)
             .with_mode(TableMode::Schemaless)
             .with_permissions(COMPARTMENT_PERMS)
             .with_indexes([
@@ -710,7 +711,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // Capability grants (intra-tenant, user-to-user). Tenant-readable so the
         // memory ACL can resolve `grantee = $auth.user`; only the compartment's
         // owner may write a grant on it (GRANT_PERMS) so a grant cannot be forged.
-        table_schema("grant")
+        table_schema(tables::GRANT)
             .with_mode(TableMode::Schemaless)
             .with_permissions(GRANT_PERMS)
             .with_indexes([
@@ -722,7 +723,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // resolves a principal so `$auth` carries both `$auth.tenant` (the hard
         // isolation key) and `$auth.user` (the compartment-ownership / sharing
         // actor). Provisioned by the owner/root; read only by the SIGNIN.
-        table_schema("principal")
+        table_schema(tables::PRINCIPAL)
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("principal_tenant_user_uq", ["tenant", "user"]),
@@ -734,14 +735,14 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // tenant. The server reads it as the owner when it builds a workspace's
         // session, and the operator's CLI writes it as the owner; it holds the
         // endpoint's key, so no member session reads or writes it.
-        table_schema("embedder_config")
+        table_schema(tables::EMBEDDER_CONFIG)
             .with_mode(TableMode::Schemaless)
             .with_permissions(OWNER_VIEW_PERMS)
             .with_indexes([unique_index("embedder_config_tenant_uq", ["tenant_id"])]),
         // The loop's readings of a workspace's behavior audits against the
         // regression confidence admission is held to: one row per reading,
         // appended, the latest in force. Tenant-scoped like the behaviors.
-        table_schema("behavior_tuning")
+        table_schema(tables::BEHAVIOR_TUNING)
             .with_mode(TableMode::Schemaless)
             .with_permissions(TENANT_PERMS)
             .with_indexes([index("behavior_tuning_tenant_idx", ["tenant_id"])]),

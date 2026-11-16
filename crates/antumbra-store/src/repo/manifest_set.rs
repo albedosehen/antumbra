@@ -21,7 +21,7 @@ use antumbra_core::{Result, TenantId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "manifest_set";
+const TABLE: &str = crate::tables::MANIFEST_SET;
 
 #[derive(Serialize, Deserialize)]
 struct Row {

@@ -10,7 +10,7 @@ use antumbra_core::{EvaluationRun, Result, RunId, SubjectKind};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "evaluation_run";
+const TABLE: &str = crate::tables::EVALUATION_RUN;
 
 /// Record a measured run.
 pub async fn insert(store: &Store, run: &EvaluationRun) -> Result<()> {

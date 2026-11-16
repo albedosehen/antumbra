@@ -20,9 +20,9 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const HIVE: &str = "hive";
-const MEMBERSHIP: &str = "hive_membership";
-const OFFER: &str = "hive_offer";
+const HIVE: &str = crate::tables::HIVE;
+const MEMBERSHIP: &str = crate::tables::HIVE_MEMBERSHIP;
+const OFFER: &str = crate::tables::HIVE_OFFER;
 
 fn sanitize(s: &str) -> String {
     s.replace([':', '/', '\\', '|', ' '], "_")

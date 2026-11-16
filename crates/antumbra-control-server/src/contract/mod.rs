@@ -95,15 +95,24 @@ pub fn contract() -> Contract {
 pub fn schema() -> Vec<TableDefinition> {
     let mut tables = antumbra_store::schema::tables(antumbra_store::EMBED_DIM as u32);
     for (name, columns) in [
-        ("memory", memories::columns()),
-        ("memory_edge", memory_edges::columns()),
-        ("compartment", compartments::columns()),
-        ("grant", grants::columns()),
-        ("document_chunk", document_chunks::columns()),
-        ("expert", experts::columns()),
-        ("evaluation_run", evaluation_runs::columns()),
-        ("orchestration_run", orchestration_runs::columns()),
-        ("shadow", shadows::columns()),
+        (antumbra_store::tables::MEMORY, memories::columns()),
+        (antumbra_store::tables::MEMORY_EDGE, memory_edges::columns()),
+        (antumbra_store::tables::COMPARTMENT, compartments::columns()),
+        (antumbra_store::tables::GRANT, grants::columns()),
+        (
+            antumbra_store::tables::DOCUMENT_CHUNK,
+            document_chunks::columns(),
+        ),
+        (antumbra_store::tables::EXPERT, experts::columns()),
+        (
+            antumbra_store::tables::EVALUATION_RUN,
+            evaluation_runs::columns(),
+        ),
+        (
+            antumbra_store::tables::ORCHESTRATION_RUN,
+            orchestration_runs::columns(),
+        ),
+        (antumbra_store::tables::SHADOW, shadows::columns()),
     ] {
         let table = tables
             .iter_mut()

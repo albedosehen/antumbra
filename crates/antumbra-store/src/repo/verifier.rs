@@ -32,9 +32,9 @@ use crate::error::map;
 use crate::repo::lifecycle;
 use crate::store::Store;
 
-const TABLE: &str = "verifier";
-const TRANSITIONS: &str = "verifier_transition";
-const MEASUREMENTS: &str = "verifier_measurement";
+const TABLE: &str = crate::tables::VERIFIER;
+const TRANSITIONS: &str = crate::tables::VERIFIER_TRANSITION;
+const MEASUREMENTS: &str = crate::tables::VERIFIER_MEASUREMENT;
 
 #[derive(Serialize, Deserialize)]
 struct VerifierRow {

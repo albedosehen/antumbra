@@ -16,9 +16,9 @@ use antumbra_core::{BaselineRecord, ContributionRecord, ExpertId, Result, Routin
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "contribution";
-const BASELINE: &str = "population_baseline";
-const OUTCOME: &str = "routing_outcome";
+const TABLE: &str = crate::tables::CONTRIBUTION;
+const BASELINE: &str = crate::tables::POPULATION_BASELINE;
+const OUTCOME: &str = crate::tables::ROUTING_OUTCOME;
 
 fn key(record: &ContributionRecord) -> String {
     format!(

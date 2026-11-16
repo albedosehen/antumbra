@@ -22,7 +22,7 @@ pub(super) fn resource() -> Resource {
     // sort claims hold.
     read_only(
         "orchestration_runs",
-        "orchestration_run",
+        antumbra_store::tables::ORCHESTRATION_RUN,
         "key",
         vec![
             FieldExposure::column("key"),

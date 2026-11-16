@@ -14,7 +14,7 @@ use antumbra_core::{Result, RunId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "loop_control";
+const TABLE: &str = crate::tables::LOOP_CONTROL;
 
 fn record_id(run_id: &RunId) -> Result<RecordID> {
     RecordID::<()>::new(TABLE, run_id.as_str()).map_err(map)

@@ -22,7 +22,7 @@ pub(super) fn resource() -> Resource {
         pinned: vec!["tenant_id".into()],
         ..listing(
             "grants",
-            "grant",
+            antumbra_store::tables::GRANT,
             vec![
                 FieldExposure::column("grantee"),
                 FieldExposure::column("compartment"),

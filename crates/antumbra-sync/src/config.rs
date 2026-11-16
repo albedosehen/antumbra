@@ -182,7 +182,7 @@ mod tests {
         let store = Endpoint::embedded("mem://").connect().await.unwrap();
         // A connected store can be queried (schema applied).
         assert_eq!(
-            antumbra_store::repo::sync::list_rows(&store, "memory")
+            antumbra_store::repo::sync::list_rows(&store, antumbra_store::tables::MEMORY)
                 .await
                 .unwrap()
                 .len(),

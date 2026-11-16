@@ -22,7 +22,7 @@ pub(super) fn resource() -> Resource {
         pinned: vec!["tenant_id".into()],
         ..listing(
             "memory_edges",
-            "memory_edge",
+            antumbra_store::tables::MEMORY_EDGE,
             vec![
                 FieldExposure::column("from_id"),
                 FieldExposure::column("to_id"),

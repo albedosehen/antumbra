@@ -16,7 +16,7 @@ use antumbra_core::{AntumbraError, Result};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "invite_code";
+const TABLE: &str = crate::tables::INVITE_CODE;
 
 /// A mint-once signup invite.
 #[derive(Debug, Clone, Serialize, Deserialize)]

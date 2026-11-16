@@ -16,7 +16,7 @@ use antumbra_core::{AntumbraError, Result, TenantId, UserId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "principal";
+const TABLE: &str = crate::tables::PRINCIPAL;
 
 fn key(tenant: &TenantId, user: &UserId) -> String {
     format!("{}|{}", tenant.as_str(), user.as_str()).replace([':', '/', '\\', '|'], "_")
