@@ -199,8 +199,11 @@ services:
       # refuses to start on an empty or placeholder secret itself.
       - ANTUMBRA_MAGIC_SECRET=${ANTUMBRA_MAGIC_SECRET:-}
       - ANTUMBRA_DB_PASS=${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
-      # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email; left
-      # empty, links are logged to this container's stderr (dev mailer).
+      # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email. For
+      # development only, ANTUMBRA_DEV_MAILER=1 logs each link to this
+      # container's stderr instead. With neither, or with SMTP_HOST set but
+      # unusable, the server refuses to start; it never falls back to logging.
+      - ANTUMBRA_DEV_MAILER=${ANTUMBRA_DEV_MAILER:-}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-}
       - SMTP_USER=${SMTP_USER:-}
