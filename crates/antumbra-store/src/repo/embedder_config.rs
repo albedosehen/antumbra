@@ -21,7 +21,7 @@ use antumbra_core::{Result, TenantId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "embedder_config";
+const TABLE: &str = crate::tables::EMBEDDER_CONFIG;
 
 /// A workspace's embedder endpoint. `api_key` is an optional bearer token for the
 /// endpoint, stored in a row only the owner view reads or writes

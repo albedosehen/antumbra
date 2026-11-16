@@ -30,6 +30,9 @@ use chrono::Utc;
 #[cfg(feature = "models")]
 use crate::{connect, make_embedder, refresh_router, RouterRefresh};
 
+use clap::Args;
+
+use crate::capture_args::CaptureSftArgs;
 pub use crate::eval_args::EvalArgs;
 
 /// `antumbra eval`: an adapter's pass rate on a corpus, with no training.
@@ -148,13 +151,30 @@ pub async fn eval(args: EvalArgs) -> anyhow::Result<()> {
 }
 
 /// What `antumbra ask` was given.
+#[derive(Args, Debug)]
 pub struct AskArgs {
+    /// The task to route and answer.
     pub task: String,
+    #[arg(long, default_value_t = 1)]
     pub k: usize,
+    /// Max tokens to generate for the answer.
+    #[arg(long, default_value_t = 128)]
     pub max_new_tokens: usize,
+    /// Abstention threshold on relative coverage. Adjacent experts compress
+    /// the margin; lower it to serve rather than escalate.
+    #[arg(long, default_value_t = 0.08)]
     pub threshold: f32,
+    /// Standing experts always composed onto the routed one (your conventions),
+    /// `name:weight,...`, the static rule layer, internalized into the learned gate.
+    #[arg(long)]
     pub with: Option<String>,
+    /// Blend weight for the task-routed (contextual) expert when composing
+    /// with standing experts.
+    #[arg(long, default_value_t = 0.4)]
     pub self_weight: f32,
+    /// Sampling temperature. 0 = greedy (deterministic, the learned mode,
+    /// the right default for serving); raise for diverse draws.
+    #[arg(long, default_value_t = 0.0)]
     pub temperature: f64,
 }
 
@@ -285,13 +305,30 @@ pub async fn ask(url: &str, args: AskArgs) -> anyhow::Result<()> {
 }
 
 /// What `antumbra scope` was given.
+#[derive(Args, Debug)]
 pub struct ScopeArgs {
+    /// Path to a scope spec JSON: { behavior, base_model?, governing_feature?,
+    /// fail_context, candidates: [<full context objects, each with verify>] }.
+    #[arg(long)]
     pub spec: String,
+    /// Probe with this expert's adapter (by name) instead of the bare base,
+    /// so the search maps that expert's own competence boundary.
+    #[arg(long)]
     pub expert: Option<String>,
+    /// Infer the governing feature from which contexts pass vs fail, instead
+    /// of trusting the spec's label (treats fail_context + candidates as a pool).
+    #[arg(long)]
     pub discover: bool,
+    #[arg(long, default_value_t = 96)]
     pub max_new_tokens: usize,
+    /// Best-of-K samples per context check (generation is stochastic).
+    #[arg(long, default_value_t = 8)]
     pub samples: usize,
+    /// Sampling temperature; higher diversifies the best-of-K draws.
+    #[arg(long, default_value_t = 0.8)]
     pub temperature: f64,
+    /// Confidence assigned to the recovered boundary.
+    #[arg(long, default_value_t = 0.7)]
     pub confidence: f32,
 }
 
@@ -655,14 +692,19 @@ pub async fn train(url: &str, args: TrainArgs) -> anyhow::Result<()> {
 }
 
 /// What `antumbra teach` was given.
+#[derive(Args, Debug)]
 pub struct TeachArgs {
+    /// JSON corpus of {id, prompt, completion, verify} corrections.
+    #[arg(long)]
     pub corpus: String,
+    #[arg(long, default_value_t = 1)]
     pub generations: u32,
+    #[arg(long, default_value = "run:teach")]
     pub run: String,
-    pub rounds: usize,
-    pub samples: usize,
-    pub max_new_tokens: usize,
-    pub lr: f64,
+    #[command(flatten)]
+    pub capture: CaptureSftArgs,
+    /// Warm-start from this adapter (accumulate onto an existing expert).
+    #[arg(long)]
     pub parent: Option<String>,
 }
 
@@ -670,10 +712,10 @@ pub async fn teach(url: &str, args: TeachArgs) -> anyhow::Result<()> {
     let corpus = args.corpus;
     let generations = args.generations;
     let run = args.run;
-    let rounds = args.rounds;
-    let samples = args.samples;
-    let max_new_tokens = args.max_new_tokens;
-    let lr = args.lr;
+    let rounds = args.capture.rounds;
+    let samples = args.capture.samples;
+    let max_new_tokens = args.capture.max_new_tokens;
+    let lr = args.capture.lr;
     let parent = args.parent;
     #[cfg(feature = "models")]
     {

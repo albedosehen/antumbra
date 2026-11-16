@@ -23,7 +23,7 @@ pub(super) fn resource() -> Resource {
         // wire.
         ..read_only(
             "compartments",
-            "compartment",
+            antumbra_store::tables::COMPARTMENT,
             "key",
             vec![
                 FieldExposure::column("key"),

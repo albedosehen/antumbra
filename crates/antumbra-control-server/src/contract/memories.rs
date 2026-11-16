@@ -41,7 +41,7 @@ pub(super) fn resource() -> Resource {
         // is claimed by no index and so is not a sort here.
         ..read_only(
             "memories",
-            "memory",
+            antumbra_store::tables::MEMORY,
             "key",
             vec![
                 FieldExposure::column("key"),

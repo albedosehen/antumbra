@@ -19,6 +19,7 @@ use chrono::Utc;
 use clap::Parser;
 
 mod behave;
+mod capture_args;
 mod claude;
 mod cli;
 mod commands;
@@ -371,84 +372,13 @@ async fn run() -> anyhow::Result<()> {
                 }
             }
         }
-        Command::Ask {
-            task,
-            k,
-            max_new_tokens,
-            threshold,
-            with,
-            self_weight,
-            temperature,
-        } => {
-            models::ask(
-                &cli.url,
-                models::AskArgs {
-                    task,
-                    k,
-                    max_new_tokens,
-                    threshold,
-                    with,
-                    self_weight,
-                    temperature,
-                },
-            )
-            .await?;
-        }
-
-        Command::Scope {
-            spec,
-            expert,
-            discover,
-            max_new_tokens,
-            samples,
-            temperature,
-            confidence,
-        } => {
-            models::scope(
-                &cli.url,
-                models::ScopeArgs {
-                    spec,
-                    expert,
-                    discover,
-                    max_new_tokens,
-                    samples,
-                    temperature,
-                    confidence,
-                },
-            )
-            .await?;
-        }
-
+        Command::Ask(args) => models::ask(&cli.url, args).await?,
+        Command::Scope(args) => models::scope(&cli.url, args).await?,
         Command::Train(args) => {
             models::train(&cli.url, args).await?;
         }
-
         Command::Eval(args) => models::eval(args).await?,
-        Command::Teach {
-            corpus,
-            generations,
-            run,
-            rounds,
-            samples,
-            max_new_tokens,
-            lr,
-            parent,
-        } => {
-            models::teach(
-                &cli.url,
-                models::TeachArgs {
-                    corpus,
-                    generations,
-                    run,
-                    rounds,
-                    samples,
-                    max_new_tokens,
-                    lr,
-                    parent,
-                },
-            )
-            .await?;
-        }
+        Command::Teach(args) => models::teach(&cli.url, args).await?,
 
         Command::GateTrain {
             epochs,
@@ -537,129 +467,11 @@ async fn run() -> anyhow::Result<()> {
                 );
             }
         }
-        Command::Evolve {
-            corpus,
-            run,
-            target,
-            max_gens,
-            samples,
-            rounds,
-            max_new_tokens,
-        } => {
-            commands::evolve(
-                &cli.url,
-                commands::EvolveArgs {
-                    corpus,
-                    run,
-                    target,
-                    max_gens,
-                    samples,
-                    rounds,
-                    max_new_tokens,
-                },
-            )
-            .await?;
-        }
-        Command::Serve {
-            task,
-            max_new_tokens,
-            threshold,
-            temperature,
-        } => {
-            commands::serve(
-                &cli.url,
-                commands::ServeArgs {
-                    task,
-                    max_new_tokens,
-                    threshold,
-                    temperature,
-                },
-            )
-            .await?;
-        }
-        Command::Populate {
-            corpus,
-            run,
-            target_coverage,
-            max_experts,
-            samples,
-            rounds,
-            max_new_tokens,
-        } => {
-            commands::populate(
-                &cli.url,
-                commands::PopulateArgs {
-                    corpus,
-                    run,
-                    target_coverage,
-                    max_experts,
-                    samples,
-                    rounds,
-                    max_new_tokens,
-                },
-            )
-            .await?;
-        }
-        Command::MemoryImport {
-            source,
-            out,
-            capture_threshold,
-            train,
-            run,
-            rounds,
-            samples,
-            max_new_tokens,
-            lr,
-        } => {
-            commands::memory_import(
-                &cli.url,
-                commands::MemoryImportArgs {
-                    source,
-                    out,
-                    capture_threshold,
-                    train,
-                    run,
-                    rounds,
-                    samples,
-                    max_new_tokens,
-                    lr,
-                },
-            )
-            .await?;
-        }
-        Command::Consolidate {
-            source,
-            log,
-            min_recurrence,
-            min_confidence,
-            train,
-            replay_ratio,
-            run,
-            rounds,
-            samples,
-            max_new_tokens,
-            lr,
-            batch_size,
-        } => {
-            ops::consolidate(
-                &cli.url,
-                ops::ConsolidateArgs {
-                    source,
-                    log,
-                    min_recurrence,
-                    min_confidence,
-                    train,
-                    replay_ratio,
-                    run,
-                    rounds,
-                    samples,
-                    max_new_tokens,
-                    lr,
-                    batch_size,
-                },
-            )
-            .await?;
-        }
+        Command::Evolve(args) => commands::evolve(&cli.url, args).await?,
+        Command::Serve(args) => commands::serve(&cli.url, args).await?,
+        Command::Populate(args) => commands::populate(&cli.url, args).await?,
+        Command::MemoryImport(args) => commands::memory_import(&cli.url, args).await?,
+        Command::Consolidate(args) => ops::consolidate(&cli.url, args).await?,
         Command::Behave(args) => behave::run(&cli.url, args).await?,
         Command::Retire {
             expert,
@@ -676,161 +488,13 @@ async fn run() -> anyhow::Result<()> {
         Command::Revive { expert, note } => {
             ops::move_expert(&cli.url, &expert, antumbra_core::ExpertStatus::Active, note).await?;
         }
-        Command::Remember {
-            tenant,
-            user,
-            compartment,
-            content,
-            network,
-            confidence,
-        } => {
-            ops::remember(
-                &cli.url,
-                ops::RememberArgs {
-                    tenant,
-                    user,
-                    compartment,
-                    content,
-                    network,
-                    confidence,
-                },
-            )
-            .await?;
+        Command::Remember(args) => ops::remember(&cli.url, args).await?,
+        Command::Ingest(args) => {
+            ops::ingest(&cli.url, copal_archive().as_deref(), args).await?;
         }
-        Command::Ingest {
-            tenant,
-            user,
-            title,
-            file,
-            source,
-            path,
-            no_git,
-            compartment,
-            run,
-        } => {
-            let (content, default_source) = match (file, run.is_empty()) {
-                (Some(f), true) => (
-                    std::fs::read_to_string(&f)
-                        .map_err(|e| anyhow::anyhow!("read {}: {e}", f.display()))?,
-                    f.display().to_string(),
-                ),
-                (None, false) => (ops::run_for_output(&run)?, format!("$ {}", run.join(" "))),
-                _ => anyhow::bail!("give exactly one of --file <path> or `-- <command ...>`"),
-            };
-            // The anchor is what makes the document answerable later: a recalled
-            // chunk names the commit it describes, so a session can tell whether
-            // it is still on HEAD.
-            let provenance = (!no_git)
-                .then(gitctx::detect)
-                .flatten()
-                .map(|p| match path {
-                    Some(path) => p.at_path(path),
-                    None => p,
-                });
-            ops::ingest(
-                &cli.url,
-                copal_archive().as_deref(),
-                ops::IngestArgs {
-                    tenant,
-                    user,
-                    title,
-                    source: Some(source.unwrap_or(default_source)),
-                    content,
-                    provenance,
-                    compartment,
-                },
-            )
-            .await?;
-        }
-        Command::GitFacts {
-            tenant,
-            user,
-            compartment,
-            days,
-            top,
-            dry_run,
-        } => {
-            let log = gitfacts::read_log(days).ok_or_else(|| {
-                anyhow::anyhow!("not inside a git repository (or git is not on the path)")
-            })?;
-            let facts = gitfacts::derive(&gitfacts::parse_log(&log), top);
-            let sentences = gitfacts::render(&facts, days);
-            let anchor = gitctx::detect();
-            let evidence = gitfacts::evidence(anchor.as_ref(), &facts, days);
-            for s in &sentences {
-                println!("{s}");
-            }
-            if dry_run {
-                println!("(dry run: {} fact(s) not stored)", sentences.len());
-            } else {
-                let stored = ops::store_facts(
-                    &cli.url,
-                    ops::FactsArgs {
-                        tenant,
-                        user,
-                        compartment,
-                        facts: sentences,
-                        evidence,
-                    },
-                )
-                .await?;
-                println!("stored {stored} fact(s) with evidence {:?}", facts.range);
-            }
-        }
-        Command::Metabolize {
-            source,
-            out,
-            min_recurrence,
-            no_steps,
-            watch,
-            interval_secs,
-            train,
-            run,
-            rounds,
-            samples,
-            max_new_tokens,
-            lr,
-        } => {
-            commands::metabolize(
-                &cli.url,
-                commands::MetabolizeArgs {
-                    source,
-                    out,
-                    min_recurrence,
-                    no_steps,
-                    watch,
-                    interval_secs,
-                    train,
-                    run,
-                    rounds,
-                    samples,
-                    max_new_tokens,
-                    lr,
-                },
-            )
-            .await?;
-        }
-        Command::ProposeCompartments {
-            tenant,
-            user,
-            inbox,
-            similarity_threshold,
-            min_size,
-            apply,
-        } => {
-            ops::propose_compartments(
-                &cli.url,
-                ops::ProposeCompartmentsArgs {
-                    tenant,
-                    user,
-                    inbox,
-                    similarity_threshold,
-                    min_size,
-                    apply,
-                },
-            )
-            .await?;
-        }
+        Command::GitFacts(args) => ops::git_facts(&cli.url, args).await?,
+        Command::Metabolize(args) => commands::metabolize(&cli.url, args).await?,
+        Command::ProposeCompartments(args) => ops::propose_compartments(&cli.url, args).await?,
         Command::SetEmbedder {
             tenant,
             endpoint,
@@ -989,5 +653,304 @@ mod tests {
                 "{id} hides its value iff a key"
             );
         }
+    }
+
+    /// What a command that captures parsed: its own `--run` and the shared
+    /// capture-SFT block.
+    fn captured(argv: &[&str]) -> anyhow::Result<(String, capture_args::CaptureSftArgs)> {
+        match parsed(argv) {
+            Command::Teach(a) => Ok((a.run, a.capture)),
+            Command::MemoryImport(a) => Ok((a.run, a.capture)),
+            Command::Consolidate(a) => Ok((a.run, a.capture)),
+            Command::Metabolize(a) => Ok((a.run, a.capture)),
+            _ => anyhow::bail!("{argv:?} is not a command that captures"),
+        }
+    }
+
+    // The capture-SFT block is the shared one (#308): the four commands that
+    // capture parse the same defaults for it, each keeps its own `--run`, and
+    // a flag given reaches the block.
+    #[test]
+    fn the_capture_sft_block_reads_the_same_in_every_command_that_captures() -> anyhow::Result<()> {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+        for (argv, run) in [
+            (["antumbra", "teach", "--corpus", "c.json"], "run:teach"),
+            (
+                ["antumbra", "memory-import", "--source", "m.json"],
+                "run:memory",
+            ),
+            (
+                ["antumbra", "consolidate", "--source", "m.json"],
+                "expert:consolidated",
+            ),
+            (
+                ["antumbra", "metabolize", "--source", "t.json"],
+                "run:metabolize",
+            ),
+        ] {
+            let (own_run, capture) = captured(&argv)?;
+            assert_eq!(own_run, run, "{argv:?}");
+            assert_eq!(capture.rounds, 40, "{argv:?}");
+            assert_eq!(capture.samples, 8, "{argv:?}");
+            assert_eq!(capture.max_new_tokens, 32, "{argv:?}");
+            assert_eq!(capture.lr, 3e-4, "{argv:?}");
+        }
+        let (_, capture) = captured(&[
+            "antumbra",
+            "consolidate",
+            "--source",
+            "m.json",
+            "--rounds",
+            "3",
+            "--lr",
+            "0.01",
+        ])?;
+        assert_eq!((capture.rounds, capture.lr), (3, 0.01));
+        Ok(())
+    }
+
+    /// The `claude` commands that call the surface; `--help` says the same of
+    /// `--surface` and `--token` in each.
+    const SURFACE_CALLERS: [&str; 6] = [
+        "dependencies",
+        "remember",
+        "auto-mode-env",
+        "skill-used",
+        "skills",
+        "reanchor",
+    ];
+    const SURFACE_HELP: &str = "The Antumbra MCP surface, as the hooks know it";
+    const TOKEN_HELP: &str =
+        "The bearer token for that surface. Prefer the environment variable: a \
+                              flag ends up in the shell's history";
+
+    /// The surface pair as a `claude` command parsed it.
+    fn surface_of(argv: &[&str]) -> anyhow::Result<claude::surface_args::SurfaceArgs> {
+        use cli::ClaudeAction;
+        let Command::Claude { action } = parsed(argv) else {
+            anyhow::bail!("{argv:?} is not a claude command");
+        };
+        match action {
+            ClaudeAction::Dependencies { surface, .. }
+            | ClaudeAction::Remember { surface, .. }
+            | ClaudeAction::AutoModeEnv { surface, .. }
+            | ClaudeAction::SkillUsed { surface, .. }
+            | ClaudeAction::Skills { surface, .. }
+            | ClaudeAction::Reanchor { surface, .. } => Ok(surface),
+            _ => anyhow::bail!("{argv:?} does not call the surface"),
+        }
+    }
+
+    // The surface pair is the shared one (#308): the six `claude` commands
+    // that call the surface read `--surface` and `--token` the same way and
+    // say the same of them in --help.
+    #[test]
+    fn the_surface_pair_reads_the_same_in_every_claude_command_that_calls_it() -> anyhow::Result<()>
+    {
+        use clap::CommandFactory;
+        // `--surface` reads ANTUMBRA_URL and `--token` ANTUMBRA_TOKEN, so a
+        // shell that sets them parses its own values.
+        let surface =
+            std::env::var("ANTUMBRA_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".to_owned());
+        let token = std::env::var("ANTUMBRA_TOKEN").ok();
+        for sub in SURFACE_CALLERS {
+            let got = surface_of(&["antumbra", "claude", sub])?;
+            assert_eq!(got.surface, surface, "{sub}");
+            assert_eq!(got.token, token, "{sub}");
+            let given = [
+                "antumbra",
+                "claude",
+                sub,
+                "--surface",
+                "http://surface.test",
+                "--token",
+                "t",
+            ];
+            let got = surface_of(&given)?;
+            assert_eq!(got.surface, "http://surface.test", "{sub}");
+            assert_eq!(got.token.as_deref(), Some("t"), "{sub}");
+        }
+        let cli = Cli::command();
+        let claude = cli
+            .find_subcommand("claude")
+            .ok_or_else(|| anyhow::anyhow!("no claude command"))?;
+        for sub in SURFACE_CALLERS {
+            let cmd = claude
+                .find_subcommand(sub)
+                .ok_or_else(|| anyhow::anyhow!("no claude {sub}"))?;
+            let flag = |id: &str| {
+                cmd.get_arguments()
+                    .find(|a| a.get_id() == id)
+                    .ok_or_else(|| anyhow::anyhow!("claude {sub} has no --{id}"))
+            };
+            let env = |a: &clap::Arg| a.get_env().map(|e| e.to_string_lossy().into_owned());
+            let help = |a: &clap::Arg| a.get_help().map(ToString::to_string);
+            let surface = flag("surface")?;
+            assert_eq!(
+                surface
+                    .get_default_values()
+                    .iter()
+                    .map(|v| v.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+                vec!["http://127.0.0.1:8081".to_owned()],
+                "{sub}"
+            );
+            assert_eq!(env(surface), Some("ANTUMBRA_URL".to_owned()), "{sub}");
+            assert_eq!(help(surface), Some(SURFACE_HELP.to_owned()), "{sub}");
+            let token = flag("token")?;
+            assert_eq!(env(token), Some("ANTUMBRA_TOKEN".to_owned()), "{sub}");
+            assert!(token.is_hide_env_values_set(), "{sub}");
+            assert_eq!(help(token), Some(TOKEN_HELP.to_owned()), "{sub}");
+        }
+        Ok(())
+    }
+
+    // Each subcommand the parser now hands over whole (#308) parses with only
+    // its required flags, and keeps its defaults.
+    #[test]
+    fn every_subcommand_handed_over_whole_parses_with_its_required_flags_alone(
+    ) -> anyhow::Result<()> {
+        let Command::Ask(a) = parsed(&["antumbra", "ask", "add two numbers"]) else {
+            anyhow::bail!("ask");
+        };
+        assert_eq!(
+            (a.task.as_str(), a.k, a.max_new_tokens, a.with),
+            ("add two numbers", 1, 128, None)
+        );
+        assert_eq!(
+            (a.threshold, a.self_weight, a.temperature),
+            (0.08, 0.4, 0.0)
+        );
+        let Command::Serve(a) = parsed(&["antumbra", "serve"]) else {
+            anyhow::bail!("serve");
+        };
+        assert_eq!(
+            (a.task, a.max_new_tokens, a.threshold, a.temperature),
+            (None, 128, 0.08, 0.0)
+        );
+        let Command::Scope(a) = parsed(&["antumbra", "scope", "--spec", "s.json"]) else {
+            anyhow::bail!("scope");
+        };
+        assert_eq!(
+            (a.spec.as_str(), a.expert, a.discover),
+            ("s.json", None, false)
+        );
+        assert_eq!(
+            (a.max_new_tokens, a.samples, a.temperature, a.confidence),
+            (96, 8, 0.8, 0.7)
+        );
+        let Command::Teach(a) = parsed(&["antumbra", "teach", "--corpus", "c.json"]) else {
+            anyhow::bail!("teach");
+        };
+        assert_eq!(
+            (a.corpus.as_str(), a.generations, a.parent),
+            ("c.json", 1, None)
+        );
+        let Command::Evolve(a) = parsed(&["antumbra", "evolve", "--corpus", "c.json"]) else {
+            anyhow::bail!("evolve");
+        };
+        assert_eq!(
+            (a.run.as_str(), a.target, a.max_gens),
+            ("run:evolve", 0.9, 3)
+        );
+        assert_eq!((a.samples, a.rounds, a.max_new_tokens), (6, 2, 32));
+        let Command::Populate(a) = parsed(&["antumbra", "populate", "--corpus", "c.json"]) else {
+            anyhow::bail!("populate");
+        };
+        assert_eq!(
+            (a.run.as_str(), a.target_coverage, a.max_experts),
+            ("grown", 0.9, 3)
+        );
+        assert_eq!((a.samples, a.rounds, a.max_new_tokens), (8, 3, 32));
+        let Command::MemoryImport(a) = parsed(&["antumbra", "memory-import", "--source", "m.json"])
+        else {
+            anyhow::bail!("memory-import");
+        };
+        assert_eq!(
+            (a.out.as_str(), a.capture_threshold, a.train),
+            ("corpora/_imported.json", 0.5, false)
+        );
+        let Command::Consolidate(a) = parsed(&["antumbra", "consolidate", "--source", "m.json"])
+        else {
+            anyhow::bail!("consolidate");
+        };
+        assert_eq!(
+            (a.log.as_str(), a.min_recurrence, a.min_confidence),
+            ("corpora/_consolidated.json", 2, 0.5)
+        );
+        assert_eq!((a.train, a.replay_ratio, a.batch_size), (false, 0.5, 1));
+        let remember = [
+            "antumbra",
+            "remember",
+            "--tenant",
+            "t",
+            "--user",
+            "u",
+            "--compartment",
+            "c",
+            "--content",
+            "x",
+        ];
+        let Command::Remember(a) = parsed(&remember) else {
+            anyhow::bail!("remember");
+        };
+        assert_eq!((a.network.as_str(), a.confidence), ("world", 1.0));
+        let ingest = [
+            "antumbra", "ingest", "--tenant", "t", "--user", "u", "--title", "routes",
+        ];
+        let Command::Ingest(a) = parsed(&ingest) else {
+            anyhow::bail!("ingest");
+        };
+        assert_eq!(
+            (a.file, a.source, a.path, a.no_git, a.compartment),
+            (None, None, None, false, None)
+        );
+        assert!(a.run.is_empty());
+        let with_command = [&ingest[..], &["--", "deno", "task", "routes"]].concat();
+        let Command::Ingest(a) = parsed(&with_command) else {
+            anyhow::bail!("ingest with a command");
+        };
+        assert_eq!(a.run, ["deno", "task", "routes"]);
+        let both = [&ingest[..], &["--file", "f", "--", "ls"]].concat();
+        assert!(!refusal(&both).is_empty(), "--file and a command conflict");
+        let git_facts = [
+            "antumbra",
+            "git-facts",
+            "--tenant",
+            "t",
+            "--user",
+            "u",
+            "--compartment",
+            "c",
+        ];
+        let Command::GitFacts(a) = parsed(&git_facts) else {
+            anyhow::bail!("git-facts");
+        };
+        assert_eq!((a.days, a.top, a.dry_run), (90, 10, false));
+        let Command::Metabolize(a) = parsed(&["antumbra", "metabolize", "--source", "t.json"])
+        else {
+            anyhow::bail!("metabolize");
+        };
+        assert_eq!(
+            (a.out.as_str(), a.min_recurrence, a.no_steps, a.watch),
+            ("corpora/_metabolized.json", 1, false, false)
+        );
+        assert_eq!((a.interval_secs, a.train), (300, false));
+        let Command::ProposeCompartments(a) = parsed(&[
+            "antumbra",
+            "propose-compartments",
+            "--tenant",
+            "t",
+            "--user",
+            "u",
+        ]) else {
+            anyhow::bail!("propose-compartments");
+        };
+        assert_eq!(
+            (a.inbox, a.similarity_threshold, a.min_size, a.apply),
+            (None, 0.6, 3, false)
+        );
+        Ok(())
     }
 }

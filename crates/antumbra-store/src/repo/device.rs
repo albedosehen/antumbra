@@ -22,7 +22,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const DEVICE: &str = "device_profile";
+const DEVICE: &str = crate::tables::DEVICE_PROFILE;
 
 #[derive(Serialize, Deserialize)]
 struct DeviceRow {

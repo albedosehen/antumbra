@@ -17,7 +17,7 @@ use crate::error::map;
 use crate::knn::search_effort;
 use crate::store::Store;
 
-const TABLE: &str = "expert";
+const TABLE: &str = crate::tables::EXPERT;
 
 /// Insert an expert. The domain id lives in the `key` column (unique index);
 /// SurrealDB assigns the record id.

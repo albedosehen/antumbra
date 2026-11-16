@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use antumbra_http::SurfaceClient;
 
+use super::surface_args::SurfaceArgs;
 use super::{
     apply, auto_mode, bridge, brief, conventions, dependencies, examine, mcp_lint, mcp_stdio,
     reanchor, render, repository_root, skills, Inputs, Standing,
@@ -180,8 +181,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::Dependencies {
             dir,
             repos,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
             dry_run,
         } => {
             let trees: Vec<dependencies::Tree> = tree_dirs(&project(dir)?, repos.as_deref())
@@ -209,8 +209,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             }
         }
         ClaudeAction::Remember {
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
             dry_run,
         } => {
             let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
@@ -230,8 +229,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::AutoModeEnv {
             dir,
             repos,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
             each,
         } => {
             let trees = working_trees(&project(dir)?, repos.as_deref());
@@ -284,8 +282,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         }
         ClaudeAction::SkillUsed {
             name,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
         } => {
             let as_a_hook = name.is_none();
             let client = surface_client(
@@ -327,8 +324,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::Skills {
             dir,
             days,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
         } => {
             let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
@@ -344,8 +340,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             limit,
             days,
             dry_run,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
         } => {
             let project = project(dir)?;
             let repo = origin_of(&project)

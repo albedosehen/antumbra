@@ -13,7 +13,7 @@ use antumbra_core::{Result, RunId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "generation_head";
+const TABLE: &str = crate::tables::GENERATION_HEAD;
 
 /// Upsert the loop head; this single write IS the checkpoint.
 pub async fn save_head(store: &Store, head: &GenerationHead) -> Result<()> {

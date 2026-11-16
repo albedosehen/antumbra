@@ -26,8 +26,8 @@ use crate::repo::memory;
 use crate::schema;
 use crate::store::Store;
 
-const TABLE: &str = "memory_chunk";
-const MEMORY: &str = "memory";
+const TABLE: &str = crate::tables::MEMORY_CHUNK;
+const MEMORY: &str = crate::tables::MEMORY;
 
 /// How many chunk rows to read per memory wanted: a memory's neighboring
 /// pieces crowd the nearest rows, so the search reads wider than it returns.

@@ -16,7 +16,7 @@ use antumbra_core::{MemoryPolicy, Result, TenantId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "memory_policy";
+const TABLE: &str = crate::tables::MEMORY_POLICY;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PolicyRow {

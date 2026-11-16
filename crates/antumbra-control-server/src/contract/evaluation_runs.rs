@@ -21,7 +21,7 @@ pub(super) fn resource() -> Resource {
     // reads stay its own business rather than a sort this contract promises.
     listing(
         "evaluation_runs",
-        "evaluation_run",
+        antumbra_store::tables::EVALUATION_RUN,
         vec![
             FieldExposure::column("run_id"),
             FieldExposure::column("subject_kind"),

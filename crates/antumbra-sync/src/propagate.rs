@@ -52,7 +52,7 @@ pub struct MemoryChange {
 /// A background task owns the subscription and exits when the feed ends or the
 /// returned receiver is dropped.
 pub async fn watch_shared_memories(store: &Store) -> Result<mpsc::Receiver<MemoryChange>> {
-    let mut feed = rows::watch_table(store, "memory").await?;
+    let mut feed = rows::watch_table(store, antumbra_store::tables::MEMORY).await?;
     let (tx, rx) = mpsc::channel(64);
     let store = store.clone();
     tokio::spawn(async move {

@@ -18,7 +18,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "recipe";
+const TABLE: &str = crate::tables::RECIPE;
 
 #[derive(Serialize, Deserialize)]
 struct RecipeRow {

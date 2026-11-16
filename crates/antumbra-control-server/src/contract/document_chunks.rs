@@ -21,7 +21,7 @@ pub(super) fn resource() -> Resource {
         // `key` by the DTO convention.
         ..read_only(
             "document_chunks",
-            "document_chunk",
+            antumbra_store::tables::DOCUMENT_CHUNK,
             "key",
             vec![
                 FieldExposure::column("title"),

@@ -20,7 +20,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "relic";
+const TABLE: &str = crate::tables::RELIC;
 
 #[derive(Serialize, Deserialize)]
 struct VersionRow {

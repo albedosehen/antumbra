@@ -27,7 +27,7 @@ use crate::error::map;
 use crate::repo::{expert, router};
 use crate::store::Store;
 
-const TABLE: &str = "expert_transition";
+const TABLE: &str = crate::tables::EXPERT_TRANSITION;
 
 #[derive(Serialize, Deserialize)]
 struct TransitionRow {

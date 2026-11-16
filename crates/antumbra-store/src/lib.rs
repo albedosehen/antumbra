@@ -17,6 +17,7 @@ mod lexical;
 pub mod repo;
 pub mod schema;
 pub mod store;
+pub mod tables;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 

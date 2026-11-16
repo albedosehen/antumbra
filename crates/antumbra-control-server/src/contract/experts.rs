@@ -21,7 +21,7 @@ pub(super) fn resource() -> Resource {
     // sort.
     read_only(
         "experts",
-        "expert",
+        antumbra_store::tables::EXPERT,
         "key",
         vec![
             FieldExposure::column("key"),

@@ -15,7 +15,7 @@ use antumbra_core::Result;
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "magic_link_use";
+const TABLE: &str = crate::tables::MAGIC_LINK_USE;
 
 /// Mark a link id consumed. `true` = first use (proceed); `false` = already
 /// consumed (the link is being replayed; refuse it). Atomic: a keyed `CREATE`
