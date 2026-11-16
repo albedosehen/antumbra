@@ -45,6 +45,13 @@ pub struct GitProvenance {
     pub path: Option<String>,
 }
 
+/// Whether `s` is a commit sha as git writes one: 7 to 40 hexadecimal digits,
+/// ASCII by construction. The one check every reader of a sha applies before
+/// it slices, stores or compares one.
+pub fn is_commit_sha(s: &str) -> bool {
+    (7..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 impl GitProvenance {
     /// A provenance at `repo` and `commit`, with no branch or path.
     pub fn new(repo: impl Into<String>, commit: impl Into<String>) -> Self {
@@ -72,8 +79,7 @@ impl GitProvenance {
     /// `@`, a 7 to 40 digit hex commit, and no `:` in the branch.
     pub fn is_valid(&self) -> bool {
         let repo_ok = !self.repo.trim().is_empty() && !self.repo.contains('@');
-        let commit_ok = (7..=40).contains(&self.commit.len())
-            && self.commit.chars().all(|c| c.is_ascii_hexdigit());
+        let commit_ok = is_commit_sha(&self.commit);
         let branch_ok = self
             .branch
             .as_deref()
@@ -371,6 +377,26 @@ pub fn demote_out_of_scope<T>(items: Vec<T>, scope_of_item: impl Fn(&T) -> Scope
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_commit_sha_is_seven_to_forty_hex_digits() {
+        for sha in [
+            "abcdef0",
+            "fedcba9876543210fedcba9876543210fedcba98",
+            "ABCDEF0123",
+        ] {
+            assert!(is_commit_sha(sha), "{sha}");
+        }
+        for not in [
+            "abcdef",
+            "fedcba9876543210fedcba9876543210fedcba98f",
+            "not-a-sha",
+            "ééééééé",
+            "",
+        ] {
+            assert!(!is_commit_sha(not), "{not:?}");
+        }
+    }
 
     #[test]
     fn evidence_round_trips_every_shape() {

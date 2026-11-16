@@ -43,7 +43,9 @@ pub struct Merge {
 
 impl Merge {
     /// The merge a `pull_request` delivery describes; `None` unless it is a
-    /// merge with a merge commit and a recognizable repository.
+    /// merge with a merge commit that is a commit sha and a recognizable
+    /// repository. GitHub sends forty hex digits; what else a sender with the
+    /// webhook secret might send is refused here rather than carried on.
     pub fn from_event(event: &PullRequestEvent) -> Option<Self> {
         if !event.is_merge() {
             return None;
@@ -53,7 +55,10 @@ impl Merge {
             repo: event.repository.slug()?,
             head_branch: pr.head.name.clone(),
             base_branch: pr.base.name.clone(),
-            merge_commit: pr.merge_commit_sha.clone()?,
+            merge_commit: pr
+                .merge_commit_sha
+                .clone()
+                .filter(|sha| antumbra_core::provenance::is_commit_sha(sha))?,
         })
     }
 
@@ -350,6 +355,12 @@ mod tests {
         let mut no_sha = event();
         no_sha.pull_request.merge_commit_sha = None;
         assert_eq!(Merge::from_event(&no_sha), None);
+        // Not a commit sha: too short, not hex, or not ASCII at all.
+        for odd in ["abc", "not-a-sha", "ééééééé"] {
+            let mut odd_sha = event();
+            odd_sha.pull_request.merge_commit_sha = Some(odd.into());
+            assert_eq!(Merge::from_event(&odd_sha), None, "{odd:?}");
+        }
         let mut no_slug = event();
         no_slug.repository.html_url = None;
         no_slug.repository.full_name = "orders".into();
