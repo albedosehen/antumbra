@@ -9,8 +9,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use antumbra_core::Result;
+use surql::query::crud::create_record;
 
+use antumbra_core::{AntumbraError, Result};
+
+use crate::error::map;
 use crate::store::Store;
 
 const TABLE: &str = crate::tables::ACCOUNT;
@@ -33,11 +36,19 @@ fn key(subject: &str) -> String {
     subject.replace([':', '/', '\\', '|', ' ', '@'], "_")
 }
 
-/// Persist a new account (signup). Keyed by subject; idempotent on it.
+/// Persist a new account (signup). Keyed by subject, and a creation rather
+/// than a write: a second account for the same login is refused, so a signup
+/// that lost a race, or a replayed one, cannot overwrite the first.
 pub async fn create(store: &Store, account: &Account) -> Result<()> {
-    store
-        .put(TABLE, key(&account.subject).as_str(), account)
-        .await
+    let mut row = serde_json::to_value(account)?;
+    row["id"] = serde_json::json!(key(&account.subject));
+    match create_record(store.client(), TABLE, row).await {
+        Ok(_) => Ok(()),
+        Err(e) if e.to_string().contains("already exists") => Err(AntumbraError::rejected(
+            "an account for this login already exists",
+        )),
+        Err(e) => Err(map(e)),
+    }
 }
 
 /// Look up the account for a verified login subject (login).
@@ -49,6 +60,38 @@ pub async fn get_by_subject(store: &Store, subject: &str) -> Result<Option<Accou
 mod tests {
     use super::*;
     use crate::testing::mem_store;
+
+    /// A signup creates and never overwrites: a second account for the same
+    /// login (a signup that lost a race, or a replayed one) is refused and the
+    /// first stands.
+    #[tokio::test]
+    async fn a_second_account_for_the_same_login_is_refused() -> Result<()> {
+        let store = crate::testing::mem_store().await?;
+        let first = Account {
+            subject: "email:dana@example.com".into(),
+            tenant: "ws:first".into(),
+            user: "user:dana".into(),
+            email: Some("dana@example.com".into()),
+            display: None,
+            created_at: Utc::now(),
+        };
+        create(&store, &first).await?;
+        let second = Account {
+            tenant: "ws:second".into(),
+            ..first.clone()
+        };
+        let Err(refused) = create(&store, &second).await else {
+            return Err(AntumbraError::other(
+                "a second account for the login was written",
+            ));
+        };
+        assert!(refused.is_rejection(), "{refused}");
+        let Some(kept) = get_by_subject(&store, &first.subject).await? else {
+            return Err(AntumbraError::other("the first account vanished"));
+        };
+        assert_eq!(kept.tenant, "ws:first");
+        Ok(())
+    }
 
     #[tokio::test]
     async fn create_then_lookup_by_subject() -> Result<()> {
