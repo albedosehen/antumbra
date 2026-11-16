@@ -3,10 +3,12 @@
 //!
 //! The server verifies the token; nothing here does. The claims are read only
 //! to name the workspace in the agent's settings, so a hosted user is never
-//! asked for an id their token already carries.
+//! asked for an id their token already carries; the reading is
+//! [`antumbra_auth::unverified`]'s, the same the console does.
 
-use base64::Engine;
 use serde_json::Value;
+
+pub use antumbra_auth::unverified::{expires, is_operator, tenant as workspace};
 
 /// Whether `text` has a JWT's shape: three base64url parts.
 pub fn looks_like_jwt(text: &str) -> bool {
@@ -17,36 +19,6 @@ pub fn looks_like_jwt(text: &str) -> bool {
                 && p.bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'=')
         })
-}
-
-/// The token's claims, unverified.
-fn claims(token: &str) -> Option<Value> {
-    let payload = token.split('.').nth(1)?;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(payload.trim_end_matches('='))
-        .ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-/// The workspace (tenant) a token grants.
-pub fn workspace(token: &str) -> Option<String> {
-    claims(token)?
-        .get("tenant")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
-/// When the token expires, as seconds since the epoch.
-pub fn expires(token: &str) -> Option<i64> {
-    claims(token)?.get("exp").and_then(Value::as_i64)
-}
-
-/// Whether the token is its server's operator's, which `antumbra tui` needs
-/// to act on the substrate.
-pub fn is_operator(token: &str) -> bool {
-    claims(token)
-        .and_then(|c| c.get("operator").and_then(Value::as_bool))
-        .unwrap_or(false)
 }
 
 /// What the user pasted: a token, or a sign-in link to trade for one.
@@ -81,6 +53,8 @@ pub fn from_signin(body: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+
     use super::*;
 
     fn token(claims: &str) -> String {
