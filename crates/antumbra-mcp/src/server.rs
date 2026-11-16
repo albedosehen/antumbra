@@ -82,6 +82,13 @@ pub struct McpServer {
     /// duration (see `session`); checked at every tool call. `None` where the
     /// transport signs in per request (the embedded networked surface).
     session: Option<Arc<crate::session::SessionKeeper>>,
+    /// The lock a tool call takes when `store` is a connection shared with
+    /// other identities (the embedded networked surface): the call signs the
+    /// connection in as this session's identity under it and holds it until
+    /// the tool returns, so no other identity's signin lands in between
+    /// ([`McpServer::bound`]). `None` where the session has a connection of
+    /// its own, which stays signed in as it.
+    shared_bind: Option<Arc<tokio::sync::Mutex<()>>>,
     /// The typed decider that answers "does this memory answer this query" as a
     /// calibrated probability, which is what lets recall say
     /// nothing rather than return the best of a bad lot. `None` = no floor runs
