@@ -1,0 +1,68 @@
+name: Feature request
+description: Ask for something Antumbra does not do yet.
+type: "Feature"
+labels: ["triage", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to describe this.
+  - id: component
+    type: dropdown
+    attributes:
+      label: What component does this affect?
+      options:
+        - antumbra (the CLI, including setup)
+        - antumbra-mcp (the server and its tools)
+        - antumbra-tui (the console)
+        - antumbra-control-server (hosted sign-in)
+        - The Claude Code hooks
+        - Docker and compose
+        - Training, serving or the loop
+        - Documentation
+        - Something new
+    validations:
+      required: true
+  - id: problem
+    type: textarea
+    attributes:
+      label: Is this feature related to a problem?
+      description: What are you trying to do that you cannot do today?
+    validations:
+      required: true
+  - id: solution
+    type: textarea
+    attributes:
+      label: Suggest a solution
+      description: What would the feature look like, and how might it work?
+    validations:
+      required: true
+  - id: alternatives
+    type: textarea
+    attributes:
+      label: Alternative methods
+      description: What else did you consider, and why is it worse?
+    validations:
+      required: true
+  - id: version
+    type: input
+    attributes:
+      label: Antumbra version
+      description: Copy and paste the output of `antumbra --version`.
+      placeholder: antumbra 0.0.0
+    validations:
+      required: true
+  - id: contact
+    type: input
+    attributes:
+      label: Contact details
+      description: How can we reach you if we need more information? (optional)
+    validations:
+      required: false
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search [the issues](https://github.com/albedosehen/antumbra/issues) first.
+      options:
+        - label: I have searched the existing issues
+          required: true

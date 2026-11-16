@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issues
+    url: https://github.com/albedosehen/antumbra/security/advisories/new
+    about: Report a vulnerability privately. It is fixed, then published with the release that carries the fix.
+  - name: Setting Antumbra up
+    url: https://antumbrahq.ai/setup.md
+    about: The setup guide, written for the coding agent that runs it and for you.
+  - name: Documentation
+    url: https://github.com/albedosehen/antumbra/tree/main/docs
+    about: Getting started, architecture, security posture and the glossary.
