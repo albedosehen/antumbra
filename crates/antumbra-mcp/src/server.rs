@@ -634,12 +634,17 @@ impl McpServer {
     /// document is reference material the agent was *given*, kept distinct from
     /// the episodic memory it *earned* so neither drowns the other.
     #[tool(
-        description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored."
+        description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored. A document is at most 512 KiB; split a larger one, or ingest the part that matters."
     )]
     async fn ingest_document(
         &self,
         Parameters(p): Parameters<IngestDocumentParams>,
     ) -> Result<Json<IngestedOut>, ErrorData> {
+        // Before anything is archived or embedded: the cap bounds the
+        // embedder's time one call may spend, and a refusal costs none of it.
+        if let Some(why) = antumbra_ingest::too_large(&p.content) {
+            return Err(ErrorData::invalid_params(why, None));
+        }
         let provenance = p.provenance.map(anchor_from).transpose()?;
         let compartment = p
             .compartment

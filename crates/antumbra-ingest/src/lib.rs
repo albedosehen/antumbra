@@ -51,6 +51,36 @@ pub struct Ingested {
     pub archived: Option<ArchivedDocument>,
 }
 
+/// The most content one document may hold: about 540 chunks of
+/// [`DEFAULT_CHUNK_CHARS`], each an embedding call, which is as much of an
+/// embedder's time as one ingest should be able to spend. A relic indexes at
+/// most 64,000 characters of its text, well inside this.
+pub const MAX_DOCUMENT_BYTES: usize = 512 * 1024;
+/// The most chunks one document becomes, whatever the chunker makes of it: the
+/// bound that still holds if the chunk size ever changes.
+pub const MAX_CHUNKS: usize = 1_024;
+
+/// Why `content` may not be ingested as it is, when there is a reason: it is
+/// past [`MAX_DOCUMENT_BYTES`]. Cheap, so every door asks before any work.
+pub fn too_large(content: &str) -> Option<String> {
+    (content.len() > MAX_DOCUMENT_BYTES).then(|| {
+        format!(
+            "the document is {} bytes, and the most one ingest takes is {} ({} KiB); \
+             split it, or ingest the part that matters",
+            content.len(),
+            MAX_DOCUMENT_BYTES,
+            MAX_DOCUMENT_BYTES / 1024
+        )
+    })
+}
+
+fn within_bounds(doc: &Document) -> anyhow::Result<()> {
+    match too_large(&doc.content) {
+        Some(why) => Err(anyhow::anyhow!(why)),
+        None => Ok(()),
+    }
+}
+
 /// Ingest `doc` under `tenant`: archive the original when an `archive` is
 /// configured (upload first, fail closed), chunk and embed the content, then
 /// replace the title's previous chunks with the new ones.
@@ -65,6 +95,8 @@ pub async fn ingest_text(
     archive: Option<&CopalArchive>,
     doc: &Document,
 ) -> anyhow::Result<Ingested> {
+    // Before the original is archived: a refusal must leave nothing behind.
+    within_bounds(doc)?;
     let archived = match archive {
         Some(archive) => Some(
             archive
@@ -97,13 +129,19 @@ pub async fn ingest_recorded(
     doc: &Document,
     archived: Option<ArchivedDocument>,
 ) -> anyhow::Result<Ingested> {
+    within_bounds(doc)?;
     let source = source_of(doc);
     let now = Utc::now();
-    let mut chunks = Vec::new();
-    for (ordinal, content) in chunk_text(&doc.content, DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP)
-        .into_iter()
-        .enumerate()
-    {
+    let pieces = chunk_text(&doc.content, DEFAULT_CHUNK_CHARS, DEFAULT_CHUNK_OVERLAP);
+    // Counted before the first embedding, so a document the chunker cuts finer
+    // than the byte cap allows for costs nothing.
+    anyhow::ensure!(
+        pieces.len() <= MAX_CHUNKS,
+        "the document would become {} chunks, and the most one ingest takes is {MAX_CHUNKS}",
+        pieces.len()
+    );
+    let mut chunks = Vec::with_capacity(pieces.len());
+    for (ordinal, content) in pieces.into_iter().enumerate() {
         let embedding = embedder.embed(&content).await?;
         let mut chunk = DocumentChunk {
             id: DocumentChunkId::new(chunk_id(
@@ -207,6 +245,24 @@ mod tests {
     use antumbra_store::EMBED_DIM;
     use serde_json::{json, Value};
     use std::sync::Arc;
+
+    #[test]
+    fn a_document_past_the_cap_is_refused_and_one_at_it_stays_in_bounds() -> anyhow::Result<()> {
+        anyhow::ensure!(too_large(&"x".repeat(MAX_DOCUMENT_BYTES)).is_none());
+        let Some(why) = too_large(&"x".repeat(MAX_DOCUMENT_BYTES + 1)) else {
+            anyhow::bail!("a document past the cap was accepted");
+        };
+        anyhow::ensure!(why.contains("512 KiB"), "{why}");
+        // The byte cap keeps the chunk count inside its own bound, so the
+        // second check only ever catches a chunker that changed under it.
+        let pieces = chunk_text(
+            &"x".repeat(MAX_DOCUMENT_BYTES),
+            DEFAULT_CHUNK_CHARS,
+            DEFAULT_CHUNK_OVERLAP,
+        );
+        anyhow::ensure!(pieces.len() <= MAX_CHUNKS, "{} chunks", pieces.len());
+        Ok(())
+    }
 
     /// A copal that answers the create + upload calls, or fails them, offline.
     struct FakeCopal {
