@@ -96,7 +96,7 @@ pub async fn recent_unscoped(store: &Store) -> Result<Vec<EvaluationRun>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::evaluation::EvalStatus;
     use chrono::Utc;
 
@@ -114,8 +114,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recent_unscoped_reads_all_newest_first() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn recent_unscoped_reads_all_newest_first() -> Result<()> {
+        let s = mem_store().await?;
         let now = Utc::now();
         insert(
             &s,
@@ -125,21 +125,19 @@ mod tests {
                 now - chrono::Duration::seconds(60),
             ),
         )
-        .await
-        .unwrap();
-        insert(&s, &make("run:new", EvalStatus::Failure, now))
-            .await
-            .unwrap();
+        .await?;
+        insert(&s, &make("run:new", EvalStatus::Failure, now)).await?;
 
-        let runs = recent_unscoped(&s).await.unwrap();
+        let runs = recent_unscoped(&s).await?;
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].run_id.as_str(), "run:new", "newest first");
         assert_eq!(runs[0].status, EvalStatus::Failure);
+        Ok(())
     }
 
     #[tokio::test]
     async fn list_for_run_reads_one_run_oldest_first() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let now = Utc::now();
         let at = |secs: i64| now - chrono::Duration::seconds(secs);
         let shadow = |id: &str, task: &str, when| EvaluationRun {

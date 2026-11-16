@@ -27,7 +27,7 @@ fn memory(id: &str, tenant: &str, content: &str, whole: Vec<f32>) -> Memory {
 /// vector, and dropped with their memory; another workspace never sees them.
 #[tokio::test]
 async fn chunks_are_replaced_found_and_removed_by_their_memory() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:a");
     let m = memory("memory:long", "ws:a", "a long memory", axis(0))
         .in_compartment(CompartmentId::new("comp:a"));
@@ -75,7 +75,7 @@ async fn chunks_are_replaced_found_and_removed_by_their_memory() -> Result<()> {
 /// failing the recall it is one leg of; within its time it finds the pieces.
 #[tokio::test]
 async fn a_chunk_search_stopped_at_its_timeout_finds_nothing_rather_than_failing() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:a");
     for i in 0..40 {
         let m = memory(&format!("memory:m{i}"), "ws:a", "a long memory", axis(i));
@@ -105,7 +105,7 @@ async fn a_chunk_search_stopped_at_its_timeout_finds_nothing_rather_than_failing
 }
 
 #[test]
-fn a_timeout_is_told_from_other_errors() {
+fn a_timeout_is_told_from_other_errors() -> Result<()> {
     // What the engine says, verbatim (SurrealDB 3, embedded).
     assert!(timed_out(
         "query error: The query was not executed because it exceeded the timeout: 1ns"
@@ -114,13 +114,14 @@ fn a_timeout_is_told_from_other_errors() {
     assert!(!timed_out(
         "There was a problem with the database: Not enough permissions"
     ));
+    Ok(())
 }
 
 /// A memory that moves keeps its chunks' vectors: refiling rewrites where
 /// they are filed and nothing else.
 #[tokio::test]
 async fn a_moved_memory_is_refiled_with_its_vectors() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:a");
     let mut m = memory("memory:long", "ws:a", "a long memory", axis(0))
         .in_compartment(CompartmentId::new("comp:a"));
@@ -150,7 +151,7 @@ async fn a_moved_memory_is_refiled_with_its_vectors() -> Result<()> {
 /// and a memory with no chunks is still found by its whole vector.
 #[tokio::test]
 async fn the_dense_leg_finds_a_memory_by_a_piece_of_it() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:a");
     // The memory the query is about: its whole vector says something else.
     let target = memory("memory:target", "ws:a", "notes", axis(0));
@@ -199,7 +200,7 @@ async fn the_dense_leg_finds_a_memory_by_a_piece_of_it() -> Result<()> {
 /// since a time, forgotten ones flagged; and every workspace that has any.
 #[tokio::test]
 async fn the_chunker_reads_what_changed_and_every_workspace() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:a");
     let before = chrono::Utc::now() - chrono::Duration::seconds(5);
     memory::upsert(&store, &memory("memory:one", "ws:a", "one", axis(1))).await?;
@@ -241,7 +242,7 @@ async fn the_chunker_reads_what_changed_and_every_workspace() -> Result<()> {
 /// that is not there.
 #[tokio::test]
 async fn the_chunk_leg_fetches_its_memories_by_key() -> Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:a");
     for (id, ws) in [
         ("memory:one", "ws:a"),
@@ -287,16 +288,16 @@ async fn the_chunk_leg_fetches_its_memories_by_key() -> Result<()> {
 /// compartment, even when the list of compartments names it. A session that
 /// can read more than the exact search takes is walked, and remembered.
 #[tokio::test]
-async fn a_member_who_reads_little_is_searched_exactly_and_sees_only_what_it_may() -> Result<()> {
-    use crate::repo::{compartment, hive, principal};
+async fn a_member_who_reads_little_is_searched_exactly_and_sees_only_what_it_may(
+) -> anyhow::Result<()> {
+    use crate::repo::{compartment, hive};
     use antumbra_core::{
         Capability, Compartment, Grant, Hive, HiveMembership, HiveOffer, OfferStatus, OfferedKind,
     };
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = crate::testing::mem_store().await?;
     let tenant = TenantId::new("ws:exact");
     let (owner, member) = (UserId::new("user:owner"), UserId::new("user:member"));
-    principal::provision(&store, &tenant, &owner).await?;
-    principal::provision(&store, &tenant, &member).await?;
+    crate::testing::members(&store, &tenant, &[&owner, &member]).await?;
     let now = chrono::Utc::now();
     for (id, who) in [
         ("comp:owner-private", &owner),
@@ -383,9 +384,9 @@ async fn a_member_who_reads_little_is_searched_exactly_and_sees_only_what_it_may
     assert!(!walks(&walk_key(&tenant, &member, &readable)));
     // The list decides what is cheap to read, never what is visible.
     let forged = vec!["comp:owner-private".to_string()];
-    let read = exact(&store, &tenant, &axis(10), 20, None, &forged, long, 100)
-        .await?
-        .expect("within the cap");
+    let Some(read) = exact(&store, &tenant, &axis(10), 20, None, &forged, long, 100).await? else {
+        anyhow::bail!("an exact search over one compartment is within the cap");
+    };
     assert!(read.iter().all(|(m, _)| m != "memory:private"), "{read:?}");
 
     store.signin(&tenant, &owner).await?;

@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! An expert's moves are visible exactly where the expert is.
 //! A tenant session reads shared experts and its own private ones; if it could
 //! read those experts but not their moves, a demoted expert would look active
@@ -10,8 +8,8 @@ use chrono::Utc;
 use antumbra_core::{
     Expert, ExpertId, ExpertStatus, Generation, Result, TenantId, TransitionCause, UserId,
 };
-use antumbra_store::repo::{expert, lifecycle, principal};
-use antumbra_store::Store;
+use antumbra_store::repo::{expert, lifecycle};
+use antumbra_store::testing;
 
 const DIM: usize = 4;
 
@@ -35,14 +33,13 @@ fn expert(id: &str, owner: Option<&str>) -> Expert {
 
 #[tokio::test]
 async fn a_tenant_session_sees_the_moves_of_the_experts_it_can_see() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = testing::mem_store_of(DIM).await?;
     let (tenant, ada, bob) = (
         TenantId::new("ws:t"),
         UserId::new("user:ada"),
         UserId::new("user:bob"),
     );
-    principal::provision(&store, &tenant, &ada).await?;
-    principal::provision(&store, &tenant, &bob).await?;
+    testing::members(&store, &tenant, &[&ada, &bob]).await?;
     for (id, owner) in [
         ("expert:shared", None),
         ("expert:shared-live", None),

@@ -106,7 +106,7 @@ pub async fn list_for_run(store: &Store, run_id: &RunId) -> Result<Vec<RecipeRec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use chrono::Utc;
 
     fn record(run: &str, generation: u32, fitness: f32) -> RecipeRecord {
@@ -132,10 +132,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_row_round_trips_by_its_shadow() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let r = record("run:a", 1, 0.5);
         upsert(&s, &r).await?;
-        let back = get(&s, &r.shadow).await?.expect("stored");
+        let Some(back) = get(&s, &r.shadow).await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the recipe row did not read back",
+            ));
+        };
         assert_eq!(
             (
                 back.generation,
@@ -154,7 +158,7 @@ mod tests {
     /// one row per shadow, however many times it was written.
     #[tokio::test]
     async fn rewriting_a_shadows_row_replaces_it() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         upsert(&s, &record("run:a", 0, 0.2)).await?;
         upsert(&s, &record("run:a", 0, 0.3)).await?;
         let rows = list_for_run(&s, &RunId::new("run:a")).await?;
@@ -165,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_runs_history_reads_in_generation_order_and_alone() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         for (run, generation) in [("run:a", 2), ("run:a", 0), ("run:b", 1), ("run:a", 1)] {
             upsert(&s, &record(run, generation, 0.1)).await?;
         }

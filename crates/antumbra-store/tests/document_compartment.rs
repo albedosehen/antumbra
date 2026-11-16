@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced document privacy: a document kept in a private
 //! compartment is invisible to another member of the same tenant until the
 //! compartment is granted, and hidden again on revoke, on reads that carry no
@@ -12,8 +10,8 @@ use antumbra_core::{
     Capability, Compartment, CompartmentId, DocumentChunk, DocumentChunkId, Grant, Result,
     TenantId, UserId,
 };
-use antumbra_store::repo::{compartment, document, principal};
-use antumbra_store::Store;
+use antumbra_store::repo::{compartment, document};
+use antumbra_store::{testing, Store};
 
 const DIM: usize = 4;
 
@@ -59,13 +57,12 @@ struct Org {
 
 /// Two members of one tenant; lily owns a private compartment.
 async fn org() -> Result<Org> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = testing::mem_store_of(DIM).await?;
     let tenant = TenantId::new("ws:org");
     let lily = UserId::new("user:lily");
     let oslo = UserId::new("user:oslo");
     let lilys = CompartmentId::new("comp:lily-private");
-    principal::provision(&store, &tenant, &lily).await?;
-    principal::provision(&store, &tenant, &oslo).await?;
+    testing::members(&store, &tenant, &[&lily, &oslo]).await?;
     compartment::create(
         &store,
         &Compartment::new(
