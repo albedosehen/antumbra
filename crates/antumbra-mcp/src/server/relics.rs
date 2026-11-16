@@ -174,14 +174,6 @@ fn path_of(slug: &str) -> String {
     format!("/relic/{slug}")
 }
 
-/// What the first `n` characters of `text` are, cut on a character boundary.
-fn first_chars(text: &str, n: usize) -> &str {
-    match text.char_indices().nth(n) {
-        Some((at, _)) => &text[..at],
-        None => text,
-    }
-}
-
 /// The current version of a relic as an export takes it away: its HTML as it
 /// was published, and the slug and version that name the file.
 pub(crate) struct RelicSource {
@@ -472,7 +464,10 @@ impl McpServer {
         let doc = antumbra_ingest::Document {
             title: core_relic::document_title(&slug),
             source: p.source.clone(),
-            content: format!("{title}\n\n{}", first_chars(&text, MAX_INDEXED_CHARS)),
+            content: format!(
+                "{title}\n\n{}",
+                antumbra_core::text::first_chars(&text, MAX_INDEXED_CHARS)
+            ),
             provenance: None,
             compartment: Some(compartment),
         };

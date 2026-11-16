@@ -1728,9 +1728,7 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
 // ---------------------------------------------------------------- the machine
 
 fn home() -> anyhow::Result<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
+    crate::machine::home()
         .ok_or_else(|| anyhow::anyhow!("no home directory (neither USERPROFILE nor HOME is set)"))
 }
 
