@@ -23,7 +23,7 @@ Isolation is **engine-enforced**, defense-in-depth:
 
 - Per-request **JWT** verification before any DB access; `exp` is **mandatory** (a non-expiring token is a standing key). HS256 (shared secret, self-hosted) or RS256 (against an auth service). Audience is required so a token minted for another verifier is rejected.
 - The verified token **is** the identity; there is no token→identity table, so a leaked token grants exactly its claimed `(tenant, user)` scope and nothing more.
-- Each request signs the shared connection in as its identity, serialized by an auth lock: no session reuse or confused-deputy across tenants.
+- On an embedded store, where every identity shares one connection, each **tool call** signs the connection in as its identity under an auth lock and holds the lock until the tool returns. The signin travels with the call, not with the HTTP request that carried it, because a call over `/mcp` runs after that request is answered. A remote deployment gives each identity its own signed-in connection and holds no lock on the hot path.
 
 ## Trust boundaries / operator-supplied inputs
 

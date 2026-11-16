@@ -79,6 +79,19 @@ const TENANT_PERMS: [(&str, &str); 4] = [
     ("delete", "tenant_id = $auth.tenant"),
 ];
 
+/// Compartment permissions: any member may read a row, since the memory rule's
+/// subqueries resolve through it, but only its owner may create, update or
+/// delete it. The memory rule trusts the row live (`OWN_COMPARTMENT.owner =
+/// $auth.user`), so a member who could set `owner` on another member's
+/// compartment would read everything in it; and a member may create a
+/// compartment only as its owner.
+const COMPARTMENT_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "tenant_id = $auth.tenant AND owner = $auth.user"),
+    ("update", "tenant_id = $auth.tenant AND owner = $auth.user"),
+    ("delete", "tenant_id = $auth.tenant AND owner = $auth.user"),
+];
+
 /// Only the **owner** of the referenced compartment may write the row. The
 /// compartment table is tenant-readable, so the subquery resolves for any session,
 /// but it returns the compartment id only when `$auth.user` owns it.
@@ -670,11 +683,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("relic_tenant_compartment_idx", ["tenant_id", "compartment"]),
             ]),
         // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
-        // subqueries resolve; ownership/sharing is carried in the rows (owner +
-        // the grant table) and enforced by the memory rule.
+        // subqueries resolve; written by their owner alone, since the memory
+        // rule trusts the row's owner live (COMPARTMENT_PERMS).
         table_schema("compartment")
             .with_mode(TableMode::Schemaless)
-            .with_permissions(TENANT_PERMS)
+            .with_permissions(COMPARTMENT_PERMS)
             .with_indexes([
                 unique_index("compartment_key_uq", ["tenant_id", "key"]),
                 index("compartment_owner_idx", ["tenant_id", "owner"]),

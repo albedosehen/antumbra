@@ -42,6 +42,8 @@ antumbra-mcp --mint-token --tenant <workspace> --user <user> \
 
 It prints a bearer JWT signed with the same HS256 secret the server verifies with (an RS256 deployment mints via its own auth service's private key instead). The token _is_ the identity (it grants exactly `(tenant, user)`) and carries a finite `exp`, so it is long-lived, never an eternal standing key. For a purely **offline**, single identity you can instead run the **stdio** server and have your agent connect directly; then the capture/bootstrap tools are called in-band and the `SessionStart` script is optional.
 
+The `.sh` hooks hand the token to `curl` as a config line on its stdin (`--config -`), never as a command-line argument, so it is not in the machine's process list while a request runs; the `.ps1` hooks set the header on the client in-process.
+
 ### The MCP connection, with the token in a file
 
 The agent's own connection to the surface needs the bearer too. Rather than a static `Authorization: Bearer ${ANTUMBRA_TOKEN}` header, which needs the token in the settings file's `env` block, point the server entry at `antumbra-mcp-headers` as its `headersHelper`. It prints the header from the same token file the hooks read, so the token can live only in that file:

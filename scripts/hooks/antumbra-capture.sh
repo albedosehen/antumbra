@@ -45,18 +45,16 @@ if [ "$event" = "Stop" ] && command -v curl >/dev/null 2>&1; then
   # what this machine's agent recalled for itself is judged against this turn.
   host_id="$(printf '%s' "${ANTUMBRA_HOST_ID:-}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   if [ -n "$token" ] && [ -n "$body" ]; then
-    if [ -n "$host_id" ]; then
-      curl -s -o /dev/null -X POST "$url/mcp/call" \
-        -H 'Content-Type: application/json' \
-        -H "Authorization: Bearer $token" \
-        -H "X-Antumbra-Host: $host_id" \
-        --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
-    else
-      curl -s -o /dev/null -X POST "$url/mcp/call" \
-        -H 'Content-Type: application/json' \
-        -H "Authorization: Bearer $token" \
-        --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
-    fi
+    named=()
+    [ -n "$host_id" ] && named=(-H "X-Antumbra-Host: $host_id")
+    # The bearer reaches curl as a config line on its stdin, never as an
+    # argument: an argument sits in the process list, readable by every other
+    # user of the machine, for as long as the request lasts.
+    printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -s -o /dev/null -X POST "$url/mcp/call" \
+      -H 'Content-Type: application/json' \
+      --config - \
+      "${named[@]}" \
+      --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
   fi
 fi
 
