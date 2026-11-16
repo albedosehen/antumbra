@@ -2,6 +2,7 @@
 //! home built for each test, so no real setting is read or written.
 
 use super::*;
+use base64::Engine;
 use std::collections::HashMap;
 use std::path::Path;
 

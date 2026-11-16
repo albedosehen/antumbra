@@ -11,6 +11,9 @@ jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 serde = { workspace = true }
 anyhow.workspace = true
 uuid = { version = "1", features = ["v4"] }
+# Reading a token's claims without verifying it (`unverified`).
+base64 = "0.22"
+serde_json.workspace = true
 
 [lints]
 workspace = true

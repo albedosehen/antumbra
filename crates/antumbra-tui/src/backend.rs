@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use antumbra_core::console::{Action, Snapshot};
 use antumbra_core::ports::Embedder;
@@ -18,6 +18,8 @@ use antumbra_core::testing::FixedEmbedder;
 use antumbra_core::{ExpertId, LearnedRouter};
 use antumbra_store::repo::console;
 use antumbra_store::{Store, EMBED_DIM};
+
+use antumbra_http::{SurfaceClient, SurfaceError};
 
 use crate::settings::Found;
 
@@ -147,22 +149,26 @@ pub struct Server {
     surface_from: String,
     token_from: String,
     agent: ureq::Agent,
+    /// Tool calls, through the client every door shares.
+    surface: SurfaceClient,
     /// The tag of the last snapshot read, so an unchanged one is not sent again.
     seen: Mutex<Option<String>>,
 }
 
 impl Server {
     pub fn new(surface: Found, token: Found) -> Self {
+        let url = surface.value.trim_end_matches('/').to_string();
+        let agent = antumbra_http::agent(TIMEOUT);
         Self {
-            url: surface.value.trim_end_matches('/').to_string(),
+            // From the machine `ANTUMBRA_HOST_ID` names when it names one, so
+            // the server stamps what the console writes with it.
+            surface: SurfaceClient::with_agent(&url, Some(&token.value), agent.clone())
+                .from_machine(antumbra_http::host_id()),
+            url,
             token: token.value,
             surface_from: surface.from,
             token_from: token.from,
-            agent: ureq::Agent::config_builder()
-                .timeout_global(Some(TIMEOUT))
-                .http_status_as_error(false)
-                .build()
-                .into(),
+            agent,
             seen: Mutex::new(None),
         }
     }
@@ -226,14 +232,19 @@ impl Server {
     }
 
     fn route(&self, task: &str) -> Result<Vec<(ExpertId, f32)>> {
-        let mut res = self
-            .agent
-            .post(&format!("{}/mcp/call", self.url))
-            .header("authorization", &self.bearer())
-            .send_json(json!({ "tool": "route", "arguments": { "task": task, "top_k": 5 } }))
-            .with_context(|| format!("could not reach {}", self.url))?;
-        self.check(res.status().as_u16())?;
-        let out: Value = res.body_mut().read_json()?;
+        let out = match self
+            .surface
+            .call("route", json!({ "task": task, "top_k": 5 }))
+        {
+            Ok(out) => out,
+            // The shared refusal, with where this console found the token.
+            Err(SurfaceError::TokenRefused { .. }) => bail!(
+                "the server at {} refused the token from {}; it may have expired, or be for another server",
+                self.url,
+                self.token_from
+            ),
+            Err(e) => return Err(e.into()),
+        };
         Ok(out["routes"]
             .as_array()
             .into_iter()

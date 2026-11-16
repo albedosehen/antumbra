@@ -6,6 +6,7 @@ members = [
     "crates/antumbra-store",
     "crates/antumbra-embed",
     "crates/antumbra-copal",
+    "crates/antumbra-http",
     "crates/antumbra-github",
     "crates/antumbra-ingest",
     "crates/antumbra-bench",
