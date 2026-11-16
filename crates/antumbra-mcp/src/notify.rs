@@ -138,7 +138,7 @@ mod tests {
     use antumbra_store::repo::sync::ChangeAction;
 
     #[test]
-    fn change_notification_carries_the_routable_fields() {
+    fn change_notification_carries_the_routable_fields() -> anyhow::Result<()> {
         use antumbra_core::{CompartmentId, MemoryId, TenantId, UserId};
         let change = MemoryChange {
             action: ChangeAction::Create,
@@ -152,12 +152,13 @@ mod tests {
         assert_eq!(param.data["action"], "create");
         assert_eq!(param.data["compartment"], "comp:1");
         assert_eq!(param.data["memory"], "mem:9");
+        Ok(())
     }
 
     // An identity with no registered session is simply skipped (no panic, none
     // delivered) -- the common case for a change whose recipients are offline.
     #[tokio::test]
-    async fn notify_with_no_sessions_delivers_none() {
+    async fn notify_with_no_sessions_delivers_none() -> anyhow::Result<()> {
         use antumbra_core::{CompartmentId, MemoryId, TenantId, UserId};
         let registry = PeerRegistry::new();
         let change = MemoryChange {
@@ -168,5 +169,6 @@ mod tests {
             recipients: vec![UserId::new("ghost")],
         };
         assert_eq!(registry.notify(&change).await, 0);
+        Ok(())
     }
 }

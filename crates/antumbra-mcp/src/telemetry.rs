@@ -311,20 +311,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_endpoint_that_is_unset_empty_or_blank_exports_nothing() {
+    fn an_endpoint_that_is_unset_empty_or_blank_exports_nothing() -> anyhow::Result<()> {
         assert!(!set(None));
         // What compose passes for `${OTEL_EXPORTER_OTLP_ENDPOINT:-}` when
         // docker/.env does not set it.
         assert!(!set(Some(OsStr::new(""))));
         assert!(!set(Some(OsStr::new(" \t"))));
         assert!(set(Some(OsStr::new("http://openobserve:5080/api/default"))));
+        Ok(())
     }
 
     #[test]
-    fn an_empty_service_name_leaves_the_server_to_name_itself() {
+    fn an_empty_service_name_leaves_the_server_to_name_itself() -> anyhow::Result<()> {
         assert!(!set(None));
         assert!(!set(Some(OsStr::new(""))));
         assert!(!set(Some(OsStr::new(" "))));
         assert!(set(Some(OsStr::new("antumbra-kuskokwim"))));
+        Ok(())
     }
 }

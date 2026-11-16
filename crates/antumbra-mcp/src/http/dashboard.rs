@@ -98,13 +98,13 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt; // oneshot
 
-    async fn get_path(path: &str) -> Response {
-        let req = Request::builder().uri(path).body(Body::empty()).unwrap();
-        routes::<()>().oneshot(req).await.unwrap()
+    async fn get_path(path: &str) -> anyhow::Result<Response> {
+        let req = Request::builder().uri(path).body(Body::empty())?;
+        Ok(routes::<()>().oneshot(req).await?)
     }
 
     #[tokio::test]
-    async fn every_asset_is_served_with_its_type_and_the_policy() {
+    async fn every_asset_is_served_with_its_type_and_the_policy() -> anyhow::Result<()> {
         for (path, kind) in [
             ("/dashboard", "text/html"),
             ("/dashboard/app.js", "text/javascript"),
@@ -113,31 +113,33 @@ mod tests {
             ("/dashboard/relics.js", "text/javascript"),
             ("/dashboard/relics.css", "text/css"),
         ] {
-            let res = get_path(path).await;
+            let res = get_path(path).await?;
             assert_eq!(res.status(), StatusCode::OK, "{path}");
             let headers = res.headers();
-            let content_type = headers[header::CONTENT_TYPE].to_str().unwrap();
+            let content_type = headers[header::CONTENT_TYPE].to_str()?;
             assert!(content_type.starts_with(kind), "{path}: {content_type}");
             assert_eq!(headers[header::CONTENT_SECURITY_POLICY], POLICY, "{path}");
             assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
         }
+        Ok(())
     }
 
     /// The page's assets are relative to `/dashboard`, so the trailing-slash
     /// form sends the browser there instead of serving a page whose links
     /// would miss.
     #[tokio::test]
-    async fn the_trailing_slash_form_redirects_to_the_page() {
-        let res = get_path("/dashboard/").await;
+    async fn the_trailing_slash_form_redirects_to_the_page() -> anyhow::Result<()> {
+        let res = get_path("/dashboard/").await?;
         assert!(res.status().is_redirection());
         assert_eq!(res.headers()[header::LOCATION], "../dashboard");
+        Ok(())
     }
 
     /// Nothing inline: the policy allows only the page's own files, so an
     /// inline script or style would be refused by the browser, and a `style`
     /// attribute too. Checked here so the page cannot drift from the policy.
     #[test]
-    fn the_page_has_nothing_the_policy_would_refuse() {
+    fn the_page_has_nothing_the_policy_would_refuse() -> anyhow::Result<()> {
         assert!(!PAGE.contains("<script>"), "inline script");
         assert!(!PAGE.contains("<style"), "inline style element");
         assert!(!PAGE.contains("style=\""), "style attribute");
@@ -149,12 +151,13 @@ mod tests {
         // run, since the sections in their own files define what it loads.
         assert!(SCRIPT.contains(r#"addEventListener("DOMContentLoaded", start)"#));
         assert!(BEHAVIORS.contains("function loadBehaviors"));
+        Ok(())
     }
 
     /// The script writes stored text with `textContent`, never as markup, so a
     /// memory that holds markup is shown, not run.
     #[test]
-    fn the_scripts_never_write_markup() {
+    fn the_scripts_never_write_markup() -> anyhow::Result<()> {
         for (name, script) in [
             ("app.js", SCRIPT),
             ("behaviors.js", BEHAVIORS),
@@ -170,5 +173,6 @@ mod tests {
             }
             assert!(!script.contains("eval("), "{name}: eval");
         }
+        Ok(())
     }
 }

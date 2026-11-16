@@ -8,8 +8,8 @@
 use super::*;
 
 #[tokio::test]
-async fn ingest_then_recall_a_knowledge_document() {
-    let s = server().await;
+async fn ingest_then_recall_a_knowledge_document() -> anyhow::Result<()> {
+    let s = server().await?;
     let ingested = s
         .ingest_document(Parameters(IngestDocumentParams {
             compartment: None,
@@ -21,8 +21,7 @@ async fn ingest_then_recall_a_knowledge_document() {
                 .into(),
             source: Some("onboarding.md".into()),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(ingested.0.chunks >= 1);
     assert_eq!(ingested.0.title, "Onboarding");
 
@@ -31,8 +30,7 @@ async fn ingest_then_recall_a_knowledge_document() {
             query: "what runtime does this project use".into(),
             top_k: Some(3),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(!recalled.0.chunks.is_empty());
     assert!(recalled.0.chunks.iter().all(|c| c.title == "Onboarding"));
     // No copal archive configured: no provenance, exactly as before.
@@ -48,9 +46,9 @@ async fn ingest_then_recall_a_knowledge_document() {
             "recall_documents",
             serde_json::json!({ "query": "runtime", "top_k": 1 }),
         )
-        .await
-        .unwrap();
+        .await?;
     assert!(viarest.get("chunks").is_some());
+    Ok(())
 }
 
 /// A canned copal for the ingest tests: create answers with a fixed file
@@ -103,7 +101,7 @@ async fn ingest_into_a_compartment_is_private_and_refused_before_archiving_when_
         antumbra_copal::CopalTenancy::PerWorkspace,
         copal.clone(),
     ));
-    let s = server().await.with_copal_archive(archive);
+    let s = server().await?.with_copal_archive(archive);
     let mine = s
         .create_compartment(Parameters(CreateCompartmentParams {
             name: "reviews".into(),
@@ -198,8 +196,8 @@ fn canned_archive(up: bool) -> Arc<antumbra_copal::CopalArchive> {
 }
 
 #[tokio::test]
-async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() {
-    let s = server().await.with_copal_archive(canned_archive(true));
+async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() -> anyhow::Result<()> {
+    let s = server().await?.with_copal_archive(canned_archive(true));
     s.ingest_document(Parameters(IngestDocumentParams {
         compartment: None,
         provenance: None,
@@ -209,30 +207,29 @@ async fn ingest_with_a_copal_archive_stamps_every_chunk_with_provenance() {
             .into(),
         source: Some("onboarding.md".into()),
     }))
-    .await
-    .unwrap();
+    .await?;
 
     let recalled = s
         .recall_documents(Parameters(RecallDocumentsParams {
             query: "what runtime does this project use".into(),
             top_k: Some(3),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(!recalled.0.chunks.is_empty());
     // Every chunk names the archived original: the file AND the bytes.
     assert!(recalled.0.chunks.iter().all(|c| c.copal_file.as_deref()
         == Some("01k6f2x9q3w8e5r7t1y4z6a8b0")
         && c.copal_digest.as_deref()
             == Some("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")));
+    Ok(())
 }
 
 #[tokio::test]
-async fn ingest_fails_closed_when_the_configured_copal_is_unreachable() {
+async fn ingest_fails_closed_when_the_configured_copal_is_unreachable() -> anyhow::Result<()> {
     // Upload-first: with the archive configured but down, the ingest fails
     // BEFORE any chunk is stored -- a document of record that silently
     // dropped originals would be worse than none.
-    let s = server().await.with_copal_archive(canned_archive(false));
+    let s = server().await?.with_copal_archive(canned_archive(false));
     let res = s
         .ingest_document(Parameters(IngestDocumentParams {
             compartment: None,
@@ -247,63 +244,58 @@ async fn ingest_fails_closed_when_the_configured_copal_is_unreachable() {
         "a configured archive that is down fails ingest"
     );
     // Nothing was stored: the workspace still lists zero documents.
-    assert_eq!(s.workspace_stats().await.unwrap().0.documents, 0);
+    assert_eq!(s.workspace_stats().await?.0.documents, 0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn population_and_stats_report_the_workspace() {
-    let s = server().await;
+async fn population_and_stats_report_the_workspace() -> anyhow::Result<()> {
+    let s = server().await?;
     // A fresh workspace has no experts.
-    assert!(s.population().await.unwrap().0.experts.is_empty());
-    assert_eq!(s.workspace_stats().await.unwrap().0.experts, 0);
+    assert!(s.population().await?.0.experts.is_empty());
+    assert_eq!(s.workspace_stats().await?.0.experts, 0);
 
     // Seed a memory and a document through the dispatcher.
     s.call_tool(
         "store_memory",
         serde_json::json!({ "content": "remember this" }),
     )
-    .await
-    .unwrap();
+    .await?;
     s.call_tool(
         "ingest_document",
         serde_json::json!({ "title": "Doc", "content": "some reference text" }),
     )
-    .await
-    .unwrap();
+    .await?;
 
-    let stats = s.workspace_stats().await.unwrap();
+    let stats = s.workspace_stats().await?;
     assert!(stats.0.memories >= 1);
     assert_eq!(stats.0.documents, 1);
 
     // The document list names it, with its chunks, and over the REST
     // dispatcher too.
-    let listed = s.list_documents().await.unwrap();
+    let listed = s.list_documents().await?;
     assert_eq!(listed.0.documents.len(), 1);
     assert!(listed.0.documents[0].chunks >= 1);
-    let via = s
-        .call_tool("list_documents", serde_json::json!({}))
-        .await
-        .unwrap();
+    let via = s.call_tool("list_documents", serde_json::json!({})).await?;
     assert_eq!(via["documents"].as_array().map(Vec::len), Some(1));
 
     // The stats tool is reachable over the REST dispatcher too.
     let via = s
         .call_tool("workspace_stats", serde_json::json!({}))
-        .await
-        .unwrap();
+        .await?;
     assert!(via.get("memories").is_some());
+    Ok(())
 }
 
 /// A page of `list_memories` is the most recently updated first, says
 /// whether another follows, and continues from `offset`, over the REST
 /// dispatcher as over JSON-RPC.
 #[tokio::test]
-async fn list_memories_pages_newest_first() {
-    let s = server().await;
+async fn list_memories_pages_newest_first() -> anyhow::Result<()> {
+    let s = server().await?;
     for content in ["first", "second", "third"] {
         s.call_tool("store_memory", serde_json::json!({ "content": content }))
-            .await
-            .unwrap();
+            .await?;
         // Distinct update times, so the order is the order of storing.
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
@@ -313,44 +305,47 @@ async fn list_memories_pages_newest_first() {
             serde_json::json!({ "limit": 2, "offset": offset }),
         )
     };
-    let contents = |v: &serde_json::Value| -> Vec<String> {
-        v["memories"]
-            .as_array()
-            .unwrap()
+    let contents = |v: &serde_json::Value| -> anyhow::Result<Vec<String>> {
+        let Some(memories) = v["memories"].as_array() else {
+            anyhow::bail!("the page lists no memories: {v}");
+        };
+        memories
             .iter()
-            .map(|m| m["content"].as_str().unwrap().to_string())
+            .map(|m| {
+                m["content"]
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow::anyhow!("a listed memory has no content: {m}"))
+            })
             .collect()
     };
-    let first = page(0).await.unwrap();
-    assert_eq!(contents(&first), ["third", "second"]);
+    let first = page(0).await?;
+    assert_eq!(contents(&first)?, ["third", "second"]);
     assert_eq!(first["more"], true);
-    let last = page(2).await.unwrap();
-    assert_eq!(contents(&last), ["first"]);
+    let last = page(2).await?;
+    assert_eq!(contents(&last)?, ["first"]);
     assert!(
         last.get("more").is_none(),
         "the last page says nothing follows"
     );
-    let unpaged = s
-        .call_tool("list_memories", serde_json::json!({}))
-        .await
-        .unwrap();
-    assert_eq!(contents(&unpaged).len(), 3);
+    let unpaged = s.call_tool("list_memories", serde_json::json!({})).await?;
+    assert_eq!(contents(&unpaged)?.len(), 3);
+    Ok(())
 }
 
 #[tokio::test]
-async fn compartment_tools_create_list_store_share() {
-    let s = server().await;
+async fn compartment_tools_create_list_store_share() -> anyhow::Result<()> {
+    let s = server().await?;
 
     let c = s
         .create_compartment(Parameters(CreateCompartmentParams {
             name: "deno work".into(),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(c.0.id.starts_with("comp:"));
     assert_eq!(c.0.origin, "user");
 
-    let listed = s.list_compartments().await.unwrap();
+    let listed = s.list_compartments().await?;
     assert!(listed.0.compartments.iter().any(|x| x.id == c.0.id));
 
     // Store a memory explicitly into the new compartment.
@@ -364,8 +359,7 @@ async fn compartment_tools_create_list_store_share() {
             volatile: None,
             compartment: Some(c.0.id.clone()),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(m.0.id.starts_with("memory:"));
 
     // Share + revoke succeed (engine enforcement is proven in the store
@@ -376,8 +370,7 @@ async fn compartment_tools_create_list_store_share() {
             grantee: "user:other".into(),
             capability: "reference".into(),
         }))
-        .await
-        .unwrap()
+        .await?
         .0
         .shared
     );
@@ -386,11 +379,11 @@ async fn compartment_tools_create_list_store_share() {
             compartment_id: c.0.id,
             grantee: "user:other".into(),
         }))
-        .await
-        .unwrap()
+        .await?
         .0
         .revoked
     );
+    Ok(())
 }
 
 // Sharing and revoking are the owner's: another member of the workspace who
@@ -399,7 +392,7 @@ async fn compartment_tools_create_list_store_share() {
 // and a revoke that landed leaves none. Two users' servers over one store.
 #[tokio::test]
 async fn sharing_someone_elses_compartment_is_refused_not_reported_shared() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = mem_store().await?;
     let tenant = TenantId::new("ws:test");
     let server_for = |user: &str| McpServer::for_tests_as(store.clone(), "ws:test", user);
     let a = server_for("user:a");
@@ -474,8 +467,8 @@ async fn sharing_someone_elses_compartment_is_refused_not_reported_shared() -> a
 }
 
 #[tokio::test]
-async fn propose_compartments_clusters_inbox_then_applies() {
-    let s = server().await;
+async fn propose_compartments_clusters_inbox_then_applies() -> anyhow::Result<()> {
+    let s = server().await?;
     // Memories written with no compartment land in the inbox (default).
     for content in [
         "deno run typescript module",
@@ -492,8 +485,7 @@ async fn propose_compartments_clusters_inbox_then_applies() {
             volatile: None,
             compartment: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     }
 
     // Suggest-only: proposals returned, nothing persisted. Threshold 0.0
@@ -505,8 +497,7 @@ async fn propose_compartments_clusters_inbox_then_applies() {
             min_size: 3,
             apply: false,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(!suggested.0.proposals.is_empty(), "a region is proposed");
     assert!(
         suggested
@@ -524,13 +515,16 @@ async fn propose_compartments_clusters_inbox_then_applies() {
             min_size: 3,
             apply: true,
         }))
-        .await
-        .unwrap();
-    let prop = applied.0.proposals.first().expect("a proposal");
-    let new_id = prop.compartment_id.clone().expect("apply persisted an id");
+        .await?;
+    let Some(prop) = applied.0.proposals.first() else {
+        anyhow::bail!("apply returned no proposal");
+    };
+    let Some(new_id) = prop.compartment_id.clone() else {
+        anyhow::bail!("apply persisted no compartment id");
+    };
 
     // It is owned by the user and marked as a proposal awaiting curation.
-    let comps = s.list_compartments().await.unwrap();
+    let comps = s.list_compartments().await?;
     assert!(comps
         .0
         .compartments
@@ -538,27 +532,27 @@ async fn propose_compartments_clusters_inbox_then_applies() {
         .any(|c| c.id == new_id && c.origin == "proposed"));
 
     // Its members were moved out of the inbox into it (engine round-trip).
-    let moved = memory::list_by_compartment(&s.store, &s.tenant, &CompartmentId::new(new_id))
-        .await
-        .unwrap();
+    let moved =
+        memory::list_by_compartment(&s.store, &s.tenant, &CompartmentId::new(new_id)).await?;
     assert_eq!(moved.len(), prop.members.len());
     assert!(moved.len() >= 3, "the whole inbox region moved");
+    Ok(())
 }
 
 #[tokio::test]
-async fn shared_connection_isolates_tenants_under_signin() {
+async fn shared_connection_isolates_tenants_under_signin() -> anyhow::Result<()> {
     // The HTTP transport's model on an embedded (single-writer) engine: ONE
     // shared connection, signed in per request. Two tenants' servers share
     // the store; serialized signin must isolate them through the real MCP
     // tools, not just at the store layer.
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let store = mem_store().await?;
     let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
     let (ta, ua) = (TenantId::new("ws:a"), UserId::new("user:a"));
     let (tb, ub) = (TenantId::new("ws:b"), UserId::new("user:b"));
 
     // Provision both identities owner-side (principal + default compartment).
-    let comp_a = crate::provision_identity(&store, &ta, &ua).await.unwrap();
-    let comp_b = crate::provision_identity(&store, &tb, &ub).await.unwrap();
+    let comp_a = crate::provision_identity(&store, &ta, &ua).await?;
+    let comp_b = crate::provision_identity(&store, &tb, &ub).await?;
     let server_a = McpServer::new(
         store.clone(),
         embedder.clone(),
@@ -579,7 +573,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
     );
 
     // Request 1: bind tenant a, store a memory via a's server.
-    store.signin(&ta, &ua).await.unwrap();
+    store.signin(&ta, &ua).await?;
     server_a
         .store_memory(Parameters(StoreParams {
             provenance: None,
@@ -590,11 +584,10 @@ async fn shared_connection_isolates_tenants_under_signin() {
             volatile: None,
             compartment: None,
         }))
-        .await
-        .unwrap();
+        .await?;
 
     // Request 2: re-bind the SAME connection as tenant b; b must not see it.
-    store.signin(&tb, &ub).await.unwrap();
+    store.signin(&tb, &ub).await?;
     let b_view = server_b
         .list_memories(Parameters(ListParams {
             host: None,
@@ -602,8 +595,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
             limit: None,
             offset: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(
         b_view
             .0
@@ -619,8 +611,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
             limit: Some(50),
             offset: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(
         b_page
             .0
@@ -631,7 +622,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
     );
 
     // Request 3: a re-binds and DOES see its own memory.
-    store.signin(&ta, &ua).await.unwrap();
+    store.signin(&ta, &ua).await?;
     let a_view = server_a
         .list_memories(Parameters(ListParams {
             host: None,
@@ -639,8 +630,7 @@ async fn shared_connection_isolates_tenants_under_signin() {
             limit: None,
             offset: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(
         a_view
             .0
@@ -649,14 +639,15 @@ async fn shared_connection_isolates_tenants_under_signin() {
             .any(|m| m.content.contains("alpha")),
         "tenant a must see its own memory"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn auto_propose_trigger_fires_once_the_inbox_grows() {
+async fn auto_propose_trigger_fires_once_the_inbox_grows() -> anyhow::Result<()> {
     // With the autonomous trigger armed at 4, the inbox is left alone until it
     // reaches 4 memories, at which point a write self-organizes it into an
     // Origin::Proposed compartment (and the inbox shrinks, quieting the trigger).
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let store = mem_store().await?;
     let s = McpServer::new(
         store,
         Arc::new(FixedEmbedder::new(EMBED_DIM)),
@@ -680,35 +671,36 @@ async fn auto_propose_trigger_fires_once_the_inbox_grows() {
 
     // The first three writes stay below the threshold: no auto-proposal.
     for n in 0..3 {
-        let out = s.store_memory(Parameters(put(n))).await.unwrap();
+        let out = s.store_memory(Parameters(put(n))).await?;
         assert!(
             out.0.auto_proposed.is_empty(),
             "below threshold: inbox left alone"
         );
     }
     // The fourth write reaches the threshold: the antumbra organizes the inbox.
-    let out = s.store_memory(Parameters(put(3))).await.unwrap();
+    let out = s.store_memory(Parameters(put(3))).await?;
     assert!(
         !out.0.auto_proposed.is_empty(),
         "at threshold the antumbra auto-creates proposed compartment(s)"
     );
 
     // The created compartment is a proposal the user owns, awaiting curation.
-    let comps = s.list_compartments().await.unwrap();
+    let comps = s.list_compartments().await?;
     assert!(comps.0.compartments.iter().any(|c| c.origin == "proposed"));
 
     // The inbox shrank below the threshold, so the next write does not re-fire.
-    let again = s.store_memory(Parameters(put(99))).await.unwrap();
+    let again = s.store_memory(Parameters(put(99))).await?;
     assert!(
         again.0.auto_proposed.is_empty(),
         "inbox no longer over threshold"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn answer_routes_then_serves_through_the_expert() {
+async fn answer_routes_then_serves_through_the_expert() -> anyhow::Result<()> {
     use antumbra_core::testing::EchoServe;
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    let store = mem_store().await?;
     // A permissive router with one expert so routing covers any task.
     router::save(
         &store,
@@ -722,8 +714,7 @@ async fn answer_routes_then_serves_through_the_expert() {
             floor: -1.0,
         },
     )
-    .await
-    .unwrap();
+    .await?;
     let s = McpServer::new(
         store,
         Arc::new(FixedEmbedder::new(EMBED_DIM)),
@@ -739,16 +730,18 @@ async fn answer_routes_then_serves_through_the_expert() {
             repo: None,
             standing_only: false,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(!out.0.escalate, "the population covers the task");
     assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
     // EchoServe serves the prompt straight back, proving route -> serve wiring.
     assert_eq!(out.0.answer, "add two numbers");
+    Ok(())
 }
 
 // A serving engine that doesn't have the routed expert's adapter must make
-// `answer` ESCALATE, not error -- and never call `act` (F4).
+// `answer` ESCALATE, not error -- and never call `act` (F4). An `act` that is
+// called anyway answers with an error, which `answer` passes on, so the test
+// below would fail on it.
 struct Unservable;
 #[async_trait::async_trait]
 impl antumbra_core::ports::Serve for Unservable {
@@ -756,7 +749,9 @@ impl antumbra_core::ports::Serve for Unservable {
         &self,
         _req: ActRequest,
     ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
-        panic!("act must not be called when the expert is unservable");
+        Err(antumbra_core::AntumbraError::other(
+            "act must not be called when the expert is unservable",
+        ))
     }
     fn can_serve(&self, _expert: &ExpertId) -> bool {
         false
@@ -764,8 +759,8 @@ impl antumbra_core::ports::Serve for Unservable {
 }
 
 #[tokio::test]
-async fn answer_escalates_when_the_routed_expert_is_not_servable() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn answer_escalates_when_the_routed_expert_is_not_servable() -> anyhow::Result<()> {
+    let store = mem_store().await?;
     router::save(
         &store,
         &LearnedRouter {
@@ -778,8 +773,7 @@ async fn answer_escalates_when_the_routed_expert_is_not_servable() {
             floor: -1.0,
         },
     )
-    .await
-    .unwrap();
+    .await?;
     let s = McpServer::new(
         store,
         Arc::new(FixedEmbedder::new(EMBED_DIM)),
@@ -795,28 +789,28 @@ async fn answer_escalates_when_the_routed_expert_is_not_servable() {
             repo: None,
             standing_only: false,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(
         out.0.escalate,
         "an unservable routed expert escalates, not errors"
     );
     assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
     assert!(out.0.answer.is_empty());
+    Ok(())
 }
 
 #[tokio::test]
-async fn answer_without_a_serving_engine_reports_not_configured() {
-    let s = server().await; // serve = None
+async fn answer_without_a_serving_engine_reports_not_configured() -> anyhow::Result<()> {
+    let s = server().await?; // serve = None
     let out = s
         .answer(Parameters(AnswerParams {
             task: "x".into(),
             repo: None,
             standing_only: false,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(out.0.escalate && out.0.note.is_some());
+    Ok(())
 }
 
 /// Provenance travels with the memory: a structured anchor becomes a `git:`
@@ -824,8 +818,8 @@ async fn answer_without_a_serving_engine_reports_not_configured() {
 /// caller's repo + branch tags each hit's scope and demotes the out-of-scope
 /// ones below the in-scope ones without hiding them.
 #[tokio::test]
-async fn provenance_is_stored_and_scopes_recall() {
-    let s = server().await;
+async fn provenance_is_stored_and_scopes_recall() -> anyhow::Result<()> {
+    let s = server().await?;
     let store = |content: &str, branch: &str, repo: &str| StoreParams {
         provenance: Some(ProvenanceParams {
             repo: repo.into(),
@@ -846,22 +840,19 @@ async fn provenance_is_stored_and_scopes_recall() {
         "feat/orders",
         "github.com/o/r",
     )))
-    .await
-    .unwrap();
+    .await?;
     s.store_memory(Parameters(store(
         "the orders route is POST /orders on main",
         "main",
         "github.com/o/r",
     )))
-    .await
-    .unwrap();
+    .await?;
     s.store_memory(Parameters(store(
         "the orders route lives in another repo",
         "main",
         "github.com/o/other",
     )))
-    .await
-    .unwrap();
+    .await?;
 
     // No context: every hit comes back with its parsed provenance and no scope.
     let plain = s
@@ -876,14 +867,15 @@ async fn provenance_is_stored_and_scopes_recall() {
             floor: None,
             session: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(plain.0.memories.len(), 3);
     for m in &plain.0.memories {
-        let p = m
-            .provenance
-            .as_ref()
-            .expect("provenance parsed from evidence");
+        let Some(p) = m.provenance.as_ref() else {
+            anyhow::bail!(
+                "no provenance was parsed from the evidence of `{}`",
+                m.content
+            );
+        };
         assert_eq!(p.commit, "b697da7");
         assert!(m.scope.is_none());
     }
@@ -902,14 +894,17 @@ async fn provenance_is_stored_and_scopes_recall() {
             floor: None,
             session: None,
         }))
-        .await
-        .unwrap();
-    let scopes: Vec<&str> = scoped
+        .await?;
+    let scopes = scoped
         .0
         .memories
         .iter()
-        .map(|m| m.scope.as_deref().unwrap())
-        .collect();
+        .map(|m| {
+            m.scope
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("`{}` came back with no scope", m.content))
+        })
+        .collect::<anyhow::Result<Vec<&str>>>()?;
     assert_eq!(scopes[0], "in_scope", "{scopes:?}");
     assert!(
         scopes[1..]
@@ -937,19 +932,20 @@ async fn provenance_is_stored_and_scopes_recall() {
         }))
         .await;
     assert!(bad.is_err());
+    Ok(())
 }
 
 /// A tool profile is enforced where the agent first sees the tools and where
 /// it calls them: `agent` advertises its twenty-one, the REST dispatch serves those
 /// and refuses the rest by name, and no profile advertises everything.
 #[tokio::test]
-async fn a_tool_profile_narrows_what_is_advertised_and_served() {
+async fn a_tool_profile_narrows_what_is_advertised_and_served() -> anyhow::Result<()> {
     let all = McpServer::all_tool_names();
     assert_eq!(all.len(), 38, "{all:?}");
-    let profile = crate::profile::ToolProfile::parse("agent", &all)
-        .unwrap()
-        .expect("agent is a profile, not `all`");
-    let s = server().await.with_tool_profile(Arc::new(profile));
+    let Some(profile) = crate::profile::ToolProfile::parse("agent", &all)? else {
+        anyhow::bail!("agent is a profile, not `all`");
+    };
+    let s = server().await?.with_tool_profile(Arc::new(profile));
     let advertised: Vec<String> = s
         .advertised_tools()
         .into_iter()
@@ -967,14 +963,15 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() {
             "store_memory",
             serde_json::json!({ "content": "deno, not npm, in acme-api", "network": "opinion" }),
         )
-        .await
-        .unwrap();
-    assert!(stored["id"].as_str().unwrap().starts_with("memory:"));
+        .await?;
+    let Some(id) = stored["id"].as_str() else {
+        anyhow::bail!("the stored memory carries no id: {stored}");
+    };
+    assert!(id.starts_with("memory:"));
 
-    let err = s
-        .call_tool("list_memories", serde_json::json!({}))
-        .await
-        .unwrap_err();
+    let Err(err) = s.call_tool("list_memories", serde_json::json!({})).await else {
+        anyhow::bail!("a tool outside the profile was served");
+    };
     assert!(
         err.message.contains("not in this server's tool profile")
             && err.message.contains("recall_memories"),
@@ -982,5 +979,6 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() {
         err.message
     );
 
-    assert_eq!(server().await.advertised_tools().len(), 38);
+    assert_eq!(server().await?.advertised_tools().len(), 38);
+    Ok(())
 }

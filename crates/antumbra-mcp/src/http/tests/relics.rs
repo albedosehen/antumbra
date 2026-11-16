@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use antumbra_core::{CompartmentId, Relic, RelicVersion, Visibility};
 use antumbra_store::repo::relic;
+use antumbra_store::testing::mem_store;
 
 use crate::http::relics::{public_row, EXPORTS_PER_CLIENT, PUBLIC_READS_PER_CLIENT};
 
@@ -37,49 +38,43 @@ fn page(slug: &str, visibility: Visibility) -> Relic {
     }
 }
 
-async fn app() -> Router {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-    relic::put(&store, &page("open", Visibility::Public))
-        .await
-        .unwrap();
-    relic::put(&store, &page("closed", Visibility::Private))
-        .await
-        .unwrap();
+async fn app() -> anyhow::Result<Router> {
+    let store = mem_store().await?;
+    relic::put(&store, &page("open", Visibility::Public)).await?;
+    relic::put(&store, &page("closed", Visibility::Private)).await?;
     let copal = antumbra_copal::CopalArchive::new(
         "127.0.0.1:9",
         antumbra_copal::CopalTenancy::Shared("antumbra".into()),
     )
     .with_render_origin(Some(ORIGIN.into()));
-    router(
+    Ok(router(
         state_archived(
             store,
             Arc::new(FixedEmbedder::new(EMBED_DIM)),
             Some(Arc::new(copal)),
         )
         .await,
-    )
+    ))
 }
 
-async fn get(app: &Router, uri: &str) -> Response {
-    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
-    app.clone().oneshot(req).await.unwrap()
+async fn get(app: &Router, uri: &str) -> anyhow::Result<Response> {
+    let req = Request::builder().uri(uri).body(Body::empty())?;
+    Ok(app.clone().oneshot(req).await?)
 }
 
-async fn json_of(res: Response) -> serde_json::Value {
-    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    serde_json::from_slice(&bytes).unwrap()
+async fn json_of(res: Response) -> anyhow::Result<serde_json::Value> {
+    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await?;
+    Ok(serde_json::from_slice(&bytes)?)
 }
 
 #[tokio::test]
-async fn a_public_relic_is_described_to_anyone_and_a_private_one_to_no_one() {
-    let app = app().await;
+async fn a_public_relic_is_described_to_anyone_and_a_private_one_to_no_one() -> anyhow::Result<()> {
+    let app = app().await?;
 
-    let open = get(&app, "/relic/open/public").await;
+    let open = get(&app, "/relic/open/public").await?;
     assert_eq!(open.status(), StatusCode::OK);
     assert_eq!(open.headers()[header::CACHE_CONTROL], "no-store");
-    let body = json_of(open).await;
+    let body = json_of(open).await?;
     assert_eq!(body["iframe_src"], format!("{ORIGIN}/v1/public/01fileopen"));
     assert_eq!(body["title"], "The open page");
     // Nothing about who owns it or where it lives.
@@ -93,24 +88,23 @@ async fn a_public_relic_is_described_to_anyone_and_a_private_one_to_no_one() {
         "/relic/missing/public",
         "/relic/Not%20A%20Slug/public",
     ] {
-        let res = get(&app, uri).await;
+        let res = get(&app, uri).await?;
         assert_eq!(res.status(), StatusCode::NOT_FOUND, "{uri}");
     }
     // A private relic and a missing one answer exactly alike.
-    let closed = json_of(get(&app, "/relic/closed/public").await).await;
-    let missing = json_of(get(&app, "/relic/missing/public").await).await;
+    let closed = json_of(get(&app, "/relic/closed/public").await?).await?;
+    let missing = json_of(get(&app, "/relic/missing/public").await?).await?;
     assert_eq!(closed, missing);
+    Ok(())
 }
 
 #[tokio::test]
-async fn the_pages_are_served_to_anyone_and_frame_only_the_render_origin() {
-    let app = app().await;
+async fn the_pages_are_served_to_anyone_and_frame_only_the_render_origin() -> anyhow::Result<()> {
+    let app = app().await?;
     for uri in ["/relics", "/relic/closed", "/relic/missing"] {
-        let res = get(&app, uri).await;
+        let res = get(&app, uri).await?;
         assert_eq!(res.status(), StatusCode::OK, "{uri}");
-        let csp = res.headers()[header::CONTENT_SECURITY_POLICY]
-            .to_str()
-            .unwrap();
+        let csp = res.headers()[header::CONTENT_SECURITY_POLICY].to_str()?;
         assert!(
             csp.contains(&format!("frame-src {ORIGIN};")),
             "{uri}: {csp}"
@@ -118,16 +112,17 @@ async fn the_pages_are_served_to_anyone_and_frame_only_the_render_origin() {
         assert!(csp.contains("frame-ancestors 'none'"), "{uri}: {csp}");
     }
     assert_eq!(
-        get(&app, "/relic/Not_A_Slug").await.status(),
+        get(&app, "/relic/Not_A_Slug").await?.status(),
         StatusCode::NOT_FOUND
     );
-    let slash = get(&app, "/relics/").await;
+    let slash = get(&app, "/relics/").await?;
     assert!(slash.status().is_redirection());
     assert_eq!(slash.headers()[header::LOCATION], "../relics");
     // The relics script and style are dashboard assets.
     for uri in ["/dashboard/relics.js", "/dashboard/relics.css"] {
-        assert_eq!(get(&app, uri).await.status(), StatusCode::OK, "{uri}");
+        assert_eq!(get(&app, uri).await?.status(), StatusCode::OK, "{uri}");
     }
+    Ok(())
 }
 
 // On a per-identity state the owner connection is no one else's, so the public
@@ -137,7 +132,7 @@ async fn the_pages_are_served_to_anyone_and_frame_only_the_render_origin() {
 #[tokio::test]
 async fn a_public_lookup_waits_on_the_lock_only_where_the_connection_is_shared(
 ) -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = mem_store().await?;
     relic::put(&store, &page("open", Visibility::Public)).await?;
     let embedder: Arc<dyn Embedder> = Arc::new(FixedEmbedder::new(EMBED_DIM));
     let wait = Duration::from_millis(300);
@@ -164,12 +159,12 @@ async fn a_public_lookup_waits_on_the_lock_only_where_the_connection_is_shared(
 // request is refused with a retry hint, before the lookup does any work.
 #[tokio::test]
 async fn public_lookups_past_a_clients_burst_are_refused() -> anyhow::Result<()> {
-    let app = app().await;
+    let app = app().await?;
     for n in 0..PUBLIC_READS_PER_CLIENT.burst {
-        let res = get(&app, "/relic/open/public").await;
+        let res = get(&app, "/relic/open/public").await?;
         anyhow::ensure!(res.status() == StatusCode::OK, "request {n}");
     }
-    let refused = get(&app, "/relic/open/public").await;
+    let refused = get(&app, "/relic/open/public").await?;
     anyhow::ensure!(refused.status() == StatusCode::TOO_MANY_REQUESTS);
     anyhow::ensure!(refused.headers().get(header::RETRY_AFTER).is_some());
     anyhow::ensure!(refused.headers()[header::CACHE_CONTROL] == "no-store");
@@ -249,7 +244,7 @@ async fn a_pdf_is_printed_once_per_version() -> anyhow::Result<()> {
     let renderer = Arc::new(crate::pdf::PdfRenderer::new(&base)?);
     let (app, pages) = exporting_with(Some(renderer)).await?;
     for n in 0..2 {
-        let res = get_as(&app, "/relic/open/export?format=pdf", None).await;
+        let res = get_as(&app, "/relic/open/export?format=pdf", None).await?;
         anyhow::ensure!(res.status() == StatusCode::OK, "export {n}");
         anyhow::ensure!(
             res.headers()[header::CONTENT_TYPE] == "application/pdf",
@@ -261,14 +256,11 @@ async fn a_pdf_is_printed_once_per_version() -> anyhow::Result<()> {
                 .contains("open-v1.pdf"),
             "export {n}"
         );
-        let body = text_of(res).await;
+        let body = text_of(res).await?;
         anyhow::ensure!(body.starts_with("%PDF"), "export {n}: {body}");
     }
     anyhow::ensure!(prints.load(Ordering::SeqCst) == 1, "printed once");
-    let reads = match pages.reads.lock() {
-        Ok(reads) => reads.len(),
-        Err(poisoned) => poisoned.into_inner().len(),
-    };
+    let reads = pages.read().len();
     anyhow::ensure!(reads == 1, "copal read once, got {reads}");
     Ok(())
 }
@@ -277,20 +269,16 @@ async fn a_pdf_is_printed_once_per_version() -> anyhow::Result<()> {
 // here, before the renderer is even looked for.
 #[tokio::test]
 async fn pdf_exports_past_a_clients_burst_are_refused_before_any_work() -> anyhow::Result<()> {
-    let (app, pages) = exporting().await;
+    let (app, pages) = exporting().await?;
     for n in 0..EXPORTS_PER_CLIENT.burst {
-        let res = get_as(&app, "/relic/open/export?format=pdf", None).await;
+        let res = get_as(&app, "/relic/open/export?format=pdf", None).await?;
         anyhow::ensure!(res.status() == StatusCode::NOT_IMPLEMENTED, "export {n}");
     }
-    let refused = get_as(&app, "/relic/open/export?format=pdf", None).await;
+    let refused = get_as(&app, "/relic/open/export?format=pdf", None).await?;
     anyhow::ensure!(refused.status() == StatusCode::TOO_MANY_REQUESTS);
-    let reads = match pages.reads.lock() {
-        Ok(reads) => reads.len(),
-        Err(poisoned) => poisoned.into_inner().len(),
-    };
-    anyhow::ensure!(reads == 0, "nothing was read from copal");
+    anyhow::ensure!(pages.read().is_empty(), "nothing was read from copal");
     // The other formats are not budgeted.
-    let html = get_as(&app, "/relic/open/export?format=html", None).await;
+    let html = get_as(&app, "/relic/open/export?format=html", None).await?;
     anyhow::ensure!(html.status() == StatusCode::OK);
     Ok(())
 }
@@ -302,6 +290,17 @@ const PAGE: &str = "<!doctype html><title>Plan</title><h1>The plan</h1>\
 #[derive(Default)]
 struct Pages {
     reads: std::sync::Mutex<Vec<String>>,
+}
+
+impl Pages {
+    /// The files read so far. The list is only ever pushed to, so a lock
+    /// poisoned mid-push still holds a whole list.
+    fn read(&self) -> Vec<String> {
+        self.reads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 impl antumbra_copal::CopalTransport for Pages {
@@ -335,25 +334,26 @@ impl antumbra_copal::CopalTransport for Pages {
         _credential: &antumbra_copal::CopalCredential,
         _limit: u64,
     ) -> antumbra_core::Result<Vec<u8>> {
-        self.reads.lock().unwrap().push(url.to_string());
+        // Only ever pushed to, so a poisoned lock still holds a whole list.
+        self.reads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(url.to_string());
         Ok(PAGE.as_bytes().to_vec())
     }
 }
 
 /// A public relic `open`, and a private relic `closed` in lily's own
 /// compartment, over a copal that serves [`PAGE`].
-async fn exporting() -> (Router, Arc<Pages>) {
-    match exporting_with(None).await {
-        Ok(ready) => ready,
-        Err(e) => panic!("the exporting fixture failed: {e}"),
-    }
+async fn exporting() -> anyhow::Result<(Router, Arc<Pages>)> {
+    exporting_with(None).await
 }
 
 /// As [`exporting`], printing through `pdf` when one is given.
 async fn exporting_with(
     pdf: Option<Arc<crate::pdf::PdfRenderer>>,
 ) -> anyhow::Result<(Router, Arc<Pages>)> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = mem_store().await?;
     let compartment =
         crate::provision_identity(&store, &TenantId::new("ws:org"), &UserId::new("user:lily"))
             .await?;
@@ -383,29 +383,24 @@ async fn exporting_with(
     Ok((router(state), pages))
 }
 
-async fn get_as(app: &Router, uri: &str, auth: Option<&str>) -> Response {
+async fn get_as(app: &Router, uri: &str, auth: Option<&str>) -> anyhow::Result<Response> {
     let mut req = Request::builder().uri(uri);
     if let Some(auth) = auth {
         req = req.header(header::AUTHORIZATION, auth);
     }
-    app.clone()
-        .oneshot(req.body(Body::empty()).unwrap())
-        .await
-        .unwrap()
+    Ok(app.clone().oneshot(req.body(Body::empty())?).await?)
 }
 
-async fn text_of(res: Response) -> String {
-    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    String::from_utf8(bytes.to_vec()).unwrap()
+async fn text_of(res: Response) -> anyhow::Result<String> {
+    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await?;
+    Ok(String::from_utf8(bytes.to_vec())?)
 }
 
 #[tokio::test]
-async fn a_public_relic_exports_to_anyone_as_a_file_this_origin_never_runs() {
-    let (app, pages) = exporting().await;
+async fn a_public_relic_exports_to_anyone_as_a_file_this_origin_never_runs() -> anyhow::Result<()> {
+    let (app, pages) = exporting().await?;
 
-    let html = get_as(&app, "/relic/open/export?format=html", None).await;
+    let html = get_as(&app, "/relic/open/export?format=html", None).await?;
     assert_eq!(html.status(), StatusCode::OK);
     let h = html.headers();
     assert_eq!(h[header::CONTENT_TYPE], "text/html; charset=utf-8");
@@ -414,18 +409,17 @@ async fn a_public_relic_exports_to_anyone_as_a_file_this_origin_never_runs() {
         "attachment; filename=\"open-v1.html\""
     );
     assert!(h[header::CONTENT_SECURITY_POLICY]
-        .to_str()
-        .unwrap()
+        .to_str()?
         .starts_with("sandbox"));
     assert_eq!(h[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
     assert_eq!(h[header::CACHE_CONTROL], "no-store");
-    assert_eq!(text_of(html).await, PAGE);
+    assert_eq!(text_of(html).await?, PAGE);
     assert_eq!(
-        *pages.reads.lock().unwrap(),
+        pages.read(),
         vec!["http://127.0.0.1:9/v1/files/01fileopen/content".to_string()]
     );
 
-    let md = get_as(&app, "/relic/open/export?format=md", None).await;
+    let md = get_as(&app, "/relic/open/export?format=md", None).await?;
     assert_eq!(md.status(), StatusCode::OK);
     assert_eq!(
         md.headers()[header::CONTENT_TYPE],
@@ -435,41 +429,42 @@ async fn a_public_relic_exports_to_anyone_as_a_file_this_origin_never_runs() {
         md.headers()[header::CONTENT_DISPOSITION],
         "attachment; filename=\"open-v1.md\""
     );
-    assert_eq!(text_of(md).await, "# The plan\n\nCut **65** to 22.\n");
+    assert_eq!(text_of(md).await?, "# The plan\n\nCut **65** to 22.\n");
 
     // Without a format, the page as it was published.
-    let plain = get_as(&app, "/relic/open/export", None).await;
+    let plain = get_as(&app, "/relic/open/export", None).await?;
     assert_eq!(
         plain.headers()[header::CONTENT_DISPOSITION],
         "attachment; filename=\"open-v1.html\""
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_private_relic_exports_only_to_who_may_see_it() {
-    let (app, pages) = exporting().await;
+async fn a_private_relic_exports_only_to_who_may_see_it() -> anyhow::Result<()> {
+    let (app, pages) = exporting().await?;
 
     // No token: a private relic, a missing one and a malformed name alike.
-    let unseen = text_of(get_as(&app, "/relic/closed/export", None).await).await;
+    let unseen = text_of(get_as(&app, "/relic/closed/export", None).await?).await?;
     for uri in [
         "/relic/closed/export",
         "/relic/missing/export",
         "/relic/Not_A_Slug/export",
     ] {
-        let res = get_as(&app, uri, None).await;
+        let res = get_as(&app, uri, None).await?;
         assert_eq!(res.status(), StatusCode::NOT_FOUND, "{uri}");
-        assert_eq!(text_of(res).await, unseen, "{uri}");
+        assert_eq!(text_of(res).await?, unseen, "{uri}");
     }
     assert_eq!(
         get_as(&app, "/relic/closed/export", Some("Bearer not-a-jwt"))
-            .await
+            .await?
             .status(),
         StatusCode::UNAUTHORIZED
     );
-    assert!(pages.reads.lock().unwrap().is_empty());
+    assert!(pages.read().is_empty());
 
-    let lily = format!("Bearer {}", token("ws:org", "user:lily"));
-    let mine = get_as(&app, "/relic/closed/export?format=markdown", Some(&lily)).await;
+    let lily = format!("Bearer {}", token("ws:org", "user:lily")?);
+    let mine = get_as(&app, "/relic/closed/export?format=markdown", Some(&lily)).await?;
     assert_eq!(mine.status(), StatusCode::OK);
     assert_eq!(
         mine.headers()[header::CONTENT_DISPOSITION],
@@ -477,36 +472,38 @@ async fn a_private_relic_exports_only_to_who_may_see_it() {
     );
 
     // Someone else in the workspace: nothing of lily's, but a public relic.
-    let rosa = format!("Bearer {}", token("ws:org", "user:rosa"));
+    let rosa = format!("Bearer {}", token("ws:org", "user:rosa")?);
     assert_eq!(
         get_as(&app, "/relic/closed/export", Some(&rosa))
-            .await
+            .await?
             .status(),
         StatusCode::NOT_FOUND
     );
     assert_eq!(
         get_as(&app, "/relic/open/export", Some(&rosa))
-            .await
+            .await?
             .status(),
         StatusCode::OK
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn an_export_says_what_it_cannot_make() {
-    let (app, pages) = exporting().await;
+async fn an_export_says_what_it_cannot_make() -> anyhow::Result<()> {
+    let (app, pages) = exporting().await?;
     assert_eq!(
         get_as(&app, "/relic/open/export?format=docx", None)
-            .await
+            .await?
             .status(),
         StatusCode::BAD_REQUEST
     );
-    let pdf = get_as(&app, "/relic/open/export?format=pdf", None).await;
+    let pdf = get_as(&app, "/relic/open/export?format=pdf", None).await?;
     assert_eq!(pdf.status(), StatusCode::NOT_IMPLEMENTED);
-    let said = json_of(pdf).await;
-    assert!(
-        said["error"].as_str().unwrap().contains("--pdf-renderer"),
-        "{said}"
-    );
-    assert!(pages.reads.lock().unwrap().is_empty());
+    let said = json_of(pdf).await?;
+    let Some(error) = said["error"].as_str() else {
+        anyhow::bail!("the refusal carries no error text: {said}");
+    };
+    assert!(error.contains("--pdf-renderer"), "{said}");
+    assert!(pages.read().is_empty());
+    Ok(())
 }

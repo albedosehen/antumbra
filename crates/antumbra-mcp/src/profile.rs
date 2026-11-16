@@ -174,52 +174,60 @@ mod tests {
         .collect()
     }
 
+    /// The profile `spec` names, which has to be one (not `all`).
+    fn profile(spec: &str) -> anyhow::Result<ToolProfile> {
+        let Some(profile) = ToolProfile::parse(spec, &known())? else {
+            anyhow::bail!("{spec:?} parsed as no profile at all");
+        };
+        Ok(profile)
+    }
+
     #[test]
-    fn all_means_no_profile_and_agent_means_the_named_set() {
-        assert_eq!(ToolProfile::parse("all", &known()).unwrap(), None);
-        assert_eq!(ToolProfile::parse(" ALL ", &known()).unwrap(), None);
-        let agent = ToolProfile::parse("agent", &known()).unwrap().unwrap();
+    fn all_means_no_profile_and_agent_means_the_named_set() -> anyhow::Result<()> {
+        assert_eq!(ToolProfile::parse("all", &known())?, None);
+        assert_eq!(ToolProfile::parse(" ALL ", &known())?, None);
+        let agent = profile("agent")?;
         let names: Vec<&str> = agent.names().collect();
         assert_eq!(names.len(), AGENT_PROFILE.len());
         assert!(agent.allows("recall_memories") && agent.allows("answer"));
         assert!(!agent.allows("share_compartment") && !agent.allows("population"));
         // An agent publishes relics; who may see one is the user's call.
         assert!(agent.allows("publish_relic") && !agent.allows("set_relic_visibility"));
+        Ok(())
     }
 
     #[test]
-    fn a_list_is_exact_and_agent_extends_within_it() {
-        let p = ToolProfile::parse("recall_memories, store_memory", &known())
-            .unwrap()
-            .unwrap();
+    fn a_list_is_exact_and_agent_extends_within_it() -> anyhow::Result<()> {
+        let p = profile("recall_memories, store_memory")?;
         assert_eq!(
             p.names().collect::<Vec<_>>(),
             vec!["recall_memories", "store_memory"]
         );
-        let p = ToolProfile::parse("agent,population", &known())
-            .unwrap()
-            .unwrap();
+        let p = profile("agent,population")?;
         assert!(p.allows("population") && p.allows("route"));
         assert!(!p.allows("share_compartment"));
+        Ok(())
     }
 
     #[test]
-    fn unknown_or_empty_specs_are_refused_with_the_full_list() {
-        let err = ToolProfile::parse("agent,recal_memories", &known()).unwrap_err();
+    fn unknown_or_empty_specs_are_refused_with_the_full_list() -> anyhow::Result<()> {
+        let Err(err) = ToolProfile::parse("agent,recal_memories", &known()) else {
+            anyhow::bail!("a misspelled tool name was accepted");
+        };
         assert!(matches!(&err, ProfileError::Unknown { name, .. } if name == "recal_memories"));
         assert!(err.to_string().contains("share_compartment"), "{err}");
-        assert_eq!(
-            ToolProfile::parse(" , ", &known()).unwrap_err(),
-            ProfileError::Empty
-        );
+        let Err(err) = ToolProfile::parse(" , ", &known()) else {
+            anyhow::bail!("an empty spec was accepted");
+        };
+        assert_eq!(err, ProfileError::Empty);
+        Ok(())
     }
 
     #[test]
-    fn filter_keeps_order_and_drops_the_rest() {
-        let p = ToolProfile::parse("route,store_memory", &known())
-            .unwrap()
-            .unwrap();
+    fn filter_keeps_order_and_drops_the_rest() -> anyhow::Result<()> {
+        let p = profile("route,store_memory")?;
         let kept = p.filter(vec!["store_memory", "population", "route"], |t| t);
         assert_eq!(kept, vec!["store_memory", "route"]);
+        Ok(())
     }
 }

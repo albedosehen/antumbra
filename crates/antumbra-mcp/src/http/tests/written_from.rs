@@ -6,7 +6,11 @@
 use super::*;
 
 /// A `POST /mcp/call`, naming a machine when `device` is given.
-fn call_from(tok: &str, device: Option<&str>, body: serde_json::Value) -> Request<Body> {
+fn call_from(
+    tok: &str,
+    device: Option<&str>,
+    body: serde_json::Value,
+) -> anyhow::Result<Request<Body>> {
     let mut b = Request::builder()
         .method("POST")
         .uri("/mcp/call")
@@ -14,48 +18,48 @@ fn call_from(tok: &str, device: Option<&str>, body: serde_json::Value) -> Reques
     if let Some(d) = device {
         b = b.header(DEVICE_HEADER, d);
     }
-    b.body(Body::from(body.to_string())).unwrap()
+    Ok(b.body(Body::from(body.to_string()))?)
 }
 
-async fn json_of(resp: Response) -> serde_json::Value {
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+async fn json_of(resp: Response) -> anyhow::Result<serde_json::Value> {
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await?;
+    Ok(serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
 }
 
 /// What the identity's memories say about where each came from, by content.
-async fn stamps(st: &Arc<HttpState>, tok: &str) -> Vec<(String, Option<String>)> {
+async fn stamps(st: &Arc<HttpState>, tok: &str) -> anyhow::Result<Vec<(String, Option<String>)>> {
     let listed = router(st.clone())
         .oneshot(call_from(
             tok,
             None,
             serde_json::json!({ "tool": "list_memories", "arguments": {} }),
-        ))
-        .await
-        .unwrap();
-    let mut out: Vec<(String, Option<String>)> = json_of(listed).await["memories"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|m| {
-            (
-                m["content"].as_str().unwrap().to_string(),
-                m["author_host"].as_str().map(str::to_string),
-            )
-        })
-        .collect();
+        )?)
+        .await?;
+    let listed = json_of(listed).await?;
+    let Some(memories) = listed["memories"].as_array() else {
+        anyhow::bail!("the listing carries no memories: {listed}");
+    };
+    let mut out = Vec::with_capacity(memories.len());
+    for m in memories {
+        let Some(content) = m["content"].as_str() else {
+            anyhow::bail!("a listed memory has no content: {m}");
+        };
+        out.push((
+            content.to_string(),
+            m["author_host"].as_str().map(str::to_string),
+        ));
+    }
     out.sort();
-    out
+    Ok(out)
 }
 
 /// One token, three callers: two that name their machines and one that names
 /// none, through the REST shim. Each write carries its own machine, the
 /// unnamed one the server's, and `list_memories {host}` returns one machine's.
 #[tokio::test]
-async fn rest_calls_are_stamped_with_the_machine_each_names() {
-    let st = state().await;
-    let tok = token("ws:dev", "user:dev");
+async fn rest_calls_are_stamped_with_the_machine_each_names() -> anyhow::Result<()> {
+    let st = state().await?;
+    let tok = token("ws:dev", "user:dev")?;
     for (device, content) in [
         (Some("mac"), "from the laptop"),
         (Some("Windows"), "from the desk"),
@@ -69,15 +73,14 @@ async fn rest_calls_are_stamped_with_the_machine_each_names() {
                 &tok,
                 device,
                 serde_json::json!({ "tool": "store_memory", "arguments": { "content": content } }),
-            ))
-            .await
-            .unwrap();
+            )?)
+            .await?;
         assert_eq!(resp.status(), StatusCode::OK, "{device:?}");
     }
 
     let at = |host: &str| Some(host.to_string());
     assert_eq!(
-        stamps(&st, &tok).await,
+        stamps(&st, &tok).await?,
         [
             ("from an unnamed machine".to_string(), at("test")),
             ("from somewhere".to_string(), at("test")),
@@ -90,11 +93,12 @@ async fn rest_calls_are_stamped_with_the_machine_each_names() {
             &tok,
             None,
             serde_json::json!({ "tool": "list_memories", "arguments": { "host": "windows", "limit": 5 } }),
-        ))
-        .await
-        .unwrap();
-    let theirs = json_of(theirs).await;
-    let theirs = theirs["memories"].as_array().unwrap();
+        )?)
+        .await?;
+    let theirs = json_of(theirs).await?;
+    let Some(theirs) = theirs["memories"].as_array() else {
+        anyhow::bail!("the listing carries no memories: {theirs}");
+    };
     assert_eq!(theirs.len(), 1);
     assert_eq!(theirs[0]["content"], "from the desk");
 
@@ -104,13 +108,13 @@ async fn rest_calls_are_stamped_with_the_machine_each_names() {
             &tok,
             Some("mac"),
             serde_json::json!({ "tool": "devices", "arguments": {} }),
-        ))
-        .await
-        .unwrap();
-    let said = json_of(said).await;
+        )?)
+        .await?;
+    let said = json_of(said).await?;
     assert_eq!(said["this_device"], "mac");
     assert_eq!(said["named_by_client"], true);
     assert_eq!(st.servers.lock().await.map.len(), 1);
+    Ok(())
 }
 
 /// A POST to `/mcp` within an initialized session.
@@ -119,7 +123,7 @@ fn rpc(
     session: Option<&str>,
     device: Option<&str>,
     body: serde_json::Value,
-) -> Request<Body> {
+) -> anyhow::Result<Request<Body>> {
     let mut b = Request::builder()
         .method("POST")
         .uri("/mcp")
@@ -133,16 +137,16 @@ fn rpc(
     if let Some(d) = device {
         b = b.header(DEVICE_HEADER, d);
     }
-    b.body(Body::from(body.to_string())).unwrap()
+    Ok(b.body(Body::from(body.to_string()))?)
 }
 
 /// Over JSON-RPC the name is read from each `tools/call` request, not fixed
 /// when the session starts: one session whose calls name two machines stamps
 /// two machines.
 #[tokio::test]
-async fn each_json_rpc_call_is_stamped_with_the_machine_it_names() {
-    let st = state().await;
-    let tok = token("ws:rpc", "user:rpc");
+async fn each_json_rpc_call_is_stamped_with_the_machine_it_names() -> anyhow::Result<()> {
+    let st = state().await?;
+    let tok = token("ws:rpc", "user:rpc")?;
     let jwt = format!("Bearer {tok}");
     let app = router(st.clone());
 
@@ -157,17 +161,17 @@ async fn each_json_rpc_call_is_stamped_with_the_machine_it_names() {
                 "params": { "protocolVersion": "2025-06-18", "capabilities": {},
                             "clientInfo": { "name": "test", "version": "0" } }
             }),
-        ))
-        .await
-        .unwrap();
+        )?)
+        .await?;
     assert_eq!(resp.status(), StatusCode::OK);
-    let session = resp
+    let Some(session) = resp
         .headers()
         .get("mcp-session-id")
-        .expect("stateful mode returns a session id")
-        .to_str()
-        .unwrap()
-        .to_string();
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+    else {
+        anyhow::bail!("stateful mode returns a session id");
+    };
     let resp = app
         .clone()
         .oneshot(rpc(
@@ -175,9 +179,8 @@ async fn each_json_rpc_call_is_stamped_with_the_machine_it_names() {
             Some(&session),
             Some("mac"),
             serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-        ))
-        .await
-        .unwrap();
+        )?)
+        .await?;
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
 
     for (id, device, content) in [
@@ -194,23 +197,21 @@ async fn each_json_rpc_call_is_stamped_with_the_machine_it_names() {
                     "jsonrpc": "2.0", "id": id, "method": "tools/call",
                     "params": { "name": "store_memory", "arguments": { "content": content } }
                 }),
-            ))
-            .await
-            .unwrap();
+            )?)
+            .await?;
         assert_eq!(resp.status(), StatusCode::OK);
         // The answer streams; read it through so the call has run.
-        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
-            .await
-            .unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await?;
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("memory:"), "{device}: {text}");
     }
 
     assert_eq!(
-        stamps(&st, &tok).await,
+        stamps(&st, &tok).await?,
         [
             ("said on the desk".to_string(), Some("windows".to_string())),
             ("said on the laptop".to_string(), Some("mac".to_string())),
         ]
     );
+    Ok(())
 }
