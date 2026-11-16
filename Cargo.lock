@@ -431,6 +431,7 @@ dependencies = [
  "antumbra-boundary",
  "antumbra-core",
  "antumbra-gate",
+ "anyhow",
  "async-trait",
  "chrono",
  "futures",
