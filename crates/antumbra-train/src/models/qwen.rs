@@ -435,6 +435,14 @@ impl QwenCausalLm {
         self.timing
     }
 
+    /// Generate with the adapter's delta or without it. Off, every projection
+    /// is the frozen base alone, as the GRPO reference pass reads it, and
+    /// [`CausalLm::generate`] answers as the base model would. For measuring
+    /// what an adapter costs a token; whoever turns it off turns it back on.
+    pub fn set_adapter(&mut self, on: bool) {
+        self.model.set_lora(on);
+    }
+
     /// Teacher-force `completion` after `prompt` through the adapter, with no
     /// gradient: for each of the completion's tokens and the end-of-turn after
     /// it, the log-probability the model gives it and the token the model ranks

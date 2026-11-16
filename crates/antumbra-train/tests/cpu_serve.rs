@@ -1,7 +1,7 @@
 //! Live CPU check of the serving path: load the Qwen2.5-Coder base on the CPU,
 //! restore an expert trained in bf16 on the GPU, and generate, reporting the
-//! two phases apart (reading the prompt, then each token after the first) at
-//! one expert's rank and at a four-expert blend's.
+//! two phases apart (reading the prompt, then each token after the first) for
+//! the bare base, at one expert's rank and at a four-expert blend's.
 //!
 //! Gated twice over, as the GPU checks are: the file only compiles under
 //! `--features models`, and the test is `#[ignore]`d and asserts that
@@ -21,9 +21,8 @@
 
 use std::time::Instant;
 
-use antumbra_train::grpo::GrpoLm;
 use antumbra_train::models::{GenTiming, QwenCausalLm};
-use antumbra_train::RaftConfig;
+use antumbra_train::{CausalLm, RaftConfig};
 use candle_core::Device;
 
 type Outcome<T> = Result<T, Box<dyn std::error::Error>>;
@@ -59,19 +58,19 @@ impl Run {
 async fn generate_all(model: &mut QwenCausalLm) -> Outcome<Run> {
     let (mut timing, mut first) = (GenTiming::default(), String::new());
     for p in PROMPTS {
-        let sample = model
-            .sample_group(p, 1)
+        let answer = model
+            .generate(p, 1)
             .await?
             .into_iter()
             .next()
-            .ok_or("one sample was asked for and none came back")?;
+            .ok_or("one answer was asked for and none came back")?;
         let t = model.last_timing().ok_or("the generation was not timed")?;
         timing.prompt_tokens += t.prompt_tokens;
         timing.prompt_secs += t.prompt_secs;
         timing.decoded += t.decoded;
         timing.decode_secs += t.decode_secs;
         if first.is_empty() {
-            first = sample.completion;
+            first = answer;
         }
     }
     Ok(Run { timing, first })
@@ -114,9 +113,15 @@ async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
     }
     let load_secs = start.elapsed().as_secs_f64();
     let own = generate_all(&mut one).await?;
-    drop(one);
     eprintln!("rank {}: {:?}", cfg.lora_rank, own.first);
     assert!(own.timing.decoded > 0, "the expert decoded no tokens");
+
+    // The same model with the adapter's delta off: what the base alone costs
+    // a token, and so what an adapter adds to it.
+    one.set_adapter(false);
+    let bare = generate_all(&mut one).await?;
+    drop(one);
+    assert!(bare.timing.decoded > 0, "the bare base decoded no tokens");
 
     // A four-expert blend's rank: four quarter-weight copies of the expert,
     // through load_blend, which add up to the expert itself.
@@ -137,8 +142,12 @@ async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
 
     eprintln!(
         "RESULT cpu {form}: load {load_secs:.1}s; \
+         bare base: prefill {:.1} tok/s, decode {:.2} tok/s over {}; \
          rank {}: prefill {:.1} tok/s over {} tokens, decode {:.2} tok/s over {}; \
          rank {blend_rank}: prefill {:.1} tok/s, decode {:.2} tok/s over {}",
+        bare.prefill(),
+        bare.decode(),
+        bare.timing.decoded,
         cfg.lora_rank,
         own.prefill(),
         own.timing.prompt_tokens,
