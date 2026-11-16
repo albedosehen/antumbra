@@ -1,0 +1,79 @@
+name: Bug report
+description: Something does not do what the docs or the code say it does.
+type: "Bug"
+labels: ["triage", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A reproduction that can be copied and pasted is the most useful thing you can give.
+  - id: component
+    type: dropdown
+    attributes:
+      label: What component does this affect?
+      options:
+        - antumbra (the CLI, including setup)
+        - antumbra-mcp (the server and its tools)
+        - antumbra-tui (the console)
+        - antumbra-control-server (hosted sign-in)
+        - The Claude Code hooks
+        - Docker and compose
+        - Training, serving or the loop
+        - Documentation
+    validations:
+      required: true
+  - id: what
+    type: textarea
+    attributes:
+      label: Describe the bug
+      description: What exactly goes wrong?
+      placeholder: |
+        A short description of the problem, with as much relevant detail as you have. Put code and output in code blocks.
+    validations:
+      required: true
+  - id: steps
+    type: textarea
+    attributes:
+      label: Steps to reproduce
+      description: What are the steps necessary to reproduce this?
+      placeholder: |
+        **Show the exact commands or code that reproduce the behaviour.** Ideally anyone can paste them and see the same thing. If that is not possible, describe the steps and the environment as precisely as you can.
+    validations:
+      required: true
+  - id: expected
+    type: textarea
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - id: version
+    type: input
+    attributes:
+      label: Antumbra version
+      description: Copy and paste the output of `antumbra --version` (or `antumbra-mcp --version` for a server).
+      placeholder: antumbra 0.0.0
+    validations:
+      required: true
+  - id: contact
+    type: input
+    attributes:
+      label: Contact details
+      description: How can we reach you if we need more information? (optional)
+      placeholder: a GitHub handle, or an address you are happy to see here
+    validations:
+      required: false
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search [the issues](https://github.com/albedosehen/antumbra/issues) first.
+      options:
+        - label: I have searched the existing issues
+          required: true
+  - type: checkboxes
+    attributes:
+      label: Does this report contain anything private?
+      description: Issues are public. Replace internal hostnames, addresses, tokens and personal paths with placeholders before you submit.
+      options:
+        - label: It names no internal hosts, addresses, tokens or personal paths
+          required: true

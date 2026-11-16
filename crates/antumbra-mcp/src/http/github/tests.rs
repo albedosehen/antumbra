@@ -35,7 +35,7 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         verifier: crate::auth::JwtVerifier::hs256(b"test-secret"),
         embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
-        auth: Mutex::new(()),
+        auth: Arc::new(Mutex::new(())),
         auto_propose: None,
         recipe: antumbra_core::behavior::Recipe::default(),
         tune_confidence: false,
