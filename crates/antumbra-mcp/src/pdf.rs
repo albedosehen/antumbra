@@ -6,16 +6,26 @@
 //!
 //! The page goes to Chromium as an uploaded file and prints with its
 //! backgrounds and its own `@page` size. What it may fetch while it renders
-//! (web fonts, a charting library) is the renderer's to restrict; the Compose
-//! service refuses private addresses, so a page cannot reach into the network
-//! the server sits on.
+//! (web fonts, a charting library) is restricted twice: the renderer refuses
+//! private addresses when started as the compose profile starts it
+//! (`--chromium-deny-private-ips=true`), and before every print this module
+//! replaces a reference to a private, loopback or link-local address, literal
+//! or resolved, with `about:blank` ([`without_private_hosts`]), so a page
+//! cannot reach into the network the server sits on where the renderer was
+//! started otherwise.
 
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::time::Duration;
 
 use antumbra_core::{AntumbraError, Result};
 
 /// How long one page may take to print, fonts and scripts included.
 const TIMEOUT_SECS: u64 = 60;
+/// How long one host name may take to resolve before a print; one that does
+/// not resolve in time is left as it is, since the renderer cannot reach it
+/// either.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(2);
 /// The most PDF read back from the renderer.
 const MAX_PDF_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -55,8 +65,10 @@ impl PdfRenderer {
         })
     }
 
-    /// The PDF of one HTML page.
+    /// The PDF of one HTML page, with its references to private addresses made
+    /// inert first.
     pub async fn render(&self, html: Vec<u8>) -> Result<Vec<u8>> {
+        let html = without_private_hosts(html).await;
         let agent = self.agent.clone();
         let url = self.url.clone();
         tokio::task::spawn_blocking(move || {
@@ -127,9 +139,228 @@ fn boundary_for(html: &[u8]) -> String {
         .unwrap_or_default()
 }
 
+/// `html` with every URL whose host is a private, loopback, link-local or
+/// unspecified address, or a name that resolves to one, replaced by
+/// `about:blank`. Each name is resolved once, under [`RESOLVE_TIMEOUT`]; one
+/// that does not resolve is left as it is.
+pub async fn without_private_hosts(html: Vec<u8>) -> Vec<u8> {
+    let text = String::from_utf8_lossy(&html);
+    let mut verdicts: HashMap<String, bool> = HashMap::new();
+    for host in hosts_in(&text) {
+        let private = match host.parse::<IpAddr>() {
+            Ok(ip) => is_private_ip(ip),
+            Err(_) => resolves_private(&host).await,
+        };
+        verdicts.insert(host, private);
+    }
+    if !verdicts.values().any(|&private| private) {
+        return html;
+    }
+    without_references_to(&text, &|host| verdicts.get(host).copied().unwrap_or(false)).into_bytes()
+}
+
+/// Whether `host` resolves to a private address, taking any such answer as yes.
+async fn resolves_private(host: &str) -> bool {
+    match tokio::time::timeout(RESOLVE_TIMEOUT, tokio::net::lookup_host((host, 0u16))).await {
+        Ok(Ok(addrs)) => addrs.into_iter().any(|addr| is_private_ip(addr.ip())),
+        _ => false,
+    }
+}
+
+/// An address a page has no business fetching from while it prints: loopback,
+/// RFC 1918 and the shared range, link-local (the cloud metadata address among
+/// them), unspecified and broadcast, and their IPv6 counterparts.
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, _, _] = v4.octets();
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || (a == 100 && (64..=127).contains(&b))
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| is_private_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// The URL schemes a page fetches over.
+const SCHEMES: [&str; 4] = ["http", "https", "ws", "wss"];
+
+/// What ends a URL written into HTML, CSS or script.
+fn ends_a_url(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')' | '`' | '\\')
+}
+
+/// Every URL in `text` as `(start, end, host)`, the host lowercased, without
+/// userinfo, brackets or port.
+fn url_spans(text: &str) -> Vec<(usize, usize, String)> {
+    let mut spans = Vec::new();
+    for (sep, _) in text.match_indices("://") {
+        // The scheme is the letters just before the separator.
+        let scheme_start = text[..sep]
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| c.is_ascii_alphabetic())
+            .last()
+            .map_or(sep, |(i, _)| i);
+        if !SCHEMES.contains(&text[scheme_start..sep].to_ascii_lowercase().as_str()) {
+            continue;
+        }
+        let rest = &text[sep + 3..];
+        let end = sep + 3 + rest.find(ends_a_url).unwrap_or(rest.len());
+        let authority = &text[sep + 3..end];
+        let authority = authority.split(['/', '?', '#']).next().unwrap_or(authority);
+        let authority = authority.rsplit('@').next().unwrap_or(authority);
+        let host = match authority.strip_prefix('[') {
+            Some(bracketed) => bracketed.split(']').next().unwrap_or(bracketed),
+            None => match authority.rsplit_once(':') {
+                Some((host, port))
+                    if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) =>
+                {
+                    host
+                }
+                _ => authority,
+            },
+        };
+        if !host.is_empty() {
+            spans.push((scheme_start, end, host.to_ascii_lowercase()));
+        }
+    }
+    spans
+}
+
+/// The hosts `text` references, once each.
+fn hosts_in(text: &str) -> Vec<String> {
+    let mut hosts: Vec<String> = url_spans(text).into_iter().map(|(_, _, h)| h).collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
+/// `text` with every URL whose host `is_private` replaced by `about:blank`.
+fn without_references_to(text: &str, is_private: &dyn Fn(&str) -> bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for (start, end, host) in url_spans(text) {
+        if start < at || !is_private(&host) {
+            continue;
+        }
+        out.push_str(&text[at..start]);
+        out.push_str("about:blank");
+        at = end;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
     use super::*;
+
+    #[test]
+    fn references_to_private_addresses_become_blank_and_public_ones_stay() {
+        let loopback = Ipv4Addr::LOCALHOST;
+        let lan = Ipv4Addr::new(10, 1, 2, 3);
+        let metadata = Ipv4Addr::new(169, 254, 169, 254);
+        let page = format!(
+            r#"<img src="http://{loopback}/a"> <script src="HTTPS://{lan}:8443/b.js"></script>
+               <link href='http://[::1]/c.css'> <style>@import url(http://{metadata}/latest/meta-data)</style>
+               <a href="https://user:pw@{lan}/d">x</a> <img src="https://cdn.example/lib.js">
+               <img src="http://internal.example/e"> <img src="data:image/png;base64,AAAA">
+               <a href="ws://{loopback}:9000/socket">s</a>"#
+        );
+        let verdict = |host: &str| {
+            host.parse::<IpAddr>()
+                .map(is_private_ip)
+                .unwrap_or(host == "internal.example")
+        };
+        let out = without_references_to(&page, &verdict);
+        for gone in [
+            loopback.to_string(),
+            lan.to_string(),
+            "[::1]".to_string(),
+            metadata.to_string(),
+            "internal.example".to_string(),
+            "user:pw@".to_string(),
+        ] {
+            assert!(!out.contains(&gone), "{gone} is still in: {out}");
+        }
+        assert!(out.contains("https://cdn.example/lib.js"), "{out}");
+        assert!(out.contains("data:image/png;base64,AAAA"), "{out}");
+        assert_eq!(out.matches("about:blank").count(), 7, "{out}");
+    }
+
+    #[test]
+    fn hosts_are_read_once_each_without_port_userinfo_or_brackets() {
+        let text = "see http://A.example:8080/x and https://a.example/y, ws://[::1]:1/z, \
+                    https://u:p@b.example/w, mailto:someone@c.example, and plain text";
+        assert_eq!(hosts_in(text), vec!["::1", "a.example", "b.example"]);
+    }
+
+    #[test]
+    fn the_private_ranges_are_the_ones_a_page_may_not_reach() {
+        for private in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)),
+            IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1)),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1)),
+            IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)),
+            IpAddr::V6(Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped()),
+        ] {
+            assert!(is_private_ip(private), "{private}");
+        }
+        for public in [
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 5)),
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 7)),
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+        ] {
+            assert!(!is_private_ip(public), "{public}");
+        }
+    }
+
+    // The whole path a print takes: literal private addresses go without any
+    // resolving, and a name that cannot resolve stays, since the renderer
+    // cannot reach it either.
+    #[tokio::test]
+    async fn a_page_is_scrubbed_before_it_prints() {
+        let lan = Ipv4Addr::new(192, 168, 7, 7);
+        let page = format!(
+            r#"<img src="http://{lan}/pixel"> <img src="https://nowhere.invalid/x"> <p>text</p>"#
+        );
+        let out =
+            String::from_utf8_lossy(&without_private_hosts(page.into_bytes()).await).into_owned();
+        assert!(!out.contains(&lan.to_string()), "{out}");
+        assert!(out.contains("https://nowhere.invalid/x"), "{out}");
+        assert!(out.contains("<p>text</p>"), "{out}");
+        let plain = b"<p>no references</p>".to_vec();
+        assert_eq!(without_private_hosts(plain.clone()).await, plain);
+    }
+
+    #[test]
+    fn the_compose_renderer_is_started_denying_private_addresses() {
+        let compose = include_str!("../../../docker/docker-compose.yml");
+        assert!(
+            compose.contains("--chromium-deny-private-ips=true"),
+            "the pdf service must deny private addresses"
+        );
+    }
 
     #[test]
     fn the_page_goes_as_index_html_with_the_print_settings() {
