@@ -412,6 +412,7 @@ dependencies = [
  "antumbra-critic",
  "antumbra-store",
  "antumbra-train",
+ "anyhow",
  "async-trait",
  "candle-core",
  "candle-nn",

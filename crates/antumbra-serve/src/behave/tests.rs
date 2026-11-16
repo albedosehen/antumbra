@@ -957,3 +957,110 @@ async fn the_trainer_judges_an_answer_as_recording_judged_the_examples() {
     }
     assert_eq!(spec.follows("git add src/lib.rs\n"), Some(false));
 }
+
+/// An expert whose card is `card`, in the store, under the standing id.
+async fn expert_with_card(store: &Store, card: serde_json::Value) -> anyhow::Result<ExpertId> {
+    let tenant = TenantId::new("ws:a");
+    let owner = UserId::new("user:owner");
+    let id = expert_id(&tenant, &owner, "everywhere");
+    expert::insert(
+        store,
+        &Expert {
+            id: id.clone(),
+            name: "standing".into(),
+            base_model: "base".into(),
+            artifact_uri: "adapters/standing.safetensors".into(),
+            capability_card: card,
+            capability_vec: None,
+            fitness: 1.0,
+            frozen_at: Some(Utc::now()),
+            generation: Generation::ZERO,
+            owner: Some(owner.clone()),
+            compartment: Some(behavior::compartment_id(&tenant, &owner)),
+            placed_on: Some("rig".into()),
+            created_at: Utc::now(),
+        },
+    )
+    .await?;
+    Ok(id)
+}
+
+/// One behavior audited on two later examples, one print to note.
+fn one_audit(expert: &ExpertId) -> Audited {
+    Audited {
+        expert: expert.clone(),
+        set: "set".into(),
+        behaviors: vec![(
+            "memory:rule".into(),
+            behavior::Audit {
+                set: "set".into(),
+                fresh: 2,
+                base: 1,
+                expert: 2,
+                worse: None,
+            },
+            vec!["print-a".into()],
+        )],
+    }
+}
+
+// A card that is not an object, or whose audited section is not, is a row
+// this code never wrote: the audit is refused in words naming the expert,
+// where indexing into it would have panicked the keeper's task, and the card
+// is left as it was.
+#[tokio::test]
+async fn note_audit_refuses_a_card_that_is_not_an_object() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+    for odd in [
+        serde_json::json!(["legacy"]),
+        serde_json::json!("legacy"),
+        serde_json::json!({ "standing": true, "audited": ["not", "an", "object"] }),
+    ] {
+        let id = expert_with_card(&store, odd.clone()).await?;
+        let Err(e) = note_audit(&store, &plan, &one_audit(&id)).await else {
+            anyhow::bail!("{odd} was indexed into");
+        };
+        anyhow::ensure!(
+            e.to_string().contains("not an object") && e.to_string().contains(id.as_str()),
+            "{e}"
+        );
+        let Some(kept) = expert::get(&store, &id).await? else {
+            anyhow::bail!("the expert is gone");
+        };
+        anyhow::ensure!(
+            kept.capability_card == odd,
+            "the card changed: {}",
+            kept.capability_card
+        );
+        expert::delete(&store, &id).await?;
+    }
+    Ok(())
+}
+
+// A card that is nothing yet, or an object without the sections, gets them
+// and the audit's prints under the behavior.
+#[tokio::test]
+async fn note_audit_makes_the_sections_a_card_lacks() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+    for start in [
+        serde_json::Value::Null,
+        serde_json::json!({ "standing": true }),
+        serde_json::json!({ "standing": true, "audited": null }),
+    ] {
+        let id = expert_with_card(&store, start.clone()).await?;
+        note_audit(&store, &plan, &one_audit(&id)).await?;
+        let Some(noted) = expert::get(&store, &id).await? else {
+            anyhow::bail!("the expert is gone");
+        };
+        anyhow::ensure!(
+            noted.capability_card[behavior::CARD_AUDITED]["memory:rule"]
+                == serde_json::json!(["print-a"]),
+            "from {start}: {}",
+            noted.capability_card
+        );
+        expert::delete(&store, &id).await?;
+    }
+    Ok(())
+}
