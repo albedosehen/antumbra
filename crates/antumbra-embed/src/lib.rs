@@ -26,6 +26,9 @@
 //! [`HttpEmbedder`] deliberately has no `Debug` impl, so the key cannot leak
 //! through `{:?}`.
 
+#[cfg(feature = "clap")]
+pub mod args;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

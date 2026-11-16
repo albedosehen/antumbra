@@ -32,7 +32,6 @@ mod auth {
     pub use antumbra_auth::*;
 }
 mod dependencies;
-mod embed;
 mod hardware;
 mod http;
 mod notify;
@@ -166,24 +165,8 @@ struct Cli {
     /// Validity, in days, of a `--mint-token` token.
     #[arg(long, default_value_t = 365)]
     token_ttl_days: u64,
-    /// Embed via an OpenAI-compatible `/embeddings` endpoint (e.g. a local
-    /// text-embeddings-inference / Ollama server) instead of the built-in
-    /// embedder. It must return `EMBED_DIM`-wide vectors. Off when unset.
-    #[arg(long, env = "ANTUMBRA_EMBEDDER_URL")]
-    embedder_url: Option<String>,
-    /// Model name sent to `--embedder-url` (must produce the index dimension).
-    #[arg(long, default_value = "all-MiniLM-L6-v2")]
-    embedder_model: String,
-    /// Optional bearer key for `--embedder-url`.
-    #[arg(long, env = "ANTUMBRA_EMBEDDER_KEY", hide_env_values = true)]
-    embedder_key: Option<String>,
-    /// Use the deterministic byte-histogram stand-in instead of a real embedder.
-    /// Recall is then NOT semantic (it matches character statistics), so this is
-    /// for smoke tests and demos only. Without `--features models`, the server
-    /// refuses to start with neither this nor `--embedder-url` rather than
-    /// silently degrading recall.
-    #[arg(long, env = "ANTUMBRA_FAKE_EMBEDDER", default_value_t = false)]
-    fake_embedder: bool,
+    #[command(flatten)]
+    embedder: antumbra_embed::args::EmbedderArgs,
     /// Rerank hybrid-recall candidates with a cross-encoder via a TEI/Cohere-style
     /// `/rerank` endpoint (the precision stage after RRF). Off when unset.
     #[arg(long, env = "ANTUMBRA_RERANK_URL")]
@@ -202,34 +185,8 @@ struct Cli {
     /// Optional bearer key for `--rerank-url`.
     #[arg(long, env = "ANTUMBRA_RERANK_KEY", hide_env_values = true)]
     rerank_key: Option<String>,
-    /// Archive each ingested document's ORIGINAL content to a copal file
-    /// service (the document of record): bare `host:port` or a full URL base.
-    /// The upload happens before any chunk is stored (a dead copal fails the
-    /// ingest), and every chunk carries the copal file id + digest. Off when
-    /// unset: ingest keeps only the chunks, exactly as before.
-    #[arg(long, env = "ANTUMBRA_COPAL_ADDR")]
-    copal_addr: Option<String>,
-    /// Land every workspace's documents under this ONE copal tenant, named by
-    /// the `x-copal-tenant` header (copal `header` auth mode). Omit all three
-    /// tenancy args for the default: per-workspace tenancy over header auth,
-    /// where each workspace presents ITSELF as the copal tenant (its own
-    /// quotas, listings, and search scope). Either way the archive identity is
-    /// (workspace, title). At most one of --copal-tenant / --copal-key /
-    /// --copal-keys.
-    #[arg(long, env = "ANTUMBRA_COPAL_TENANT")]
-    copal_tenant: Option<String>,
-    /// One `ck1` copal API key for every workspace: shared tenancy under
-    /// copal's deployed `keys` auth mode, where the tenant is bound to the
-    /// credential (the key's tenant is THE tenant).
-    #[arg(long, env = "ANTUMBRA_COPAL_KEY", hide_env_values = true)]
-    copal_key: Option<String>,
-    /// Path to a JSON file mapping workspace tenant -> `ck1` copal API key
-    /// (e.g. `{"ws:acme": "ck1..."}`): per-workspace tenancy under copal's
-    /// `keys` auth mode. Loaded once at startup (restart to pick up newly
-    /// minted keys); a workspace absent from the map fails its ingest rather
-    /// than landing in another tenant.
-    #[arg(long, env = "ANTUMBRA_COPAL_KEYS")]
-    copal_keys: Option<std::path::PathBuf>,
+    #[command(flatten)]
+    copal: antumbra_copal::args::CopalArgs,
     /// The origin copal's render listener answers on (its
     /// `COPAL_RENDER_ORIGIN`), e.g. `http://10.0.0.130:8083`: where relics are
     /// displayed, and the one origin the relic pages may frame. Relics need it
@@ -327,16 +284,10 @@ pub(crate) async fn connect_serving(url: &str) -> Result<Store> {
     Ok(Store::connect_without_schema(config, EMBED_DIM).await?)
 }
 
-/// The built-in embedder when no `--embedder-url` is configured: the real candle
-/// BERT under `--features models`; `--fake-embedder` still selects the
-/// byte-histogram stand-in for smoke tests. Both produce `EMBED_DIM`-wide vectors.
+/// The built-in embedder when the flags name none: the real candle BERT under
+/// `--features models`. It produces `EMBED_DIM`-wide vectors.
 #[cfg(feature = "models")]
-fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
-    if fake {
-        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
-            EMBED_DIM,
-        )));
-    }
+fn builtin_embedder() -> Result<Box<dyn Embedder>> {
     Ok(Box::new(antumbra_serve::BertEmbedder::load()?))
 }
 
@@ -345,15 +296,8 @@ fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
 /// Refusing to start beats a server whose recall silently matches character
 /// statistics instead of meaning.
 #[cfg(not(feature = "models"))]
-fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
-    if fake {
-        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
-            EMBED_DIM,
-        )));
-    }
-    anyhow::bail!(
-        "no embedder configured: pass --embedder-url <OpenAI-compatible /embeddings endpoint \n         returning {EMBED_DIM}-d vectors> (for example Ollama serving all-minilm), or \n         --fake-embedder to accept the non-semantic byte-histogram stand-in (demos only)"
-    )
+fn builtin_embedder() -> Result<Box<dyn Embedder>> {
+    Err(antumbra_embed::args::NoEmbedder.into())
 }
 
 /// Owner-side provisioning for an identity: ensure the principal exists and the
@@ -591,10 +535,7 @@ impl Cli {
         let set = |value: Option<String>| value.filter(|v| !v.trim().is_empty());
         self.rerank_url = set(self.rerank_url);
         self.rerank_key = set(self.rerank_key);
-        self.copal_addr = set(self.copal_addr);
-        self.copal_tenant = set(self.copal_tenant);
-        self.copal_key = set(self.copal_key);
-        self.copal_keys = self.copal_keys.filter(|p| !p.as_os_str().is_empty());
+        self.copal = self.copal.without_empty_settings();
         self.copal_render_origin = set(self.copal_render_origin);
         self.pdf_renderer = set(self.pdf_renderer);
         self
@@ -649,13 +590,9 @@ async fn run() -> Result<()> {
     // A configured endpoint embeds on the tenant's side; otherwise the
     // built-in embedder (candle BERT under `models`; the byte-histogram stand-in
     // only when asked for explicitly). Either way the vectors are EMBED_DIM-wide.
-    let embedder: Arc<dyn Embedder> = match cli.embedder_url {
-        Some(url) => Arc::new(embed::HttpEmbedder::new(
-            url,
-            cli.embedder_model,
-            cli.embedder_key,
-        )),
-        None => Arc::from(make_embedder(cli.fake_embedder)?),
+    let embedder: Arc<dyn Embedder> = match cli.embedder.configured() {
+        Some(embedder) => Arc::from(embedder),
+        None => Arc::from(builtin_embedder()?),
     };
 
     // Optional cross-encoder rerank stage. Operator-configured endpoint; the
@@ -746,13 +683,7 @@ async fn run() -> Result<()> {
 
     // Optional copal document-of-record archive. Operator-configured; absent,
     // ingest keeps only the chunks (the v0 behavior, unchanged).
-    let copal = antumbra_copal::CopalArchive::from_flags(
-        cli.copal_addr.as_deref(),
-        cli.copal_tenant,
-        cli.copal_key,
-        cli.copal_keys.as_deref(),
-        cli.copal_render_origin,
-    )?;
+    let copal = cli.copal.archive(cli.copal_render_origin)?;
     // The relic viewer's PDF download, printed by a renderer beside the
     // server; only the networked surface has a viewer.
     let pdf = cli
@@ -972,8 +903,8 @@ mod tests {
         .expect("empty values parse")
         .without_empty_settings();
         assert_eq!(cli.rerank_url, None);
-        assert_eq!(cli.copal_addr, None);
-        assert_eq!(cli.copal_tenant, None);
+        assert_eq!(cli.copal.copal_addr, None);
+        assert_eq!(cli.copal.copal_tenant, None);
         assert_eq!(cli.copal_render_origin, None);
 
         let cli = Cli::try_parse_from([
@@ -986,7 +917,7 @@ mod tests {
         .expect("set values parse")
         .without_empty_settings();
         assert_eq!(cli.rerank_url.as_deref(), Some("http://rerank/rerank"));
-        assert_eq!(cli.copal_addr.as_deref(), Some("http://copal:8080"));
+        assert_eq!(cli.copal.copal_addr.as_deref(), Some("http://copal:8080"));
     }
 
     #[test]
@@ -1057,5 +988,56 @@ mod tests {
         serve.register_expert(&minted, "adapters/fresh_g0.safetensors");
         assert!(serve.can_serve(&minted), "hot-registration has a target");
         Ok(())
+    }
+
+    // The embedder and copal flags are the shared ones (#304): the model reads
+    // its variable (a server started with it set no longer ignores it), the
+    // keys hide their environment values in --help, every flag keeps its name
+    // and default.
+    #[test]
+    fn the_embedder_and_copal_flags_read_as_in_every_binary() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        let flag = |id: &str| {
+            cmd.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                (
+                    a.get_long().map(str::to_owned),
+                    a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                    a.is_hide_env_values_set(),
+                    a.get_default_values()
+                        .iter()
+                        .map(|v| v.to_string_lossy().into_owned())
+                        .collect::<Vec<_>>(),
+                )
+            })
+        };
+        assert_eq!(
+            flag("embedder_model"),
+            Some((
+                Some("embedder-model".into()),
+                Some("ANTUMBRA_EMBEDDER_MODEL".into()),
+                false,
+                vec!["all-MiniLM-L6-v2".into()],
+            ))
+        );
+        for (id, long, env) in [
+            ("embedder_url", "embedder-url", "ANTUMBRA_EMBEDDER_URL"),
+            ("embedder_key", "embedder-key", "ANTUMBRA_EMBEDDER_KEY"),
+            ("fake_embedder", "fake-embedder", "ANTUMBRA_FAKE_EMBEDDER"),
+            ("copal_addr", "copal-addr", "ANTUMBRA_COPAL_ADDR"),
+            ("copal_tenant", "copal-tenant", "ANTUMBRA_COPAL_TENANT"),
+            ("copal_key", "copal-key", "ANTUMBRA_COPAL_KEY"),
+            ("copal_keys", "copal-keys", "ANTUMBRA_COPAL_KEYS"),
+        ] {
+            let got = flag(id).unwrap_or_else(|| panic!("{id} is a flag"));
+            assert_eq!(got.0.as_deref(), Some(long), "{id}");
+            assert_eq!(got.1.as_deref(), Some(env), "{id}");
+            assert_eq!(
+                got.2,
+                id.ends_with("_key"),
+                "{id} hides its value iff a key"
+            );
+        }
     }
 }

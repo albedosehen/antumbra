@@ -27,8 +27,8 @@ antumbra-store = { path = "../antumbra-store" }
 antumbra-tui = { path = "../antumbra-tui" }
 # The per-workspace embedder (set-embedder / reembed) builds an HttpEmbedder
 # from a workspace's configured endpoint; light (ureq), no models needed.
-antumbra-embed = { path = "../antumbra-embed" }
-antumbra-copal = { path = "../antumbra-copal" }
+antumbra-embed = { path = "../antumbra-embed", features = ["clap"] }
+antumbra-copal = { path = "../antumbra-copal", features = ["clap"] }
 antumbra-ingest = { path = "../antumbra-ingest" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-loop = { path = "../antumbra-loop" }
