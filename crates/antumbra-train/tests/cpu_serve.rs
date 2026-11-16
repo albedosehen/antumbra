@@ -76,6 +76,15 @@ async fn generate_all(model: &mut QwenCausalLm) -> Outcome<Run> {
     Ok(Run { timing, first })
 }
 
+/// A freshly loaded model's first generation, and how fast it read that
+/// prompt. A first forward pays for work no later one does, so it is timed
+/// apart and kept out of every rate.
+async fn first_prompt(model: &mut QwenCausalLm) -> Outcome<f64> {
+    model.generate(PROMPTS[0], 1).await?;
+    let t = model.last_timing().ok_or("the generation was not timed")?;
+    Ok(t.prompt_tokens as f64 / t.prompt_secs)
+}
+
 #[tokio::test]
 #[ignore = "live CPU: set ANTUMBRA_CPU_SERVE=1 and run with --release --ignored"]
 async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
@@ -112,6 +121,7 @@ async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
         one.load_adapter(a)?;
     }
     let load_secs = start.elapsed().as_secs_f64();
+    let cold = first_prompt(&mut one).await?;
     let own = generate_all(&mut one).await?;
     eprintln!("rank {}: {:?}", cfg.lora_rank, own.first);
     assert!(own.timing.decoded > 0, "the expert decoded no tokens");
@@ -136,12 +146,13 @@ async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
         let specs = vec![(a.clone(), 0.25f32); 4];
         four.load_blend(&specs)?;
     }
+    first_prompt(&mut four).await?;
     let blend = generate_all(&mut four).await?;
     eprintln!("rank {blend_rank}: {:?}", blend.first);
     assert!(blend.timing.decoded > 0, "the blend decoded no tokens");
 
     eprintln!(
-        "RESULT cpu {form}: load {load_secs:.1}s; \
+        "RESULT cpu {form}: load {load_secs:.1}s, first prompt read at {cold:.1} tok/s; \
          bare base: prefill {:.1} tok/s, decode {:.2} tok/s over {}; \
          rank {}: prefill {:.1} tok/s over {} tokens, decode {:.2} tok/s over {}; \
          rank {blend_rank}: prefill {:.1} tok/s, decode {:.2} tok/s over {}",
