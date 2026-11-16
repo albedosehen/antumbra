@@ -10,6 +10,7 @@ use opentelemetry::trace::{Status, TracerProvider as _};
 use opentelemetry_sdk::trace::{
     InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData,
 };
+use std::time::{Duration, Instant};
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::{EnvFilter, Layer as _};
 
@@ -49,15 +50,31 @@ impl Traces {
             .context("the exporter is up")
     }
 
-    /// The one ended span named `name`.
-    fn one(&self, name: &str) -> anyhow::Result<SpanData> {
-        let mut found: Vec<_> = self
-            .ended()?
-            .into_iter()
-            .filter(|s| s.name == name)
-            .collect();
-        assert_eq!(found.len(), 1, "one `{name}` span, got {}", found.len());
-        Ok(found.remove(0))
+    /// How long a span the test caused is given to end. A call carried by a
+    /// stream runs on the session's task after the response the test awaited,
+    /// so its span ends a moment after the test's next line, and later still
+    /// on a loaded runner.
+    const WAIT: Duration = Duration::from_secs(2);
+
+    /// The one ended span named `name`, waited for up to [`Self::WAIT`]: a
+    /// slow runner changes how long this takes, not what it finds. More than
+    /// one is wrong at once; none by the end of the wait is wrong by name.
+    async fn one(&self, name: &str) -> anyhow::Result<SpanData> {
+        let deadline = Instant::now() + Self::WAIT;
+        loop {
+            let mut found: Vec<_> = self
+                .ended()?
+                .into_iter()
+                .filter(|s| s.name == name)
+                .collect();
+            match found.len() {
+                1 => return found.pop().context("the one span"),
+                0 if Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                n => anyhow::bail!("one `{name}` span, got {n}"),
+            }
+        }
     }
 }
 
@@ -178,7 +195,7 @@ async fn a_request_span_keeps_its_route_and_not_the_path_it_was_sent() -> anyhow
     assert_eq!(app.oneshot(page).await?.status(), StatusCode::OK);
 
     let ended = traces.ended()?;
-    let page = traces.one("GET /dashboard")?;
+    let page = traces.one("GET /dashboard").await?;
     assert_eq!(attribute(&page, "url.path").as_deref(), Some("/dashboard"));
     assert_eq!(attribute(&page, "url.query"), None);
     let Some(lost) = ended
@@ -224,7 +241,7 @@ async fn an_open_event_stream_has_already_ended_its_span() -> anyhow::Result<()>
     assert_eq!(resp.status(), StatusCode::OK, "GET opens the SSE stream");
     let stream = resp.into_body();
 
-    let get = traces.one("GET /mcp")?;
+    let get = traces.one("GET /mcp").await?;
     assert_eq!(get.span_kind, opentelemetry::trace::SpanKind::Server);
     assert!(get.end_time >= get.start_time);
     drop(stream);
@@ -244,8 +261,8 @@ async fn a_rest_tool_call_is_a_span_inside_its_request() -> anyhow::Result<()> {
         .await?;
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let request = traces.one("POST /mcp/call")?;
-    let tool = traces.one("tool workspace_stats")?;
+    let request = traces.one("POST /mcp/call").await?;
+    let tool = traces.one("tool workspace_stats").await?;
     assert_eq!(tool.parent_span_id, request.span_context.span_id());
     assert_eq!(
         tool.span_context.trace_id(),
@@ -285,7 +302,7 @@ async fn a_first_call_traces_building_its_server_and_a_second_builds_nothing() -
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    let build = traces.one("session build")?;
+    let build = traces.one("session build").await?;
     let requests: Vec<SpanData> = traces
         .ended()?
         .into_iter()
@@ -300,7 +317,7 @@ async fn a_first_call_traces_building_its_server_and_a_second_builds_nothing() -
     );
     for stage in ["session auth wait", "session provision", "session connect"] {
         assert_eq!(
-            traces.one(stage)?.parent_span_id,
+            traces.one(stage).await?.parent_span_id,
             build.span_context.span_id(),
             "{stage} is part of the build"
         );
@@ -341,7 +358,7 @@ async fn a_failed_tool_call_marks_its_span_an_error_and_leaves_the_message_out(
         "the caller hears what was wrong: {told}"
     );
 
-    let tool = traces.one("tool store_memory")?;
+    let tool = traces.one("tool store_memory").await?;
     assert!(
         matches!(tool.status, Status::Error { .. }),
         "{:?}",
@@ -363,6 +380,20 @@ async fn a_failed_tool_call_marks_its_span_an_error_and_leaves_the_message_out(
     Ok(())
 }
 
+/// A span that never ends is reported by name once the wait is out, not
+/// waited for without end.
+#[tokio::test]
+async fn a_span_that_never_comes_is_reported_by_name_after_the_wait() -> anyhow::Result<()> {
+    let traces = Traces::start();
+    let asked = Instant::now();
+    let Err(e) = traces.one("never").await else {
+        anyhow::bail!("no span was opened, so none can be found");
+    };
+    anyhow::ensure!(e.to_string().contains("one `never` span, got 0"), "{e}");
+    anyhow::ensure!(asked.elapsed() >= Traces::WAIT, "waited out the bound");
+    Ok(())
+}
+
 /// A name no tool has is the caller's text, so its span says `unknown`.
 #[tokio::test]
 async fn an_unknown_tool_is_traced_as_unknown() -> anyhow::Result<()> {
@@ -376,7 +407,7 @@ async fn an_unknown_tool_is_traced_as_unknown() -> anyhow::Result<()> {
         .await?;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-    let tool = traces.one("tool unknown")?;
+    let tool = traces.one("tool unknown").await?;
     assert_eq!(
         attribute(&tool, "gen_ai.tool.name").as_deref(),
         Some("unknown")
@@ -427,7 +458,7 @@ async fn a_jsonrpc_tool_call_joins_the_request_that_carried_it() -> anyhow::Resu
     };
     assert!(answered, "the call answered on its stream; saw: {seen}");
 
-    let tool = traces.one("tool workspace_stats")?;
+    let tool = traces.one("tool workspace_stats").await?;
     let Some(carried) = traces
         .ended()?
         .into_iter()

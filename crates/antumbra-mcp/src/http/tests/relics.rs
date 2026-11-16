@@ -164,8 +164,21 @@ async fn public_lookups_past_a_clients_burst_are_refused() -> anyhow::Result<()>
         let res = get(&app, "/relic/open/public").await?;
         anyhow::ensure!(res.status() == StatusCode::OK, "request {n}");
     }
-    let refused = get(&app, "/relic/open/public").await?;
-    anyhow::ensure!(refused.status() == StatusCode::TOO_MANY_REQUESTS);
+    // The bucket refills while the burst is sent (two tokens a second at this
+    // rate), so a slow runner may find one back by now: a few more requests
+    // spend what came back, and the refusal is waited for, bounded. Twenty
+    // find none only where each request takes half a second.
+    let mut refused = None;
+    for _ in 0..20 {
+        let res = get(&app, "/relic/open/public").await?;
+        if res.status() == StatusCode::TOO_MANY_REQUESTS {
+            refused = Some(res);
+            break;
+        }
+    }
+    let Some(refused) = refused else {
+        anyhow::bail!("twenty requests past the burst and none refused");
+    };
     anyhow::ensure!(refused.headers().get(header::RETRY_AFTER).is_some());
     anyhow::ensure!(refused.headers()[header::CACHE_CONTROL] == "no-store");
     Ok(())
