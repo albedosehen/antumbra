@@ -250,6 +250,7 @@ name = "antumbra-copal"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "clap",
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.20",
@@ -297,7 +298,9 @@ version = "0.2.7"
 dependencies = [
  "antumbra-core",
  "antumbra-store",
+ "anyhow",
  "async-trait",
+ "clap",
  "serde_json",
  "tokio",
  "ureq",

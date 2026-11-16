@@ -61,6 +61,8 @@ use serde_json::{json, Value};
 
 use antumbra_core::{AntumbraError, Result};
 
+#[cfg(feature = "clap")]
+pub mod args;
 mod transport;
 
 /// How one request proves its copal tenant: the `x-copal-tenant` header

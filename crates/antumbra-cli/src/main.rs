@@ -11,7 +11,6 @@ use antumbra_copal::CopalArchive;
 use antumbra_core::ports::Embedder;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{Expert, ExpertId, Generation, RunId, ShadowStatus};
-use antumbra_embed::HttpEmbedder;
 use antumbra_gate::{route as gate_route, GateConfig};
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, expert, lifecycle, shadow};
@@ -64,10 +63,11 @@ async fn connect(url: &str) -> anyhow::Result<Store> {
     Ok(db.connect(url, EMBED_DIM).await?)
 }
 
-/// The embedder choice from the global `--embedder-url` / `--fake-embedder`
-/// flags, captured once (like `DB_CREDS`) so the many handlers that embed can
-/// call `make_embedder` without threading the flags through every call site.
-static EMBEDDER: std::sync::OnceLock<EmbedderChoice> = std::sync::OnceLock::new();
+/// The embedder flags, captured once (like `DB_CREDS`) so the many handlers
+/// that embed can call `make_embedder` without threading them through every
+/// call site.
+static EMBEDDER: std::sync::OnceLock<antumbra_embed::args::EmbedderArgs> =
+    std::sync::OnceLock::new();
 
 /// The copal document-of-record archive from the global `--copal-*` flags,
 /// resolved once like the embedder: `None` when no address is configured.
@@ -78,35 +78,19 @@ fn copal_archive() -> Option<std::sync::Arc<CopalArchive>> {
     COPAL.get().cloned().flatten()
 }
 
-struct EmbedderChoice {
-    url: Option<String>,
-    model: String,
-    key: Option<String>,
-    fake: bool,
-}
-
-/// The active embedder. A configured `--embedder-url` always wins (the same
-/// endpoint the population was built with). Otherwise the byte-histogram
-/// stand-in only when `--fake-embedder` asks for it explicitly, the real candle
-/// BERT under `--features models`, and a refusal without `models`: a command
-/// whose recall silently matched character statistics instead of meaning would
-/// be worse than one that stops and says so. Every path produces `EMBED_DIM`-wide
-/// vectors so the gate and store stay dimension-consistent.
+/// The active embedder: what the flags name outright (a configured
+/// `--embedder-url` always wins, the stand-in only when `--fake-embedder` asks
+/// for it), else the real candle BERT under `--features models`, and a refusal
+/// without `models`. Every path produces `EMBED_DIM`-wide vectors so the gate
+/// and store stay dimension-consistent.
 fn make_embedder() -> anyhow::Result<Box<dyn Embedder>> {
-    let choice = EMBEDDER
+    let flags = EMBEDDER
         .get()
         .ok_or_else(|| anyhow::anyhow!("embedder flags were not captured before a handler ran"))?;
-    if let Some(url) = &choice.url {
-        return Ok(Box::new(HttpEmbedder::new(
-            url.clone(),
-            choice.model.clone(),
-            choice.key.clone(),
-        )));
+    match flags.configured() {
+        Some(embedder) => Ok(embedder),
+        None => builtin_embedder(),
     }
-    if choice.fake {
-        return Ok(Box::new(FixedEmbedder::new(EMBED_DIM)));
-    }
-    builtin_embedder()
 }
 
 #[cfg(feature = "models")]
@@ -116,11 +100,7 @@ fn builtin_embedder() -> anyhow::Result<Box<dyn Embedder>> {
 
 #[cfg(not(feature = "models"))]
 fn builtin_embedder() -> anyhow::Result<Box<dyn Embedder>> {
-    anyhow::bail!(
-        "no embedder configured: pass --embedder-url <OpenAI-compatible /embeddings endpoint \
-         returning {EMBED_DIM}-d vectors> (for example Ollama serving all-minilm), or \
-         --fake-embedder to accept the non-semantic byte-histogram stand-in (demos only)"
-    )
+    Err(antumbra_embed::args::NoEmbedder.into())
 }
 
 /// The demo specialists `seed` registers, as (name, capability description).
@@ -175,21 +155,10 @@ fn tui_alias(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::Os
 async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse_from(tui_alias(std::env::args_os()));
     let _ = DB_CREDS.set(cli.db.clone());
-    let _ = EMBEDDER.set(EmbedderChoice {
-        url: cli.embedder_url.clone(),
-        model: cli.embedder_model.clone(),
-        key: cli.embedder_key.clone(),
-        fake: cli.fake_embedder,
-    });
-    let _ = COPAL.set(CopalArchive::from_flags(
-        cli.copal_addr.as_deref(),
-        cli.copal_tenant.clone(),
-        cli.copal_key.clone(),
-        cli.copal_keys.as_deref(),
-        // The CLI ingests documents; it publishes no relics, so it needs no
-        // render origin.
-        None,
-    )?);
+    let _ = EMBEDDER.set(cli.embedder.clone());
+    // The CLI ingests documents; it publishes no relics, so it needs no
+    // render origin.
+    let _ = COPAL.set(cli.copal.archive(None)?);
     match cli.command {
         Command::Setup { mode } => {
             // Files, Docker, HTTP and prompts: all blocking, so off the runtime.
@@ -967,5 +936,58 @@ mod tests {
                 .map(std::ffi::OsString::from),
         );
         assert_eq!(elsewhere[2], "--tui", "only a leading --tui is the console");
+    }
+
+    // The embedder and copal flags are the shared ones (#304): the model reads
+    // its variable, the keys hide their environment values in --help, every
+    // flag keeps its name and default and reaches every subcommand.
+    #[test]
+    fn the_embedder_and_copal_flags_read_as_in_every_binary() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        let flag = |id: &str| {
+            cmd.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                (
+                    a.get_long().map(str::to_owned),
+                    a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                    a.is_hide_env_values_set(),
+                    a.is_global_set(),
+                    a.get_default_values()
+                        .iter()
+                        .map(|v| v.to_string_lossy().into_owned())
+                        .collect::<Vec<_>>(),
+                )
+            })
+        };
+        assert_eq!(
+            flag("embedder_model"),
+            Some((
+                Some("embedder-model".into()),
+                Some("ANTUMBRA_EMBEDDER_MODEL".into()),
+                false,
+                true,
+                vec!["all-MiniLM-L6-v2".into()],
+            ))
+        );
+        for (id, long, env) in [
+            ("embedder_url", "embedder-url", "ANTUMBRA_EMBEDDER_URL"),
+            ("embedder_key", "embedder-key", "ANTUMBRA_EMBEDDER_KEY"),
+            ("fake_embedder", "fake-embedder", "ANTUMBRA_FAKE_EMBEDDER"),
+            ("copal_addr", "copal-addr", "ANTUMBRA_COPAL_ADDR"),
+            ("copal_tenant", "copal-tenant", "ANTUMBRA_COPAL_TENANT"),
+            ("copal_key", "copal-key", "ANTUMBRA_COPAL_KEY"),
+            ("copal_keys", "copal-keys", "ANTUMBRA_COPAL_KEYS"),
+        ] {
+            let got = flag(id).unwrap_or_else(|| panic!("{id} is a flag"));
+            assert_eq!(got.0.as_deref(), Some(long), "{id}");
+            assert_eq!(got.1.as_deref(), Some(env), "{id}");
+            assert!(got.3, "{id} is global");
+            assert_eq!(
+                got.2,
+                id.ends_with("_key"),
+                "{id} hides its value iff a key"
+            );
+        }
     }
 }
