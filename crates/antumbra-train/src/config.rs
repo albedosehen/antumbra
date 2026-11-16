@@ -354,40 +354,45 @@ mod tests {
     }
 
     #[test]
-    fn a_serving_quantization_parses_by_its_ggml_name() {
+    fn a_serving_quantization_parses_by_its_ggml_name() -> antumbra_core::Result<()> {
         for (name, want) in [
             ("q8_0", ServeQuant::Q8_0),
             ("Q8", ServeQuant::Q8_0),
             ("q4_k", ServeQuant::Q4K),
             (" Q4K ", ServeQuant::Q4K),
         ] {
-            assert_eq!(name.parse::<ServeQuant>().unwrap(), want, "{name}");
+            assert_eq!(name.parse::<ServeQuant>()?, want, "{name}");
         }
         assert!("q2_k".parse::<ServeQuant>().is_err());
         assert_eq!(ServeQuant::Q4K.to_ggml(), GgmlDType::Q4K);
         assert_eq!(RaftConfig::default().serve_quant, None);
+        Ok(())
     }
 
     /// A build with no GPU backend serves quantized unless told otherwise, and
     /// a GPU build serves dense; either can be told.
     #[test]
-    fn a_setting_names_the_build_default_a_dense_base_or_a_form() {
+    fn a_setting_names_the_build_default_a_dense_base_or_a_form() -> antumbra_core::Result<()> {
         let build = if cfg!(any(feature = "cuda", feature = "metal")) {
             None
         } else {
             Some(ServeQuant::Q8_0)
         };
         assert_eq!(ServeQuant::for_build(), build);
-        assert_eq!(ServeQuant::from_setting("auto").unwrap(), build);
-        assert_eq!(ServeQuant::from_setting("").unwrap(), build);
+        assert_eq!(ServeQuant::from_setting("auto")?, build);
+        assert_eq!(ServeQuant::from_setting("")?, build);
         for dense in ["off", "none", " Dense "] {
-            assert_eq!(ServeQuant::from_setting(dense).unwrap(), None, "{dense}");
+            assert_eq!(ServeQuant::from_setting(dense)?, None, "{dense}");
         }
         for q in [ServeQuant::Q8_0, ServeQuant::Q4K] {
-            assert_eq!(ServeQuant::from_setting(q.name()).unwrap(), Some(q));
+            assert_eq!(ServeQuant::from_setting(q.name())?, Some(q));
         }
-        let err = ServeQuant::from_setting("q2_k").unwrap_err().to_string();
-        assert!(err.contains("auto, off, q8_0 or q4_k"), "{err}");
+        let refused = ServeQuant::from_setting("q2_k");
+        assert!(
+            refused.is_err_and(|e| e.to_string().contains("auto, off, q8_0 or q4_k")),
+            "a setting that names nothing says what a setting may be"
+        );
+        Ok(())
     }
 
     #[test]

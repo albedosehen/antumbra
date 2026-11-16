@@ -27,15 +27,16 @@ const PROMPT: &str = "Write a one-line Rust function that adds two i64 values.";
 // MultiAdapterServe generates under block_in_place: a multi-threaded runtime.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "live CPU: set ANTUMBRA_CPU_SERVE=1 and ANTUMBRA_CPU_ADAPTER, run with --release --ignored"]
-async fn the_engine_serves_an_expert_on_a_node_with_no_gpu() {
+async fn the_engine_serves_an_expert_on_a_node_with_no_gpu(
+) -> Result<(), Box<dyn std::error::Error>> {
     assert!(
         std::env::var("ANTUMBRA_CPU_SERVE").is_ok(),
         "ANTUMBRA_CPU_SERVE=1 must be set to run this ignored live CPU test"
     );
     let adapter = std::env::var("ANTUMBRA_CPU_ADAPTER")
-        .expect("ANTUMBRA_CPU_ADAPTER names the expert to serve");
+        .map_err(|_| "ANTUMBRA_CPU_ADAPTER names the expert to serve")?;
     let setting = std::env::var("ANTUMBRA_SERVE_QUANT").unwrap_or_else(|_| "auto".into());
-    let quant = ServeQuant::from_setting(&setting).expect("a serving quantization");
+    let quant = ServeQuant::from_setting(&setting)?;
     let cfg = RaftConfig {
         serve_quant: quant,
         ..RaftConfig::for_serving(48, 0.0)
@@ -54,8 +55,7 @@ async fn the_engine_serves_an_expert_on_a_node_with_no_gpu() {
     let start = Instant::now();
     let one = engine
         .act(ActRequest::new("one", PROMPT, vec![expert.clone()]))
-        .await
-        .expect("serves one expert on the CPU")
+        .await?
         .final_output;
     let first = start.elapsed().as_secs_f64();
     assert!(!one.trim().is_empty(), "the expert produced no answer");
@@ -63,14 +63,11 @@ async fn the_engine_serves_an_expert_on_a_node_with_no_gpu() {
     let mut halves = ActRequest::new("halves", PROMPT, vec![expert.clone(), expert.clone()]);
     halves.weights = vec![0.5, 0.5];
     let start = Instant::now();
-    let two = engine
-        .act(halves)
-        .await
-        .expect("serves a blend on the CPU")
-        .final_output;
+    let two = engine.act(halves).await?.final_output;
     let second = start.elapsed().as_secs_f64();
 
     eprintln!("one expert: {one:?}\ntwo halves: {two:?}");
     eprintln!("RESULT first answer {first:.1}s (base load included), second {second:.1}s");
     assert_eq!(two, one, "two half-weight copies answer as the expert does");
+    Ok(())
 }
