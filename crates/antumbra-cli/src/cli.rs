@@ -243,7 +243,7 @@ pub enum ClaudeAction {
         #[arg(long)]
         dir: Option<std::path::PathBuf>,
         /// Call out a skill not used in this many days.
-        #[arg(long, default_value_t = 30)]
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(i64).range(0..=36_500))]
         days: i64,
         /// The Antumbra MCP surface, as the hooks know it.
         #[arg(
@@ -270,7 +270,7 @@ pub enum ClaudeAction {
         limit: u32,
         /// Only the merges of the last this many days. The session-start hook
         /// passes a few, so each session reports only what is recent.
-        #[arg(long)]
+        #[arg(long, value_parser = clap::value_parser!(i64).range(0..=36_500))]
         days: Option<i64>,
         /// Say which merges would be reported and write nothing.
         #[arg(long, default_value_t = false)]

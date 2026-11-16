@@ -112,7 +112,7 @@ pub enum VerifierAction {
         #[arg(long, default_value_t = 0.5)]
         min_accepted: f64,
         /// How long a sound measurement keeps it trusted.
-        #[arg(long, default_value_t = 7)]
+        #[arg(long, default_value_t = 7, value_parser = clap::value_parser!(i64).range(0..=36_500))]
         ttl_days: i64,
     },
     /// The decisive test: every trusted synthesized verifier in a domain runs
