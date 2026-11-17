@@ -529,7 +529,7 @@ mod tests {
                     event: "Stop",
                     script: "antumbra-capture.sh",
                     command: "bash \"/home/me/.antumbra/hooks/antumbra-capture.sh\"".into(),
-                    timeout: 5,
+                    timeout: 10,
                 },
             ],
             env: vec![
@@ -555,7 +555,7 @@ mod tests {
             v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
             "bash \"/home/me/.antumbra/hooks/antumbra-session-start.sh\""
         );
-        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["timeout"], 5);
+        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["timeout"], 10);
         assert_eq!(wired.added, vec!["SessionStart", "Stop"]);
         assert!(wired.auto_memory_set);
         assert!(wired.changed());

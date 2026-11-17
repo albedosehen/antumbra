@@ -52,10 +52,52 @@ out="$(run '{"session_id":"s1","prompt_id":"p1","hook_event_name":"Stop","last_a
 test -z "$out" && test ! -e "$CURL_ARGS"
 check 'is silent and reports nothing again' $?
 
+echo 'a session nudged a moment ago'
+out="$(run '{"session_id":"s1","prompt_id":"p3","hook_event_name":"Stop","last_assistant_message":"waiting on a build"}')"
+test -z "$out"
+check 'is let stop without another nudge' $?
+grep '^{' "$CURL_ARGS" 2>/dev/null | jq -e '.arguments.text == "waiting on a build"' > /dev/null
+check 'and the end of its turn is still reported' $?
+out="$(ANTUMBRA_CAPTURE_EVERY_SECS=0 run '{"session_id":"s1","prompt_id":"p4","hook_event_name":"Stop","last_assistant_message":"more"}')"
+printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+check 'unless the interval is set to none, which nudges every turn' $?
+rm -f "$WORK/run/antumbra-capture-Stop-s1"
+
+echo 'a turn that saved as it went'
+TRANSCRIPT="$WORK/transcript.jsonl"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__antumbra__store_memory","input":{}}]}}' > "$TRANSCRIPT"
+stop() { printf '{"session_id":"%s","hook_event_name":"Stop","last_assistant_message":"%s","transcript_path":"%s"}' "$1" "$2" "$TRANSCRIPT"; }
+out="$(run "$(stop s5 'saved it')")"
+test -z "$out"
+check 'is not stopped to save again' $?
+test -e "$CURL_ARGS"
+check 'and the end of its turn is still reported' $?
+out="$(ANTUMBRA_CAPTURE_EVERY_SECS=0 run "$(stop s5 'nothing new')")"
+printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+check 'the save is not counted a second time' $?
+rm -f "$WORK/run/antumbra-capture-Stop-s5"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__antumbra__record_behavior","input":{}}]}}' >> "$TRANSCRIPT"
+out="$(ANTUMBRA_CAPTURE_EVERY_SECS=0 run "$(stop s5 'recorded one')")"
+test -z "$out"
+check 'a recorded behavior counts as a save' $?
+printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","content":"{\"name\": \"mcp__antumbra__store_memory\"}"}]}}' > "$TRANSCRIPT"
+out="$(run "$(stop s6 'looked a tool up')")"
+printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+check 'a tool only named inside a result does not' $?
+
+echo 'a stop the nudge itself caused'
+out="$(ANTUMBRA_CAPTURE_EVERY_SECS=0 run '{"session_id":"s7","hook_event_name":"Stop","stop_hook_active":true,"last_assistant_message":"saved"}')"
+test -z "$out"
+check 'goes through, with no sentinel left to say so' $?
+
 echo 'a compaction'
 run '{"session_id":"s2","hook_event_name":"PreCompact"}' > /dev/null
 test ! -e "$CURL_ARGS"
 check 'reports no turn' $?
+# Nudged a moment ago at the end of a turn: a compaction is nudged all the same.
+out="$(run '{"session_id":"s1","hook_event_name":"PreCompact"}')"
+printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+check 'is always nudged' $?
 
 echo 'a hostile session id'
 rm -f "$WORK/run"/antumbra-capture-*

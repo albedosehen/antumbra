@@ -35,7 +35,11 @@ run_dir="${XDG_RUNTIME_DIR:-$HOME/.antumbra/run}"
 mkdir -p "$run_dir" 2>/dev/null && chmod 700 "$run_dir" 2>/dev/null
 SENTINEL="$run_dir/antumbra-capture-${safe_event}-${safe_session}"
 if [ -f "$SENTINEL" ]; then rm -f "$SENTINEL"; exit 0; fi
-touch "$SENTINEL"
+# A stop this hook's own nudge caused goes through, whatever became of the
+# sentinel.
+if [ "$event" = "Stop" ] && [ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false')" = "true" ]; then
+  exit 0
+fi
 
 if [ "$event" = "Stop" ] && command -v curl >/dev/null 2>&1; then
   url="${ANTUMBRA_URL:-http://127.0.0.1:8081}"
@@ -68,6 +72,48 @@ if [ "$event" = "Stop" ] && command -v curl >/dev/null 2>&1; then
   fi
 fi
 
+# Whether this stop is nudged. The end of a turn is not when the agent has
+# saved since this hook last looked (the transcript holds a store_memory or
+# record_behavior call past the mark kept from then), or when the session was
+# nudged, or saved, within the last ANTUMBRA_CAPTURE_EVERY_SECS seconds (600
+# unless set; 0 nudges every turn). A long job stops many times while it waits
+# on something, and each nudge costs it a turn and says nothing new. A
+# compaction is always nudged: what is not saved then is about to be cut.
+number() { case "$1" in ''|*[!0-9]*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
+if [ "$event" = "Stop" ]; then
+  every="$(number "${ANTUMBRA_CAPTURE_EVERY_SECS:-}" 600)"
+  state="$run_dir/antumbra-capture-state-${safe_session}"
+  now="$(date +%s)"
+  last=0; mark=0
+  if [ -r "$state" ]; then read -r last mark < "$state" || true; fi
+  last="$(number "${last:-}" 0)"; mark="$(number "${mark:-}" 0)"
+  size=0; saved=0
+  transcript="$(printf '%s' "$input" | jq -r '.transcript_path // ""')"
+  if [ -n "$transcript" ] && [ -r "$transcript" ]; then
+    size="$(number "$(wc -c < "$transcript" | tr -d ' ')" 0)"
+    # Another transcript, or this one rewritten: read it from the start.
+    [ "$mark" -gt "$size" ] && mark=0
+    # No further back than four megabytes, however long the session.
+    [ $((size - mark)) -gt 4194304 ] && mark=$((size - 4194304))
+    # A tool call's own name, not one quoted inside a result.
+    if tail -c "+$((mark + 1))" "$transcript" 2>/dev/null \
+      | grep -Eq '"name"[[:space:]]*:[[:space:]]*"[^"]*(store_memory|record_behavior)"'; then
+      saved=1
+    fi
+  fi
+  due=1
+  if [ "$saved" = 1 ]; then
+    due=0
+  elif [ "$every" -gt 0 ] && [ $((now - last)) -lt "$every" ]; then
+    due=0
+  fi
+  stamp="$last"
+  if [ "$due" = 1 ] || [ "$saved" = 1 ]; then stamp="$now"; fi
+  printf '%s %s\n' "$stamp" "$size" > "$state" 2>/dev/null || true
+  [ "$due" = 1 ] || exit 0
+fi
+touch "$SENTINEL"
+
 # Where the session is, in git terms (fail-open: no repository, no anchor).
 git_note=""
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -80,7 +126,7 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
     | tr '[:upper:]' '[:lower:]')
   case "$repo" in *\\*|/*) repo="" ;; */*) ;; *) repo="" ;; esac
   if [ -n "$commit" ] && [ -n "$repo" ]; then
-    git_note=" For any memory about this code, pass provenance {repo: \"${repo}\", commit: \"${commit}\", branch: \"${branch}\"} (add path when it is about one file): that anchor is how a later session tells whether the memory still applies."
+    git_note=" For any memory about this code, pass provenance {repo: \"${repo}\", commit: \"${commit}\", branch: \"${branch}\"} (add path when it is about one file): that anchor is how a later session tells whether the memory still applies. That is the repository this session started in; for work done in another, pass that one's own."
   fi
 fi
 
