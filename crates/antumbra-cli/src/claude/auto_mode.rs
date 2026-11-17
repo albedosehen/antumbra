@@ -351,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_is_told_from_https_in_every_spelling() {
+    fn ssh_is_told_from_https_in_every_spelling() -> anyhow::Result<()> {
         let cases = [
             ("git@github.com:acme/app.git", true),
             ("ssh://git@github.com/acme/app.git", true),
@@ -364,6 +364,7 @@ mod tests {
         for (remote, ssh) in cases {
             assert_eq!(is_ssh(remote), ssh, "{remote}");
         }
+        Ok(())
     }
 
     #[test]
@@ -473,10 +474,11 @@ mod tests {
     }
 
     #[test]
-    fn with_nothing_to_propose_the_draft_is_the_defaults_alone() {
+    fn with_nothing_to_propose_the_draft_is_the_defaults_alone() -> anyhow::Result<()> {
         let text = render(&[], &Memory::NotAsked("x".to_string()));
         assert!(text.contains("      \"$defaults\"\n    ]"), "{text}");
         assert!(!text.contains("Source control"), "{text}");
+        Ok(())
     }
 
     /// The whole reason the surface reports a similarity: the same memory comes
@@ -553,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn a_memory_offered_for_many_slots_is_shown_once_with_all_of_them() {
+    fn a_memory_offered_for_many_slots_is_shown_once_with_all_of_them() -> anyhow::Result<()> {
         let everything = Candidate {
             id: "memory:1".to_string(),
             content: "shaman is production".to_string(),
@@ -575,6 +577,7 @@ mod tests {
             slots().into_iter().map(|slot| (slot, Vec::new())).collect();
         let text = render(&[], &Memory::Asked(nothing));
         assert!(text.contains("remembers nothing"), "{text}");
+        Ok(())
     }
 
     #[test]

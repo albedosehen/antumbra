@@ -423,6 +423,78 @@ async fn refresh_after_move(_store: &antumbra_store::Store) -> anyhow::Result<()
     Ok(())
 }
 
+/// What `antumbra revoke-token` is given: the token to end, as a file or an
+/// id; neither means the token saved on this machine.
+#[derive(Args, Debug)]
+pub struct RevokeTokenArgs {
+    /// A file holding the token to revoke (the one `setup` saves, by default).
+    #[arg(long, conflicts_with = "jti")]
+    pub token_file: Option<std::path::PathBuf>,
+    /// The token's id (its `jti` claim), when the token itself is not at hand.
+    /// The revocation is then kept for a year, the longest a token lives.
+    #[arg(long)]
+    pub jti: Option<String>,
+    /// Why, recorded with the revocation.
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+/// The id to revoke and how long to keep the revocation: from the token's own
+/// claims when the token is at hand (its id and expiry), else the given id
+/// kept for a year.
+pub fn revocation_of(
+    args: &RevokeTokenArgs,
+) -> anyhow::Result<(String, chrono::DateTime<chrono::Utc>)> {
+    let now = chrono::Utc::now();
+    let a_year = now + chrono::Duration::days(365);
+    if let Some(jti) = &args.jti {
+        anyhow::ensure!(!jti.trim().is_empty(), "--jti is empty");
+        return Ok((jti.trim().to_string(), a_year));
+    }
+    let path = match &args.token_file {
+        Some(path) => path.clone(),
+        None => crate::machine::home()
+            .ok_or_else(|| anyhow::anyhow!("no home directory; pass --token-file or --jti"))?
+            .join(".antumbra")
+            .join("token.txt"),
+    };
+    let token = std::fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("cannot read the token file {}: {e}", path.display()))?;
+    revocation_of_token(token.trim(), a_year)
+}
+
+/// [`revocation_of`] for a token's text.
+fn revocation_of_token(
+    token: &str,
+    a_year: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<(String, chrono::DateTime<chrono::Utc>)> {
+    let Some(jti) = antumbra_auth::unverified::jti(token) else {
+        anyhow::bail!(
+            "this token carries no id, so it cannot be revoked on its own (it was minted before \
+             tokens had ids); rotate the signing key to end it"
+        );
+    };
+    let until = antumbra_auth::unverified::expires(token)
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+        .unwrap_or(a_year);
+    Ok((jti, until))
+}
+
+/// End a token before it expires, through the owner connection: the id goes
+/// on the store's denylist, which every networked server reads every half
+/// minute.
+pub async fn revoke_token(url: &str, args: RevokeTokenArgs) -> anyhow::Result<()> {
+    let (jti, until) = revocation_of(&args)?;
+    let store = crate::connect(url).await?;
+    antumbra_store::repo::revocation::revoke(&store, &jti, until, args.note).await?;
+    println!(
+        "revoked token {jti}: every networked server refuses it within 30 seconds, and the \
+         revocation is kept until {}",
+        until.to_rfc3339()
+    );
+    Ok(())
+}
+
 /// What `antumbra remember` is given.
 #[derive(Args, Debug)]
 pub struct RememberArgs {
@@ -875,16 +947,60 @@ pub async fn store_facts(
 mod tests {
     use super::*;
     #[test]
-    fn run_for_output_captures_stdout_and_reports_failure() {
-        let ok = run_for_output(&["cargo".to_string(), "--version".to_string()]).unwrap();
+    fn run_for_output_captures_stdout_and_reports_failure() -> anyhow::Result<()> {
+        let ok = run_for_output(&["cargo".to_string(), "--version".to_string()])?;
         assert!(ok.starts_with("cargo "));
-        let err = run_for_output(&[
+        let Err(err) = run_for_output(&[
             "cargo".to_string(),
             "definitely-not-a-cargo-subcommand".to_string(),
-        ])
-        .unwrap_err()
-        .to_string();
+        ]) else {
+            anyhow::bail!("a failing command's output was taken for a success");
+        };
+        let err = err.to_string();
         assert!(err.contains("exited with"), "{err}");
         assert!(run_for_output(&[]).is_err());
+        Ok(())
+    }
+    /// The revocation names the token's own id and lasts as long as the token
+    /// would have; a bare id is kept for a year; a token without an id is
+    /// refused with the way out.
+    #[test]
+    fn a_revocation_is_the_tokens_own_id_for_the_tokens_own_life() -> anyhow::Result<()> {
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let now = chrono::Utc::now();
+        let a_year = now + chrono::Duration::days(365);
+        let token = |claims: &str| {
+            format!(
+                "{}.{}.{}",
+                engine.encode(r#"{"alg":"HS256","typ":"JWT"}"#),
+                engine.encode(claims),
+                engine.encode("signature")
+            )
+        };
+        let exp = (now + chrono::Duration::days(7)).timestamp();
+        let (jti, until) = revocation_of_token(
+            &token(&format!(
+                r#"{{"tenant":"ws:a","user":"user:a","jti":"abc123","exp":{exp}}}"#
+            )),
+            a_year,
+        )?;
+        anyhow::ensure!(jti == "abc123");
+        anyhow::ensure!(
+            until.timestamp() == exp,
+            "the revocation lasts as long as the token"
+        );
+        let Err(e) = revocation_of_token(&token(r#"{"tenant":"ws:a","user":"user:a"}"#), a_year)
+        else {
+            anyhow::bail!("a token without an id was accepted");
+        };
+        anyhow::ensure!(e.to_string().contains("carries no id"), "{e}");
+        let (jti, until) = revocation_of(&RevokeTokenArgs {
+            token_file: None,
+            jti: Some(" bare ".into()),
+            note: None,
+        })?;
+        anyhow::ensure!(jti == "bare" && until > now + chrono::Duration::days(364));
+        Ok(())
     }
 }

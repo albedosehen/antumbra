@@ -322,37 +322,37 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn fixed_embedder_is_deterministic() {
+    async fn fixed_embedder_is_deterministic() -> anyhow::Result<()> {
         let e = FixedEmbedder::new(8);
-        assert_eq!(
-            e.embed("hello").await.unwrap(),
-            e.embed("hello").await.unwrap()
-        );
+        assert_eq!(e.embed("hello").await?, e.embed("hello").await?);
         assert_eq!(e.dim(), 8);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn scripted_reranker_promotes_matching_content() {
+    async fn scripted_reranker_promotes_matching_content() -> anyhow::Result<()> {
         let r = ScriptedReranker::promoting_content_substring("PROMOTE");
         let cands = vec![
             ("a".to_string(), "ordinary text".to_string()),
             ("b".to_string(), "carries PROMOTE token".to_string()),
             ("c".to_string(), "also ordinary".to_string()),
         ];
-        let out = r.rerank("q", &cands).await.unwrap();
+        let out = r.rerank("q", &cands).await?;
         assert_eq!(out, vec!["b", "a", "c"], "matching id leads, rest stable");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn scripted_reranker_failing_returns_err() {
+    async fn scripted_reranker_failing_returns_err() -> anyhow::Result<()> {
         assert!(ScriptedReranker::failing()
             .rerank("q", &[("a".to_string(), "x".to_string())])
             .await
             .is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn marker_verifier_checks_the_field() {
+    async fn marker_verifier_checks_the_field() -> anyhow::Result<()> {
         let v = MarkerVerifier {
             expect: "ok".into(),
         };
@@ -362,23 +362,25 @@ mod tests {
             dimension: "tests".into(),
             artifact: serde_json::json!({"marker": "ok"}),
         };
-        assert!(v.verify(&req).await.unwrap().passed);
+        assert!(v.verify(&req).await?.passed);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn feature_probe_recovers_governing_value() {
+    async fn feature_probe_recovers_governing_value() -> anyhow::Result<()> {
         let p = FeatureProbe {
             feature: "runtime".into(),
             ok_value: serde_json::json!("node"),
         };
-        assert!(p
-            .acceptable("npm install", &serde_json::json!({"runtime": "node"}))
-            .await
-            .unwrap());
-        assert!(!p
-            .acceptable("npm install", &serde_json::json!({"runtime": "deno"}))
-            .await
-            .unwrap());
+        assert!(
+            p.acceptable("npm install", &serde_json::json!({"runtime": "node"}))
+                .await?
+        );
+        assert!(
+            !p.acceptable("npm install", &serde_json::json!({"runtime": "deno"}))
+                .await?
+        );
+        Ok(())
     }
 }
 
@@ -481,19 +483,17 @@ mod scripted_decider {
     /// port first: a caller of the relevance floor can be written and tested
     /// against this, and the trained head drops in as the only changed piece.
     #[tokio::test]
-    async fn a_noul_answers_both_sides_of_a_threshold() {
+    async fn a_noul_answers_both_sides_of_a_threshold() -> anyhow::Result<()> {
         let d = ScriptedDecider::on_substring("relevant", 0.9);
-        let hit = d
-            .decide("this is relevant", &[Question::Noul])
-            .await
-            .unwrap();
-        let miss = d.decide("this is not", &[Question::Noul]).await.unwrap();
+        let hit = d.decide("this is relevant", &[Question::Noul]).await?;
+        let miss = d.decide("this is not", &[Question::Noul]).await?;
         match (&hit[0], &miss[0]) {
             (Answer::Noul { probability: a }, Answer::Noul { probability: b }) => {
                 assert!(*a > 0.8 && *b < 0.2, "got {a} and {b}");
             }
-            other => panic!("a Noul question must get a Noul answer, got {other:?}"),
+            other => anyhow::bail!("a Noul question must get a Noul answer, got {other:?}"),
         }
+        Ok(())
     }
 
     /// A choice returns a DISTRIBUTION, not just a pick. That is the half the
@@ -501,7 +501,7 @@ mod scripted_decider {
     /// "none of these fit" are different answers, and only the distribution
     /// distinguishes them.
     #[tokio::test]
-    async fn a_choice_returns_a_distribution_and_not_only_a_pick() {
+    async fn a_choice_returns_a_distribution_and_not_only_a_pick() -> anyhow::Result<()> {
         let d = ScriptedDecider::on_substring("rust", 0.7);
         let q = Question::Choice {
             options: vec![
@@ -510,7 +510,7 @@ mod scripted_decider {
                 "go expert".into(),
             ],
         };
-        let out = d.decide("write a rust trait", &[q]).await.unwrap();
+        let out = d.decide("write a rust trait", &[q]).await?;
         match &out[0] {
             Answer::Choice { index, probs } => {
                 assert_eq!(*index, 1, "the rust option is chosen");
@@ -522,15 +522,16 @@ mod scripted_decider {
                 );
                 assert!(probs[1] > probs[0] && probs[1] > probs[2]);
             }
-            other => panic!("expected a Choice answer, got {other:?}"),
+            other => anyhow::bail!("expected a Choice answer, got {other:?}"),
         }
+        Ok(())
     }
 
     /// One state, several questions, one call: the questions about a state share
     /// an encoding, and answering them together is what makes this affordable in
     /// a serving path.
     #[tokio::test]
-    async fn a_batch_answers_in_order_and_matches_each_variant() {
+    async fn a_batch_answers_in_order_and_matches_each_variant() -> anyhow::Result<()> {
         let d = ScriptedDecider::on_substring("x", 0.8);
         let out = d
             .decide(
@@ -546,19 +547,20 @@ mod scripted_decider {
                     },
                 ],
             )
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(out.len(), 3, "one answer per question, in order");
         assert!(matches!(out[0], Answer::Noul { .. }));
         assert!(matches!(out[1], Answer::Score { expected } if (expected - 5.0).abs() < 1e-6));
         assert!(matches!(out[2], Answer::Choice { index: 1, .. }));
+        Ok(())
     }
 
     /// A head that fails to load must degrade to the path it replaced rather
     /// than to nothing, so the failure has to be visible.
     #[tokio::test]
-    async fn a_failing_decider_reports_the_failure() {
+    async fn a_failing_decider_reports_the_failure() -> anyhow::Result<()> {
         let d = ScriptedDecider::failing();
         assert!(d.decide("anything", &[Question::Noul]).await.is_err());
+        Ok(())
     }
 }

@@ -251,6 +251,7 @@ version = "0.2.7"
 dependencies = [
  "antumbra-core",
  "antumbra-http",
+ "anyhow",
  "clap",
  "serde_json",
  "sha2 0.11.0",
@@ -263,6 +264,7 @@ dependencies = [
 name = "antumbra-core"
 version = "0.2.7"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "fancy-regex 0.17.0",
@@ -289,6 +291,7 @@ name = "antumbra-eclipse"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "anyhow",
  "serde",
  "serde_json",
 ]
@@ -313,6 +316,7 @@ name = "antumbra-gate"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "anyhow",
  "chrono",
  "serde_json",
 ]
@@ -323,6 +327,7 @@ version = "0.2.7"
 dependencies = [
  "antumbra-core",
  "antumbra-http",
+ "anyhow",
  "chrono",
  "hex",
  "hmac",
@@ -455,6 +460,7 @@ dependencies = [
  "antumbra-boundary",
  "antumbra-core",
  "antumbra-gate",
+ "antumbra-store",
  "anyhow",
  "async-trait",
  "chrono",

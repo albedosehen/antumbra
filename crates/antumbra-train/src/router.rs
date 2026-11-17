@@ -148,7 +148,7 @@ mod tests {
     /// cosine confuses them) but differ on a small second dimension. The
     /// learned metric must down-weight the shared dim and route by the rest.
     #[tokio::test]
-    async fn learns_to_separate_experts_sharing_a_background() {
+    async fn learns_to_separate_experts_sharing_a_background() -> Result<()> {
         let mut exemplars = Vec::new();
         for i in 0..8 {
             let j = i as f32 * 0.01;
@@ -157,11 +157,12 @@ mod tests {
             // "specific": big shared dim, +third
             exemplars.push((ExpertId::new("specific"), vec![1.0, 0.0, 0.20 + j]));
         }
-        let router = train_learned_router(&exemplars, 300).unwrap();
+        let router = train_learned_router(&exemplars, 300)?;
 
         // A query sharing the background but tilted to the third dim -> specific.
         let ranked = router.route(&[1.0, 0.02, 0.18]);
         assert_eq!(ranked[0].0, ExpertId::new("specific"));
         assert!(ranked[0].1 > 0.6, "confident: {:?}", ranked[0]);
+        Ok(())
     }
 }

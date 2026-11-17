@@ -1,10 +1,9 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Engine-enforced compartment ACL (Phase 1b): a memory in a private
 //! compartment is invisible to another user until its compartment is granted,
 //! and hidden again on revoke, enforced by the engine via the memory rule's
 //! grant-graph subquery, on an unfiltered `SELECT` (no app-side WHERE).
 
+use anyhow::Result;
 use chrono::Utc;
 
 use antumbra_core::{
@@ -12,7 +11,7 @@ use antumbra_core::{
     MemoryNetwork, TenantId, UserId,
 };
 use antumbra_store::repo::{compartment, edge, memory, principal};
-use antumbra_store::Store;
+use antumbra_store::{testing, Store};
 
 fn mem(id: &str, tenant: &str, content: &str, comp: Option<&str>) -> Memory {
     let m = Memory::new(id, tenant, MemoryNetwork::World, content, 0.8, Utc::now());
@@ -22,18 +21,17 @@ fn mem(id: &str, tenant: &str, content: &str, comp: Option<&str>) -> Memory {
     }
 }
 
-async fn visible_ids(store: &Store) -> Vec<String> {
-    memory::all_unscoped(store)
-        .await
-        .unwrap()
+async fn visible_ids(store: &Store) -> Result<Vec<String>> {
+    Ok(memory::all_unscoped(store)
+        .await?
         .into_iter()
         .map(|m| m.id.as_str().to_string())
-        .collect()
+        .collect())
 }
 
 #[tokio::test]
-async fn memory_visibility_follows_compartment_grants() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn memory_visibility_follows_compartment_grants() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
@@ -42,27 +40,22 @@ async fn memory_visibility_follows_compartment_grants() {
 
     // Owner provisions both users, creates A's private compartment, and seeds a
     // private memory in it plus an un-compartmentalized (shared-pool) memory.
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await?;
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A private", now),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
     )
-    .await
-    .unwrap();
-    memory::upsert(&store, &mem("memory:pub", "ws:org", "shared pool", None))
-        .await
-        .unwrap();
+    .await?;
+    memory::upsert(&store, &mem("memory:pub", "ws:org", "shared pool", None)).await?;
 
     // userB sees the shared pool but NOT A's private compartment.
-    store.signin(&t, &ub).await.unwrap();
-    let seen = visible_ids(&store).await;
+    store.signin(&t, &ub).await?;
+    let seen = visible_ids(&store).await?;
     assert!(seen.contains(&"memory:pub".to_string()));
     assert!(
         !seen.contains(&"memory:priv".to_string()),
@@ -70,7 +63,7 @@ async fn memory_visibility_follows_compartment_grants() {
     );
 
     // Owner grants Reference on the compartment to userB.
-    store.invalidate().await.unwrap();
+    store.invalidate().await?;
     compartment::grant(
         &store,
         &Grant::new(
@@ -82,110 +75,103 @@ async fn memory_visibility_follows_compartment_grants() {
             now,
         ),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // userB now sees A's compartment memory (grant took effect immediately).
-    store.signin(&t, &ub).await.unwrap();
+    store.signin(&t, &ub).await?;
     assert!(
         visible_ids(&store)
-            .await
+            .await?
             .contains(&"memory:priv".to_string()),
         "grant must make A's compartment visible to B"
     );
 
     // Revoke → hidden again.
-    store.invalidate().await.unwrap();
-    compartment::revoke(&store, &t, &ca, &ub, now)
-        .await
-        .unwrap();
-    store.signin(&t, &ub).await.unwrap();
+    store.invalidate().await?;
+    compartment::revoke(&store, &t, &ca, &ub, now).await?;
+    store.signin(&t, &ub).await?;
     assert!(
         !visible_ids(&store)
-            .await
+            .await?
             .contains(&"memory:priv".to_string()),
         "revoke must hide it again"
     );
 
     // userA always sees their own compartment plus the shared pool.
-    store.invalidate().await.unwrap();
-    store.signin(&t, &ua).await.unwrap();
-    let seen = visible_ids(&store).await;
+    store.invalidate().await?;
+    store.signin(&t, &ua).await?;
+    let seen = visible_ids(&store).await?;
     assert!(seen.contains(&"memory:priv".to_string()) && seen.contains(&"memory:pub".to_string()));
+    Ok(())
 }
 
 // Deleting a compartment is a tombstone: the engine's owner subquery excludes it
 // (`deleted_at IS NONE`), so its memories become invisible to the owner at once --
 // and the deletion is a row that propagates rather than orphaning silently.
 #[tokio::test]
-async fn deleting_a_compartment_hides_its_memories_from_the_owner() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn deleting_a_compartment_hides_its_memories_from_the_owner() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
+    principal::provision(&store, &t, &ua).await?;
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // The owner sees its compartment memory.
-    store.signin(&t, &ua).await.unwrap();
+    store.signin(&t, &ua).await?;
     assert!(visible_ids(&store)
-        .await
+        .await?
         .contains(&"memory:priv".to_string()));
 
     // Delete the compartment (owner mode), then the owner no longer sees it.
-    store.invalidate().await.unwrap();
-    compartment::delete(&store, &t, &ca, now).await.unwrap();
-    store.signin(&t, &ua).await.unwrap();
+    store.invalidate().await?;
+    compartment::delete(&store, &t, &ca, now).await?;
+    store.signin(&t, &ua).await?;
     assert!(
         !visible_ids(&store)
-            .await
+            .await?
             .contains(&"memory:priv".to_string()),
         "a deleted compartment hides its memories from the owner"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn linking_into_a_compartment_requires_link_capability() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn linking_into_a_compartment_requires_link_capability() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await?;
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem("memory:target", "ws:org", "A target", Some("comp:a")),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem("memory:source", "ws:org", "shared source", None),
     )
-    .await
-    .unwrap();
+    .await?;
 
     let e = MemoryEdge::new(
         t.clone(),
@@ -209,20 +195,16 @@ async fn linking_into_a_compartment_requires_link_capability() {
             now,
         ),
     )
-    .await
-    .unwrap();
-    store.signin(&t, &ub).await.unwrap();
+    .await?;
+    store.signin(&t, &ub).await?;
     let _ = edge::relate(&store, &e).await; // engine denies the create (no link)
     assert!(
-        edge::neighbors(&store, &t, &from, None)
-            .await
-            .unwrap()
-            .is_empty(),
+        edge::neighbors(&store, &t, &from, None).await?.is_empty(),
         "reference grant must not permit linking"
     );
 
     // Upgrade to LINK -> the edge create now succeeds.
-    store.invalidate().await.unwrap();
+    store.invalidate().await?;
     compartment::grant(
         &store,
         &Grant::new(
@@ -234,18 +216,15 @@ async fn linking_into_a_compartment_requires_link_capability() {
             now,
         ),
     )
-    .await
-    .unwrap();
-    store.signin(&t, &ub).await.unwrap();
-    edge::relate(&store, &e).await.unwrap();
+    .await?;
+    store.signin(&t, &ub).await?;
+    edge::relate(&store, &e).await?;
     assert_eq!(
-        edge::neighbors(&store, &t, &from, None)
-            .await
-            .unwrap()
-            .len(),
+        edge::neighbors(&store, &t, &from, None).await?.len(),
         1,
         "link grant must permit linking"
     );
+    Ok(())
 }
 
 // Security: a tenant member who does NOT own a compartment cannot forge a grant
@@ -256,31 +235,28 @@ async fn linking_into_a_compartment_requires_link_capability() {
 // into another user's private compartment, since share_compartment accepts an
 // arbitrary compartment id.)
 #[tokio::test]
-async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await?;
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // B (scoped, non-owner) tries to forge a grant to A's compartment.
-    store.signin(&t, &ub).await.unwrap();
+    store.signin(&t, &ub).await?;
     let forged = Grant::new(
         t.clone(),
         ca.clone(),
@@ -294,20 +270,18 @@ async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() {
     // The forged grant did not take effect: B still cannot see A's private memory.
     assert!(
         !visible_ids(&store)
-            .await
+            .await?
             .contains(&"memory:priv".to_string()),
         "a forged grant must not unlock a non-owned compartment"
     );
 
     // And no live grant row exists for the compartment (verified in owner mode).
-    store.invalidate().await.unwrap();
+    store.invalidate().await?;
     assert!(
-        compartment::list_grants(&store, &t, &ca)
-            .await
-            .unwrap()
-            .is_empty(),
+        compartment::list_grants(&store, &t, &ca).await?.is_empty(),
         "the engine refused to create the forged grant"
     );
+    Ok(())
 }
 
 // The legitimate path the `share_compartment` tool drives in production: the
@@ -315,31 +289,28 @@ async fn a_non_owner_cannot_forge_a_grant_to_another_users_compartment() {
 // the grantee then sees it. Proves the owner-only grant rule does not break real
 // sharing (the existing visibility test grants in owner/bypass mode).
 #[tokio::test]
-async fn an_owner_can_share_their_own_compartment_while_scoped() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn an_owner_can_share_their_own_compartment_while_scoped() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await?;
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem("memory:priv", "ws:org", "A private", Some("comp:a-private")),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // A (scoped, the owner) shares the compartment with B -- must succeed.
-    store.signin(&t, &ua).await.unwrap();
+    store.signin(&t, &ua).await?;
     compartment::grant(
         &store,
         &Grant::new(
@@ -351,17 +322,17 @@ async fn an_owner_can_share_their_own_compartment_while_scoped() {
             now,
         ),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // B now sees A's compartment memory.
-    store.signin(&t, &ub).await.unwrap();
+    store.signin(&t, &ub).await?;
     assert!(
         visible_ids(&store)
-            .await
+            .await?
             .contains(&"memory:priv".to_string()),
         "the owner can share their own compartment under a scoped session"
     );
+    Ok(())
 }
 
 // Security (the write-side dual of grant-forgery): a tenant member who does NOT
@@ -370,25 +341,23 @@ async fn an_owner_can_share_their_own_compartment_while_scoped() {
 // scoped write into A's private compartment fails closed -- A never finds a memory
 // planted by B in their own private space. The owner's own/shared writes still work.
 #[tokio::test]
-async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let ua = UserId::new("user:a");
     let ub = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
 
-    principal::provision(&store, &t, &ua).await.unwrap();
-    principal::provision(&store, &t, &ub).await.unwrap();
+    testing::members(&store, &t, &[&ua, &ub]).await?;
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), ua.clone(), "A", now),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // B (scoped, non-owner) tries to plant a memory in A's private compartment.
-    store.signin(&t, &ub).await.unwrap();
+    store.signin(&t, &ub).await?;
     let _ = memory::upsert(
         &store,
         &mem(
@@ -401,11 +370,11 @@ async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() {
     .await; // engine denies the create; ignore the result, assert the end-state
 
     // A (the owner) never sees a planted memory in their own space.
-    store.invalidate().await.unwrap();
-    store.signin(&t, &ua).await.unwrap();
+    store.invalidate().await?;
+    store.signin(&t, &ua).await?;
     assert!(
         !visible_ids(&store)
-            .await
+            .await?
             .contains(&"memory:injected".to_string()),
         "a non-owner must not be able to inject into a private compartment"
     );
@@ -420,21 +389,19 @@ async fn a_non_owner_cannot_inject_a_memory_into_another_users_compartment() {
             Some("comp:a-private"),
         ),
     )
-    .await
-    .unwrap();
-    memory::upsert(&store, &mem("memory:shared", "ws:org", "shared pool", None))
-        .await
-        .unwrap();
-    let seen = visible_ids(&store).await;
+    .await?;
+    memory::upsert(&store, &mem("memory:shared", "ws:org", "shared pool", None)).await?;
+    let seen = visible_ids(&store).await?;
     assert!(
         seen.contains(&"memory:own".to_string()) && seen.contains(&"memory:shared".to_string()),
         "the owner writes its own compartment + the shared pool"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let now = Utc::now();
     for (id, tenant, owner, name) in [
         ("comp:ws:a:user:a:behavior", "ws:a", "user:a", "behavior"),
@@ -452,8 +419,7 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
                 now,
             ),
         )
-        .await
-        .unwrap();
+        .await?;
     }
     compartment::delete(
         &store,
@@ -461,11 +427,9 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
         &CompartmentId::new("comp:ws:c:user:c:behavior"),
         now,
     )
-    .await
-    .unwrap();
+    .await?;
     let mut ids: Vec<String> = compartment::list_named(&store, "behavior")
-        .await
-        .unwrap()
+        .await?
         .into_iter()
         .map(|c| c.id.as_str().to_string())
         .collect();
@@ -474,6 +438,7 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
         ids,
         ["comp:ws:a:user:a:behavior", "comp:ws:b:user:b:behavior"]
     );
+    Ok(())
 }
 
 /// The read rule finds a memory's own compartment by its record id, the key
@@ -481,21 +446,19 @@ async fn compartments_of_one_name_are_listed_across_workspaces_and_owners() {
 /// them still decides who sees the memory: its owner, a grantee until revoked,
 /// nobody else, and not the owner either once the compartment is deleted.
 #[tokio::test]
-async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let owner = UserId::new("user:owner");
     let other = UserId::new("user:other");
     let key = CompartmentId::new(r"comp:a/b\c|d e");
     let now = Utc::now();
-    principal::provision(&store, &t, &owner).await.unwrap();
-    principal::provision(&store, &t, &other).await.unwrap();
+    testing::members(&store, &t, &[&owner, &other]).await?;
     compartment::create(
         &store,
         &Compartment::new(key.clone(), t.clone(), owner.clone(), "odd key", now),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem(
@@ -505,24 +468,27 @@ async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
             Some(key.as_str()),
         ),
     )
-    .await
-    .unwrap();
+    .await?;
     let sees = |user: UserId| {
         let (store, t) = (&store, &t);
         async move {
-            store.invalidate().await.unwrap();
-            store.signin(t, &user).await.unwrap();
-            visible_ids(store).await.contains(&"memory:odd".to_string())
+            store.invalidate().await?;
+            store.signin(t, &user).await?;
+            Ok::<bool, anyhow::Error>(
+                visible_ids(store)
+                    .await?
+                    .contains(&"memory:odd".to_string()),
+            )
         }
     };
 
     assert!(
-        sees(owner.clone()).await,
+        sees(owner.clone()).await?,
         "the owner sees their own compartment"
     );
-    assert!(!sees(other.clone()).await, "another user does not");
+    assert!(!sees(other.clone()).await?, "another user does not");
 
-    store.invalidate().await.unwrap();
+    store.invalidate().await?;
     compartment::grant(
         &store,
         &Grant::new(
@@ -534,22 +500,23 @@ async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
             now,
         ),
     )
-    .await
-    .unwrap();
-    assert!(sees(other.clone()).await, "a grant shows it to the grantee");
-
-    store.invalidate().await.unwrap();
-    compartment::revoke(&store, &t, &key, &other, now)
-        .await
-        .unwrap();
-    assert!(!sees(other.clone()).await, "a revoke hides it again");
-
-    store.invalidate().await.unwrap();
-    compartment::delete(&store, &t, &key, now).await.unwrap();
+    .await?;
     assert!(
-        !sees(owner.clone()).await,
+        sees(other.clone()).await?,
+        "a grant shows it to the grantee"
+    );
+
+    store.invalidate().await?;
+    compartment::revoke(&store, &t, &key, &other, now).await?;
+    assert!(!sees(other.clone()).await?, "a revoke hides it again");
+
+    store.invalidate().await?;
+    compartment::delete(&store, &t, &key, now).await?;
+    assert!(
+        !sees(owner.clone()).await?,
         "a deleted compartment no longer shows its memories to its owner"
     );
+    Ok(())
 }
 
 // A grant names its workspace, and the rule's subquery asks for the workspace
@@ -557,16 +524,15 @@ async fn the_owner_branch_holds_for_a_key_with_every_mapped_character() {
 // compartment key, opens nothing here, whatever the engine does with the grant
 // table's own permission inside a permission subquery.
 #[tokio::test]
-async fn a_grant_in_another_workspace_opens_nothing_here() -> antumbra_core::Result<()> {
-    let store = Store::connect_memory(4).await?;
+async fn a_grant_in_another_workspace_opens_nothing_here() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let here = TenantId::new("ws:here");
     let elsewhere = TenantId::new("ws:elsewhere");
     let owner = UserId::new("user:owner");
     let member = UserId::new("user:member");
     let key = CompartmentId::new("comp:shared-key");
     let now = Utc::now();
-    principal::provision(&store, &here, &owner).await?;
-    principal::provision(&store, &here, &member).await?;
+    testing::members(&store, &here, &[&owner, &member]).await?;
     compartment::create(
         &store,
         &Compartment::new(
@@ -603,14 +569,12 @@ async fn a_grant_in_another_workspace_opens_nothing_here() -> antumbra_core::Res
     .await?;
 
     store.signin(&here, &member).await?;
-    if visible_ids(&store)
-        .await
-        .contains(&"memory:here-private".to_string())
-    {
-        return Err(antumbra_core::AntumbraError::other(
-            "a grant in another workspace opened a private compartment here",
-        ));
-    }
+    anyhow::ensure!(
+        !visible_ids(&store)
+            .await?
+            .contains(&"memory:here-private".to_string()),
+        "a grant in another workspace opened a private compartment here"
+    );
     // A grant in this workspace still does.
     store.invalidate().await?;
     compartment::grant(
@@ -626,14 +590,12 @@ async fn a_grant_in_another_workspace_opens_nothing_here() -> antumbra_core::Res
     )
     .await?;
     store.signin(&here, &member).await?;
-    if !visible_ids(&store)
-        .await
-        .contains(&"memory:here-private".to_string())
-    {
-        return Err(antumbra_core::AntumbraError::other(
-            "a grant in this workspace did not open the compartment",
-        ));
-    }
+    anyhow::ensure!(
+        visible_ids(&store)
+            .await?
+            .contains(&"memory:here-private".to_string()),
+        "a grant in this workspace did not open the compartment"
+    );
     Ok(())
 }
 
@@ -643,15 +605,14 @@ async fn a_grant_in_another_workspace_opens_nothing_here() -> antumbra_core::Res
 // the compartment row live, so this is what keeps a private compartment
 // private against a member who reaches the engine without the app layer.
 #[tokio::test]
-async fn a_member_cannot_rewrite_another_members_compartment() -> anyhow::Result<()> {
-    let store = Store::connect_memory(4).await?;
+async fn a_member_cannot_rewrite_another_members_compartment() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let t = TenantId::new("ws:org");
     let a = UserId::new("user:a");
     let b = UserId::new("user:b");
     let ca = CompartmentId::new("comp:a-private");
     let now = Utc::now();
-    principal::provision(&store, &t, &a).await?;
-    principal::provision(&store, &t, &b).await?;
+    testing::members(&store, &t, &[&a, &b]).await?;
     compartment::create(
         &store,
         &Compartment::new(ca.clone(), t.clone(), a.clone(), "A private", now),
@@ -681,7 +642,7 @@ async fn a_member_cannot_rewrite_another_members_compartment() -> anyhow::Result
     compartment::create(&store, &forged).await.ok();
     anyhow::ensure!(
         !visible_ids(&store)
-            .await
+            .await?
             .contains(&"memory:priv".to_string()),
         "B reads A's private memory"
     );

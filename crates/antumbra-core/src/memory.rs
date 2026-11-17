@@ -268,9 +268,10 @@ impl Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn reinforce_raises_confidence_and_count() {
+    fn reinforce_raises_confidence_and_count() -> anyhow::Result<()> {
         let now = Utc::now();
         let mut m = Memory::new(
             "memory:a",
@@ -284,19 +285,21 @@ mod tests {
         m.reinforce(now);
         assert_eq!(m.reinforcement, 1);
         assert!(m.confidence > 0.4 && m.confidence < 1.0);
+        Ok(())
     }
 
     #[test]
-    fn network_and_status_as_str() {
+    fn network_and_status_as_str() -> anyhow::Result<()> {
         assert_eq!(MemoryNetwork::World.as_str(), "world");
         assert_eq!(MemoryNetwork::Bank.as_str(), "bank");
         assert_eq!(MemoryNetwork::Opinion.as_str(), "opinion");
         assert_eq!(MemoryStatus::Committed.as_str(), "committed");
         assert_eq!(MemoryStatus::Planned.as_str(), "planned");
+        Ok(())
     }
 
     #[test]
-    fn builder_chain_sets_every_field() {
+    fn builder_chain_sets_every_field() -> anyhow::Result<()> {
         let now = Utc::now();
         let m = Memory::new("memory:b", "ws:1", MemoryNetwork::Bank, "x", 1.5, now)
             .with_embedding(vec![0.1, 0.2])
@@ -307,16 +310,20 @@ mod tests {
             .planned();
         assert_eq!(m.confidence, 1.0, "confidence clamps to [0,1]");
         assert_eq!(m.embedding.as_deref(), Some(&[0.1f32, 0.2][..]));
-        assert_eq!(m.compartment.as_ref().unwrap().as_str(), "comp:1");
-        assert_eq!(m.author.as_ref().unwrap().as_str(), "user:a");
+        assert_eq!(
+            m.compartment.as_ref().context("a compartment")?.as_str(),
+            "comp:1"
+        );
+        assert_eq!(m.author.as_ref().context("an author")?.as_str(), "user:a");
         assert_eq!(m.author_host.as_deref(), Some("host-1"));
         assert_eq!(m.evidence, vec!["src".to_string()]);
         assert!(m.volatile);
         assert_eq!(m.status, MemoryStatus::Planned);
+        Ok(())
     }
 
     #[test]
-    fn soft_delete_sets_the_tombstone() {
+    fn soft_delete_sets_the_tombstone() -> anyhow::Result<()> {
         let now = Utc::now();
         let mut m = Memory::new("memory:c", "ws:1", MemoryNetwork::World, "x", 0.5, now);
         assert!(!m.is_deleted());
@@ -324,10 +331,11 @@ mod tests {
         assert!(m.is_deleted());
         assert_eq!(m.deleted_at, Some(now));
         assert_eq!(m.updated_at, now);
+        Ok(())
     }
 
     #[test]
-    fn memory_edge_new_carries_its_fields() {
+    fn memory_edge_new_carries_its_fields() -> anyhow::Result<()> {
         let now = Utc::now();
         let e = MemoryEdge::new(
             "ws:1",
@@ -341,10 +349,11 @@ mod tests {
         assert_eq!(e.to_id.as_str(), "memory:b");
         assert_eq!(e.edge_type, EdgeType::Supersedes);
         assert_eq!(e.edge_type.as_str(), "supersedes");
+        Ok(())
     }
 
     #[test]
-    fn consolidation_link_round_trips() {
+    fn consolidation_link_round_trips() -> anyhow::Result<()> {
         let now = Utc::now();
         let mut m = Memory::new("memory:a", "ws:1", MemoryNetwork::World, "x", 1.0, now);
         assert!(!m.is_consolidated());
@@ -354,11 +363,13 @@ mod tests {
             m.consolidated_expert,
             Some(ExpertId::new("expert:consolidated-pm"))
         );
+        Ok(())
     }
 
     #[test]
-    fn network_serializes_lowercase() {
-        let json = serde_json::to_string(&MemoryNetwork::Opinion).unwrap();
+    fn network_serializes_lowercase() -> anyhow::Result<()> {
+        let json = serde_json::to_string(&MemoryNetwork::Opinion)?;
         assert_eq!(json, "\"opinion\"");
+        Ok(())
     }
 }

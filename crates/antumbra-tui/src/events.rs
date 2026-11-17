@@ -51,7 +51,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_kind_has_a_glyph() {
+    fn every_kind_has_a_glyph() -> anyhow::Result<()> {
         for kind in [
             EventKind::Spawn,
             EventKind::Graduate,
@@ -62,5 +62,6 @@ mod tests {
         ] {
             assert!(!kind.glyph().is_empty(), "{kind:?} has a glyph");
         }
+        Ok(())
     }
 }

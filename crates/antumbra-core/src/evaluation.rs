@@ -93,9 +93,10 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_comparison() {
+    fn fingerprint_comparison() -> anyhow::Result<()> {
         assert!(run(Some("abc")).fingerprint_matches(&run(Some("abc"))));
         assert!(!run(Some("abc")).fingerprint_matches(&run(Some("xyz"))));
         assert!(!run(None).fingerprint_matches(&run(Some("abc"))));
+        Ok(())
     }
 }

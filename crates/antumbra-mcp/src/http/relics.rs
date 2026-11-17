@@ -332,7 +332,7 @@ async fn export(
     };
     let relic = match headers.get(header::AUTHORIZATION) {
         Some(value) => {
-            let Ok(identity) = state.verifier.verify_header(value.to_str().ok()) else {
+            let Ok(identity) = state.identity_of(value.to_str().ok()) else {
                 return problem(StatusCode::UNAUTHORIZED, "the token was refused");
             };
             match signed_in_row(&state, &identity, &slug).await {
@@ -460,7 +460,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_pages_may_frame_the_render_origin_and_nothing_else() {
+    fn the_pages_may_frame_the_render_origin_and_nothing_else() -> anyhow::Result<()> {
         let framed = policy(Some("http://render.example:8083"));
         assert!(
             framed.contains("frame-src http://render.example:8083;"),
@@ -469,13 +469,14 @@ mod tests {
         assert!(framed.contains("frame-ancestors 'none'"));
         assert!(framed.contains("script-src 'self';"));
         assert!(policy(None).contains("frame-src 'none';"));
+        Ok(())
     }
 
     /// The pages hold nothing the policy would refuse, and load only the
     /// relics script and the dashboard's style, by paths that resolve from
     /// where each page is served.
     #[test]
-    fn the_pages_have_nothing_the_policy_would_refuse() {
+    fn the_pages_have_nothing_the_policy_would_refuse() -> anyhow::Result<()> {
         for (name, page, prefix) in [
             ("relics.html", GALLERY, "dashboard/"),
             ("relic.html", VIEWER, "../dashboard/"),
@@ -500,5 +501,6 @@ mod tests {
                 "{name}"
             );
         }
+        Ok(())
     }
 }

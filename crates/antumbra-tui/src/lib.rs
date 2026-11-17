@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! Antumbra operator console (`antumbra tui`): a live, animated view of the
 //! population (umbra), boundaries (antumbra), and the learned gate, read from
 //! the Antumbra server with the same address and token the hooks use.

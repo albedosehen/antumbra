@@ -196,6 +196,7 @@ mod tests {
     use super::super::{mark_audit, Audit};
     use super::*;
     use crate::{MemoryNetwork, TenantId};
+    use anyhow::Context as _;
 
     fn audited(id: &str, fresh: usize, base: usize, expert: usize, worse: Option<f32>) -> Memory {
         let mut m = Memory::new(
@@ -220,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pool_is_the_audits_of_admitted_bets_and_nothing_else() {
+    fn the_pool_is_the_audits_of_admitted_bets_and_nothing_else() -> anyhow::Result<()> {
         let memories = vec![
             audited("memory:a", 3, 3, 3, Some(0.74)),
             audited("memory:b", 2, 2, 0, Some(0.6)),
@@ -241,10 +242,11 @@ mod tests {
         );
         assert_eq!(Pool::of(&[]), Pool::default());
         assert_eq!(Pool::default().realized(), 0.5);
+        Ok(())
     }
 
     #[test]
-    fn a_pool_leans_only_with_enough_evidence_and_only_past_the_margin() {
+    fn a_pool_leans_only_with_enough_evidence_and_only_past_the_margin() -> anyhow::Result<()> {
         let held = Pool {
             bets: 2,
             fresh: 6,
@@ -280,32 +282,42 @@ mod tests {
             expert: 5,
         };
         assert_eq!(few.lean(), None, "five examples are too few");
+        Ok(())
     }
 
     #[test]
-    fn a_reading_moves_only_when_the_one_before_agreed_and_stays_in_bounds() {
+    fn a_reading_moves_only_when_the_one_before_agreed_and_stays_in_bounds() -> anyhow::Result<()> {
         let held = Pool {
             bets: 2,
             fresh: 6,
             base: 2,
             expert: 6,
         };
-        let first = read(&held, 0.9, None).unwrap();
+        let first = read(&held, 0.9, None).context("a reading")?;
         assert_eq!((first.lean, first.from, first.to), (Lean::Looser, 0.9, 0.9));
         assert!(!first.moved());
         assert!(first.describe().contains("the bets held; stays at 0.90"));
-        let second = read(&held, 0.9, Some(Lean::Looser)).unwrap();
+        let second = read(&held, 0.9, Some(Lean::Looser)).context("a reading")?;
         assert_eq!(second.to, 0.92);
         assert!(second.moved());
         assert!(second.describe().contains("moved from 0.90 to 0.92"));
         assert_eq!(
-            read(&held, 0.9, Some(Lean::Stricter)).unwrap().to,
+            read(&held, 0.9, Some(Lean::Stricter))
+                .context("a reading")?
+                .to,
             0.9,
             "a change of mind is a first reading"
         );
-        assert_eq!(read(&held, 0.97, Some(Lean::Looser)).unwrap().to, CEILING);
         assert_eq!(
-            read(&held, CEILING, Some(Lean::Looser)).unwrap().to,
+            read(&held, 0.97, Some(Lean::Looser))
+                .context("a reading")?
+                .to,
+            CEILING
+        );
+        assert_eq!(
+            read(&held, CEILING, Some(Lean::Looser))
+                .context("a reading")?
+                .to,
             CEILING
         );
 
@@ -315,12 +327,17 @@ mod tests {
             base: 6,
             expert: 2,
         };
-        let r = read(&failed, 0.9, Some(Lean::Stricter)).unwrap();
+        let r = read(&failed, 0.9, Some(Lean::Stricter)).context("a reading")?;
         assert_eq!((r.lean, r.to), (Lean::Stricter, 0.88));
         assert!(r
             .describe()
             .contains("the bets failed; moved from 0.90 to 0.88"));
-        assert_eq!(read(&failed, 0.61, Some(Lean::Stricter)).unwrap().to, FLOOR);
+        assert_eq!(
+            read(&failed, 0.61, Some(Lean::Stricter))
+                .context("a reading")?
+                .to,
+            FLOOR
+        );
 
         let even = Pool {
             bets: 2,
@@ -331,5 +348,6 @@ mod tests {
         assert!(read(&even, 0.9, Some(Lean::Looser)).is_none());
         assert_eq!(Lean::parse(Lean::Looser.as_str()), Some(Lean::Looser));
         assert_eq!(Lean::parse("sideways"), None);
+        Ok(())
     }
 }

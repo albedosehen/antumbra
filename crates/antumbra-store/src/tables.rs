@@ -38,6 +38,7 @@ pub const PRINCIPAL: &str = "principal";
 pub const RECIPE: &str = "recipe";
 pub const REGION_CENSUS: &str = "region_census";
 pub const RELIC: &str = "relic";
+pub const REVOKED_TOKEN: &str = "revoked_token";
 pub const REWARD_SIGNAL: &str = "reward_signal";
 pub const ROUTING_OUTCOME: &str = "routing_outcome";
 pub const SHADOW: &str = "shadow";
@@ -81,6 +82,7 @@ pub const ALL: &[&str] = &[
     RECIPE,
     REGION_CENSUS,
     RELIC,
+    REVOKED_TOKEN,
     REWARD_SIGNAL,
     ROUTING_OUTCOME,
     SHADOW,
@@ -105,6 +107,6 @@ mod tests {
         let mut named: Vec<String> = ALL.iter().map(|n| (*n).to_owned()).collect();
         named.sort();
         assert_eq!(named, defined);
-        assert_eq!(ALL.len(), 40, "every name is distinct");
+        assert_eq!(ALL.len(), 41, "every name is distinct");
     }
 }

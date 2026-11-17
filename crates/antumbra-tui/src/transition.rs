@@ -103,15 +103,16 @@ mod tests {
     use crate::theme;
 
     #[test]
-    fn each_transition_targets_the_right_scope() {
+    fn each_transition_targets_the_right_scope() -> anyhow::Result<()> {
         assert!(matches!(focus_switch().1, Scope::Detail));
         assert!(matches!(theme_wash(&theme::SHADOW).1, Scope::Detail));
         assert!(matches!(layout_switch().1, Scope::Body));
         assert!(matches!(overlay_open().1, Scope::Overlay));
+        Ok(())
     }
 
     #[test]
-    fn scope_area_resolves_within_the_frame() {
+    fn scope_area_resolves_within_the_frame() -> anyhow::Result<()> {
         let frame = Rect::new(0, 0, 120, 40);
         let detail = scope_area(&Scope::Detail, frame);
         let body = scope_area(&Scope::Body, frame);
@@ -127,5 +128,6 @@ mod tests {
         assert!(body.top() >= 3 && body.bottom() < frame.bottom());
         // Overlay falls back to the body (the caller resolves it precisely).
         assert_eq!(scope_area(&Scope::Overlay, frame), body);
+        Ok(())
     }
 }

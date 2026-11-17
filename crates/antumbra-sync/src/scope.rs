@@ -119,18 +119,16 @@ impl Replicate {
 mod tests {
     use super::*;
     use antumbra_core::{Compartment, TenantId, UserId};
-    use antumbra_store::repo::principal;
-    use antumbra_store::EMBED_DIM;
+    use antumbra_store::testing::{mem_store, members};
     use chrono::Utc;
     use serde_json::json;
 
     async fn lilys_scope() -> Result<Scope> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:org");
         let lily = UserId::new("user:lily");
         let oslo = UserId::new("user:oslo");
-        principal::provision(&store, &tenant, &lily).await?;
-        principal::provision(&store, &tenant, &oslo).await?;
+        members(&store, &tenant, &[&lily, &oslo]).await?;
         for (id, owner) in [("comp:hers", &lily), ("comp:his", &oslo)] {
             compartment::create(
                 &store,
@@ -187,8 +185,9 @@ mod tests {
     /// `to_id` and no compartment, so the policy cannot judge it and the engine
     /// must -- which is why a refusal there is expected rather than a fault.
     #[test]
-    fn an_edge_is_left_to_the_engine() {
+    fn an_edge_is_left_to_the_engine() -> Result<()> {
         assert!(Replicate::EngineDecides.refusal_is_expected());
         assert!(!Replicate::Owned(|_, _| true).refusal_is_expected());
+        Ok(())
     }
 }

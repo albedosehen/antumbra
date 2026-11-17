@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The copal document-of-record archive: on ingest, a knowledge document's
 //! ORIGINAL content is uploaded to a copal file service (content-addressed,
 //! versioned, sealed at rest) before its chunks are stored, and every chunk
@@ -185,8 +183,9 @@ pub struct RenderLink {
 }
 
 impl CopalArchive {
-    /// Point at `addr` -- a bare `host:port` (given `http://`) or a full URL
-    /// base (used as-is) -- landing documents per `tenancy`.
+    /// Point at `addr` -- a bare `host:port` (given `http://` for this
+    /// machine, `https://` elsewhere) or a full URL base (used as-is) --
+    /// landing documents per `tenancy`.
     pub fn new(addr: &str, tenancy: CopalTenancy) -> Self {
         Self::with_transport(addr, tenancy, Arc::new(transport::UreqTransport::new()))
     }
@@ -211,6 +210,18 @@ impl CopalArchive {
     pub fn with_render_origin(mut self, origin: Option<String>) -> Self {
         self.render_origin = origin.map(|o| o.trim_end_matches('/').to_string());
         self
+    }
+
+    /// Whether the archive is told the tenant in a request header it trusts as
+    /// given (copal's header auth mode: [`CopalTenancy::PerWorkspace`] and
+    /// [`CopalTenancy::Shared`]), so isolation between workspaces at the
+    /// archive rests on the network path alone. The keyed modes prove the
+    /// tenant with a credential instead.
+    pub fn trusts_headers(&self) -> bool {
+        matches!(
+            self.tenancy,
+            CopalTenancy::PerWorkspace | CopalTenancy::Shared(_)
+        )
     }
 
     /// The render origin, when one is configured.
@@ -482,14 +493,36 @@ fn create_and_upload(
     })
 }
 
-/// Mirror how copal itself normalizes an embedder address: a full URL base is
-/// used as-is (trailing slash trimmed), a bare `host:port` gets `http://`.
+/// A full URL base is used as-is (trailing slash trimmed); a bare `host:port`
+/// gets a scheme: `http://` for this machine (`localhost`, `127.x`, `::1`),
+/// `https://` for anywhere else, so an address that forgot its scheme never
+/// turns into cleartext across a network by default.
 fn normalize_base(addr: &str) -> String {
     let addr = addr.trim_end_matches('/');
     if addr.starts_with("http://") || addr.starts_with("https://") {
         addr.to_string()
-    } else {
+    } else if is_loopback(addr) {
         format!("http://{addr}")
+    } else {
+        format!("https://{addr}")
+    }
+}
+
+/// Whether `authority` (`host`, `host:port` or `[v6]:port`) names this machine.
+fn is_loopback(authority: &str) -> bool {
+    let host = match authority.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None => authority.rsplit_once(':').map_or(authority, |(h, _)| h),
+    };
+    host == "localhost" || host == "::1" || host.starts_with("127.")
+}
+
+/// Whether `base` (a normalized URL base) speaks plain HTTP to an address that
+/// is not this machine: a token or a document on such a link is in the open.
+fn is_cleartext_across_a_network(base: &str) -> bool {
+    match base.strip_prefix("http://") {
+        Some(rest) => !is_loopback(rest.split('/').next().unwrap_or(rest)),
+        None => false,
     }
 }
 
@@ -591,6 +624,12 @@ pub enum CopalConfigError {
     #[error("--copal-keys {path} maps no workspaces")]
     KeysEmpty { path: String },
     #[error(
+        "--copal-addr {0} speaks plain HTTP to an address that is not this machine, so every \
+         document and credential on the way would be in the open; use https://, or pass \
+         --copal-allow-http for a network you trust"
+    )]
+    Cleartext(String),
+    #[error(
         "--copal-keys {path}: the key for workspace {workspace} is not a plain ASCII credential"
     )]
     KeyNotAscii { path: String, workspace: String },
@@ -609,16 +648,24 @@ impl CopalArchive {
     /// shared), `keys_file` (keys auth, per-workspace), or none of them
     /// (header auth, per-workspace, the default). Naming two is a
     /// contradiction refused up front, not a precedence resolved in silence.
+    ///
+    /// An explicit `http://` address that is not this machine is refused
+    /// unless `allow_http` says the network between the server and the
+    /// archive is trusted; a bare address gets `https://` there on its own.
     pub fn from_flags(
         addr: Option<&str>,
         tenant: Option<String>,
         key: Option<String>,
         keys_file: Option<&std::path::Path>,
         render_origin: Option<String>,
+        allow_http: bool,
     ) -> std::result::Result<Option<Arc<Self>>, CopalConfigError> {
         let Some(addr) = addr else {
             return Ok(None);
         };
+        if !allow_http && is_cleartext_across_a_network(&normalize_base(addr)) {
+            return Err(CopalConfigError::Cleartext(addr.to_string()));
+        }
         let tenancy = match (tenant, key, keys_file) {
             (None, None, None) => CopalTenancy::PerWorkspace,
             (Some(t), None, None) => CopalTenancy::Shared(t),

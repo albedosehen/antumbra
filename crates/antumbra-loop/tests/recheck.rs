@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The loop's recheck of the verifiers that judged its training, the verifier
 //! trust protocol run by the loop: a trusted synthesized verifier is measured
 //! again on the policy's own answers, each labeled by the task's authored
@@ -13,12 +11,13 @@ use antumbra_core::ports::{
 };
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{
-    Expert, ExpertId, ExpertStatus, Generation, JudgedSample, Result, RunId, Tally, TrustPolicy,
-    TrustState, TrustVerdict, VerifierGrant, VerifierId, VerifierOrigin, VerifierRecord,
-    VerifierTier,
+    AntumbraError, Expert, ExpertId, ExpertStatus, Generation, JudgedSample, Result, RunId, Tally,
+    TrustMeasurement, TrustPolicy, TrustState, TrustVerdict, VerifierGrant, VerifierId,
+    VerifierOrigin, VerifierRecord, VerifierTier,
 };
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{boundary, expert, lifecycle, verifier};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 /// Passes a completion its spec lists under `accept`.
@@ -92,16 +91,25 @@ fn judged(of: &VerifierId, completion: &str, passed: bool, n: usize) -> Vec<Judg
         .collect()
 }
 
-fn trained_under(of: &VerifierId, judged: Vec<JudgedSample>) -> ScriptedTrainer {
+fn trained_under(of: &VerifierId, judged: Vec<JudgedSample>) -> Result<ScriptedTrainer> {
     let passes = judged.iter().filter(|j| j.rewarded).count();
-    ScriptedTrainer {
+    let passes = u32::try_from(passes)
+        .map_err(|_| AntumbraError::other(format!("{passes} passes do not fit a grant")))?;
+    Ok(ScriptedTrainer {
         granted_by: vec![VerifierGrant {
             verifier: of.clone(),
-            passes: u32::try_from(passes).unwrap(),
+            passes,
         }],
         judged,
         ..ScriptedTrainer::graduating()
-    }
+    })
+}
+
+/// The measurement a recheck made, or the error that it made none.
+fn measured(recheck: &antumbra_loop::Recheck) -> Result<&TrustMeasurement> {
+    recheck.measurement.as_ref().ok_or_else(|| {
+        AntumbraError::other(format!("{} was not measured", recheck.verifier.as_str()))
+    })
 }
 
 /// An expert an earlier generation graduated under `of`.
@@ -131,13 +139,13 @@ async fn taught_by(store: &Store, of: &VerifierId) -> Result<ExpertId> {
 
 #[tokio::test]
 async fn a_verifier_rewarding_wrong_answers_is_quarantined_with_what_it_taught() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
     let hacked = trusted(&store, "strings", &["right", "wrong"]).await?;
     let taught = taught_by(&store, &hacked.id).await?;
     let mut answers = judged(&hacked.id, "right", true, 5);
     answers.extend(judged(&hacked.id, "wrong", true, 3));
-    let trainer = trained_under(&hacked.id, answers);
+    let trainer = trained_under(&hacked.id, answers)?;
     let reports = GenerationLoop::new(
         &store,
         &trainer,
@@ -152,7 +160,7 @@ async fn a_verifier_rewarding_wrong_answers_is_quarantined_with_what_it_taught()
     assert_eq!(recheck.verifier, hacked.id);
     assert_eq!((recheck.anchored, recheck.unanchored), (8, 0));
     assert_eq!(recheck.rewarded_wrong, 3);
-    let m = recheck.measurement.as_ref().expect("measured");
+    let m = measured(recheck)?;
     assert_eq!((m.good, m.good_passed, m.bad, m.bad_passed), (5, 5, 3, 3));
     assert!(matches!(m.verdict, TrustVerdict::FalsePositives { .. }));
     assert_eq!(recheck.moved, Some(TrustState::Quarantined));
@@ -172,12 +180,12 @@ async fn a_verifier_rewarding_wrong_answers_is_quarantined_with_what_it_taught()
 
 #[tokio::test]
 async fn a_sound_verifier_is_measured_again_and_its_graduate_joins() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
     let sound = trusted(&store, "strings", &["right"]).await?;
     let mut answers = judged(&sound.id, "right", true, 5);
     answers.extend(judged(&sound.id, "wrong", false, 30));
-    let trainer = trained_under(&sound.id, answers);
+    let trainer = trained_under(&sound.id, answers)?;
     let reports = GenerationLoop::new(
         &store,
         &trainer,
@@ -190,7 +198,7 @@ async fn a_sound_verifier_is_measured_again_and_its_graduate_joins() -> Result<(
 
     let recheck = &reports[0].rechecks[0];
     assert_eq!(recheck.rewarded_wrong, 0);
-    let m = recheck.measurement.as_ref().expect("measured");
+    let m = measured(recheck)?;
     assert!(m.verdict.is_sound(), "{:?}", m.verdict);
     assert_eq!(recheck.moved, None);
     // Recorded like any measurement, so its trust is renewed.
@@ -205,12 +213,12 @@ async fn a_sound_verifier_is_measured_again_and_its_graduate_joins() -> Result<(
 /// verifier is sound again.
 #[tokio::test]
 async fn a_run_pools_its_rechecks_until_they_can_bound_the_rate() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
     let sound = trusted(&store, "strings", &["right"]).await?;
     let mut answers = judged(&sound.id, "right", true, 5);
     answers.extend(judged(&sound.id, "wrong", false, 15));
-    let trainer = trained_under(&sound.id, answers);
+    let trainer = trained_under(&sound.id, answers)?;
     let reports = GenerationLoop::new(
         &store,
         &trainer,
@@ -223,7 +231,7 @@ async fn a_run_pools_its_rechecks_until_they_can_bound_the_rate() -> Result<()> 
 
     let first = &reports[0].rechecks[0];
     assert_eq!(first.generations, 1);
-    let m = first.measurement.as_ref().expect("measured");
+    let m = measured(first)?;
     assert!(
         matches!(m.verdict, TrustVerdict::Unmeasured { .. }),
         "{:?}",
@@ -231,7 +239,7 @@ async fn a_run_pools_its_rechecks_until_they_can_bound_the_rate() -> Result<()> 
     );
     let second = &reports[1].rechecks[0];
     assert_eq!(second.generations, 2);
-    let m = second.measurement.as_ref().expect("measured");
+    let m = measured(second)?;
     assert_eq!((m.good, m.bad), (10, 30));
     assert!(m.verdict.is_sound(), "{:?}", m.verdict);
     assert_eq!(verifier::measurements(&store, &sound.id).await?.len(), 3);
@@ -240,11 +248,11 @@ async fn a_run_pools_its_rechecks_until_they_can_bound_the_rate() -> Result<()> 
 
 #[tokio::test]
 async fn answers_no_authored_verifier_anchors_are_not_measured() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     // The only authored verifier is in another domain.
     register(&store, "grids", VerifierOrigin::Authored, &["right"]).await?;
     let lone = trusted(&store, "strings", &["right", "wrong"]).await?;
-    let trainer = trained_under(&lone.id, judged(&lone.id, "wrong", true, 4));
+    let trainer = trained_under(&lone.id, judged(&lone.id, "wrong", true, 4))?;
     let reports = GenerationLoop::new(
         &store,
         &trainer,
@@ -265,11 +273,11 @@ async fn answers_no_authored_verifier_anchors_are_not_measured() -> Result<()> {
 
 #[tokio::test]
 async fn a_shadow_trained_under_a_withdrawn_verifier_does_not_graduate() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let pulled = trusted(&store, "strings", &["right"]).await?;
     verifier::transition(&store, &pulled.id, TrustState::Quarantined, None).await?;
     // No verifier to recheck with: the withdrawal alone keeps it out.
-    let trainer = trained_under(&pulled.id, judged(&pulled.id, "right", true, 2));
+    let trainer = trained_under(&pulled.id, judged(&pulled.id, "right", true, 2))?;
     let reports = GenerationLoop::new(
         &store,
         &trainer,
@@ -305,15 +313,12 @@ impl Trainer for WithReference {
 
 /// The pooled measurement after two generations whose policy never answers
 /// the task right, with `reference` as the task's right answer.
-async fn never_right(
-    reference: Option<&str>,
-    name: &str,
-) -> Result<antumbra_core::TrustMeasurement> {
-    let store = Store::connect_memory(8).await?;
+async fn never_right(reference: Option<&str>, name: &str) -> Result<TrustMeasurement> {
+    let store = mem_store_of(8).await?;
     register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
     let sound = trusted(&store, "strings", &["right"]).await?;
     let trainer = WithReference {
-        inner: trained_under(&sound.id, judged(&sound.id, "wrong", false, 15)),
+        inner: trained_under(&sound.id, judged(&sound.id, "wrong", false, 15))?,
         reference: reference.map(str::to_string),
     };
     let reports = GenerationLoop::new(
@@ -325,10 +330,7 @@ async fn never_right(
     .rechecking(&Accepts)
     .run_until(&RunId::new(name), 2)
     .await?;
-    Ok(reports[1].rechecks[0]
-        .measurement
-        .clone()
-        .expect("measured"))
+    Ok(measured(&reports[1].rechecks[0])?.clone())
 }
 
 /// A policy that never answers the task right gives a recheck no known-good
@@ -356,10 +358,10 @@ async fn a_reference_answer_lets_a_verifier_the_policy_never_satisfies_be_judged
 /// policy that answers the task right every time and 29 answers built to be
 /// wrong.
 async fn against_deliberate(accept: &[&str], name: &str) -> Result<antumbra_loop::Recheck> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     register(&store, "strings", VerifierOrigin::Authored, &["right"]).await?;
     let checked = trusted(&store, "strings", accept).await?;
-    let trainer = trained_under(&checked.id, judged(&checked.id, "right", true, 5));
+    let trainer = trained_under(&checked.id, judged(&checked.id, "right", true, 5))?;
     let deliberate = (0..29).map(|i| ("swap".to_string(), format!("wrong-{i}")));
     let reports = GenerationLoop::new(
         &store,
@@ -380,12 +382,12 @@ async fn against_deliberate(accept: &[&str], name: &str) -> Result<antumbra_loop
 #[tokio::test]
 async fn deliberately_wrong_answers_are_known_bad_from_the_first_generation() -> Result<()> {
     let sound = against_deliberate(&["right"], "run:deliberate-sound").await?;
-    let m = sound.measurement.as_ref().expect("measured");
+    let m = measured(&sound)?;
     assert_eq!((m.good, m.bad, m.adversarial), (5, 29, 29));
     assert!(m.verdict.is_sound(), "{:?}", m.verdict);
 
     let lax = against_deliberate(&["right", "wrong-3"], "run:deliberate-lax").await?;
-    let m = lax.measurement.as_ref().expect("measured");
+    let m = measured(&lax)?;
     assert!(
         matches!(m.verdict, TrustVerdict::Shortcut { .. }),
         "{:?}",

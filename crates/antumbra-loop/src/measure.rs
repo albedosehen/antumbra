@@ -178,7 +178,7 @@ mod tests {
     /// must satisfy this or the trend could never be anything but
     /// inconclusive for some windows.
     #[test]
-    fn the_default_schedule_leaves_the_default_watch_able_to_answer() {
+    fn the_default_schedule_leaves_the_default_watch_able_to_answer() -> Result<()> {
         let cfg = LoopConfig::default();
         let guaranteed = cfg.watch.window / cfg.audit_every as usize;
         assert!(
@@ -189,6 +189,7 @@ mod tests {
             cfg.watch.window,
             cfg.watch.min_audited
         );
+        Ok(())
     }
 
     fn row(task: &str, metrics: serde_json::Value) -> EvaluationRun {
@@ -214,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn a_persisted_generation_reads_back_as_the_point_it_was() {
+    fn a_persisted_generation_reads_back_as_the_point_it_was() -> Result<()> {
         let point = history_point(
             &row(
                 "gen:3",
@@ -247,10 +248,11 @@ mod tests {
             0,
         );
         assert_eq!(unaudited.and_then(|p| p.audit), None);
+        Ok(())
     }
 
     #[test]
-    fn a_generation_the_trend_cannot_read_is_left_out_rather_than_guessed() {
+    fn a_generation_the_trend_cannot_read_is_left_out_rather_than_guessed() -> Result<()> {
         let unmeasured = serde_json::json!({
             "fitness": 0.9,
             "partition_seed": null,
@@ -266,5 +268,6 @@ mod tests {
         // A freeze baseline shares the table and is not a generation.
         let freeze = serde_json::json!({ "fitness": 0.9, "event": "freeze" });
         assert_eq!(history_point(&row("freeze:g1", freeze), 0), None);
+        Ok(())
     }
 }

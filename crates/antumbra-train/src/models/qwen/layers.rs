@@ -690,7 +690,10 @@ mod tests {
     }
 
     fn factor(varmap: &VarMap, name: &str) -> CResult<Vec<f32>> {
-        let vars = varmap.data().lock().expect("varmap lock");
+        let vars = varmap
+            .data()
+            .lock()
+            .map_err(|_| candle_core::Error::msg("the varmap lock is poisoned"))?;
         vars[name].flatten_all()?.to_vec1::<f32>()
     }
 

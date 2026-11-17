@@ -286,63 +286,72 @@ fn actionable_boundary() -> FailureBoundary {
 
 /// Compare `actual` against the stored golden `tests/golden/<name>.txt`.
 /// Re-create/update goldens by running with `ANTUMBRA_BLESS=1`.
-fn assert_golden(name: &str, actual: &str) {
+fn assert_golden(name: &str, actual: &str) -> anyhow::Result<()> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("golden")
         .join(format!("{name}.txt"));
     if std::env::var_os("ANTUMBRA_BLESS").is_some() {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, actual).unwrap();
-        return;
+        let Some(dir) = path.parent() else {
+            anyhow::bail!("{} has no parent directory", path.display());
+        };
+        std::fs::create_dir_all(dir)?;
+        std::fs::write(&path, actual)?;
+        return Ok(());
     }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-        panic!(
+    let Ok(expected) = std::fs::read_to_string(&path) else {
+        anyhow::bail!(
             "missing golden {}; run `ANTUMBRA_BLESS=1 cargo test -p antumbra-tui golden`",
             path.display()
-        )
-    });
+        );
+    };
     assert!(
         actual == expected,
         "golden mismatch for `{name}` (re-bless with ANTUMBRA_BLESS=1 if intentional)\
          \n--- expected ---\n{expected}\n--- actual ---\n{actual}"
     );
+    Ok(())
 }
 
 /// Render the active overlay's modal box and golden just that region, so the
 /// animated graph behind it never churns the comparison.
-fn golden_overlay(name: &str, app: &mut App, w: u16, h: u16) {
-    let buf = render(app, w, h, 1600.0).unwrap();
-    let rect = crate::ui::overlay_area(app, buf.area).expect("an overlay must be open");
-    assert_golden(name, &to_text_in(&buf, rect));
+fn golden_overlay(name: &str, app: &mut App, w: u16, h: u16) -> anyhow::Result<()> {
+    let buf = render(app, w, h, 1600.0)?;
+    let Some(rect) = crate::ui::overlay_area(app, buf.area) else {
+        anyhow::bail!("an overlay must be open");
+    };
+    assert_golden(name, &to_text_in(&buf, rect))
 }
 
 // Golden the keybinding help modal exactly; adding/renaming a binding must be
 // a deliberate re-bless, not a silent drift.
 #[test]
-fn golden_help_overlay() {
+fn golden_help_overlay() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.toggle_help();
-    golden_overlay("help", &mut app, 120, 36);
+    golden_overlay("help", &mut app, 120, 36)?;
+    Ok(())
 }
 
 // Golden the command palette's full command list.
 #[test]
-fn golden_command_palette() {
+fn golden_command_palette() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_palette();
-    golden_overlay("palette", &mut app, 120, 36);
+    golden_overlay("palette", &mut app, 120, 36)?;
+    Ok(())
 }
 
 // Golden the Memory page: the penumbra edge graph (memories clustered by
 // network, type-colored edges) beside the selected trace's detail. The graph
 // is statically laid out (no animation clock), so the full frame is stable.
 #[test]
-fn golden_memory_page() {
+fn golden_memory_page() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Memory);
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
-    assert_golden("memory_page", &to_text(&buf));
+    let buf = render(&mut app, 120, 36, 1600.0)?;
+    assert_golden("memory_page", &to_text(&buf))?;
+    Ok(())
 }
 
 // A memory anchored to a commit says where it was learned and how that sits
@@ -405,14 +414,14 @@ fn golden_sovereign_page() -> anyhow::Result<()> {
     app.set_page(crate::app::Page::Sovereign);
     app.select_next();
     let buf = render(&mut app, 120, 36, 1600.0)?;
-    assert_golden("sovereign_page", &to_text(&buf));
+    assert_golden("sovereign_page", &to_text(&buf))?;
     Ok(())
 }
 
 // Golden the sortable population table (full-width data grid, no animated
 // graph, so the full frame is deterministic). Default sort is fitness-desc.
 #[test]
-fn golden_population_table() {
+fn golden_population_table() -> anyhow::Result<()> {
     let now = Utc::now();
     let mk = |id: &str, name: &str, fitness: f32, gen: u32, frozen: bool| Expert {
         id: ExpertId::new(id),
@@ -437,15 +446,16 @@ fn golden_population_table() {
     ];
     app.sort_experts();
     app.set_layout(LayoutMode::Table);
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
-    assert_golden("population_table", &to_text(&buf));
+    let buf = render(&mut app, 120, 36, 1600.0)?;
+    assert_golden("population_table", &to_text(&buf))?;
+    Ok(())
 }
 
 // Golden the reward-landscape heatmap (the bottom strip of the dashboard
 // layout). Scoped to that strip so the animated population graph above it
 // never churns the comparison; the heatmap itself is deterministic.
 #[test]
-fn golden_reward_heatmap() {
+fn golden_reward_heatmap() -> anyhow::Result<()> {
     let now = Utc::now();
     let mk = |id: &str, curve: Vec<f32>| Shadow {
         id: ShadowId::new(id),
@@ -463,7 +473,7 @@ fn golden_reward_heatmap() {
         mk("shadow:fall", vec![0.6, 0.3, 0.1, 0.05]),
     ];
     app.set_layout(LayoutMode::Dashboard);
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
+    let buf = render(&mut app, 120, 36, 1600.0)?;
     // Recompute the heatmap strip: the body is the 4th chrome row, then the
     // dashboard puts the heatmap in the bottom Length(9) slice.
     let chrome = Layout::vertical([
@@ -475,54 +485,59 @@ fn golden_reward_heatmap() {
     ])
     .split(buf.area);
     let strip = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(chrome[3])[1];
-    assert_golden("reward_heatmap", &to_text_in(&buf, strip));
+    assert_golden("reward_heatmap", &to_text_in(&buf, strip))?;
+    Ok(())
 }
 
 // Golden the Loop page: the generational pipeline with the current stage lit
 // (deterministic: no animated graph, no wall-clock fields shown).
 #[test]
-fn golden_loop_page() {
+fn golden_loop_page() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Loop);
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
-    assert_golden("loop_page", &to_text(&buf));
+    let buf = render(&mut app, 120, 36, 1600.0)?;
+    assert_golden("loop_page", &to_text(&buf))?;
+    Ok(())
 }
 
 // Golden the Loop page with a pending halt (the operator graceful-stop).
 #[test]
-fn golden_loop_halted() {
+fn golden_loop_halted() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Loop);
     app.loop_halt_pending = true;
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
-    assert_golden("loop_halted", &to_text(&buf));
+    let buf = render(&mut app, 120, 36, 1600.0)?;
+    assert_golden("loop_halted", &to_text(&buf))?;
+    Ok(())
 }
 
 // Golden the Evals page: the evaluation-run table with a regression failure
 // (deterministic: fixed runs, no timestamps shown).
 #[test]
-fn golden_evals_page() {
+fn golden_evals_page() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Evals);
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
-    assert_golden("evals_page", &to_text(&buf));
+    let buf = render(&mut app, 120, 36, 1600.0)?;
+    assert_golden("evals_page", &to_text(&buf))?;
+    Ok(())
 }
 
 // Golden the evaluation drill-down: the regression comparison + run history
 // for a drifted subject (scoped to the modal; no timestamps shown).
 #[test]
-fn golden_eval_detail() {
+fn golden_eval_detail() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Evals);
     app.selected_eval = 0; // the drifted arith run
     app.open_detail();
-    golden_overlay("eval_detail", &mut app, 120, 36);
+    golden_overlay("eval_detail", &mut app, 120, 36)?;
+    Ok(())
 }
 
 // Golden the loop drill-down: the done/current/pending lifecycle ladder and
 // the run's evaluation history (the Loop → Evals link), scoped to the modal.
 #[test]
-fn golden_loop_detail() {
+fn golden_loop_detail() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Loop);
     // Tie a couple of eval runs to the displayed run (run:demo) so the
@@ -547,13 +562,14 @@ fn golden_loop_detail() {
         ev("shadow:g4", SubjectKind::Shadow, EvalStatus::Failure),
     ];
     app.open_detail();
-    golden_overlay("loop_detail", &mut app, 120, 36);
+    golden_overlay("loop_detail", &mut app, 120, 36)?;
+    Ok(())
 }
 
 // Golden the Loop page with several live runs: the selectable run list with
 // the focused run highlighted, its pipeline below (no timestamps shown).
 #[test]
-fn golden_loop_multihead() {
+fn golden_loop_multihead() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Loop);
     let now = Utc::now();
@@ -569,14 +585,15 @@ fn golden_loop_multihead() {
         mk("run:lists", 7, LoopState::Consolidate),
     ];
     app.selected_loop = 1;
-    let buf = render(&mut app, 120, 36, 1600.0).unwrap();
-    assert_golden("loop_multihead", &to_text(&buf));
+    let buf = render(&mut app, 120, 36, 1600.0)?;
+    assert_golden("loop_multihead", &to_text(&buf))?;
+    Ok(())
 }
 
 // Golden the gate (router) inspector: the weight profile + self-routing
 // health (a healthy gate routes each centroid back to itself).
 #[test]
-fn golden_gate_inspector() {
+fn golden_gate_inspector() -> anyhow::Result<()> {
     let onehot = |n: usize, i: usize| {
         let mut v = vec![0.0f32; n];
         v[i] = 1.0;
@@ -603,58 +620,64 @@ fn golden_gate_inspector() {
         floor: 0.1,
     });
     app.open_gate();
-    golden_overlay("gate_inspector", &mut app, 120, 36);
+    golden_overlay("gate_inspector", &mut app, 120, 36)?;
+    Ok(())
 }
 
 // Golden the operator-action confirm prompt.
 #[test]
-fn golden_confirm_delete() {
+fn golden_confirm_delete() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.boundaries = vec![actionable_boundary()];
     app.focus = Focus::Boundaries;
     app.request_action();
-    golden_overlay("confirm_delete", &mut app, 120, 36);
+    golden_overlay("confirm_delete", &mut app, 120, 36)?;
+    Ok(())
 }
 
 // Golden the live event-stream overlay (events stamped at clock 0, frame at
 // 1600ms → "1s ago", so it's deterministic).
 #[test]
-fn golden_event_stream() {
+fn golden_event_stream() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.operator_event("string-specialist emerged".into());
     app.operator_event("shadow:g4 graduated".into());
     app.open_events();
-    golden_overlay("events", &mut app, 100, 12);
+    golden_overlay("events", &mut app, 100, 12)?;
+    Ok(())
 }
 
 /// Golden the focused-layout right detail column (the panels, no animated
 /// graph, no wall-clock timestamps, so it's stable).
-fn golden_detail_column(name: &str, app: &mut App, w: u16, h: u16) {
-    let buf = render(app, w, h, 1600.0).unwrap();
+fn golden_detail_column(name: &str, app: &mut App, w: u16, h: u16) -> anyhow::Result<()> {
+    let buf = render(app, w, h, 1600.0)?;
     let rect = crate::transition::detail_area(buf.area);
-    assert_golden(name, &to_text_in(&buf, rect));
+    assert_golden(name, &to_text_in(&buf, rect))
 }
 
 #[test]
-fn golden_focused_experts_panel() {
+fn golden_focused_experts_panel() -> anyhow::Result<()> {
     let mut app = demo_app();
-    golden_detail_column("focused_experts", &mut app, 120, 36);
+    golden_detail_column("focused_experts", &mut app, 120, 36)?;
+    Ok(())
 }
 
 #[test]
-fn golden_focused_shadows_panel() {
+fn golden_focused_shadows_panel() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.shadows = vec![graduated_shadow()];
     app.focus = Focus::Shadows;
-    golden_detail_column("focused_shadows", &mut app, 120, 36);
+    golden_detail_column("focused_shadows", &mut app, 120, 36)?;
+    Ok(())
 }
 
 #[test]
-fn golden_focused_boundaries_panel() {
+fn golden_focused_boundaries_panel() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.boundaries = vec![actionable_boundary()];
     app.focus = Focus::Boundaries;
-    golden_detail_column("focused_boundaries", &mut app, 120, 36);
+    golden_detail_column("focused_boundaries", &mut app, 120, 36)?;
+    Ok(())
 }
 
 mod behavior;

@@ -192,10 +192,11 @@ mod tests {
     }
 
     #[test]
-    fn the_refusal_names_both_ways_out() {
+    fn the_refusal_names_both_ways_out() -> anyhow::Result<()> {
         let shown = NoEmbedder.to_string();
         assert!(shown.contains("--embedder-url"), "{shown}");
         assert!(shown.contains("--fake-embedder"), "{shown}");
         assert!(shown.contains(&EMBED_DIM.to_string()), "{shown}");
+        Ok(())
     }
 }

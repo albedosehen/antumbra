@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The kayak contract gate.
 //!
 //! THE contract lives in `antumbra_control_server::contract` and is validated
@@ -19,37 +17,40 @@
 #![cfg(feature = "contract")]
 
 use antumbra_control_server::contract::{contract, schema};
+use anyhow::{Context, Result};
 use kayak::{generate_all, validate};
 
 #[test]
-fn contract_validates_against_the_real_schema() {
+fn contract_validates_against_the_real_schema() -> Result<()> {
     let violations = validate(&contract(), &schema());
     assert_eq!(violations, vec![], "contract drifted from schema");
+    Ok(())
 }
 
 #[test]
-fn generated_artifacts_match_the_checked_in_documents() {
+fn generated_artifacts_match_the_checked_in_documents() -> Result<()> {
     let artifacts =
-        generate_all(&contract(), &schema(), &["openapi", "sdl"]).expect("contract generates");
+        generate_all(&contract(), &schema(), &["openapi", "sdl"]).context("contract generates")?;
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     for (filename, content) in &artifacts {
         let checked_in_path = format!("{root}/docs/{filename}");
         if std::env::var("KAYAK_BLESS").is_ok() {
-            std::fs::write(&checked_in_path, content).unwrap();
+            std::fs::write(&checked_in_path, content)?;
         }
-        let checked_in = std::fs::read_to_string(&checked_in_path).unwrap_or_else(|_| {
-            panic!("{checked_in_path} missing; run with KAYAK_BLESS=1 to create")
-        });
+        let checked_in = std::fs::read_to_string(&checked_in_path).with_context(|| {
+            format!("{checked_in_path} missing; run with KAYAK_BLESS=1 to create")
+        })?;
         assert_eq!(
             content.trim(),
             checked_in.trim(),
             "{filename} drifted from its checked-in copy; KAYAK_BLESS=1 to re-bless",
         );
     }
+    Ok(())
 }
 
 #[test]
-fn the_gate_actually_fires_on_an_unindexed_sort() {
+fn the_gate_actually_fires_on_an_unindexed_sort() -> Result<()> {
     // Sanity that the gate is not vacuously green: an unindexable sort over
     // the REAL schema must be refused by name. `content` is a memory column
     // covered only by the BM25 full-text index, which serves no ORDER BY.
@@ -60,10 +61,11 @@ fn the_gate_actually_fires_on_an_unindexed_sort() {
         violations.iter().any(|v| v.to_string().contains("content")),
         "expected a named refusal, got {violations:?}",
     );
+    Ok(())
 }
 
 #[test]
-fn the_typed_columns_change_nothing_but_the_columns() {
+fn the_typed_columns_change_nothing_but_the_columns() -> Result<()> {
     // The contract layer types wire columns over the store's SCHEMALESS
     // tables, and this pins down that it does ONLY that: same tables, same
     // indexes, in the same order. An index that could be edited on the way
@@ -84,4 +86,5 @@ fn the_typed_columns_change_nothing_but_the_columns() {
             stored.name
         );
     }
+    Ok(())
 }

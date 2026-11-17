@@ -127,12 +127,12 @@ pub async fn neighbors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use chrono::Utc;
 
     #[tokio::test]
-    async fn relate_is_idempotent_and_all_unscoped_reads_every_edge() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn relate_is_idempotent_and_all_unscoped_reads_every_edge() -> Result<()> {
+        let s = mem_store().await?;
         let now = Utc::now();
         let contradicts = MemoryEdge::new(
             "ws:1",
@@ -142,9 +142,9 @@ mod tests {
             0.8,
             now,
         );
-        relate(&s, &contradicts).await.unwrap();
+        relate(&s, &contradicts).await?;
         // Re-relating the same (from,to,type) upserts in place, not duplicates.
-        relate(&s, &contradicts).await.unwrap();
+        relate(&s, &contradicts).await?;
         relate(
             &s,
             &MemoryEdge::new(
@@ -156,17 +156,16 @@ mod tests {
                 now,
             ),
         )
-        .await
-        .unwrap();
+        .await?;
 
-        let all = all_unscoped(&s).await.unwrap();
+        let all = all_unscoped(&s).await?;
         assert_eq!(all.len(), 2, "two distinct edges across tenants");
 
         // The tenant-scoped neighbor read still sees only its own edge.
-        let from_a = neighbors(&s, &TenantId::new("ws:1"), &MemoryId::new("memory:a"), None)
-            .await
-            .unwrap();
+        let from_a =
+            neighbors(&s, &TenantId::new("ws:1"), &MemoryId::new("memory:a"), None).await?;
         assert_eq!(from_a.len(), 1);
         assert_eq!(from_a[0].edge_type, EdgeType::Contradicts);
+        Ok(())
     }
 }

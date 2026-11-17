@@ -394,7 +394,7 @@ mod tests {
 
     /// The agent's documented default, row by row.
     #[test]
-    fn it_bridges_exactly_what_the_agent_would_have_read() {
+    fn it_bridges_exactly_what_the_agent_would_have_read() -> anyhow::Result<()> {
         for (files, start, below, expected) in [
             // An AGENTS.md alone: bridged beside itself.
             (
@@ -473,12 +473,13 @@ mod tests {
         ] {
             assert_eq!(planned(&files, start, &below), expected, "{files:?}");
         }
+        Ok(())
     }
 
     /// A bridge we wrote must not count as the project's own instructions, or the
     /// second run would conclude the first one's AGENTS.md was never read.
     #[test]
-    fn a_bridge_is_transparent_so_a_second_run_changes_nothing() {
+    fn a_bridge_is_transparent_so_a_second_run_changes_nothing() -> anyhow::Result<()> {
         let bridge = bridge_text("AGENTS.md");
         let files = [
             ("/repo/AGENTS.md", "a"),
@@ -494,19 +495,21 @@ mod tests {
                 create("/repo/web/CLAUDE.local.md", "AGENTS.md"),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn nothing_above_the_repository_is_touched() {
+    fn nothing_above_the_repository_is_touched() -> anyhow::Result<()> {
         let files = [("/AGENTS.md", "machine-wide"), ("/repo/AGENTS.md", "a")];
         assert_eq!(
             planned(&files, "/repo", &[]),
             vec![create("/repo/CLAUDE.local.md", "AGENTS.md")]
         );
+        Ok(())
     }
 
     #[test]
-    fn the_doctor_sees_unread_bridged_and_not_applicable() {
+    fn the_doctor_sees_unread_bridged_and_not_applicable() -> anyhow::Result<()> {
         let bridge = bridge_text("AGENTS.md");
         for (files, expected) in [
             (
@@ -535,10 +538,11 @@ mod tests {
                 "{files:?}"
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn the_bridge_is_an_import_and_says_what_it_is() {
+    fn the_bridge_is_an_import_and_says_what_it_is() -> anyhow::Result<()> {
         let text = bridge_text(".claude/AGENTS.md");
         assert!(is_bridge(&text));
         assert!(
@@ -546,11 +550,12 @@ mod tests {
             "{text}"
         );
         assert!(!is_bridge("my own notes\n@AGENTS.md\n"));
+        Ok(())
     }
 
     /// Removal must never cost the user something they wrote.
     #[test]
-    fn only_an_untouched_bridge_is_ever_deleted() {
+    fn only_an_untouched_bridge_is_ever_deleted() -> anyhow::Result<()> {
         assert!(is_only_a_bridge(&bridge_text("AGENTS.md")));
         assert!(is_only_a_bridge(&format!(
             "{}\n\n",
@@ -559,10 +564,11 @@ mod tests {
         let extended = format!("{}- and my own note\n", bridge_text("AGENTS.md"));
         assert!(is_bridge(&extended) && !is_only_a_bridge(&extended));
         assert!(!is_only_a_bridge("my own notes\n@AGENTS.md\n"));
+        Ok(())
     }
 
     #[test]
-    fn a_bridge_written_with_the_earlier_marker_is_still_ours() {
+    fn a_bridge_written_with_the_earlier_marker_is_still_ours() -> anyhow::Result<()> {
         assert_ne!(
             LEGACY_MARKER, MARKER,
             "the earlier marker is a different text"
@@ -575,10 +581,11 @@ mod tests {
         assert!(is_bridge(earlier));
         assert!(is_only_a_bridge(earlier));
         assert!(!bridge_text("AGENTS.md").contains("ADR"));
+        Ok(())
     }
 
     #[test]
-    fn the_exclude_line_is_added_once_and_keeps_what_was_there() {
+    fn the_exclude_line_is_added_once_and_keeps_what_was_there() -> anyhow::Result<()> {
         assert!(!excludes_bridges(
             "# git ls-files --others --exclude-from=.git/info/exclude\n"
         ));
@@ -593,5 +600,6 @@ mod tests {
         assert!(kept.starts_with("*.log\n"), "{kept:?}");
         assert!(excludes_bridges(&kept));
         assert!(excludes_bridges(&with_exclude_line("")));
+        Ok(())
     }
 }

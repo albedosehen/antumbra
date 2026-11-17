@@ -152,13 +152,14 @@ mod tests {
     const SOVEREIGN: (&str, &str) = ("DISABLE_TELEMETRY", "1");
 
     #[test]
-    fn nothing_is_said_outside_sovereign_mode() {
+    fn nothing_is_said_outside_sovereign_mode() -> anyhow::Result<()> {
         let quiet = inputs(
             Os::Windows,
             &[],
             Instructions::Unread(PathBuf::from("AGENTS.md")),
         );
         assert_eq!(said(&quiet), None);
+        Ok(())
     }
 
     #[test]

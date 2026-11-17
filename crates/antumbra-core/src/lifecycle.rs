@@ -152,34 +152,39 @@ mod tests {
     }
 
     #[test]
-    fn staleness_demotes_and_every_demotion_but_deletion_revives() {
-        assert_eq!(Active.transition(Dormant, &operator()).unwrap(), Dormant);
-        assert_eq!(Dormant.transition(Archived, &operator()).unwrap(), Archived);
-        assert_eq!(Dormant.transition(Active, &operator()).unwrap(), Active);
-        assert_eq!(Archived.transition(Active, &operator()).unwrap(), Active);
-        assert_eq!(Active.transition(Archived, &operator()).unwrap(), Archived);
+    fn staleness_demotes_and_every_demotion_but_deletion_revives() -> anyhow::Result<()> {
+        assert_eq!(Active.transition(Dormant, &operator())?, Dormant);
+        assert_eq!(Dormant.transition(Archived, &operator())?, Archived);
+        assert_eq!(Dormant.transition(Active, &operator())?, Active);
+        assert_eq!(Archived.transition(Active, &operator())?, Active);
+        assert_eq!(Active.transition(Archived, &operator())?, Archived);
+        Ok(())
     }
 
     #[test]
-    fn only_redundancy_deletes() {
+    fn only_redundancy_deletes() -> anyhow::Result<()> {
         let stale = TransitionCause::Stale {
             generations: vec![Generation(2), Generation(4), Generation(6)],
             contributions: vec![0.0, -0.1, 0.0],
         };
         for from in [Dormant, Archived] {
-            let refused = from.transition(Deleted, &operator()).unwrap_err();
+            let Err(refused) = from.transition(Deleted, &operator()) else {
+                anyhow::bail!("an operator must not delete a {from:?} expert");
+            };
             assert!(refused.is_rejection(), "{refused}");
             assert!(
                 from.transition(Deleted, &stale).is_err(),
                 "staleness demotes"
             );
-            assert_eq!(from.transition(Deleted, &redundant()).unwrap(), Deleted);
+            assert_eq!(from.transition(Deleted, &redundant())?, Deleted);
         }
-        assert_eq!(Active.transition(Dormant, &stale).unwrap(), Dormant);
+        assert_eq!(Active.transition(Dormant, &stale)?, Dormant);
+        Ok(())
     }
 
     #[test]
-    fn an_active_expert_is_demoted_before_it_is_deleted_and_deletion_is_final() {
+    fn an_active_expert_is_demoted_before_it_is_deleted_and_deletion_is_final() -> anyhow::Result<()>
+    {
         assert!(matches!(
             Active.transition(Deleted, &redundant()),
             Err(AntumbraError::InvalidTransition { .. })
@@ -188,18 +193,21 @@ mod tests {
             assert!(Deleted.transition(to, &redundant()).is_err(), "{to:?}");
         }
         assert!(Active.transition(Active, &operator()).is_err());
+        Ok(())
     }
 
     #[test]
-    fn what_each_state_allows() {
+    fn what_each_state_allows() -> anyhow::Result<()> {
         assert!(Active.is_routable() && Active.is_servable());
         assert!(!Dormant.is_routable() && Dormant.is_servable());
         assert!(!Archived.is_routable() && !Archived.is_servable() && Archived.keeps_weights());
         assert!(!Deleted.is_servable() && !Deleted.keeps_weights());
+        Ok(())
     }
 
     #[test]
-    fn an_expert_with_no_history_is_active_and_otherwise_where_its_last_move_left_it() {
+    fn an_expert_with_no_history_is_active_and_otherwise_where_its_last_move_left_it(
+    ) -> anyhow::Result<()> {
         assert_eq!(current_status(&[]), Active);
         let moved = |from, to| ExpertTransition {
             expert: ExpertId::new("expert:a"),
@@ -213,10 +221,11 @@ mod tests {
             current_status(&[moved(Active, Dormant), moved(Dormant, Archived)]),
             Archived
         );
+        Ok(())
     }
 
     #[test]
-    fn a_transition_round_trips_with_its_cause_tagged() {
+    fn a_transition_round_trips_with_its_cause_tagged() -> anyhow::Result<()> {
         let t = ExpertTransition {
             expert: ExpertId::new("expert:a"),
             from: Dormant,
@@ -225,10 +234,11 @@ mod tests {
             generation: Some(Generation(4)),
             at: Utc::now(),
         };
-        let json = serde_json::to_value(&t).unwrap();
+        let json = serde_json::to_value(&t)?;
         assert_eq!(json["cause"]["kind"], "redundant");
         assert_eq!(json["to"], "deleted");
-        let back: ExpertTransition = serde_json::from_value(json).unwrap();
+        let back: ExpertTransition = serde_json::from_value(json)?;
         assert_eq!(back, t);
+        Ok(())
     }
 }

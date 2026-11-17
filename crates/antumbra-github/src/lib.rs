@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The native GitHub integration: the events that make a memory's
 //! git anchor stale (a merge, a branch deletion) originate in the hosting
 //! platform, so the platform tells Antumbra directly instead of a session hook
@@ -28,9 +26,6 @@ mod knowledge;
 mod repos;
 mod signature;
 #[cfg(any(test, feature = "testing"))]
-// Test support, held to the rule the tests it serves are held to, when their
-// sweep lands (#302).
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub mod testing;
 
 pub use api::{

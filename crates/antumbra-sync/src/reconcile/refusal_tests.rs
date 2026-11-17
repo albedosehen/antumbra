@@ -1,7 +1,7 @@
 use super::*;
 use antumbra_core::{DeviceProfile, DeviceRole, TenantId, UserId};
-use antumbra_store::repo::{device, principal};
-use antumbra_store::EMBED_DIM;
+use antumbra_store::repo::device;
+use antumbra_store::testing::{mem_store, members};
 
 use crate::scope::Replicate;
 use crate::table::PENUMBRA_TABLES;
@@ -19,13 +19,12 @@ fn tenant() -> TenantId {
 /// Two members of one tenant, provisioned on both stores so either can sign
 /// a session in.
 async fn org() -> Result<(Store, Store, UserId, UserId)> {
-    let local = Store::connect_memory(EMBED_DIM).await?;
-    let remote = Store::connect_memory(EMBED_DIM).await?;
+    let local = mem_store().await?;
+    let remote = mem_store().await?;
     let lily = UserId::new("user:lily");
     let oslo = UserId::new("user:oslo");
     for store in [&local, &remote] {
-        principal::provision(store, &tenant(), &lily).await?;
-        principal::provision(store, &tenant(), &oslo).await?;
+        members(store, &tenant(), &[&lily, &oslo]).await?;
     }
     Ok((local, remote, lily, oslo))
 }

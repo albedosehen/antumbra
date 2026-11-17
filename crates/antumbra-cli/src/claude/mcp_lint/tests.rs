@@ -2,7 +2,7 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn property_names_follow_the_pattern_the_api_quotes() {
+fn property_names_follow_the_pattern_the_api_quotes() -> anyhow::Result<()> {
     let long = "x".repeat(65);
     let cases = [
         ("path", true),
@@ -19,10 +19,11 @@ fn property_names_follow_the_pattern_the_api_quotes() {
     for (name, accepted) in cases {
         assert_eq!(is_acceptable_property_name(name), accepted, "{name:?}");
     }
+    Ok(())
 }
 
 #[test]
-fn a_sound_schema_has_nothing_wrong() {
+fn a_sound_schema_has_nothing_wrong() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": { "query": { "type": "string" }, "top_k": { "type": "integer" } },
@@ -30,24 +31,27 @@ fn a_sound_schema_has_nothing_wrong() {
     });
     assert_eq!(problems(&schema), Vec::new());
     assert_eq!(problems(&json!({ "type": "object" })), Vec::new());
+    Ok(())
 }
 
 #[test]
-fn a_refused_property_name_is_named() {
+fn a_refused_property_name_is_named() -> anyhow::Result<()> {
     let schema = json!({ "type": "object", "properties": { "file path": {}, "ok": {} } });
     assert_eq!(
         problems(&schema),
         vec![Problem::PropertyName("file path".to_string())]
     );
+    Ok(())
 }
 
 #[test]
-fn only_top_level_names_are_held_to_the_pattern() {
+fn only_top_level_names_are_held_to_the_pattern() -> anyhow::Result<()> {
     let schema = json!({
         "type": "object",
         "properties": { "options": { "type": "object", "properties": { "any name": {} } } }
     });
     assert_eq!(problems(&schema), Vec::new());
+    Ok(())
 }
 
 #[test]
@@ -62,7 +66,8 @@ fn a_schema_the_meta_schema_refuses_is_invalid() -> anyhow::Result<()> {
 }
 
 #[test]
-fn a_root_that_is_not_an_object_costs_the_server_its_tools_and_ends_the_matter() {
+fn a_root_that_is_not_an_object_costs_the_server_its_tools_and_ends_the_matter(
+) -> anyhow::Result<()> {
     let roots = [
         json!(null),
         json!({}),
@@ -76,10 +81,11 @@ fn a_root_that_is_not_an_object_costs_the_server_its_tools_and_ends_the_matter()
     }
     assert!(Problem::NotAnObject.is_failure());
     assert!(!Problem::NotAnObject.breaks_requests());
+    Ok(())
 }
 
 #[test]
-fn the_dialect_decides_whether_the_meta_schema_is_consulted() {
+fn the_dialect_decides_whether_the_meta_schema_is_consulted() -> anyhow::Result<()> {
     let invalid_anywhere = json!({ "type": "object", "required": "not-a-list" });
     let with = |dialect: &str| {
         let mut schema = invalid_anywhere.clone();
@@ -102,10 +108,11 @@ fn the_dialect_decides_whether_the_meta_schema_is_consulted() {
             "http://json-schema.org/draft-07/schema#".to_string()
         )]
     );
+    Ok(())
 }
 
 #[test]
-fn another_dialect_is_still_held_to_the_property_names() {
+fn another_dialect_is_still_held_to_the_property_names() -> anyhow::Result<()> {
     let schema = json!({
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -118,10 +125,11 @@ fn another_dialect_is_still_held_to_the_property_names() {
             Problem::OtherDialect("http://json-schema.org/draft-07/schema#".to_string()),
         ]
     );
+    Ok(())
 }
 
 #[test]
-fn a_root_combinator_is_the_whole_story_and_a_nested_one_is_none() {
+fn a_root_combinator_is_the_whole_story_and_a_nested_one_is_none() -> anyhow::Result<()> {
     for keyword in ROOT_COMBINATORS {
         let schema = json!({ "type": "object", keyword: [{ "properties": { "bad name": {} } }] });
         assert_eq!(problems(&schema), vec![Problem::RootCombinator(keyword)]);
@@ -131,16 +139,18 @@ fn a_root_combinator_is_the_whole_story_and_a_nested_one_is_none() {
         "properties": { "target": { "anyOf": [{ "type": "string" }, { "type": "integer" }] } }
     });
     assert_eq!(problems(&nested), Vec::new());
+    Ok(())
 }
 
 #[test]
-fn only_what_fails_a_request_counts_as_breaking() {
+fn only_what_fails_a_request_counts_as_breaking() -> anyhow::Result<()> {
     assert!(Problem::PropertyName("a b".into()).breaks_requests());
     assert!(Problem::InvalidSchema("x".into()).breaks_requests());
     assert!(!Problem::RootCombinator("anyOf").breaks_requests());
     assert!(!Problem::OtherDialect("d".into()).breaks_requests());
     assert!(!Problem::RootCombinator("anyOf").is_failure());
     assert!(!Problem::OtherDialect("d".into()).is_failure());
+    Ok(())
 }
 
 #[test]
@@ -173,7 +183,7 @@ fn tools_are_found_at_every_depth_of_the_envelope() -> anyhow::Result<()> {
 }
 
 #[test]
-fn a_rule_names_the_tool_the_way_the_agent_does() {
+fn a_rule_names_the_tool_the_way_the_agent_does() -> anyhow::Result<()> {
     assert_eq!(rule_name("kushtaka", "recall"), "mcp__kushtaka__recall");
     assert_eq!(
         rule_name("claude.ai Claude Docs", "batch"),
@@ -183,10 +193,11 @@ fn a_rule_names_the_tool_the_way_the_agent_does() {
         rule_name("context7", "query-docs"),
         "mcp__context7__query-docs"
     );
+    Ok(())
 }
 
 #[test]
-fn the_report_prints_a_deny_rule_for_what_breaks_and_only_that() {
+fn the_report_prints_a_deny_rule_for_what_breaks_and_only_that() -> anyhow::Result<()> {
     let tools = [
         Tool {
             name: "fine".into(),
@@ -225,4 +236,5 @@ fn the_report_prints_a_deny_rule_for_what_breaks_and_only_that() {
 
     let clean = render("s", 1, &[]);
     assert!(clean.contains("nothing the API would refuse"), "{clean}");
+    Ok(())
 }

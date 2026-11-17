@@ -184,6 +184,7 @@ impl GenerationLoop<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::AntumbraError;
     use antumbra_core::RunId;
     use chrono::{Duration, Utc};
 
@@ -212,14 +213,15 @@ mod tests {
     }
 
     #[test]
-    fn persistent_uselessness_confirms_with_its_evidence() {
+    fn persistent_uselessness_confirms_with_its_evidence() -> Result<()> {
         let stream = [
             measured(0, 4, Some(0.2), None),
             measured(2, 4, Some(0.0), None),
             measured(4, 3, Some(-0.25), None),
             measured(6, 5, Some(0.0), None),
         ];
-        let evidence = confirms(&stream, &policy()).expect("confirmed");
+        let evidence = confirms(&stream, &policy())
+            .ok_or_else(|| AntumbraError::other("uselessness was not confirmed"))?;
         assert_eq!(
             evidence,
             [
@@ -228,10 +230,11 @@ mod tests {
                 (Generation(6), 0.0)
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_contributing_measurement_in_the_window_is_never_demoted() {
+    fn a_contributing_measurement_in_the_window_is_never_demoted() -> Result<()> {
         let stream = [
             measured(0, 4, Some(0.0), None),
             measured(2, 4, Some(0.0), None),
@@ -246,10 +249,11 @@ mod tests {
             measured(2, 4, Some(0.0), None),
         ];
         assert!(confirms(&short, &policy()).is_none(), "not yet persistent");
+        Ok(())
     }
 
     #[test]
-    fn unused_or_thin_measurements_are_not_evidence() {
+    fn unused_or_thin_measurements_are_not_evidence() -> Result<()> {
         let unused = [
             measured(0, 4, Some(0.0), None),
             measured(2, 0, None, None),
@@ -268,10 +272,11 @@ mod tests {
             confirms(&thin, &policy()).is_none(),
             "one task is not evidence"
         );
+        Ok(())
     }
 
     #[test]
-    fn warnings_read_share_use_and_drift() {
+    fn warnings_read_share_use_and_drift() -> Result<()> {
         let fell = [
             measured(0, 6, Some(0.1), Some(0.9)),
             measured(2, 6, Some(0.1), Some(0.9)),
@@ -297,5 +302,6 @@ mod tests {
         ];
         assert!(warnings(&steady).is_empty());
         assert!(warnings(&[]).is_empty());
+        Ok(())
     }
 }

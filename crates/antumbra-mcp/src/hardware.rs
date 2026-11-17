@@ -75,7 +75,7 @@ mod tests {
     use antumbra_core::{role_for, DeviceRole};
 
     #[test]
-    fn the_first_card_listed_is_the_one_training_would_use() {
+    fn the_first_card_listed_is_the_one_training_would_use() -> anyhow::Result<()> {
         // One GPU, as nvidia-smi prints it (nounits, so bare MiB).
         assert_eq!(first_reported_mib("24564\n"), Some(24_564));
         // Two, the smaller first: that is the one device 0 is, so that is the
@@ -86,10 +86,11 @@ mod tests {
             DeviceRole::Memory,
             "a big second card does not make device 0 a trainer"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_reading_that_is_not_a_reading_is_not_a_zero() {
+    fn a_reading_that_is_not_a_reading_is_not_a_zero() -> anyhow::Result<()> {
         assert_eq!(first_reported_mib(""), None);
         assert_eq!(first_reported_mib("\n  \n"), None);
         // What a driver-less box prints on stdout before failing.
@@ -101,18 +102,20 @@ mod tests {
             role_for("cuda", first_reported_mib("[N/A]\n")),
             DeviceRole::Genesis
         );
+        Ok(())
     }
 
     /// The default build drives no accelerator, so it must not claim one: this
     /// is what keeps a CPU-only binary on a GPU box from advertising itself as
     /// somewhere to train.
     #[test]
-    fn a_build_with_no_gpu_backend_says_so_and_asks_nothing_further() {
+    fn a_build_with_no_gpu_backend_says_so_and_asks_nothing_further() -> anyhow::Result<()> {
         if cfg!(any(feature = "cuda", feature = "metal")) {
-            return;
+            return Ok(());
         }
         assert_eq!(backend(), "cpu");
         assert_eq!(vram_mib(), None);
         assert_eq!(role_for(backend(), vram_mib()), DeviceRole::Memory);
+        Ok(())
     }
 }

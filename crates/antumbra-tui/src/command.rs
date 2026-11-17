@@ -197,7 +197,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fuzzy_matches_subsequences_case_insensitively() {
+    fn fuzzy_matches_subsequences_case_insensitively() -> anyhow::Result<()> {
         assert!(fuzzy_score("theme · cycle palette", "theme").is_some());
         assert!(fuzzy_score("theme · cycle palette", "cyc").is_some());
         assert!(fuzzy_score("reload from the store", "RLD").is_some());
@@ -205,18 +205,24 @@ mod tests {
         assert!(fuzzy_score("reload", "dler").is_none());
         // An empty query matches everything.
         assert_eq!(fuzzy_score("anything", ""), Some(0));
+        Ok(())
     }
 
     #[test]
-    fn closer_matches_score_lower() {
+    fn closer_matches_score_lower() -> anyhow::Result<()> {
         // A contiguous match beats a gappy one of the same query.
-        let contiguous = fuzzy_score("focus", "foc").unwrap();
-        let gappy = fuzzy_score("f o c", "foc").unwrap();
+        let Some(contiguous) = fuzzy_score("focus", "foc") else {
+            anyhow::bail!("`foc` did not match `focus`");
+        };
+        let Some(gappy) = fuzzy_score("f o c", "foc") else {
+            anyhow::bail!("`foc` did not match `f o c`");
+        };
         assert!(contiguous < gappy, "{contiguous} should rank above {gappy}");
+        Ok(())
     }
 
     #[test]
-    fn matches_filters_and_ranks() {
+    fn matches_filters_and_ranks() -> anyhow::Result<()> {
         // The literal `fps` commands score best and lead the list (a fuzzy
         // subsequence like "focus penumbra · shadows" may also match, but ranks
         // lower).
@@ -233,5 +239,6 @@ mod tests {
         assert_eq!(quit[0].action, Action::Quit);
         // An empty query returns the whole registry in order.
         assert_eq!(matches("").len(), COMMANDS.len());
+        Ok(())
     }
 }

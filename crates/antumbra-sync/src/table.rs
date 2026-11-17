@@ -86,12 +86,13 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::Result;
 
     /// Every table the sync replicates is one the schema defines: a renamed
     /// store table fails here by name rather than silently stopping its
     /// replication.
     #[test]
-    fn every_replicated_table_is_one_the_schema_defines() {
+    fn every_replicated_table_is_one_the_schema_defines() -> Result<()> {
         let defined: Vec<String> = antumbra_store::schema::tables(antumbra_store::EMBED_DIM as u32)
             .iter()
             .map(|t| t.name.clone())
@@ -104,5 +105,6 @@ mod tests {
             );
         }
         assert!(PENUMBRA_TABLES.len() >= 6);
+        Ok(())
     }
 }

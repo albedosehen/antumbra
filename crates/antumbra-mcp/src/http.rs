@@ -66,7 +66,7 @@ use antumbra_core::ports::Embedder;
 use antumbra_core::{TenantId, UserId};
 use antumbra_store::Store;
 
-use crate::auth::{Identity, JwtVerifier};
+use crate::auth::{Access, AuthError, Identity, JwtVerifier};
 use crate::server::McpServer;
 
 mod behaviors;
@@ -76,6 +76,7 @@ mod dashboard;
 mod experts;
 mod github;
 mod relics;
+mod revocation;
 pub(crate) use github::GithubConfig;
 
 type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
@@ -217,6 +218,9 @@ struct HttpState {
     /// One MCP service per identity (provisioned once), all sharing `store`.
     /// Bounded so a host that sees many distinct identities cannot grow it without
     /// limit; an evicted identity rebuilds its service on the next request.
+    /// The ids of the tokens revoked before their expiry, as the store's
+    /// `revoked_token` table had them at the last refresh ([`revocation`]).
+    revoked: std::sync::RwLock<std::collections::HashSet<String>>,
     sessions: Mutex<Bounded<Identity, IdentityService>>,
     /// One server per identity for the REST shim (`/mcp/call`), provisioned once
     /// like `sessions`. Built per request, every hook call and dashboard load
@@ -303,11 +307,19 @@ pub async fn serve(
         source,
         profile,
         github: github.map(Arc::new),
+        revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
         steward: Arc::default(),
     });
+    // A revocation written while the server was down applies to its first
+    // request; the refresh then keeps the list within REFRESH of the table.
+    let revoked = revocation::refresh(&state).await?;
+    if revoked > 0 {
+        eprintln!("antumbra-mcp: {revoked} revoked token(s) refused");
+    }
+    revocation::spawn(state.clone());
     spawn_live_propagation(state.clone(), announced);
     chunker::spawn(state.clone(), chunk_in_flight);
     behaviors::spawn(state.clone());
@@ -483,7 +495,7 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
-    let identity = match state.verifier.verify_header(header_val) {
+    let identity = match state.identity_of(header_val) {
         Ok(id) => id,
         Err(e) => {
             // Log the reason server-side; the client only ever sees a generic 401.
@@ -516,6 +528,31 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
 }
 
 impl HttpState {
+    /// The request's verified token and role, refused as well when its id is
+    /// on the denylist: a token on a lost or shared machine is ended by
+    /// `antumbra revoke-token`, and every networked server refuses it within
+    /// [`revocation::REFRESH`]. Every route that takes a token comes through
+    /// here or [`Self::identity_of`].
+    fn access_of(&self, header: Option<&str>) -> Result<Access, AuthError> {
+        let access = self.verifier.verify_header_access(header)?;
+        if let Some(jti) = &access.jti {
+            // A poisoned lock holds a whole set: nothing writes it in two steps.
+            let revoked = self
+                .revoked
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if revoked.contains(jti) {
+                return Err(AuthError::Invalid("token revoked".into()));
+            }
+        }
+        Ok(access)
+    }
+
+    /// [`Self::access_of`], as the identity alone.
+    fn identity_of(&self, header: Option<&str>) -> Result<Identity, AuthError> {
+        self.access_of(header).map(|a| a.identity)
+    }
+
     /// Get (or first-time provision) the MCP service for an identity. All
     /// services share the one `store`; only their provenance fields differ.
     async fn service_for(&self, identity: &Identity) -> Result<IdentityService> {
@@ -862,7 +899,7 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
-    let identity = match state.verifier.verify_header(header_val) {
+    let identity = match state.identity_of(header_val) {
         Ok(id) => id,
         Err(e) => {
             eprintln!("antumbra-mcp: rejected /mcp/call: {e}");

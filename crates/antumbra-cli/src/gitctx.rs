@@ -63,7 +63,7 @@ mod tests {
     /// well-formed anchor for it; outside git (a tarball checkout) it yields
     /// nothing rather than something wrong.
     #[test]
-    fn detects_a_well_formed_anchor_or_nothing() {
+    fn detects_a_well_formed_anchor_or_nothing() -> anyhow::Result<()> {
         match detect() {
             Some(p) => {
                 assert!(p.is_valid());
@@ -76,15 +76,16 @@ mod tests {
                     || git_in(Path::new("."), &["remote", "get-url", "origin"]).is_none()
             ),
         }
+        Ok(())
     }
 
     /// From any directory, the tree's own anchor and files: `tracked_files`
     /// names them from the repository root.
     #[test]
-    fn reads_a_tree_from_outside_it() {
+    fn reads_a_tree_from_outside_it() -> anyhow::Result<()> {
         let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         if detect_in(crate_dir).is_none() {
-            return;
+            return Ok(());
         }
         assert_eq!(
             detect_in(crate_dir).map(|a| a.repo),
@@ -96,10 +97,11 @@ mod tests {
             "{files:?}"
         );
         assert!(tracked_files(&std::env::temp_dir().join("not-a-repo-anywhere")).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn a_failing_git_command_is_none() {
+    fn a_failing_git_command_is_none() -> anyhow::Result<()> {
         assert_eq!(
             git_in(
                 Path::new("."),
@@ -107,5 +109,6 @@ mod tests {
             ),
             None
         );
+        Ok(())
     }
 }

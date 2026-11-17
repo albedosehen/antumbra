@@ -14,10 +14,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_mean_of_nothing_is_none_and_of_something_its_average() {
+    fn the_mean_of_nothing_is_none_and_of_something_its_average() -> anyhow::Result<()> {
         assert_eq!(mean(std::iter::empty()), None);
         assert_eq!(mean([2.0]), Some(2.0));
         assert_eq!(mean([1.0, 2.0, 3.0, 6.0]), Some(3.0));
         assert_eq!(mean(vec![0.5, 1.5].into_iter()), Some(1.0));
+        Ok(())
     }
 }

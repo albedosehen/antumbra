@@ -136,7 +136,7 @@ copal answers on the compose network and on `127.0.0.1:8092` only: its default `
 
 ## Notes
 
-- `docker/.env` holds secrets and is gitignored. Move these to a secret manager (Doppler) for anything beyond local use. Compose passes them as environment, never as command-line arguments; a deployment that mounts secrets as files (Docker secrets, Kubernetes, a Key Vault CSI mount) passes `--db-pass-file` and `--jwt-secret-file` to `antumbra-mcp` instead, so they appear in neither the process arguments nor the environment.
+- `docker/.env` holds secrets and is gitignored. Move these to a secret manager (Doppler) for anything beyond local use. Compose passes them as environment, never as command-line arguments; a deployment that mounts secrets as files (Docker secrets, Kubernetes, a Key Vault CSI mount) passes `--db-pass-file` and `--jwt-secret-file` to `antumbra-mcp`, and `--db-pass-file` and `--magic-secret-file` to `antumbra-control-server`, instead, so they appear in neither the process arguments nor the environment.
 - The first image build of `antumbra-mcp` or `antumbra-control-server` compiles the workspace and is slow; rebuilds are cached.
 - The RS256 private key never enters an image; it is bind-mounted read-only at runtime.
 

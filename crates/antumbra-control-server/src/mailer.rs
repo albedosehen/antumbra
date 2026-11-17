@@ -134,10 +134,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn smtp_is_requested_only_by_a_non_empty_host() {
+    fn smtp_is_requested_only_by_a_non_empty_host() -> anyhow::Result<()> {
         assert!(!smtp_requested(None), "unset = not requested");
         assert!(!smtp_requested(Some("")), "empty (compose default) = unset");
         assert!(smtp_requested(Some("smtp.example.com")));
+        Ok(())
     }
 
     /// An SMTP mailer that cannot be built, as a bad `SMTP_PORT` leaves it.

@@ -1,7 +1,9 @@
 use super::*;
 
 use std::collections::HashMap;
+use std::sync::MutexGuard;
 
+use anyhow::Context as _;
 use tokenizers::models::wordlevel::WordLevel;
 use tokenizers::pre_tokenizers::whitespace::Whitespace;
 use tokenizers::processors::template::TemplateProcessing;
@@ -10,8 +12,8 @@ use crate::decision_probe::{split_by_memory, verbatim_containment};
 
 /// A ModernBERT small enough to build and train on a CPU in a test: two
 /// layers, one of them local, sixteen wide.
-fn tiny_config() -> Config {
-    serde_json::from_value(serde_json::json!({
+fn tiny_config() -> anyhow::Result<Config> {
+    Ok(serde_json::from_value(serde_json::json!({
         "vocab_size": 32,
         "hidden_size": 16,
         "num_hidden_layers": 2,
@@ -24,42 +26,50 @@ fn tiny_config() -> Config {
         "global_rope_theta": 10000.0,
         "local_attention": 8,
         "local_rope_theta": 10000.0
-    }))
-    .expect("tiny config")
+    }))?)
 }
 
-fn tiny_model(varmap: &VarMap, pooling: Pooling) -> PairModel {
+fn tiny_model(varmap: &VarMap, pooling: Pooling) -> anyhow::Result<PairModel> {
     let vb = VarBuilder::from_varmap(varmap, DType::F32, &Device::Cpu);
-    PairModel::new(vb, &tiny_config(), pooling).expect("build tiny model")
+    Ok(PairModel::new(vb, &tiny_config()?, pooling)?)
 }
 
 /// Rows of token ids, all the same width, with a full mask.
-fn rows(ids: &[[u32; 6]]) -> (Tensor, Tensor) {
+fn rows(ids: &[[u32; 6]]) -> candle_core::Result<(Tensor, Tensor)> {
     let flat: Vec<u32> = ids.iter().flatten().copied().collect();
     let shape = (ids.len(), 6);
-    (
-        Tensor::from_vec(flat, shape, &Device::Cpu).unwrap(),
-        Tensor::ones(shape, DType::U32, &Device::Cpu).unwrap(),
-    )
+    Ok((
+        Tensor::from_vec(flat, shape, &Device::Cpu)?,
+        Tensor::ones(shape, DType::U32, &Device::Cpu)?,
+    ))
+}
+
+/// The variables in `varmap`, locked for reading.
+fn vars_of(varmap: &VarMap) -> anyhow::Result<MutexGuard<'_, HashMap<String, Var>>> {
+    varmap
+        .data()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("the variable map is poisoned"))
 }
 
 #[test]
-fn the_model_gives_two_logits_per_pair_under_either_pooling() {
+fn the_model_gives_two_logits_per_pair_under_either_pooling() -> anyhow::Result<()> {
     for pooling in [Pooling::Cls, Pooling::Mean] {
         let varmap = VarMap::new();
-        let model = tiny_model(&varmap, pooling);
-        let (ids, mask) = rows(&[[1, 5, 2, 7, 8, 2], [1, 6, 2, 9, 10, 2], [1, 5, 2, 3, 4, 2]]);
-        let logits = model.logits(&ids, &mask).unwrap();
+        let model = tiny_model(&varmap, pooling)?;
+        let (ids, mask) = rows(&[[1, 5, 2, 7, 8, 2], [1, 6, 2, 9, 10, 2], [1, 5, 2, 3, 4, 2]])?;
+        let logits = model.logits(&ids, &mask)?;
         assert_eq!(logits.dims(), &[3, 2], "{pooling:?}");
     }
+    Ok(())
 }
 
 /// The training step reaches every part of the model: on a signal only the
 /// query token carries, the loss falls and the pairs separate.
 #[test]
-fn training_learns_a_signal_carried_by_the_query() {
+fn training_learns_a_signal_carried_by_the_query() -> anyhow::Result<()> {
     let varmap = VarMap::new();
-    let model = tiny_model(&varmap, Pooling::Mean);
+    let model = tiny_model(&varmap, Pooling::Mean)?;
     // Token 5 after [CLS] means "relevant", token 6 means not; the memory
     // tokens are shared noise.
     let data = [
@@ -71,57 +81,54 @@ fn training_learns_a_signal_carried_by_the_query() {
         ([1, 6, 2, 11, 12, 2], 0),
     ];
     let ids: Vec<[u32; 6]> = data.iter().map(|(r, _)| *r).collect();
-    let (ids, mask) = rows(&ids);
+    let (ids, mask) = rows(&ids)?;
     let labels: Vec<u32> = data.iter().map(|(_, l)| *l).collect();
-    let labels = Tensor::new(labels.as_slice(), &Device::Cpu).unwrap();
+    let labels = Tensor::new(labels.as_slice(), &Device::Cpu)?;
     let mut opt = AdamW::new(
         varmap.all_vars(),
         ParamsAdamW {
             lr: 1e-2,
             ..Default::default()
         },
-    )
-    .unwrap();
-    let loss_of = |m: &PairModel| {
-        candle_nn::loss::cross_entropy(&m.logits(&ids, &mask).unwrap(), &labels).unwrap()
+    )?;
+    let loss_of = |m: &PairModel| -> candle_core::Result<Tensor> {
+        candle_nn::loss::cross_entropy(&m.logits(&ids, &mask)?, &labels)
     };
-    let first = loss_of(&model).to_scalar::<f32>().unwrap();
+    let first = loss_of(&model)?.to_scalar::<f32>()?;
     for _ in 0..60 {
-        opt.backward_step(&loss_of(&model)).unwrap();
+        opt.backward_step(&loss_of(&model)?)?;
     }
-    let last = loss_of(&model).to_scalar::<f32>().unwrap();
+    let last = loss_of(&model)?.to_scalar::<f32>()?;
     assert!(last < first * 0.25, "loss {first} -> {last}");
-    let probs = candle_nn::ops::softmax(&model.logits(&ids, &mask).unwrap(), D::Minus1)
-        .unwrap()
-        .i((.., 1))
-        .unwrap()
-        .to_vec1::<f32>()
-        .unwrap();
+    let probs = candle_nn::ops::softmax(&model.logits(&ids, &mask)?, D::Minus1)?
+        .i((.., 1))?
+        .to_vec1::<f32>()?;
     let scored = score_at_half(&probs, data.iter().map(|(_, l)| *l == 1));
     assert_eq!(scored.accuracy, 1.0, "{probs:?}");
+    Ok(())
 }
 
 /// A checkpoint of a tiny model's own variables, minus the classifier and
 /// minus any names in `drop`.
-fn checkpoint_of(drop: &[&str]) -> HashMap<String, Tensor> {
+fn checkpoint_of(drop: &[&str]) -> anyhow::Result<HashMap<String, Tensor>> {
     let source = VarMap::new();
-    let _ = tiny_model(&source, Pooling::Mean);
-    let tensors = source
-        .data()
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(name, _)| !name.starts_with("classifier.") && !drop.contains(&name.as_str()))
-        .map(|(name, var)| (name.clone(), var.as_tensor().copy().unwrap()))
-        .collect();
-    tensors
+    let _ = tiny_model(&source, Pooling::Mean)?;
+    let vars = vars_of(&source)?;
+    let mut tensors = HashMap::new();
+    for (name, var) in vars.iter() {
+        if name.starts_with("classifier.") || drop.contains(&name.as_str()) {
+            continue;
+        }
+        tensors.insert(name.clone(), var.as_tensor().copy()?);
+    }
+    Ok(tensors)
 }
 
-fn build_from(checkpoint: HashMap<String, Tensor>) -> candle_core::Result<(VarMap, PairModel)> {
+fn build_from(checkpoint: HashMap<String, Tensor>) -> anyhow::Result<(VarMap, PairModel)> {
     let varmap = VarMap::new();
     let model = PairModel::new(
         from_checkpoint(checkpoint, &varmap, &Device::Cpu),
-        &tiny_config(),
+        &tiny_config()?,
         Pooling::Mean,
     )?;
     Ok((varmap, model))
@@ -130,12 +137,12 @@ fn build_from(checkpoint: HashMap<String, Tensor>) -> candle_core::Result<(VarMa
 /// Built from a checkpoint, every variable but the classifier holds the
 /// checkpoint's value, and every one of them trains.
 #[test]
-fn a_checkpoint_supplies_every_variable_but_the_classifier() {
-    let checkpoint = checkpoint_of(&[]);
-    let (varmap, _) = build_from(checkpoint.clone()).unwrap();
+fn a_checkpoint_supplies_every_variable_but_the_classifier() -> anyhow::Result<()> {
+    let checkpoint = checkpoint_of(&[])?;
+    let (varmap, _) = build_from(checkpoint.clone())?;
     // Counted before the lock below: `all_vars` takes the same lock.
     let trainable = varmap.all_vars().len();
-    let vars = varmap.data().lock().unwrap();
+    let vars = vars_of(&varmap)?;
     let fresh: Vec<&String> = vars
         .keys()
         .filter(|n| !checkpoint.contains_key(*n))
@@ -145,10 +152,11 @@ fn a_checkpoint_supplies_every_variable_but_the_classifier() {
     assert_eq!(fresh, ["classifier.bias", "classifier.weight"]);
     let name = "model.final_norm.weight";
     assert_eq!(
-        vars[name].as_tensor().to_vec1::<f32>().unwrap(),
-        checkpoint[name].to_vec1::<f32>().unwrap()
+        vars[name].as_tensor().to_vec1::<f32>()?,
+        checkpoint[name].to_vec1::<f32>()?
     );
     assert_eq!(trainable, vars.len());
+    Ok(())
 }
 
 /// ModernBERT's first layer has no attention-norm weight, so candle leaves
@@ -156,27 +164,29 @@ fn a_checkpoint_supplies_every_variable_but_the_classifier() {
 /// starting fresh, which would re-normalize the embeddings and stop being the
 /// pretrained model.
 #[test]
-fn a_norm_the_checkpoint_lacks_is_left_out_not_started_fresh() {
+fn a_norm_the_checkpoint_lacks_is_left_out_not_started_fresh() -> anyhow::Result<()> {
     let norm = "model.layers.0.attn_norm.weight";
-    let (varmap, model) = build_from(checkpoint_of(&[norm])).unwrap();
-    assert!(!varmap.data().lock().unwrap().contains_key(norm));
-    let (ids, mask) = rows(&[[1, 5, 2, 7, 8, 2]]);
-    assert_eq!(model.logits(&ids, &mask).unwrap().dims(), &[1, 2]);
+    let (varmap, model) = build_from(checkpoint_of(&[norm])?)?;
+    assert!(!vars_of(&varmap)?.contains_key(norm));
+    let (ids, mask) = rows(&[[1, 5, 2, 7, 8, 2]])?;
+    assert_eq!(model.logits(&ids, &mask)?.dims(), &[1, 2]);
+    Ok(())
 }
 
 /// A variable the model needs and the checkpoint lacks is an error when the
 /// model is built, not a silent random start.
 #[test]
-fn a_required_tensor_the_checkpoint_lacks_is_an_error() {
-    let refused = build_from(checkpoint_of(&["model.final_norm.weight"]))
-        .err()
-        .expect("missing tensor refused")
-        .to_string();
+fn a_required_tensor_the_checkpoint_lacks_is_an_error() -> anyhow::Result<()> {
+    let Err(refused) = build_from(checkpoint_of(&["model.final_norm.weight"])?) else {
+        anyhow::bail!("a missing tensor was accepted");
+    };
+    let refused = refused.to_string();
     assert!(refused.contains("not in the checkpoint"), "{refused}");
+    Ok(())
 }
 
 /// A word-level tokenizer with the pair template ModernBERT's uses.
-fn tiny_tokenizer() -> Tokenizer {
+fn tiny_tokenizer() -> anyhow::Result<Tokenizer> {
     let words = [
         "[PAD]", "[CLS]", "[SEP]", "[UNK]", "where", "is", "the", "key", "under", "mat", "a", "b",
     ];
@@ -189,19 +199,19 @@ fn tiny_tokenizer() -> Tokenizer {
         .vocab(vocab.into_iter().collect())
         .unk_token("[UNK]".into())
         .build()
-        .unwrap();
+        .map_err(anyhow::Error::from_boxed)?;
     let mut tokenizer = Tokenizer::new(model);
     tokenizer.with_pre_tokenizer(Some(Whitespace {}));
     let template = TemplateProcessing::builder()
         .try_single("[CLS] $A [SEP]")
-        .unwrap()
+        .map_err(anyhow::Error::msg)?
         .try_pair("[CLS] $A [SEP] $B:1 [SEP]:1")
-        .unwrap()
+        .map_err(anyhow::Error::msg)?
         .special_tokens(vec![("[CLS]", 1), ("[SEP]", 2)])
         .build()
-        .unwrap();
+        .map_err(anyhow::Error::msg)?;
     tokenizer.with_post_processor(Some(template));
-    tokenizer
+    Ok(tokenizer)
 }
 
 fn pair(query: &str, memory: &str, relevant: bool) -> LabeledPair {
@@ -215,15 +225,15 @@ fn pair(query: &str, memory: &str, relevant: bool) -> LabeledPair {
 /// A pair reads as one sequence, the memory is what gets cut, and a batch is
 /// padded to its longest pair with the padding masked out.
 #[test]
-fn pairs_are_one_sequence_cut_from_the_memory_and_padded() {
-    let mut tokenizer = tiny_tokenizer();
+fn pairs_are_one_sequence_cut_from_the_memory_and_padded() -> anyhow::Result<()> {
+    let mut tokenizer = tiny_tokenizer()?;
     // 14 tokens: three special, the 4-token query whole, 7 of the memory's 8.
-    configure_tokenizer(&mut tokenizer, 14, 0).unwrap();
+    configure_tokenizer(&mut tokenizer, 14, 0)?;
     let long = pair("where is the key", "under the mat under a b a b", true);
     let short = pair("key", "mat", false);
-    let (ids, mask) = encode_pairs(&tokenizer, &[&long, &short], &Device::Cpu).unwrap();
-    let ids = ids.to_vec2::<u32>().unwrap();
-    let mask = mask.to_vec2::<u32>().unwrap();
+    let (ids, mask) = encode_pairs(&tokenizer, &[&long, &short], &Device::Cpu)?;
+    let ids = ids.to_vec2::<u32>()?;
+    let mask = mask.to_vec2::<u32>()?;
     // [CLS] where is the key [SEP] under the mat under a b a [SEP]: the query
     // whole, the memory's last token cut.
     assert_eq!(ids[0], vec![1, 4, 5, 6, 7, 2, 8, 6, 9, 8, 10, 11, 10, 2]);
@@ -231,26 +241,29 @@ fn pairs_are_one_sequence_cut_from_the_memory_and_padded() {
     // [CLS] key [SEP] mat [SEP], then padding the mask leaves out.
     assert_eq!(ids[1], vec![1, 7, 2, 9, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert_eq!(mask[1], vec![1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    Ok(())
 }
 
 #[test]
-fn the_learning_rate_warms_up_then_decays_to_zero() {
+fn the_learning_rate_warms_up_then_decays_to_zero() -> anyhow::Result<()> {
     let peak = 1e-3;
     assert!(scheduled_lr(peak, 0, 100) < peak);
     assert_eq!(scheduled_lr(peak, 9, 100), peak);
     assert!(scheduled_lr(peak, 50, 100) < peak);
     assert!(scheduled_lr(peak, 99, 100) < scheduled_lr(peak, 50, 100));
     assert!(scheduled_lr(peak, 100, 100).abs() < 1e-12);
+    Ok(())
 }
 
 #[test]
-fn the_shuffle_is_a_permutation_fixed_by_its_seed() {
+fn the_shuffle_is_a_permutation_fixed_by_its_seed() -> anyhow::Result<()> {
     let a = shuffled(50, 7);
     let mut sorted = a.clone();
     sorted.sort_unstable();
     assert_eq!(sorted, (0..50).collect::<Vec<_>>());
     assert_eq!(a, shuffled(50, 7));
     assert_ne!(a, shuffled(50, 8));
+    Ok(())
 }
 
 /// The relevance head's validation, with a pair encoder: does a fine-tuned
@@ -270,13 +283,13 @@ fn the_shuffle_is_a_permutation_fixed_by_its_seed() {
 /// ANTUMBRA_D2_LR (3e-5), ANTUMBRA_D2_SEED (0).
 #[test]
 #[ignore = "needs ANTUMBRA_D2_LABELS, downloads and fine-tunes an encoder"]
-fn d2_pair_encoder_against_the_control() {
+fn d2_pair_encoder_against_the_control() -> anyhow::Result<()> {
     let Ok(path) = std::env::var("ANTUMBRA_D2_LABELS") else {
         println!("ANTUMBRA_D2_LABELS unset -- skipped");
-        return;
+        return Ok(());
     };
-    let raw = std::fs::read_to_string(&path).expect("read labels");
-    let pairs: Vec<LabeledPair> = serde_json::from_str(&raw).expect("parse labels");
+    let raw = std::fs::read_to_string(&path).context("read labels")?;
+    let pairs: Vec<LabeledPair> = serde_json::from_str(&raw).context("parse labels")?;
     assert!(pairs.len() >= 20, "need a real set, got {}", pairs.len());
     let (train, test) = split_by_memory(&pairs);
 
@@ -303,7 +316,7 @@ fn d2_pair_encoder_against_the_control() {
     );
     let started = std::time::Instant::now();
     let got = fine_tune_and_score(&train, &test, &cfg, &mut |line| println!("  {line}"))
-        .expect("fine-tune");
+        .context("fine-tune")?;
     println!(
         "  PAIR ENCODER  acc={:.3} prec={:.3} rec={:.3} F1={:.3}  in {:.0}s  {}",
         got.accuracy,
@@ -326,4 +339,5 @@ fn d2_pair_encoder_against_the_control() {
         "  NO MODEL: does the memory contain the query verbatim?  acc={:.3} F1={:.3}",
         triv.accuracy, triv.f1
     );
+    Ok(())
 }

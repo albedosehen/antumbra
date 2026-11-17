@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! # antumbra-serve (hardware-adaptive serving)
 //!
 //! S-LoRA-style serving: one shared base resident on a single device plus a
@@ -331,10 +329,10 @@ impl Serve for MultiAdapterServe {
 mod tests {
     use super::*;
     use antumbra_core::ports::ActRequest;
-    use antumbra_core::AntumbraError;
+    use antumbra_core::{AntumbraError, Result};
 
     #[tokio::test]
-    async fn serve_seam_reports_unimplemented() {
+    async fn serve_seam_reports_unimplemented() -> Result<()> {
         let serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B-Instruct", "/adapters");
         let req = ActRequest {
             task_id: "t:1".into(),
@@ -342,8 +340,11 @@ mod tests {
             adapters: vec![],
             weights: Vec::new(),
         };
-        let err = serve.act(req).await.unwrap_err();
+        let Err(err) = serve.act(req).await else {
+            return Err(AntumbraError::other("the seam served the request"));
+        };
         assert!(matches!(err, AntumbraError::Unimplemented(_)));
+        Ok(())
     }
 }
 
@@ -351,12 +352,20 @@ mod tests {
 mod tests {
     use super::*;
     use antumbra_core::ports::ActRequest;
-    use antumbra_core::ExpertId;
+    use antumbra_core::{AntumbraError, ExpertId, Result};
+
+    /// The message `serve` refuses `req` with.
+    async fn refused(serve: &MultiAdapterServe, req: ActRequest) -> Result<String> {
+        let Err(e) = serve.act(req).await else {
+            return Err(AntumbraError::other("the request was served"));
+        };
+        Ok(e.to_string())
+    }
 
     // The resolution path is device-free: an empty request and an unregistered
     // expert both fail *before* any base load, so these run without a GPU.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn empty_request_errors_before_load() {
+    async fn empty_request_errors_before_load() -> Result<()> {
         let serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B", Default::default());
         let req = ActRequest {
             task_id: "t".into(),
@@ -364,12 +373,13 @@ mod tests {
             adapters: vec![],
             weights: Vec::new(),
         };
-        let msg = serve.act(req).await.unwrap_err().to_string();
+        let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter selected"), "{msg}");
+        Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn unregistered_expert_errors_before_load() {
+    async fn unregistered_expert_errors_before_load() -> Result<()> {
         let serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B", Default::default());
         let req = ActRequest {
             task_id: "t".into(),
@@ -377,12 +387,13 @@ mod tests {
             adapters: vec![ExpertId::new("expert:ghost")],
             weights: Vec::new(),
         };
-        let msg = serve.act(req).await.unwrap_err().to_string();
+        let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter registered"), "{msg}");
+        Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_blend_beyond_the_slots_errors_before_load() {
+    async fn a_blend_beyond_the_slots_errors_before_load() -> Result<()> {
         let mut serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B", Default::default());
         let ids: Vec<ExpertId> = (0..=BLEND_SLOTS)
             .map(|i| ExpertId::new(format!("expert:{i}")))
@@ -390,29 +401,28 @@ mod tests {
         for id in &ids {
             serve.register(id.clone(), "adapters/never-read.safetensors");
         }
-        let msg = serve
-            .act(ActRequest::new("t", "hi", ids))
-            .await
-            .unwrap_err()
-            .to_string();
+        let msg = refused(&serve, ActRequest::new("t", "hi", ids)).await?;
         assert!(msg.contains("at most"), "{msg}");
+        Ok(())
     }
 
     #[test]
-    fn the_resident_rank_holds_every_slot_at_the_trained_scale() {
+    fn the_resident_rank_holds_every_slot_at_the_trained_scale() -> Result<()> {
         let trained = RaftConfig::default();
         let resident = blend_config(&trained);
         assert_eq!(resident.lora_rank, trained.lora_rank * BLEND_SLOTS);
         assert!((resident.lora_scale() - trained.lora_scale()).abs() < 1e-12);
+        Ok(())
     }
 
     #[test]
-    fn registry_tracks_adapters() {
+    fn registry_tracks_adapters() -> Result<()> {
         let serve = MultiAdapterServe::new("base", Default::default())
             .with_adapter(ExpertId::new("expert:a"), "adapters/a.safetensors")
             .with_adapter(ExpertId::new("expert:b"), "adapters/b.safetensors");
         assert_eq!(serve.len(), 2);
         assert!(!serve.is_empty());
+        Ok(())
     }
 
     /// The regression: a retrained expert keeps its id, and the resident

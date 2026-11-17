@@ -239,16 +239,15 @@ impl McpServer {
 mod tests {
     use super::*;
     use antumbra_core::testing::FixedEmbedder;
+    use antumbra_store::testing::mem_store;
     use antumbra_store::EMBED_DIM;
 
     const REPO: &str = "github.com/acme/orders";
 
-    async fn server_as(store: &Store, tenant: &str, user: &str) -> McpServer {
+    async fn server_as(store: &Store, tenant: &str, user: &str) -> anyhow::Result<McpServer> {
         let (tenant, user) = (TenantId::new(tenant), UserId::new(user));
-        let compartment = crate::provision_identity(store, &tenant, &user)
-            .await
-            .unwrap();
-        McpServer::new(
+        let compartment = crate::provision_identity(store, &tenant, &user).await?;
+        Ok(McpServer::new(
             store.clone(),
             Arc::new(FixedEmbedder::new(EMBED_DIM)),
             tenant,
@@ -256,10 +255,15 @@ mod tests {
             "h".into(),
             compartment,
             None,
-        )
+        ))
     }
 
-    async fn remember(s: &McpServer, content: &str, repo: &str, branch: &str) -> String {
+    async fn remember(
+        s: &McpServer,
+        content: &str,
+        repo: &str,
+        branch: &str,
+    ) -> anyhow::Result<String> {
         remember_in(s, content, repo, branch, None).await
     }
 
@@ -269,25 +273,24 @@ mod tests {
         repo: &str,
         branch: &str,
         compartment: Option<String>,
-    ) -> String {
-        s.store_memory(Parameters(StoreParams {
-            provenance: Some(ProvenanceParams {
-                repo: repo.into(),
-                commit: "b697da7".into(),
-                branch: Some(branch.into()),
-                path: Some("src/orders.rs".into()),
-            }),
-            content: content.into(),
-            network: "world".into(),
-            confidence: None,
-            evidence: None,
-            volatile: None,
-            compartment,
-        }))
-        .await
-        .unwrap()
-        .0
-        .id
+    ) -> anyhow::Result<String> {
+        let stored = s
+            .store_memory(Parameters(StoreParams {
+                provenance: Some(ProvenanceParams {
+                    repo: repo.into(),
+                    commit: "b697da7".into(),
+                    branch: Some(branch.into()),
+                    path: Some("src/orders.rs".into()),
+                }),
+                content: content.into(),
+                network: "world".into(),
+                confidence: None,
+                evidence: None,
+                volatile: None,
+                compartment,
+            }))
+            .await?;
+        Ok(stored.0.id)
     }
 
     fn merge(merged_at: Option<&str>) -> MergeReport {
@@ -300,66 +303,65 @@ mod tests {
         }
     }
 
-    async fn report(s: &McpServer, merges: Vec<MergeReport>) -> MergesRecorded {
-        s.record_merges(Parameters(RecordMergesParams {
-            repo: REPO.into(),
-            merges,
-        }))
-        .await
-        .unwrap()
-        .0
+    async fn report(s: &McpServer, merges: Vec<MergeReport>) -> anyhow::Result<MergesRecorded> {
+        let recorded = s
+            .record_merges(Parameters(RecordMergesParams {
+                repo: REPO.into(),
+                merges,
+            }))
+            .await?;
+        Ok(recorded.0)
     }
 
     /// The scope the one memory recalled for "outbox" has, seen from `main`.
-    async fn scope_from_main(s: &McpServer) -> Option<String> {
-        s.recall_memories(Parameters(RecallParams {
-            host: None,
-            repo: Some(REPO.into()),
-            branch: Some("main".into()),
-            query: "outbox".into(),
-            top_k: Some(1),
-            network: None,
-            full: None,
-            floor: None,
-            session: None,
-        }))
-        .await
-        .unwrap()
-        .0
-        .memories
-        .first()
-        .and_then(|m| m.scope.clone())
+    async fn scope_from_main(s: &McpServer) -> anyhow::Result<Option<String>> {
+        let recalled = s
+            .recall_memories(Parameters(RecallParams {
+                host: None,
+                repo: Some(REPO.into()),
+                branch: Some("main".into()),
+                query: "outbox".into(),
+                top_k: Some(1),
+                network: None,
+                full: None,
+                floor: None,
+                session: None,
+            }))
+            .await?;
+        Ok(recalled.0.memories.first().and_then(|m| m.scope.clone()))
     }
 
-    async fn anchor(s: &McpServer, id: &str) -> Option<GitProvenance> {
-        let m = memory::get(&s.store, &s.tenant, &MemoryId::new(id))
-            .await
-            .unwrap()
-            .unwrap();
-        GitProvenance::from_evidence(&m.evidence)
+    /// The git anchor on memory `id`; an error when it has none.
+    async fn anchor(s: &McpServer, id: &str) -> anyhow::Result<GitProvenance> {
+        let Some(m) = memory::get(&s.store, &s.tenant, &MemoryId::new(id)).await? else {
+            anyhow::bail!("{id} is not in the store");
+        };
+        let Some(anchor) = GitProvenance::from_evidence(&m.evidence) else {
+            anyhow::bail!("{id} carries no git anchor: {:?}", m.evidence);
+        };
+        Ok(anchor)
     }
 
     #[tokio::test]
-    async fn a_merge_moves_the_branchs_memories_and_nothing_else() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
-        let on_branch = remember(&s, "the outbox drains every second", REPO, "feat/outbox").await;
-        let elsewhere = remember(&s, "retries back off", REPO, "feat/retries").await;
+    async fn a_merge_moves_the_branchs_memories_and_nothing_else() -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
+        let on_branch = remember(&s, "the outbox drains every second", REPO, "feat/outbox").await?;
+        let elsewhere = remember(&s, "retries back off", REPO, "feat/retries").await?;
         let other_repo =
-            remember(&s, "same branch name", "github.com/acme/web", "feat/outbox").await;
+            remember(&s, "same branch name", "github.com/acme/web", "feat/outbox").await?;
 
-        let recorded = report(&s, vec![merge(None)]).await;
+        let recorded = report(&s, vec![merge(None)]).await?;
         assert_eq!((recorded.moved, recorded.not_writable), (1, 0));
 
-        let kept = memory::get(&s.store, &s.tenant, &MemoryId::new(&on_branch))
-            .await
-            .unwrap()
-            .unwrap();
+        let Some(kept) = memory::get(&s.store, &s.tenant, &MemoryId::new(&on_branch)).await? else {
+            anyhow::bail!("the moved memory is gone");
+        };
         assert!(
             kept.embedding.is_some(),
             "a moved memory keeps its embedding"
         );
-        let moved = anchor(&s, &on_branch).await.unwrap();
+        let moved = anchor(&s, &on_branch).await?;
         assert_eq!(moved.branch.as_deref(), Some("main"));
         assert_eq!(moved.commit, "4e1318f");
         assert_eq!(
@@ -368,101 +370,108 @@ mod tests {
             "the path is kept"
         );
         assert_eq!(
-            anchor(&s, &elsewhere).await.unwrap().branch.as_deref(),
+            anchor(&s, &elsewhere).await?.branch.as_deref(),
             Some("feat/retries")
         );
         assert_eq!(
-            anchor(&s, &other_repo).await.unwrap().branch.as_deref(),
+            anchor(&s, &other_repo).await?.branch.as_deref(),
             Some("feat/outbox")
         );
 
         // Reported again, the merge finds nothing left on the branch.
-        assert_eq!(report(&s, vec![merge(None)]).await.moved, 0);
+        assert_eq!(report(&s, vec![merge(None)]).await?.moved, 0);
+        Ok(())
     }
 
     /// The point of the tool: from the base branch, a merged branch's memory
     /// reads as in scope instead of `other_branch`.
     #[tokio::test]
-    async fn after_the_merge_recall_from_the_base_branch_counts_it_in_scope() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
-        remember(&s, "the outbox drains every second", REPO, "feat/outbox").await;
-        assert_eq!(scope_from_main(&s).await.as_deref(), Some("other_branch"));
-        report(&s, vec![merge(None)]).await;
-        assert_eq!(scope_from_main(&s).await.as_deref(), Some("in_scope"));
+    async fn after_the_merge_recall_from_the_base_branch_counts_it_in_scope() -> anyhow::Result<()>
+    {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
+        remember(&s, "the outbox drains every second", REPO, "feat/outbox").await?;
+        assert_eq!(scope_from_main(&s).await?.as_deref(), Some("other_branch"));
+        report(&s, vec![merge(None)]).await?;
+        assert_eq!(scope_from_main(&s).await?.as_deref(), Some("in_scope"));
+        Ok(())
     }
 
     /// A branch merged into another branch that then merged: reported in one
     /// call, oldest first, the memory is carried on to the second base, which
     /// only works because the anchors read once are kept current.
     #[tokio::test]
-    async fn a_stacked_branch_is_carried_on_within_one_report() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
-        let id = remember(&s, "the retry budget is three", REPO, "feat/retries").await;
+    async fn a_stacked_branch_is_carried_on_within_one_report() -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
+        let id = remember(&s, "the retry budget is three", REPO, "feat/retries").await?;
         let child = MergeReport {
             head_branch: "feat/retries".into(),
             base_branch: "feat/outbox".into(),
             merge_commit: "c0ffee1".into(),
             ..merge(None)
         };
-        let recorded = report(&s, vec![child, merge(None)]).await;
+        let recorded = report(&s, vec![child, merge(None)]).await?;
         let each: Vec<usize> = recorded.merges.iter().map(|m| m.moved).collect();
         assert_eq!(each, vec![1, 1]);
-        let now = anchor(&s, &id).await.unwrap();
+        let now = anchor(&s, &id).await?;
         assert_eq!(
             (now.branch.as_deref(), now.commit.as_str()),
             (Some("main"), "4e1318f")
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_empty_report_moves_nothing() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
-        remember(&s, "the outbox drains every second", REPO, "feat/outbox").await;
-        let recorded = report(&s, Vec::new()).await;
+    async fn an_empty_report_moves_nothing() -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
+        remember(&s, "the outbox drains every second", REPO, "feat/outbox").await?;
+        let recorded = report(&s, Vec::new()).await?;
         assert_eq!((recorded.moved, recorded.merges.len()), (0, 0));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_memory_created_after_the_merge_belongs_to_a_new_branch_of_that_name() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
-        let id = remember(&s, "new work on a reused name", REPO, "feat/outbox").await;
-        let recorded = report(&s, vec![merge(Some("2020-01-01T00:00:00Z"))]).await;
+    async fn a_memory_created_after_the_merge_belongs_to_a_new_branch_of_that_name(
+    ) -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
+        let id = remember(&s, "new work on a reused name", REPO, "feat/outbox").await?;
+        let recorded = report(&s, vec![merge(Some("2020-01-01T00:00:00Z"))]).await?;
         assert_eq!(recorded.moved, 0);
         assert_eq!(
-            anchor(&s, &id).await.unwrap().branch.as_deref(),
+            anchor(&s, &id).await?.branch.as_deref(),
             Some("feat/outbox")
         );
+        Ok(())
     }
 
     /// A session still on the branch after it merged stores memories anchored
     /// at the branch's last commit. Those are the merged work, whenever stored.
     #[tokio::test]
-    async fn a_memory_anchored_at_a_merged_commit_moves_whenever_it_was_stored() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
-        let id = remember(&s, "stored after the merge", REPO, "feat/outbox").await;
+    async fn a_memory_anchored_at_a_merged_commit_moves_whenever_it_was_stored(
+    ) -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
+        let id = remember(&s, "stored after the merge", REPO, "feat/outbox").await?;
         let late = MergeReport {
             commits: vec!["B697DA70000000000000000000000000000000ff".into()],
             ..merge(Some("2020-01-01T00:00:00Z"))
         };
-        assert_eq!(report(&s, vec![late]).await.moved, 1);
-        assert_eq!(
-            anchor(&s, &id).await.unwrap().branch.as_deref(),
-            Some("main")
-        );
+        assert_eq!(report(&s, vec![late]).await?.moved, 1);
+        assert_eq!(anchor(&s, &id).await?.branch.as_deref(), Some("main"));
+        Ok(())
     }
 
     #[test]
-    fn a_commit_matches_written_short_on_either_side() {
+    fn a_commit_matches_written_short_on_either_side() -> anyhow::Result<()> {
         let merged = vec!["b697da7e1f".to_string(), "c0ffee1".to_string()];
         assert!(carried(&merged, "b697da7"));
         assert!(carried(&merged, "C0FFEE1234"));
         assert!(!carried(&merged, "b697da8"));
         assert!(!carried(&[], "b697da7"));
+        Ok(())
     }
 
     /// Two people in one workspace, signed in in turn over one connection as the
@@ -470,19 +479,18 @@ mod tests {
     /// invisible to B, and the one A shared read-only is visible but not B's to
     /// rewrite, and is counted as such. A's own report moves both.
     #[tokio::test]
-    async fn a_merge_moves_only_what_the_caller_may_write() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let a = server_as(&store, "ws:t", "user:a").await;
-        let b = server_as(&store, "ws:t", "user:b").await;
+    async fn a_merge_moves_only_what_the_caller_may_write() -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let a = server_as(&store, "ws:t", "user:a").await?;
+        let b = server_as(&store, "ws:t", "user:b").await?;
 
-        store.signin(&a.tenant, &a.user).await.unwrap();
-        let private = remember(&a, "a's own outbox note", REPO, "feat/outbox").await;
+        store.signin(&a.tenant, &a.user).await?;
+        let private = remember(&a, "a's own outbox note", REPO, "feat/outbox").await?;
         let shared_space = a
             .create_compartment(Parameters(CreateCompartmentParams {
                 name: "outbox".into(),
             }))
-            .await
-            .unwrap()
+            .await?
             .0
             .id;
         let shared = remember_in(
@@ -492,32 +500,29 @@ mod tests {
             "feat/outbox",
             Some(shared_space.clone()),
         )
-        .await;
+        .await?;
         a.share_compartment(Parameters(ShareParams {
             compartment_id: shared_space,
             grantee: "user:b".into(),
             capability: "reference".into(),
         }))
-        .await
-        .unwrap();
+        .await?;
 
-        store.signin(&b.tenant, &b.user).await.unwrap();
-        let by_b = report(&b, vec![merge(None)]).await;
+        store.signin(&b.tenant, &b.user).await?;
+        let by_b = report(&b, vec![merge(None)]).await?;
         assert_eq!((by_b.moved, by_b.not_writable), (0, 1));
 
-        store.signin(&a.tenant, &a.user).await.unwrap();
+        store.signin(&a.tenant, &a.user).await?;
         for id in [&private, &shared] {
-            assert_eq!(
-                anchor(&a, id).await.unwrap().branch.as_deref(),
-                Some("feat/outbox")
-            );
+            assert_eq!(anchor(&a, id).await?.branch.as_deref(), Some("feat/outbox"));
         }
-        let by_a = report(&a, vec![merge(None)]).await;
+        let by_a = report(&a, vec![merge(None)]).await?;
         assert_eq!((by_a.moved, by_a.not_writable), (2, 0));
+        Ok(())
     }
 
     #[test]
-    fn a_report_that_is_not_a_merge_is_refused() {
+    fn a_report_that_is_not_a_merge_is_refused() -> anyhow::Result<()> {
         let bad = |edit: fn(&mut MergeReport)| {
             let mut m = merge(None);
             edit(&mut m);
@@ -532,6 +537,7 @@ mod tests {
             reported("orders", &merge(None)).is_err(),
             "a bare repo name"
         );
+        Ok(())
     }
 
     /// Every tool the server advertises is one the REST shim can dispatch. The
@@ -539,14 +545,15 @@ mod tests {
     /// shim is one a hook cannot call; bad arguments are fine here, an unknown
     /// name is not.
     #[tokio::test]
-    async fn every_advertised_tool_is_reachable_over_rest() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
+    async fn every_advertised_tool_is_reachable_over_rest() -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
         for name in McpServer::all_tool_names() {
             if let Err(e) = s.call_tool(&name, serde_json::json!({})).await {
                 assert!(!e.message.contains("unknown tool"), "{name}: {}", e.message);
             }
         }
+        Ok(())
     }
 
     /// Both reachable over the REST shim, which dispatches by name: a tool the
@@ -554,10 +561,10 @@ mod tests {
     /// so the session bootstrap's orphan penalty and `antumbra claude remember`
     /// both got "unknown tool".
     #[tokio::test]
-    async fn the_rest_shim_reaches_record_merges_and_penalize_memory() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let s = server_as(&store, "ws:a", "user:a").await;
-        let id = remember(&s, "the outbox drains every second", REPO, "feat/outbox").await;
+    async fn the_rest_shim_reaches_record_merges_and_penalize_memory() -> anyhow::Result<()> {
+        let store = mem_store().await?;
+        let s = server_as(&store, "ws:a", "user:a").await?;
+        let id = remember(&s, "the outbox drains every second", REPO, "feat/outbox").await?;
         let recorded = s
             .call_tool(
                 "record_merges",
@@ -570,14 +577,13 @@ mod tests {
                     }],
                 }),
             )
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(recorded["moved"], 1);
         assert_eq!(recorded["merges"][0]["head_branch"], "feat/outbox");
         let penalized = s
             .call_tool("penalize_memory", serde_json::json!({ "memory_id": id }))
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(penalized["found"], true);
+        Ok(())
     }
 }
