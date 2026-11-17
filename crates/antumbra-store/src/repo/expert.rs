@@ -1,7 +1,7 @@
 //! Expert repository (the umbra population of small frozen experts), with routing-as-retrieval (KNN routing).
 //!
 //! Built entirely on surql-rs: [`Store::put`] for writes, the `Query` builder
-//! + `crud` for typed reads, and `Query::vector_search_indexed` for KNN
+//! and `crud` for typed reads, and `Query::vector_search_indexed` for KNN
 //! through `expert_cap_hnsw`. No hand-authored SurrealQL.
 //!
 //! A row is what two stores can hold a copy of and keep in step:
@@ -571,6 +571,28 @@ mod tests {
             assert_eq!(row.name, id);
         }
         assert_eq!(list(&s).await?.len(), 2);
+        Ok(())
+    }
+
+    /// A store that has been through the move, written into since by a
+    /// server from before it: the expert is not given a second record.
+    #[tokio::test]
+    async fn an_expert_still_under_an_engine_assigned_id_is_not_given_a_second_record(
+    ) -> antumbra_core::Result<()> {
+        let s = crate::testing::mem_store().await?;
+        let e = expert("expert:a", unit());
+        insert_as_before(&s, &e).await?;
+
+        // Refused by the unique index on `key`: said, and nothing lost.
+        let refused = insert(&s, &e).await;
+        assert!(refused.is_err(), "one expert was given two records");
+        assert_eq!(records(&s).await?.len(), 1);
+        assert!(get(&s, &e.id).await?.is_some(), "and it is still read");
+
+        // Moved, as the next start moves it, it is written in place.
+        assert_eq!(adopt_ids(&s).await?, 1);
+        insert(&s, &e).await?;
+        assert_eq!(records(&s).await?.len(), 1);
         Ok(())
     }
 
