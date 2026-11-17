@@ -23,8 +23,27 @@ struct Traces {
     _guard: tracing::subscriber::DefaultGuard,
 }
 
+/// A second subscriber, registered for the life of the test process and never
+/// anyone's default.
+///
+/// `tracing` caches, per callsite, whether any subscriber wants it, and keeps
+/// one maximum level for the process. While exactly one subscriber is
+/// registered it works both out from the default of whichever thread asks,
+/// and the tests of this binary run on many threads with a subscriber on
+/// this one alone. So what another test's thread did, while one of these
+/// tests held the only subscriber, could leave a span this test opened
+/// unmade: the test waited out its two seconds for a span that was not late,
+/// on every run at four test threads once the tests beside it changed. With
+/// two registered, every registered subscriber is asked, whichever thread
+/// does the asking.
+fn keep_a_second_subscriber() {
+    static SECOND: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+    SECOND.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default()));
+}
+
 impl Traces {
     fn start() -> Self {
+        keep_a_second_subscriber();
         let exporter = InMemorySpanExporter::default();
         let provider = SdkTracerProvider::builder()
             .with_span_processor(crate::telemetry::RoutesOnly(SimpleSpanProcessor::new(
