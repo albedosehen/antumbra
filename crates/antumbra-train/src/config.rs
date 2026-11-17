@@ -104,6 +104,33 @@ impl ServeQuant {
         }
     }
 
+    /// The forms an operator's setting asks an expert's drift be measured on
+    /// when it is admitted. `auto`, and a setting left empty, is Q8_0 alone,
+    /// the form a build with no GPU backend serves by default; `off` is none;
+    /// and `q8_0`, `q4_k` or both with a comma name them, each measured once.
+    pub fn drift_from_setting(setting: &str) -> Result<Vec<Self>, antumbra_core::AntumbraError> {
+        let setting = setting.trim().to_ascii_lowercase();
+        match setting.as_str() {
+            "auto" | "" => return Ok(vec![ServeQuant::Q8_0]),
+            "off" | "none" => return Ok(Vec::new()),
+            _ => {}
+        }
+        let mut forms = Vec::new();
+        for name in setting.split(',') {
+            let name = name.trim();
+            let form: Self = name.parse().map_err(|_| {
+                antumbra_core::AntumbraError::other(format!(
+                    "unknown quantization `{name}` to measure drift on (use auto, off, q8_0, \
+                     q4_k, or both with a comma)"
+                ))
+            })?;
+            if !forms.contains(&form) {
+                forms.push(form);
+            }
+        }
+        Ok(forms)
+    }
+
     /// The name a setting or a log line uses for this form.
     pub fn name(self) -> &'static str {
         match self {
@@ -401,6 +428,36 @@ mod tests {
             refused.is_err_and(|e| e.to_string().contains("auto, off, q8_0 or q4_k")),
             "a setting that names nothing says what a setting may be"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_drift_setting_names_no_form_one_or_both() -> Result<()> {
+        let (q8, q4) = (ServeQuant::Q8_0, ServeQuant::Q4K);
+        for (setting, want) in [
+            ("auto", vec![q8]),
+            ("", vec![q8]),
+            ("off", vec![]),
+            (" None ", vec![]),
+            ("q4_k", vec![q4]),
+            ("q8_0,q4_k", vec![q8, q4]),
+            (" Q4K , q8 ", vec![q4, q8]),
+            // A form named twice is measured once.
+            ("q8_0,q8,q8_0", vec![q8]),
+        ] {
+            assert_eq!(
+                ServeQuant::drift_from_setting(setting)?,
+                want,
+                "{setting:?}"
+            );
+        }
+        for refused in ["q2_k", "q8_0,", "q8_0;q4_k", "dense"] {
+            let named = ServeQuant::drift_from_setting(refused);
+            assert!(
+                named.is_err_and(|e| e.to_string().contains("use auto, off, q8_0")),
+                "{refused:?} names no form and says what a setting may be"
+            );
+        }
         Ok(())
     }
 

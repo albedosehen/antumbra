@@ -139,6 +139,15 @@ struct Cli {
     /// the recipe's value stands and the audits are only noted.
     #[arg(long, env = "ANTUMBRA_BEHAVE_TUNE_CONFIDENCE")]
     behave_tune_confidence: bool,
+    /// Which quantized forms of the base an expert is measured on when it is
+    /// admitted: `auto` (Q8_0, the form a server with no GPU serves by
+    /// default), `off`, `q8_0`, `q4_k`, or `q8_0,q4_k`. An expert is trained
+    /// over the dense base and may be served over a quantized one; the
+    /// measurement reads its held-out examples through both and records the
+    /// difference on its card. It costs one more load of the base per form,
+    /// per admitted training, and nothing is refused on it.
+    #[arg(long, env = "ANTUMBRA_BEHAVE_DRIFT", default_value = "auto")]
+    behave_drift: String,
     /// How the base model is held to serve experts: `auto`, `off`, `q8_0` or
     /// `q4_k`. `auto` serves from a Q8_0 base on a build with no GPU backend,
     /// where the dense base is too slow to answer with, and from the dense
@@ -814,6 +823,10 @@ async fn run() -> Result<()> {
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
+        // Said at start, not at the first training an hour in.
+        #[cfg(feature = "models")]
+        antumbra_serve::ServeQuant::drift_from_setting(&cli.behave_drift)
+            .map_err(|e| anyhow::anyhow!("--behave-drift: {e}"))?;
         let source = expert_source(
             cli.expert_source.as_deref(),
             jwt_secret.as_deref(),
@@ -836,6 +849,7 @@ async fn run() -> Result<()> {
             github,
             recipe,
             cli.behave_tune_confidence,
+            cli.behave_drift,
             source,
             &cli.serve_quant,
         )

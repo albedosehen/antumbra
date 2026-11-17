@@ -60,6 +60,7 @@ fn admitted(ids: &[&str], adapter: &str) -> Trained {
         replay: 0,
         adapter_uri: adapter.into(),
         seal: None,
+        drift: Vec::new(),
         base_model: "base".into(),
         fitness: 1.0,
         base_fitness: 0.0,
@@ -299,6 +300,7 @@ async fn mint_marks_only_the_behaviors_still_as_they_were_taught() -> anyhow::Re
         replay: 0,
         adapter_uri: "adapters/x.safetensors".into(),
         seal: None,
+        drift: Vec::new(),
         base_model: "base".into(),
         fitness: 1.0,
         base_fitness: 0.0,
@@ -393,6 +395,7 @@ async fn learned_and_missed(admitted: bool) -> anyhow::Result<(Store, Plan, Trai
         replay: 0,
         adapter_uri: "adapters/x.safetensors".into(),
         seal: None,
+        drift: Vec::new(),
         base_model: "base".into(),
         fitness: 0.5,
         base_fitness: 0.25,
@@ -1201,5 +1204,72 @@ async fn a_refused_retraining_leaves_the_expert_its_adapter() -> anyhow::Result<
     assert_eq!(report.superseded, None, "and nothing is to be removed");
     assert_eq!(served(&store, &plan).await?, before);
     assert_eq!(before.0, "adapters/e.aa.safetensors");
+    Ok(())
+}
+
+/// A quarter of a nat apart on average over two positions, one of them
+/// ranking another token first.
+fn two_positions() -> antumbra_train::quant::Drift {
+    use antumbra_train::quant::{Drift, Reading};
+    let reading = |logprob, top1| Reading { logprob, top1 };
+    let mut drift = Drift::default();
+    drift.add(
+        &[reading(-1.0, 1), reading(-2.0, 2)],
+        &[reading(-1.5, 1), reading(-2.0, 3)],
+    );
+    drift
+}
+
+#[tokio::test]
+async fn an_expert_s_card_records_what_each_quantized_base_did_to_it() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+    let trained = Trained {
+        drift: vec![
+            (ServeQuant::Q8_0, antumbra_train::quant::Drift::default()),
+            (ServeQuant::Q4K, two_positions()),
+        ],
+        ..sealed(&["memory:rule"], "adapters/e.aa.safetensors", "aa")
+    };
+
+    let report = mint(&store, &plan, trained, "rig").await?;
+
+    assert_eq!(
+        report
+            .drift
+            .iter()
+            .map(|(form, _)| *form)
+            .collect::<Vec<_>>(),
+        [ServeQuant::Q8_0, ServeQuant::Q4K],
+        "the report says what was measured, in the order it was asked for"
+    );
+    let Some(e) = expert::get(&store, &expert_id(&plan.tenant, &plan.user, &plan.scope)).await?
+    else {
+        anyhow::bail!("the expert was not minted");
+    };
+    assert_eq!(
+        e.capability_card[drift::CARD_DRIFT],
+        serde_json::json!({
+            "q8_0": { "positions": 0, "mean_shift": 0.0, "largest_shift": 0.0, "flips": 0 },
+            "q4_k": { "positions": 2, "mean_shift": 0.25, "largest_shift": 0.5, "flips": 1 },
+        })
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_expert_measured_on_nothing_has_no_drift_on_its_card() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+    let trained = sealed(&["memory:rule"], "adapters/e.aa.safetensors", "aa");
+
+    let report = mint(&store, &plan, trained, "rig").await?;
+
+    assert!(report.drift.is_empty());
+    let Some(e) = expert::get(&store, &expert_id(&plan.tenant, &plan.user, &plan.scope)).await?
+    else {
+        anyhow::bail!("the expert was not minted");
+    };
+    assert_eq!(e.capability_card.get(drift::CARD_DRIFT), None);
     Ok(())
 }

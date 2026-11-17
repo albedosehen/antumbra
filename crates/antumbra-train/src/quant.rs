@@ -71,6 +71,18 @@ impl Drift {
     pub fn flips(&self) -> usize {
         self.positions - self.agree
     }
+
+    /// As an expert's card holds it: how many positions were compared, the
+    /// mean and the largest shift in nats, and how many rank another token
+    /// first.
+    pub fn to_card(&self) -> serde_json::Value {
+        serde_json::json!({
+            "positions": self.positions(),
+            "mean_shift": self.mean_shift(),
+            "largest_shift": self.largest_shift(),
+            "flips": self.flips(),
+        })
+    }
 }
 
 #[cfg(test)]
