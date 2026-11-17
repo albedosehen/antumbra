@@ -16,7 +16,7 @@
 //! nothing more. Writes stay on the MCP tools, where the engine's
 //! compartment/grant ACL does the reasoning a bare POST could not.
 
-use kayak::{Contract, ContractLimits};
+use kayak::{Contract, ContractLimits, FieldExposure, Identity, Resource, ResourceFaces};
 use surql::schema::{FieldBuilder, FieldDefinition, TableDefinition};
 
 mod compartments;
@@ -89,18 +89,30 @@ pub fn contract() -> Contract {
 /// demoted in the store still fails the gate here. Only the field lists are
 /// contract-side, and they can drift only in the direction the gate cannot
 /// see anyway on a schemaless table: a column the repo stopped writing.
+// The panic is the gate: this runs only in the drift test, and a missing
+// table must stop it by name rather than pass as a silently thinner schema.
+#[allow(clippy::panic)]
 pub fn schema() -> Vec<TableDefinition> {
     let mut tables = antumbra_store::schema::tables(antumbra_store::EMBED_DIM as u32);
     for (name, columns) in [
-        ("memory", memories::columns()),
-        ("memory_edge", memory_edges::columns()),
-        ("compartment", compartments::columns()),
-        ("grant", grants::columns()),
-        ("document_chunk", document_chunks::columns()),
-        ("expert", experts::columns()),
-        ("evaluation_run", evaluation_runs::columns()),
-        ("orchestration_run", orchestration_runs::columns()),
-        ("shadow", shadows::columns()),
+        (antumbra_store::tables::MEMORY, memories::columns()),
+        (antumbra_store::tables::MEMORY_EDGE, memory_edges::columns()),
+        (antumbra_store::tables::COMPARTMENT, compartments::columns()),
+        (antumbra_store::tables::GRANT, grants::columns()),
+        (
+            antumbra_store::tables::DOCUMENT_CHUNK,
+            document_chunks::columns(),
+        ),
+        (antumbra_store::tables::EXPERT, experts::columns()),
+        (
+            antumbra_store::tables::EVALUATION_RUN,
+            evaluation_runs::columns(),
+        ),
+        (
+            antumbra_store::tables::ORCHESTRATION_RUN,
+            orchestration_runs::columns(),
+        ),
+        (antumbra_store::tables::SHADOW, shadows::columns()),
     ] {
         let table = tables
             .iter_mut()
@@ -113,9 +125,64 @@ pub fn schema() -> Vec<TableDefinition> {
     tables
 }
 
+/// A read-only, browsable collection: paged and reachable by its `key`
+/// column, filterable and sortable only where an index serves the claim,
+/// and nothing more. Every resource in this slice is one of these or a
+/// [`listing`]; what differs between them is what each file states, and the
+/// eleven defaults that never differ are stated once, here. Writes stay on
+/// the MCP tools, which carry the compartment and grant reasoning the engine
+/// ACL expects.
+fn read_only(
+    name: &str,
+    table: &str,
+    key: &str,
+    fields: Vec<FieldExposure>,
+    filterable: &[&str],
+    sortable: &[&str],
+) -> Resource {
+    Resource {
+        faces: ResourceFaces::ALL,
+        identity: Identity::Column(key.into()),
+        ..listing(name, table, fields, filterable, sortable)
+    }
+}
+
+/// A read-only listing with no identity of its own: rows reached only
+/// through the list, filterable and sortable only where an index serves the
+/// claim.
+fn listing(
+    name: &str,
+    table: &str,
+    fields: Vec<FieldExposure>,
+    filterable: &[&str],
+    sortable: &[&str],
+) -> Resource {
+    Resource {
+        name: name.into(),
+        table: table.into(),
+        faces: ResourceFaces::LIST_ONLY,
+        identity: Identity::Absent,
+        fields,
+        pinned: vec![],
+        pinned_either: vec![],
+        filterable: filterable.iter().map(|s| (*s).to_owned()).collect(),
+        filter_options: Default::default(),
+        sortable: sortable.iter().map(|s| (*s).to_owned()).collect(),
+        max_page_size: 100,
+        graphql: None,
+        watchable: false,
+        reads_require: vec![],
+        rate_class: None,
+        sub_resources: vec![],
+        content: None,
+        actions: vec![],
+    }
+}
+
 /// Finalize a field builder. The names in this module are static and valid,
 /// so a refusal is a typo in a sibling file, worth stopping the build over;
 /// reserved-word warnings are the schema layer's concern, not the wire's.
+#[allow(clippy::expect_used)]
 fn built(field: FieldBuilder) -> FieldDefinition {
     field
         .build_unchecked()

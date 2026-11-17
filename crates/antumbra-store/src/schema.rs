@@ -17,13 +17,13 @@ use surql::schema::table::{
     TableDefinition, TableMode,
 };
 use surql::schema::{
-    generate_access_sql_with_options, generate_analyzer_sql_with_options, generate_table_sql,
-    standard_analyzer, AnalyzerDefinition,
+    generate_analyzer_sql_with_options, generate_table_sql, standard_analyzer, AnalyzerDefinition,
 };
 
 use antumbra_core::Result;
 
 use crate::error::map;
+use crate::tables;
 
 /// Default embedding dimension (all-MiniLM-L6-v2).
 pub const EMBED_DIM: usize = 384;
@@ -79,11 +79,35 @@ const TENANT_PERMS: [(&str, &str); 4] = [
     ("delete", "tenant_id = $auth.tenant"),
 ];
 
+/// Permissions for a row only the owner view touches: a member's record
+/// session neither reads nor writes it. The owner view (root, or the database
+/// user) is not subject to table permissions, so the server's own reads and
+/// the operator's writes go through as before.
+const OWNER_VIEW_PERMS: [(&str, &str); 4] = [
+    ("select", "false"),
+    ("create", "false"),
+    ("update", "false"),
+    ("delete", "false"),
+];
+
+/// Compartment permissions: any member may read a row, since the memory rule's
+/// subqueries resolve through it, but only its owner may create, update or
+/// delete it. The memory rule trusts the row live (`OWN_COMPARTMENT.owner =
+/// $auth.user`), so a member who could set `owner` on another member's
+/// compartment would read everything in it; and a member may create a
+/// compartment only as its owner.
+const COMPARTMENT_PERMS: [(&str, &str); 4] = [
+    ("select", "tenant_id = $auth.tenant"),
+    ("create", "tenant_id = $auth.tenant AND owner = $auth.user"),
+    ("update", "tenant_id = $auth.tenant AND owner = $auth.user"),
+    ("delete", "tenant_id = $auth.tenant AND owner = $auth.user"),
+];
+
 /// Only the **owner** of the referenced compartment may write the row. The
 /// compartment table is tenant-readable, so the subquery resolves for any session,
 /// but it returns the compartment id only when `$auth.user` owns it.
 const COMPARTMENT_OWNER_RULE: &str = "tenant_id = $auth.tenant AND compartment IN \
-    (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE)";
+    (SELECT VALUE key FROM compartment WHERE tenant_id = $auth.tenant AND owner = $auth.user AND deleted_at IS NONE)";
 
 /// Grant-table permissions. Any tenant member may **read** grants (so the memory
 /// rule's `grantee = $auth.user` subquery resolves), but only the **owner of the
@@ -139,11 +163,15 @@ pub(crate) fn hive_compartments(tenant: &str) -> String {
     )
 }
 
-/// The compartments granted to `user`, as a list: the grant branch of the read
-/// rule. `user` is a SurrealQL expression, as `tenant` is for
-/// [`hive_compartments`].
-pub(crate) fn granted_compartments(user: &str) -> String {
-    format!("SELECT VALUE compartment FROM grant WHERE grantee = {user} AND deleted_at IS NONE")
+/// The compartments granted to `user` in `tenant`, as a list: the grant branch
+/// of the read rule. Both are SurrealQL expressions, as for
+/// [`hive_compartments`]. The tenant is named here and not left to the grant
+/// table's own permission, which a permission subquery may not apply.
+pub(crate) fn granted_compartments(tenant: &str, user: &str) -> String {
+    format!(
+        "SELECT VALUE compartment FROM grant \
+         WHERE tenant_id = {tenant} AND grantee = {user} AND deleted_at IS NONE"
+    )
 }
 
 /// The compartments `user` owns in `tenant`, live, as a list: the owner
@@ -181,7 +209,7 @@ fn memory_select_without_hive() -> String {
         "tenant_id = $auth.tenant AND (compartment = NONE \
          OR ({OWN_COMPARTMENT}.owner = $auth.user AND {OWN_COMPARTMENT}.deleted_at IS NONE) \
          OR compartment IN ({})",
-        granted_compartments("$auth.user")
+        granted_compartments("$auth.tenant", "$auth.user")
     )
 }
 
@@ -208,8 +236,8 @@ pub(crate) fn memory_select_rule() -> String {
 /// private compartment (which the owner would then see as their own). This mirrors
 /// `EDGE_LINK_RULE` for the write side of the graph (the dual of `GRANT_PERMS`).
 const MEMORY_WRITE_RULE: &str = "tenant_id = $auth.tenant AND (compartment = NONE \
-     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
+     OR compartment IN (SELECT VALUE key FROM compartment WHERE tenant_id = $auth.tenant AND owner = $auth.user AND deleted_at IS NONE) \
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE tenant_id = $auth.tenant AND grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
 
 /// `document_chunk` follows the compartment rules a memory does, because a
 /// document is shared the way a memory is: through its compartment. It used to
@@ -333,20 +361,23 @@ const HIVE_OFFER_PERMS: [(&str, &str); 4] = [
 /// to you with the `link` capability (not mere `reference`). Read visibility of
 /// the target is already enforced when an edge is resolved back to a memory.
 const EDGE_LINK_RULE: &str = "tenant_id = $auth.tenant AND to_id IN (SELECT VALUE key FROM memory \
-     WHERE compartment = NONE \
-     OR compartment IN (SELECT VALUE key FROM compartment WHERE owner = $auth.user AND deleted_at IS NONE) \
-     OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE))";
+     WHERE tenant_id = $auth.tenant AND (compartment = NONE \
+     OR compartment IN (SELECT VALUE key FROM compartment WHERE tenant_id = $auth.tenant AND owner = $auth.user AND deleted_at IS NONE) \
+     OR compartment IN (SELECT VALUE compartment FROM grant WHERE tenant_id = $auth.tenant AND grantee = $auth.user AND capability = 'link' AND deleted_at IS NONE)))";
 
 /// The full table set, built with surql-rs builders.
 pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
     vec![
         // Expert population (umbra), the population of small frozen experts, with multi-tenant isolation across compartments. Shared experts read by
         // all; private experts read only by their owner; owner writes.
-        table_schema("expert")
+        table_schema(tables::EXPERT)
             .with_mode(TableMode::Schemaless)
             .with_permissions(EXPERT_PERMS)
             .with_indexes([
                 unique_index("expert_key_uq", ["key"]),
+                // What changed since: a pass that carries experts between
+                // stores reads `updated_at > since` as a range scan.
+                index("expert_updated_at_idx", ["updated_at"]),
                 hnsw_index(
                     "expert_cap_hnsw",
                     "capability_vec",
@@ -358,19 +389,19 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ),
             ]),
         // Shadow lifecycle (penumbra): shadow models hold the plasticity.
-        table_schema("shadow")
+        table_schema(tables::SHADOW)
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("shadow_key_uq", ["key"]),
                 index("shadow_status_idx", ["status", "generation"]),
             ]),
         // Critic signal (verifier-first): the critic for credit assignment.
-        table_schema("reward_signal")
+        table_schema(tables::REWARD_SIGNAL)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("reward_run_idx", ["run_id", "step_idx"])]),
         // Inhibitory store (antumbra): the counterfactual boundary of competence.
         // Shared, but for the boundaries a user's own training recorded.
-        table_schema("failure_boundary")
+        table_schema(tables::FAILURE_BOUNDARY)
             .with_mode(TableMode::Schemaless)
             .with_permissions(BOUNDARY_PERMS)
             .with_indexes([
@@ -386,89 +417,99 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 ),
             ]),
         // Durable orchestration (the boundary-conditioned gate, routing-as-retrieval).
-        table_schema("orchestration_run")
+        table_schema(tables::ORCHESTRATION_RUN)
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("orun_key_uq", ["key"]),
                 index("orun_status_idx", ["status", "updated_at"]),
             ]),
         // Durable generational loop head (the generation_head checkpoint).
-        table_schema("generation_head").with_mode(TableMode::Schemaless),
+        table_schema(tables::GENERATION_HEAD).with_mode(TableMode::Schemaless),
         // Out-of-band loop control (operator graceful-stop signal) for the durable generational loop.
-        table_schema("loop_control").with_mode(TableMode::Schemaless),
+        table_schema(tables::LOOP_CONTROL).with_mode(TableMode::Schemaless),
         // Hosted-onboarding control plane and product surface. No PERMISSIONS clause, so
         // both default to deny for record/tenant sessions; only the control
         // plane's owner connection reads/writes them (an account row maps a login
         // to a tenant and must never be tenant-readable).
-        table_schema("invite_code").with_mode(TableMode::Schemaless),
-        table_schema("account").with_mode(TableMode::Schemaless),
+        table_schema(tables::INVITE_CODE).with_mode(TableMode::Schemaless),
+        table_schema(tables::ACCOUNT).with_mode(TableMode::Schemaless),
         // Consumed magic-link ids (keyed by `jti`): the single-use ledger a
         // verify writes through, with an `expires_at` matching the link's so
         // rows self-expire out at the next sweep. Owner-only, like the rest of
         // the control-plane tables.
-        table_schema("magic_link_use").with_mode(TableMode::Schemaless),
+        table_schema(tables::MAGIC_LINK_USE).with_mode(TableMode::Schemaless),
+        // Revoked token ids (keyed by `jti`), each kept until the token it
+        // names would have expired: the denylist every networked server reads
+        // in the owner view. Owner-only, like the rest of the control-plane
+        // tables.
+        table_schema(tables::REVOKED_TOKEN).with_mode(TableMode::Schemaless),
         // Expert lifecycle: every status change, appended and
         // numbered per expert. Readable where its expert is, through the same
         // owner rule, so no session sees an expert without its moves.
-        table_schema("expert_transition")
+        table_schema(tables::EXPERT_TRANSITION)
             .with_mode(TableMode::Schemaless)
             .with_permissions(EXPERT_PERMS)
-            .with_indexes([unique_index("xtrans_seq_uq", ["expert", "seq"])]),
+            .with_indexes([
+                unique_index("xtrans_seq_uq", ["expert", "seq"]),
+                // What changed since: a pass that carries moves between
+                // stores reads `at > since` as a range scan.
+                index("xtrans_at_idx", ["at"]),
+            ]),
         // Each shared expert's leave-one-out contribution per measured
         // generation, the history retirement reads. Readable
         // like the shared population it measures.
-        table_schema("contribution")
+        table_schema(tables::CONTRIBUTION)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("contribution_expert_idx", ["expert", "generation"])]),
         // The population against its single best expert, per measured
         // generation of a run: the rolling comparison that is
         // reported whether or not it flatters the architecture.
-        table_schema("population_baseline")
+        table_schema(tables::POPULATION_BASELINE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("baseline_run_idx", ["run_id", "generation"])]),
         // Each live task's clear winner among the experts, from the latest
         // contribution measurement that scored them all: what
         // the learned router trains on beside the capability exemplars.
-        table_schema("routing_outcome")
+        table_schema(tables::ROUTING_OUTCOME)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS)
             .with_indexes([index("routing_outcome_winner_idx", ["winner"])]),
         // The grow step: the region census each contribution
         // measurement takes, and the decision each generation made from it.
-        table_schema("region_census")
+        table_schema(tables::REGION_CENSUS)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("census_run_idx", ["run_id", "generation"])]),
-        table_schema("grow")
+        table_schema(tables::GROW)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("grow_run_idx", ["run_id", "generation"])]),
         // The verifier namespace: verifiers keyed by content
         // address, and the append-only measurements and state changes that
         // decide whether each may grant reward. No permissions clause: owner
         // only, so no tenant session and nothing that trains can write one.
-        table_schema("verifier")
+        table_schema(tables::VERIFIER)
             .with_mode(TableMode::Schemaless)
             .with_indexes([unique_index("verifier_key_uq", ["key"])]),
-        table_schema("verifier_transition")
+        table_schema(tables::VERIFIER_TRANSITION)
             .with_mode(TableMode::Schemaless)
             .with_indexes([unique_index("vtrans_seq_uq", ["verifier", "seq"])]),
-        table_schema("verifier_measurement")
+        table_schema(tables::VERIFIER_MEASUREMENT)
             .with_mode(TableMode::Schemaless)
             .with_indexes([unique_index("vmeasure_seq_uq", ["verifier", "seq"])]),
         // Validation harness.
-        table_schema("evaluation_run")
+        table_schema(tables::EVALUATION_RUN)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("eval_subject_idx", ["subject_kind", "subject_id"])]),
         // The recipe search: one row per shadow's training
         // recipe, read back by run in generation order.
-        table_schema("recipe")
+        table_schema(tables::RECIPE)
             .with_mode(TableMode::Schemaless)
             .with_indexes([index("recipe_run_idx", ["run_id", "generation"])]),
         // A user's fabric: which of their machines an agent is running on, and
         // which one of them can train. Keyed per (tenant, user, host),
         // so the user index is what dispatch looks their genesis node up by.
-        table_schema("device_profile")
+        table_schema(tables::DEVICE_PROFILE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(DEVICE_PERMS)
             .with_indexes([
@@ -477,15 +518,15 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             ]),
         // The tenant hive: two gates and an offer ledger. One hive
         // row per tenant, so the gate cannot be ambiguous.
-        table_schema("hive")
+        table_schema(tables::HIVE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(HIVE_PERMS)
             .with_indexes([unique_index("hive_tenant_uq", ["tenant_id"])]),
-        table_schema("hive_membership")
+        table_schema(tables::HIVE_MEMBERSHIP)
             .with_mode(TableMode::Schemaless)
             .with_permissions(HIVE_MEMBERSHIP_PERMS)
             .with_indexes([unique_index("hive_member_uq", ["tenant_id", "user"])]),
-        table_schema("hive_offer")
+        table_schema(tables::HIVE_OFFER)
             .with_mode(TableMode::Schemaless)
             .with_permissions(HIVE_OFFER_PERMS)
             .with_indexes([index(
@@ -494,7 +535,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             )]),
         // What a node could not run itself, left where the machine that can will
         // find it. Indexed by the pair a trainer looks it up on.
-        table_schema("genesis_request")
+        table_schema(tables::GENESIS_REQUEST)
             .with_mode(TableMode::Schemaless)
             .with_permissions(GENESIS_REQUEST_PERMS)
             .with_indexes([index("genesis_user_idx", ["user", "status"])]),
@@ -502,7 +543,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // row per (tenant, repository), so the declared edges into and out of
         // one repository can be worked out again from every other's last
         // reading.
-        table_schema("manifest_set")
+        table_schema(tables::MANIFEST_SET)
             .with_mode(TableMode::Schemaless)
             .with_permissions(MANIFEST_SET_PERMS)
             .with_indexes([index("manifest_set_tenant_idx", ["tenant_id"])]),
@@ -510,7 +551,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // it to route a task across the shared experts; the owner trains/writes
         // it. Previously auto-created (which defaulted to deny for record
         // sessions); defined here so the read permission is explicit.
-        table_schema("learned_router")
+        table_schema(tables::LEARNED_ROUTER)
             .with_mode(TableMode::Schemaless)
             .with_permissions(SHARED_POPULATION_PERMS),
         // Penumbra memory (the soft, editable consolidation source). Tenant-
@@ -521,13 +562,16 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // `WHERE tenant_id = ...` as the documented second layer. The clause
         // becomes load-bearing once a per-tenant `ScopeCredentials` session binds
         // `$auth.tenant`; a rootful schema/migration session bypasses it.
-        table_schema("memory")
+        table_schema(tables::MEMORY)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", memory_select_rule()),
                 ("create", MEMORY_WRITE_RULE.to_string()),
                 ("update", MEMORY_WRITE_RULE.to_string()),
-                ("delete", "tenant_id = $auth.tenant".to_string()),
+                // A session may delete what it may write, and no more: the
+                // tenant filter alone let a member hard-delete any memory of
+                // the workspace, private compartments included.
+                ("delete", MEMORY_WRITE_RULE.to_string()),
             ])
             .with_indexes([
                 unique_index("memory_tenant_key_uq", ["tenant_id", "key"]),
@@ -564,7 +608,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // memory can find it. It carries the memory's workspace and
         // compartment, so its select rule is the memory's own and a chunk is
         // visible exactly when its memory is. Only the server writes it.
-        table_schema("memory_chunk")
+        table_schema(tables::MEMORY_CHUNK)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", memory_select_rule()),
@@ -596,13 +640,14 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // like `memory` (engine-enforced PERMISSIONS + the repo's explicit
         // filter). A plain table keyed by from/to/type, queried by clean
         // equality (native N-hop RELATION traversal is a later enhancement).
-        table_schema("memory_edge")
+        table_schema(tables::MEMORY_EDGE)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", "tenant_id = $auth.tenant"),
                 ("create", EDGE_LINK_RULE),
                 ("update", EDGE_LINK_RULE),
-                ("delete", "tenant_id = $auth.tenant"),
+                // Unlinking is writing the graph: the same rule as linking.
+                ("delete", EDGE_LINK_RULE),
             ])
             .with_indexes([
                 index("memory_edge_from_idx", ["tenant_id", "from_id"]),
@@ -613,7 +658,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // (tenant, memory), counted by the server as it watches recall and the
         // work after it. Apart from `memory` so a count never rewrites the
         // memory (its `updated_at` drives replication); not replicated.
-        table_schema("memory_use")
+        table_schema(tables::MEMORY_USE)
             .with_mode(TableMode::Schemaless)
             .with_permissions(TENANT_PERMS)
             .with_indexes([unique_index(
@@ -622,7 +667,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             )]),
         // A workspace's memory knobs: one row per tenant. Its own sessions
         // read it; only the owner (an operator's console action) writes it.
-        table_schema("memory_policy")
+        table_schema(tables::MEMORY_POLICY)
             .with_mode(TableMode::Schemaless)
             .with_permissions([
                 ("select", "tenant_id = $auth.tenant"),
@@ -635,7 +680,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // from episodic `memory` but isolated the same way (the compartment rule
         // in the engine + the repo's tenant filter). HNSW-indexed for semantic
         // recall over reference material.
-        table_schema("document_chunk")
+        table_schema(tables::DOCUMENT_CHUNK)
             .with_mode(TableMode::Schemaless)
             .with_permissions(document_perms())
             .with_indexes([
@@ -657,7 +702,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // its slug (unique across the server, since a public relic is found by
         // slug alone), each version's copal file listed inside it. Read through
         // the compartment like a document; written by its owner only.
-        table_schema("relic")
+        table_schema(tables::RELIC)
             .with_mode(TableMode::Schemaless)
             .with_permissions(relic_perms())
             .with_indexes([
@@ -666,11 +711,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("relic_tenant_compartment_idx", ["tenant_id", "compartment"]),
             ]),
         // Compartments (the latent-spaces). Tenant-readable so the memory ACL's
-        // subqueries resolve; ownership/sharing is carried in the rows (owner +
-        // the grant table) and enforced by the memory rule.
-        table_schema("compartment")
+        // subqueries resolve; written by their owner alone, since the memory
+        // rule trusts the row's owner live (COMPARTMENT_PERMS).
+        table_schema(tables::COMPARTMENT)
             .with_mode(TableMode::Schemaless)
-            .with_permissions(TENANT_PERMS)
+            .with_permissions(COMPARTMENT_PERMS)
             .with_indexes([
                 unique_index("compartment_key_uq", ["tenant_id", "key"]),
                 index("compartment_owner_idx", ["tenant_id", "owner"]),
@@ -679,7 +724,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // Capability grants (intra-tenant, user-to-user). Tenant-readable so the
         // memory ACL can resolve `grantee = $auth.user`; only the compartment's
         // owner may write a grant on it (GRANT_PERMS) so a grant cannot be forged.
-        table_schema("grant")
+        table_schema(tables::GRANT)
             .with_mode(TableMode::Schemaless)
             .with_permissions(GRANT_PERMS)
             .with_indexes([
@@ -691,7 +736,7 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // resolves a principal so `$auth` carries both `$auth.tenant` (the hard
         // isolation key) and `$auth.user` (the compartment-ownership / sharing
         // actor). Provisioned by the owner/root; read only by the SIGNIN.
-        table_schema("principal")
+        table_schema(tables::PRINCIPAL)
             .with_mode(TableMode::Schemaless)
             .with_indexes([
                 unique_index("principal_tenant_user_uq", ["tenant", "user"]),
@@ -700,15 +745,17 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("principal_user_idx", ["user"]),
             ]),
         // Per-workspace embedder endpoint (hosted multi-tenant): one row per
-        // tenant, tenant-scoped so a workspace sets only its own.
-        table_schema("embedder_config")
+        // tenant. The server reads it as the owner when it builds a workspace's
+        // session, and the operator's CLI writes it as the owner; it holds the
+        // endpoint's key, so no member session reads or writes it.
+        table_schema(tables::EMBEDDER_CONFIG)
             .with_mode(TableMode::Schemaless)
-            .with_permissions(TENANT_PERMS)
+            .with_permissions(OWNER_VIEW_PERMS)
             .with_indexes([unique_index("embedder_config_tenant_uq", ["tenant_id"])]),
         // The loop's readings of a workspace's behavior audits against the
         // regression confidence admission is held to: one row per reading,
         // appended, the latest in force. Tenant-scoped like the behaviors.
-        table_schema("behavior_tuning")
+        table_schema(tables::BEHAVIOR_TUNING)
             .with_mode(TableMode::Schemaless)
             .with_permissions(TENANT_PERMS)
             .with_indexes([index("behavior_tuning_tenant_idx", ["tenant_id"])]),
@@ -757,9 +804,13 @@ pub fn schema_statements(embed_dim: u32) -> Result<Vec<String>> {
     // `DEFINE TABLE` statement alone (mode, permissions), not its fields or
     // indexes, so no index is rebuilt and no row is touched.
     out.extend(tables.iter().map(TableDefinition::to_surql_overwrite));
-    // The tenant record-access method (binds $auth.tenant), idempotent so a
-    // persistent store can re-apply the schema on every connect.
-    out.extend(generate_access_sql_with_options(&tenant_access(), true).map_err(map)?);
+    // The tenant record-access method (binds $auth.tenant), re-asserted like
+    // the tables: `IF NOT EXISTS` kept the first definition for good, so a
+    // tightened SIGNIN or a shorter session reached new stores only. A
+    // redefinition leaves the principal rows alone; the live record sessions
+    // of other connections keep their authenticated state, and every
+    // connection of this process signs in afresh after the schema is applied.
+    out.push(tenant_access().to_surql_overwrite().map_err(map)?);
     Ok(out)
 }
 
@@ -768,33 +819,200 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_tenant_access_renders_its_session_duration() {
-        let sql = generate_access_sql_with_options(&tenant_access(), true).unwrap();
-        let rendered = sql.join("\n");
+    fn the_tenant_access_renders_its_session_duration() -> Result<()> {
+        let rendered = tenant_access().to_surql_overwrite().map_err(map)?;
         assert!(rendered.contains("FOR SESSION 3600s"), "{rendered}");
+        Ok(())
+    }
+
+    /// The access method is re-asserted with every schema apply, like the
+    /// tables, so a changed definition reaches a store that already has one.
+    #[tokio::test]
+    async fn the_access_method_is_overwritten_on_reapply() -> Result<()> {
+        let statements = schema_statements(4)?;
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("DEFINE ACCESS OVERWRITE tenant ")),
+            "the access method is defined with OVERWRITE"
+        );
+        assert!(
+            !statements
+                .iter()
+                .any(|s| s.contains("DEFINE ACCESS IF NOT EXISTS")),
+            "no access method is defined IF NOT EXISTS"
+        );
+
+        /// The access method's definition as the store holds it.
+        async fn defined(store: &crate::Store) -> Result<String> {
+            let rows: Vec<serde_json::Value> = store
+                .query_rows(
+                    "RETURN [(INFO FOR DB).accesses.tenant]",
+                    std::collections::BTreeMap::new(),
+                )
+                .await?;
+            let Some(definition) = rows.first().and_then(|v| v.as_str()) else {
+                return Err(antumbra_core::AntumbraError::other(format!(
+                    "no tenant access in INFO FOR DB: {rows:?}"
+                )));
+            };
+            Ok(definition.to_string())
+        }
+        let store = crate::testing::mem_store_of(4).await?;
+        let first = defined(&store).await?;
+        assert!(first.contains("SIGNIN"), "{first}");
+
+        // A shorter session, applied over the one the connect left behind.
+        let shorter = tenant_access()
+            .with_session("60s")
+            .to_surql_overwrite()
+            .map_err(map)?;
+        store
+            .query_rows::<serde_json::Value>(&shorter, std::collections::BTreeMap::new())
+            .await?;
+        let changed = defined(&store).await?;
+        assert_ne!(changed, first, "the redefinition reached the store");
+
+        // The schema's own definition, applied again, restores it.
+        for statement in schema_statements(4)? {
+            store
+                .query_rows::<serde_json::Value>(&statement, std::collections::BTreeMap::new())
+                .await?;
+        }
+        assert_eq!(defined(&store).await?, first);
+        Ok(())
     }
 
     /// The read rule is built from the subqueries the readable-compartment
     /// lists share with it, and reads exactly as it did written out whole.
     #[test]
-    fn the_read_rule_is_unchanged_by_sharing_its_subqueries() {
-        let before = r"tenant_id = $auth.tenant AND (compartment = NONE OR (type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).owner = $auth.user AND type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).deleted_at IS NONE) OR compartment IN (SELECT VALUE compartment FROM grant WHERE grantee = $auth.user AND deleted_at IS NONE) OR compartment IN (SELECT VALUE subject_id FROM hive_offer WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true)))";
+    fn the_read_rule_is_unchanged_by_sharing_its_subqueries() -> Result<()> {
+        let before = r"tenant_id = $auth.tenant AND (compartment = NONE OR (type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).owner = $auth.user AND type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).deleted_at IS NONE) OR compartment IN (SELECT VALUE compartment FROM grant WHERE tenant_id = $auth.tenant AND grantee = $auth.user AND deleted_at IS NONE) OR compartment IN (SELECT VALUE subject_id FROM hive_offer WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true)))";
         assert_eq!(memory_select_rule(), before);
-        assert!(before.contains(&granted_compartments("$auth.user")));
+        assert!(before.contains(&granted_compartments("$auth.tenant", "$auth.user")));
         assert!(before.contains(&hive_compartments("$auth.tenant")));
         assert_eq!(
             owned_compartments("$t", "$u"),
             "SELECT VALUE key FROM compartment WHERE tenant_id = $t AND owner = $u AND deleted_at IS NONE"
         );
+        Ok(())
+    }
+
+    /// Every subquery a rule asks of the grant, compartment or memory table
+    /// names the tenant itself, so no rule leans on the inner table's own
+    /// permission to keep another tenant's rows out of the answer.
+    #[test]
+    fn every_rule_subquery_names_the_tenant() -> Result<()> {
+        let rules = [
+            memory_select_rule(),
+            MEMORY_WRITE_RULE.to_string(),
+            EDGE_LINK_RULE.to_string(),
+            COMPARTMENT_OWNER_RULE.to_string(),
+        ];
+        for rule in &rules {
+            for (n, fragment) in rule.split("(SELECT VALUE").enumerate().skip(1) {
+                let body = fragment.split(')').next().unwrap_or(fragment);
+                assert!(
+                    body.contains("tenant_id"),
+                    "subquery {n} of `{rule}` names no tenant: {body}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// The edge delete rule is the edge write rule: a member may unlink only
+    /// an edge whose target they may write, so an edge into another member's
+    /// private memory survives their `DELETE` and goes under its owner's.
+    #[tokio::test]
+    async fn a_member_cannot_delete_an_edge_into_a_memory_they_cannot_write() -> Result<()> {
+        use crate::repo::{compartment, edge, memory};
+        use antumbra_core::{
+            Compartment, CompartmentId, EdgeType, Memory, MemoryEdge, MemoryNetwork, TenantId,
+            UserId,
+        };
+
+        let store = crate::testing::mem_store_of(4).await?;
+        let tenant = TenantId::new("ws:org");
+        let (lily, oslo) = (UserId::new("user:lily"), UserId::new("user:oslo"));
+        crate::testing::members(&store, &tenant, &[&lily, &oslo]).await?;
+        let now = chrono::Utc::now();
+        let private = CompartmentId::new("comp:lily-private");
+        compartment::create(
+            &store,
+            &Compartment::new(
+                private.clone(),
+                tenant.clone(),
+                lily.clone(),
+                "lily private",
+                now,
+            ),
+        )
+        .await?;
+        for (id, comp) in [("memory:shared", None), ("memory:salary", Some(private))] {
+            let mut m = Memory::new(id, tenant.clone(), MemoryNetwork::World, id, 0.9, now);
+            m.compartment = comp;
+            m.embedding = Some(vec![1.0, 0.0, 0.0, 0.0]);
+            memory::upsert(&store, &m).await?;
+        }
+        edge::relate(
+            &store,
+            &MemoryEdge::new(
+                tenant.clone(),
+                "memory:shared",
+                "memory:salary",
+                EdgeType::References,
+                1.0,
+                now,
+            ),
+        )
+        .await?;
+        let edges = |store: &crate::Store| {
+            let store = store.clone();
+            async move { edge::all_unscoped(&store).await.map(|e| e.len()) }
+        };
+        assert_eq!(edges(&store).await?, 1);
+
+        // oslo may not write lily's private memory, so may not unlink an edge
+        // into it: the engine leaves the row, without an error.
+        store.signin(&tenant, &oslo).await?;
+        store
+            .query_rows::<serde_json::Value>(
+                "DELETE memory_edge",
+                std::collections::BTreeMap::new(),
+            )
+            .await?;
+        store.invalidate().await?;
+        assert_eq!(
+            edges(&store).await?,
+            1,
+            "the edge survived a member's delete"
+        );
+
+        // lily, who may write the target, may unlink it.
+        store.signin(&tenant, &lily).await?;
+        store
+            .query_rows::<serde_json::Value>(
+                "DELETE memory_edge",
+                std::collections::BTreeMap::new(),
+            )
+            .await?;
+        store.invalidate().await?;
+        assert_eq!(edges(&store).await?, 0, "the owner's delete lands");
+        Ok(())
     }
 
     #[test]
-    fn memory_table_carries_engine_enforced_tenant_permissions() {
-        let stmts = schema_statements(EMBED_DIM as u32).unwrap();
-        let define = stmts
+    fn memory_table_carries_engine_enforced_tenant_permissions() -> Result<()> {
+        let stmts = schema_statements(EMBED_DIM as u32)?;
+        let Some(define) = stmts
             .iter()
             .find(|s| s.starts_with("DEFINE TABLE") && s.contains(" memory "))
-            .expect("memory DEFINE TABLE statement");
+        else {
+            return Err(antumbra_core::AntumbraError::other(
+                "no memory DEFINE TABLE statement",
+            ));
+        };
         // The clause renders inline on DEFINE TABLE (valid SurrealQL), not as a
         // malformed `DEFINE FIELD PERMISSIONS ...` statement. (Actions are
         // emitted in BTreeMap order, so don't assume select is first.)
@@ -804,5 +1022,6 @@ mod tests {
         assert!(define.contains("FOR update WHERE tenant_id = $auth.tenant"));
         assert!(define.contains("FOR delete WHERE tenant_id = $auth.tenant"));
         assert!(!stmts.iter().any(|s| s.contains("DEFINE FIELD PERMISSIONS")));
+        Ok(())
     }
 }

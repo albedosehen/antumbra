@@ -8,16 +8,24 @@ A SurrealDB v3 database and the Antumbra MCP server run in Docker (hardened, non
 
 ## The quick way
 
-With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.com) running, install the CLI from the latest release (no Rust needed):
+With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.com) running, install the CLI from a release (no Rust needed). The command names a release tag rather than `latest`, so what it runs is a published, unchanging asset; the installer downloads the archive for this machine and checks it against the sha256 built into the script before unpacking.
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.3.1/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.3.1/antumbra-cli-installer.ps1 | iex
+```
+
+To check the archive yourself before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
+
+```bash
+v=v0.3.1; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
+shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
 
 Then, from any directory:

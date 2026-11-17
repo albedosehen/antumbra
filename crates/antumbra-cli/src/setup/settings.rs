@@ -529,7 +529,7 @@ mod tests {
                     event: "Stop",
                     script: "antumbra-capture.sh",
                     command: "bash \"/home/me/.antumbra/hooks/antumbra-capture.sh\"".into(),
-                    timeout: 5,
+                    timeout: 10,
                 },
             ],
             env: vec![
@@ -541,28 +541,29 @@ mod tests {
         }
     }
 
-    fn parsed(text: &str) -> Value {
-        serde_json::from_str(text).unwrap()
+    fn parsed(text: &str) -> anyhow::Result<Value> {
+        Ok(serde_json::from_str(text)?)
     }
 
     #[test]
-    fn an_empty_file_gets_everything() {
-        let wired = wire("", &wiring()).unwrap();
-        let v = parsed(&wired.text);
+    fn an_empty_file_gets_everything() -> anyhow::Result<()> {
+        let wired = wire("", &wiring())?;
+        let v = parsed(&wired.text)?;
         assert_eq!(v["autoMemoryEnabled"], false);
         assert_eq!(v["env"]["ANTUMBRA_URL"], "http://127.0.0.1:8081");
         assert_eq!(
             v["hooks"]["SessionStart"][0]["hooks"][0]["command"],
             "bash \"/home/me/.antumbra/hooks/antumbra-session-start.sh\""
         );
-        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["timeout"], 5);
+        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["timeout"], 10);
         assert_eq!(wired.added, vec!["SessionStart", "Stop"]);
         assert!(wired.auto_memory_set);
         assert!(wired.changed());
+        Ok(())
     }
 
     #[test]
-    fn the_users_own_keys_order_and_formatting_survive() {
+    fn the_users_own_keys_order_and_formatting_survive() -> anyhow::Result<()> {
         let text = r#"{
     "theme": "dark",
     "permissions": {
@@ -582,8 +583,8 @@ mod tests {
     "model": "opus"
 }
 "#;
-        let wired = wire(text, &wiring()).unwrap();
-        let v = parsed(&wired.text);
+        let wired = wire(text, &wiring())?;
+        let v = parsed(&wired.text)?;
         // Theirs, untouched and in place.
         assert!(wired.text.contains("    \"theme\": \"dark\",\n"));
         assert!(wired
@@ -595,7 +596,7 @@ mod tests {
         assert_eq!(v["env"]["ANTUMBRA_URL"], "http://127.0.0.1:8081");
         assert_eq!(v["env"]["ANTUMBRA_WORKSPACE_ID"], "ws:default");
         // Our Stop hook goes in ahead of theirs; theirs stays.
-        assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
+        assert_eq!(v["hooks"]["Stop"].as_array().map(Vec::len), Some(2));
         assert_eq!(v["hooks"]["Stop"][1]["hooks"][0]["command"], "echo mine");
         // A new event inside their hooks object, indented like its neighbors.
         assert!(wired.text.contains("        \"SessionStart\": ["));
@@ -603,70 +604,80 @@ mod tests {
             wired.env_set,
             vec!["ANTUMBRA_URL", "ANTUMBRA_WORKSPACE_ID", "ANTUMBRA_HOST_ID"]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_host_id_the_user_chose_is_kept() {
-        let wired = wire(r#"{ "env": { "ANTUMBRA_HOST_ID": "windows" } }"#, &wiring()).unwrap();
-        assert_eq!(parsed(&wired.text)["env"]["ANTUMBRA_HOST_ID"], "windows");
+    fn a_host_id_the_user_chose_is_kept() -> anyhow::Result<()> {
+        let wired = wire(r#"{ "env": { "ANTUMBRA_HOST_ID": "windows" } }"#, &wiring())?;
+        assert_eq!(parsed(&wired.text)?["env"]["ANTUMBRA_HOST_ID"], "windows");
         assert!(!wired.env_set.contains(&"ANTUMBRA_HOST_ID".to_string()));
-        let wired = wire("{}", &wiring()).unwrap();
-        assert_eq!(parsed(&wired.text)["env"]["ANTUMBRA_HOST_ID"], "laptop");
+        let wired = wire("{}", &wiring())?;
+        assert_eq!(parsed(&wired.text)?["env"]["ANTUMBRA_HOST_ID"], "laptop");
+        Ok(())
     }
 
     #[test]
-    fn a_hook_already_wired_by_name_is_not_doubled() {
+    fn a_hook_already_wired_by_name_is_not_doubled() -> anyhow::Result<()> {
         // Hand-wired on Windows: the PowerShell twin of the bash script.
         let text = r#"{
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -File \"C:\\Users\\me\\.claude\\antumbra-session-start.ps1\"" }]}]
   }
 }"#;
-        let wired = wire(text, &wiring()).unwrap();
-        let v = parsed(&wired.text);
-        assert_eq!(v["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+        let wired = wire(text, &wiring())?;
+        let v = parsed(&wired.text)?;
+        assert_eq!(v["hooks"]["SessionStart"].as_array().map(Vec::len), Some(1));
         assert_eq!(wired.already.len(), 1);
         assert_eq!(wired.already[0].0, "SessionStart");
         assert_eq!(wired.added, vec!["Stop"]);
+        Ok(())
     }
 
     #[test]
-    fn running_it_twice_changes_nothing_the_second_time() {
-        let once = wire("{}", &wiring()).unwrap();
-        let twice = wire(&once.text, &wiring()).unwrap();
+    fn running_it_twice_changes_nothing_the_second_time() -> anyhow::Result<()> {
+        let once = wire("{}", &wiring())?;
+        let twice = wire(&once.text, &wiring())?;
         assert_eq!(once.text, twice.text);
         assert!(!twice.changed());
         assert_eq!(twice.already.len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn an_answer_about_auto_memory_is_kept() {
-        let wired = wire(r#"{ "autoMemoryEnabled": true }"#, &wiring()).unwrap();
-        assert_eq!(parsed(&wired.text)["autoMemoryEnabled"], true);
+    fn an_answer_about_auto_memory_is_kept() -> anyhow::Result<()> {
+        let wired = wire(r#"{ "autoMemoryEnabled": true }"#, &wiring())?;
+        assert_eq!(parsed(&wired.text)?["autoMemoryEnabled"], true);
         assert_eq!(wired.auto_memory_was, Some(true));
         assert!(!wired.auto_memory_set);
 
         let mut w = wiring();
         w.auto_memory_off = false;
-        let wired = wire("{}", &w).unwrap();
-        assert!(parsed(&wired.text).get("autoMemoryEnabled").is_none());
+        let wired = wire("{}", &w)?;
+        assert!(parsed(&wired.text)?.get("autoMemoryEnabled").is_none());
+        Ok(())
     }
 
     #[test]
-    fn one_line_objects_and_escaped_strings_are_handled() {
+    fn one_line_objects_and_escaped_strings_are_handled() -> anyhow::Result<()> {
         let text = r#"{"note": "a \"quoted\" } brace", "env": {}, "hooks": {"Stop": []}}"#;
-        let wired = wire(text, &wiring()).unwrap();
-        let v = parsed(&wired.text);
+        let wired = wire(text, &wiring())?;
+        let v = parsed(&wired.text)?;
         assert_eq!(v["note"], "a \"quoted\" } brace");
         assert_eq!(v["env"]["ANTUMBRA_WORKSPACE_ID"], "ws:default");
-        assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert_eq!(v["hooks"]["Stop"].as_array().map(Vec::len), Some(1));
+        Ok(())
     }
 
     #[test]
-    fn a_file_that_is_not_json_is_refused() {
-        let err = wire("{ not json", &wiring()).unwrap_err().to_string();
+    fn a_file_that_is_not_json_is_refused() -> anyhow::Result<()> {
+        let Err(err) = wire("{ not json", &wiring()) else {
+            anyhow::bail!("a file that is not JSON was wired");
+        };
+        let err = err.to_string();
         assert!(err.contains("not valid JSON"), "{err}");
         assert!(wire("[]", &wiring()).is_err());
         assert!(wire(r#"{"hooks": []}"#, &wiring()).is_err());
+        Ok(())
     }
 }

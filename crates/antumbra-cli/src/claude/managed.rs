@@ -119,9 +119,11 @@ fn variables(settings: &serde_json::Map<String, serde_json::Value>) -> BTreeMap<
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
+
     use super::*;
 
-    fn temp() -> PathBuf {
+    fn temp() -> anyhow::Result<PathBuf> {
         let dir = std::env::temp_dir().join(format!(
             "antumbra-managed-{}-{}",
             std::process::id(),
@@ -130,18 +132,18 @@ mod tests {
                 .map(|d| d.as_nanos())
                 .unwrap_or_default()
         ));
-        std::fs::create_dir_all(dir.join("managed-settings.d")).expect("temp dir");
-        dir
+        std::fs::create_dir_all(dir.join("managed-settings.d")).context("temp dir")?;
+        Ok(dir)
     }
 
-    fn write(path: PathBuf, text: &str) {
-        std::fs::write(path, text).expect("write");
+    fn write(path: PathBuf, text: &str) -> anyhow::Result<()> {
+        std::fs::write(path, text).context("write")
     }
 
     /// A forced gateway sign-in turns the flags off like the switches do, and
     /// so does Mantle, Bedrock's other endpoint; both read from the variables.
     #[test]
-    fn a_gateway_session_and_mantle_are_sovereign() {
+    fn a_gateway_session_and_mantle_are_sovereign() -> anyhow::Result<()> {
         let origin = super::super::Origin::Settings(dir().join("managed-settings.json"));
         let vars = |pairs: &[(&str, &str)]| {
             pairs
@@ -174,34 +176,36 @@ mod tests {
             ("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1")
         ])
         .is_empty());
+        Ok(())
     }
 
     #[test]
-    fn no_managed_files_is_none() {
-        let dir = temp();
+    fn no_managed_files_is_none() -> anyhow::Result<()> {
+        let dir = temp()?;
         assert_eq!(read(&dir), None);
-        write(dir.join("managed-settings.d").join("notes.txt"), "{}");
+        write(dir.join("managed-settings.d").join("notes.txt"), "{}")?;
         assert_eq!(read(&dir), None, "only *.json drop-ins count");
+        Ok(())
     }
 
     /// The main file first, then the drop-ins in name order, each over the
     /// one before; a hidden file or one that does not parse adds nothing.
     #[test]
-    fn the_files_merge_in_order_and_env_merges_by_name() {
-        let dir = temp();
+    fn the_files_merge_in_order_and_env_merges_by_name() -> anyhow::Result<()> {
+        let dir = temp()?;
         write(
             dir.join("managed-settings.json"),
             r#"{"env": {"DISABLE_TELEMETRY": "1", "A": "main"}}"#,
-        );
+        )?;
         let d = dir.join("managed-settings.d");
-        write(d.join("20-later.json"), r#"{"env": {"A": "twenty"}}"#);
+        write(d.join("20-later.json"), r#"{"env": {"A": "twenty"}}"#)?;
         write(
             d.join("10-first.json"),
             r#"{"env": {"A": "ten", "B": "ten"}}"#,
-        );
-        write(d.join(".hidden.json"), r#"{"env": {"A": "hidden"}}"#);
-        write(d.join("30-broken.json"), "{ not json");
-        let managed = read(&dir).expect("managed");
+        )?;
+        write(d.join(".hidden.json"), r#"{"env": {"A": "hidden"}}"#)?;
+        write(d.join("30-broken.json"), "{ not json")?;
+        let managed = read(&dir).context("managed")?;
         assert_eq!(managed.path, dir.join("managed-settings.json"));
         let got: Vec<(&str, &str)> = managed
             .variables
@@ -212,28 +216,29 @@ mod tests {
             got,
             [("A", "twenty"), ("B", "ten"), ("DISABLE_TELEMETRY", "1")]
         );
+        Ok(())
     }
 
     /// A gateway sign-in counts only with a URL to sign in to: the method
     /// alone leaves the developer at a "contact your administrator" message.
     #[test]
-    fn a_forced_gateway_sign_in_is_read_only_with_its_url() {
-        let dir = temp();
+    fn a_forced_gateway_sign_in_is_read_only_with_its_url() -> anyhow::Result<()> {
+        let dir = temp()?;
         let d = dir.join("managed-settings.d");
         write(
             d.join("10-login.json"),
             r#"{"forceLoginMethod": "gateway"}"#,
-        );
-        let managed = read(&dir).expect("managed");
+        )?;
+        let managed = read(&dir).context("managed")?;
         assert_eq!(managed.path, d, "only drop-ins: the directory is named");
         assert!(!managed.variables.contains_key(GATEWAY_LOGIN));
         write(
             d.join("20-url.json"),
             r#"{"forceLoginGatewayUrl": "https://gateway.internal.example"}"#,
-        );
+        )?;
         assert_eq!(
             read(&dir)
-                .expect("managed")
+                .context("managed")?
                 .variables
                 .get(GATEWAY_LOGIN)
                 .map(String::as_str),
@@ -242,10 +247,11 @@ mod tests {
         write(
             d.join("30-claudeai.json"),
             r#"{"forceLoginMethod": "claudeai"}"#,
-        );
+        )?;
         assert!(!read(&dir)
-            .expect("managed")
+            .context("managed")?
             .variables
             .contains_key(GATEWAY_LOGIN));
+        Ok(())
     }
 }

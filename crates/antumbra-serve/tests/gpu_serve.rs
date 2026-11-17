@@ -18,6 +18,8 @@
 
 #![cfg(feature = "models")]
 
+use anyhow::Context as _;
+
 use antumbra_core::ports::{ActRequest, Serve};
 use antumbra_core::ExpertId;
 use antumbra_serve::{MultiAdapterServe, RaftConfig};
@@ -26,7 +28,7 @@ use antumbra_serve::{MultiAdapterServe, RaftConfig};
 // multi-threaded runtime (a replacement worker takes over while a request blocks).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "live GPU: set ANTUMBRA_GPU_SERVE=1 (and the CUDA env in the header) and run with --ignored"]
-async fn multi_adapter_serve_generates_on_gpu() {
+async fn multi_adapter_serve_generates_on_gpu() -> anyhow::Result<()> {
     assert!(
         std::env::var("ANTUMBRA_GPU_SERVE").is_ok(),
         "ANTUMBRA_GPU_SERVE=1 must be set to run this ignored live GPU test"
@@ -62,7 +64,7 @@ async fn multi_adapter_serve_generates_on_gpu() {
             weights: Vec::new(),
         })
         .await
-        .expect("real GPU generation succeeds");
+        .context("real GPU generation succeeds")?;
 
     assert!(
         !out.final_output.trim().is_empty(),
@@ -84,11 +86,12 @@ async fn multi_adapter_serve_generates_on_gpu() {
             weights: Vec::new(),
         })
         .await
-        .expect("second generation on the resident base succeeds");
+        .context("second generation on the resident base succeeds")?;
     assert!(!again.final_output.trim().is_empty());
 
     eprintln!(
         "RESULT: PASS - MultiAdapterServe generated on GPU (base={base})\n--- first ---\n{}\n--- second ---\n{}",
         out.final_output, again.final_output
     );
+    Ok(())
 }

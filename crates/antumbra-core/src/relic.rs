@@ -371,7 +371,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn slugs_are_typeable_addresses() {
+    fn slugs_are_typeable_addresses() -> anyhow::Result<()> {
         for good in ["ceiling", "the-ceiling-v4", "a", "x1", &"a".repeat(64)] {
             assert!(is_valid_slug(good), "{good:?}");
         }
@@ -386,10 +386,11 @@ mod tests {
         ] {
             assert!(!is_valid_slug(bad), "{bad:?}");
         }
+        Ok(())
     }
 
     #[test]
-    fn a_title_becomes_a_valid_slug() {
+    fn a_title_becomes_a_valid_slug() -> anyhow::Result<()> {
         assert_eq!(
             slugify("The Ceiling Pays for the Floor"),
             "the-ceiling-pays-for-the-floor"
@@ -401,28 +402,28 @@ mod tests {
         assert_eq!(slugify("¡¿!"), "relic");
         let long = slugify(&"word ".repeat(40));
         assert!(long.len() <= 48 && is_valid_slug(&long), "{long}");
+        Ok(())
     }
 
     #[test]
-    fn visibility_reads_its_own_words_only() {
-        assert_eq!("Public".parse::<Visibility>().unwrap(), Visibility::Public);
-        assert_eq!(
-            " private ".parse::<Visibility>().unwrap(),
-            Visibility::Private
-        );
+    fn visibility_reads_its_own_words_only() -> anyhow::Result<()> {
+        assert_eq!("Public".parse::<Visibility>()?, Visibility::Public);
+        assert_eq!(" private ".parse::<Visibility>()?, Visibility::Private);
         assert!("unlisted".parse::<Visibility>().is_err());
         assert_eq!(Visibility::Public.as_str(), "public");
+        Ok(())
     }
 
     #[test]
-    fn document_titles_name_their_relic() {
+    fn document_titles_name_their_relic() -> anyhow::Result<()> {
         assert_eq!(document_title("ceiling"), "relic:ceiling");
         assert_eq!(slug_of_document("relic:ceiling"), Some("ceiling"));
         assert_eq!(slug_of_document("handbook"), None);
+        Ok(())
     }
 
     #[test]
-    fn html_text_keeps_the_words_and_drops_the_machinery() {
+    fn html_text_keeps_the_words_and_drops_the_machinery() -> anyhow::Result<()> {
         let page = r#"<!doctype html><html><head><title>The Ceiling</title>
             <style>.lead { color: red }</style></head><body>
             <!-- a note -->
@@ -436,10 +437,11 @@ mod tests {
         );
         assert_eq!(html_to_text("before <script>never closed"), "before");
         assert_eq!(html_to_text(r#"<a title="a > b">kept</a>"#), "kept");
+        Ok(())
     }
 
     #[test]
-    fn a_viewport_is_found_however_its_tag_is_written() {
+    fn a_viewport_is_found_however_its_tag_is_written() -> anyhow::Result<()> {
         for declared in [
             r#"<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>"#,
             r#"<META NAME="Viewport" CONTENT="width=device-width">"#,
@@ -458,5 +460,6 @@ mod tests {
         ] {
             assert!(!has_viewport_meta(missing), "{missing:?}");
         }
+        Ok(())
     }
 }

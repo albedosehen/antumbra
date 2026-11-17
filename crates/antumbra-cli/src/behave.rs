@@ -55,6 +55,11 @@ pub struct BehaveArgs {
     /// the set (above 0.5, below 1).
     #[arg(long, default_value_t = 0.9)]
     pub regression_confidence: f64,
+    /// Which quantized forms of the base an admitted expert is measured on:
+    /// `auto` (Q8_0), `off`, `q8_0`, `q4_k`, or `q8_0,q4_k`. Each form is one
+    /// more load of the base, and what it finds goes on the expert's card.
+    #[arg(long, default_value = "auto")]
+    pub drift: String,
 }
 
 /// One behavior in an `--import` file.
@@ -179,6 +184,8 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
         max_new_tokens: a.max_new_tokens,
         ..antumbra_serve::behave::standing_config(&recipe)
     };
+    let measure = antumbra_serve::ServeQuant::drift_from_setting(&a.drift)
+        .map_err(|e| anyhow::anyhow!("--drift: {e}"))?;
     let report = antumbra_serve::behave::train_behaviors(
         &store,
         embedder.as_ref(),
@@ -187,6 +194,7 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
         &scope,
         &cfg,
         recipe.regression_confidence,
+        &measure,
     )
     .await?;
     let Some(r) = report else {
@@ -227,6 +235,15 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
             }
         }
     }
+    if !r.drift.is_empty() {
+        println!("{}", antumbra_serve::behave::drift::describe(&r.drift));
+    }
+    // Left in place: a server started before this may still serve from it.
+    if let Some(old) = &r.superseded {
+        println!(
+            "the adapter it replaces is still at {old}; remove it once no running server serves from it"
+        );
+    }
     Ok(())
 }
 
@@ -240,7 +257,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_imported_rule_keeps_its_id_and_a_scope_or_rule_changes_it() {
+    fn an_imported_rule_keeps_its_id_and_a_scope_or_rule_changes_it() -> anyhow::Result<()> {
         let a = import_id("user:a", "everywhere", "Use --save-exact.");
         assert_eq!(a, import_id("user:a", "everywhere", " Use --save-exact.\n"));
         assert_ne!(
@@ -249,20 +266,21 @@ mod tests {
         );
         assert_ne!(a, import_id("user:a", "everywhere", "Pin versions."));
         assert_ne!(a, import_id("user:b", "everywhere", "Use --save-exact."));
+        Ok(())
     }
 
     #[test]
-    fn an_import_row_carries_a_spec_an_optional_scope_and_its_sources() {
+    fn an_import_row_carries_a_spec_an_optional_scope_and_its_sources() -> anyhow::Result<()> {
         let rows = rows(
             r#"[{"rule":"r","must":["x"],"examples":[{"task":"t","answer":"x"}],"violations":["y"],"scope":"github.com/a/b","sources":["memory:1","memory:2"]},
                 {"rule":"s","must":["x"],"examples":[],"violations":[]}]"#,
-        )
-        .unwrap();
+        )?;
         assert_eq!(rows[0].scope.as_deref(), Some("github.com/a/b"));
         assert_eq!(rows[0].spec.examples.len(), 1);
         assert_eq!(rows[0].sources, ["memory:1", "memory:2"]);
         assert!(rows[1].scope.is_none());
         assert!(rows[1].sources.is_empty());
         assert!(!rows[1].spec.problems().is_empty());
+        Ok(())
     }
 }

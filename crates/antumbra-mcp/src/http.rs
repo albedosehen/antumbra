@@ -10,21 +10,23 @@
 //! An embedded SurrealDB (`surrealkv://`, the edge/IoT case) is **single-writer**:
 //! only one connection may open the datastore. So the server holds **one** shared
 //! connection and multiplexes tenants over it; it does *not* open a connection
-//! per identity. Because `signin` binds the whole connection, each request takes
-//! a lock, signs the shared connection in as its identity, runs, and releases;
-//! the next request re-signs-in. The engine then hides other tenants' rows even
-//! on an unfiltered query (proven in `antumbra-store`'s embedded tests). The cost
-//! is serialization of the authenticated section: fine for an edge device; a
+//! per identity. Because `signin` binds the whole connection, each **tool call**
+//! takes a lock, signs the shared connection in as its identity, runs, and
+//! releases ([`McpServer::bound`]); the next call re-signs-in. The signin
+//! travels with the call, not with the HTTP request that carried it, because a
+//! call over `/mcp` runs on the session's task after that request has been
+//! answered. The engine then hides other tenants' rows even on an unfiltered
+//! query (proven in `antumbra-store`'s embedded tests). The cost is
+//! serialization of the authenticated section: fine for an edge device; a
 //! high-concurrency deployment points `--url` at a real `ws://` server.
 //!
 //! ## Stateful (SSE) mode for live propagation
 //!
 //! The transport runs in rmcp's stateful mode so a client can hold an open
 //! GET/SSE stream that carries **server-initiated** notifications: the only
-//! channel the MCP spec defines for push. That does not reintroduce the lock
-//! concern: the auth lock is held only while `handle` *builds* a response, and an
-//! SSE stream is MCP transport state (a channel + cache) that does no DB work and
-//! streams *after* the handler returns; it never holds the DB connection. Live
+//! channel the MCP spec defines for push. An SSE stream is MCP transport state
+//! (a channel + cache) that does no DB work of its own; the tool call it
+//! carries binds the connection for itself when it runs. Live
 //! delivery is wired in [`spawn_live_propagation`]: one owner-mode `LIVE`
 //! subscription (registered at startup) feeds the change watcher, audience is
 //! resolved under the auth lock in owner mode, and the change is pushed to each
@@ -45,6 +47,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use axum::body::Body;
@@ -64,15 +67,18 @@ use antumbra_core::ports::Embedder;
 use antumbra_core::{TenantId, UserId};
 use antumbra_store::Store;
 
-use crate::auth::{Identity, JwtVerifier};
+use crate::auth::{Access, AuthError, Identity, JwtVerifier};
 use crate::server::McpServer;
 
 mod behaviors;
 mod chunker;
 mod console;
 mod dashboard;
+mod experts;
 mod github;
 mod relics;
+mod revocation;
+pub(crate) mod sync;
 pub(crate) use github::GithubConfig;
 
 type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
@@ -83,6 +89,47 @@ type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
 const MAX_SESSIONS: usize = 4096;
 /// Cap on cached per-tenant resolved embedders.
 const MAX_EMBEDDERS: usize = 1024;
+
+/// The header a request names its session in.
+const SESSION_HEADER: &str = "mcp-session-id";
+
+/// What one identity, one session and one connection may hold open. Fixed
+/// numbers for now; a deployment that needs others changes them here.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Limits {
+    /// Open MCP sessions one identity may hold at once. An `initialize` past
+    /// it is answered `429` until a session closes or goes idle.
+    pub(crate) sessions_per_identity: usize,
+    /// A session that has carried no message for this long is closed, its
+    /// worker with it (rmcp's `keep_alive`).
+    pub(crate) session_idle: Duration,
+    /// How long a request has to begin its response. A body already streaming
+    /// is not bounded by it; a GET /mcp stream begins its response at once.
+    pub(crate) request: Duration,
+    /// How long a connection has to send its request headers.
+    pub(crate) header_read: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            sessions_per_identity: 16,
+            session_idle: Duration::from_secs(5 * 60),
+            request: Duration::from_secs(120),
+            header_read: Duration::from_secs(30),
+        }
+    }
+}
+
+/// An identity's MCP service with the manager of its sessions beside it, so
+/// the sessions open for the identity can be counted, and an admission lock,
+/// so two `initialize`s arriving at the bound cannot both pass the count.
+#[derive(Clone)]
+struct IdentitySessions {
+    service: IdentityService,
+    manager: Arc<LocalSessionManager>,
+    admission: Arc<Mutex<()>>,
+}
 
 /// A bounded, insertion-ordered map: at capacity it evicts the oldest entry
 /// before adding a new key. Bounds the per-identity caches so a long-running
@@ -127,9 +174,9 @@ impl<K: Clone + Eq + std::hash::Hash, V> Bounded<K, V> {
 /// by deployment.
 enum Serving {
     /// Embedded (no DB credentials): the single connection, the same as `store`.
-    /// A request signs it in as its record under `auth` for the call; with one
-    /// writer, serializing is fine, and embedded mem:// / surrealkv expose only
-    /// one connection anyway.
+    /// A tool call signs it in as its record under `auth` and holds the lock
+    /// until it returns ([`McpServer::bound`]); with one writer, serializing is
+    /// fine, and embedded mem:// / surrealkv expose only one connection anyway.
     Shared(Store),
     /// Remote (authenticated): a *dedicated, credential-less* connection per
     /// identity, signed in as its record and reused across that identity's
@@ -159,11 +206,13 @@ struct HttpState {
     /// Per-tenant resolved embedders: a workspace's own configured
     /// endpoint when set, else `embedder`. Resolved once per tenant and cached.
     embedders: Mutex<Bounded<String, Arc<dyn Embedder>>>,
-    /// Serializes the brief owner-side work on the shared connections: the
-    /// `signin_root` + provision on `store`, and (embedded only) a request's
-    /// record signin on the shared serving connection. On a remote the per-request
-    /// hot path holds NO lock -- each identity has its own serving connection.
-    auth: Mutex<()>,
+    /// Serializes the owner-side work on the shared connections (the
+    /// `signin_root` + provision on `store`, the keepers, the public relic
+    /// read) and, embedded only, every tool call's record signin on the shared
+    /// serving connection, held for the whole tool ([`McpServer::bound`]
+    /// holds a clone of it). On a remote the per-request hot path holds NO lock
+    /// -- each identity has its own serving connection.
+    auth: Arc<Mutex<()>>,
     /// Autonomous propose threshold, applied to every per-identity server.
     auto_propose: Option<usize>,
     /// The training every standing expert on this node gets; the serving
@@ -175,6 +224,10 @@ struct HttpState {
     /// workspace, from the audits of the experts it admitted.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
     tune_confidence: bool,
+    /// The quantized forms the keeper measures an admitted expert on, as the
+    /// operator's setting names them (`--behave-drift`).
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    behave_drift: String,
     /// The serving engine the `answer` tool drives, built once from the owner
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
@@ -194,14 +247,31 @@ struct HttpState {
     /// What prints a relic as PDF for the viewer's download, when the operator
     /// runs one; without it a relic downloads as HTML and Markdown only.
     pdf: Option<Arc<crate::pdf::PdfRenderer>>,
+    /// What bounds the relic routes that answer without a token: the public
+    /// lookup's and the export's budgets, and the printed PDFs kept for a
+    /// repeat request of the same version.
+    relics: relics::Guards,
+    /// What bounds the route that gives an expert's adapter to another of its
+    /// user's servers.
+    experts: experts::Guards,
+    /// The server this one pulls the adapters it does not hold from, applied
+    /// to every per-identity server. `None` = an expert placed on another
+    /// machine is not served here.
+    source: Option<Arc<crate::server::pull::ExpertSource>>,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     /// The GitHub App webhook receiver (`POST /github/webhook`), when the
     /// operator configured its secret and the repository-to-workspace map.
     github: Option<Arc<GithubConfig>>,
-    /// One MCP service per identity (provisioned once), all sharing `store`.
-    /// Bounded so a host that sees many distinct identities cannot grow it without
-    /// limit; an evicted identity rebuilds its service on the next request.
-    sessions: Mutex<Bounded<Identity, IdentityService>>,
+    /// The ids of the tokens revoked before their expiry, as the store's
+    /// `revoked_token` table had them at the last refresh ([`revocation`]).
+    revoked: std::sync::RwLock<std::collections::HashSet<String>>,
+    /// What one identity, one session and one connection may hold open.
+    limits: Limits,
+    /// One MCP service per identity (provisioned once), all sharing `store`,
+    /// with the manager of its sessions beside it. Bounded so a host that sees
+    /// many distinct identities cannot grow it without limit; an evicted
+    /// identity rebuilds its service on the next request.
+    sessions: Mutex<Bounded<Identity, IdentitySessions>>,
     /// One server per identity for the REST shim (`/mcp/call`), provisioned once
     /// like `sessions`. Built per request, every hook call and dashboard load
     /// signed in as root, provisioned the identity and re-registered this node
@@ -222,8 +292,7 @@ struct HttpState {
 pub async fn serve(
     addr: String,
     url: String,
-    db_user: Option<String>,
-    db_pass: Option<String>,
+    db: antumbra_store::args::DbAuthArgs,
     host: String,
     embedder: Arc<dyn Embedder>,
     verifier: JwtVerifier,
@@ -239,8 +308,12 @@ pub async fn serve(
     github: Option<GithubConfig>,
     recipe: antumbra_core::behavior::Recipe,
     tune_confidence: bool,
+    behave_drift: String,
+    source: Option<Arc<crate::server::pull::ExpertSource>>,
+    serve_quant: &str,
+    sync: Option<sync::Settings>,
 ) -> Result<()> {
-    let mut store = crate::connect(&url, db_user.as_deref(), db_pass.as_deref()).await?;
+    let mut store = crate::connect(&url, &db).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
     // on NON-root connections or the engine ACL is bypassed: give each
     // identity its own credential-less connection (schema already applied by
@@ -250,7 +323,7 @@ pub async fn serve(
     // Embedded, the one connection is signed in per request, which drops a LIVE
     // query, so live propagation follows the store's own announced writes
     // instead. Asked for before `store` is cloned, so every clone announces.
-    let (serving, announced) = match (db_user.as_deref(), db_pass.as_deref()) {
+    let (serving, announced) = match (db.db_user.as_deref(), db.db_pass.as_deref()) {
         (Some(_), Some(_)) => (
             Serving::PerIdentity {
                 url: url.clone(),
@@ -265,7 +338,7 @@ pub async fn serve(
     };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
-    let serve = crate::build_serve(&store, &host, &recipe).await?;
+    let serve = crate::build_serve(&store, &host, &recipe, serve_quant).await?;
     let state = Arc::new(HttpState {
         store,
         serving,
@@ -273,28 +346,50 @@ pub async fn serve(
         verifier,
         embedder,
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
-        auth: Mutex::new(()),
+        auth: Arc::new(Mutex::new(())),
         auto_propose,
         recipe,
         tune_confidence,
+        behave_drift,
         serve,
         reranker,
         decider,
         copal,
         pdf,
+        relics: relics::Guards::new(),
+        experts: experts::Guards::new(),
+        source,
         profile,
         github: github.map(Arc::new),
+        revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
         steward: Arc::default(),
     });
+    // A revocation written while the server was down applies to its first
+    // request; the refresh then keeps the list within REFRESH of the table.
+    let revoked = revocation::refresh(&state).await?;
+    if revoked > 0 {
+        eprintln!("antumbra-mcp: {revoked} revoked token(s) refused");
+    }
+    revocation::spawn(state.clone());
     spawn_live_propagation(state.clone(), announced);
     chunker::spawn(state.clone(), chunk_in_flight);
     behaviors::spawn(state.clone());
+    sync::spawn(state.clone(), sync);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
-    serve_until(listener, router(state), shutdown_signal(), DRAIN).await
+    let header_read = state.limits.header_read;
+    serve_until(
+        listener,
+        router(state),
+        shutdown_signal(),
+        DRAIN,
+        header_read,
+    )
+    .await
 }
 
 /// How long a stop waits for the requests still open before it returns
@@ -308,32 +403,91 @@ const DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
 /// Serve `app` on `listener` until `stop` resolves, then take no new
 /// connections and give the open ones `drain` to finish before returning
 /// anyway: a request that ends in time ends cleanly, and a stream that never
-/// ends does not hold the stop open.
+/// ends does not hold the stop open. Each connection has `header_read` to
+/// send its request headers. The connections are accepted here rather than by
+/// `axum::serve` for that bound: hyper applies it only once its connection
+/// builder has a timer, and axum's never sets one.
 async fn serve_until(
     listener: tokio::net::TcpListener,
     app: Router,
     stop: impl std::future::Future<Output = ()> + Send + 'static,
-    drain: std::time::Duration,
+    drain: Duration,
+    header_read: Duration,
 ) -> Result<()> {
-    let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
-    let serving = axum::serve(listener, app).with_graceful_shutdown(async move {
-        stop.await;
-        eprintln!(
-            "antumbra-mcp: stopping; open requests have {}s to finish",
-            drain.as_secs()
+    use futures::FutureExt as _;
+    use hyper_util::rt::{TokioIo, TokioTimer};
+    use hyper_util::service::TowerToHyperService;
+    use tower::{Service as _, ServiceExt as _};
+
+    // With the peer's address on each request, so the routes that answer
+    // without a token can budget each client ([`limit`]).
+    let mut make = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let mut http = hyper::server::conn::http1::Builder::new();
+    http.timer(TokioTimer::new())
+        .header_read_timeout(header_read);
+    let http = Arc::new(http);
+    // Every connection task waits on `stop_tx.closed()`, which resolves once
+    // the one receiver, held here, is dropped at the stop. Every task holds a
+    // clone of `open_rx`, so `open_tx.closed()` resolves once the last
+    // connection has ended.
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(());
+    let stop_tx = Arc::new(stop_tx);
+    let (open_tx, open_rx) = tokio::sync::watch::channel(());
+    let mut stop = std::pin::pin!(stop);
+    loop {
+        let (io, peer) = tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok(accepted) => accepted,
+                Err(e) => {
+                    // An accept that fails (descriptors run out, a peer reset
+                    // before it was taken) is not the end of serving.
+                    eprintln!("antumbra-mcp: accept failed: {e}");
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+            },
+            () = &mut stop => break,
+        };
+        let app = match tower::ServiceExt::<std::net::SocketAddr>::ready(&mut make).await {
+            Ok(ready) => match ready.call(peer).await {
+                Ok(app) => app,
+                Err(never) => match never {},
+            },
+            Err(never) => match never {},
+        };
+        let app = TowerToHyperService::new(
+            app.map_request(|req: Request<hyper::body::Incoming>| req.map(Body::new)),
         );
-        let _ = stopping.send(());
-    });
-    let drained = async move {
-        // Serving ended and dropped its end without a stop: nothing to drain.
-        if stopped.await.is_err() {
-            std::future::pending::<()>().await;
-        }
-        tokio::time::sleep(drain).await;
-    };
+        let http = http.clone();
+        let stop_tx = stop_tx.clone();
+        let open_rx = open_rx.clone();
+        tokio::spawn(async move {
+            let mut conn = std::pin::pin!(http.serve_connection(TokioIo::new(io), app));
+            // Fused: once the stop has been seen, it is not seen again.
+            let mut stopped = std::pin::pin!(stop_tx.closed().fuse());
+            loop {
+                tokio::select! {
+                    ended = conn.as_mut() => {
+                        if let Err(e) = ended {
+                            tracing::debug!("connection from {peer} ended: {e}");
+                        }
+                        break;
+                    }
+                    () = &mut stopped => conn.as_mut().graceful_shutdown(),
+                }
+            }
+            drop(open_rx);
+        });
+    }
+    drop(stop_rx);
+    drop(open_rx);
+    eprintln!(
+        "antumbra-mcp: stopping; open requests have {}s to finish",
+        drain.as_secs()
+    );
     tokio::select! {
-        served = std::future::IntoFuture::into_future(serving) => served?,
-        () = drained => eprintln!("antumbra-mcp: stopped with requests still open"),
+        () = open_tx.closed() => {}
+        () = tokio::time::sleep(drain) => eprintln!("antumbra-mcp: stopped with requests still open"),
     }
     Ok(())
 }
@@ -435,15 +589,28 @@ async fn propagate(
 /// Every request it serves opens a span, exported when the trace export is on
 /// ([`crate::telemetry`]), except those [`traced`] leaves out.
 fn router(state: Arc<HttpState>) -> Router {
-    Router::new()
+    let request = state.limits.request;
+    let app = Router::new()
         .route("/mcp", any(handle))
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
         .merge(console::routes())
         .merge(dashboard::routes())
         .merge(relics::routes())
-        .with_state(state)
-        .layer(OtelAxumLayer::default().filter(traced))
+        .merge(experts::routes())
+        .with_state(state);
+    bounded(app, request).layer(OtelAxumLayer::default().filter(traced))
+}
+
+/// `app` with every request given `request` to begin its response, and `408`
+/// when it has not: the bound on a handler waiting on something that never
+/// answers and on a body that arrives too slowly to be read. A response that
+/// has begun is not cut: a stream's body runs for as long as it runs.
+fn bounded(app: Router, request: Duration) -> Router {
+    app.layer(tower_http::timeout::TimeoutLayer::with_status_code(
+        StatusCode::REQUEST_TIMEOUT,
+        request,
+    ))
 }
 
 /// Whether a request gets a span: everything but what sits under the
@@ -460,7 +627,7 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
-    let identity = match state.verifier.verify_header(header_val) {
+    let identity = match state.identity_of(header_val) {
         Ok(id) => id,
         Err(e) => {
             // Log the reason server-side; the client only ever sees a generic 401.
@@ -469,7 +636,7 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
         }
     };
 
-    let service = match state.service_for(&identity).await {
+    let sessions = match state.service_for(&identity).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
@@ -480,30 +647,70 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
         }
     };
 
-    // Bind the scoped connection to this identity. On a remote each identity has
-    // its own already-signed-in serving connection, so this is a no-op and the
-    // request runs with NO lock; on embedded it signs the shared connection in
-    // under `auth`, held across the exchange.
-    let _guard = match state.bind(&identity).await {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("antumbra-mcp: signin failed for {}: {e}", identity.tenant);
-            return internal_error();
-        }
-    };
-    // A tool call this request carries runs on the session's task, outside
-    // this request's span; the trace rides along so the call's span joins it.
+    // A tool call this request carries runs on the session's task, after this
+    // request has been answered, so a bind of the shared connection here would
+    // not cover it: the call binds the connection for itself when it runs
+    // ([`McpServer::bound`]). The trace rides along so the call's span joins
+    // this request's.
     req.extensions_mut()
         .insert(crate::telemetry::RequestTrace::current());
+
+    // A POST that names no session opens one: the one request the identity's
+    // bound applies to. The admission lock is held from the count to the
+    // open, so two arriving at the bound cannot both pass it; rmcp answers an
+    // open as soon as the session exists, so it is held briefly.
+    let opens =
+        req.method() == axum::http::Method::POST && !req.headers().contains_key(SESSION_HEADER);
+    let _admitted = if opens {
+        Some(sessions.admission.lock().await)
+    } else {
+        None
+    };
+    if opens {
+        let open = sessions.manager.sessions.read().await.len();
+        if open >= state.limits.sessions_per_identity {
+            eprintln!(
+                "antumbra-mcp: {}/{} has {open} sessions open; another refused",
+                identity.tenant, identity.user
+            );
+            return too_many_sessions(req, open, &state.limits).await;
+        }
+    }
     // rmcp returns its own boxed body; rewrap it as an axum body.
-    let (parts, body) = service.handle(req).await.into_parts();
+    let (parts, body) = sessions.service.handle(req).await.into_parts();
     Response::from_parts(parts, Body::new(body))
 }
 
 impl HttpState {
-    /// Get (or first-time provision) the MCP service for an identity. All
-    /// services share the one `store`; only their provenance fields differ.
-    async fn service_for(&self, identity: &Identity) -> Result<IdentityService> {
+    /// The request's verified token and role, refused as well when its id is
+    /// on the denylist: a token on a lost or shared machine is ended by
+    /// `antumbra revoke-token`, and every networked server refuses it within
+    /// [`revocation::REFRESH`]. Every route that takes a token comes through
+    /// here or [`Self::identity_of`].
+    fn access_of(&self, header: Option<&str>) -> Result<Access, AuthError> {
+        let access = self.verifier.verify_header_access(header)?;
+        if let Some(jti) = &access.jti {
+            // A poisoned lock holds a whole set: nothing writes it in two steps.
+            let revoked = self
+                .revoked
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if revoked.contains(jti) {
+                return Err(AuthError::Invalid("token revoked".into()));
+            }
+        }
+        Ok(access)
+    }
+
+    /// [`Self::access_of`], as the identity alone.
+    fn identity_of(&self, header: Option<&str>) -> Result<Identity, AuthError> {
+        self.access_of(header).map(|a| a.identity)
+    }
+
+    /// Get (or first-time provision) the MCP service for an identity, with the
+    /// manager of its sessions. All services share the one `store`; only
+    /// their provenance fields differ.
+    async fn service_for(&self, identity: &Identity) -> Result<IdentitySessions> {
         if let Some(s) = self.sessions.lock().await.get(identity) {
             return Ok(s.clone());
         }
@@ -513,17 +720,25 @@ impl HttpState {
             .instrument(crate::telemetry::session_stage("session build"))
             .await?
             .with_registry(self.registry.clone());
+        // A session that carries no message for `session_idle` is closed by
+        // its own worker, and rmcp drops it from the manager when the worker
+        // ends, so the manager holds the identity's live sessions and no others.
+        let mut manager = LocalSessionManager::default();
+        manager.session_config.keep_alive = Some(self.limits.session_idle);
+        let manager = Arc::new(manager);
         // The factory clones the (store-sharing) server for each MCP exchange.
-        let service = StreamableHttpService::new(
-            move || Ok(mcp.clone()),
-            Arc::new(LocalSessionManager::default()),
-            server_config(),
-        );
+        let service =
+            StreamableHttpService::new(move || Ok(mcp.clone()), manager.clone(), server_config());
+        let sessions = IdentitySessions {
+            service,
+            manager,
+            admission: Arc::new(Mutex::new(())),
+        };
         self.sessions
             .lock()
             .await
-            .insert(identity.clone(), service.clone());
-        Ok(service)
+            .insert(identity.clone(), sessions.clone());
+        Ok(sessions)
     }
 
     /// The REST shim's server for an identity, built (and the identity
@@ -605,6 +820,11 @@ impl HttpState {
         if let Some(keeper) = keeper {
             mcp = mcp.with_session_keeper(keeper);
         }
+        // Embedded: the tools share one connection with every other identity
+        // and the owner-side work, so each call binds it under the same lock.
+        if matches!(self.serving, Serving::Shared(_)) {
+            mcp = mcp.with_shared_bind(self.auth.clone());
+        }
         if let Some(threshold) = self.auto_propose {
             mcp = mcp.with_auto_propose(threshold);
         }
@@ -616,6 +836,9 @@ impl HttpState {
         }
         if let Some(archive) = self.copal.clone() {
             mcp = mcp.with_copal_archive(archive);
+        }
+        if let Some(source) = self.source.clone() {
+            mcp = mcp.with_expert_source(source);
         }
         if let Some(profile) = self.profile.clone() {
             mcp = mcp.with_tool_profile(profile);
@@ -663,10 +886,13 @@ impl HttpState {
         Ok((conn, Some(keeper)))
     }
 
-    /// Bind the scoped serving connection to `identity` for a request. Embedded:
-    /// sign the shared connection in under `auth` and return the guard to hold
-    /// across the exchange. Remote: the identity's own connection is already
-    /// signed in, so return `None` -- the request runs with no lock.
+    /// Bind the scoped serving connection to `identity` for work a handler does
+    /// inline, in the request's own span (the console's snapshot, a relic
+    /// export). Embedded: sign the shared connection in under `auth` and return
+    /// the guard to hold across that work. Remote: the identity's own
+    /// connection is already signed in, so return `None` -- the work runs with
+    /// no lock. A tool call does not use this: it runs after its request has
+    /// been answered, and binds for itself ([`McpServer::bound`]).
     async fn bind(&self, identity: &Identity) -> Result<Option<tokio::sync::MutexGuard<'_, ()>>> {
         match &self.serving {
             Serving::Shared(conn) => {
@@ -736,6 +962,37 @@ fn server_config() -> StreamableHttpServerConfig {
 
 fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, "invalid or missing bearer token").into_response()
+}
+
+/// The answer to an `initialize` past its identity's bound: `429` carrying
+/// the JSON-RPC error a client shows, which names the bound and the two ways
+/// past it. The request's own id rides back on it when the body is a request.
+async fn too_many_sessions(req: Request<Body>, open: usize, limits: &Limits) -> Response {
+    let id = axum::body::to_bytes(req.into_body(), 64 * 1024)
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|body| body.get("id").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let idle = limits.session_idle.as_secs();
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(header::RETRY_AFTER, idle.to_string())],
+        Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32000,
+                "message": format!(
+                    "{open} sessions are open for this identity, the most it may hold ({}): \
+                     close one with DELETE /mcp and its Mcp-Session-Id, or wait for an idle \
+                     one to close ({idle} s without a message)",
+                    limits.sessions_per_identity
+                ),
+            }
+        })),
+    )
+        .into_response()
 }
 
 fn internal_error() -> Response {
@@ -836,7 +1093,7 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
-    let identity = match state.verifier.verify_header(header_val) {
+    let identity = match state.identity_of(header_val) {
         Ok(id) => id,
         Err(e) => {
             eprintln!("antumbra-mcp: rejected /mcp/call: {e}");
@@ -873,22 +1130,11 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         Some(device) => mcp.called_from(device),
         None => mcp,
     };
-    // Bind the scoped connection, then dispatch. Embedded: lock + signin the
-    // shared connection, held across the call. Remote: a no-op (the identity's
-    // own connection is already signed in), so the call runs with no lock.
-    let result = {
-        let _guard = match state.bind(&identity).await {
-            Ok(g) => g,
-            Err(e) => {
-                eprintln!(
-                    "antumbra-mcp: /mcp/call signin failed for {}: {e}",
-                    identity.tenant
-                );
-                return internal_error();
-            }
-        };
-        mcp.call_tool(&call.tool, call.arguments).await
-    };
+    // Dispatch. The call binds its connection for itself: embedded, it takes
+    // the lock and signs the shared connection in, held across the call;
+    // remote, the identity's own connection is already signed in and the call
+    // runs with no lock ([`McpServer::bound`]).
+    let result = mcp.call_tool(&call.tool, call.arguments).await;
 
     match result {
         Ok(value) => Json(value).into_response(),

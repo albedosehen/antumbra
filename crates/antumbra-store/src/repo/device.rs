@@ -11,12 +11,10 @@
 //! trainer and have genesis routed to it.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::{and_, eq};
-use surql::types::RecordID;
 
 use antumbra_core::{DeviceProfile, DeviceRole, Result, TenantId, UserId};
 
@@ -24,7 +22,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const DEVICE: &str = "device_profile";
+const DEVICE: &str = crate::tables::DEVICE_PROFILE;
 
 #[derive(Serialize, Deserialize)]
 struct DeviceRow {
@@ -90,12 +88,13 @@ fn record_key(profile: &DeviceProfile) -> &str {
 /// Register a node, or update what it can do. Idempotent per (tenant, user,
 /// host): the same machine coming back keeps its row.
 pub async fn upsert(store: &Store, profile: &DeviceProfile) -> Result<()> {
-    let rid = RecordID::<()>::new(DEVICE, record_key(profile)).map_err(map)?;
-    let data: Value = serde_json::to_value(DeviceRow::from_domain(profile))?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            DEVICE,
+            record_key(profile),
+            &DeviceRow::from_domain(profile),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Every machine a user has registered in a tenant, newest registration first.
@@ -144,11 +143,7 @@ pub async fn genesis_for_user(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
-
-    async fn store() -> Result<Store> {
-        Store::connect_memory(EMBED_DIM).await
-    }
+    use crate::testing::mem_store;
 
     fn profile(user: &str, host: &str, role: DeviceRole) -> DeviceProfile {
         DeviceProfile::new(
@@ -163,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_node_re_registering_updates_its_row_rather_than_adding_one() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
 
@@ -180,7 +175,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_genesis_node_is_the_one_that_can_train_and_only_that_users() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let alice = UserId::new("user:alice");
         let bob = UserId::new("user:bob");
@@ -216,7 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_role_this_build_cannot_route_to_is_skipped_not_fatal() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
 

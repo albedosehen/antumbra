@@ -84,12 +84,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn heat_cell_maps_reward_to_a_shade() {
+    fn heat_cell_maps_reward_to_a_shade() -> anyhow::Result<()> {
         assert_eq!(heat_cell(0.0), '·');
         assert_eq!(heat_cell(0.5), '▒');
         assert_eq!(heat_cell(1.0), '█');
         // Clamps out-of-range without panicking.
         assert_eq!(heat_cell(2.0), '█');
         assert_eq!(heat_cell(-1.0), '·');
+        Ok(())
     }
 }

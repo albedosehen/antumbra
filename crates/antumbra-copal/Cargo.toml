@@ -1,6 +1,6 @@
 [package]
 name = "antumbra-copal"
-version = "0.2.7"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,7 @@ description = "The copal document-of-record archive client: uploads an ingested 
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
+antumbra-http = { path = "../antumbra-http" }
 serde_json.workspace = true
 # The upload's declared digest, which copal verifies against the bytes.
 sha2 = "0.11"
@@ -20,3 +21,19 @@ tokio = { workspace = true }
 # Outbound HTTP for the archive: the same blocking client (and TLS posture)
 # the embedder's transport uses.
 ureq = { version = "3", features = ["json"] }
+# The copal flags the binaries share (`args`), behind the `clap` feature so the
+# library stays flag-free for everyone else.
+clap = { workspace = true, optional = true, features = ["env"] }
+
+[features]
+clap = ["dep:clap"]
+
+[dev-dependencies]
+antumbra-http = { path = "../antumbra-http", features = ["testing"] }
+# The tests return `anyhow::Result`: the archive's own errors and the config
+# errors both convert into it, and a fixture that is not what a test expected
+# is a `bail!` with the same words the panic had.
+anyhow.workspace = true
+
+[lints]
+workspace = true

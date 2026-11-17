@@ -70,17 +70,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejections_are_distinguishable_from_internal_faults() {
+    fn rejections_are_distinguishable_from_internal_faults() -> anyhow::Result<()> {
         let refusal = AntumbraError::rejected("invite code expired");
         assert!(refusal.is_rejection());
         assert_eq!(refusal.to_string(), "invite code expired");
         for internal in [AntumbraError::store("io"), AntumbraError::other("bug")] {
             assert!(!internal.is_rejection());
         }
+        Ok(())
     }
 
     #[test]
-    fn variants_render_their_message() {
+    fn variants_render_their_message() -> anyhow::Result<()> {
         assert_eq!(AntumbraError::store("boom").to_string(), "store: boom");
         assert_eq!(AntumbraError::other("nope").to_string(), "nope");
         assert_eq!(
@@ -104,11 +105,16 @@ mod tests {
             .to_string(),
             "dimension mismatch: expected 384, got 2"
         );
+        Ok(())
     }
 
     #[test]
-    fn serde_errors_convert_via_from() {
-        let err: AntumbraError = serde_json::from_str::<i32>("not json").unwrap_err().into();
+    fn serde_errors_convert_via_from() -> anyhow::Result<()> {
+        let Err(serde) = serde_json::from_str::<i32>("not json") else {
+            anyhow::bail!("\"not json\" must not parse as an integer");
+        };
+        let err: AntumbraError = serde.into();
         assert!(err.to_string().starts_with("serde:"));
+        Ok(())
     }
 }

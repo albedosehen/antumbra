@@ -10,10 +10,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_records, query_records, upsert_record};
+use surql::query::crud::{delete_records, query_records};
 use surql::query::expressions::{as_, count_all, count_if, field};
 use surql::types::operators::{and_, eq, is_none};
-use surql::types::RecordID;
 
 use antumbra_core::{CompartmentId, DocumentChunk, DocumentChunkId, Result, TenantId};
 
@@ -23,7 +22,7 @@ use crate::fusion::{rrf_fuse, DEFAULT_RRF_K};
 use crate::knn::{candidate_pool, search_effort};
 use crate::store::Store;
 
-const TABLE: &str = "document_chunk";
+const TABLE: &str = crate::tables::DOCUMENT_CHUNK;
 
 /// Candidate-pool sizing for [`recall_hybrid`] (see the `memory` repo for the
 /// rationale): each leg fetches `k * POOL_MULTIPLIER`, clamped, so fusion can
@@ -96,11 +95,9 @@ impl ChunkRow {
 /// Insert a document's chunks (addressed by their globally-unique ids).
 pub async fn insert_chunks(store: &Store, chunks: &[DocumentChunk]) -> Result<()> {
     for c in chunks {
-        let id = RecordID::<()>::new(TABLE, c.id.as_str()).map_err(map)?;
-        let data = serde_json::to_value(ChunkRow::from_domain(c))?;
-        upsert_record(store.client(), &id, data)
-            .await
-            .map_err(map)?;
+        store
+            .put(TABLE, c.id.as_str(), &ChunkRow::from_domain(c))
+            .await?;
     }
     Ok(())
 }
@@ -328,19 +325,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chunks_round_trip_and_recall_by_vector() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn chunks_round_trip_and_recall_by_vector() -> Result<()> {
+        let store = crate::testing::mem_store().await?;
         let tenant = TenantId::new("t");
         let mut a = vec![0.0f32; EMBED_DIM];
         a[0] = 1.0;
         let mut b = vec![0.0f32; EMBED_DIM];
         b[1] = 1.0;
-        insert_chunks(&store, &[chunk("dc:1", 0, a.clone()), chunk("dc:2", 1, b)])
-            .await
-            .unwrap();
+        insert_chunks(&store, &[chunk("dc:1", 0, a.clone()), chunk("dc:2", 1, b)]).await?;
 
         // The chunk nearest the `a` query is dc:1.
-        let near = recall(&store, &tenant, &a, 2).await.unwrap();
+        let near = recall(&store, &tenant, &a, 2).await?;
         assert_eq!(near.len(), 2);
         assert_eq!(near[0].id.as_str(), "dc:1");
         assert_eq!(near[0].title, "onboarding guide");
@@ -348,11 +343,11 @@ mod tests {
         // The document list dedups the title across its chunks, and counts
         // them.
         assert_eq!(
-            list_titles(&store, &tenant).await.unwrap(),
+            list_titles(&store, &tenant).await?,
             vec!["onboarding guide".to_string()]
         );
         assert_eq!(
-            summaries(&store, &tenant).await.unwrap(),
+            summaries(&store, &tenant).await?,
             vec![DocumentSummary {
                 title: "onboarding guide".into(),
                 chunks: 2,
@@ -362,35 +357,33 @@ mod tests {
 
         // Another tenant sees none of it (defense-in-depth filter; the engine
         // ACL scopes it too under a record session).
-        let other = recall(&store, &TenantId::new("other"), &a, 2)
-            .await
-            .unwrap();
+        let other = recall(&store, &TenantId::new("other"), &a, 2).await?;
         assert!(other.is_empty());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn copal_provenance_round_trips_and_absent_stays_absent() {
+    async fn copal_provenance_round_trips_and_absent_stays_absent() -> Result<()> {
         // A chunk stamped with document-of-record provenance keeps it across
         // the store; one ingested without an archive comes back with both
         // fields absent (never null), indistinguishable from a pre-copal row.
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        let store = crate::testing::mem_store().await?;
         let tenant = TenantId::new("t");
         let mut a = vec![0.0f32; EMBED_DIM];
         a[0] = 1.0;
         let mut b = vec![0.0f32; EMBED_DIM];
         b[1] = 1.0;
         let archived = chunk("dc:arch", 0, a.clone()).with_copal("file:01J", "sha256:abc");
-        insert_chunks(&store, &[archived, chunk("dc:bare", 1, b)])
-            .await
-            .unwrap();
+        insert_chunks(&store, &[archived, chunk("dc:bare", 1, b)]).await?;
 
-        let got = recall(&store, &tenant, &a, 2).await.unwrap();
+        let got = recall(&store, &tenant, &a, 2).await?;
         assert_eq!(got.len(), 2);
         let by_id: HashMap<&str, &DocumentChunk> = got.iter().map(|c| (c.id.as_str(), c)).collect();
         assert_eq!(by_id["dc:arch"].copal_file.as_deref(), Some("file:01J"));
         assert_eq!(by_id["dc:arch"].copal_digest.as_deref(), Some("sha256:abc"));
         assert_eq!(by_id["dc:bare"].copal_file, None);
         assert_eq!(by_id["dc:bare"].copal_digest, None);
+        Ok(())
     }
 }
 
@@ -419,8 +412,8 @@ mod delete_title_tests {
     /// Each title is one row, counted per tenant, and archived when any of
     /// its chunks names a file of record.
     #[tokio::test]
-    async fn summaries_count_each_titles_chunks_in_its_tenant() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn summaries_count_each_titles_chunks_in_its_tenant() -> Result<()> {
+        let store = crate::testing::mem_store().await?;
         let mut archived = chunk("docchunk:b0", "ws:t", "b");
         archived.copal_file = Some("file:b".into());
         insert_chunks(
@@ -434,30 +427,29 @@ mod delete_title_tests {
                 chunk("docchunk:ua", "ws:u", "a"),
             ],
         )
-        .await
-        .unwrap();
+        .await?;
         let summary = |title: &str, chunks: u32, archived: bool| DocumentSummary {
             title: title.into(),
             chunks,
             archived,
         };
         assert_eq!(
-            summaries(&store, &TenantId::new("ws:t")).await.unwrap(),
+            summaries(&store, &TenantId::new("ws:t")).await?,
             vec![summary("a", 3, false), summary("b", 2, true)]
         );
         assert_eq!(
-            summaries(&store, &TenantId::new("ws:u")).await.unwrap(),
+            summaries(&store, &TenantId::new("ws:u")).await?,
             vec![summary("a", 1, false)]
         );
         assert!(summaries(&store, &TenantId::new("ws:none"))
-            .await
-            .unwrap()
+            .await?
             .is_empty());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn delete_title_drops_only_that_title_in_that_tenant() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn delete_title_drops_only_that_title_in_that_tenant() -> Result<()> {
+        let store = crate::testing::mem_store().await?;
         insert_chunks(
             &store,
             &[
@@ -467,27 +459,25 @@ mod delete_title_tests {
                 chunk("docchunk:ua", "ws:u", "a"),
             ],
         )
-        .await
-        .unwrap();
-        delete_title(&store, &TenantId::new("ws:t"), "a", None)
-            .await
-            .unwrap();
+        .await?;
+        delete_title(&store, &TenantId::new("ws:t"), "a", None).await?;
         assert_eq!(
-            list_titles(&store, &TenantId::new("ws:t")).await.unwrap(),
+            list_titles(&store, &TenantId::new("ws:t")).await?,
             vec!["b".to_string()]
         );
         assert_eq!(
-            list_titles(&store, &TenantId::new("ws:u")).await.unwrap(),
+            list_titles(&store, &TenantId::new("ws:u")).await?,
             vec!["a".to_string()],
             "another tenant's document of the same title is untouched"
         );
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod existing_database_tests {
     use super::*;
-    use crate::repo::{compartment, principal};
+    use crate::repo::compartment;
     use antumbra_core::{Compartment, UserId};
     use chrono::Utc;
     use surql::schema::table::{table_schema, TableMode};
@@ -531,12 +521,11 @@ mod existing_database_tests {
     /// rule, and must leave the rows and the vector index as they were.
     #[tokio::test]
     async fn an_existing_database_picks_up_the_rule_and_keeps_its_data() -> Result<()> {
-        let store = Store::connect_memory(DIM).await?;
+        let store = crate::testing::mem_store_of(DIM).await?;
         let tenant = TenantId::new("ws:org");
         let lily = UserId::new("user:lily");
         let oslo = UserId::new("user:oslo");
-        principal::provision(&store, &tenant, &lily).await?;
-        principal::provision(&store, &tenant, &oslo).await?;
+        crate::testing::members(&store, &tenant, &[&lily, &oslo]).await?;
         compartment::create(
             &store,
             &Compartment::new(

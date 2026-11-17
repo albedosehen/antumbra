@@ -36,6 +36,8 @@ use base64::Engine;
 use clap::{Args, Parser, Subcommand};
 use serde_json::{json, Value};
 
+use antumbra_http::{SurfaceClient, DEVICE_HEADER};
+
 use crate::claude::hooks;
 
 /// Where the store's vectors come from: ollama's default address.
@@ -118,16 +120,22 @@ pub struct HostedArgs {
     /// The workspace's address, as you were given it: https://...
     #[arg(value_name = "URL")]
     pub server: String,
-    /// The token. Prefer --token-file, or ANTUMBRA_TOKEN, so it stays out of
-    /// your shell history.
+    /// The token, for scripts. Prefer --token-file, or ANTUMBRA_TOKEN, so it
+    /// stays out of your shell history.
     #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true, conflicts_with_all = ["token_file", "signin_link"])]
     pub token: Option<String>,
     /// A file holding the token.
     #[arg(long, conflicts_with = "signin_link")]
     pub token_file: Option<PathBuf>,
-    /// The sign-in link from your email; setup trades it for the token.
+    /// The sign-in link from your email; setup trades it for the token. For
+    /// scripts: run without it and setup asks, so the link stays out of your
+    /// shell history.
     #[arg(long)]
     pub signin_link: Option<String>,
+    /// Accept a plain http:// address for a server that is not this machine's
+    /// own, for a lab. The token then travels in cleartext, and you said so.
+    #[arg(long)]
+    pub allow_http: bool,
     #[command(flatten)]
     pub common: Common,
 }
@@ -195,6 +203,9 @@ fn menu() -> anyhow::Result<()> {
                 token: None,
                 token_file: None,
                 signin_link: None,
+                // The interactive path is for the address one was given, so
+                // the lab exception is a flag, not a question.
+                allow_http: false,
                 common: LocalDefaults::parse_from(["local"]).args.common,
             })
         }
@@ -316,11 +327,11 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     let wants = vec![
         env_file::Want {
             name: "SURREAL_PASS",
-            value: secret(24, true),
+            value: secret(24, true)?,
         },
         env_file::Want {
             name: "ANTUMBRA_JWT_SECRET",
-            value: secret(32, false),
+            value: secret(32, false)?,
         },
         env_file::Want {
             name: "ANTUMBRA_SURREAL_DATA",
@@ -361,7 +372,9 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         }
     } else {
         std::fs::create_dir_all(&data)?;
-        write_private(&env_path, &env_text)?;
+        if let Some(caveat) = write_private(&env_path, &env_text)? {
+            steps.warn(caveat);
+        }
         for part in &said {
             steps.ok(format!("{env_name}: {part}"));
         }
@@ -436,7 +449,9 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             }
             None => {
                 let t = mint(&compose_files, &args.workspace, &args.user)?;
-                write_private(&token_path, &t)?;
+                if let Some(caveat) = write_private(&token_path, &t)? {
+                    steps.warn(caveat);
+                }
                 steps.ok(format!(
                     "minted a token for {} / {}, saved to {} (valid for a year)",
                     args.workspace,
@@ -623,7 +638,7 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
         steps.info(format!(
             "pulling the {MODEL} embedding model (about 46 MB)..."
         ));
-        let mut response = agent_within(Duration::from_secs(1800))
+        let mut response = antumbra_http::agent(Duration::from_secs(1800))
             .post(&format!("{base}/api/pull"))
             .send_json(json!({ "model": MODEL, "stream": false }))
             .map_err(|e| anyhow::anyhow!("pulling {MODEL}: {e}"))?;
@@ -633,7 +648,7 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
         }
     }
     // The first embedding loads the model into memory, which takes a while.
-    let mut response = agent_within(Duration::from_secs(120))
+    let mut response = antumbra_http::agent(Duration::from_secs(120))
         .post(&format!("{base}/v1/embeddings"))
         .send_json(json!({ "model": MODEL, "input": "antumbra" }))
         .map_err(|e| anyhow::anyhow!("embedding a test sentence: {e}"))?;
@@ -901,9 +916,7 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
         .trim_end_matches('/')
         .trim_end_matches("/mcp")
         .to_string();
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        anyhow::bail!("the workspace's address starts with https:// (got {url:?})");
-    }
+    may_carry_the_token(&url, args.allow_http)?;
     println!("Connecting this machine to the hosted workspace at {url}.\n");
 
     let pasted = if let Some(t) = &args.token {
@@ -922,6 +935,8 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
     let token = match pasted {
         token::Pasted::Token(t) => t,
         token::Pasted::Link(link) => {
+            // The link's answer is the token itself.
+            may_carry_the_token(&link, args.allow_http)?;
             let mut response = agent(Duration::from_secs(30))
                 .get(&link)
                 .call()
@@ -951,7 +966,9 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
     if steps.dry_run {
         steps.would(format!("save the token to {}", token_path.display()));
     } else {
-        write_private(&token_path, &token)?;
+        if let Some(caveat) = write_private(&token_path, &token)? {
+            steps.warn(caveat);
+        }
         steps.ok(format!("token saved to {}", token_path.display()));
     }
 
@@ -960,6 +977,7 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
         "url": url,
         "workspace": workspace,
         "token_file": token_path,
+        "allow_http": args.allow_http,
     });
     finish(
         &home,
@@ -970,6 +988,60 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
         &state,
         &steps,
     )
+}
+
+/// Refuse `address` unless the token may travel over it: `https://` anywhere,
+/// plain `http://` to this machine alone, or plain `http://` anywhere when the
+/// operator said so with `--allow-http`.
+fn may_carry_the_token(address: &str, allow_http: bool) -> anyhow::Result<()> {
+    match cleartext_problem(address, allow_http) {
+        None => Ok(()),
+        Some(problem) => Err(anyhow::anyhow!("{problem}")),
+    }
+}
+
+/// What is wrong with the token travelling to `address`, if anything: no
+/// scheme, or plain `http://` to a machine other than this one without
+/// `allow_http`. `None` when the address is fine.
+fn cleartext_problem(address: &str, allow_http: bool) -> Option<String> {
+    if address.starts_with("https://") {
+        return None;
+    }
+    let Some(rest) = address.strip_prefix("http://") else {
+        return Some(format!(
+            "the address must start with https:// (got {address:?})"
+        ));
+    };
+    if allow_http || is_this_machine(host_of(rest)) {
+        return None;
+    }
+    Some(format!(
+        "{address:?} is a plain http:// address, so the token would travel in cleartext. \
+         Use the https:// address, or pass --allow-http if this is a lab where that is accepted"
+    ))
+}
+
+/// The host in what follows a URL's scheme: the authority up to the first
+/// `/`, `?` or `#`, without userinfo or a port, and a bracketed IPv6 address
+/// without its brackets.
+fn host_of(rest: &str) -> &str {
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let authority = authority.rsplit('@').next().unwrap_or(authority);
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        return bracketed.split(']').next().unwrap_or(bracketed);
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => host,
+        _ => authority,
+    }
+}
+
+/// Whether `host` names this machine: `localhost`, or a loopback address.
+fn is_this_machine(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 // ---------------------------------------------------------------- both
@@ -1040,15 +1112,19 @@ fn platform_hooks() -> Vec<(&'static str, &'static str, u32)> {
             pick("antumbra-prompt-recall.sh", "antumbra-prompt-recall.ps1"),
             20,
         ),
+        // Ten seconds: the hook's own work is bounded (two for its report to
+        // the server, a few git calls), but starting PowerShell alone takes
+        // three on a machine that is busy building, and a hook cut off at
+        // five skipped its nudge and left its sentinel behind.
         (
             "Stop",
             pick("antumbra-capture.sh", "antumbra-capture.ps1"),
-            5,
+            10,
         ),
         (
             "PreCompact",
             pick("antumbra-capture.sh", "antumbra-capture.ps1"),
-            5,
+            10,
         ),
     ]
 }
@@ -1230,27 +1306,15 @@ fn verify(url: &str, token: &str) -> anyhow::Result<()> {
         token,
         "recall_memories",
         json!({ "query": "antumbra setup", "top_k": 1 }),
-        "recall",
     )
     .map(|_| ())
 }
 
-/// One tool call through the server's REST shim, its answer on success. `what`
-/// names the call in the error the server's refusal becomes.
-fn call_tool(
-    url: &str,
-    token: &str,
-    tool: &str,
-    arguments: Value,
-    what: &str,
-) -> anyhow::Result<Value> {
-    call_tool_from(url, token, None, tool, arguments, what)
+/// One tool call through the server's REST shim, its answer on success; a
+/// refusal is the server's own words, as every door shows them.
+fn call_tool(url: &str, token: &str, tool: &str, arguments: Value) -> anyhow::Result<Value> {
+    call_tool_from(url, token, None, tool, arguments)
 }
-
-/// The header a client names its machine in, which the server stamps on what
-/// that machine writes (#193). The MCP headers helper sends it from
-/// `ANTUMBRA_HOST_ID`.
-const DEVICE_HEADER: &str = "X-Antumbra-Host";
 
 /// [`call_tool`] from the machine `device` names, as the agent's connection
 /// calls once the headers helper names it.
@@ -1260,35 +1324,12 @@ fn call_tool_from(
     device: Option<&str>,
     tool: &str,
     arguments: Value,
-    what: &str,
 ) -> anyhow::Result<Value> {
-    let mut request = agent(Duration::from_secs(30))
-        .post(&format!("{url}/mcp/call"))
-        .header("authorization", &format!("Bearer {token}"));
-    if let Some(device) = device {
-        request = request.header(DEVICE_HEADER, device);
-    }
-    let mut response = request
-        .send_json(json!({ "tool": tool, "arguments": arguments }))
-        .map_err(|e| anyhow::anyhow!("could not reach {url}: {e}"))?;
-    let status = response.status();
-    let body: Value = response.body_mut().read_json().unwrap_or(Value::Null);
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        anyhow::bail!(
-            "the server at {url} refused the token; it may have expired, or be for another server"
-        );
-    }
-    if let Some(said) = body.get("error") {
-        anyhow::bail!(
-            "{what} failed: {}",
-            said.as_str()
-                .map_or_else(|| said.to_string(), str::to_string)
-        );
-    }
-    if !status.is_success() {
-        anyhow::bail!("the server at {url} answered {status}");
-    }
-    Ok(body)
+    Ok(
+        SurfaceClient::new(url, Some(token), Duration::from_secs(30))
+            .from_machine(device.map(str::to_owned))
+            .call(tool, arguments)?,
+    )
 }
 
 /// The name this machine's sessions report, which the hooks read from
@@ -1322,7 +1363,6 @@ fn register_machine(url: &str, token: &str, host: &str, steps: &Steps) {
         token,
         "register_device",
         json!({ "host": host }),
-        "registering this machine",
     ) {
         Ok(said) if said["registered"] == true => steps.ok(format!(
             "this machine is listed among your devices as {} (a {} node)",
@@ -1430,6 +1470,21 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         );
     } else {
         ok(format!("token in {}", token_path.display()));
+        if let Some(problem) = private_file_problem(&token_path) {
+            fail(
+                problem,
+                "run setup again, which rewrites it readable by you alone".into(),
+            );
+        }
+        if let Some(exp) = token::expires(&token) {
+            let left = exp - chrono::Utc::now().timestamp();
+            if left <= 3 * 86_400 {
+                println!(
+                    "  ! the token expires in {} hours; ask for a new sign-in link and run `antumbra setup hosted <url>` again before then",
+                    left.max(0) / 3600
+                );
+            }
+        }
         match verify(&url, &token) {
             Ok(()) => {
                 reachable = true;
@@ -1560,6 +1615,19 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
             "run setup again".into(),
         ),
     }
+    // A plain http:// address to another machine carries the token in
+    // cleartext; setup refuses it unless told --allow-http, which it records.
+    let allow_http = state
+        .get("allow_http")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if let Some(problem) = cleartext_problem(&url, allow_http) {
+        fail(
+            problem,
+            "use the https:// address, or run setup again with --allow-http if this is a lab"
+                .into(),
+        );
+    }
     match find_program("claude") {
         Some(claude) => {
             let registered = Command::new(claude)
@@ -1588,14 +1656,7 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         // its headers helper names it, so the answer says what the server
         // stamps that connection's writes with. Whether the helper names it is
         // the helper line above; the two together are what the agent gets.
-        match call_tool_from(
-            &url,
-            &token,
-            Some(&host),
-            "devices",
-            json!({}),
-            "listing your devices",
-        ) {
+        match call_tool_from(&url, &token, Some(&host), "devices", json!({})) {
             Ok(said) => {
                 match stamp_of(&said, &host) {
                     Stamp::Named => ok(format!(
@@ -1653,9 +1714,7 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
 // ---------------------------------------------------------------- the machine
 
 fn home() -> anyhow::Result<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
+    crate::machine::home()
         .ok_or_else(|| anyhow::anyhow!("no home directory (neither USERPROFILE nor HOME is set)"))
 }
 
@@ -1671,15 +1730,19 @@ fn host_id() -> String {
 }
 
 /// `n` random bytes as base64 (URL-safe and unpadded for a password, so it
-/// needs no quoting anywhere).
-fn secret(n: usize, url_safe: bool) -> String {
+/// needs no quoting anywhere). Without the OS random source there is no
+/// secret worth the name, so that failure is setup's to report, not to paper
+/// over.
+fn secret(n: usize, url_safe: bool) -> anyhow::Result<String> {
     let mut bytes = vec![0u8; n];
-    getrandom::fill(&mut bytes).expect("the OS random source");
-    if url_safe {
+    getrandom::fill(&mut bytes).map_err(|e| {
+        anyhow::anyhow!("the OS random source failed ({e}); the stack's secrets cannot be made")
+    })?;
+    Ok(if url_safe {
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
     } else {
         base64::engine::general_purpose::STANDARD.encode(bytes)
-    }
+    })
 }
 
 /// A program on the PATH. On Windows, `.exe`, `.cmd` and `.bat` count, and
@@ -1724,41 +1787,108 @@ fn output(program: &str, args: &[&str]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// The agent every call setup makes is made with: a refusal's body comes back
+/// rather than becoming a bare status.
 fn agent(timeout: Duration) -> ureq::Agent {
-    agent_within(timeout)
+    antumbra_http::agent(timeout)
 }
 
-fn agent_within(timeout: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .http_status_as_error(false)
-        .build()
-        .into()
-}
-
-/// Writes a file only its owner can read (a token, the stack's secrets).
-fn write_private(path: &Path, text: &str) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+/// Writes a file only its owner can read (a token, the stack's secrets). The
+/// directory it lives in is made the owner's alone; the text goes to a
+/// temporary name beside it, with the final permissions, and is renamed into
+/// place, so a crash mid-write leaves the old file or none, never a truncated
+/// token. On Windows the file is given an owner-only DACL after the rename.
+/// What could not be tightened comes back as a caveat for the caller to show.
+fn write_private(path: &Path, text: &str) -> anyhow::Result<Option<String>> {
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let temporary = {
+        let mut name = path
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_else(|| "private".into());
+        name.push(".tmp");
+        parent.join(name)
+    };
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)?;
+        // A directory that was there before, however it was made, holds the
+        // same secrets: it is the owner's alone too.
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .mode(0o600)
-            .open(path)?;
+            .open(&temporary)?;
         file.write_all(text.as_bytes())?;
-        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
-        Ok(())
+        file.sync_all()?;
+        drop(file);
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::rename(&temporary, path)?;
+        Ok(None)
     }
     #[cfg(not(unix))]
     {
-        std::fs::write(path, text)?;
-        Ok(())
+        std::fs::create_dir_all(parent)?;
+        let mut file = std::fs::File::create(&temporary)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temporary, path)?;
+        // The file inherits the directory's ACL; cut the inheritance and grant
+        // the owner alone. icacls ships with Windows, so a failure here is a
+        // restricted account or a filesystem without ACLs, worth a word.
+        let Ok(user) = std::env::var("USERNAME") else {
+            return Ok(Some(format!(
+                "{} keeps the permissions it inherited; USERNAME is not set, so it could not be made yours alone",
+                path.display()
+            )));
+        };
+        let tightened = std::process::Command::new("icacls")
+            .arg(path)
+            .args(["/inheritance:r", "/grant:r", &format!("{user}:F")])
+            .output();
+        match tightened {
+            Ok(out) if out.status.success() => Ok(None),
+            Ok(out) => Ok(Some(format!(
+                "{} keeps the permissions it inherited; icacls refused: {}",
+                path.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ))),
+            Err(e) => Ok(Some(format!(
+                "{} keeps the permissions it inherited; icacls could not run: {e}",
+                path.display()
+            ))),
+        }
     }
+}
+
+/// Why `path` is not the owner's alone, when it is not: a token readable by
+/// another user of the machine is that user's token too.
+#[cfg(unix)]
+fn private_file_problem(path: &Path) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).ok()?.permissions().mode() & 0o777;
+    (mode & 0o077 != 0).then(|| {
+        format!(
+            "{} is readable by other users of this machine (mode {mode:o})",
+            path.display()
+        )
+    })
+}
+
+/// The DACL is set when the file is written; it is not read back here.
+#[cfg(not(unix))]
+fn private_file_problem(_path: &Path) -> Option<String> {
+    None
 }
 
 #[cfg(unix)]
@@ -1791,35 +1921,81 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_hook_setup_writes_is_bundled() {
+    fn every_hook_setup_writes_is_bundled() -> anyhow::Result<()> {
         for (_, script, _) in platform_hooks() {
             assert!(hooks::bundled(script).is_some(), "{script}");
         }
         assert!(hooks::bundled(headers_helper_name()).is_some());
+        Ok(())
     }
 
     #[test]
-    fn secrets_are_long_and_need_no_quoting() {
-        let pass = secret(24, true);
+    fn the_token_travels_only_over_https_or_to_this_machine() -> anyhow::Result<()> {
+        for fine in [
+            "https://workspace.example",
+            "https://workspace.example:8443/mcp",
+            "http://127.0.0.1:8081",
+            "http://127.5.6.7",
+            "http://localhost:8081",
+            "http://LOCALHOST/mcp",
+            "http://[::1]:8081/mcp",
+            "http://user@localhost:1",
+        ] {
+            anyhow::ensure!(cleartext_problem(fine, false).is_none(), "{fine}");
+        }
+        for elsewhere in [
+            "http://workspace.example:8081",
+            "http://localhost.example",
+            "http://127.0.0.1.example",
+            "http://user@workspace.example",
+        ] {
+            let Some(said) = cleartext_problem(elsewhere, false) else {
+                anyhow::bail!("{elsewhere} was accepted");
+            };
+            anyhow::ensure!(
+                said.contains("cleartext") && said.contains("--allow-http"),
+                "{elsewhere}: {said}"
+            );
+            anyhow::ensure!(
+                cleartext_problem(elsewhere, true).is_none(),
+                "{elsewhere} with --allow-http"
+            );
+        }
+        let Some(said) = cleartext_problem("workspace.example", false) else {
+            anyhow::bail!("an address without a scheme was accepted");
+        };
+        anyhow::ensure!(said.contains("https://"), "{said}");
+        anyhow::ensure!(
+            cleartext_problem("workspace.example", true).is_some(),
+            "--allow-http does not excuse a missing scheme"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn secrets_are_long_and_need_no_quoting() -> anyhow::Result<()> {
+        let pass = secret(24, true)?;
         assert_eq!(pass.len(), 32);
         assert!(pass
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
-        assert_ne!(pass, secret(24, true));
-        assert_eq!(secret(32, false).len(), 44);
+        assert_ne!(pass, secret(24, true)?);
+        assert_eq!(secret(32, false)?.len(), 44);
+        Ok(())
     }
 
     #[test]
-    fn a_path_with_spaces_is_quoted_in_the_command() {
+    fn a_path_with_spaces_is_quoted_in_the_command() -> anyhow::Result<()> {
         let cmd = script_command(Path::new("/home/a b/.antumbra/hooks/antumbra-capture.sh"));
         assert!(
             cmd.ends_with("\"/home/a b/.antumbra/hooks/antumbra-capture.sh\""),
             "{cmd}"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_machine_is_registered_under_the_name_its_hooks_report() {
+    fn the_machine_is_registered_under_the_name_its_hooks_report() -> anyhow::Result<()> {
         // A name pinned in the settings before setup is the one the hooks
         // report, so it is the one registered.
         let pinned = json!({ "env": { "ANTUMBRA_HOST_ID": " mac " } });
@@ -1828,11 +2004,15 @@ mod tests {
         let blank = json!({ "env": { "ANTUMBRA_HOST_ID": "  " } });
         assert!(!session_host(&blank).trim().is_empty());
         assert!(!session_host(&Value::Null).trim().is_empty());
+        Ok(())
     }
 
     #[test]
-    fn the_check_tells_a_helper_that_names_the_machine_from_one_that_does_not() {
-        let bundled = hooks::bundled(headers_helper_name()).unwrap();
+    fn the_check_tells_a_helper_that_names_the_machine_from_one_that_does_not() -> anyhow::Result<()>
+    {
+        let Some(bundled) = hooks::bundled(headers_helper_name()) else {
+            anyhow::bail!("the headers helper is not bundled");
+        };
         assert!(
             bundled.contains(DEVICE_HEADER),
             "this build's names the machine"
@@ -1851,10 +2031,11 @@ mod tests {
         let before = "@{ Authorization = \"Bearer $token\" } | ConvertTo-Json -Compress";
         assert_eq!(helper_state(Some(before)), Helper::Unnamed);
         assert_eq!(helper_state(None), Helper::Missing);
+        Ok(())
     }
 
     #[test]
-    fn the_check_reads_what_the_server_stamps_this_machines_writes_with() {
+    fn the_check_reads_what_the_server_stamps_this_machines_writes_with() -> anyhow::Result<()> {
         let said = |stamped: &str| json!({ "devices": [], "this_device": stamped });
         assert_eq!(stamp_of(&said("windows"), "windows"), Stamp::Named);
         assert_eq!(stamp_of(&said("windows"), " Windows "), Stamp::Named);
@@ -1867,21 +2048,25 @@ mod tests {
             stamp_of(&json!({ "devices": [] }), "windows"),
             Stamp::Unsaid
         );
+        Ok(())
     }
 
     #[test]
-    fn the_repository_is_found_from_inside_it() {
+    fn the_repository_is_found_from_inside_it() -> anyhow::Result<()> {
         let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let repo = find_repo(Some(here)).unwrap().unwrap();
+        let Some(repo) = find_repo(Some(here))? else {
+            anyhow::bail!("the crate's own directory is not seen as inside the repository");
+        };
         assert!(repo.join("docker").join("docker-compose.yml").is_file());
         assert!(
             find_repo(Some(&std::env::temp_dir())).is_err(),
             "a directory given that is not a clone is an error, not the published image"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_stack_without_a_clone_runs_the_image_setup_names() {
+    fn the_stack_without_a_clone_runs_the_image_setup_names() -> anyhow::Result<()> {
         assert!(STACK_COMPOSE.contains("image: ${ANTUMBRA_IMAGE:-antumbra-mcp:local}"));
         for name in [
             "SURREAL_PASS=",
@@ -1890,10 +2075,11 @@ mod tests {
         ] {
             assert!(STACK_ENV_EXAMPLE.contains(name), "{name}");
         }
+        Ok(())
     }
 
     #[test]
-    fn an_upgrade_moves_a_release_image_and_keeps_one_named_by_hand() {
+    fn an_upgrade_moves_a_release_image_and_keeps_one_named_by_hand() -> anyhow::Result<()> {
         assert!(release_image_moves(None));
         assert!(release_image_moves(Some("")));
         assert!(release_image_moves(Some(
@@ -1906,30 +2092,67 @@ mod tests {
         assert!(!release_image_moves(Some(
             "ghcr.io/albedosehen/antumbra-mcp-gpu:0.2.0"
         )));
+        Ok(())
     }
 
     #[test]
-    fn an_earlier_clone_setup_lends_its_env_to_the_stack() {
+    fn an_earlier_clone_setup_lends_its_env_to_the_stack() -> anyhow::Result<()> {
         let dir = std::env::temp_dir().join(format!("antumbra-earlier-{}", std::process::id()));
         let clone = dir.join("clone");
-        std::fs::create_dir_all(clone.join("docker")).unwrap();
-        std::fs::write(clone.join("docker").join(".env"), "SURREAL_PASS=old\n").unwrap();
+        std::fs::create_dir_all(clone.join("docker"))?;
+        std::fs::write(clone.join("docker").join(".env"), "SURREAL_PASS=old\n")?;
         std::fs::write(
             dir.join("setup.json"),
-            serde_json::to_string(&json!({ "mode": "local", "repo": clone })).unwrap(),
-        )
-        .unwrap();
+            serde_json::to_string(&json!({ "mode": "local", "repo": clone }))?,
+        )?;
         assert_eq!(earlier_env(&dir), Some(clone.join("docker").join(".env")));
         std::fs::write(
             dir.join("setup.json"),
-            serde_json::to_string(&json!({ "mode": "local", "repo": null })).unwrap(),
-        )
-        .unwrap();
+            serde_json::to_string(&json!({ "mode": "local", "repo": null }))?,
+        )?;
         assert_eq!(
             earlier_env(&dir),
             None,
             "a pulled stack has no clone to lend"
         );
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// A private file is the owner's alone, as is its directory, and is
+    /// replaced whole: a second write leaves the new text, no temporary, and
+    /// the same permissions.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_file_is_the_owners_alone_and_replaced_whole() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("antumbra-private-{}", std::process::id()));
+        let path = dir.join("nested").join("token.txt");
+        let caveat = write_private(&path, "first\n")?;
+        anyhow::ensure!(caveat.is_none(), "{caveat:?}");
+        let second = write_private(&path, "second\n")?;
+        anyhow::ensure!(second.is_none(), "{second:?}");
+        let mode = |p: &Path| -> anyhow::Result<u32> {
+            Ok(std::fs::metadata(p)?.permissions().mode() & 0o777)
+        };
+        anyhow::ensure!(std::fs::read_to_string(&path)? == "second\n");
+        anyhow::ensure!(mode(&path)? == 0o600, "file mode {:o}", mode(&path)?);
+        anyhow::ensure!(
+            mode(&dir.join("nested"))? == 0o700,
+            "dir mode {:o}",
+            mode(&dir.join("nested"))?
+        );
+        anyhow::ensure!(
+            !dir.join("nested").join("token.txt.tmp").exists(),
+            "the temporary is gone"
+        );
+        anyhow::ensure!(private_file_problem(&path).is_none());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+        let Some(problem) = private_file_problem(&path) else {
+            anyhow::bail!("a file readable by others was not a problem");
+        };
+        anyhow::ensure!(problem.contains("644"), "{problem}");
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 }

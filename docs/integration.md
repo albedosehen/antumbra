@@ -42,11 +42,11 @@ The script fetches the bootstrap memory and returns it as `additionalContext`. (
 
 ### 2. Capture on stop / before compaction (nothing learned is lost)
 
-A **Stop** hook (and a **PreCompact** hook, for when the context window is about to be summarized) nudges the agent to deposit non-obvious observations back into Antumbra before the turn ends. A sentinel file makes it fire once, not in a loop. This is the write half of memory, and the raw successful traces it leaves are what `antumbra metabolize` later turns into a trained expert.
+A **Stop** hook reminds the agent to deposit non-obvious observations back into Antumbra before the turn ends. The reminder reaches the agent as feedback that keeps the turn going, not as a block, so nothing is reported to the user as a hook problem; a sentinel file makes it fire once, not in a loop. The same hook on **PreCompact**, for when the context window is about to be summarized, blocks nothing: it tells the summary to keep what has not been stored yet, and the end of the turn after it is reminded. This is the write half of memory, and the raw successful traces it leaves are what `antumbra metabolize` later turns into a trained expert.
 
 ```jsonc
-"Stop":       [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
-"PreCompact": [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}]
+"Stop":       [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 10 }]}],
+"PreCompact": [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 10 }]}]
 ```
 
 ### 3. Behavior overrides (make Antumbra the single source of truth)
@@ -286,10 +286,12 @@ Before this, every document in a workspace was recallable by every member. Docum
 The address, on the server's usual clap/env conventions:
 
 ```
-ANTUMBRA_COPAL_ADDR=127.0.0.1:9010    # --copal-addr: bare host:port (http:// assumed) or a full URL base
+ANTUMBRA_COPAL_ADDR=127.0.0.1:9010    # --copal-addr: bare host:port (http:// for this machine, https:// elsewhere) or a full URL base
 ```
 
-Tenancy is the deployment's second choice: *which Copal tenant does a workspace's document land in, and how does the call prove it?* Copal's `header` auth mode (its default until 1.0) trusts the `x-copal-tenant` header as the identity; its deployed `keys` mode binds the tenant to a `ck1` credential. One knob per shape, at most one of the three (two together refuse at startup):
+An explicit `http://` address that is not this machine is refused unless `--copal-allow-http` (`ANTUMBRA_COPAL_ALLOW_HTTP`) says the network between the server and the archive is trusted, as the compose stack's own is.
+
+Tenancy is the deployment's second choice: *which Copal tenant does a workspace's document land in, and how does the call prove it?* Copal's `header` auth mode (its default until 1.0) trusts the `x-copal-tenant` header as the identity; its deployed `keys` mode binds the tenant to a `ck1` credential. On the networked server (`--http`), where many identities write through one process, a header-named tenancy leaves isolation at the archive to that network alone, so the server refuses to start with one unless `--copal-trust-headers` (`ANTUMBRA_COPAL_TRUST_HEADERS`) says the network is yours; the compose stack says so for its own network, and a hosted deployment should prefer the keyed modes. One knob per shape, at most one of the three (two together refuse at startup):
 
 |                           | Copal `header` auth (dev default)                             | Copal `keys` auth (deployed)                                        |
 | ------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
@@ -304,6 +306,7 @@ The contract:
 - **Re-ingest revisions, never litters.** The create carries an idempotency key derived from (workspace, title), where the title of a document kept in a compartment carries that compartment, so two members' private documents of one title are two archived files and "the original" of one is never the other's text — the *antumbra* workspace tenant, in every tenancy shape — so ingesting the same title again revisions the *same* Copal file, two workspaces sharing a title never revision each other's document (even inside a shared tenant), and moving a deployment between shapes never re-identifies a document. The version history is the document's history; the archived file's metadata names its owning workspace.
 - **The bytes are verified, and identical bytes are not stored twice.** The upload declares the content's sha256 in `x-copal-digest`, and Copal refuses bytes that do not hash to it, so `copal_digest` is checked end to end rather than taken on trust. A re-ingest whose content the archived file already holds is not uploaded again, so unchanged content adds no version. A refused call fails the ingest with Copal's own reason (its error kind and message), not only a status code.
 - **Absent means exactly today's behavior.** No `--copal-addr`, no archive: ingest keeps only the chunks, nothing new is required, and chunks written either way coexist (the provenance fields are simply absent on archive-less chunks).
+- **Adapters are archived too.** A server with an archive uploads each adapter it admits (a private file under `adapters/`, `application/octet-stream`, the adapter's sha256 as `x-copal-digest`) and names the file on the expert's card; see [the GPU server](running-the-trainer.md#the-gpu-server-serving--standing-experts). Unlike an ingest, a failed upload does not fail the mint. These transfers have their own budget, `ANTUMBRA_COPAL_TRANSFER_TIMEOUT_SECS` (300 s by default).
 - **Every door archives the same way.** The CLI's `antumbra ingest` takes the same four flags (`--copal-addr`, `--copal-tenant`, `--copal-key`, `--copal-keys`, or the `ANTUMBRA_COPAL_*` envs) and follows the same upload-first, fail-closed contract through the shared `antumbra-copal` client, so a CI step that ingests a framework's lister output or a generated service doc lands a document of record too.
 
 ---

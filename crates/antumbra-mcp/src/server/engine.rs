@@ -75,15 +75,52 @@ impl McpServer {
             default_compartment,
             auto_propose: None,
             serve,
+            source: None,
             registry: None,
             reranker: None,
             reranker_cache: Arc::new(tokio::sync::Mutex::new(RerankCache::new())),
             copal: None,
             profile: None,
             session: None,
+            shared_bind: None,
             decider: None,
             steward: Arc::new(Steward::default()),
         }
+    }
+
+    /// A server over `store` for the test workspace `ws:test`, as `user:test`
+    /// on the host `test-host`, with the stand-in embedder and no serving
+    /// engine: what twenty test modules built by hand.
+    #[cfg(test)]
+    pub(crate) fn for_tests(store: Store) -> Self {
+        Self::new(
+            store,
+            Arc::new(antumbra_core::testing::FixedEmbedder::new(
+                antumbra_store::EMBED_DIM,
+            )),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "test-host".into(),
+            CompartmentId::new("comp:test:default"),
+            None,
+        )
+    }
+
+    /// [`Self::for_tests`] as `user` of `tenant`, with that user's default
+    /// compartment, for the tests that put two members over one store.
+    #[cfg(test)]
+    pub(crate) fn for_tests_as(store: Store, tenant: &str, user: &str) -> Self {
+        Self::new(
+            store,
+            Arc::new(antumbra_core::testing::FixedEmbedder::new(
+                antumbra_store::EMBED_DIM,
+            )),
+            TenantId::new(tenant),
+            UserId::new(user),
+            "test-host".into(),
+            CompartmentId::new(format!("comp:{user}:default")),
+            None,
+        )
     }
 
     /// This server for one call from `device`, a machine name already checked
@@ -132,6 +169,15 @@ impl McpServer {
         self
     }
 
+    /// Pull the adapters of experts placed on other machines from `source`,
+    /// so `answer` serves them here. Off by default: such an expert is then
+    /// one this server cannot serve.
+    #[must_use]
+    pub fn with_expert_source(mut self, source: Arc<super::pull::ExpertSource>) -> Self {
+        self.source = Some(source);
+        self
+    }
+
     /// Narrow this session to a tool profile: only its tools are listed and
     /// callable. Off by default (every tool).
     pub fn with_tool_profile(mut self, profile: Arc<crate::profile::ToolProfile>) -> Self {
@@ -144,6 +190,36 @@ impl McpServer {
     pub fn with_session_keeper(mut self, keeper: Arc<crate::session::SessionKeeper>) -> Self {
         self.session = Some(keeper);
         self
+    }
+
+    /// Make `store` a connection shared with other identities, serialized by
+    /// `lock`: every tool call signs it in as this session's identity under
+    /// the lock and holds the lock until the tool returns ([`Self::bound`]).
+    #[must_use]
+    pub fn with_shared_bind(mut self, lock: Arc<tokio::sync::Mutex<()>>) -> Self {
+        self.shared_bind = Some(lock);
+        self
+    }
+
+    /// Bind a shared store to this session's identity for one tool call. On a
+    /// connection of the session's own there is nothing to do. On a shared one
+    /// the lock is taken, the connection signed in as `(tenant, user)`, and the
+    /// guard handed back for the caller to hold across the tool, so the
+    /// signin travels with the call rather than with the HTTP request that
+    /// carried it: rmcp runs a streamed call on the session's task after that
+    /// request has been answered, when a request-level bind is already gone.
+    pub(crate) async fn bound(
+        &self,
+    ) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>, ErrorData> {
+        let Some(lock) = &self.shared_bind else {
+            return Ok(None);
+        };
+        let guard = lock.clone().lock_owned().await;
+        self.store
+            .signin(&self.tenant, &self.user)
+            .await
+            .map_err(|e| ErrorData::internal_error(format!("signin failed: {e}"), None))?;
+        Ok(Some(guard))
     }
 
     /// Refresh the record session when it is about to expire, before a tool
@@ -452,6 +528,9 @@ impl McpServer {
             self.check_profile(name)?;
         }
         self.keep_session().await?;
+        // Held to the end of the dispatch: a shared connection stays this
+        // caller's for the whole tool.
+        let _bound = self.bound().await?;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
         macro_rules! dispatch {
@@ -590,6 +669,9 @@ impl ServerHandler for McpServer {
         let result = async {
             server.check_profile(&request.name)?;
             server.keep_session().await?;
+            // Held until the router returns: a shared connection stays this
+            // caller's for the whole tool.
+            let _bound = server.bound().await?;
             let tcc = rmcp::handler::server::tool::ToolCallContext::new(server, request, context);
             Self::tool_router().call(tcc).await
         }
@@ -620,14 +702,20 @@ impl ServerHandler for McpServer {
         // happen here -- the HTTP layer's signin runs on a different handle and a
         // cloned remote connection does not share it. Signing in as the record
         // scopes the engine ACL for every tool call in this session.
-        if let Err(e) = self.store.signin(&self.tenant, &self.user).await {
-            eprintln!(
-                "antumbra-mcp: session signin failed for {}/{}: {e}",
-                self.tenant.as_str(),
-                self.user.as_str()
-            );
-        } else if let Some(keeper) = &self.session {
-            keeper.mark_signed_in().await;
+        //
+        // Not on a shared connection: there each tool call binds it for itself
+        // ([`Self::bound`]), and a signin here, off the lock, could land
+        // between another identity's signin and its tool.
+        if self.shared_bind.is_none() {
+            if let Err(e) = self.store.signin(&self.tenant, &self.user).await {
+                eprintln!(
+                    "antumbra-mcp: session signin failed for {}/{}: {e}",
+                    self.tenant.as_str(),
+                    self.user.as_str()
+                );
+            } else if let Some(keeper) = &self.session {
+                keeper.mark_signed_in().await;
+            }
         }
         if let Some(registry) = &self.registry {
             let identity = crate::auth::Identity {
@@ -645,14 +733,16 @@ mod tests {
     use antumbra_core::AntumbraError;
 
     #[test]
-    fn an_unreadable_router_routes_as_none_and_a_store_fault_still_fails() {
-        let undecodable = serde_json::from_str::<antumbra_core::LearnedRouter>("{}")
-            .expect_err("a router needs its fields");
+    fn an_unreadable_router_routes_as_none_and_a_store_fault_still_fails() -> anyhow::Result<()> {
+        let Err(undecodable) = serde_json::from_str::<antumbra_core::LearnedRouter>("{}") else {
+            anyhow::bail!("a router needs its fields");
+        };
         assert!(matches!(readable(Err(undecodable.into())), Ok(None)));
         assert!(matches!(
             readable(Err(AntumbraError::Store("connection reset".into()))),
             Err(AntumbraError::Store(_))
         ));
         assert!(matches!(readable(Ok(None)), Ok(None)));
+        Ok(())
     }
 }

@@ -35,9 +35,7 @@ use antumbra_core::{AntumbraError, Result};
 /// The one network operation an [`HttpReranker`] performs: POST a JSON body to a
 /// rerank endpoint and return the parsed JSON response. Behind a trait so the
 /// reranker's logic is testable without a socket.
-pub trait RerankTransport: Send + Sync {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value>;
-}
+pub use antumbra_http::JsonPost as RerankTransport;
 
 /// Default per-request budget for the rerank endpoint, overridable with
 /// `ANTUMBRA_RERANK_TIMEOUT_SECS`. Without a bound a hung or unreachable endpoint
@@ -72,59 +70,14 @@ const RERANK_MAX_BATCH: usize = 32;
 const RERANK_BUDGET_MS: u64 = 2000;
 
 fn max_batch() -> usize {
-    std::env::var("ANTUMBRA_RERANK_BATCH")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(RERANK_MAX_BATCH)
+    antumbra_http::env_positive("ANTUMBRA_RERANK_BATCH", RERANK_MAX_BATCH)
 }
 
 fn budget() -> std::time::Duration {
-    let ms = std::env::var("ANTUMBRA_RERANK_BUDGET_MS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|&n| n > 0)
-        .unwrap_or(RERANK_BUDGET_MS);
-    std::time::Duration::from_millis(ms)
-}
-
-/// The production transport: a blocking `ureq` POST over an agent with a bounded
-/// global timeout, so a dead endpoint fails fast instead of hanging the worker.
-struct UreqTransport {
-    agent: ureq::Agent,
-}
-
-impl UreqTransport {
-    fn new() -> Self {
-        let secs = std::env::var("ANTUMBRA_RERANK_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&s| s > 0)
-            .unwrap_or(RERANK_TIMEOUT_SECS);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(secs)))
-            .build()
-            .into();
-        Self { agent }
-    }
-}
-
-impl RerankTransport for UreqTransport {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value> {
-        let mut req = self
-            .agent
-            .post(url)
-            .header("content-type", "application/json");
-        if let Some(key) = api_key {
-            req = req.header("authorization", &format!("Bearer {key}"));
-        }
-        let mut resp = req
-            .send_json(body)
-            .map_err(|e| AntumbraError::other(format!("rerank POST {url} failed: {e}")))?;
-        resp.body_mut()
-            .read_json::<Value>()
-            .map_err(|e| AntumbraError::other(format!("rerank response was not JSON: {e}")))
-    }
+    std::time::Duration::from_millis(antumbra_http::env_positive(
+        "ANTUMBRA_RERANK_BUDGET_MS",
+        RERANK_BUDGET_MS,
+    ))
 }
 
 /// The model a text-embeddings-inference endpoint serves, from its `/info`, if
@@ -132,10 +85,7 @@ impl RerankTransport for UreqTransport {
 /// chosen by. `None` for an endpoint with no `/info` (Cohere, Jina) or one not
 /// up yet.
 pub fn served_model(rerank_url: &str, api_key: Option<&str>) -> Option<String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(2)))
-        .build()
-        .into();
+    let agent = antumbra_http::agent(std::time::Duration::from_secs(2));
     let mut req = agent.get(&info_url(rerank_url));
     if let Some(key) = api_key {
         req = req.header("authorization", &format!("Bearer {key}"));
@@ -181,7 +131,12 @@ impl HttpReranker {
             url,
             model,
             api_key,
-            transport: Arc::new(UreqTransport::new()),
+            // The shared transport: a bounded patience, and a refusal's body
+            // in the error rather than a bare status.
+            transport: Arc::new(antumbra_http::UreqJson::new(
+                "rerank",
+                antumbra_http::patience("ANTUMBRA_RERANK_TIMEOUT_SECS", RERANK_TIMEOUT_SECS),
+            )),
             max_batch: max_batch(),
             budget: budget(),
         }
@@ -307,28 +262,40 @@ impl Reranker for HttpReranker {
 mod tests {
     use super::*;
 
-    /// Returns a canned response, so the request shaping + parsing are tested
-    /// without a socket.
-    struct FakeTransport(Result<Value>);
-
-    impl RerankTransport for FakeTransport {
-        fn post(&self, _url: &str, _api_key: Option<&str>, _body: &Value) -> Result<Value> {
-            self.0
-                .as_ref()
-                .map(Clone::clone)
-                .map_err(|e| AntumbraError::other(e.to_string()))
-        }
-    }
+    use antumbra_http::testing::{serve, Canned};
 
     fn reranker(resp: Result<Value>) -> HttpReranker {
         HttpReranker {
             url: "http://localhost/rerank".into(),
             model: None,
             api_key: None,
-            transport: Arc::new(FakeTransport(resp)),
+            transport: Arc::new(Canned(resp)),
             max_batch: RERANK_MAX_BATCH,
             budget: std::time::Duration::from_millis(RERANK_BUDGET_MS),
         }
+    }
+
+    /// The endpoint's refusal reaches the caller in the endpoint's words: a
+    /// text-embeddings-inference 422 used to become a bare status.
+    #[tokio::test]
+    async fn a_refusals_body_is_surfaced() -> anyhow::Result<()> {
+        let (url, served) = serve(
+            1,
+            422,
+            r#"{"error":"batch size 100 > maximum allowed batch size 32","error_type":"Validation"}"#,
+        )?;
+        let reranker = HttpReranker::new(url, None, None);
+        let Err(e) = reranker.rerank("q", &candidates()).await else {
+            anyhow::bail!("a 422 was accepted");
+        };
+        let shown = e.to_string();
+        anyhow::ensure!(
+            shown.starts_with("rerank POST http://")
+                && shown.contains("answered 422: batch size 100 > maximum allowed batch size 32"),
+            "{shown}"
+        );
+        served.requests()?;
+        Ok(())
     }
 
     fn candidates() -> Vec<(String, String)> {
@@ -415,7 +382,7 @@ mod tests {
     /// its fused order. It is scored in batches, and the order is by score
     /// across all of them rather than within each.
     #[tokio::test]
-    async fn a_pool_past_the_endpoints_batch_limit_is_scored_in_batches() -> Result<()> {
+    async fn a_pool_past_the_endpoints_batch_limit_is_scored_in_batches() -> anyhow::Result<()> {
         let tei = Arc::new(TeiLike::new(32));
         // Scores that interleave across batch boundaries: id i scores (i * 37) % 100.
         let pool: Vec<(String, String)> = (0..100)
@@ -431,7 +398,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn relevance_keeps_the_callers_order_across_batches() -> Result<()> {
+    async fn relevance_keeps_the_callers_order_across_batches() -> anyhow::Result<()> {
         let tei = Arc::new(TeiLike::new(32));
         let texts: Vec<String> = (0..70).map(|i| format!("t{}", 70 - i)).collect();
         let scores =
@@ -446,7 +413,7 @@ mod tests {
     /// A batch that fails fails the call: ranking a pool that was only partly
     /// scored would put every unscored candidate last for no reason.
     #[tokio::test]
-    async fn one_failed_batch_fails_the_whole_ranking() {
+    async fn one_failed_batch_fails_the_whole_ranking() -> anyhow::Result<()> {
         let tei = Arc::new(TeiLike {
             fail_call: Some(1),
             ..TeiLike::new(32)
@@ -455,6 +422,7 @@ mod tests {
             .map(|i| (format!("c{i}"), format!("t{i}")))
             .collect();
         assert!(batched(tei).rerank("q", &pool).await.is_err());
+        Ok(())
     }
 
     fn slow(per_batch_ms: u64) -> Arc<TeiLike> {
@@ -476,7 +444,7 @@ mod tests {
     /// recall wait. Past the budget no further batch is sent, so a slow endpoint
     /// is not handed work nobody will read.
     #[tokio::test]
-    async fn a_ranking_that_overruns_its_budget_fails_and_stops_sending() {
+    async fn a_ranking_that_overruns_its_budget_fails_and_stops_sending() -> anyhow::Result<()> {
         let tei = slow(150);
         let pool: Vec<(String, String)> = (0..100)
             .map(|i| (format!("c{i}"), format!("t{i}")))
@@ -490,10 +458,11 @@ mod tests {
         // Longer than a batch takes, so a batch sent late would have landed.
         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
         assert!(tei.sizes().len() < 4, "sent {:?}", tei.sizes());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_ranking_inside_its_budget_is_untouched() -> Result<()> {
+    async fn a_ranking_inside_its_budget_is_untouched() -> anyhow::Result<()> {
         let tei = slow(150);
         let pool: Vec<(String, String)> = (0..10)
             .map(|i| (format!("c{i}"), format!("t{i}")))
@@ -505,78 +474,84 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parses_tei_array_and_reorders_best_first() {
+    async fn parses_tei_array_and_reorders_best_first() -> anyhow::Result<()> {
         // index 2 (id "c") is most relevant, then 0 ("a"), then 1 ("b").
         let resp = json!([
             { "index": 1, "score": 0.10 },
             { "index": 0, "score": 0.80 },
             { "index": 2, "score": 0.95 },
         ]);
-        let out = reranker(Ok(resp)).rerank("q", &candidates()).await.unwrap();
+        let out = reranker(Ok(resp)).rerank("q", &candidates()).await?;
         assert_eq!(out, vec!["c", "a", "b"]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn parses_cohere_results_shape() {
+    async fn parses_cohere_results_shape() -> anyhow::Result<()> {
         let resp = json!({ "results": [
             { "index": 0, "relevance_score": 0.9 },
             { "index": 2, "relevance_score": 0.5 },
             { "index": 1, "relevance_score": 0.1 },
         ]});
-        let out = reranker(Ok(resp)).rerank("q", &candidates()).await.unwrap();
+        let out = reranker(Ok(resp)).rerank("q", &candidates()).await?;
         assert_eq!(out, vec!["a", "c", "b"]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn appends_dropped_ids_so_result_is_a_permutation() {
+    async fn appends_dropped_ids_so_result_is_a_permutation() -> anyhow::Result<()> {
         // Endpoint scored only index 1; the other ids must still come back.
         let resp = json!([{ "index": 1, "score": 0.9 }]);
-        let out = reranker(Ok(resp)).rerank("q", &candidates()).await.unwrap();
+        let out = reranker(Ok(resp)).rerank("q", &candidates()).await?;
         assert_eq!(out.len(), 3, "every id returned: {out:?}");
         assert_eq!(out[0], "b", "the scored id leads");
         assert!(out.contains(&"a".to_string()) && out.contains(&"c".to_string()));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn ignores_out_of_range_index() {
+    async fn ignores_out_of_range_index() -> anyhow::Result<()> {
         let resp = json!([
             { "index": 9, "score": 0.99 },
             { "index": 0, "score": 0.5 },
         ]);
-        let out = reranker(Ok(resp)).rerank("q", &candidates()).await.unwrap();
+        let out = reranker(Ok(resp)).rerank("q", &candidates()).await?;
         // index 9 dropped; "a" (0) leads, the rest appended.
         assert_eq!(out[0], "a");
         assert_eq!(out.len(), 3);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn errors_on_a_malformed_response() {
+    async fn errors_on_a_malformed_response() -> anyhow::Result<()> {
         assert!(reranker(Ok(json!({ "unexpected": true })))
             .rerank("q", &candidates())
             .await
             .is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn propagates_a_transport_error() {
+    async fn propagates_a_transport_error() -> anyhow::Result<()> {
         assert!(reranker(Err(AntumbraError::other("connection refused")))
             .rerank("q", &candidates())
             .await
             .is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn empty_candidates_is_empty_without_a_call() {
+    async fn empty_candidates_is_empty_without_a_call() -> anyhow::Result<()> {
         // No transport call needed; returns empty.
         let out = reranker(Err(AntumbraError::other("must not be called")))
             .rerank("q", &[])
-            .await
-            .unwrap();
+            .await?;
         assert!(out.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn request_body_is_tei_shaped() {
+    fn request_body_is_tei_shaped() -> anyhow::Result<()> {
         let r = reranker(Ok(Value::Null));
         let body = r.request_body("the query", &["t0", "t1"]);
         assert_eq!(body["query"], "the query");
@@ -584,10 +559,11 @@ mod tests {
         assert_eq!(body["raw_scores"], false);
         assert_eq!(body["truncate"], true, "a long memory is cut, not refused");
         assert!(body.get("model").is_none(), "model omitted when None");
+        Ok(())
     }
 
     #[test]
-    fn the_info_endpoint_sits_beside_rerank_and_names_the_model() {
+    fn the_info_endpoint_sits_beside_rerank_and_names_the_model() -> anyhow::Result<()> {
         assert_eq!(info_url("http://rerank/rerank"), "http://rerank/info");
         assert_eq!(
             info_url("http://10.0.0.132:8091/rerank/"),
@@ -601,20 +577,22 @@ mod tests {
         );
         assert_eq!(model_from_info(&json!({"model_id": " "})), None);
         assert_eq!(model_from_info(&json!({})), None);
+        Ok(())
     }
 
     #[test]
-    fn request_body_includes_model_when_set() {
+    fn request_body_includes_model_when_set() -> anyhow::Result<()> {
         let r = HttpReranker {
             url: "http://localhost/rerank".into(),
             model: Some("rerank-v2".into()),
             api_key: None,
-            transport: Arc::new(FakeTransport(Ok(Value::Null))),
+            transport: Arc::new(Canned(Ok(Value::Null))),
             max_batch: RERANK_MAX_BATCH,
             budget: std::time::Duration::from_millis(RERANK_BUDGET_MS),
         };
         let body = r.request_body("q", &["t"]);
         assert_eq!(body["model"], "rerank-v2");
+        Ok(())
     }
 
     // The irreducible real POST: point `ANTUMBRA_RERANK_URL` at a running
@@ -622,9 +600,9 @@ mod tests {
     // cannot run offline.
     #[tokio::test]
     #[ignore = "needs a live rerank endpoint (set ANTUMBRA_RERANK_URL)"]
-    async fn real_endpoint_reorders_candidates() {
+    async fn real_endpoint_reorders_candidates() -> anyhow::Result<()> {
         let Ok(url) = std::env::var("ANTUMBRA_RERANK_URL") else {
-            return;
+            return Ok(());
         };
         let model = std::env::var("ANTUMBRA_RERANK_MODEL").ok();
         let key = std::env::var("ANTUMBRA_RERANK_KEY").ok();
@@ -637,9 +615,9 @@ mod tests {
         ];
         let out = HttpReranker::new(url, model, key)
             .rerank("company earnings results", &cands)
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(out.len(), 2);
         assert_eq!(out[0], "doc:near", "the on-topic doc should rank first");
+        Ok(())
     }
 }

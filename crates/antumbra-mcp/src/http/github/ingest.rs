@@ -210,7 +210,8 @@ pub(super) fn spawn(state: Arc<HttpState>, plan: IngestPlan) {
     let what = format!(
         "{} @ {} ({} document(s){})",
         plan.slug,
-        &plan.commit[..plan.commit.len().min(12)],
+        // A sha is ASCII, and short ones are whole; neither cut can panic.
+        plan.commit.get(..12).unwrap_or(&plan.commit),
         plan.paths.len(),
         if plan.truncated {
             ", listing truncated"

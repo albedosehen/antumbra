@@ -1,6 +1,6 @@
 [package]
 name = "antumbra-store"
-version = "0.2.7"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -24,9 +24,22 @@ futures = "0.3"
 # Spans around recall's retrieval legs, exported by antumbra-mcp when it
 # traces (see its `telemetry::TRACE_FILTER`). No subscriber here.
 tracing = "0.1"
+# The credential flags the binaries share (`args`), behind the `clap` feature
+# so the library stays flag-free for everyone else.
+clap = { workspace = true, optional = true, features = ["env"] }
+
+[features]
+clap = ["dep:clap"]
+# An embedded store, provisioned members and a signed-in session, for the
+# tests of the crates that drive a store.
+testing = []
 
 [dev-dependencies]
+# The crate's own integration tests build the library without cfg(test), so
+# they take the `testing` module through the feature, as a dependant would.
+antumbra-store = { path = ".", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+anyhow.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 # End-to-end test: counterfactual search + gate over the substrate.
@@ -34,3 +47,6 @@ chrono.workspace = true
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-boundary = { path = "../antumbra-boundary" }
 antumbra-gate = { path = "../antumbra-gate" }
+
+[lints]
+workspace = true

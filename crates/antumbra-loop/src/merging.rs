@@ -286,6 +286,7 @@ impl GenerationLoop<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::AntumbraError;
 
     fn scores(pairs: &[(&str, f32)]) -> TaskScores {
         TaskScores {
@@ -294,16 +295,17 @@ mod tests {
     }
 
     #[test]
-    fn only_tasks_all_three_scored_are_compared() {
+    fn only_tasks_all_three_scored_are_compared() -> Result<()> {
         let m = scores(&[("a", 1.0), ("b", 0.5), ("c", 1.0)]);
         let l = scores(&[("a", 0.5), ("b", 0.5)]);
         let r = scores(&[("a", 1.0), ("b", 0.0), ("c", 0.0)]);
         assert_eq!(triple_means(&m, &l, &r), Some((0.75, 0.5, 0.5)));
         assert_eq!(triple_means(&m, &scores(&[]), &r), None);
+        Ok(())
     }
 
     #[test]
-    fn a_merged_adapter_lands_beside_the_first_and_is_named_for_its_generation() {
+    fn a_merged_adapter_lands_beside_the_first_and_is_named_for_its_generation() -> Result<()> {
         let run = RunId::new("search:abc");
         let path = merged_path("/reports/adapters/x.safetensors", &run, Generation(3));
         assert!(path.ends_with("merged-search_abc-g3.safetensors"), "{path}");
@@ -312,13 +314,16 @@ mod tests {
             merged_path("x.safetensors", &run, Generation(0)),
             "merged-search_abc-g0.safetensors"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_merged_card_and_vector_cover_both() {
-        let v = mean_vector(&[1.0, 0.0], &[0.0, 1.0]).expect("a vector");
+    fn the_merged_card_and_vector_cover_both() -> Result<()> {
+        let v = mean_vector(&[1.0, 0.0], &[0.0, 1.0])
+            .ok_or_else(|| AntumbraError::other("no mean vector"))?;
         assert!((v[0] - v[1]).abs() < 1e-6 && (v[0] * v[0] + v[1] * v[1] - 1.0).abs() < 1e-6);
         assert!(mean_vector(&[1.0], &[1.0, 0.0]).is_none());
         assert!(mean_vector(&[1.0, 0.0], &[-1.0, 0.0]).is_none());
+        Ok(())
     }
 }

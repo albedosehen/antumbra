@@ -23,16 +23,30 @@ use antumbra_train::{CandleModelLoader, CaptureTrainer, JsonCorpus, RaftConfig};
 #[cfg(feature = "models")]
 use crate::{refresh_router, RouterRefresh};
 
-/// Parameters for [`populate`]; mirrors the clap variant so `main.rs`'s arm
-/// stays a one-line dispatch.
+use clap::Args;
+
+use crate::capture_args::CaptureSftArgs;
+
+/// What `antumbra populate` is given.
+#[derive(Args, Debug)]
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct PopulateArgs {
+    /// JSON corpus of verifiable tasks ({id,prompt,verify}).
+    #[arg(long)]
     pub corpus: String,
+    #[arg(long, default_value = "grown")]
     pub run: String,
+    /// Stop once this fraction of tasks is covered by the population.
+    #[arg(long, default_value_t = 0.9)]
     pub target_coverage: f32,
+    /// How many new specialists to grow at most.
+    #[arg(long, default_value_t = 3)]
     pub max_experts: usize,
+    #[arg(long, default_value_t = 8)]
     pub samples: usize,
+    #[arg(long, default_value_t = 3)]
     pub rounds: usize,
+    #[arg(long, default_value_t = 32)]
     pub max_new_tokens: usize,
 }
 
@@ -240,18 +254,27 @@ pub async fn populate(url: &str, args: PopulateArgs) -> anyhow::Result<()> {
     }
 }
 
-/// Parameters for [`memory_import`]; mirrors the clap variant.
+/// What `antumbra memory-import` is given.
+#[derive(Args, Debug)]
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct MemoryImportArgs {
+    /// JSON array of normalized memories ({content, scope, marker, forbid,
+    /// confidence, ...}). See `memory::MemoryRecord`.
+    #[arg(long)]
     pub source: String,
+    /// Where to write the converted capture corpus for inspection / `teach`.
+    #[arg(long, default_value = "corpora/_imported.json")]
     pub out: String,
+    /// Confidence at/above which a memory is trusted on import (else seed).
+    #[arg(long, default_value_t = 0.5)]
     pub capture_threshold: f32,
+    /// Also internalize the captured memories now (the capture loop).
+    #[arg(long, default_value_t = false)]
     pub train: bool,
+    #[arg(long, default_value = "run:memory")]
     pub run: String,
-    pub rounds: usize,
-    pub samples: usize,
-    pub max_new_tokens: usize,
-    pub lr: f64,
+    #[command(flatten)]
+    pub capture: CaptureSftArgs,
 }
 
 /// Bootstrap from an existing memory export: adapt normalized
@@ -265,10 +288,13 @@ pub async fn memory_import(url: &str, args: MemoryImportArgs) -> anyhow::Result<
         capture_threshold,
         train,
         run,
-        rounds,
-        samples,
-        max_new_tokens,
-        lr,
+        capture:
+            CaptureSftArgs {
+                rounds,
+                samples,
+                max_new_tokens,
+                lr,
+            },
     } = args;
     #[cfg(feature = "models")]
     {
@@ -392,15 +418,26 @@ pub async fn memory_import(url: &str, args: MemoryImportArgs) -> anyhow::Result<
     }
 }
 
-/// Parameters for [`evolve`]; mirrors the clap variant.
+/// What `antumbra evolve` is given.
+#[derive(Args, Debug)]
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct EvolveArgs {
+    /// JSON corpus of verifiable tasks ({id,prompt,verify}).
+    #[arg(long)]
     pub corpus: String,
+    #[arg(long, default_value = "run:evolve")]
     pub run: String,
+    /// Stop once the held pass-rate reaches this.
+    #[arg(long, default_value_t = 0.9)]
     pub target: f32,
+    /// Generation budget (each is one warm-started RAFT pass).
+    #[arg(long, default_value_t = 3)]
     pub max_gens: usize,
+    #[arg(long, default_value_t = 6)]
     pub samples: usize,
+    #[arg(long, default_value_t = 2)]
     pub rounds: usize,
+    #[arg(long, default_value_t = 32)]
     pub max_new_tokens: usize,
 }
 
@@ -543,12 +580,21 @@ pub async fn evolve(url: &str, args: EvolveArgs) -> anyhow::Result<()> {
     }
 }
 
-/// Parameters for [`serve`].
+/// What `antumbra serve` is given.
+#[derive(Args, Debug)]
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct ServeArgs {
+    /// Answer this one prompt and exit; omit to stream prompts from stdin.
+    #[arg(long)]
     pub task: Option<String>,
+    /// Max tokens to generate per answer.
+    #[arg(long, default_value_t = 128)]
     pub max_new_tokens: usize,
+    /// Abstention threshold on relative coverage; below it the gate escalates.
+    #[arg(long, default_value_t = 0.08)]
     pub threshold: f32,
+    /// Sampling temperature. 0 = greedy (deterministic, the learned mode).
+    #[arg(long, default_value_t = 0.0)]
     pub temperature: f64,
 }
 
@@ -697,24 +743,38 @@ async fn serve_prompt(
     Ok(())
 }
 
-/// Parameters for [`metabolize`].
+/// What `antumbra metabolize` is given.
+#[derive(Args, Debug)]
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct MetabolizeArgs {
-    /// A normalized trace file (any harness exports to this shape).
+    /// JSON file of normalized harness traces ({goal, solution, kind, steps,
+    /// success, recurrence, ...}). See `antumbra_train::HarnessTrace`. Any
+    /// harness exports to this shape (see scripts/ for an example adapter).
+    #[arg(long)]
     pub source: String,
+    /// Where to write the converted capture corpus for inspection / `teach`.
+    #[arg(long, default_value = "corpora/_metabolized.json")]
     pub out: String,
+    /// Recurrence floor: only patterns seen at least this often metabolize.
+    #[arg(long, default_value_t = 1)]
     pub min_recurrence: u32,
-    /// Drop the per-step decomposition (learn only the collapsed outcome).
+    /// Do NOT metabolize each trace's decomposition (its steps); learn only
+    /// the collapsed one-shot outcome, not the process. Steps are on by default.
+    #[arg(long, default_value_t = false)]
     pub no_steps: bool,
-    /// Re-pull and metabolize on a cadence.
+    /// Re-pull and metabolize on a cadence (a continuous learning daemon).
+    #[arg(long, default_value_t = false)]
     pub watch: bool,
+    /// Seconds between cycles when --watch is set.
+    #[arg(long, default_value_t = 300)]
     pub interval_secs: u64,
+    /// Also internalize the metabolized traces now (the capture loop).
+    #[arg(long, default_value_t = false)]
     pub train: bool,
+    #[arg(long, default_value = "run:metabolize")]
     pub run: String,
-    pub rounds: usize,
-    pub samples: usize,
-    pub max_new_tokens: usize,
-    pub lr: f64,
+    #[command(flatten)]
+    pub capture: CaptureSftArgs,
 }
 
 /// Metabolize a harness's successful orchestration traces into the frozen-expert population: adapt a
@@ -732,10 +792,13 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
         interval_secs,
         train,
         run,
-        rounds,
-        samples,
-        max_new_tokens,
-        lr,
+        capture:
+            CaptureSftArgs {
+                rounds,
+                samples,
+                max_new_tokens,
+                lr,
+            },
     } = args;
     #[cfg(feature = "models")]
     {
@@ -813,11 +876,12 @@ pub async fn metabolize(url: &str, args: MetabolizeArgs) -> anyhow::Result<()> {
             } else if tasks.is_empty() {
                 println!("nothing to train: no trace cleared the metabolization gate");
             } else {
-                let store = store.as_ref().expect("store built when train");
-                let embedder = embedder
-                    .as_ref()
-                    .expect("embedder built when train")
-                    .as_ref();
+                // Both are built above whenever `train` is; a miss is this
+                // command's own wiring, reported rather than unwound.
+                let (Some(store), Some(embedder)) = (store.as_ref(), embedder.as_ref()) else {
+                    anyhow::bail!("--train without a store and an embedder to train with");
+                };
+                let embedder = embedder.as_ref();
                 let cfg = RaftConfig {
                     samples_per_task: samples,
                     rounds,

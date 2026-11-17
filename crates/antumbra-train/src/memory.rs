@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn reinforced_memory_becomes_a_trusted_capture() {
+    fn reinforced_memory_becomes_a_trusted_capture() -> Result<()> {
         let imported = to_task(
             &record("use deno install", Some(0.9)),
             0,
@@ -269,10 +269,11 @@ mod tests {
             Some("use deno install")
         );
         assert_eq!(imported.task.skill(), "package-manager");
+        Ok(())
     }
 
     #[test]
-    fn weak_memory_becomes_a_seed_with_no_trusted_completion() {
+    fn weak_memory_becomes_a_seed_with_no_trusted_completion() -> Result<()> {
         let imported = to_task(
             &record("use deno install", Some(0.2)),
             0,
@@ -282,31 +283,36 @@ mod tests {
         assert!(imported.task.completion.is_none());
         // The check survives so RAFT can verify a discovered sample.
         assert_eq!(imported.task.verify["program"], "python");
+        Ok(())
     }
 
     #[test]
-    fn missing_confidence_is_trusted() {
+    fn missing_confidence_is_trusted() -> Result<()> {
         let imported = to_task(
             &record("use deno install", None),
             0,
             &ImportPolicy::default(),
         );
         assert_eq!(imported.intake, Intake::Capture);
+        Ok(())
     }
 
     #[test]
-    fn marker_check_is_injection_safe_and_case_insensitive() {
+    fn marker_check_is_injection_safe_and_case_insensitive() -> Result<()> {
         // A marker with quotes/newlines must not break the python source.
         let verify = marker_verify("use \"deno\"\nnow", &["NPM".into()]);
-        let src = verify["args"][1].as_str().unwrap();
+        let Some(src) = verify["args"][1].as_str() else {
+            return Err(AntumbraError::other("the marker check has no source"));
+        };
         assert!(src.contains("\\\"deno\\\""));
         // forbid is lowercased.
         assert!(src.contains("npm"));
         assert!(!src.contains("NPM"));
+        Ok(())
     }
 
     #[test]
-    fn from_memory_maps_compartment_and_gate_signals() {
+    fn from_memory_maps_compartment_and_gate_signals() -> Result<()> {
         let now = chrono::Utc::now();
         let mut m = antumbra_core::Memory::new(
             "memory:x",
@@ -335,16 +341,18 @@ mod tests {
             "a reinforced, verifiable compartment memory should graduate: {}",
             v.reason
         );
+        Ok(())
     }
 
     #[test]
-    fn parse_export_reads_a_normalized_array() {
+    fn parse_export_reads_a_normalized_array() -> Result<()> {
         let bytes = br#"[{"content":"use deno","scope":"pm","confidence":0.8}]"#;
-        let records = parse_export(bytes).unwrap();
+        let records = parse_export(bytes)?;
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].content, "use deno");
         let imported = import(&records, &ImportPolicy::default());
         assert_eq!(imported[0].intake, Intake::Capture);
         assert_eq!(imported[0].task.skill(), "pm");
+        Ok(())
     }
 }

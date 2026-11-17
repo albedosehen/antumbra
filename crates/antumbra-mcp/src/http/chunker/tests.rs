@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use antumbra_core::testing::FixedEmbedder;
 use antumbra_core::{AntumbraError, CompartmentId, Memory, MemoryId, MemoryNetwork};
 use antumbra_store::repo::memory;
-use antumbra_store::{Store, EMBED_DIM};
+use antumbra_store::testing::mem_store;
+use antumbra_store::EMBED_DIM;
 
 use super::*;
 use crate::http::tests::state_embedding;
@@ -39,8 +40,8 @@ fn counting() -> Arc<Counting> {
     })
 }
 
-async fn keeper(embedder: Arc<Counting>) -> Arc<HttpState> {
-    state_embedding(Store::connect_memory(EMBED_DIM).await.unwrap(), embedder).await
+async fn keeper(embedder: Arc<Counting>) -> anyhow::Result<Arc<HttpState>> {
+    Ok(state_embedding(mem_store().await?, embedder).await)
 }
 
 /// `words` numbered words after `tag`: long enough for several pieces.
@@ -62,59 +63,52 @@ fn note(id: &str, content: &str) -> Memory {
     )
 }
 
-async fn held(state: &HttpState) -> std::collections::HashMap<String, Indexed> {
-    memory_chunk::indexed(&state.store, &TenantId::new("ws:a"))
-        .await
-        .unwrap()
+async fn held(state: &HttpState) -> anyhow::Result<std::collections::HashMap<String, Indexed>> {
+    Ok(memory_chunk::indexed(&state.store, &TenantId::new("ws:a")).await?)
 }
 
 /// A restart answers before the index reads anything: the first pass waits,
 /// with the auth lock free, and then runs.
 #[tokio::test]
-async fn the_first_pass_waits_so_a_restart_answers_first() {
+async fn the_first_pass_waits_so_a_restart_answers_first() -> anyhow::Result<()> {
     let embedder = counting();
-    let state = keeper(embedder.clone()).await;
-    memory::upsert(&state.store, &note("memory:long", &long("alpha", 200)))
-        .await
-        .unwrap();
+    let state = keeper(embedder.clone()).await?;
+    memory::upsert(&state.store, &note("memory:long", &long("alpha", 200))).await?;
     spawn_after(state.clone(), 4, Duration::from_millis(1500));
 
     assert!(
         state.auth.try_lock().is_ok(),
         "a session built now does not wait on the index"
     );
-    assert!(held(&state).await.is_empty(), "nothing read yet");
+    assert!(held(&state).await?.is_empty(), "nothing read yet");
     assert_eq!(embedder.calls.load(Ordering::SeqCst), 0);
 
     let mut cut = false;
     for _ in 0..100 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if !held(&state).await.is_empty() {
+        if !held(&state).await?.is_empty() {
             cut = true;
             break;
         }
     }
     assert!(cut, "the first pass ran after its wait");
     assert!(FIRST >= Duration::from_secs(60), "{FIRST:?}");
+    Ok(())
 }
 
 /// The first pass cuts every long memory and leaves a short one whole; the
 /// next finds nothing to do and embeds nothing.
 #[tokio::test]
-async fn a_pass_cuts_the_long_memories_and_the_next_has_nothing_to_do() {
+async fn a_pass_cuts_the_long_memories_and_the_next_has_nothing_to_do() -> anyhow::Result<()> {
     let embedder = counting();
-    let state = keeper(embedder.clone()).await;
+    let state = keeper(embedder.clone()).await?;
     let text = long("alpha", 200);
     let pieces = split(&text, MEMORY_CHUNK_CHARS).len();
     assert!(pieces > 2, "{pieces}");
-    memory::upsert(&state.store, &note("memory:long", &text))
-        .await
-        .unwrap();
-    memory::upsert(&state.store, &note("memory:short", "a short memory"))
-        .await
-        .unwrap();
+    memory::upsert(&state.store, &note("memory:long", &text)).await?;
+    memory::upsert(&state.store, &note("memory:short", "a short memory")).await?;
 
-    let first = pass(&state, None, 4).await.unwrap();
+    let first = pass(&state, None, 4).await?;
     assert_eq!(
         first,
         Tally {
@@ -123,62 +117,55 @@ async fn a_pass_cuts_the_long_memories_and_the_next_has_nothing_to_do() {
             ..Tally::default()
         }
     );
-    let index = held(&state).await;
+    let index = held(&state).await?;
     assert_eq!(index.len(), 1, "the short memory is read whole");
     assert_eq!(index["memory:long"].content_hash, cut_hash(&text));
     let embedded = embedder.calls.load(Ordering::SeqCst);
     assert_eq!(embedded, pieces);
 
-    assert_eq!(pass(&state, None, 4).await.unwrap(), Tally::default());
+    assert_eq!(pass(&state, None, 4).await?, Tally::default());
     let later = Utc::now() + chrono::Duration::minutes(1);
-    assert_eq!(
-        pass(&state, Some(later), 4).await.unwrap(),
-        Tally::default()
-    );
+    assert_eq!(pass(&state, Some(later), 4).await?, Tally::default());
     assert_eq!(embedder.calls.load(Ordering::SeqCst), embedded);
+    Ok(())
 }
 
 /// The pass after an edit re-cuts it, refiles a moved memory without
 /// embedding it again, and drops a forgotten one and one grown short; the full
 /// pass drops the chunks of a memory purged before any pass saw it go.
 #[tokio::test]
-async fn passes_follow_edits_moves_forgetting_and_purges() {
+async fn passes_follow_edits_moves_forgetting_and_purges() -> anyhow::Result<()> {
     let embedder = counting();
-    let state = keeper(embedder.clone()).await;
+    let state = keeper(embedder.clone()).await?;
     let tenant = TenantId::new("ws:a");
     for id in ["edited", "moved", "forgotten", "purged", "shortened"] {
         let m = note(&format!("memory:{id}"), &long(id, 150));
-        memory::upsert(&state.store, &m).await.unwrap();
+        memory::upsert(&state.store, &m).await?;
     }
-    assert_eq!(pass(&state, None, 2).await.unwrap().cut, 5);
+    assert_eq!(pass(&state, None, 2).await?.cut, 5);
     let since = Utc::now();
     let embedded = embedder.calls.load(Ordering::SeqCst);
 
     let edited = note("memory:edited", &long("rewritten", 150));
-    memory::upsert(&state.store, &edited).await.unwrap();
-    let mut moved = memory::get(&state.store, &tenant, &MemoryId::new("memory:moved"))
-        .await
-        .unwrap()
-        .unwrap()
-        .in_compartment(CompartmentId::new("comp:elsewhere"));
+    memory::upsert(&state.store, &edited).await?;
+    let Some(moved) = memory::get(&state.store, &tenant, &MemoryId::new("memory:moved")).await?
+    else {
+        anyhow::bail!("the memory to move is not in the store");
+    };
+    let mut moved = moved.in_compartment(CompartmentId::new("comp:elsewhere"));
     moved.updated_at = Utc::now();
-    memory::upsert(&state.store, &moved).await.unwrap();
-    memory::delete(&state.store, &tenant, &MemoryId::new("memory:purged"))
-        .await
-        .unwrap();
+    memory::upsert(&state.store, &moved).await?;
+    memory::delete(&state.store, &tenant, &MemoryId::new("memory:purged")).await?;
     memory::soft_delete(
         &state.store,
         &tenant,
         &MemoryId::new("memory:forgotten"),
         Utc::now(),
     )
-    .await
-    .unwrap();
-    memory::upsert(&state.store, &note("memory:shortened", "now short"))
-        .await
-        .unwrap();
+    .await?;
+    memory::upsert(&state.store, &note("memory:shortened", "now short")).await?;
 
-    let after = pass(&state, Some(since), 2).await.unwrap();
+    let after = pass(&state, Some(since), 2).await?;
     let edited_pieces = split(&edited.content, MEMORY_CHUNK_CHARS).len();
     assert_eq!(
         after,
@@ -195,7 +182,7 @@ async fn passes_follow_edits_moves_forgetting_and_purges() {
         embedded + edited_pieces,
         "only the edited memory was embedded again"
     );
-    let index = held(&state).await;
+    let index = held(&state).await?;
     assert_eq!(
         index["memory:edited"].content_hash,
         cut_hash(&edited.content)
@@ -208,7 +195,7 @@ async fn passes_follow_edits_moves_forgetting_and_purges() {
         "no incremental pass saw it"
     );
 
-    let full = pass(&state, None, 2).await.unwrap();
+    let full = pass(&state, None, 2).await?;
     assert_eq!(
         full,
         Tally {
@@ -216,29 +203,30 @@ async fn passes_follow_edits_moves_forgetting_and_purges() {
             ..Tally::default()
         }
     );
-    assert!(!held(&state).await.contains_key("memory:purged"));
+    assert!(!held(&state).await?.contains_key("memory:purged"));
+    Ok(())
 }
 
 /// A memory the embedder cannot read is skipped and counted, and the pass goes
 /// on; an embedder that fails memory after memory stops the pass.
 #[tokio::test]
-async fn an_embedder_failure_skips_a_memory_and_a_down_embedder_stops_the_pass() {
-    let state = keeper(counting()).await;
-    memory::upsert(&state.store, &note("memory:fine", &long("fine", 150)))
-        .await
-        .unwrap();
-    memory::upsert(&state.store, &note("memory:odd", &long("unreadable", 150)))
-        .await
-        .unwrap();
-    let t = pass(&state, None, 4).await.unwrap();
+async fn an_embedder_failure_skips_a_memory_and_a_down_embedder_stops_the_pass(
+) -> anyhow::Result<()> {
+    let state = keeper(counting()).await?;
+    memory::upsert(&state.store, &note("memory:fine", &long("fine", 150))).await?;
+    memory::upsert(&state.store, &note("memory:odd", &long("unreadable", 150))).await?;
+    let t = pass(&state, None, 4).await?;
     assert_eq!((t.cut, t.failed), (1, 1));
-    assert!(held(&state).await.contains_key("memory:fine"));
+    assert!(held(&state).await?.contains_key("memory:fine"));
 
-    let state = keeper(counting()).await;
+    let state = keeper(counting()).await?;
     for i in 0..FAILURES_IN_A_ROW {
         let m = note(&format!("memory:odd-{i}"), &long("unreadable", 150));
-        memory::upsert(&state.store, &m).await.unwrap();
+        memory::upsert(&state.store, &m).await?;
     }
-    let e = pass(&state, None, 4).await.unwrap_err();
+    let Err(e) = pass(&state, None, 4).await else {
+        anyhow::bail!("a pass over an embedder that is down went through");
+    };
     assert!(format!("{e:#}").contains("in a row"), "{e:#}");
+    Ok(())
 }

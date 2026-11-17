@@ -37,42 +37,36 @@ pub fn context(dir: &Path) -> GitContext {
 mod tests {
     use super::*;
 
-    fn scratch(name: &str) -> std::path::PathBuf {
+    fn scratch(name: &str) -> anyhow::Result<std::path::PathBuf> {
         let dir = std::env::temp_dir().join(format!("antumbra-here-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
     }
 
     #[test]
-    fn a_clone_is_named_by_its_origin_and_branch() {
-        let dir = scratch("clone");
-        let run = |args: &[&str]| {
-            Command::new("git")
-                .arg("-C")
-                .arg(&dir)
-                .args(args)
-                .output()
-                .unwrap()
-        };
-        run(&["init", "-q", "-b", "main"]);
-        run(&["remote", "add", "origin", "git@github.com:acme/orders.git"]);
+    fn a_clone_is_named_by_its_origin_and_branch() -> anyhow::Result<()> {
+        let dir = scratch("clone")?;
+        let run = |args: &[&str]| Command::new("git").arg("-C").arg(&dir).args(args).output();
+        run(&["init", "-q", "-b", "main"])?;
+        run(&["remote", "add", "origin", "git@github.com:acme/orders.git"])?;
         let here = context(&dir);
         assert_eq!(here.repo.as_deref(), Some("github.com/acme/orders"));
         assert_eq!(here.branch.as_deref(), Some("main"));
         let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
     }
 
     #[test]
-    fn a_directory_with_no_remote_names_no_repository() {
-        let dir = scratch("bare");
+    fn a_directory_with_no_remote_names_no_repository() -> anyhow::Result<()> {
+        let dir = scratch("bare")?;
         Command::new("git")
             .arg("-C")
             .arg(&dir)
             .args(["init", "-q"])
-            .output()
-            .unwrap();
+            .output()?;
         assert_eq!(context(&dir).repo, None);
         let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
     }
 }

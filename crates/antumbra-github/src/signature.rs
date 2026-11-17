@@ -53,8 +53,10 @@ pub fn sign(secret: &[u8], body: &[u8]) -> String {
     format!("{PREFIX}{}", hex::encode(mac.finalize().into_bytes()))
 }
 
+/// HMAC accepts a key of any length, so the one error path is unreachable and
+/// the expect stays.
+#[allow(clippy::expect_used)]
 fn mac(secret: &[u8]) -> Hmac<Sha256> {
-    // HMAC accepts a key of any length, so this cannot fail.
     Hmac::<Sha256>::new_from_slice(secret).expect("HMAC accepts any key length")
 }
 
@@ -69,7 +71,7 @@ mod tests {
         "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
 
     #[test]
-    fn the_documented_vector_verifies_and_signs() {
+    fn the_documented_vector_verifies_and_signs() -> anyhow::Result<()> {
         assert_eq!(sign(SECRET, BODY), SIGNATURE);
         assert_eq!(verify(SECRET, BODY, Some(SIGNATURE)), Ok(()));
         assert_eq!(
@@ -77,10 +79,11 @@ mod tests {
             Ok(()),
             "surrounding whitespace is tolerated"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_missing_malformed_or_wrong_signature_is_refused() {
+    fn a_missing_malformed_or_wrong_signature_is_refused() -> anyhow::Result<()> {
         assert_eq!(verify(SECRET, BODY, None), Err(SignatureError::Missing));
         for bad in [
             "",
@@ -105,5 +108,6 @@ mod tests {
             Err(SignatureError::Mismatch),
             "a changed body no longer matches"
         );
+        Ok(())
     }
 }

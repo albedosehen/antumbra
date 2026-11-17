@@ -53,12 +53,19 @@ dwIDAQAB
 -----END PUBLIC KEY-----
 ";
 
+/// A canned answer's body: the bytes as given, or a JSON value serialized
+/// when the route is answered.
+enum Body {
+    Bytes(Vec<u8>),
+    Json(Value),
+}
+
 /// A transport answering from canned routes (`"GET <url>"` and
 /// `"POST <url>"`) and recording every call. An unmatched route answers 404
 /// with a body naming it, so a test sees what it forgot.
 #[derive(Default)]
 pub struct FakeTransport {
-    routes: HashMap<String, (u16, Vec<u8>)>,
+    routes: HashMap<String, (u16, Body)>,
     calls: Mutex<Vec<String>>,
     bearers: Mutex<Vec<String>>,
 }
@@ -70,42 +77,70 @@ impl FakeTransport {
 
     /// Answer `method url` with `status` and `body`.
     pub fn route(mut self, method: &str, url: &str, status: u16, body: impl Into<Vec<u8>>) -> Self {
-        self.routes
-            .insert(format!("{method} {url}"), (status, body.into()));
+        self.routes.insert(
+            format!("{method} {url}"),
+            (status, Body::Bytes(body.into())),
+        );
         self
     }
 
-    /// Answer `method url` with `status` and a JSON body.
-    pub fn json(self, method: &str, url: &str, status: u16, body: &Value) -> Self {
-        let bytes = serde_json::to_vec(body).expect("serializable");
-        self.route(method, url, status, bytes)
+    /// Answer `method url` with `status` and a JSON body. The value is
+    /// serialized when the route is answered, so one that cannot be is that
+    /// call's error rather than a panic here.
+    pub fn json(mut self, method: &str, url: &str, status: u16, body: &Value) -> Self {
+        self.routes.insert(
+            format!("{method} {url}"),
+            (status, Body::Json(body.clone())),
+        );
+        self
     }
 
-    /// Every call so far, as `"METHOD url"`, in order.
+    /// Every call so far, as `"METHOD url"`, in order. The fake only ever
+    /// pushes to the list, so a poisoned lock holds a whole list and is read
+    /// as is.
     pub fn calls(&self) -> Vec<String> {
-        self.calls.lock().expect("calls").clone()
+        self.calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    /// The bearer presented on each call, in order.
+    /// The bearer presented on each call, in order. Read as `calls` is.
     pub fn bearers(&self) -> Vec<String> {
-        self.bearers.lock().expect("bearers").clone()
+        self.bearers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn answer(&self, key: String, bearer: &str) -> Result<HttpResponse, ApiError> {
-        self.calls.lock().expect("calls").push(key.clone());
+        // Read as `calls` and `bearers` are: a push cannot leave a list
+        // half-written.
+        self.calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(key.clone());
         self.bearers
             .lock()
-            .expect("bearers")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(bearer.to_string());
-        Ok(match self.routes.get(&key) {
-            Some((status, body)) => HttpResponse {
-                status: *status,
-                body: body.clone(),
-            },
-            None => HttpResponse {
+        let Some((status, body)) = self.routes.get(&key) else {
+            return Ok(HttpResponse {
                 status: 404,
                 body: format!("no canned route for {key}").into_bytes(),
-            },
+            });
+        };
+        let body = match body {
+            Body::Bytes(bytes) => bytes.clone(),
+            Body::Json(value) => serde_json::to_vec(value).map_err(|e| {
+                ApiError::Transport(format!(
+                    "the canned body for {key} is not serializable: {e}"
+                ))
+            })?,
+        };
+        Ok(HttpResponse {
+            status: *status,
+            body,
         })
     }
 }

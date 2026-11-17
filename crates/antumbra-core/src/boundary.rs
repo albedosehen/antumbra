@@ -176,7 +176,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn governing_feature_is_the_one_key_that_differs() {
+    fn governing_feature_is_the_one_key_that_differs() -> anyhow::Result<()> {
         // Exactly one key differs (runtime) -> that is the governing feature.
         let fail = serde_json::json!({ "runtime": "deno", "task": "install" });
         let ok = serde_json::json!({ "runtime": "node", "task": "install" });
@@ -184,10 +184,11 @@ mod tests {
             governing_feature_from_pair(&fail, &ok),
             Some("runtime".to_string())
         );
+        Ok(())
     }
 
     #[test]
-    fn governing_feature_is_none_when_zero_or_many_keys_differ() {
+    fn governing_feature_is_none_when_zero_or_many_keys_differ() -> anyhow::Result<()> {
         // Identical -> no contrast.
         let same = serde_json::json!({ "runtime": "deno" });
         assert_eq!(governing_feature_from_pair(&same, &same), None);
@@ -202,6 +203,7 @@ mod tests {
             governing_feature_from_pair(&fail, &ok),
             Some("extra".to_string())
         );
+        Ok(())
     }
 
     fn boundary(actionable: bool, ctx: Vec<f32>, confidence: f32) -> FailureBoundary {
@@ -226,25 +228,28 @@ mod tests {
     }
 
     #[test]
-    fn open_negatives_never_inhibit() {
+    fn open_negatives_never_inhibit() -> anyhow::Result<()> {
         let b = boundary(false, vec![1.0, 0.0], 1.0);
         assert!(!b.is_actionable());
         assert_eq!(b.inhibition_for(&[1.0, 0.0], 0.5), 0.0);
+        Ok(())
     }
 
     #[test]
-    fn inhibition_is_zero_outside_scope() {
+    fn inhibition_is_zero_outside_scope() -> anyhow::Result<()> {
         let b = boundary(true, vec![1.0, 0.0], 1.0);
         // Orthogonal candidate is far from the incorrect region -> no penalty.
         assert_eq!(b.inhibition_for(&[0.0, 1.0], 0.5), 0.0);
+        Ok(())
     }
 
     #[test]
-    fn inhibition_grows_inside_scope_scaled_by_confidence() {
+    fn inhibition_grows_inside_scope_scaled_by_confidence() -> anyhow::Result<()> {
         let b = boundary(true, vec![1.0, 0.0], 0.5);
         // Identical context -> max proximity, scaled by confidence 0.5.
         let p = b.inhibition_for(&[1.0, 0.0], 0.0);
         assert!((p - 0.5).abs() < 1e-6);
+        Ok(())
     }
 
     /// Relative scope separates near-identical contexts an absolute radius
@@ -252,7 +257,7 @@ mod tests {
     /// candidates, inhibition fires for the one nearer the failure and is zero
     /// for the one nearer C', by the sign of the margin.
     #[test]
-    fn relative_scope_fires_only_nearer_the_failure() {
+    fn relative_scope_fires_only_nearer_the_failure() -> anyhow::Result<()> {
         let mut b = boundary(true, vec![1.0, 0.05, 0.0], 1.0);
         b.ok_context_vec = Some(vec![1.0, 0.0, 0.05]); // C', same background, tilted
 
@@ -263,15 +268,17 @@ mod tests {
         // though its absolute similarity to the failure is high.
         let near_ok = b.inhibition_for(&[1.0, 0.0, 0.1], 0.5);
         assert_eq!(near_ok, 0.0);
+        Ok(())
     }
 
     #[test]
-    fn covered_by_an_expert_in_the_failure_region() {
+    fn covered_by_an_expert_in_the_failure_region() -> anyhow::Result<()> {
         let mut b = boundary(true, vec![1.0, 0.05, 0.0], 1.0);
         b.ok_context_vec = Some(vec![1.0, 0.0, 0.05]); // C'
                                                        // An expert whose capability sits on the failure side resolves it.
         assert!(b.is_covered_by(&[1.0, 0.1, 0.0]));
         // One sitting on the C' side does not.
         assert!(!b.is_covered_by(&[1.0, 0.0, 0.1]));
+        Ok(())
     }
 }

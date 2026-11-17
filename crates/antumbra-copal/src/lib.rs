@@ -59,6 +59,8 @@ use serde_json::{json, Value};
 
 use antumbra_core::{AntumbraError, Result};
 
+#[cfg(feature = "clap")]
+pub mod args;
 mod transport;
 
 /// How one request proves its copal tenant: the `x-copal-tenant` header
@@ -108,6 +110,25 @@ pub trait CopalTransport: Send + Sync {
         Err(AntumbraError::other(
             "this copal transport cannot read files",
         ))
+    }
+    /// [`Self::put_bytes`] for a file that may be large, such as an adapter. A
+    /// transport that bounds how long a call may take gives this one a budget
+    /// of its own, so the bound that makes a dead copal fail fast does not cut
+    /// off a large upload on a slow link. By default, the same call.
+    fn put_file(
+        &self,
+        url: &str,
+        credential: &CopalCredential,
+        content_type: &str,
+        digest: &str,
+        body: &[u8],
+    ) -> Result<Value> {
+        self.put_bytes(url, credential, content_type, digest, body)
+    }
+    /// [`Self::get_bytes`] for a file that may be large, on the budget
+    /// [`Self::put_file`] has. By default, the same call.
+    fn get_file(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
+        self.get_bytes(url, credential, limit)
     }
 }
 
@@ -181,8 +202,9 @@ pub struct RenderLink {
 }
 
 impl CopalArchive {
-    /// Point at `addr` -- a bare `host:port` (given `http://`) or a full URL
-    /// base (used as-is) -- landing documents per `tenancy`.
+    /// Point at `addr` -- a bare `host:port` (given `http://` for this
+    /// machine, `https://` elsewhere) or a full URL base (used as-is) --
+    /// landing documents per `tenancy`.
     pub fn new(addr: &str, tenancy: CopalTenancy) -> Self {
         Self::with_transport(addr, tenancy, Arc::new(transport::UreqTransport::new()))
     }
@@ -207,6 +229,18 @@ impl CopalArchive {
     pub fn with_render_origin(mut self, origin: Option<String>) -> Self {
         self.render_origin = origin.map(|o| o.trim_end_matches('/').to_string());
         self
+    }
+
+    /// Whether the archive is told the tenant in a request header it trusts as
+    /// given (copal's header auth mode: [`CopalTenancy::PerWorkspace`] and
+    /// [`CopalTenancy::Shared`]), so isolation between workspaces at the
+    /// archive rests on the network path alone. The keyed modes prove the
+    /// tenant with a credential instead.
+    pub fn trusts_headers(&self) -> bool {
+        matches!(
+            self.tenancy,
+            CopalTenancy::PerWorkspace | CopalTenancy::Shared(_)
+        )
     }
 
     /// The render origin, when one is configured.
@@ -294,6 +328,7 @@ impl CopalArchive {
                 &body,
                 RELIC_CONTENT_TYPE,
                 html.as_bytes(),
+                Budget::Call,
             )
         })
         .await
@@ -363,6 +398,103 @@ impl CopalArchive {
             .map_err(|e| AntumbraError::other(format!("copal read task panicked: {e}")))?
     }
 
+    /// Archive one admitted adapter: a private copal file at
+    /// `adapters/<the adapter's own file name>`, uploaded as bytes with
+    /// `sha256`, the digest on the adapter's seal, as the one copal verifies.
+    /// The create is idempotent per (workspace, expert, sha256), so a mint
+    /// retried after a failure replays the same file, and an adapter copal
+    /// already holds is not uploaded again.
+    ///
+    /// Refused before any call when `bytes` are not `sha256`, and after it when
+    /// copal's digest of what it holds is not: an archive that is not the
+    /// adapter is worse than none.
+    pub async fn put_adapter(
+        &self,
+        workspace: &str,
+        expert: &antumbra_core::ExpertId,
+        sha256: &str,
+        bytes: Vec<u8>,
+    ) -> Result<ArchivedDocument> {
+        if content_digest(&bytes) != sha256 {
+            return Err(AntumbraError::other(format!(
+                "the adapter of {} is not the sha256 its seal names; nothing was archived",
+                expert.as_str()
+            )));
+        }
+        let credential = self.credential(workspace)?;
+        let base = self.base.clone();
+        let transport = self.transport.clone();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in workspace
+            .bytes()
+            .chain([0u8])
+            .chain(expert.as_str().bytes())
+            .chain([0u8])
+            .chain(sha256.bytes())
+        {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        let body = json!({
+            "path": format!("adapters/{}", antumbra_core::adapter::file_name(expert, sha256)),
+            "content_type": ADAPTER_CONTENT_TYPE,
+            "access": "private",
+            "idempotency_key": format!("antumbra-adapter-{hash:016x}"),
+            "metadata": {
+                "workspace": workspace,
+                "expert": expert.as_str(),
+                "sha256": sha256,
+                "bytes": bytes.len(),
+            },
+        });
+        let stored = tokio::task::spawn_blocking(move || {
+            create_and_upload(
+                transport.as_ref(),
+                &base,
+                &credential,
+                &body,
+                ADAPTER_CONTENT_TYPE,
+                &bytes,
+                Budget::Transfer,
+            )
+        })
+        .await
+        .map_err(|e| AntumbraError::other(format!("copal adapter task panicked: {e}")))??;
+        if stored.digest != sha256 {
+            return Err(AntumbraError::other(format!(
+                "copal holds sha256 {} for the adapter of {}, whose seal names {sha256}",
+                stored.digest,
+                expert.as_str()
+            )));
+        }
+        Ok(stored)
+    }
+
+    /// The bytes of an archived adapter, read as `workspace` and refused past
+    /// `limit`, which the caller takes from the size on the adapter's seal. On
+    /// the transfer budget, since an adapter is tens of megabytes.
+    ///
+    /// `file_id` comes from an expert's card and becomes part of a URL, so
+    /// only what a copal file id is made of is let through.
+    pub async fn read_adapter(
+        &self,
+        workspace: &str,
+        file_id: &str,
+        limit: u64,
+    ) -> Result<Vec<u8>> {
+        if !is_file_id(file_id) {
+            return Err(AntumbraError::other(format!(
+                "{file_id:?} is not a copal file id"
+            )));
+        }
+        let credential = self.credential(workspace)?;
+        let url = format!("{}/v1/files/{file_id}/content", self.base);
+        let transport = self.transport.clone();
+        tokio::task::spawn_blocking(move || transport.get_file(&url, &credential, limit))
+            .await
+            .map_err(|e| AntumbraError::other(format!("copal adapter task panicked: {e}")))?
+    }
+
     /// The permanent address of a public relic file, which needs no call:
     /// copal's render listener serves public files at `/v1/public/<id>`.
     pub fn public_url(&self, file_id: &str) -> Option<String> {
@@ -423,6 +555,7 @@ impl CopalArchive {
                 &body,
                 "text/plain",
                 content.as_bytes(),
+                Budget::Call,
             )
         })
         .await
@@ -437,6 +570,28 @@ const RELIC_CONTENT_TYPE: &str = "text/html; charset=utf-8";
 /// agent writes, with its images inlined.
 pub const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
 
+/// The content type adapter files are stored with: their bytes, as they are.
+const ADAPTER_CONTENT_TYPE: &str = "application/octet-stream";
+
+/// Whether `text` is what a copal file id is made of: letters, digits, `-`
+/// and `_`, and no more of them than an id has.
+fn is_file_id(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 64
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Which of the transport's budgets an upload is on.
+#[derive(Clone, Copy)]
+enum Budget {
+    /// A page or a document: the bound every other call has.
+    Call,
+    /// A file that may be large: [`CopalTransport::put_file`].
+    Transfer,
+}
+
 /// Create a file record from `body`, then upload `bytes` to it, declaring
 /// their sha256. A replayed record that already holds exactly these bytes is
 /// not uploaded again, since copal would add a version for identical content.
@@ -448,6 +603,7 @@ fn create_and_upload(
     body: &Value,
     content_type: &str,
     bytes: &[u8],
+    budget: Budget,
 ) -> Result<ArchivedDocument> {
     let created = transport.post_json(&format!("{base}/v1/files"), credential, body)?;
     let file_id = created
@@ -461,13 +617,11 @@ fn create_and_upload(
             digest,
         });
     }
-    let uploaded = transport.put_bytes(
-        &format!("{base}/v1/files/{file_id}/content"),
-        credential,
-        content_type,
-        &digest,
-        bytes,
-    )?;
+    let url = format!("{base}/v1/files/{file_id}/content");
+    let uploaded = match budget {
+        Budget::Call => transport.put_bytes(&url, credential, content_type, &digest, bytes),
+        Budget::Transfer => transport.put_file(&url, credential, content_type, &digest, bytes),
+    }?;
     let digest = uploaded
         .get("digest")
         .and_then(Value::as_str)
@@ -478,14 +632,36 @@ fn create_and_upload(
     })
 }
 
-/// Mirror how copal itself normalizes an embedder address: a full URL base is
-/// used as-is (trailing slash trimmed), a bare `host:port` gets `http://`.
+/// A full URL base is used as-is (trailing slash trimmed); a bare `host:port`
+/// gets a scheme: `http://` for this machine (`localhost`, `127.x`, `::1`),
+/// `https://` for anywhere else, so an address that forgot its scheme never
+/// turns into cleartext across a network by default.
 fn normalize_base(addr: &str) -> String {
     let addr = addr.trim_end_matches('/');
     if addr.starts_with("http://") || addr.starts_with("https://") {
         addr.to_string()
-    } else {
+    } else if is_loopback(addr) {
         format!("http://{addr}")
+    } else {
+        format!("https://{addr}")
+    }
+}
+
+/// Whether `authority` (`host`, `host:port` or `[v6]:port`) names this machine.
+fn is_loopback(authority: &str) -> bool {
+    let host = match authority.strip_prefix('[') {
+        Some(rest) => rest.split(']').next().unwrap_or(rest),
+        None => authority.rsplit_once(':').map_or(authority, |(h, _)| h),
+    };
+    host == "localhost" || host == "::1" || host.starts_with("127.")
+}
+
+/// Whether `base` (a normalized URL base) speaks plain HTTP to an address that
+/// is not this machine: a token or a document on such a link is in the open.
+fn is_cleartext_across_a_network(base: &str) -> bool {
+    match base.strip_prefix("http://") {
+        Some(rest) => !is_loopback(rest.split('/').next().unwrap_or(rest)),
+        None => false,
     }
 }
 
@@ -587,6 +763,12 @@ pub enum CopalConfigError {
     #[error("--copal-keys {path} maps no workspaces")]
     KeysEmpty { path: String },
     #[error(
+        "--copal-addr {0} speaks plain HTTP to an address that is not this machine, so every \
+         document and credential on the way would be in the open; use https://, or pass \
+         --copal-allow-http for a network you trust"
+    )]
+    Cleartext(String),
+    #[error(
         "--copal-keys {path}: the key for workspace {workspace} is not a plain ASCII credential"
     )]
     KeyNotAscii { path: String, workspace: String },
@@ -605,16 +787,24 @@ impl CopalArchive {
     /// shared), `keys_file` (keys auth, per-workspace), or none of them
     /// (header auth, per-workspace, the default). Naming two is a
     /// contradiction refused up front, not a precedence resolved in silence.
+    ///
+    /// An explicit `http://` address that is not this machine is refused
+    /// unless `allow_http` says the network between the server and the
+    /// archive is trusted; a bare address gets `https://` there on its own.
     pub fn from_flags(
         addr: Option<&str>,
         tenant: Option<String>,
         key: Option<String>,
         keys_file: Option<&std::path::Path>,
         render_origin: Option<String>,
+        allow_http: bool,
     ) -> std::result::Result<Option<Arc<Self>>, CopalConfigError> {
         let Some(addr) = addr else {
             return Ok(None);
         };
+        if !allow_http && is_cleartext_across_a_network(&normalize_base(addr)) {
+            return Err(CopalConfigError::Cleartext(addr.to_string()));
+        }
         let tenancy = match (tenant, key, keys_file) {
             (None, None, None) => CopalTenancy::PerWorkspace,
             (Some(t), None, None) => CopalTenancy::Shared(t),

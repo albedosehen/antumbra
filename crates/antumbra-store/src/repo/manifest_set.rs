@@ -9,12 +9,10 @@
 //! nobody can forge a manifest into the graph's evidence.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::manifest::{Manifest, ManifestSet};
 use antumbra_core::provenance::normalize_repo;
@@ -23,7 +21,7 @@ use antumbra_core::{Result, TenantId};
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "manifest_set";
+const TABLE: &str = crate::tables::MANIFEST_SET;
 
 #[derive(Serialize, Deserialize)]
 struct Row {
@@ -49,7 +47,6 @@ pub async fn upsert(
     set: &ManifestSet,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let rid = RecordID::<()>::new(TABLE, key(tenant, &set.repo).as_str()).map_err(map)?;
     let row = Row {
         tenant_id: tenant.as_str().to_string(),
         repo: normalize_repo(&set.repo),
@@ -58,11 +55,9 @@ pub async fn upsert(
         manifests: set.manifests.clone(),
         read_at: now.to_rfc3339(),
     };
-    let data: Value = serde_json::to_value(row)?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(TABLE, key(tenant, &set.repo).as_str(), &row)
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Every repository's latest reading in a workspace, in repository order.
@@ -89,7 +84,7 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<ManifestSet>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::manifest;
 
     fn set(repo: &str, commit: &str, text: &str) -> ManifestSet {
@@ -105,7 +100,7 @@ mod tests {
     /// workspace never sees another's rows.
     #[tokio::test]
     async fn the_latest_reading_replaces_the_last_and_stays_in_its_workspace() -> Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = mem_store().await?;
         let acme = TenantId::new("ws:acme");
         let other = TenantId::new("ws:other");
         let now = chrono::Utc::now();

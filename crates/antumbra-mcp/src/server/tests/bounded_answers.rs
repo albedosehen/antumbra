@@ -2,7 +2,11 @@ use super::*;
 use crate::server::params::RECALL_CONTENT_CHARS;
 
 /// Seed `n` memories each far longer than the bound, and recall them.
-async fn recall_long(s: &McpServer, n: usize, full: Option<bool>) -> Vec<MemoryView> {
+async fn recall_long(
+    s: &McpServer,
+    n: usize,
+    full: Option<bool>,
+) -> anyhow::Result<Vec<MemoryView>> {
     for i in 0..n {
         // Distinct prefixes so the rows are not deduplicated, and a length
         // comfortably past the cut.
@@ -16,10 +20,9 @@ async fn recall_long(s: &McpServer, n: usize, full: Option<bool>) -> Vec<MemoryV
             volatile: None,
             compartment: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     }
-    s.recall_memories(Parameters(RecallParams {
+    Ok(s.recall_memories(Parameters(RecallParams {
         host: None,
         repo: None,
         branch: None,
@@ -30,17 +33,16 @@ async fn recall_long(s: &McpServer, n: usize, full: Option<bool>) -> Vec<MemoryV
         floor: None,
         session: None,
     }))
-    .await
-    .unwrap()
+    .await?
     .0
-    .memories
+    .memories)
 }
 
 /// The payload has a stated ceiling, and this test is what holds it there.
 #[tokio::test]
-async fn a_default_recall_of_long_memories_stays_under_a_stated_size() {
-    let s = server().await;
-    let hits = recall_long(&s, 5, None).await;
+async fn a_default_recall_of_long_memories_stays_under_a_stated_size() -> anyhow::Result<()> {
+    let s = server().await?;
+    let hits = recall_long(&s, 5, None).await?;
     assert_eq!(hits.len(), 5, "all five come back");
 
     let prose: usize = hits.iter().map(|m| m.content.chars().count()).sum();
@@ -50,19 +52,20 @@ async fn a_default_recall_of_long_memories_stays_under_a_stated_size() {
     );
     // The whole serialized payload, envelopes included, under the budget a
     // session-start hook has to live inside.
-    let payload = serde_json::to_string(&hits).unwrap();
+    let payload = serde_json::to_string(&hits)?;
     assert!(
         payload.len() < 10_000,
         "payload {} chars must fit a hook's 10,000-character context",
         payload.len()
     );
+    Ok(())
 }
 
 /// The marker is present exactly when the cut happened, and `content_chars`
 /// still reports the STORED length either way.
 #[tokio::test]
-async fn the_marker_is_present_exactly_when_the_content_was_cut() {
-    let s = server().await;
+async fn the_marker_is_present_exactly_when_the_content_was_cut() -> anyhow::Result<()> {
+    let s = server().await?;
     let short = "a short note about scheduling";
     s.store_memory(Parameters(StoreParams {
         provenance: None,
@@ -73,9 +76,8 @@ async fn the_marker_is_present_exactly_when_the_content_was_cut() {
         volatile: None,
         compartment: None,
     }))
-    .await
-    .unwrap();
-    let hits = recall_long(&s, 2, None).await;
+    .await?;
+    let hits = recall_long(&s, 2, None).await?;
 
     for m in &hits {
         if m.truncated {
@@ -104,13 +106,14 @@ async fn the_marker_is_present_exactly_when_the_content_was_cut() {
     if let Some(w) = whole {
         assert!(!w.truncated, "a row under the bound carries no marker");
     }
+    Ok(())
 }
 
 /// `full: true` returns the untruncated text with no marker.
 #[tokio::test]
-async fn full_returns_everything_and_says_nothing_was_cut() {
-    let s = server().await;
-    let hits = recall_long(&s, 3, Some(true)).await;
+async fn full_returns_everything_and_says_nothing_was_cut() -> anyhow::Result<()> {
+    let s = server().await?;
+    let hits = recall_long(&s, 3, Some(true)).await?;
     assert!(!hits.is_empty());
     for m in &hits {
         assert!(!m.truncated, "nothing is cut when full was asked for");
@@ -124,4 +127,5 @@ async fn full_returns_everything_and_says_nothing_was_cut() {
             "these rows are longer than the bound, so this is a real check"
         );
     }
+    Ok(())
 }

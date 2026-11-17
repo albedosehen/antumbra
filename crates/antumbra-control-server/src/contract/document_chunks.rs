@@ -4,52 +4,43 @@
 //! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Resource};
 use surql::schema::{datetime_field, int_field, string_field, FieldDefinition};
 
-use super::built;
+use super::{built, read_only};
 
 /// Knowledge-document chunks: reference material, a distinct type from
 /// episodic memory but tenant-isolated the same way. Read-only; ingestion is
 /// the MCP `store_document` path, which owns chunking and embedding.
 pub(super) fn resource() -> Resource {
     Resource {
-        name: "document_chunks".into(),
-        table: "document_chunk".into(),
-        faces: ResourceFaces::ALL,
-        // Chunks are addressed by their globally-unique domain id, stored as
-        // `key` by the DTO convention.
-        identity: Identity::Column("key".into()),
-        fields: vec![
-            FieldExposure::column("title"),
-            FieldExposure::column("source"),
-            FieldExposure::column("ordinal"),
-            FieldExposure::column("content"),
-            // Document-of-record provenance: when a copal archive was
-            // configured at ingest, the chunk names the archived file and
-            // its content digest (see antumbra-mcp/src/copal.rs). Absent on
-            // chunks ingested without one, like the row itself.
-            FieldExposure::column("copal_file"),
-            FieldExposure::column("copal_digest"),
-            FieldExposure::column("created_at"),
-            // The embedding stays off the wire for the same reason the
-            // memory one does: recall machinery, not content.
-        ],
         // tenant_id is server-bound; document_chunk_tenant_title_idx leads
         // with it, seating the plain listing and crediting the title filter.
         pinned: vec!["tenant_id".into()],
-        pinned_either: vec![],
-        filterable: vec!["title".into()],
-        filter_options: Default::default(),
-        sortable: vec!["created_at".into()],
-        max_page_size: 100,
-        graphql: None,
-        watchable: false,
-        reads_require: vec![],
-        rate_class: None,
-        sub_resources: vec![],
-        content: None,
-        actions: vec![],
+        // Chunks are addressed by their globally-unique domain id, stored as
+        // `key` by the DTO convention.
+        ..read_only(
+            "document_chunks",
+            antumbra_store::tables::DOCUMENT_CHUNK,
+            "key",
+            vec![
+                FieldExposure::column("title"),
+                FieldExposure::column("source"),
+                FieldExposure::column("ordinal"),
+                FieldExposure::column("content"),
+                // Document-of-record provenance: when a copal archive was
+                // configured at ingest, the chunk names the archived file and
+                // its content digest (see antumbra-mcp/src/copal.rs). Absent on
+                // chunks ingested without one, like the row itself.
+                FieldExposure::column("copal_file"),
+                FieldExposure::column("copal_digest"),
+                FieldExposure::column("created_at"),
+                // The embedding stays off the wire for the same reason the
+                // memory one does: recall machinery, not content.
+            ],
+            &["title"],
+            &["created_at"],
+        )
     }
 }
 

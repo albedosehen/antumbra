@@ -471,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn masking_the_routed_expert_falls_back_to_the_next_or_escalates() {
+    fn masking_the_routed_expert_falls_back_to_the_next_or_escalates() -> Result<()> {
         let experts = [
             expert("a", vec![1.0, 0.0, 0.0]),
             expert("b", vec![0.7, 0.7, 0.0]),
@@ -508,10 +508,11 @@ mod tests {
         // routes to it.
         let rest = [expert("b", vec![0.7, 0.7, 0.0])];
         assert_ne!(route_top1(&task, Some(&router), &rest, &[], None), Some(a));
+        Ok(())
     }
 
     #[test]
-    fn without_a_router_the_heuristic_gate_routes() {
+    fn without_a_router_the_heuristic_gate_routes() -> Result<()> {
         let experts = [
             expert("a", vec![1.0, 0.0, 0.0]),
             expert("b", vec![0.0, 1.0, 0.0]),
@@ -521,10 +522,11 @@ mod tests {
         assert_eq!(to, Some(a.clone()));
         let masked = route_top1(&[1.0, 0.0, 0.0], None, &experts, &[], Some(&a));
         assert_ne!(masked, Some(a));
+        Ok(())
     }
 
     #[test]
-    fn the_live_sample_is_the_same_whatever_order_the_tasks_come_in() {
+    fn the_live_sample_is_the_same_whatever_order_the_tasks_come_in() -> Result<()> {
         let tasks = |ids: &[&str]| -> Vec<TaskPrompt> {
             ids.iter()
                 .map(|id| TaskPrompt {
@@ -541,15 +543,17 @@ mod tests {
         assert_eq!(one.len(), 3);
         assert_eq!(one, other);
         assert_eq!(sample_live(tasks(&["a"]), 3).len(), 1);
+        Ok(())
     }
 
     #[test]
-    fn seeds_are_the_runs_and_differ_by_generation() {
+    fn seeds_are_the_runs_and_differ_by_generation() -> Result<()> {
         let run = RunId::new("run");
         let at = |g| seeds("contribution", &run, Generation(g), 2);
         assert_eq!(at(1), at(1));
         assert_ne!(at(1), at(2));
         assert_ne!(at(1), seeds("admission", &run, Generation(1), 2));
         assert_eq!(seeds("contribution", &run, Generation(1), 3).len(), 3);
+        Ok(())
     }
 }

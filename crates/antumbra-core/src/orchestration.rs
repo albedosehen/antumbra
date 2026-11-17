@@ -107,7 +107,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn happy_path_completes() {
+    fn happy_path_completes() -> anyhow::Result<()> {
         let mut run = OrchestrationRun::start(RunId::new("run:1"), "task:42", Utc::now());
         for to in [
             OrchestrationStatus::Executing,
@@ -115,20 +115,22 @@ mod tests {
             OrchestrationStatus::Deciding,
             OrchestrationStatus::Done,
         ] {
-            run.advance_to(to, Utc::now()).unwrap();
+            run.advance_to(to, Utc::now())?;
         }
         assert!(run.status.is_terminal());
+        Ok(())
     }
 
     #[test]
-    fn deciding_can_loop_for_another_round() {
+    fn deciding_can_loop_for_another_round() -> anyhow::Result<()> {
         assert!(OrchestrationStatus::Deciding
             .transition(OrchestrationStatus::Routing)
             .is_ok());
+        Ok(())
     }
 
     #[test]
-    fn looping_back_to_routing_advances_the_round() {
+    fn looping_back_to_routing_advances_the_round() -> anyhow::Result<()> {
         let mut run = OrchestrationRun::start(RunId::new("run:1"), "task:1", Utc::now());
         assert_eq!(run.round, 0);
         for to in [
@@ -137,7 +139,7 @@ mod tests {
             OrchestrationStatus::Deciding,
             OrchestrationStatus::Routing, // loop back: round 1
         ] {
-            run.advance_to(to, Utc::now()).unwrap();
+            run.advance_to(to, Utc::now())?;
         }
         assert_eq!(
             run.round, 1,
@@ -150,15 +152,17 @@ mod tests {
             OrchestrationStatus::Deciding,
             OrchestrationStatus::Routing,
         ] {
-            run.advance_to(to, Utc::now()).unwrap();
+            run.advance_to(to, Utc::now())?;
         }
         assert_eq!(run.round, 2);
+        Ok(())
     }
 
     #[test]
-    fn cannot_skip_states() {
+    fn cannot_skip_states() -> anyhow::Result<()> {
         assert!(OrchestrationStatus::Routing
             .transition(OrchestrationStatus::Done)
             .is_err());
+        Ok(())
     }
 }

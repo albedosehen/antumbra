@@ -248,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_a_silence_and_an_endless_server_are_each_an_error() {
+    fn a_refusal_a_silence_and_an_endless_server_are_each_an_error() -> anyhow::Result<()> {
         let refused = Script::saying(vec![
             json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32602, "message": "unsupported protocol" } }),
         ]);
@@ -271,5 +271,6 @@ mod tests {
             .map(|e| e.to_string())
             .unwrap_or_default();
         assert!(said.contains("still paging"), "{said}");
+        Ok(())
     }
 }

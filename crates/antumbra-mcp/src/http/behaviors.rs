@@ -386,6 +386,11 @@ mod keeper {
                     }
                     let job = plan.clone();
                     let confidence = confidence_for(state, tenant).await?;
+                    // Checked when the server started; a setting that names no
+                    // form measures nothing.
+                    let measure =
+                        antumbra_serve::ServeQuant::drift_from_setting(&state.behave_drift)
+                            .unwrap_or_default();
                     // The training is a shadow in the penumbra while it
                     // runs, settled by `mint`, or pruned if it fails.
                     {
@@ -394,12 +399,12 @@ mod keeper {
                         behave::begin(&state.store, &plan).await?;
                     }
                     let trained = crate::server::heavy::spawn_heavy(async move {
-                        behave::train(&job, embedder.as_ref(), &cfg, confidence).await
+                        behave::train(&job, embedder.as_ref(), &cfg, confidence, &measure).await
                     })
                     .await
                     .map_err(anyhow::Error::from)
                     .and_then(|r| r.map_err(anyhow::Error::from));
-                    let trained = match trained {
+                    let mut trained = match trained {
                         Ok(t) => t,
                         Err(e) => {
                             let _guard = state.auth.lock().await;
@@ -408,6 +413,19 @@ mod keeper {
                             return Err(e);
                         }
                     };
+                    // A second copy of an admitted adapter, where this server
+                    // keeps an archive: before the mint, so the row is written
+                    // once, naming it.
+                    if let (Some(archive), Some(seal)) = (&state.copal, &trained.seal) {
+                        trained.archived = crate::server::pull::archive_adapter(
+                            archive,
+                            tenant,
+                            &behave::expert_id(&plan.tenant, &plan.user, &plan.scope),
+                            seal,
+                            &trained.adapter_uri,
+                        )
+                        .await;
+                    }
                     let report = {
                         let _guard = state.auth.lock().await;
                         state.store.signin_root().await?;
@@ -417,6 +435,16 @@ mod keeper {
                         Some((id, uri)) => {
                             if let Some(serve) = &state.serve {
                                 serve.register_expert(&id, &uri);
+                            }
+                            // Only now that nothing here resolves to it: the
+                            // file the expert before this one was served from.
+                            if let Some(old) = &report.superseded {
+                                if let Err(e) = behave::adapter::discard(old, &uri) {
+                                    eprintln!(
+                                        "antumbra-mcp: standing experts, {}: the adapter it replaces was left in place: {e}",
+                                        id.as_str()
+                                    );
+                                }
                             }
                             failed.remove(&key);
                             tally.trained += 1;
@@ -432,6 +460,13 @@ mod keeper {
                                     format!("; not learned: {}", missed.join("; "))
                                 }
                             );
+                            if !report.drift.is_empty() {
+                                eprintln!(
+                                    "antumbra-mcp: standing experts, {}: {}",
+                                    id.as_str(),
+                                    behave::drift::describe(&report.drift)
+                                );
+                            }
                         }
                         None => {
                             failed.insert(key, print);

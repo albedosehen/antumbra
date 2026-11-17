@@ -100,6 +100,8 @@ impl Fabric {
 /// The collector's full configuration.
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
+    /// The local store's endpoint. Not connected by a collector that is
+    /// given its local store ([`crate::worker::run_on`]).
     pub local: Endpoint,
     pub remote: Endpoint,
     /// Whose fabric to replicate. `None` is owner mode over the whole tenant,
@@ -109,7 +111,10 @@ pub struct SyncConfig {
     /// compartments and the shared pool, which is both the privacy answer and
     /// exactly what their session can write back. `ReconcileStats::refused`
     /// should stay at zero -- a refusal on a narrowed table means the
-    /// replication policy and the engine ACL disagree.
+    /// replication policy and the engine ACL disagree. The one table where
+    /// they are known to disagree is `expert`: a user's session reads their
+    /// standing experts and writes none, so each one such a collector offers
+    /// is refused and counted.
     pub fabric: Option<Fabric>,
     /// Delay between reconcile cycles once connected.
     pub interval: Duration,
@@ -158,7 +163,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_endpoint_carries_no_credentials() {
+    fn embedded_endpoint_carries_no_credentials() -> Result<()> {
         let e = Endpoint::embedded("mem://");
         assert_eq!(e.url, "mem://");
         assert_eq!(e.namespace, "antumbra");
@@ -166,32 +171,34 @@ mod tests {
         assert!(e.username.is_none() && e.password.is_none());
         // Builds a valid connection config (no creds branch).
         assert!(e.connection_config().is_ok());
+        Ok(())
     }
 
     #[test]
-    fn authoritative_endpoint_carries_root_credentials() {
+    fn authoritative_endpoint_carries_root_credentials() -> Result<()> {
         let e = Endpoint::authoritative("ws://h:8000/rpc", "root", "pw");
         assert_eq!(e.username.as_deref(), Some("root"));
         assert_eq!(e.password.as_deref(), Some("pw"));
         // Builds a valid connection config (creds branch).
         assert!(e.connection_config().is_ok());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn embedded_endpoint_connects_and_applies_schema() {
-        let store = Endpoint::embedded("mem://").connect().await.unwrap();
+    async fn embedded_endpoint_connects_and_applies_schema() -> Result<()> {
+        let store = Endpoint::embedded("mem://").connect().await?;
         // A connected store can be queried (schema applied).
         assert_eq!(
-            antumbra_store::repo::sync::list_rows(&store, "memory")
-                .await
-                .unwrap()
+            antumbra_store::repo::sync::list_rows(&store, antumbra_store::tables::MEMORY)
+                .await?
                 .len(),
             0
         );
+        Ok(())
     }
 
     #[test]
-    fn sync_config_defaults_and_with_interval() {
+    fn sync_config_defaults_and_with_interval() -> Result<()> {
         let cfg = SyncConfig::new(Endpoint::embedded("mem://"), Endpoint::embedded("mem://"));
         assert_eq!(cfg.interval, Duration::from_secs(15));
         assert_eq!(cfg.min_backoff, Duration::from_millis(500));
@@ -201,6 +208,7 @@ mod tests {
         assert_eq!(cfg.gc_every, 240);
         let cfg = cfg.with_interval(Duration::from_secs(2));
         assert_eq!(cfg.interval, Duration::from_secs(2));
+        Ok(())
     }
 }
 
@@ -208,6 +216,7 @@ mod tests {
 mod fabric_tests {
     use super::*;
     use antumbra_store::repo::principal;
+    use antumbra_store::testing::mem_store;
 
     /// Binding is a real sign-in against the engine, not a stored label: an
     /// unprovisioned principal is a configuration error and has to read as one,
@@ -215,7 +224,7 @@ mod fabric_tests {
     /// was already signed in as.
     #[tokio::test]
     async fn binding_needs_a_principal_that_exists() -> Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = mem_store().await?;
         let fabric = Fabric::new("ws:org", "user:lily");
         assert!(
             fabric.bind(&store).await.is_err(),
@@ -231,8 +240,9 @@ mod fabric_tests {
     /// deployment runs today. Scoping is opt-in and stays that way until the
     /// per-table replication scope exists to make it lossless.
     #[test]
-    fn a_collector_is_unscoped_unless_it_is_told_otherwise() {
+    fn a_collector_is_unscoped_unless_it_is_told_otherwise() -> Result<()> {
         let cfg = SyncConfig::new(Endpoint::embedded("mem://"), Endpoint::embedded("mem://"));
         assert_eq!(cfg.fabric, None);
+        Ok(())
     }
 }

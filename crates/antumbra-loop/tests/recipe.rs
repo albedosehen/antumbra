@@ -7,9 +7,10 @@ use async_trait::async_trait;
 use antumbra_core::ports::{TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::slice::Partition;
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer, SCRIPTED_RECIPE};
-use antumbra_core::{Result, RunId, ShadowId, TrainingRecipe};
+use antumbra_core::{AntumbraError, Result, RunId, ShadowId, TrainingRecipe};
 use antumbra_loop::{GenerationLoop, GenerationReport, LoopConfig};
 use antumbra_store::repo::recipe;
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 const ASKED: TrainingRecipe = TrainingRecipe {
@@ -32,7 +33,7 @@ async fn run(
 
 #[tokio::test]
 async fn each_generation_leaves_a_row_descending_from_the_last() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let reports = run(
         &store,
         &ScriptedTrainer::graduating(),
@@ -79,7 +80,7 @@ async fn each_generation_leaves_a_row_descending_from_the_last() -> Result<()> {
 
 #[tokio::test]
 async fn the_loops_recipe_is_asked_for_and_recorded_as_run() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let cfg = LoopConfig {
         recipe: Some(ASKED),
         ..LoopConfig::default()
@@ -88,14 +89,14 @@ async fn the_loops_recipe_is_asked_for_and_recorded_as_run() -> Result<()> {
     assert_eq!(reports[0].recipe, Some(ASKED));
     let row = recipe::get(&store, &ShadowId::new("run:recipe:g0"))
         .await?
-        .expect("a row for the generation");
+        .ok_or_else(|| AntumbraError::other("no recipe row for the generation"))?;
     assert_eq!(row.recipe, ASKED);
     Ok(())
 }
 
 #[tokio::test]
 async fn a_trainer_that_does_not_say_leaves_no_row() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer {
         ignores_recipe: true,
         ..ScriptedTrainer::graduating()
@@ -133,7 +134,7 @@ impl Trainer for Headstrong {
 /// the asked-for recipe would credit settings no shadow used.
 #[tokio::test]
 async fn a_run_under_another_recipe_is_recorded_as_it_ran() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let trainer = Headstrong {
         inner: ScriptedTrainer::graduating(),
         own: SCRIPTED_RECIPE,
@@ -146,7 +147,7 @@ async fn a_run_under_another_recipe_is_recorded_as_it_ran() -> Result<()> {
     assert_eq!(reports[0].recipe, Some(SCRIPTED_RECIPE));
     let row = recipe::get(&store, &ShadowId::new("run:recipe:g0"))
         .await?
-        .expect("a row for the generation");
+        .ok_or_else(|| AntumbraError::other("no recipe row for the generation"))?;
     assert_eq!(row.recipe, SCRIPTED_RECIPE);
     Ok(())
 }
@@ -166,11 +167,11 @@ async fn the_partition_seed_is_kept_only_under_a_confirmed_holdout() -> Result<(
             .map(|row| row.and_then(|r| r.partition_seed))
     };
 
-    let confirmed = Store::connect_memory(8).await?;
+    let confirmed = mem_store_of(8).await?;
     run(&confirmed, &ScriptedTrainer::graduating(), cfg.clone(), 1).await?;
     assert_eq!(seed_of(confirmed).await?, Some(7));
 
-    let ignored = Store::connect_memory(8).await?;
+    let ignored = mem_store_of(8).await?;
     let trainer = ScriptedTrainer {
         ignores_holdout: true,
         ..ScriptedTrainer::graduating()

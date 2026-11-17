@@ -1,0 +1,67 @@
+name: Improvement
+description: Suggest an improvement to something that exists.
+type: "Improvement"
+labels: ["triage", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest this.
+  - id: component
+    type: dropdown
+    attributes:
+      label: What component does this affect?
+      options:
+        - antumbra (the CLI, including setup)
+        - antumbra-mcp (the server and its tools)
+        - antumbra-tui (the console)
+        - antumbra-control-server (hosted sign-in)
+        - The Claude Code hooks
+        - Docker and compose
+        - Training, serving or the loop
+        - Documentation
+    validations:
+      required: true
+  - id: problem
+    type: textarea
+    attributes:
+      label: Is this improvement related to a problem?
+      description: What is the situation in which the current behaviour falls short?
+    validations:
+      required: true
+  - id: solution
+    type: textarea
+    attributes:
+      label: Suggest a solution
+      description: What should happen instead, and how might it work?
+    validations:
+      required: true
+  - id: alternatives
+    type: textarea
+    attributes:
+      label: Alternative methods
+      description: What else did you consider, and why is it worse?
+    validations:
+      required: true
+  - id: version
+    type: input
+    attributes:
+      label: Antumbra version
+      description: Copy and paste the output of `antumbra --version`.
+      placeholder: antumbra 0.0.0
+    validations:
+      required: true
+  - id: contact
+    type: input
+    attributes:
+      label: Contact details
+      description: How can we reach you if we need more information? (optional)
+    validations:
+      required: false
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue for this?
+      description: Please search [the issues](https://github.com/albedosehen/antumbra/issues) first.
+      options:
+        - label: I have searched the existing issues
+          required: true

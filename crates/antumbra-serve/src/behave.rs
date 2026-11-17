@@ -10,7 +10,8 @@
 //!    controls held (`antumbra_train::behave::admit`).
 //!
 //! The expert is the user's own, private, and one per scope: a repository,
-//! or everywhere. A re-run replaces it.
+//! or everywhere. A re-run that is admitted replaces it; one that is refused
+//! leaves it, and the adapter it is served from, as they were ([`adapter`]).
 //!
 //! The work is three phases, so a server can hold its store only for the
 //! first and the last: [`plan`] reads the behaviors, [`train`] runs on the
@@ -31,7 +32,11 @@ use antumbra_store::{Store, EMBED_DIM};
 use antumbra_train::behave::{self as course, Verdict};
 use antumbra_train::{
     capture_corrections, eval_pass_rate, CandleModelLoader, CorpusTask, ModelLoader, RaftConfig,
+    ServeQuant,
 };
+
+pub mod adapter;
+pub mod drift;
 
 /// What a run did: the expert minted, if admitted, and the scores behind it.
 #[derive(Debug, Clone)]
@@ -43,6 +48,14 @@ pub struct BehaveReport {
     pub verdict: Verdict,
     /// The minted expert and its adapter, when admitted.
     pub expert: Option<(ExpertId, String)>,
+    /// The file on this host that the expert before this one was served
+    /// from, when the minted expert's adapter is another file. It is left in
+    /// place: whoever serves from it registers the new one first, then
+    /// [`adapter::discard`]s this.
+    pub superseded: Option<String>,
+    /// What each quantized form of the base measured did to the minted
+    /// expert, as its card now records. Empty when none was measured.
+    pub drift: drift::Measured,
 }
 
 /// The private standing expert for a user's behaviors in `scope`, in
@@ -138,7 +151,17 @@ pub fn seed_of(plan: &Plan) -> u64 {
 pub struct Trained {
     pub verdict: Verdict,
     pub replay: usize,
+    /// Where the adapter rests: admitted, the file named by its content;
+    /// refused, the candidate the training wrote.
     pub adapter_uri: String,
+    /// The admitted adapter's sha256 and size. `None` when refused.
+    pub seal: Option<adapter::Seal>,
+    /// The copal file the admitted adapter is archived in. A training does
+    /// not archive: whoever mints it and keeps an archive sets this first.
+    pub archived: Option<String>,
+    /// What each quantized form of the base measured does to the admitted
+    /// expert. Empty when refused, and when none was measured.
+    pub drift: drift::Measured,
     pub base_model: String,
     pub fitness: f32,
     /// The base model's pass rate on the same held-out tasks, before
@@ -157,11 +180,20 @@ pub struct Trained {
 /// Score the base, train beside its own replay, and score again. Touches no
 /// store. `cfg` sets the base model, epochs and learning rate; scoring is
 /// greedy, one answer per task.
+///
+/// The training writes a candidate adapter. Admitted, it is promoted to the
+/// file its content names ([`adapter::place`]); refused, it stays a candidate
+/// and no admitted adapter is written to.
+///
+/// An admitted expert is then read through each of the `measure` forms of
+/// the base, after the verdict and changing nothing about it
+/// ([`drift::measure`]): one more load of the base for each form.
 pub async fn train(
     plan: &Plan,
     embedder: &dyn Embedder,
     cfg: &RaftConfig,
     confidence: f64,
+    measure: &[ServeQuant],
 ) -> Result<Trained> {
     let (mut tasks, mut held): (Vec<CorpusTask>, Vec<CorpusTask>) = (Vec::new(), Vec::new());
     for (m, spec) in &plan.taught {
@@ -179,10 +211,16 @@ pub async fn train(
     // Seeded from the set taught, so the same set trains the same way in any
     // process, whatever was trained before it; the node's generation seed
     // shifts it for measuring how much a training varies.
+    //
+    // It saves into the candidates directory. The path it writes is the same
+    // for every training of this expert, and it writes before admission has
+    // decided, so that path must never be one an expert's row names.
+    let adapter_dir = cfg.adapter_dir.clone();
     let cfg = RaftConfig {
         temperature: 0.0,
         samples_per_task: 1,
         seed: Some(seed_of(plan)),
+        adapter_dir: adapter::candidates(&adapter_dir),
         ..cfg.clone()
     };
     let run = RunId::new(
@@ -214,6 +252,7 @@ pub async fn train(
         &scores.per_task,
         confidence,
     );
+    let (adapter_uri, seal) = adapter::place(&out.adapter_uri, &adapter_dir, verdict.admitted)?;
 
     // The expert routes by the tasks of the behaviors it learned.
     let learned = verdict.learned();
@@ -231,11 +270,21 @@ pub async fn train(
         }
     }
     let n = routed.len().max(1) as f32;
+    // Last, since it gives the trained model up: what a quantized base does
+    // to the expert just admitted.
+    let drift = if verdict.admitted {
+        drift::measure(model, &cfg, &adapter_uri, &held, measure).await
+    } else {
+        Vec::new()
+    };
     Ok(Trained {
         misses: course::misses(&held, &scores.draws),
         verdict,
         replay: replayed,
-        adapter_uri: out.adapter_uri,
+        adapter_uri,
+        seal,
+        archived: None,
+        drift,
         base_model: cfg.base_model.clone(),
         fitness: scores.pass_rate,
         base_fitness: base.pass_rate,
@@ -643,21 +692,37 @@ pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result
         memory::upsert(store, &m).await?;
     }
     if let Some(mut e) = expert::get(store, &audited.expert).await? {
-        let card = &mut e.capability_card;
+        // A card is a JSON object, or nothing yet. Anything else is a row this
+        // code never wrote, and it is reported rather than indexed into, since
+        // `Value`'s index panics on it, in the keeper's task.
+        if e.capability_card.is_null() {
+            e.capability_card = serde_json::Value::Object(Default::default());
+        }
+        let Some(card) = e.capability_card.as_object_mut() else {
+            return Err(antumbra_core::AntumbraError::other(format!(
+                "expert {} has a capability card that is not an object; its audit was not noted",
+                e.id.as_str()
+            )));
+        };
         for (id, earlier) in &lineage {
             for key in [behavior::CARD_EXAMPLES, behavior::CARD_AUDITED] {
-                if card[key].get(id.as_str()).is_none() {
-                    if let Some(known) = card[key].get(earlier.as_str()).cloned() {
-                        card[key][id.as_str()] = known;
-                    }
+                let present = card.get(key).and_then(|s| s.get(id.as_str())).is_some();
+                let known = card.get(key).and_then(|s| s.get(earlier.as_str())).cloned();
+                if let (false, Some(known)) = (present, known) {
+                    card_section(card, key, &e.id)?.insert(id.clone(), known);
                 }
             }
         }
-        for (id, _, prints) in &audited.behaviors {
-            let slot = &mut card[behavior::CARD_AUDITED][id.as_str()];
-            let mut list = slot.as_array().cloned().unwrap_or_default();
-            list.extend(prints.iter().map(|p| serde_json::Value::String(p.clone())));
-            *slot = serde_json::Value::Array(list);
+        if !audited.behaviors.is_empty() {
+            let section = card_section(card, behavior::CARD_AUDITED, &e.id)?;
+            for (id, _, prints) in &audited.behaviors {
+                let slot = section
+                    .entry(id.clone())
+                    .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+                let mut list = slot.as_array().cloned().unwrap_or_default();
+                list.extend(prints.iter().map(|p| serde_json::Value::String(p.clone())));
+                *slot = serde_json::Value::Array(list);
+            }
         }
         expert::delete(store, &e.id).await?;
         expert::insert(store, &e).await?;
@@ -665,10 +730,36 @@ pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result
     Ok(())
 }
 
+/// The object under `key` on a card, made when absent or null: the sections
+/// `note_audit` writes are objects of behavior id to entry. A section of any
+/// other shape is a card this code never wrote, reported rather than indexed
+/// into.
+fn card_section<'a>(
+    card: &'a mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    expert: &ExpertId,
+) -> Result<&'a mut serde_json::Map<String, serde_json::Value>> {
+    let slot = card
+        .entry(key)
+        .or_insert_with(|| serde_json::Value::Object(Default::default()));
+    if slot.is_null() {
+        *slot = serde_json::Value::Object(Default::default());
+    }
+    slot.as_object_mut().ok_or_else(|| {
+        antumbra_core::AntumbraError::other(format!(
+            "expert {} has a card section {key:?} that is not an object; its audit was not noted",
+            expert.as_str()
+        ))
+    })
+}
+
 /// Mint the standing expert when `trained` was admitted, replacing the one
 /// before. It holds the behaviors it learned, and its card records the set it
 /// was trained on, so the keeper leaves it be until that set changes. It is
-/// placed on `host`, the machine whose disk holds its adapter.
+/// placed on `host`, the machine whose disk holds its adapter, and its card
+/// records that adapter's sha256 and size, with the copal file it is
+/// archived in when it was. The file the expert before it was
+/// served from is reported, not removed.
 ///
 /// Either way each behavior notes how the training went for it: its held-out
 /// rates, whether it was learned, and whether the expert was admitted; and one
@@ -689,7 +780,8 @@ pub async fn mint(
     let ids = plan.behaviors();
     let id = expert_id(&plan.tenant, &plan.user, &plan.scope);
     // The expert this training would replace: its shadow's parent.
-    let parent = expert::get(store, &id).await?.map(|e| e.id);
+    let before = expert::get(store, &id).await?;
+    let parent = before.as_ref().map(|e| e.id.clone());
     let curve = vec![trained.base_fitness, trained.fitness];
     record_boundaries(store, plan, &trained.verdict, &trained.misses).await?;
     if !trained.verdict.admitted {
@@ -700,6 +792,8 @@ pub async fn mint(
             replay: trained.replay,
             verdict: trained.verdict,
             expert: None,
+            superseded: None,
+            drift: Vec::new(),
         });
     }
     let verdict = trained.verdict;
@@ -753,6 +847,21 @@ pub async fn mint(
         })
         .collect();
     card[behavior::CARD_SCORES] = serde_json::Value::Object(scores);
+    if let Some(seal) = &trained.seal {
+        let mut held = seal.to_card();
+        if let Some(file) = &trained.archived {
+            held[adapter::CARD_COPAL_FILE] = serde_json::json!(file);
+        }
+        card[adapter::CARD_ADAPTER] = held;
+    }
+    if !trained.drift.is_empty() {
+        card[drift::CARD_DRIFT] = drift::to_card(&trained.drift);
+    }
+    // The file the expert before this one is served from, when this host
+    // holds it and it is not the same bytes admitted again.
+    let superseded = before
+        .filter(|e| e.is_placed_on(host) && e.artifact_uri != trained.adapter_uri)
+        .map(|e| e.artifact_uri);
     let e = Expert {
         id: id.clone(),
         name: id.as_str().to_string(),
@@ -796,11 +905,17 @@ pub async fn mint(
         replay: trained.replay,
         verdict,
         expert: Some((e.id, trained.adapter_uri)),
+        superseded,
+        drift: trained.drift,
     })
 }
 
 /// Train `user`'s behaviors in `scope` into their standing expert: [`plan`],
 /// [`train`] and [`mint`] in one. `None` when there is nothing to teach.
+// The store and the embedder it reads from, whose expert it is (workspace,
+// user, scope) and how it is trained (configuration, confidence, the forms to
+// measure): each is one of `plan`, `train` and `mint`'s own arguments.
+#[allow(clippy::too_many_arguments)]
 pub async fn train_behaviors(
     store: &Store,
     embedder: &dyn Embedder,
@@ -809,12 +924,13 @@ pub async fn train_behaviors(
     scope: &str,
     cfg: &RaftConfig,
     confidence: f64,
+    measure: &[ServeQuant],
 ) -> Result<Option<BehaveReport>> {
     let Some(plan) = plan(store, tenant, user, scope).await? else {
         return Ok(None);
     };
     begin(store, &plan).await?;
-    let trained = match train(&plan, embedder, cfg, confidence).await {
+    let trained = match train(&plan, embedder, cfg, confidence, measure).await {
         Ok(t) => t,
         Err(e) => {
             abandon(store, &plan).await?;

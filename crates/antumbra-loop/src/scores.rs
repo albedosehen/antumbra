@@ -114,6 +114,7 @@ impl ScoreCache {
 mod tests {
     use super::*;
     use antumbra_core::ports::{TrainOutcome, TrainRequest};
+    use antumbra_core::AntumbraError;
     use async_trait::async_trait;
 
     /// Scores every task 0.5 and remembers what it was asked.
@@ -122,14 +123,30 @@ mod tests {
         asked: Mutex<Vec<Vec<String>>>,
     }
 
+    impl Counting {
+        /// Every list of tasks it was asked to score, in order. The fake only
+        /// ever pushes to the list, so a poisoned lock holds a whole list and
+        /// is read as is.
+        fn asked(&self) -> Vec<Vec<String>> {
+            self.asked
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+    }
+
     #[async_trait]
     impl Trainer for Counting {
         async fn train_shadow(&self, _req: TrainRequest) -> Result<TrainOutcome> {
-            unreachable!("only evaluation is exercised")
+            Err(AntumbraError::other("only evaluation is exercised"))
         }
 
         async fn evaluate(&self, req: EvaluateRequest) -> Result<TaskScores> {
-            self.asked.lock().unwrap().push(req.task_ids.clone());
+            // Read as `asked` is: a push cannot leave the list half-written.
+            self.asked
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(req.task_ids.clone());
             Ok(TaskScores {
                 scores: req
                     .task_ids
@@ -163,7 +180,7 @@ mod tests {
             .await?;
         assert_eq!(again.scores.len(), 3);
         assert_eq!(
-            *trainer.asked.lock().unwrap(),
+            trainer.asked(),
             vec![vec!["t1".to_string(), "t2".into()], vec!["t3".into()]]
         );
         assert_eq!(
@@ -190,7 +207,7 @@ mod tests {
             .evaluate(&trainer, req(Some("a"), &["t1"], &[2]))
             .await?;
         cache.evaluate(&trainer, req(None, &["t1"], &[1])).await?;
-        assert_eq!(trainer.asked.lock().unwrap().len(), 4);
+        assert_eq!(trainer.asked().len(), 4);
         assert_eq!(cache.counted().reused, 0);
         Ok(())
     }
@@ -206,12 +223,12 @@ mod tests {
         cache
             .evaluate(&trainer, req(None, &["unscorable"], &[1]))
             .await?;
-        assert_eq!(trainer.asked.lock().unwrap().len(), 2);
+        assert_eq!(trainer.asked().len(), 2);
         Ok(())
     }
 
     #[test]
-    fn counts_since_a_point_are_the_difference() {
+    fn counts_since_a_point_are_the_difference() -> Result<()> {
         let before = Evaluations {
             asked: 10,
             reused: 4,
@@ -227,5 +244,6 @@ mod tests {
                 reused: 12
             }
         );
+        Ok(())
     }
 }

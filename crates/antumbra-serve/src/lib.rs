@@ -43,7 +43,7 @@ pub use antumbra_train::seed::seed_generation;
 /// Re-exported so callers can construct [`MultiAdapterServe`] without depending
 /// on `antumbra-train` directly.
 #[cfg(feature = "models")]
-pub use antumbra_train::RaftConfig;
+pub use antumbra_train::{RaftConfig, ServeQuant};
 
 // --- the real resident multi-adapter engine (models build) ----------------
 
@@ -54,8 +54,9 @@ pub use antumbra_train::RaftConfig;
 /// alpha raised in step, so one expert serves exactly as at its trained rank
 /// and a blend of up to that many (a routed expert with the user's standing
 /// ones) needs no rebuild. A `register`ed map resolves the gate's `ExpertId`s
-/// to adapter files; the resident blend is tracked so repeated requests for
-/// the same one skip the swap.
+/// to adapter files; the resident blend is tracked by those files, so repeated
+/// requests for the same one skip the swap and an expert registered again
+/// under another file is loaded from it.
 #[cfg(feature = "models")]
 pub struct MultiAdapterServe {
     base_model: String,
@@ -89,7 +90,21 @@ fn blend_config(trained: &antumbra_train::RaftConfig) -> antumbra_train::RaftCon
 #[derive(Default)]
 struct Resident {
     model: Option<antumbra_train::models::QwenCausalLm>,
-    current: Option<Vec<(antumbra_core::ExpertId, u32)>>,
+    current: Option<BlendKey>,
+}
+
+/// What tells one resident blend from another: each adapter's file and the
+/// bits of its weight. The file, not the expert: a retrained expert keeps its
+/// id and is served from another file, and must not pass for what is loaded.
+#[cfg(feature = "models")]
+type BlendKey = Vec<(String, u32)>;
+
+#[cfg(feature = "models")]
+fn blend_key(specs: &[(String, f32)]) -> BlendKey {
+    specs
+        .iter()
+        .map(|(path, weight)| (path.clone(), weight.to_bits()))
+        .collect()
 }
 
 #[cfg(feature = "models")]
@@ -107,10 +122,13 @@ impl MultiAdapterServe {
 
     /// Map an expert to its adapter file (its `artifact_uri`). Routes naming this
     /// expert hot-swap that file onto the resident base.
+    ///
+    /// The registry is a map of names to paths, and a poisoned lock holds the
+    /// same map, so every lock on it here is taken as it is.
     pub fn register(&mut self, expert: antumbra_core::ExpertId, adapter_path: impl Into<String>) {
         self.registry
             .get_mut()
-            .expect("registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(expert, adapter_path.into());
     }
 
@@ -128,12 +146,42 @@ impl MultiAdapterServe {
 
     /// How many adapters are registered.
     pub fn len(&self) -> usize {
-        self.registry.read().expect("registry lock").len()
+        self.registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     /// Whether no adapter is registered.
     pub fn is_empty(&self) -> bool {
-        self.registry.read().expect("registry lock").is_empty()
+        self.registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    }
+
+    /// Each of `blend`'s experts as the adapter file registered for it now,
+    /// with its weight.
+    fn resolve(
+        &self,
+        blend: &[(antumbra_core::ExpertId, f32)],
+    ) -> antumbra_core::Result<Vec<(String, f32)>> {
+        let registry = self
+            .registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        blend
+            .iter()
+            .map(|(e, w)| {
+                let path = registry.get(e).cloned().ok_or_else(|| {
+                    antumbra_core::AntumbraError::other(format!(
+                        "MultiAdapterServe: no adapter registered for {e} (register the \
+                         population before serving)"
+                    ))
+                })?;
+                Ok((path, *w))
+            })
+            .collect()
     }
 }
 
@@ -145,16 +193,18 @@ impl Serve for MultiAdapterServe {
     fn can_serve(&self, expert: &antumbra_core::ExpertId) -> bool {
         self.registry
             .read()
-            .expect("registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(expert)
     }
 
     /// Hot-register a freshly-minted expert's adapter, so a route to it serves
-    /// without a restart (a standing expert the keeper just trained).
+    /// without a restart (a standing expert the keeper just trained). An
+    /// expert registered again under another file is served from that file by
+    /// the next request to take the engine.
     fn register_expert(&self, expert: &antumbra_core::ExpertId, adapter_uri: &str) {
         self.registry
             .write()
-            .expect("registry lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(expert.clone(), adapter_uri.to_string());
     }
 
@@ -181,25 +231,7 @@ impl Serve for MultiAdapterServe {
         }
         // Resolve before touching the device: an unknown expert is a config
         // error, not a generation failure, and must not pay a model load.
-        let specs: Vec<(String, f32)> = {
-            let registry = self.registry.read().expect("registry lock");
-            blend
-                .iter()
-                .map(|(e, w)| {
-                    let path = registry.get(e).cloned().ok_or_else(|| {
-                        AntumbraError::other(format!(
-                            "MultiAdapterServe: no adapter registered for {e} (register the \
-                             population before serving)"
-                        ))
-                    })?;
-                    Ok((path, *w))
-                })
-                .collect::<antumbra_core::Result<_>>()?
-        };
-        let key: Vec<(antumbra_core::ExpertId, u32)> = blend
-            .iter()
-            .map(|(e, w)| (e.clone(), w.to_bits()))
-            .collect();
+        self.resolve(&blend)?;
 
         // candle generation is synchronous and device-bound. Run it under
         // `block_in_place` so the runtime spawns a replacement worker and other
@@ -208,6 +240,11 @@ impl Serve for MultiAdapterServe {
         let final_output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let mut st = self.state.lock().await;
+                // Resolved again now the engine is this request's: one that
+                // waited here while an expert was retrained loads the file
+                // registered since, not the one that was there when it asked.
+                let specs = self.resolve(&blend)?;
+                let key = blend_key(&specs);
                 if st.model.is_none() {
                     // Load the base with neutral (zero) LoRA factors; adapters are
                     // swapped in below. Reuse the trainer's loader so the model is
@@ -224,18 +261,20 @@ impl Serve for MultiAdapterServe {
                     // A failed load can leave the factors half-written: forget
                     // what was resident before trying.
                     st.current = None;
-                    st.model
-                        .as_mut()
-                        .expect("base loaded above")
-                        .load_blend(&specs)?;
+                    let Some(model) = st.model.as_mut() else {
+                        return Err(AntumbraError::other(
+                            "the base model is not resident after loading",
+                        ));
+                    };
+                    model.load_blend(&specs)?;
                     st.current = Some(key);
                 }
-                let outputs = st
-                    .model
-                    .as_mut()
-                    .expect("base loaded above")
-                    .generate(&req.prompt, 1)
-                    .await?;
+                let Some(model) = st.model.as_mut() else {
+                    return Err(AntumbraError::other(
+                        "the base model is not resident after loading",
+                    ));
+                };
+                let outputs = model.generate(&req.prompt, 1).await?;
                 antumbra_core::Result::Ok(outputs.into_iter().next().unwrap_or_default())
             })
         })?;
@@ -290,10 +329,10 @@ impl Serve for MultiAdapterServe {
 mod tests {
     use super::*;
     use antumbra_core::ports::ActRequest;
-    use antumbra_core::AntumbraError;
+    use antumbra_core::{AntumbraError, Result};
 
     #[tokio::test]
-    async fn serve_seam_reports_unimplemented() {
+    async fn serve_seam_reports_unimplemented() -> Result<()> {
         let serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B-Instruct", "/adapters");
         let req = ActRequest {
             task_id: "t:1".into(),
@@ -301,8 +340,11 @@ mod tests {
             adapters: vec![],
             weights: Vec::new(),
         };
-        let err = serve.act(req).await.unwrap_err();
+        let Err(err) = serve.act(req).await else {
+            return Err(AntumbraError::other("the seam served the request"));
+        };
         assert!(matches!(err, AntumbraError::Unimplemented(_)));
+        Ok(())
     }
 }
 
@@ -310,12 +352,20 @@ mod tests {
 mod tests {
     use super::*;
     use antumbra_core::ports::ActRequest;
-    use antumbra_core::ExpertId;
+    use antumbra_core::{AntumbraError, ExpertId, Result};
+
+    /// The message `serve` refuses `req` with.
+    async fn refused(serve: &MultiAdapterServe, req: ActRequest) -> Result<String> {
+        let Err(e) = serve.act(req).await else {
+            return Err(AntumbraError::other("the request was served"));
+        };
+        Ok(e.to_string())
+    }
 
     // The resolution path is device-free: an empty request and an unregistered
     // expert both fail *before* any base load, so these run without a GPU.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn empty_request_errors_before_load() {
+    async fn empty_request_errors_before_load() -> Result<()> {
         let serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B", Default::default());
         let req = ActRequest {
             task_id: "t".into(),
@@ -323,12 +373,13 @@ mod tests {
             adapters: vec![],
             weights: Vec::new(),
         };
-        let msg = serve.act(req).await.unwrap_err().to_string();
+        let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter selected"), "{msg}");
+        Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn unregistered_expert_errors_before_load() {
+    async fn unregistered_expert_errors_before_load() -> Result<()> {
         let serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B", Default::default());
         let req = ActRequest {
             task_id: "t".into(),
@@ -336,12 +387,13 @@ mod tests {
             adapters: vec![ExpertId::new("expert:ghost")],
             weights: Vec::new(),
         };
-        let msg = serve.act(req).await.unwrap_err().to_string();
+        let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter registered"), "{msg}");
+        Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_blend_beyond_the_slots_errors_before_load() {
+    async fn a_blend_beyond_the_slots_errors_before_load() -> Result<()> {
         let mut serve = MultiAdapterServe::new("Qwen/Qwen2.5-Coder-1.5B", Default::default());
         let ids: Vec<ExpertId> = (0..=BLEND_SLOTS)
             .map(|i| ExpertId::new(format!("expert:{i}")))
@@ -349,28 +401,60 @@ mod tests {
         for id in &ids {
             serve.register(id.clone(), "adapters/never-read.safetensors");
         }
-        let msg = serve
-            .act(ActRequest::new("t", "hi", ids))
-            .await
-            .unwrap_err()
-            .to_string();
+        let msg = refused(&serve, ActRequest::new("t", "hi", ids)).await?;
         assert!(msg.contains("at most"), "{msg}");
+        Ok(())
     }
 
     #[test]
-    fn the_resident_rank_holds_every_slot_at_the_trained_scale() {
+    fn the_resident_rank_holds_every_slot_at_the_trained_scale() -> Result<()> {
         let trained = RaftConfig::default();
         let resident = blend_config(&trained);
         assert_eq!(resident.lora_rank, trained.lora_rank * BLEND_SLOTS);
         assert!((resident.lora_scale() - trained.lora_scale()).abs() < 1e-12);
+        Ok(())
     }
 
     #[test]
-    fn registry_tracks_adapters() {
+    fn registry_tracks_adapters() -> Result<()> {
         let serve = MultiAdapterServe::new("base", Default::default())
             .with_adapter(ExpertId::new("expert:a"), "adapters/a.safetensors")
             .with_adapter(ExpertId::new("expert:b"), "adapters/b.safetensors");
         assert_eq!(serve.len(), 2);
         assert!(!serve.is_empty());
+        Ok(())
+    }
+
+    /// The regression: a retrained expert keeps its id, and the resident
+    /// blend was known by id, so its new adapter was never loaded.
+    #[test]
+    fn an_expert_registered_under_another_file_is_another_blend() -> antumbra_core::Result<()> {
+        let expert = ExpertId::new("expert:a");
+        let serve = MultiAdapterServe::new("base", Default::default())
+            .with_adapter(expert.clone(), "adapters/a.1.safetensors");
+        let blend = [(expert.clone(), 1.0f32)];
+        let before = blend_key(&serve.resolve(&blend)?);
+        assert_eq!(
+            before,
+            blend_key(&serve.resolve(&blend)?),
+            "the same file at the same weight is the blend already resident"
+        );
+
+        serve.register_expert(&expert, "adapters/a.2.safetensors");
+        let after = blend_key(&serve.resolve(&blend)?);
+
+        assert_ne!(before, after);
+        assert_eq!(
+            after,
+            vec![("adapters/a.2.safetensors".to_string(), 1.0f32.to_bits())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_blend_at_another_weight_is_another_blend() {
+        let at = |weight: f32| blend_key(&[("adapters/a.safetensors".to_string(), weight)]);
+        assert_eq!(at(0.5), at(0.5));
+        assert_ne!(at(0.5), at(1.0));
     }
 }

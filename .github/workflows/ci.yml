@@ -76,10 +76,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: syntax check (bash -n)
         run: for f in scripts/hooks/*.sh; do bash -n "$f"; done
-      - name: capture hook emits a block decision, then fires once
+      - name: capture hook reminds as feedback and not as a block, then fires once
         run: |
           out=$(printf '%s' '{"session_id":"ci","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh)
-          echo "$out" | jq -e '.decision == "block"' > /dev/null
+          echo "$out" | jq -e '(has("decision") | not) and .hookSpecificOutput.hookEventName == "Stop"' > /dev/null
           # The same turn fires once: a second call clears the sentinel and is silent.
           printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh > /dev/null
           again=$(printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh)
@@ -88,18 +88,10 @@ jobs:
         run: bash scripts/hooks/tests/capture.sh
       - name: capture reports the end of a turn, once (.ps1)
         run: pwsh -NoProfile -File scripts/hooks/tests/capture.ps1
-      - name: strip-attribution denies vendor attribution, allows a clean command
-        run: |
-          deny=$(printf '%s' '{"tool_input":{"command":"git commit -m x --trailer Co-Authored-By:Claude"}}' | bash scripts/hooks/strip-attribution.sh)
-          echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' > /dev/null
-          clean=$(printf '%s' '{"tool_input":{"command":"git commit -m clean"}}' | bash scripts/hooks/strip-attribution.sh)
-          test -z "$clean"
-          # Case-insensitive, the PowerShell tool's input too, escaped quotes kept whole.
-          deny=$(printf '%s' '{"tool_name":"PowerShell","tool_input":{"command":"gh pr create --body \"x\n\nco-authored-by: GPT-5\""}}' | bash scripts/hooks/strip-attribution.sh)
-          echo "$deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' > /dev/null
-          # Only the command counts, not the tool call's description.
-          clean=$(printf '%s' '{"tool_input":{"command":"git commit -m \"plain \\\"quoted\\\" message\"","description":"no Co-Authored-By: Claude here"}}' | bash scripts/hooks/strip-attribution.sh)
-          test -z "$clean"
+      - name: strip-attribution denies vendor attribution and allows a clean command, over one list of cases (.sh)
+        run: bash scripts/hooks/tests/strip-attribution.sh
+      - name: strip-attribution denies vendor attribution and allows a clean command, over one list of cases (.ps1)
+        run: pwsh -NoProfile -File scripts/hooks/tests/strip-attribution.ps1
       - name: session-start emits valid additionalContext (no server → cold bootstrap)
         run: |
           ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
@@ -129,6 +121,11 @@ jobs:
       # RUSTSEC-XXXX` (or move it into an audit.toml) rather than dropping the gate.
       - name: cargo audit
         run: cargo audit
+      # The control server is its own cargo workspace with its own lockfile, so
+      # the scan above never sees it. Run from the root so `.cargo/audit.toml`
+      # applies to both.
+      - name: cargo audit (control server)
+        run: cargo audit --file crates/antumbra-control-server/Cargo.lock
 
   control-server:
     name: control server (own workspace, contract gate)

@@ -7,7 +7,7 @@ fn memory(network: MemoryNetwork, confidence: f32, written: DateTime<Utc>) -> Me
 }
 
 #[test]
-fn an_unused_memory_loses_half_its_strength_each_half_life() {
+fn an_unused_memory_loses_half_its_strength_each_half_life() -> anyhow::Result<()> {
     let now = Utc::now();
     let policy = MemoryPolicy::default();
     let fresh = memory(MemoryNetwork::Bank, 0.8, now);
@@ -17,10 +17,11 @@ fn an_unused_memory_loses_half_its_strength_each_half_life() {
     assert!((strength(&old, None, &policy, now) - 0.4).abs() < 1e-3);
     let older = memory(MemoryNetwork::Bank, 0.8, now - Duration::days(180));
     assert!((strength(&older, None, &policy, now) - 0.2).abs() < 1e-3);
+    Ok(())
 }
 
 #[test]
-fn each_network_and_a_volatile_memory_fade_at_their_own_rate() {
+fn each_network_and_a_volatile_memory_fade_at_their_own_rate() -> anyhow::Result<()> {
     let now = Utc::now();
     let policy = MemoryPolicy::default();
     let written = now - Duration::days(14);
@@ -29,10 +30,11 @@ fn each_network_and_a_volatile_memory_fade_at_their_own_rate() {
     changing.volatile = true;
     assert!(strength(&fact, None, &policy, now) > 0.9);
     assert!((strength(&changing, None, &policy, now) - 0.5).abs() < 1e-3);
+    Ok(())
 }
 
 #[test]
-fn a_use_restarts_the_fade() {
+fn a_use_restarts_the_fade() -> anyhow::Result<()> {
     let now = Utc::now();
     let policy = MemoryPolicy::default();
     let old = memory(MemoryNetwork::Bank, 0.8, now - Duration::days(180));
@@ -43,10 +45,11 @@ fn a_use_restarts_the_fade() {
         ..MemoryUse::new("memory:1")
     };
     assert!((strength(&old, Some(&usage), &policy, now) - 0.8).abs() < 1e-6);
+    Ok(())
 }
 
 #[test]
-fn being_passed_over_weighs_against_a_memory_and_use_offsets_it() {
+fn being_passed_over_weighs_against_a_memory_and_use_offsets_it() -> anyhow::Result<()> {
     let now = Utc::now();
     let policy = MemoryPolicy::default();
     let m = memory(MemoryNetwork::World, 1.0, now);
@@ -63,10 +66,11 @@ fn being_passed_over_weighs_against_a_memory_and_use_offsets_it() {
         ..MemoryUse::new("memory:1")
     };
     assert!(strength(&m, Some(&drawn_on), &policy, now) > 0.99);
+    Ok(())
 }
 
 #[test]
-fn with_auto_off_strength_is_the_confidence() {
+fn with_auto_off_strength_is_the_confidence() -> anyhow::Result<()> {
     let now = Utc::now();
     let policy = MemoryPolicy {
         auto: false,
@@ -75,17 +79,19 @@ fn with_auto_off_strength_is_the_confidence() {
     let old = memory(MemoryNetwork::Bank, 0.7, now - Duration::days(900));
     assert!((strength(&old, None, &policy, now) - 0.7).abs() < 1e-6);
     assert_eq!(policy.rank_factor(0.0), 1.0);
+    Ok(())
 }
 
 #[test]
-fn strength_moves_recall_order_by_its_weight() {
+fn strength_moves_recall_order_by_its_weight() -> anyhow::Result<()> {
     let policy = MemoryPolicy::default();
     assert_eq!(policy.rank_factor(1.0), 1.0);
     assert!((policy.rank_factor(0.0) - 0.75).abs() < 1e-6);
+    Ok(())
 }
 
 #[test]
-fn clamping_brings_every_knob_into_range() {
+fn clamping_brings_every_knob_into_range() -> anyhow::Result<()> {
     let wild = MemoryPolicy {
         world_half_life_days: -5.0,
         use_threshold: f32::NAN,
@@ -99,10 +105,11 @@ fn clamping_brings_every_knob_into_range() {
     assert_eq!(wild.max_links, 10);
     assert_eq!(wild.strength_weight, 1.0);
     assert_eq!(MemoryPolicy::default().clamped(), MemoryPolicy::default());
+    Ok(())
 }
 
 #[test]
-fn every_knob_reads_back_what_it_sets() {
+fn every_knob_reads_back_what_it_sets() -> anyhow::Result<()> {
     for knob in KNOBS {
         let mut p = MemoryPolicy::default();
         let v = if knob.step >= 1.0 {
@@ -114,13 +121,15 @@ fn every_knob_reads_back_what_it_sets() {
         assert_eq!((knob.get)(&p), v, "{}", knob.key);
         assert!(MemoryPolicy::knob(knob.key).is_some());
     }
+    Ok(())
 }
 
 #[test]
-fn a_policy_missing_knobs_reads_with_their_defaults() {
-    let p: MemoryPolicy = serde_json::from_value(serde_json::json!({ "auto": false })).unwrap();
+fn a_policy_missing_knobs_reads_with_their_defaults() -> anyhow::Result<()> {
+    let p: MemoryPolicy = serde_json::from_value(serde_json::json!({ "auto": false }))?;
     assert!(!p.auto);
     assert_eq!(p.max_links, MemoryPolicy::default().max_links);
-    let u: MemoryUse = serde_json::from_value(serde_json::json!({ "memory": "memory:1" })).unwrap();
+    let u: MemoryUse = serde_json::from_value(serde_json::json!({ "memory": "memory:1" }))?;
     assert_eq!(u.recalled, 0);
+    Ok(())
 }

@@ -2,9 +2,12 @@
 //! expert's status changes, and the population as the gate may see it.
 //!
 //! A move is one row, never rewritten, numbered per expert. The number orders
-//! an expert's history, and the unique index on it turns two writers racing to
-//! move the same expert into one success and one refusal rather than two
-//! forks. Each row carries its expert's owner under the expert table's own
+//! an expert's history. A move's record is named for its expert and its
+//! number, so the same move is the same record on every store that holds it,
+//! and two writers racing to make it are one success and one refusal rather
+//! than two forks: the second finds the record there. Rows written before
+//! that have an engine-assigned record id; [`adopt_ids`] moves them when a
+//! store's schema is ensured. Each row carries its expert's owner under the expert table's own
 //! permissions, so a session sees exactly the moves of the experts it can see:
 //! a session that could read an expert but not its moves would take a demoted
 //! expert for an active one.
@@ -14,9 +17,11 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use serde_json::Value;
 use surql::query::builder::Query;
-use surql::query::crud::{create_record, query_records};
+use surql::query::crud::{create_record, delete_record, get_record, query_records, upsert_record};
 use surql::types::operators::eq;
+use surql::types::RecordID;
 
 use antumbra_core::{
     current_status, AntumbraError, Expert, ExpertId, ExpertStatus, ExpertTransition, Generation,
@@ -24,10 +29,22 @@ use antumbra_core::{
 };
 
 use crate::error::map;
-use crate::repo::{expert, router};
+use crate::repo::{expert, router, sync};
 use crate::store::Store;
 
-const TABLE: &str = "expert_transition";
+const TABLE: &str = crate::tables::EXPERT_TRANSITION;
+
+/// What [`adopt_ids`] appends to the `expert` of a row it is moving, so the
+/// unique index on an expert's numbers admits the record that takes its
+/// place. No expert's id holds a control character.
+const MOVING: &str = "\u{1f}moving";
+
+/// The key of a move's record: its expert's id, then its number in that
+/// expert's history at a fixed width, so what follows the last colon is
+/// always the number, whatever the expert's id holds.
+fn record_key(expert: &str, seq: u32) -> String {
+    format!("{expert}:{seq:010}")
+}
 
 #[derive(Serialize, Deserialize)]
 struct TransitionRow {
@@ -82,12 +99,17 @@ pub async fn transition(
         generation,
         at: Utc::now(),
     };
+    let seq = u32::try_from(past.len()).unwrap_or(u32::MAX);
     let row = TransitionRow {
         transition: transition.clone(),
-        seq: u32::try_from(past.len()).unwrap_or(u32::MAX),
+        seq,
         owner: subject.owner.as_ref().map(|u| u.as_str().to_string()),
     };
-    create_record(store.client(), TABLE, serde_json::to_value(row)?)
+    // Created, never put: a second writer making the same move finds the
+    // record there and is refused, where a put would replace the first
+    // writer's move with its own.
+    let at = RecordID::<()>::new(TABLE, record_key(id.as_str(), seq).as_str()).map_err(map)?;
+    create_record(store.client(), &at.to_string(), serde_json::to_value(row)?)
         .await
         .map_err(map)?;
     Ok(transition)
@@ -194,6 +216,80 @@ pub async fn archive_trained_under(store: &Store, verifier: &VerifierId) -> Resu
     Ok(archived)
 }
 
+/// A raw row's expert and number, when it has both.
+fn named(row: &Value) -> Option<(String, u32)> {
+    let expert = row.get("expert")?.as_str()?.to_string();
+    let seq = u32::try_from(row.get("seq")?.as_u64()?).ok()?;
+    Some((expert, seq))
+}
+
+/// Whether a raw `expert_transition` row, as [`sync::list_rows`] returns it,
+/// sits in the record its expert and number name. Only such a row is the
+/// same record on every store that holds the move, so only such a row can be
+/// copied between two: one still under an engine-assigned id, or one
+/// [`adopt_ids`] is partway through moving, would be refused by the unique
+/// index of a store that has the move, or land beside it.
+pub fn is_own_record(row: &Value) -> bool {
+    match (sync::row_id(row), named(row)) {
+        (Some(at), Some((expert, seq))) => expert::is_home(&at, &record_key(&expert, seq)),
+        _ => false,
+    }
+}
+
+/// Move every move still under an engine-assigned record id to the record its
+/// expert and number name, keeping every field: how many were moved. Run when
+/// a store's schema is ensured, as the owner. Running it again moves nothing.
+///
+/// The unique index on an expert's numbers forbids writing the new record
+/// while the old one holds the number, so a row is moved in three steps: the
+/// old record's expert is marked as moving, the row is written under its own
+/// id, and the old record is removed. Between the first and the second the
+/// expert's history lacks that move, which is why this runs before a store
+/// is served. A move cut short is finished here the next time: a marked
+/// record whose move has no record of its own is written, and the marked
+/// one removed either way.
+pub(crate) async fn adopt_ids(store: &Store) -> Result<usize> {
+    let rows = sync::list_rows(store, TABLE).await?;
+    let mut moved = 0;
+    for mut row in rows {
+        let (Some(at), Some((holder, seq))) = (sync::row_id(&row), named(&row)) else {
+            continue;
+        };
+        let moving = holder.strip_suffix(MOVING);
+        let expert = moving.unwrap_or(&holder).to_string();
+        let key = record_key(&expert, seq);
+        if moving.is_none() && expert::is_home(&at, &key) {
+            continue;
+        }
+        let Value::Object(fields) = &mut row else {
+            continue;
+        };
+        fields.remove("id");
+        let old = RecordID::<()>::parse(&at).map_err(map)?;
+        if moving.is_none() {
+            // Out of the number's way, still a whole row.
+            fields.insert("expert".into(), Value::String(format!("{expert}{MOVING}")));
+            upsert_record(store.client(), &old, Value::Object(fields.clone()))
+                .await
+                .map_err(map)?;
+        }
+        let home = RecordID::<()>::new(TABLE, key.as_str()).map_err(map)?;
+        if get_record(store.client(), &home)
+            .await
+            .map_err(map)?
+            .is_none()
+        {
+            fields.insert("expert".into(), Value::String(expert));
+            upsert_record(store.client(), &home, Value::Object(fields.clone()))
+                .await
+                .map_err(map)?;
+            moved += 1;
+        }
+        delete_record(store.client(), &old).await.map_err(map)?;
+    }
+    Ok(moved)
+}
+
 async fn in_states(store: &Store, keep: fn(ExpertStatus) -> bool) -> Result<Vec<Expert>> {
     Ok(population(store)
         .await?
@@ -207,6 +303,7 @@ async fn in_states(store: &Store, keep: fn(ExpertStatus) -> bool) -> Result<Vec<
 mod tests {
     use super::*;
     use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::UserId;
 
     fn expert(id: &str, owner: Option<&str>) -> Expert {
@@ -234,7 +331,7 @@ mod tests {
     }
 
     async fn store_with(ids: &[&str]) -> Result<Store> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         for id in ids {
             expert::insert(&s, &expert(id, None)).await?;
         }
@@ -291,9 +388,11 @@ mod tests {
             .await
             .is_err());
         transition(&s, &a, ExpertStatus::Dormant, operator(), None).await?;
-        let refused = transition(&s, &a, ExpertStatus::Deleted, operator(), None)
-            .await
-            .unwrap_err();
+        let Err(refused) = transition(&s, &a, ExpertStatus::Deleted, operator(), None).await else {
+            return Err(antumbra_core::AntumbraError::other(
+                "a dormant expert was deleted with nothing covering it",
+            ));
+        };
         assert!(refused.is_rejection(), "{refused}");
         assert_eq!(history(&s, &a).await?.len(), 1);
         assert!(transition(
@@ -364,7 +463,11 @@ mod tests {
         .await?;
         let a = ExpertId::new("expert:a");
         transition(&s, &a, ExpertStatus::Dormant, operator(), None).await?;
-        let loaded = load_router(&s).await?.expect("a router");
+        let Some(loaded) = load_router(&s).await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the saved router did not load",
+            ));
+        };
         let kept: Vec<&str> = loaded.experts.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(kept, ["expert:b"]);
         assert!(
@@ -381,7 +484,7 @@ mod tests {
     /// hide the expert from other users hide its moves too.
     #[tokio::test]
     async fn a_move_carries_its_experts_owner() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         expert::insert(&s, &expert("expert:mine", Some("user:ada"))).await?;
         let id = ExpertId::new("expert:mine");
         transition(&s, &id, ExpertStatus::Dormant, operator(), None).await?;
@@ -389,6 +492,232 @@ mod tests {
         let rows: Vec<TransitionRow> = query_records(s.client(), &query).await.map_err(map)?;
         assert_eq!(rows[0].owner.as_deref(), Some("user:ada"));
         assert_eq!(rows[0].seq, 0);
+        Ok(())
+    }
+
+    /// Every record of the table as it is stored: its record id and its row.
+    async fn records(s: &Store) -> Result<Vec<(String, Value)>> {
+        let mut found = Vec::new();
+        for row in sync::list_rows(s, TABLE).await? {
+            let Some(at) = sync::row_id(&row) else {
+                return Err(AntumbraError::other("a stored row has no record id"));
+            };
+            found.push((at, row));
+        }
+        Ok(found)
+    }
+
+    /// The row of `expert`'s move number `seq`, from `from` to `to`.
+    fn row_of(expert: &str, seq: u32, from: ExpertStatus, to: ExpertStatus) -> Result<Value> {
+        Ok(serde_json::to_value(TransitionRow {
+            transition: ExpertTransition {
+                expert: ExpertId::new(expert),
+                from,
+                to,
+                cause: operator(),
+                generation: None,
+                at: Utc::now(),
+            },
+            seq,
+            owner: None,
+        })?)
+    }
+
+    /// Record a move as a store did before a move's record was named for it:
+    /// under an id the engine assigns.
+    async fn move_as_before(
+        s: &Store,
+        expert: &str,
+        seq: u32,
+        from: ExpertStatus,
+        to: ExpertStatus,
+    ) -> Result<()> {
+        create_record(s.client(), TABLE, row_of(expert, seq, from, to)?)
+            .await
+            .map_err(map)?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_move_is_the_record_its_expert_and_number_name() -> Result<()> {
+        let id = "expert:ws:a:user:b:behavior:owner/repo";
+        let s = store_with(&[id]).await?;
+        let subject = ExpertId::new(id);
+        transition(&s, &subject, ExpertStatus::Dormant, operator(), None).await?;
+        transition(&s, &subject, ExpertStatus::Archived, operator(), None).await?;
+
+        let stored = records(&s).await?;
+        assert_eq!(stored.len(), 2);
+        for (seq, key) in [
+            (0u32, format!("{id}:0000000000")),
+            (1, format!("{id}:0000000001")),
+        ] {
+            assert_eq!(record_key(id, seq), key);
+            assert!(
+                stored.iter().any(|(at, _)| expert::is_home(at, &key)),
+                "no record named {key}: {stored:?}"
+            );
+        }
+        assert!(stored.iter().all(|(_, row)| is_own_record(row)));
+        Ok(())
+    }
+
+    /// Two writers that both read the same history make the same move. The
+    /// second finds the first's record there and is refused, and the history
+    /// keeps the first's.
+    #[tokio::test]
+    async fn the_same_move_made_twice_is_refused() -> Result<()> {
+        let s = store_with(&["expert:a"]).await?;
+        let a = ExpertId::new("expert:a");
+        transition(&s, &a, ExpertStatus::Dormant, operator(), None).await?;
+
+        // The second writer's move, under the number the first one took.
+        let at = RecordID::<()>::new(TABLE, record_key("expert:a", 0).as_str()).map_err(map)?;
+        let again = row_of("expert:a", 0, ExpertStatus::Active, ExpertStatus::Archived)?;
+        let second = create_record(s.client(), &at.to_string(), again).await;
+        assert!(second.is_err(), "one move was written twice");
+
+        let moves = history(&s, &a).await?;
+        assert_eq!(moves.len(), 1);
+        assert_eq!(moves[0].to, ExpertStatus::Dormant, "the first writer's");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn moves_under_engine_assigned_ids_are_moved_to_their_own() -> Result<()> {
+        let old = "expert:ws:a:user:b:behavior:owner/repo";
+        let s = store_with(&[old, "expert:new"]).await?;
+        move_as_before(&s, old, 0, ExpertStatus::Active, ExpertStatus::Dormant).await?;
+        move_as_before(&s, old, 1, ExpertStatus::Dormant, ExpertStatus::Archived).await?;
+        // And one made since: already where it belongs.
+        let new = ExpertId::new("expert:new");
+        transition(&s, &new, ExpertStatus::Dormant, operator(), None).await?;
+        let before = history(&s, &ExpertId::new(old)).await?;
+        assert!(
+            records(&s)
+                .await?
+                .iter()
+                .filter(|(_, row)| is_own_record(row))
+                .count()
+                == 1
+        );
+
+        assert_eq!(adopt_ids(&s).await?, 2);
+
+        let stored = records(&s).await?;
+        assert_eq!(stored.len(), 3, "the same three moves");
+        assert!(
+            stored.iter().all(|(_, row)| is_own_record(row)),
+            "{stored:?}"
+        );
+        // Every expert's history and status as they were.
+        let after = history(&s, &ExpertId::new(old)).await?;
+        assert_eq!(
+            serde_json::to_value(&after)?,
+            serde_json::to_value(&before)?
+        );
+        assert_eq!(
+            status_of(&s, &ExpertId::new(old)).await?,
+            ExpertStatus::Archived
+        );
+        assert_eq!(status_of(&s, &new).await?, ExpertStatus::Dormant);
+        // And the next move takes the next number.
+        transition(
+            &s,
+            &ExpertId::new(old),
+            ExpertStatus::Active,
+            operator(),
+            None,
+        )
+        .await?;
+        assert_eq!(history(&s, &ExpertId::new(old)).await?.len(), 3);
+
+        // Again: nothing to move.
+        assert_eq!(adopt_ids(&s).await?, 0);
+        assert_eq!(records(&s).await?.len(), 4);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_move_of_a_move_cut_short_is_finished_the_next_time() -> Result<()> {
+        let s = store_with(&["expert:a", "expert:b"]).await?;
+        // Cut short after its first step: the old record marked as moving,
+        // and no record of the move's own yet.
+        let marked = format!("expert:a{MOVING}");
+        move_as_before(&s, &marked, 0, ExpertStatus::Active, ExpertStatus::Dormant).await?;
+        // Cut short after its second: the move's own record written, and the
+        // marked one not yet removed.
+        let left = format!("expert:b{MOVING}");
+        move_as_before(&s, &left, 0, ExpertStatus::Active, ExpertStatus::Dormant).await?;
+        transition(
+            &s,
+            &ExpertId::new("expert:b"),
+            ExpertStatus::Dormant,
+            operator(),
+            None,
+        )
+        .await?;
+        assert_eq!(
+            status_of(&s, &ExpertId::new("expert:a")).await?,
+            ExpertStatus::Active,
+            "its one move is out of its history until the move is finished"
+        );
+
+        assert_eq!(adopt_ids(&s).await?, 1, "one was still to be written");
+
+        let stored = records(&s).await?;
+        assert_eq!(stored.len(), 2, "and no marked record is left: {stored:?}");
+        assert!(stored.iter().all(|(_, row)| is_own_record(row)));
+        for id in ["expert:a", "expert:b"] {
+            assert_eq!(
+                status_of(&s, &ExpertId::new(id)).await?,
+                ExpertStatus::Dormant,
+                "{id}"
+            );
+        }
+        Ok(())
+    }
+
+    /// What a pass between two stores asks of a move before it copies it.
+    #[tokio::test]
+    async fn only_a_move_in_its_own_record_is_one_to_copy() -> Result<()> {
+        let s = store_with(&["expert:a", "expert:old"]).await?;
+        transition(
+            &s,
+            &ExpertId::new("expert:a"),
+            ExpertStatus::Dormant,
+            operator(),
+            None,
+        )
+        .await?;
+        move_as_before(
+            &s,
+            "expert:old",
+            0,
+            ExpertStatus::Active,
+            ExpertStatus::Dormant,
+        )
+        .await?;
+        let marked = format!("expert:cut{MOVING}");
+        move_as_before(&s, &marked, 0, ExpertStatus::Active, ExpertStatus::Dormant).await?;
+
+        let copied: Vec<String> = records(&s)
+            .await?
+            .into_iter()
+            .filter(|(_, row)| is_own_record(row))
+            .filter_map(|(_, row)| named(&row).map(|(expert, _)| expert))
+            .collect();
+        assert_eq!(copied, vec!["expert:a".to_string()]);
+
+        assert!(!is_own_record(
+            &serde_json::json!({ "expert": "expert:a", "seq": 0 })
+        ));
+        assert!(!is_own_record(
+            &serde_json::json!({ "id": "expert_transition:x", "seq": 0 })
+        ));
+        assert!(!is_own_record(
+            &serde_json::json!({ "id": "expert_transition:x", "expert": "x" })
+        ));
         Ok(())
     }
 }

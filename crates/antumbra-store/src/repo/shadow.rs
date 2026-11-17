@@ -4,19 +4,15 @@
 //! record id and written with `crud::upsert_record`. No raw SurrealQL.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
-use surql::query::crud::{get_record, upsert_record};
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{ExpertId, Generation, Result, Shadow, ShadowId, ShadowStatus};
 
 use crate::dto::parse_dt;
-use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "shadow";
+const TABLE: &str = crate::tables::SHADOW;
 
 #[derive(Serialize, Deserialize)]
 struct ShadowRow {
@@ -60,23 +56,18 @@ impl ShadowRow {
 
 /// Insert or replace a shadow (status transitions re-upsert the full row).
 pub async fn upsert(store: &Store, shadow: &Shadow) -> Result<()> {
-    let id = RecordID::<()>::new(TABLE, shadow.id.as_str()).map_err(map)?;
-    let data: Value = serde_json::to_value(ShadowRow::from_domain(shadow))?;
-    upsert_record(store.client(), &id, data)
+    store
+        .put(TABLE, shadow.id.as_str(), &ShadowRow::from_domain(shadow))
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Fetch one shadow by id.
 pub async fn get(store: &Store, id: &ShadowId) -> Result<Option<Shadow>> {
-    let rid = RecordID::<()>::new(TABLE, id.as_str()).map_err(map)?;
-    match get_record(store.client(), &rid).await.map_err(map)? {
-        Some(value) => Ok(Some(
-            serde_json::from_value::<ShadowRow>(value)?.into_domain()?,
-        )),
-        None => Ok(None),
-    }
+    store
+        .get_row::<ShadowRow>(TABLE, id.as_str())
+        .await?
+        .map(ShadowRow::into_domain)
+        .transpose()
 }
 
 /// All shadows currently in a given lifecycle state.

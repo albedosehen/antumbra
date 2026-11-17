@@ -135,13 +135,14 @@ mod tests {
     }
 
     #[test]
-    fn asking_twice_about_one_compartment_asks_once() {
+    fn asking_twice_about_one_compartment_asks_once() -> anyhow::Result<()> {
         let first = request("user:a", "comp:rust");
         assert_eq!(request("user:a", "comp:rust").id, first.id);
         // A different compartment is a different question, and another user's
         // compartment is another user's question.
         assert_ne!(request("user:a", "comp:surql").id, first.id);
         assert_ne!(request("user:b", "comp:rust").id, first.id);
+        Ok(())
     }
 
     #[test]

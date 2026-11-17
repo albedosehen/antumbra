@@ -3,14 +3,15 @@
 //! slug, title and versions are the owner's to change alone, even for a member
 //! granted `link`; and no one in another tenant can take a slug that is held.
 
+use anyhow::Result;
 use chrono::Utc;
 
 use antumbra_core::{
-    Capability, Compartment, CompartmentId, Grant, Relic, RelicVersion, Result, TenantId, UserId,
+    Capability, Compartment, CompartmentId, Grant, Relic, RelicVersion, TenantId, UserId,
     Visibility,
 };
 use antumbra_store::repo::{compartment, principal, relic};
-use antumbra_store::Store;
+use antumbra_store::{testing, Store};
 
 const DIM: usize = 4;
 
@@ -24,13 +25,12 @@ struct Org {
 
 /// Two members of one tenant; lily owns a private compartment.
 async fn org() -> Result<Org> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = testing::mem_store_of(DIM).await?;
     let tenant = TenantId::new("ws:org");
     let lily = UserId::new("user:lily");
     let oslo = UserId::new("user:oslo");
     let lilys = CompartmentId::new("comp:lily-private");
-    principal::provision(&store, &tenant, &lily).await?;
-    principal::provision(&store, &tenant, &oslo).await?;
+    testing::members(&store, &tenant, &[&lily, &oslo]).await?;
     compartment::create(
         &store,
         &Compartment::new(
@@ -114,7 +114,9 @@ async fn a_private_relic_is_seen_by_its_compartments_audience_only() -> Result<(
     retitled.visibility = Visibility::Public;
     assert!(!relic::put(&o.store, &retitled).await?);
     o.store.invalidate().await?;
-    let stored = relic::get(&o.store, &o.tenant, "ceiling").await?.unwrap();
+    let Some(stored) = relic::get(&o.store, &o.tenant, "ceiling").await? else {
+        anyhow::bail!("lily's relic is gone");
+    };
     assert_eq!(stored.title, "The Ceiling");
     assert_eq!(stored.owner, o.lily);
     assert_eq!(stored.visibility, Visibility::Private);
@@ -155,7 +157,9 @@ async fn another_tenant_cannot_take_a_held_slug() -> Result<()> {
     assert!(!relic::put(&o.store, &taken).await?, "the slug is held");
 
     o.store.invalidate().await?;
-    let stored = relic::get(&o.store, &o.tenant, "ceiling").await?.unwrap();
+    let Some(stored) = relic::get(&o.store, &o.tenant, "ceiling").await? else {
+        anyhow::bail!("lily's relic is gone");
+    };
     assert_eq!(stored.owner, o.lily, "lily's relic is untouched");
     Ok(())
 }

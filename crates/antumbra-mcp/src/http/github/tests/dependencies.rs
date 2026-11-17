@@ -94,39 +94,41 @@ fn merged(number: u64, sha: &str, base: &str) -> serde_json::Value {
 }
 
 /// The declared edges in the workspace: from, to, and the file's anchor.
-async fn declared(st: &HttpState) -> Vec<(String, String, Option<String>)> {
+async fn declared(st: &HttpState) -> anyhow::Result<Vec<(String, String, Option<String>)>> {
     let mut edges: Vec<_> = memory::with_any_evidence(
         &st.store,
         &TenantId::new(TENANT),
         &[Source::Declared.evidence_entry()],
     )
-    .await
-    .unwrap()
+    .await?
     .iter()
     .filter_map(Edge::of)
     .map(|e| (e.from, e.to, e.anchor.map(|a| a.to_evidence())))
     .collect();
     edges.sort();
-    edges
+    Ok(edges)
 }
 
 /// Wait for the detached reading to leave `want` declared edges, or fail.
-async fn wait_for_declared(st: &HttpState, want: usize) -> Vec<(String, String, Option<String>)> {
+async fn wait_for_declared(
+    st: &HttpState,
+    want: usize,
+) -> anyhow::Result<Vec<(String, String, Option<String>)>> {
     for _ in 0..100 {
-        let have = declared(st).await;
+        let have = declared(st).await?;
         if have.len() == want {
-            return have;
+            return Ok(have);
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    panic!(
+    anyhow::bail!(
         "never {want} declared edge(s); have {:?}",
-        declared(st).await
-    );
+        declared(st).await?
+    )
 }
 
 #[tokio::test]
-async fn the_app_keeps_the_declared_edges_among_its_repositories() {
+async fn the_app_keeps_the_declared_edges_among_its_repositories() -> anyhow::Result<()> {
     let fake = token_route(FakeTransport::new());
     let fake = cold(
         fake,
@@ -156,9 +158,9 @@ async fn the_app_keeps_the_declared_edges_among_its_repositories() {
     let fake = tree(merge(fake, 44), WEB, RESTORED, &[("Cargo.toml", WEB_CARGO)]);
     let fake = Arc::new(merge(fake, 45));
     let cfg = plain()
-        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM).unwrap())
+        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM)?)
         .with_api(GithubApi::with_transport(API, fake.clone()));
-    let st = state(Some(cfg)).await;
+    let st = state(Some(cfg)).await?;
 
     deliver(
         &st,
@@ -166,8 +168,8 @@ async fn the_app_keeps_the_declared_edges_among_its_repositories() {
         &json!({"action": "created", "installation": {"id": 77},
                 "repositories": [{"full_name": FULL}, {"full_name": WEB}]}),
     )
-    .await;
-    let installed = wait_for_declared(&st, 1).await;
+    .await?;
+    let installed = wait_for_declared(&st, 1).await?;
     assert_eq!(
         installed,
         [(
@@ -186,22 +188,23 @@ async fn the_app_keeps_the_declared_edges_among_its_repositories() {
     );
 
     // The dependency is dropped on the default branch: retracted.
-    deliver(&st, "pull_request", &merged(43, DROPPED, "main")).await;
-    assert!(wait_for_declared(&st, 0).await.is_empty());
+    deliver(&st, "pull_request", &merged(43, DROPPED, "main")).await?;
+    assert!(wait_for_declared(&st, 0).await?.is_empty());
 
     // Declared again: back, anchored to the new commit.
-    deliver(&st, "pull_request", &merged(44, RESTORED, "main")).await;
-    let restored = wait_for_declared(&st, 1).await;
+    deliver(&st, "pull_request", &merged(44, RESTORED, "main")).await?;
+    let restored = wait_for_declared(&st, 1).await?;
     assert_eq!(
         restored[0].2.as_deref(),
         Some(format!("git:github.com/acme/web@{RESTORED}#main:Cargo.toml").as_str())
     );
 
     // A merge into another branch is not the repository's reading.
-    deliver(&st, "pull_request", &merged(45, ELSEWHERE, "release")).await;
+    deliver(&st, "pull_request", &merged(45, ELSEWHERE, "release")).await?;
     assert!(
         !fake.calls().iter().any(|c| c.contains(ELSEWHERE)),
         "{:?}",
         fake.calls()
     );
+    Ok(())
 }

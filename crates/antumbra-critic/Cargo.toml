@@ -1,6 +1,6 @@
 [package]
 name = "antumbra-critic"
-version = "0.2.7"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -17,3 +17,6 @@ tokio = { workspace = true, features = ["process", "time"] }
 [dev-dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

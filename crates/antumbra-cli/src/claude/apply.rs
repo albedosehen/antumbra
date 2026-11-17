@@ -326,14 +326,14 @@ mod tests {
     }
 
     #[test]
-    fn the_top_level_env_is_found_and_a_lookalike_is_not() {
+    fn the_top_level_env_is_found_and_a_lookalike_is_not() -> anyhow::Result<()> {
         let text = r#"{
   "hooks": { "env": { "NOT": "this one" } },
   "note": "env",
   "env": { "REAL": "1" }
 }"#;
         let Some((open, close)) = top_level_object(text, "env") else {
-            panic!("the top-level env was not found in {text}");
+            anyhow::bail!("the top-level env was not found in {text}");
         };
         assert_eq!(&text[open + 1..close], r#" "REAL": "1" "#);
         assert_eq!(top_level_object(text, "nothing"), None);
@@ -345,6 +345,7 @@ mod tests {
         // A document whose root is an array has no top-level keys at all, so a
         // value that happens to read `env` must not adopt the object after it.
         assert_eq!(top_level_object(r#"["env", {"A": "1"}]"#, "env"), None);
+        Ok(())
     }
 
     #[test]
@@ -417,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn the_check_refuses_a_rewrite_that_changed_anything_else() {
+    fn the_check_refuses_a_rewrite_that_changed_anything_else() -> anyhow::Result<()> {
         let before = "{\n  \"env\": { \"A\": \"1\" },\n  \"keep\": true\n}";
         let cases = [
             // A name dropped.
@@ -443,6 +444,7 @@ mod tests {
         let good =
             r#"{ "env": { "A": "1", "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1" }, "keep": true }"#;
         assert!(only_added(before, good, &[POWERSHELL]).is_ok());
+        Ok(())
     }
 
     #[test]

@@ -71,6 +71,73 @@ impl ServeQuant {
             ServeQuant::Q4K => GgmlDType::Q4K,
         }
     }
+
+    /// How this build serves when nothing says otherwise. A build with no GPU
+    /// backend serves on the CPU, where the dense f32 base reads about 6 GB a
+    /// token, so it serves from Q8_0: about a quarter of the bytes. Neither
+    /// quantized form is the dense base. On two experts' held-out behavior
+    /// tasks Q8_0 reworded 58% of the answers and Q4_K 87%, and 82 and 79 of
+    /// 113 answers passed their checks against the dense base's 85: drops too
+    /// small for that many answers to tell from chance. Q8_0 is the default
+    /// because it moves an expert least (it changes the first-ranked token a
+    /// quarter as often as Q4_K) and decodes about as fast. A GPU build keeps
+    /// the dense base it trained on.
+    pub fn for_build() -> Option<Self> {
+        if cfg!(any(feature = "cuda", feature = "metal")) {
+            None
+        } else {
+            Some(ServeQuant::Q8_0)
+        }
+    }
+
+    /// What an operator's setting names: `auto` is [`Self::for_build`], `off`
+    /// keeps the base dense, and `q8_0` or `q4_k` name a form on any build.
+    pub fn from_setting(setting: &str) -> Result<Option<Self>, antumbra_core::AntumbraError> {
+        match setting.trim().to_ascii_lowercase().as_str() {
+            "auto" | "" => Ok(Self::for_build()),
+            "off" | "none" | "dense" => Ok(None),
+            other => other.parse().map(Some).map_err(|_| {
+                antumbra_core::AntumbraError::other(format!(
+                    "unknown serving quantization `{other}` (use auto, off, q8_0 or q4_k)"
+                ))
+            }),
+        }
+    }
+
+    /// The forms an operator's setting asks an expert's drift be measured on
+    /// when it is admitted. `auto`, and a setting left empty, is Q8_0 alone,
+    /// the form a build with no GPU backend serves by default; `off` is none;
+    /// and `q8_0`, `q4_k` or both with a comma name them, each measured once.
+    pub fn drift_from_setting(setting: &str) -> Result<Vec<Self>, antumbra_core::AntumbraError> {
+        let setting = setting.trim().to_ascii_lowercase();
+        match setting.as_str() {
+            "auto" | "" => return Ok(vec![ServeQuant::Q8_0]),
+            "off" | "none" => return Ok(Vec::new()),
+            _ => {}
+        }
+        let mut forms = Vec::new();
+        for name in setting.split(',') {
+            let name = name.trim();
+            let form: Self = name.parse().map_err(|_| {
+                antumbra_core::AntumbraError::other(format!(
+                    "unknown quantization `{name}` to measure drift on (use auto, off, q8_0, \
+                     q4_k, or both with a comma)"
+                ))
+            })?;
+            if !forms.contains(&form) {
+                forms.push(form);
+            }
+        }
+        Ok(forms)
+    }
+
+    /// The name a setting or a log line uses for this form.
+    pub fn name(self) -> &'static str {
+        match self {
+            ServeQuant::Q8_0 => "q8_0",
+            ServeQuant::Q4K => "q4_k",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -217,7 +284,9 @@ impl RaftConfig {
     /// penalty, an n-gram block, and nucleus truncation, so generation is the
     /// learned mode without the degeneration greedy/likelihood decoding is prone
     /// to (Holtzman et al, Keskar et al). Training keeps the defaults (off) so
-    /// best-of-K draws stay faithful to the policy.
+    /// best-of-K draws stay faithful to the policy. The base is held the way
+    /// this build serves ([`ServeQuant::for_build`]): quantized where there is
+    /// no GPU backend, so a model loaded from this config there cannot train.
     pub fn for_serving(max_new_tokens: usize, temperature: f64) -> Self {
         Self {
             max_new_tokens,
@@ -225,6 +294,7 @@ impl RaftConfig {
             top_p: 0.9,
             repetition_penalty: 1.2,
             no_repeat_ngram_size: 3,
+            serve_quant: ServeQuant::for_build(),
             ..Self::default()
         }
     }
@@ -233,24 +303,27 @@ impl RaftConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::Result;
 
     #[test]
-    fn train_dtype_parses_by_name_and_refuses_the_unknown() {
+    fn train_dtype_parses_by_name_and_refuses_the_unknown() -> Result<()> {
         assert_eq!("f32".parse::<TrainDtype>().ok(), Some(TrainDtype::F32));
         assert_eq!(" BF16 ".parse::<TrainDtype>().ok(), Some(TrainDtype::Bf16));
         assert_eq!("f16".parse::<TrainDtype>().ok(), Some(TrainDtype::F16));
         assert!("fp8".parse::<TrainDtype>().is_err());
+        Ok(())
     }
 
     #[test]
-    fn train_dtype_maps_to_candle() {
+    fn train_dtype_maps_to_candle() -> Result<()> {
         assert_eq!(TrainDtype::F16.to_candle(), DType::F16);
         assert_eq!(TrainDtype::Bf16.to_candle(), DType::BF16);
         assert_eq!(TrainDtype::F32.to_candle(), DType::F32);
+        Ok(())
     }
 
     #[test]
-    fn default_is_an_instruct_base_with_decode_off() {
+    fn default_is_an_instruct_base_with_decode_off() -> Result<()> {
         let cfg = RaftConfig::default();
         assert!(cfg.base_model.contains("Instruct"));
         assert_eq!(cfg.top_p, 1.0);
@@ -260,10 +333,11 @@ mod tests {
             cfg.batch_size, 1,
             "one step per example is the validated recipe"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_recipe_replaces_only_the_searched_settings() {
+    fn a_recipe_replaces_only_the_searched_settings() -> Result<()> {
         let base = RaftConfig::default();
         let recipe = TrainingRecipe {
             learning_rate: 3e-4,
@@ -288,20 +362,22 @@ mod tests {
             "rank, alpha and the rest stay as configured"
         );
         assert_eq!(base.with_recipe(&base.recipe()).recipe(), base.recipe());
+        Ok(())
     }
 
     #[test]
-    fn lora_scale_is_alpha_over_rank() {
+    fn lora_scale_is_alpha_over_rank() -> Result<()> {
         let cfg = RaftConfig {
             lora_rank: 16,
             lora_alpha: 32.0,
             ..RaftConfig::default()
         };
         assert_eq!(cfg.lora_scale(), 2.0);
+        Ok(())
     }
 
     #[test]
-    fn lora_scale_is_zero_not_nan_for_a_rank_zero_adapter() {
+    fn lora_scale_is_zero_not_nan_for_a_rank_zero_adapter() -> Result<()> {
         let cfg = RaftConfig {
             lora_rank: 0,
             lora_alpha: 32.0,
@@ -310,30 +386,92 @@ mod tests {
         let scale = cfg.lora_scale();
         assert!(scale.is_finite(), "a rank-0 adapter must not yield NaN");
         assert_eq!(scale, 0.0);
+        Ok(())
     }
 
     #[test]
-    fn a_serving_quantization_parses_by_its_ggml_name() {
+    fn a_serving_quantization_parses_by_its_ggml_name() -> Result<()> {
         for (name, want) in [
             ("q8_0", ServeQuant::Q8_0),
             ("Q8", ServeQuant::Q8_0),
             ("q4_k", ServeQuant::Q4K),
             (" Q4K ", ServeQuant::Q4K),
         ] {
-            assert_eq!(name.parse::<ServeQuant>().unwrap(), want, "{name}");
+            assert_eq!(name.parse::<ServeQuant>()?, want, "{name}");
         }
         assert!("q2_k".parse::<ServeQuant>().is_err());
         assert_eq!(ServeQuant::Q4K.to_ggml(), GgmlDType::Q4K);
         assert_eq!(RaftConfig::default().serve_quant, None);
+        Ok(())
+    }
+
+    /// A build with no GPU backend serves quantized unless told otherwise, and
+    /// a GPU build serves dense; either can be told.
+    #[test]
+    fn a_setting_names_the_build_default_a_dense_base_or_a_form() -> Result<()> {
+        let build = if cfg!(any(feature = "cuda", feature = "metal")) {
+            None
+        } else {
+            Some(ServeQuant::Q8_0)
+        };
+        assert_eq!(ServeQuant::for_build(), build);
+        assert_eq!(ServeQuant::from_setting("auto")?, build);
+        assert_eq!(ServeQuant::from_setting("")?, build);
+        for dense in ["off", "none", " Dense "] {
+            assert_eq!(ServeQuant::from_setting(dense)?, None, "{dense}");
+        }
+        for q in [ServeQuant::Q8_0, ServeQuant::Q4K] {
+            assert_eq!(ServeQuant::from_setting(q.name())?, Some(q));
+        }
+        let refused = ServeQuant::from_setting("q2_k");
+        assert!(
+            refused.is_err_and(|e| e.to_string().contains("auto, off, q8_0 or q4_k")),
+            "a setting that names nothing says what a setting may be"
+        );
+        Ok(())
     }
 
     #[test]
-    fn for_serving_turns_the_decode_policy_on() {
+    fn a_drift_setting_names_no_form_one_or_both() -> Result<()> {
+        let (q8, q4) = (ServeQuant::Q8_0, ServeQuant::Q4K);
+        for (setting, want) in [
+            ("auto", vec![q8]),
+            ("", vec![q8]),
+            ("off", vec![]),
+            (" None ", vec![]),
+            ("q4_k", vec![q4]),
+            ("q8_0,q4_k", vec![q8, q4]),
+            (" Q4K , q8 ", vec![q4, q8]),
+            // A form named twice is measured once.
+            ("q8_0,q8,q8_0", vec![q8]),
+        ] {
+            assert_eq!(
+                ServeQuant::drift_from_setting(setting)?,
+                want,
+                "{setting:?}"
+            );
+        }
+        for refused in ["q2_k", "q8_0,", "q8_0;q4_k", "dense"] {
+            let named = ServeQuant::drift_from_setting(refused);
+            assert!(
+                named.is_err_and(|e| e.to_string().contains("use auto, off, q8_0")),
+                "{refused:?} names no form and says what a setting may be"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn for_serving_turns_the_decode_policy_on() -> Result<()> {
         let cfg = RaftConfig::for_serving(48, 0.0);
         assert_eq!(cfg.max_new_tokens, 48);
         assert_eq!(cfg.temperature, 0.0);
         assert_eq!(cfg.top_p, 0.9);
         assert_eq!(cfg.repetition_penalty, 1.2);
         assert_eq!(cfg.no_repeat_ngram_size, 3);
+        // Serving holds the base as the build serves it; training never does.
+        assert_eq!(cfg.serve_quant, ServeQuant::for_build());
+        assert_eq!(RaftConfig::default().serve_quant, None);
+        Ok(())
     }
 }

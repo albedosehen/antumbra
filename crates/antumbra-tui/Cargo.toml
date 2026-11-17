@@ -1,6 +1,6 @@
 [package]
 name = "antumbra-tui"
-version = "0.2.7"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,9 @@ dist = false
 
 [dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+antumbra-auth = { path = "../antumbra-auth" }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-http = { path = "../antumbra-http" }
 # The server's console routes are plain HTTP; a blocking request run off the
 # async runtime, as the CLI and the embedder do.
 ureq = { version = "3", features = ["json"] }
@@ -34,9 +36,16 @@ chrono.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 ab_glyph = "0.2"
 
+[dev-dependencies]
+# The embedded store the tui's tests stand up.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
+
 [features]
 # Raster image path (sixel/kitty/iTerm2) as a progressive enhancement over the
 # universal Braille/Canvas tier. Empty until the graphics backend is wired with
 # the first raster-worthy visual; declaring it keeps `cfg(feature = "raster")`
 # from tripping the unexpected-cfg lint. The default build stays raster-free.
 raster = []
+
+[lints]
+workspace = true

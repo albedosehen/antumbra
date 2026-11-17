@@ -1,6 +1,6 @@
 [package]
 name = "antumbra-loop"
-version = "0.2.7"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -27,4 +27,9 @@ sha2 = "0.11"
 [dev-dependencies]
 async-trait.workspace = true
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+# The embedded store the loop's tests stand up.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

@@ -10,7 +10,8 @@ use antumbra_core::testing::FeatureProbe;
 use antumbra_core::{BoundaryId, Expert, ExpertId, Generation, Grain};
 use antumbra_gate::{route, GateConfig};
 use antumbra_store::repo::{boundary, expert};
-use antumbra_store::Store;
+use antumbra_store::testing;
+use anyhow::{Context, Result};
 use chrono::Utc;
 
 fn expert_at(key: &str, vec: Vec<f32>) -> Expert {
@@ -32,16 +33,12 @@ fn expert_at(key: &str, vec: Vec<f32>) -> Expert {
 }
 
 #[tokio::test]
-async fn actionable_boundary_inhibits_routing_inside_its_scope_only() {
-    let store = Store::connect_memory(4).await.expect("connect");
+async fn actionable_boundary_inhibits_routing_inside_its_scope_only() -> Result<()> {
+    let store = testing::mem_store_of(4).await.context("connect")?;
 
     // Expert A handles the behavior that has a known failure scope; B is elsewhere.
-    expert::insert(&store, &expert_at("expert:a", vec![1.0, 0.0, 0.0, 0.0]))
-        .await
-        .unwrap();
-    expert::insert(&store, &expert_at("expert:b", vec![0.0, 1.0, 0.0, 0.0]))
-        .await
-        .unwrap();
+    expert::insert(&store, &expert_at("expert:a", vec![1.0, 0.0, 0.0, 0.0])).await?;
+    expert::insert(&store, &expert_at("expert:b", vec![0.0, 1.0, 0.0, 0.0])).await?;
 
     // Antumbra job #1: hold the behavior fixed, vary the context, re-probe until
     // acceptability flips. `npm install` is wrong under deno (C), right under
@@ -52,10 +49,9 @@ async fn actionable_boundary_inhibits_routing_inside_its_scope_only() {
     };
     let fail = serde_json::json!({ "runtime": "deno", "task": "install deps" });
     let candidates = vec![("runtime".to_string(), vec![serde_json::json!("node")])];
-    let finding = find_scope("run npm install", &fail, &candidates, &probe)
-        .await
-        .unwrap()
-        .expect("a single-feature change flips acceptability");
+    let Some(finding) = find_scope("run npm install", &fail, &candidates, &probe).await? else {
+        anyhow::bail!("a single-feature change should flip acceptability");
+    };
     assert_eq!(finding.governing_feature, "runtime");
 
     // Job #2: persist as an actionable boundary anchored at A's region (the
@@ -72,11 +68,11 @@ async fn actionable_boundary_inhibits_routing_inside_its_scope_only() {
         Utc::now(),
     );
     assert!(b.is_actionable());
-    boundary::upsert(&store, &b).await.unwrap();
+    boundary::upsert(&store, &b).await?;
 
     // Round-trip through the substrate.
-    let experts = expert::list(&store).await.unwrap();
-    let boundaries = boundary::list(&store).await.unwrap();
+    let experts = expert::list(&store).await?;
+    let boundaries = boundary::list(&store).await?;
     assert_eq!(boundaries.len(), 1);
     assert!(boundaries[0].is_actionable());
 
@@ -100,4 +96,5 @@ async fn actionable_boundary_inhibits_routing_inside_its_scope_only() {
     let control = route(&[1.0, 0.0, 0.0, 0.0], &experts, &[], 1, &cfg);
     assert!(!control.escalate);
     assert_eq!(control.chosen, vec![ExpertId::new("expert:a")]);
+    Ok(())
 }

@@ -11,6 +11,7 @@ use antumbra_core::{
 };
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{evaluation, expert, lifecycle};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 /// A frozen expert whose freeze baseline no longer matches its artifact.
@@ -55,7 +56,7 @@ async fn drifted(store: &Store, run: &RunId, name: &str) -> Result<ExpertId> {
 
 #[tokio::test]
 async fn demoted_experts_stay_under_the_tripwire_and_only_deleted_ones_leave_it() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let run = RunId::new("run:lifecycle");
     let operator = || TransitionCause::Operator { note: None };
     let dormant = drifted(&store, &run, "dormant").await?;

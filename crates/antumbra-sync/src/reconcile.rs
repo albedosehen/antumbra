@@ -31,6 +31,7 @@ use antumbra_core::Result;
 use antumbra_store::repo::sync as row_repo;
 use antumbra_store::Store;
 
+use crate::hold::{Hold, Own};
 use crate::scope::Scope;
 use crate::table::TableSpec;
 
@@ -138,88 +139,156 @@ fn lookback_floor(hwm: &str, lookback: Duration) -> String {
     }
 }
 
-/// The last-write-wins pass over two already-indexed row sets (the shared core of
-/// the full and incremental paths). A row only one side has is seeded the other
-/// way; a shared row's strictly-newer version wins on both.
-async fn reconcile_indexed(
-    local: &Store,
-    remote: &Store,
+/// One side of a pass: a store, and how the pass takes hold of it for a step.
+///
+/// A pass over a table is five steps: read this side, read the other, decide,
+/// write the other, write this one. Each read and each batch of writes takes
+/// hold of its own side for as long as it lasts and of nothing else, so a
+/// store the collector shares with other work is held while the collector
+/// uses it and never while it waits on the other store.
+pub struct Side<'a, H: Hold> {
+    pub store: &'a Store,
+    pub hold: &'a H,
+}
+
+impl<H: Hold> Clone for Side<'_, H> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<H: Hold> Copy for Side<'_, H> {}
+
+impl<'a> Side<'a, Own> {
+    /// A store that is the collector's own: nothing to hold.
+    pub fn own(store: &'a Store) -> Self {
+        Side { store, hold: &Own }
+    }
+}
+
+/// How many rows are written to a shared store before it is let go and taken
+/// again: what waits for the store waits for one batch, however long the pass.
+const BATCH: usize = 64;
+
+/// One side's rows past `since`, by record id, read while that side is held.
+async fn read<H: Hold>(
+    side: Side<'_, H>,
     spec: &TableSpec,
-    local_rows: &BTreeMap<String, Value>,
-    remote_rows: &BTreeMap<String, Value>,
-) -> Result<ReconcileStats> {
-    let mut stats = ReconcileStats::default();
-    // A refusal is counted, never confused with a write. The engine persists
-    // nothing and reports no error when a session may read a row it may not
-    // write, so this is the only place the difference is visible at all.
-    let expected = spec.replicate.refusal_is_expected();
-    let record =
-        |stats: &mut ReconcileStats, written: row_repo::Written, pulled: bool| match written {
-            row_repo::Written::Yes if pulled => stats.pulled += 1,
-            row_repo::Written::Yes => stats.pushed += 1,
-            row_repo::Written::Refused if expected => stats.declined += 1,
-            row_repo::Written::Refused => stats.refused += 1,
-            row_repo::Written::NoId => {}
-        };
+    since: &str,
+) -> Result<BTreeMap<String, Value>> {
+    let _held = side.hold.hold().await?;
+    Ok(index_by_id(
+        row_repo::list_rows_since(side.store, spec.name, spec.version_field, since).await?,
+    ))
+}
+
+/// What a pass moves, decided from two already-indexed row sets: the rows for
+/// the remote, then the rows for the local. A row only one side has is seeded
+/// the other way; a shared row's strictly-newer version wins on both.
+fn decide<'a>(
+    spec: &TableSpec,
+    local_rows: &'a BTreeMap<String, Value>,
+    remote_rows: &'a BTreeMap<String, Value>,
+) -> (Vec<&'a Value>, Vec<&'a Value>) {
+    let (mut to_remote, mut to_local) = (Vec::new(), Vec::new());
     for (id, lrow) in local_rows {
         match remote_rows.get(id) {
-            None => {
-                let written = row_repo::put_row(remote, lrow).await?;
-                record(&mut stats, written, false);
-            }
-            Some(rrow) => {
-                if is_newer(lrow, rrow, spec) {
-                    let written = row_repo::put_row(remote, lrow).await?;
-                    record(&mut stats, written, false);
-                } else if is_newer(rrow, lrow, spec) {
-                    let written = row_repo::put_row(local, rrow).await?;
-                    record(&mut stats, written, true);
-                }
-            }
+            None => to_remote.push(lrow),
+            Some(rrow) if is_newer(lrow, rrow, spec) => to_remote.push(lrow),
+            Some(rrow) if is_newer(rrow, lrow, spec) => to_local.push(rrow),
+            Some(_) => {}
         }
     }
     for (id, rrow) in remote_rows {
         if !local_rows.contains_key(id) {
-            let written = row_repo::put_row(local, rrow).await?;
-            record(&mut stats, written, true);
+            to_local.push(rrow);
         }
     }
-    Ok(stats)
+    (to_remote, to_local)
+}
+
+/// Whether `row` still belongs on `store`: it has no record of that id, or the
+/// one it has is older. Asked while a shared store is held, of a row decided
+/// on from a read made before the store was let go: something else may have
+/// written the record since, and a newer write is not replaced by an older one.
+async fn still_wins(store: &Store, spec: &TableSpec, row: &Value) -> Result<bool> {
+    let Some(id) = row_repo::row_id(row) else {
+        return Ok(true);
+    };
+    Ok(match row_repo::get_row(store, &id).await? {
+        Some(current) => is_newer(row, &current, spec),
+        None => true,
+    })
+}
+
+/// Write `rows` to `side`, held for the writing: how many landed, and how many
+/// the engine refused. A shared store is written a batch at a time and let go
+/// between two, and each row is written only if it [`still_wins`].
+///
+/// A refusal is counted, never confused with a write. The engine persists
+/// nothing and reports no error when a session may read a row it may not
+/// write, so this is the only place the difference is visible at all.
+async fn write<H: Hold>(
+    side: Side<'_, H>,
+    spec: &TableSpec,
+    rows: &[&Value],
+) -> Result<(usize, usize)> {
+    let (mut landed, mut refused) = (0, 0);
+    let batch = if H::SHARED { BATCH } else { rows.len().max(1) };
+    for rows in rows.chunks(batch) {
+        let _held = side.hold.hold().await?;
+        for row in rows {
+            if H::SHARED && !still_wins(side.store, spec, row).await? {
+                continue;
+            }
+            match row_repo::put_row(side.store, row).await? {
+                row_repo::Written::Yes => landed += 1,
+                row_repo::Written::Refused => refused += 1,
+                row_repo::Written::NoId => {}
+            }
+        }
+    }
+    Ok((landed, refused))
 }
 
 /// Reconcile one table starting from watermark `cursor` (empty = full scan), with
 /// a `lookback` delay window. Returns what moved and the new watermark: the newest
 /// version seen on either side this pass, never below `cursor`.
-async fn reconcile_table_since(
-    local: &Store,
-    remote: &Store,
+async fn reconcile_table_since<L: Hold, R: Hold>(
+    local: Side<'_, L>,
+    remote: Side<'_, R>,
     spec: &TableSpec,
     cursor: &str,
     lookback: Duration,
     scope: Option<&Scope>,
 ) -> Result<(ReconcileStats, String)> {
     let since = lookback_floor(cursor, lookback);
-    let local_rows =
-        index_by_id(row_repo::list_rows_since(local, spec.name, spec.version_field, &since).await?);
-    let remote_rows = index_by_id(
-        row_repo::list_rows_since(remote, spec.name, spec.version_field, &since).await?,
-    );
+    let local_rows = read(local, spec, &since).await?;
+    let remote_rows = read(remote, spec, &since).await?;
     // Narrow before comparing, not after: a row outside this user's scope is
     // not a row that is missing from the other side, so it must not look like
     // one. Filtering afterwards would leave the pair logic deciding to push
-    // rows it had already agreed not to carry.
+    // rows it had already agreed not to carry. The same holds for a row the
+    // table cannot pair at all, which is left out as owner too.
     //
     // The watermark is taken from the UNNARROWED rows below, on purpose. The
     // cursor tracks how far this pass read, not how much it carried; advancing
     // it only past rows in scope would re-read everything else forever.
-    let (local_kept, remote_kept) = match scope {
-        Some(scope) => (
-            narrow(&local_rows, spec, scope),
-            narrow(&remote_rows, spec, scope),
-        ),
-        None => (local_rows.clone(), remote_rows.clone()),
+    let local_kept = narrow(&local_rows, spec, scope);
+    let remote_kept = narrow(&remote_rows, spec, scope);
+    let (to_remote, to_local) = decide(spec, &local_kept, &remote_kept);
+    let (pushed, refused_there) = write(remote, spec, &to_remote).await?;
+    let (pulled, refused_here) = write(local, spec, &to_local).await?;
+    let mut stats = ReconcileStats {
+        pushed,
+        pulled,
+        ..ReconcileStats::default()
     };
-    let stats = reconcile_indexed(local, remote, spec, &local_kept, &remote_kept).await?;
+    if spec.replicate.refusal_is_expected() {
+        stats.declined = refused_there + refused_here;
+    } else {
+        stats.refused = refused_there + refused_here;
+    }
 
     let mut hwm = cursor.to_string();
     for rows in [&local_rows, &remote_rows] {
@@ -234,14 +303,16 @@ async fn reconcile_table_since(
     Ok((stats, hwm))
 }
 
-/// The rows a scoped collector carries from `spec`'s table.
+/// The rows a collector carries from `spec`'s table: those the table can pair
+/// across two stores, and under a `scope` only those in it.
 fn narrow(
     rows: &BTreeMap<String, Value>,
     spec: &TableSpec,
-    scope: &Scope,
+    scope: Option<&Scope>,
 ) -> BTreeMap<String, Value> {
     rows.iter()
-        .filter(|(_, row)| spec.replicate.admits(scope, row))
+        .filter(|(_, row)| spec.carries(row))
+        .filter(|(_, row)| scope.is_none_or(|scope| spec.replicate.admits(scope, row)))
         .map(|(id, row)| (id.clone(), row.clone()))
         .collect()
 }
@@ -254,6 +325,7 @@ pub async fn reconcile_table(
     remote: &Store,
     spec: &TableSpec,
 ) -> Result<ReconcileStats> {
+    let (local, remote) = (Side::own(local), Side::own(remote));
     Ok(
         reconcile_table_since(local, remote, spec, "", Duration::ZERO, None)
             .await?
@@ -278,6 +350,7 @@ pub async fn reconcile_all_scoped(
     tables: &[TableSpec],
     scope: Option<&Scope>,
 ) -> Result<ReconcileStats> {
+    let (local, remote) = (Side::own(local), Side::own(remote));
     let mut stats = ReconcileStats::default();
     for spec in tables {
         stats.add(
@@ -313,6 +386,20 @@ pub async fn reconcile_all_since_scoped(
     lookback: Duration,
     scope: Option<&Scope>,
 ) -> Result<ReconcileStats> {
+    let (local, remote) = (Side::own(local), Side::own(remote));
+    reconcile_all_since_on(local, remote, tables, cursors, lookback, scope).await
+}
+
+/// [`reconcile_all_since_scoped`] over two [`Side`]s, each held only for the
+/// steps that use it: the pass a collector runs on a store it shares.
+pub async fn reconcile_all_since_on<L: Hold, R: Hold>(
+    local: Side<'_, L>,
+    remote: Side<'_, R>,
+    tables: &[TableSpec],
+    cursors: &mut Cursors,
+    lookback: Duration,
+    scope: Option<&Scope>,
+) -> Result<ReconcileStats> {
     let mut stats = ReconcileStats::default();
     for spec in tables {
         let cursor = cursors.get(spec.name);
@@ -333,6 +420,9 @@ fn index_by_id(rows: Vec<Value>) -> BTreeMap<String, Value> {
 mod tests;
 
 #[cfg(test)]
+mod expert_tests;
+
+#[cfg(test)]
 mod fabric_tests;
 
 #[cfg(test)]
@@ -340,3 +430,6 @@ mod refusal_tests;
 
 #[cfg(test)]
 mod scoped_tests;
+
+#[cfg(test)]
+mod shared_tests;

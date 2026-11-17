@@ -1,0 +1,25 @@
+[package]
+name = "antumbra-http"
+version = "0.3.1"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "HTTP as Antumbra's own binaries speak it to the server: the agent every outbound call is made with, and the one client for the tool surface, so the CLI and the console refuse the same way with the server's own words."
+
+[dependencies]
+antumbra-core = { path = "../antumbra-core" }
+serde_json.workspace = true
+# Pure-Rust TLS, so it needs no system OpenSSL; `json` for send_json/read_json.
+ureq = { version = "3", features = ["json"] }
+
+[dev-dependencies]
+anyhow.workspace = true
+
+[features]
+# A canned JsonPost and a one-shot local server, for other crates' tests.
+testing = []
+
+[lints]
+workspace = true

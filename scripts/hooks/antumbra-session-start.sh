@@ -56,13 +56,19 @@ fi
 HOST_ID="${ANTUMBRA_HOST_ID:-local}"
 PENALIZE_ORPHANS="${ANTUMBRA_PENALIZE_ORPHANS:-0}"
 
-auth=(-H 'Content-Type: application/json')
-[ -n "$TOKEN" ] && auth+=(-H "Authorization: Bearer $TOKEN")
+# The bearer reaches curl as a config line on its stdin, never as an argument:
+# an argument sits in the process list, readable by every other user of the
+# machine, for as long as the request lasts. No token, no line.
+bearer() {
+  [ -n "$TOKEN" ] && printf 'header = "Authorization: Bearer %s"\n' "$TOKEN"
+  return 0
+}
 
 # One call to the surface, its answer in a file (empty for no answer). Run in
 # the background, so the calls overlap one another and the git work below.
 call() { # tool, arguments (JSON), answer file
-  curl -sS --max-time "$(remaining)" -X POST "$URL/mcp/call" "${auth[@]}" \
+  bearer | curl -sS --max-time "$(remaining)" -X POST "$URL/mcp/call" \
+    -H 'Content-Type: application/json' --config - \
     -d "$(jq -nc --arg tool "$1" --argjson args "$2" '{tool: $tool, arguments: $args}')" \
     >"$3" 2>/dev/null || : >"$3"
 }

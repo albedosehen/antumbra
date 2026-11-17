@@ -22,6 +22,8 @@ mkdir -p "$work/bin"
 # call's own --max-time and fails the way curl does.
 cat >"$work/bin/curl" <<'STUB'
 #!/usr/bin/env bash
+# What `--config -` would read: curl always drains its stdin for it.
+cat >>"${CURL_STDIN:-/dev/null}"
 [ -n "${CURL_LOG:-}" ] && printf '%s\n' "$*" >>"$CURL_LOG"
 if [ -n "${CURL_HANG:-}" ]; then
   limit=30; prev=""
@@ -102,6 +104,15 @@ calls="$work/calls.log"
 : >"$calls"
 ctx=$(run "$work/small.json" CURL_LOG="$calls" ANTUMBRA_HOST_ID=mac | context)
 check "registers it under its name" grep -qF '{"tool":"register_device","arguments":{"host":"mac"}}' "$calls"
+check "still answers" grep -q 'first small' <<<"$ctx"
+
+echo "the bearer"
+stdin="$work/curl-stdin"
+: >"$calls"
+: >"$stdin"
+ctx=$(run "$work/small.json" CURL_LOG="$calls" CURL_STDIN="$stdin" | context)
+check "is not on curl's command line" bash -c '! grep -q Bearer "$1"' _ "$calls"
+check "reaches curl through its config on stdin, on every call" test "$(grep -cx 'header = "Authorization: Bearer test-token"' "$stdin")" -ge 2
 check "still answers" grep -q 'first small' <<<"$ctx"
 : >"$calls"
 run "$work/small.json" CURL_LOG="$calls" ANTUMBRA_HOST_ID= >/dev/null

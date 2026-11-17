@@ -63,7 +63,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prose_specs_and_well_known_files_are_documents() {
+    fn prose_specs_and_well_known_files_are_documents() -> anyhow::Result<()> {
         for yes in [
             "README.md",
             "docs/adr/0018-provenance.md",
@@ -77,10 +77,11 @@ mod tests {
         ] {
             assert!(is_knowledge_document(yes), "{yes}");
         }
+        Ok(())
     }
 
     #[test]
-    fn code_vendored_trees_legal_files_and_data_are_not() {
+    fn code_vendored_trees_legal_files_and_data_are_not() -> anyhow::Result<()> {
         for no in [
             "src/main.rs",
             "package.json",
@@ -97,5 +98,6 @@ mod tests {
         ] {
             assert!(!is_knowledge_document(no), "{no}");
         }
+        Ok(())
     }
 }

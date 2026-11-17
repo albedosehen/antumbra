@@ -101,6 +101,13 @@ services:
       # where capacity stops. The serving engine is built at the rank, so
       # lowering it below an expert already minted here means retraining it.
       - ANTUMBRA_BEHAVE_RANK=${ANTUMBRA_BEHAVE_RANK:-16}
+      # How the base model is held to serve experts: auto, off, q8_0 or q4_k.
+      # auto serves from a Q8_0 base on an image with no GPU backend (the dense
+      # base reads about 6 GB a token on a CPU) and from the dense base on a
+      # GPU image. Both quantized forms reword an expert's answers: q8_0
+      # moves them least, q4_k is smaller and moves them about four times as
+      # much. off keeps the base dense anywhere.
+      - ANTUMBRA_SERVE_QUANT=${ANTUMBRA_SERVE_QUANT:-auto}
       - ANTUMBRA_BEHAVE_ROUNDS=${ANTUMBRA_BEHAVE_ROUNDS:-3}
       - ANTUMBRA_BEHAVE_LR=${ANTUMBRA_BEHAVE_LR:-1.5e-4}
       # How sure admission has to be, from a behavior's held-out counts, that
@@ -111,6 +118,10 @@ services:
       # admitted: per workspace, 0.02 at a time, only when two readings in a
       # row agree, within 0.6 and 0.98. Off, the value above stands.
       - ANTUMBRA_BEHAVE_TUNE_CONFIDENCE=${ANTUMBRA_BEHAVE_TUNE_CONFIDENCE:-false}
+      # Which quantized forms of the base an expert is measured on when it is
+      # admitted, recorded on its card: auto (Q8_0), off, q8_0, q4_k, or
+      # q8_0,q4_k. Each form is one more load of the base per training.
+      - ANTUMBRA_BEHAVE_DRIFT=${ANTUMBRA_BEHAVE_DRIFT:-auto}
       # The copal document of record: each ingested document's original is
       # archived there before its chunks are stored. Unset = off, and ingest
       # keeps only the chunks. With the `copal` profile started:
@@ -120,6 +131,12 @@ services:
       - ANTUMBRA_COPAL_ADDR=${ANTUMBRA_COPAL_ADDR:-}
       - ANTUMBRA_COPAL_TENANT=${ANTUMBRA_COPAL_TENANT:-}
       - ANTUMBRA_COPAL_KEY=${ANTUMBRA_COPAL_KEY:-}
+      # The archive sits on this stack's own network, which only this server
+      # reaches: plain http:// to it is allowed, and the header-named tenancy
+      # above is trusted. An archive elsewhere wants https:// and a keyed
+      # tenancy (ANTUMBRA_COPAL_KEY or --copal-keys) instead of these two.
+      - ANTUMBRA_COPAL_ALLOW_HTTP=${ANTUMBRA_COPAL_ALLOW_HTTP:-true}
+      - ANTUMBRA_COPAL_TRUST_HEADERS=${ANTUMBRA_COPAL_TRUST_HEADERS:-true}
       # Where copal displays pages (its COPAL_RENDER_ORIGIN), which relics need:
       # the gallery at /relics frames that origin and nothing else. Unset, no
       # relic can be published. Give copal COPAL_RENDER_FRAME_ANCESTORS naming
@@ -129,6 +146,20 @@ services:
       # profile's service, ANTUMBRA_PDF_RENDERER=http://pdf:3000. Unset, a
       # relic still downloads as HTML and Markdown.
       - ANTUMBRA_PDF_RENDERER=${ANTUMBRA_PDF_RENDERER:-}
+      # The Antumbra server that trains this user's experts, for a server that
+      # does not hold their adapters (one with no GPU): it pulls each adapter
+      # once, checks it against the expert's row and serves it from then on.
+      # Both servers need the same ANTUMBRA_JWT_SECRET. Unset, an expert
+      # placed on another machine is not served here.
+      - ANTUMBRA_EXPERT_SOURCE=${ANTUMBRA_EXPERT_SOURCE:-}
+      # A remote SurrealDB to keep this server's store in step with, for a
+      # server on an embedded store: the collector `antumbra sync` runs,
+      # inside the server, since nothing else can open that store while the
+      # server runs. With the remote's root user and password, or neither
+      # for a remote with no authentication. Unset, the server does not sync.
+      - ANTUMBRA_SYNC_REMOTE=${ANTUMBRA_SYNC_REMOTE:-}
+      - ANTUMBRA_SYNC_REMOTE_USER=${ANTUMBRA_SYNC_REMOTE_USER:-}
+      - ANTUMBRA_SYNC_REMOTE_PASS=${ANTUMBRA_SYNC_REMOTE_PASS:-}
       # Trace export over OTLP/HTTP, all optional. Empty counts as unset, so the
       # export stays off unless docker/.env sets the endpoint, and the service
       # is named antumbra-mcp unless it names one. The headers can carry the
@@ -198,9 +229,14 @@ services:
       # variable here would stop `up` of the local stack too. The server
       # refuses to start on an empty or placeholder secret itself.
       - ANTUMBRA_MAGIC_SECRET=${ANTUMBRA_MAGIC_SECRET:-}
+      # A deployment that mounts secrets as files passes --magic-secret-file and
+      # --db-pass-file instead (see docker/README.md).
       - ANTUMBRA_DB_PASS=${ANTUMBRA_CONTROL_DB_PASS:-${SURREAL_PASS}}
-      # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email; left
-      # empty, links are logged to this container's stderr (dev mailer).
+      # Set SMTP_HOST/PORT/USER/PASS/FROM to deliver real magic-link email. For
+      # development only, ANTUMBRA_DEV_MAILER=1 logs each link to this
+      # container's stderr instead. With neither, or with SMTP_HOST set but
+      # unusable, the server refuses to start; it never falls back to logging.
+      - ANTUMBRA_DEV_MAILER=${ANTUMBRA_DEV_MAILER:-}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-}
       - SMTP_USER=${SMTP_USER:-}

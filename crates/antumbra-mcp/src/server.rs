@@ -58,6 +58,10 @@ pub struct McpServer {
     /// The serving engine the `answer` tool drives (route → serve through the
     /// expert's adapter). `None` = serving not configured (route-only surface).
     serve: Option<Arc<dyn antumbra_core::ports::Serve>>,
+    /// The server an expert placed on another machine has its adapter pulled
+    /// from, when `answer` routes to one. `None` = such an expert is not
+    /// served here.
+    source: Option<Arc<pull::ExpertSource>>,
     /// Where this session registers its peer on initialize, so live propagation
     /// can push shared-memory changes to it. `None` = no live delivery
     /// (stdio, route-only, or tests).
@@ -82,6 +86,13 @@ pub struct McpServer {
     /// duration (see `session`); checked at every tool call. `None` where the
     /// transport signs in per request (the embedded networked surface).
     session: Option<Arc<crate::session::SessionKeeper>>,
+    /// The lock a tool call takes when `store` is a connection shared with
+    /// other identities (the embedded networked surface): the call signs the
+    /// connection in as this session's identity under it and holds it until
+    /// the tool returns, so no other identity's signin lands in between
+    /// ([`McpServer::bound`]). `None` where the session has a connection of
+    /// its own, which stays signed in as it.
+    shared_bind: Option<Arc<tokio::sync::Mutex<()>>>,
     /// The typed decider that answers "does this memory answer this query" as a
     /// calibrated probability, which is what lets recall say
     /// nothing rather than return the best of a bad lot. `None` = no floor runs
@@ -262,6 +273,7 @@ pub(crate) mod heavy;
 mod listing;
 mod params;
 mod provenance;
+pub(crate) mod pull;
 mod relics;
 mod rerank_cache;
 mod steward;
@@ -634,12 +646,17 @@ impl McpServer {
     /// document is reference material the agent was *given*, kept distinct from
     /// the episodic memory it *earned* so neither drowns the other.
     #[tool(
-        description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored."
+        description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored. A document is at most 512 KiB; split a larger one, or ingest the part that matters."
     )]
     async fn ingest_document(
         &self,
         Parameters(p): Parameters<IngestDocumentParams>,
     ) -> Result<Json<IngestedOut>, ErrorData> {
+        // Before anything is archived or embedded: the cap bounds the
+        // embedder's time one call may spend, and a refusal costs none of it.
+        if let Some(why) = antumbra_ingest::too_large(&p.content) {
+            return Err(ErrorData::invalid_params(why, None));
+        }
         let provenance = p.provenance.map(anchor_from).transpose()?;
         let compartment = p
             .compartment

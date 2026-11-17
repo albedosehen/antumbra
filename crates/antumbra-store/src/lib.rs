@@ -7,12 +7,17 @@
 mod dto;
 mod error;
 
+#[cfg(feature = "clap")]
+pub mod args;
 pub mod fusion;
 pub mod knn;
 mod lexical;
 pub mod repo;
 pub mod schema;
 pub mod store;
+pub mod tables;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use schema::{EMBED_DIM, TENANT_SESSION};
 pub use store::Store;

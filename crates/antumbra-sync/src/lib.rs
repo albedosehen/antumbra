@@ -12,6 +12,7 @@
 //! - [`config`] -- the two endpoints and the reconcile/backoff timing.
 //! - [`table`] -- which tables replicate and each one's version field.
 //! - [`reconcile`] -- the last-write-wins pass over a pair of stores.
+//! - [`hold`] -- how a pass takes hold of a store it shares with other work.
 //! - [`worker`] -- the supervised loop: connect, reconcile on a cadence,
 //!   reconnect with backoff, shut down cleanly.
 //! - [`propagate`] -- watch the change feed and resolve each shared-memory
@@ -19,6 +20,7 @@
 
 pub mod config;
 pub mod gc;
+pub mod hold;
 pub mod propagate;
 pub mod reconcile;
 pub mod scope;
@@ -26,11 +28,12 @@ pub mod table;
 pub mod worker;
 
 pub use config::{Endpoint, Fabric, SyncConfig};
+pub use hold::{Hold, Own};
 pub use propagate::{audience, resolve_change, watch_shared_memories, MemoryChange};
 pub use reconcile::{
-    reconcile_all, reconcile_all_scoped, reconcile_all_since, reconcile_all_since_scoped,
-    reconcile_table, Cursors, ReconcileStats,
+    reconcile_all, reconcile_all_scoped, reconcile_all_since, reconcile_all_since_on,
+    reconcile_all_since_scoped, reconcile_table, Cursors, ReconcileStats, Side,
 };
 pub use scope::{Replicate, Scope};
 pub use table::{TableSpec, PENUMBRA_TABLES};
-pub use worker::run;
+pub use worker::{run, run_on};

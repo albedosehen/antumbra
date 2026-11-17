@@ -477,18 +477,21 @@ mod tests {
     }
 
     #[test]
-    fn every_memory_opens_with_its_key_and_no_two_share_one() {
+    fn every_memory_opens_with_its_key_and_no_two_share_one() -> anyhow::Result<()> {
         let all = conventions(&rules());
         assert!(all.iter().all(|c| c.content.starts_with(&c.key)));
         let mut keys: Vec<&str> = all.iter().map(|c| c.key.as_str()).collect();
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), all.len());
+        Ok(())
     }
 
     #[test]
-    fn a_surface_that_answers_in_another_shape_is_an_error_and_not_an_empty_plan() {
+    fn a_surface_that_answers_in_another_shape_is_an_error_and_not_an_empty_plan(
+    ) -> anyhow::Result<()> {
         let broken = |_: &str, _: Value| Ok(json!({ "unexpected": true }));
         assert!(remember(&broken, &rules(), true).is_err());
+        Ok(())
     }
 }

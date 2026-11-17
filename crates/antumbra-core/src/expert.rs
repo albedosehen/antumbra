@@ -40,23 +40,25 @@ pub struct Expert {
     /// The source compartment a private expert was consolidated from.
     #[serde(default)]
     pub compartment: Option<CompartmentId>,
-    /// The node whose disk holds `artifact_uri`. `None` for an expert minted
-    /// before placement was recorded, which is read as "here", because until a
-    /// user's nodes shared a store there was only ever one machine it could
-    /// have been on.
+    /// The node that trained the expert, whose disk holds `artifact_uri`.
+    /// `None` for an expert minted before placement was recorded, which is
+    /// read as "here", because until a user's nodes shared a store there was
+    /// only ever one machine it could have been on.
     ///
-    /// This matters because the row travels and the weights do not. Adapters
-    /// are kept out of sync scope deliberately, so once a user's fabric
-    /// reconciles, every node learns about every expert while exactly one of
-    /// them can actually open the file. A node that registered them all would
-    /// route to an adapter it does not have and fail at serve time, on a path
-    /// that looks perfectly valid in the row.
+    /// This matters because the row travels and the weights do not travel
+    /// with it. The row reaches every server on its database and every store
+    /// that syncs with it; the adapter is a file, which sync does not carry.
+    /// So every node learns about every expert while one of them holds the
+    /// file. A node that registered them all would route to an adapter it
+    /// does not have and fail at serve time, on a path that looks perfectly
+    /// valid in the row. A node registers the experts placed on it, and
+    /// pulls another's adapter when it first serves that expert, checked
+    /// against the seal on the row.
     ///
-    /// A field rather than a `placed_on` graph edge: placement is one-to-one
-    /// in v1, because shipping adapters to every genesis node is deferred,
-    /// and an edge earns its keep when a relation is many-to-many or
-    /// traversed. It is neither yet. Shipping an adapter to a second node is
-    /// what would turn this back into an edge.
+    /// A field rather than a `placed_on` graph edge: it names one machine,
+    /// the one that trained the expert, and a node holding a pulled copy
+    /// does not write itself here. An edge earns its keep when a relation is
+    /// many-to-many or traversed, and this is neither.
     #[serde(default)]
     pub placed_on: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -148,12 +150,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cosine_handles_degenerate_inputs() {
+    fn cosine_handles_degenerate_inputs() -> anyhow::Result<()> {
         assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), 1.0);
         assert_eq!(cosine_similarity(&[0.0, 0.0], &[1.0, 1.0]), 0.0);
         assert_eq!(cosine_similarity(&[1.0], &[1.0, 0.0]), 0.0);
         let orth = cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]);
         assert!(orth.abs() < 1e-6);
+        Ok(())
     }
 
     fn placement_expert(placed_on: Option<&str>) -> Expert {
@@ -177,38 +180,41 @@ mod tests {
     /// The row travels and the weights do not. Once a user's nodes reconcile,
     /// every node learns about every expert while exactly one holds each file.
     #[test]
-    fn an_expert_is_servable_only_where_its_adapter_actually_is() {
+    fn an_expert_is_servable_only_where_its_adapter_actually_is() -> anyhow::Result<()> {
         let on_the_rig = placement_expert(Some("the-rig"));
         assert!(on_the_rig.is_placed_on("the-rig"));
         assert!(
             !on_the_rig.is_placed_on("her-laptop"),
             "the laptop would route to a path it cannot open"
         );
+        Ok(())
     }
 
     /// Every expert minted before placement was recorded. There was one machine
     /// then, so "unknown" and "here" were the same answer, and reading it any
     /// other way would un-serve a population that works today.
     #[test]
-    fn an_unplaced_expert_is_servable_anywhere() {
+    fn an_unplaced_expert_is_servable_anywhere() -> anyhow::Result<()> {
         let old = placement_expert(None);
         assert!(old.is_placed_on("the-rig"));
         assert!(old.is_placed_on("her-laptop"));
         assert!(old.is_placed_on("anywhere-at-all"));
+        Ok(())
     }
 
     /// The host name is compared whole. A node is not "the same machine" as one
     /// whose name it happens to start with.
     #[test]
-    fn exemplars_are_read_from_the_card() {
+    fn exemplars_are_read_from_the_card() -> anyhow::Result<()> {
         let mut e = placement_expert(None);
         assert!(e.exemplars().is_empty());
         e.capability_card = serde_json::json!({"exemplars": ["a", 1, "b"]});
         assert_eq!(e.exemplars(), vec!["a".to_string(), "b".to_string()]);
+        Ok(())
     }
 
     #[test]
-    fn only_a_card_marked_standing_has_a_standing_scope() {
+    fn only_a_card_marked_standing_has_a_standing_scope() -> anyhow::Result<()> {
         let mut e = placement_expert(None);
         assert_eq!(e.standing_scope(), None);
         e.capability_card = serde_json::json!({"scope": "everywhere"});
@@ -217,14 +223,16 @@ mod tests {
         assert_eq!(e.standing_scope(), Some("github.com/a/b"));
         e.capability_card = serde_json::json!({"standing": true});
         assert_eq!(e.standing_scope(), None);
+        Ok(())
     }
 
     #[test]
-    fn placement_is_not_a_prefix_match() {
+    fn placement_is_not_a_prefix_match() -> anyhow::Result<()> {
         let node = placement_expert(Some("rig"));
         assert!(node.is_placed_on("rig"));
         assert!(!node.is_placed_on("rig-2"));
         assert!(!node.is_placed_on("the-rig"));
         assert!(!node.is_placed_on(""));
+        Ok(())
     }
 }

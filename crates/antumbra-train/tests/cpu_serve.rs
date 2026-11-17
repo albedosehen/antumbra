@@ -1,6 +1,7 @@
 //! Live CPU check of the serving path: load the Qwen2.5-Coder base on the CPU,
-//! restore an expert trained in bf16 on the GPU, and generate, reporting tokens
-//! per second at one expert's rank and at a four-expert blend's.
+//! restore an expert trained in bf16 on the GPU, and generate, reporting the
+//! two phases apart (reading the prompt, then each token after the first) for
+//! the bare base, at one expert's rank and at a four-expert blend's.
 //!
 //! Gated twice over, as the GPU checks are: the file only compiles under
 //! `--features models`, and the test is `#[ignore]`d and asserts that
@@ -20,40 +21,73 @@
 
 use std::time::Instant;
 
-use antumbra_train::grpo::GrpoLm;
-use antumbra_train::models::QwenCausalLm;
-use antumbra_train::RaftConfig;
+use antumbra_train::models::{GenTiming, QwenCausalLm};
+use antumbra_train::{CausalLm, RaftConfig};
 use candle_core::Device;
 
-const PROMPTS: [&str; 3] = [
+type Outcome<T> = Result<T, Box<dyn std::error::Error>>;
+
+// The last two ask for long answers, so the decode rate is over enough tokens
+// to mean something.
+const PROMPTS: [&str; 4] = [
     "Write a one-line Rust function that adds two i64 values.",
     "Count the lines in notes.txt. Command only.",
-    "Create a git branch for issue #12, \"Add search\". Command only.",
+    "Write a Rust function that reverses a singly linked list, with a comment on each line.",
+    "Explain, step by step, how to rebase a feature branch onto main and resolve a conflict.",
 ];
 
-/// Greedy generation over every prompt: the tokens produced, the seconds
-/// taken, and the first prompt's answer.
-async fn generate_all(model: &mut QwenCausalLm) -> (usize, f64, String) {
-    let (mut tokens, mut secs, mut first) = (0, 0.0, String::new());
+/// Both phases summed over every prompt, and the first prompt's answer.
+struct Run {
+    timing: GenTiming,
+    first: String,
+}
+
+impl Run {
+    /// Prompt tokens read a second.
+    fn prefill(&self) -> f64 {
+        self.timing.prompt_tokens as f64 / self.timing.prompt_secs
+    }
+
+    /// Tokens decoded a second, after each answer's first.
+    fn decode(&self) -> f64 {
+        self.timing.decoded as f64 / self.timing.decode_secs
+    }
+}
+
+/// Greedy generation over every prompt.
+async fn generate_all(model: &mut QwenCausalLm) -> Outcome<Run> {
+    let (mut timing, mut first) = (GenTiming::default(), String::new());
     for p in PROMPTS {
-        let start = Instant::now();
-        let sample = model
-            .sample_group(p, 1)
-            .await
-            .expect("generates on the CPU")
-            .remove(0);
-        secs += start.elapsed().as_secs_f64();
-        tokens += sample.tokens.len();
+        let answer = model
+            .generate(p, 1)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or("one answer was asked for and none came back")?;
+        let t = model.last_timing().ok_or("the generation was not timed")?;
+        timing.prompt_tokens += t.prompt_tokens;
+        timing.prompt_secs += t.prompt_secs;
+        timing.decoded += t.decoded;
+        timing.decode_secs += t.decode_secs;
         if first.is_empty() {
-            first = sample.completion;
+            first = answer;
         }
     }
-    (tokens, secs, first)
+    Ok(Run { timing, first })
+}
+
+/// A freshly loaded model's first generation, and how fast it read that
+/// prompt. A first forward pays for work no later one does, so it is timed
+/// apart and kept out of every rate.
+async fn first_prompt(model: &mut QwenCausalLm) -> Outcome<f64> {
+    model.generate(PROMPTS[0], 1).await?;
+    let t = model.last_timing().ok_or("the generation was not timed")?;
+    Ok(t.prompt_tokens as f64 / t.prompt_secs)
 }
 
 #[tokio::test]
 #[ignore = "live CPU: set ANTUMBRA_CPU_SERVE=1 and run with --release --ignored"]
-async fn an_expert_serves_on_the_cpu() {
+async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
     assert!(
         std::env::var("ANTUMBRA_CPU_SERVE").is_ok(),
         "ANTUMBRA_CPU_SERVE=1 must be set to run this ignored live CPU test"
@@ -61,37 +95,43 @@ async fn an_expert_serves_on_the_cpu() {
     let adapter = std::env::var("ANTUMBRA_CPU_ADAPTER").ok();
     let mut cfg = RaftConfig {
         temperature: 0.0,
-        max_new_tokens: 64,
+        max_new_tokens: 128,
         ..RaftConfig::default()
     };
     if let Ok(base) = std::env::var("ANTUMBRA_CPU_BASE") {
         cfg.base_model = base;
     }
     if let Ok(quant) = std::env::var("ANTUMBRA_CPU_QUANT") {
-        cfg.serve_quant = Some(quant.parse().expect("ANTUMBRA_CPU_QUANT is q8_0 or q4_k"));
+        cfg.serve_quant = Some(quant.parse()?);
     }
     let form = cfg
         .serve_quant
         .map_or("f32".to_string(), |q| format!("{q:?}"));
-    let threads = std::thread::available_parallelism().map_or(0, |n| n.get());
     eprintln!(
-        "base {} ({form}) on the CPU ({threads} threads), adapter {}",
+        "base {} ({form}) on the CPU, adapter {}",
         cfg.base_model,
         adapter.as_deref().unwrap_or("none (fresh)")
     );
 
-    // One expert, at the rank it was trained at, through load_adapter.
+    // One expert, at the rank it was trained at, through load_adapter: a bf16
+    // expert into the f32 model the CPU holds.
     let start = Instant::now();
-    let mut one = QwenCausalLm::load(Device::Cpu, cfg.clone()).expect("the base loads");
+    let mut one = QwenCausalLm::load(Device::Cpu, cfg.clone())?;
     if let Some(a) = &adapter {
-        one.load_adapter(a)
-            .expect("a bf16 expert loads into the f32 model");
+        one.load_adapter(a)?;
     }
     let load_secs = start.elapsed().as_secs_f64();
-    let (tokens, secs, answer) = generate_all(&mut one).await;
+    let cold = first_prompt(&mut one).await?;
+    let own = generate_all(&mut one).await?;
+    eprintln!("rank {}: {:?}", cfg.lora_rank, own.first);
+    assert!(own.timing.decoded > 0, "the expert decoded no tokens");
+
+    // The same model with the adapter's delta off: what the base alone costs
+    // a token, and so what an adapter adds to it.
+    one.set_adapter(false);
+    let bare = generate_all(&mut one).await?;
     drop(one);
-    eprintln!("rank {}: {answer:?}", cfg.lora_rank);
-    assert!(tokens > 0, "the expert produced no tokens");
+    assert!(bare.timing.decoded > 0, "the bare base decoded no tokens");
 
     // A four-expert blend's rank: four quarter-weight copies of the expert,
     // through load_blend, which add up to the expert itself.
@@ -101,21 +141,32 @@ async fn an_expert_serves_on_the_cpu() {
         lora_alpha: cfg.lora_alpha * 4.0,
         ..cfg.clone()
     };
-    let mut four = QwenCausalLm::load(Device::Cpu, blend_cfg).expect("the base loads");
+    let mut four = QwenCausalLm::load(Device::Cpu, blend_cfg)?;
     if let Some(a) = &adapter {
         let specs = vec![(a.clone(), 0.25f32); 4];
-        four.load_blend(&specs).expect("the blend loads");
+        four.load_blend(&specs)?;
     }
-    let (blend_tokens, blend_secs, blend_answer) = generate_all(&mut four).await;
-    eprintln!("rank {blend_rank}: {blend_answer:?}");
-    assert!(blend_tokens > 0, "the blend produced no tokens");
+    first_prompt(&mut four).await?;
+    let blend = generate_all(&mut four).await?;
+    eprintln!("rank {blend_rank}: {:?}", blend.first);
+    assert!(blend.timing.decoded > 0, "the blend decoded no tokens");
 
     eprintln!(
-        "RESULT cpu {form}, {threads} threads: load {load_secs:.1}s; \
-         rank {}: {tokens} tokens in {secs:.1}s = {:.2} tok/s; \
-         rank {blend_rank}: {blend_tokens} tokens in {blend_secs:.1}s = {:.2} tok/s",
+        "RESULT cpu {form}: load {load_secs:.1}s, first prompt read at {cold:.1} tok/s; \
+         bare base: prefill {:.1} tok/s, decode {:.2} tok/s over {}; \
+         rank {}: prefill {:.1} tok/s over {} tokens, decode {:.2} tok/s over {}; \
+         rank {blend_rank}: prefill {:.1} tok/s, decode {:.2} tok/s over {}",
+        bare.prefill(),
+        bare.decode(),
+        bare.timing.decoded,
         cfg.lora_rank,
-        tokens as f64 / secs,
-        blend_tokens as f64 / blend_secs,
+        own.prefill(),
+        own.timing.prompt_tokens,
+        own.decode(),
+        own.timing.decoded,
+        blend.prefill(),
+        blend.decode(),
+        blend.timing.decoded,
     );
+    Ok(())
 }

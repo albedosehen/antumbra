@@ -19,7 +19,7 @@
 
 use std::time::Duration;
 
-use antumbra_core::{Memory, MemoryId, MemoryNetwork, TenantId};
+use antumbra_core::{AntumbraError, Memory, MemoryId, MemoryNetwork, Result, TenantId};
 use antumbra_store::repo::memory;
 use antumbra_sync::{reconcile_all_since, Cursors, Endpoint, ReconcileStats, PENUMBRA_TABLES};
 
@@ -29,18 +29,17 @@ fn mem(id: &str, tenant: &TenantId, content: &str, at: chrono::DateTime<chrono::
 
 #[tokio::test]
 #[ignore = "live ws:// SurrealDB: set ANTUMBRA_SYNC_WS=ws://127.0.0.1:8000/rpc and run with --ignored"]
-async fn incremental_cursors_converge_over_ws() {
-    let url = std::env::var("ANTUMBRA_SYNC_WS").expect(
-        "ANTUMBRA_SYNC_WS must name a live SurrealDB (ws://127.0.0.1:8000/rpc) to run this ignored test",
-    );
+async fn incremental_cursors_converge_over_ws() -> Result<()> {
+    let url = std::env::var("ANTUMBRA_SYNC_WS").map_err(|_| {
+        AntumbraError::other(
+            "ANTUMBRA_SYNC_WS must name a live SurrealDB (ws://127.0.0.1:8000/rpc) to run this ignored test",
+        )
+    })?;
     let user = std::env::var("ANTUMBRA_SYNC_WS_USER").unwrap_or_else(|_| "root".into());
     let pass = std::env::var("ANTUMBRA_SYNC_WS_PASS").unwrap_or_else(|_| "root".into());
 
-    let local = Endpoint::embedded("mem://").connect().await.unwrap();
-    let remote = Endpoint::authoritative(&url, user, pass)
-        .connect()
-        .await
-        .unwrap();
+    let local = Endpoint::embedded("mem://").connect().await?;
+    let remote = Endpoint::authoritative(&url, user, pass).connect().await?;
     let tenant = TenantId::new("ws:sync");
     let mut cursors = Cursors::new();
     let t0 = chrono::Utc::now();
@@ -53,11 +52,8 @@ async fn incremental_cursors_converge_over_ws() {
         &local,
         &mem("ffffffff-0000-0000-0000-0000000000f1", &tenant, "A", t0),
     )
-    .await
-    .unwrap();
-    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
-        .await
-        .unwrap();
+    .await?;
+    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback).await?;
     assert_eq!(
         s,
         ReconcileStats {
@@ -75,11 +71,8 @@ async fn incremental_cursors_converge_over_ws() {
         &local,
         &mem("ffffffff-0000-0000-0000-0000000000f2", &tenant, "B", t1),
     )
-    .await
-    .unwrap();
-    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
-        .await
-        .unwrap();
+    .await?;
+    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback).await?;
     assert_eq!(
         s,
         ReconcileStats {
@@ -94,12 +87,8 @@ async fn incremental_cursors_converge_over_ws() {
     // An update on the remote alone past the watermark is pulled back (the
     // asymmetry: it sits only in the remote's window, provably newer).
     let aid = MemoryId::new("ffffffff-0000-0000-0000-0000000000f1");
-    memory::upsert(&remote, &mem(aid.as_str(), &tenant, "A2", t2))
-        .await
-        .unwrap();
-    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
-        .await
-        .unwrap();
+    memory::upsert(&remote, &mem(aid.as_str(), &tenant, "A2", t2)).await?;
+    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback).await?;
     assert_eq!(
         s,
         ReconcileStats {
@@ -112,22 +101,20 @@ async fn incremental_cursors_converge_over_ws() {
     );
     assert_eq!(
         memory::get(&local, &tenant, &aid)
-            .await
-            .unwrap()
-            .unwrap()
+            .await?
+            .ok_or_else(|| AntumbraError::other("A is missing on the local"))?
             .content,
         "A2",
         "the local took the remote's newer version"
     );
 
     // Converged: another pass over the network moves nothing.
-    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback)
-        .await
-        .unwrap();
+    let s = reconcile_all_since(&local, &remote, PENUMBRA_TABLES, &mut cursors, lookback).await?;
     assert_eq!(
         s,
         ReconcileStats::default(),
         "incremental reconcile settled over ws://"
     );
     eprintln!("RESULT: PASS - incremental cursors converge over ws://");
+    Ok(())
 }

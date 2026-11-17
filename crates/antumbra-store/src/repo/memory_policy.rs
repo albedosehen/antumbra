@@ -8,16 +8,15 @@
 //! builders; no raw SurrealQL.
 
 use surql::query::builder::Query;
-use surql::query::crud::{first, upsert_record};
+use surql::query::crud::first;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{MemoryPolicy, Result, TenantId};
 
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "memory_policy";
+const TABLE: &str = crate::tables::MEMORY_POLICY;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PolicyRow {
@@ -46,42 +45,40 @@ pub async fn get(store: &Store, tenant: &TenantId) -> Result<MemoryPolicy> {
 /// connection.
 pub async fn set(store: &Store, tenant: &TenantId, policy: &MemoryPolicy) -> Result<MemoryPolicy> {
     let policy = policy.clone().clamped();
-    let rid = RecordID::<()>::new(TABLE, key(tenant).as_str()).map_err(map)?;
     let row = PolicyRow {
         tenant_id: tenant.as_str().to_string(),
         policy: policy.clone(),
     };
-    upsert_record(store.client(), &rid, serde_json::to_value(row)?)
-        .await
-        .map_err(map)?;
+    store.put(TABLE, key(tenant).as_str(), &row).await?;
     Ok(policy)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
 
     #[tokio::test]
-    async fn a_workspace_runs_on_the_defaults_until_its_knobs_are_set() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_workspace_runs_on_the_defaults_until_its_knobs_are_set() -> Result<()> {
+        let s = mem_store().await?;
         let ws = TenantId::new("ws:a");
-        assert_eq!(get(&s, &ws).await.unwrap(), MemoryPolicy::default());
+        assert_eq!(get(&s, &ws).await?, MemoryPolicy::default());
 
         let turned = MemoryPolicy {
             bank_half_life_days: 30.0,
             strength_weight: 7.0,
             ..MemoryPolicy::default()
         };
-        let stored = set(&s, &ws, &turned).await.unwrap();
+        let stored = set(&s, &ws, &turned).await?;
         assert_eq!(stored.strength_weight, 1.0, "stored clamped");
-        let back = get(&s, &ws).await.unwrap();
+        let back = get(&s, &ws).await?;
         assert_eq!(back.bank_half_life_days, 30.0);
         assert_eq!(back, stored);
         // Another workspace keeps its own.
         assert_eq!(
-            get(&s, &TenantId::new("ws:b")).await.unwrap(),
+            get(&s, &TenantId::new("ws:b")).await?,
             MemoryPolicy::default()
         );
+        Ok(())
     }
 }
