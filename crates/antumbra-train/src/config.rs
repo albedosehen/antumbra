@@ -71,6 +71,46 @@ impl ServeQuant {
             ServeQuant::Q4K => GgmlDType::Q4K,
         }
     }
+
+    /// How this build serves when nothing says otherwise. A build with no GPU
+    /// backend serves on the CPU, where the dense f32 base reads about 6 GB a
+    /// token, so it serves from Q8_0: about a quarter of the bytes. Neither
+    /// quantized form is the dense base. On two experts' held-out behavior
+    /// tasks Q8_0 reworded 58% of the answers and Q4_K 87%, and 82 and 79 of
+    /// 113 answers passed their checks against the dense base's 85: drops too
+    /// small for that many answers to tell from chance. Q8_0 is the default
+    /// because it moves an expert least (it changes the first-ranked token a
+    /// quarter as often as Q4_K) and decodes about as fast. A GPU build keeps
+    /// the dense base it trained on.
+    pub fn for_build() -> Option<Self> {
+        if cfg!(any(feature = "cuda", feature = "metal")) {
+            None
+        } else {
+            Some(ServeQuant::Q8_0)
+        }
+    }
+
+    /// What an operator's setting names: `auto` is [`Self::for_build`], `off`
+    /// keeps the base dense, and `q8_0` or `q4_k` name a form on any build.
+    pub fn from_setting(setting: &str) -> Result<Option<Self>, antumbra_core::AntumbraError> {
+        match setting.trim().to_ascii_lowercase().as_str() {
+            "auto" | "" => Ok(Self::for_build()),
+            "off" | "none" | "dense" => Ok(None),
+            other => other.parse().map(Some).map_err(|_| {
+                antumbra_core::AntumbraError::other(format!(
+                    "unknown serving quantization `{other}` (use auto, off, q8_0 or q4_k)"
+                ))
+            }),
+        }
+    }
+
+    /// The name a setting or a log line uses for this form.
+    pub fn name(self) -> &'static str {
+        match self {
+            ServeQuant::Q8_0 => "q8_0",
+            ServeQuant::Q4K => "q4_k",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -217,7 +257,9 @@ impl RaftConfig {
     /// penalty, an n-gram block, and nucleus truncation, so generation is the
     /// learned mode without the degeneration greedy/likelihood decoding is prone
     /// to (Holtzman et al, Keskar et al). Training keeps the defaults (off) so
-    /// best-of-K draws stay faithful to the policy.
+    /// best-of-K draws stay faithful to the policy. The base is held the way
+    /// this build serves ([`ServeQuant::for_build`]): quantized where there is
+    /// no GPU backend, so a model loaded from this config there cannot train.
     pub fn for_serving(max_new_tokens: usize, temperature: f64) -> Self {
         Self {
             max_new_tokens,
@@ -225,6 +267,7 @@ impl RaftConfig {
             top_p: 0.9,
             repetition_penalty: 1.2,
             no_repeat_ngram_size: 3,
+            serve_quant: ServeQuant::for_build(),
             ..Self::default()
         }
     }
@@ -335,6 +378,32 @@ mod tests {
         Ok(())
     }
 
+    /// A build with no GPU backend serves quantized unless told otherwise, and
+    /// a GPU build serves dense; either can be told.
+    #[test]
+    fn a_setting_names_the_build_default_a_dense_base_or_a_form() -> Result<()> {
+        let build = if cfg!(any(feature = "cuda", feature = "metal")) {
+            None
+        } else {
+            Some(ServeQuant::Q8_0)
+        };
+        assert_eq!(ServeQuant::for_build(), build);
+        assert_eq!(ServeQuant::from_setting("auto")?, build);
+        assert_eq!(ServeQuant::from_setting("")?, build);
+        for dense in ["off", "none", " Dense "] {
+            assert_eq!(ServeQuant::from_setting(dense)?, None, "{dense}");
+        }
+        for q in [ServeQuant::Q8_0, ServeQuant::Q4K] {
+            assert_eq!(ServeQuant::from_setting(q.name())?, Some(q));
+        }
+        let refused = ServeQuant::from_setting("q2_k");
+        assert!(
+            refused.is_err_and(|e| e.to_string().contains("auto, off, q8_0 or q4_k")),
+            "a setting that names nothing says what a setting may be"
+        );
+        Ok(())
+    }
+
     #[test]
     fn for_serving_turns_the_decode_policy_on() -> Result<()> {
         let cfg = RaftConfig::for_serving(48, 0.0);
@@ -343,6 +412,9 @@ mod tests {
         assert_eq!(cfg.top_p, 0.9);
         assert_eq!(cfg.repetition_penalty, 1.2);
         assert_eq!(cfg.no_repeat_ngram_size, 3);
+        // Serving holds the base as the build serves it; training never does.
+        assert_eq!(cfg.serve_quant, ServeQuant::for_build());
+        assert_eq!(RaftConfig::default().serve_quant, None);
         Ok(())
     }
 }
