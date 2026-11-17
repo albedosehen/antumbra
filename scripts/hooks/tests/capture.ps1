@@ -12,6 +12,18 @@ function Check([string]$What, [bool]$Holds) {
     if ($Holds) { Write-Output "  ok    $What" } else { Write-Output "  FAIL  $What"; $script:failed = 1 }
 }
 
+# Whether `$Out` is the reminder as the agent is given it at the end of a turn:
+# feedback that keeps the turn going, and no block, which an agent reports to
+# its user as a hook that failed.
+function Reminds([string]$Out) {
+    if (-not $Out) { return $false }
+    try { $answer = $Out | ConvertFrom-Json } catch { return $false }
+    $given = $answer.hookSpecificOutput
+    return ($null -ne $given) -and ($given.hookEventName -eq 'Stop') -and
+        ([string]$given.additionalContext -match 'store_memory') -and
+        -not ($answer.PSObject.Properties.Name -contains 'decision')
+}
+
 # --- a surface that records each request body and answers {} -------------------
 $request = Join-Path $work 'request.json'
 $port = Get-Random -Minimum 20000 -Maximum 40000
@@ -63,7 +75,7 @@ foreach ($script:runner in $runners) {
 
     Write-Output 'the end of a turn'
     $out = Invoke-Hook @{ session_id = $session; prompt_id = 'p1'; hook_event_name = 'Stop'; last_assistant_message = 'deployed it blue green' }
-    Check 'still asks for memories before stopping' (($out | ConvertFrom-Json).decision -eq 'block')
+    Check 'reminds the agent to save, as feedback and not as a block' (Reminds $out)
     $sent = if (Test-Path $request) { Get-Content -Raw $request | ConvertFrom-Json } else { $null }
     Check 'reports the turn to the server' ($sent -and $sent.tool -eq 'observe_turn')
     Check 'with its session, turn and answer' ($sent -and $sent.arguments.session -eq $session -and $sent.arguments.turn -eq 'p1' -and $sent.arguments.text -eq 'deployed it blue green')
@@ -86,8 +98,16 @@ foreach ($script:runner in $runners) {
     Check 'and the end of its turn is still reported' ($sent -and $sent.arguments.text -eq 'waiting on a build')
     $env:ANTUMBRA_CAPTURE_EVERY_SECS = '0'
     $out = Invoke-Hook @{ session_id = $session; prompt_id = 'p4'; hook_event_name = 'Stop'; last_assistant_message = 'more' }
-    Check 'unless the interval is set to none, which nudges every turn' (($out | ConvertFrom-Json).decision -eq 'block')
+    Check 'unless the interval is set to none, which nudges every turn' (Reminds $out)
     Remove-Item (Join-Path $run "antumbra-capture-Stop-$session") -ErrorAction SilentlyContinue
+
+    Write-Output 'for an agent that reads only a block'
+    $env:ANTUMBRA_CAPTURE_NUDGE = 'block'
+    $out = Invoke-Hook @{ session_id = "$session-b"; hook_event_name = 'Stop' }
+    Remove-Item Env:ANTUMBRA_CAPTURE_NUDGE
+    $answer = $out | ConvertFrom-Json
+    Check 'the reminder is the block it was' (($answer.decision -eq 'block') -and ([string]$answer.reason -match 'store_memory') -and -not ($answer.PSObject.Properties.Name -contains 'hookSpecificOutput'))
+    Remove-Item (Join-Path $run "antumbra-capture-Stop-$session-b") -ErrorAction SilentlyContinue
 
     Write-Output 'a turn that saved as it went'
     $transcript = Join-Path $work "transcript-$session.jsonl"
@@ -98,14 +118,14 @@ foreach ($script:runner in $runners) {
     # With no interval, so only what the transcript holds decides.
     $env:ANTUMBRA_CAPTURE_EVERY_SECS = '0'
     $out = Invoke-Hook @{ session_id = "$session-s"; hook_event_name = 'Stop'; last_assistant_message = 'nothing new'; transcript_path = $transcript }
-    Check 'the save is not counted a second time' (($out | ConvertFrom-Json).decision -eq 'block')
+    Check 'the save is not counted a second time' (Reminds $out)
     Remove-Item (Join-Path $run "antumbra-capture-Stop-$session-s") -ErrorAction SilentlyContinue
     Add-Content -LiteralPath $transcript -Value '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__antumbra__record_behavior","input":{}}]}}'
     $out = Invoke-Hook @{ session_id = "$session-s"; hook_event_name = 'Stop'; last_assistant_message = 'recorded one'; transcript_path = $transcript }
     Check 'a recorded behavior counts as a save' ($out -eq '')
     Set-Content -LiteralPath $transcript -Value '{"type":"user","message":{"content":[{"type":"tool_result","content":"{\"name\": \"mcp__antumbra__store_memory\"}"}]}}'
     $out = Invoke-Hook @{ session_id = "$session-q"; hook_event_name = 'Stop'; last_assistant_message = 'looked a tool up'; transcript_path = $transcript }
-    Check 'a tool only named inside a result does not' (($out | ConvertFrom-Json).decision -eq 'block')
+    Check 'a tool only named inside a result does not' (Reminds $out)
 
     Write-Output 'a stop the nudge itself caused'
     $out = Invoke-Hook @{ session_id = "$session-a"; hook_event_name = 'Stop'; stop_hook_active = $true; last_assistant_message = 'saved' }
@@ -113,13 +133,19 @@ foreach ($script:runner in $runners) {
     Remove-Item Env:ANTUMBRA_CAPTURE_EVERY_SECS
 
     Write-Output 'a compaction'
-    $null = Invoke-Hook @{ session_id = "$session-c"; hook_event_name = 'PreCompact' }
-    Check 'reports no turn' (-not (Test-Path $request))
-    Remove-Item (Join-Path $run "antumbra-capture-PreCompact-$session-c") -ErrorAction SilentlyContinue
-    # Nudged a moment ago at the end of a turn: a compaction is nudged all the same.
+    # A block here would stop the compaction, and fail the request of an agent
+    # that needed it to get under its context limit. $session was reminded a
+    # moment ago, at the end of a turn above.
     $out = Invoke-Hook @{ session_id = $session; hook_event_name = 'PreCompact' }
-    Check 'is always nudged' (($out | ConvertFrom-Json).decision -eq 'block')
-    Remove-Item (Join-Path $run "antumbra-capture-PreCompact-$session") -ErrorAction SilentlyContinue
+    Check 'reports no turn' (-not (Test-Path $request))
+    Check 'is not blocked: the answer is plain text, with no decision in it' (($out -ne '') -and ($out -notmatch '"decision"') -and -not $out.StartsWith('{'))
+    Check 'says what the summary is to keep' (($out -match 'Not yet stored in Antumbra') -and ($out -match 'store_memory'))
+    Check 'and leaves no sentinel' (-not (Test-Path (Join-Path $run "antumbra-capture-PreCompact-$session")))
+    $out = Invoke-Hook @{ session_id = $session; hook_event_name = 'Stop'; last_assistant_message = 'carried on' }
+    Check 'the turn that ends after it is reminded, though one was a moment ago' (Reminds $out)
+    Remove-Item (Join-Path $run "antumbra-capture-Stop-$session") -ErrorAction SilentlyContinue
+    $out = Invoke-Hook @{ session_id = "$session-c"; hook_event_name = 'PreCompact' }
+    Check 'a session this hook has not seen is answered the same' ($out -match 'Not yet stored in Antumbra')
 
     Write-Output 'with no runtime directory named'
     # As a Windows session runs it: the state goes under the user's local data.
@@ -128,7 +154,7 @@ foreach ($script:runner in $runners) {
     Remove-Item Env:XDG_RUNTIME_DIR
     $env:LOCALAPPDATA = $local
     $out = Invoke-Hook @{ session_id = "$session-w"; hook_event_name = 'Stop' }
-    Check 'still nudges' (($out | ConvertFrom-Json).decision -eq 'block')
+    Check 'still nudges' (Reminds $out)
     $own = Join-Path (Join-Path $local 'antumbra') 'run'
     Check 'and keeps its sentinel under the local data directory' (Test-Path (Join-Path $own "antumbra-capture-Stop-$session-w"))
     $out = Invoke-Hook @{ session_id = "$session-w"; hook_event_name = 'Stop' }
@@ -138,12 +164,18 @@ foreach ($script:runner in $runners) {
 
     Write-Output 'a hostile session id'
     Get-ChildItem $run -Filter 'antumbra-capture-*' | Remove-Item -Force
-    $out = Invoke-Hook @{ session_id = '../../x y'; hook_event_name = 'Stop/../z'; last_assistant_message = 'x' }
-    Check 'is handled like any other' (($out | ConvertFrom-Json).decision -eq 'block')
-    Check 'names the sentinel from the id cut to [A-Za-z0-9_-], under the runtime directory' (Test-Path (Join-Path $run 'antumbra-capture-Stopz-xy'))
-    $others = @(Get-ChildItem $run | Where-Object { $_.Name -ne 'antumbra-capture-Stopz-xy' })
+    $out = Invoke-Hook @{ session_id = '../../x y'; hook_event_name = 'Stop'; last_assistant_message = 'x' }
+    Check 'is handled like any other' (Reminds $out)
+    $own = @('antumbra-capture-Stop-xy', 'antumbra-capture-state-xy')
+    Check 'names its files from the id cut to [A-Za-z0-9_-], under the runtime directory' ((Test-Path (Join-Path $run $own[0])) -and (Test-Path (Join-Path $run $own[1])))
+    $others = @(Get-ChildItem $run | Where-Object { $_.Name -notin $own })
     Check 'and touches nothing else' (($others.Count -eq 0) -and -not (Test-Path (Join-Path $work 'x y')))
     Get-ChildItem $run -Filter 'antumbra-capture-*' | Remove-Item -Force
+
+    Write-Output 'an event this hook does not speak on'
+    $out = Invoke-Hook @{ session_id = "$session-e"; hook_event_name = 'Stop/../z'; last_assistant_message = 'x' }
+    Check 'says nothing and reports nothing' (($out -eq '') -and -not (Test-Path $request))
+    Check 'and writes nothing' (@(Get-ChildItem $run).Count -eq 0)
 }
 
 $listener.Stop()
