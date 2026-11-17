@@ -28,10 +28,20 @@ run() {
     printf '%s' "$1" | PATH="$WORK/bin:$PATH" bash "$HOOK"
 }
 
+# Whether "$1" is the reminder as the agent is given it at the end of a turn:
+# feedback that keeps the turn going, and no block, which an agent reports to
+# its user as a hook that failed.
+reminds() {
+    printf '%s' "$1" | jq -e '
+        (has("decision") | not)
+        and .hookSpecificOutput.hookEventName == "Stop"
+        and (.hookSpecificOutput.additionalContext | test("store_memory"))' > /dev/null 2>&1
+}
+
 echo 'the end of a turn'
 out="$(run '{"session_id":"s1","prompt_id":"p1","hook_event_name":"Stop","last_assistant_message":"deployed it blue green"}')"
-printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
-check 'still asks for memories before stopping' $?
+reminds "$out"
+check 'reminds the agent to save, as feedback and not as a block' $?
 body="$(grep '^{' "$CURL_ARGS" 2>/dev/null)"
 printf '%s' "$body" | jq -e '.tool == "observe_turn"' > /dev/null
 check 'reports the turn to the server' $?
@@ -59,9 +69,15 @@ check 'is let stop without another nudge' $?
 grep '^{' "$CURL_ARGS" 2>/dev/null | jq -e '.arguments.text == "waiting on a build"' > /dev/null
 check 'and the end of its turn is still reported' $?
 out="$(ANTUMBRA_CAPTURE_EVERY_SECS=0 run '{"session_id":"s1","prompt_id":"p4","hook_event_name":"Stop","last_assistant_message":"more"}')"
-printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+reminds "$out"
 check 'unless the interval is set to none, which nudges every turn' $?
 rm -f "$WORK/run/antumbra-capture-Stop-s1"
+
+echo 'for an agent that reads only a block'
+out="$(ANTUMBRA_CAPTURE_NUDGE=block run '{"session_id":"s8","hook_event_name":"Stop"}')"
+printf '%s' "$out" | jq -e '.decision == "block" and (.reason | test("store_memory")) and (has("hookSpecificOutput") | not)' > /dev/null
+check 'the reminder is the block it was' $?
+rm -f "$WORK/run/antumbra-capture-Stop-s8"
 
 echo 'a turn that saved as it went'
 TRANSCRIPT="$WORK/transcript.jsonl"
@@ -73,7 +89,7 @@ check 'is not stopped to save again' $?
 test -e "$CURL_ARGS"
 check 'and the end of its turn is still reported' $?
 out="$(ANTUMBRA_CAPTURE_EVERY_SECS=0 run "$(stop s5 'nothing new')")"
-printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+reminds "$out"
 check 'the save is not counted a second time' $?
 rm -f "$WORK/run/antumbra-capture-Stop-s5"
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__antumbra__record_behavior","input":{}}]}}' >> "$TRANSCRIPT"
@@ -82,7 +98,7 @@ test -z "$out"
 check 'a recorded behavior counts as a save' $?
 printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","content":"{\"name\": \"mcp__antumbra__store_memory\"}"}]}}' > "$TRANSCRIPT"
 out="$(run "$(stop s6 'looked a tool up')")"
-printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+reminds "$out"
 check 'a tool only named inside a result does not' $?
 
 echo 'a stop the nudge itself caused'
@@ -91,30 +107,49 @@ test -z "$out"
 check 'goes through, with no sentinel left to say so' $?
 
 echo 'a compaction'
-run '{"session_id":"s2","hook_event_name":"PreCompact"}' > /dev/null
+# A block here would stop the compaction, and fail the request of an agent
+# that needed it to get under its context limit. s1 was reminded a moment
+# ago, at the end of a turn above.
+out="$(run '{"session_id":"s1","hook_event_name":"PreCompact"}')"
 test ! -e "$CURL_ARGS"
 check 'reports no turn' $?
-# Nudged a moment ago at the end of a turn: a compaction is nudged all the same.
-out="$(run '{"session_id":"s1","hook_event_name":"PreCompact"}')"
-printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
-check 'is always nudged' $?
+case "$out" in ''|'{'*|*'"decision"'*) false ;; *) true ;; esac
+check 'is not blocked: the answer is plain text, with no decision in it' $?
+case "$out" in *'Not yet stored in Antumbra'*store_memory*) true ;; *) false ;; esac
+check 'says what the summary is to keep' $?
+test ! -e "$WORK/run/antumbra-capture-PreCompact-s1"
+check 'and leaves no sentinel' $?
+out="$(run '{"session_id":"s1","hook_event_name":"Stop","last_assistant_message":"carried on"}')"
+reminds "$out"
+check 'the turn that ends after it is reminded, though one was a moment ago' $?
+rm -f "$WORK/run/antumbra-capture-Stop-s1"
+out="$(run '{"session_id":"s2","hook_event_name":"PreCompact"}')"
+case "$out" in *'Not yet stored in Antumbra'*) true ;; *) false ;; esac
+check 'a session this hook has not seen is answered the same' $?
 
 echo 'a hostile session id'
 rm -f "$WORK/run"/antumbra-capture-*
-out="$(run '{"session_id":"../../x y","hook_event_name":"Stop/../z","last_assistant_message":"x"}')"
-printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+out="$(run '{"session_id":"../../x y","hook_event_name":"Stop","last_assistant_message":"x"}')"
+reminds "$out"
 check 'is handled like any other' $?
-test -f "$WORK/run/antumbra-capture-Stopz-xy"
-check 'names the sentinel from the id cut to [A-Za-z0-9_-], under the runtime directory' $?
-test "$(ls "$WORK/run" | wc -l | tr -d ' ')" = 1 && test ! -e "$WORK/x y" && test ! -e "$WORK/run/../x y"
+test -f "$WORK/run/antumbra-capture-Stop-xy" && test -f "$WORK/run/antumbra-capture-state-xy"
+check 'names its files from the id cut to [A-Za-z0-9_-], under the runtime directory' $?
+test "$(ls "$WORK/run" | wc -l | tr -d ' ')" = 2 && test ! -e "$WORK/x y" && test ! -e "$WORK/run/../x y"
 check 'and touches nothing else' $?
 rm -f "$WORK/run"/antumbra-capture-*
+
+echo 'an event this hook does not speak on'
+out="$(run '{"session_id":"s9","hook_event_name":"Stop/../z","last_assistant_message":"x"}')"
+test -z "$out" && test ! -e "$CURL_ARGS"
+check 'says nothing and reports nothing' $?
+test "$(ls "$WORK/run" | wc -l | tr -d ' ')" = 0
+check 'and writes nothing' $?
 
 echo 'no token'
 rm -f "$WORK/run"/antumbra-capture-*
 out="$(printf '%s' '{"session_id":"s3","hook_event_name":"Stop","last_assistant_message":"x"}' |
     ANTUMBRA_TOKEN= ANTUMBRA_TOKEN_FILE="$WORK/none" PATH="$WORK/bin:$PATH" bash "$HOOK")"
-printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null && test ! -e "$CURL_ARGS"
+reminds "$out" && test ! -e "$CURL_ARGS"
 check 'still nudges, and reports nothing' $?
 
 exit "$FAILED"

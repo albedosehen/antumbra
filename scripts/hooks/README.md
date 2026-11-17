@@ -6,7 +6,7 @@ These are template lifecycle hooks that turn Antumbra into your agent's persiste
 | ------------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `antumbra-session-start` | `SessionStart`        | **Bootstrap**: pull the agent's standing conventions + relevant memory from Antumbra and inject them as opening context.                                    |
 | `antumbra-prompt-recall` | `UserPromptSubmit`    | **Recall**: on every message, recall the three memories most relevant to it, scoped to the repository and branch, and inject them with their ids, naming the session so the system can judge the turn. |
-| `antumbra-capture`       | `Stop`, `PreCompact`  | **Capture**: nudge the agent to write non-obvious observations back via `store_memory` before the turn ends or context is compacted (sentinel = fire once). A turn's end is nudged only when one is due: not when the agent has saved since the hook last looked, and not more often than every `ANTUMBRA_CAPTURE_EVERY_SECS`; a compaction always is. At the end of a turn it also reports the turn's last answer (`observe_turn`), so the system can count which recalled memories it drew on ([how](../../docs/integration.md#how-the-system-keeps-its-memories)). |
+| `antumbra-capture`       | `Stop`, `PreCompact`  | **Capture**: remind the agent to write non-obvious observations back via `store_memory` before what it learned is lost. At a turn's end the reminder reaches the agent as feedback that keeps the turn going (`additionalContext`), not as a block, which an agent reports to its user as a hook problem; a sentinel makes it fire once. A turn's end is reminded only when one is due: not when the agent has saved since the hook last looked, and not more often than every `ANTUMBRA_CAPTURE_EVERY_SECS`. Before a compaction it blocks nothing: it tells the summary to keep what has not been stored, and the turn's end after it is reminded. At the end of a turn it also reports the turn's last answer (`observe_turn`), so the system can count which recalled memories it drew on ([how](../../docs/integration.md#how-the-system-keeps-its-memories)). |
 | `strip-attribution`      | `PreToolUse` (git/gh) | **Override**: deny commits/PRs that embed model-vendor attribution, so work is attributed to you.                                                           |
 
 **The easy way.** `antumbra setup local` (or `antumbra setup hosted <url>`) writes the scripts for your OS to `~/.antumbra/hooks`, wires them into `~/.claude/settings.json`, and registers the MCP server with the headers helper below; `antumbra setup check` confirms it. The rest of this page is for wiring them by hand, or into another agent.
@@ -32,6 +32,7 @@ ANTUMBRA_REANCHOR_LOG=~/.antumbra/reanchor.log  # where the last merge report's 
 ANTUMBRA_RECALL_BUDGET_SEC=10          # the per-prompt recall's whole wall-clock budget; keep it under the hook's timeout
 ANTUMBRA_SESSION_BUDGET_SEC=8          # the session bootstrap's whole wall-clock budget; keep it under the hook's timeout
 ANTUMBRA_CAPTURE_EVERY_SECS=600        # the least time between two capture nudges at a turn's end; 0 nudges every turn
+ANTUMBRA_CAPTURE_NUDGE=block           # answer a due nudge with a block, for an agent that does not read Stop feedback (Claude Code before 2.1.163); the agent shows a block to its user as a hook problem
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
@@ -106,9 +107,9 @@ The `.sh` hooks need `jq` and `curl` (preinstalled on most macOS/Linux dev machi
     "UserPromptSubmit": [{ "hooks": [{ "type": "command",
       "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-prompt-recall.ps1", "timeout": 20 }]}],
     "Stop": [{ "hooks": [{ "type": "command",
-      "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
+      "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 10 }]}],
     "PreCompact": [{ "hooks": [{ "type": "command",
-      "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 5 }]}],
+      "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 10 }]}],
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [
         { "type": "command", "command": "bash ./scripts/hooks/strip-attribution.sh", "if": "Bash(git *)", "timeout": 15 },

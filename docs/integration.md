@@ -42,7 +42,7 @@ The script fetches the bootstrap memory and returns it as `additionalContext`. (
 
 ### 2. Capture on stop / before compaction (nothing learned is lost)
 
-A **Stop** hook (and a **PreCompact** hook, for when the context window is about to be summarized) nudges the agent to deposit non-obvious observations back into Antumbra before the turn ends. A sentinel file makes it fire once, not in a loop. This is the write half of memory, and the raw successful traces it leaves are what `antumbra metabolize` later turns into a trained expert.
+A **Stop** hook reminds the agent to deposit non-obvious observations back into Antumbra before the turn ends. The reminder reaches the agent as feedback that keeps the turn going, not as a block, so nothing is reported to the user as a hook problem; a sentinel file makes it fire once, not in a loop. The same hook on **PreCompact**, for when the context window is about to be summarized, blocks nothing: it tells the summary to keep what has not been stored yet, and the end of the turn after it is reminded. This is the write half of memory, and the raw successful traces it leaves are what `antumbra metabolize` later turns into a trained expert.
 
 ```jsonc
 "Stop":       [{ "hooks": [{ "type": "command", "command": "pwsh -NonInteractive -File ./scripts/hooks/antumbra-capture.ps1", "timeout": 10 }]}],
