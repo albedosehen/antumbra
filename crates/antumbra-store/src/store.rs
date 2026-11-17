@@ -213,14 +213,21 @@ impl Store {
     ///
     /// Then the one thing a schema statement cannot do: experts written
     /// before a record was named for its expert are moved to their own
-    /// records (`repo::expert::adopt_ids`). Nothing to do on a store that
-    /// has been through it.
+    /// records (`repo::expert::adopt_ids`), and so are their moves
+    /// (`repo::lifecycle::adopt_ids`). Nothing to do on a store that has
+    /// been through it.
     pub async fn ensure_schema(&self) -> Result<()> {
         let script = schema::schema_statements(self.embed_dim as u32)?.join("\n");
         self.client.query(&script).await.map_err(map)?;
         let moved = crate::repo::expert::adopt_ids(self).await?;
         if moved > 0 {
             eprintln!("antumbra-store: {moved} expert(s) moved to records named for them");
+        }
+        let moved = crate::repo::lifecycle::adopt_ids(self).await?;
+        if moved > 0 {
+            eprintln!(
+                "antumbra-store: {moved} of experts' status changes moved to records named for them"
+            );
         }
         Ok(())
     }

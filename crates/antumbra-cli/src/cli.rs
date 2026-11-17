@@ -312,11 +312,11 @@ pub enum Command {
     /// SurrealDB, last-write-wins by each row's version timestamp. Runs on a
     /// cadence until ctrl-c, or `--once` for a single pass. Replicates the
     /// penumbra tables (memory, edges, compartments, grants, devices, genesis
-    /// requests) and each expert's row across the fleet. An expert's adapter
-    /// is a file and is not carried: a server pulls it for itself, from the
-    /// server that trained the expert or from the archive. A store a server
-    /// holds open cannot be opened here: such a server runs this collector
-    /// itself, with `--sync-remote`.
+    /// requests) and each expert's row and status across the fleet. An
+    /// expert's adapter is a file and is not carried: a server pulls it for
+    /// itself, from the server that trained the expert or from the archive.
+    /// A store a server holds open cannot be opened here: such a server runs
+    /// this collector itself, with `--sync-remote`.
     Sync {
         /// Remote authoritative SurrealDB url, e.g. `ws://host:8000/rpc`.
         #[arg(long)]

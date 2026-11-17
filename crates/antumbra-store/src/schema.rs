@@ -449,7 +449,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         table_schema(tables::EXPERT_TRANSITION)
             .with_mode(TableMode::Schemaless)
             .with_permissions(EXPERT_PERMS)
-            .with_indexes([unique_index("xtrans_seq_uq", ["expert", "seq"])]),
+            .with_indexes([
+                unique_index("xtrans_seq_uq", ["expert", "seq"]),
+                // What changed since: a pass that carries moves between
+                // stores reads `at > since` as a range scan.
+                index("xtrans_at_idx", ["at"]),
+            ]),
         // Each shared expert's leave-one-out contribution per measured
         // generation, the history retirement reads. Readable
         // like the shared population it measures.
