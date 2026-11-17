@@ -63,6 +63,14 @@ pub enum Pending {
     SetMemoryPolicy(MemoryPolicy),
 }
 
+impl Pending {
+    /// Whether going ahead takes something away: a shadow collapsed, a
+    /// boundary deleted. The confirm prompt marks the key that does it.
+    pub fn removes(&self) -> bool {
+        matches!(self, Pending::PruneShadow(_) | Pending::DeleteBoundary(_))
+    }
+}
+
 /// How the body arranges its panels: the graph beside a single focused detail
 /// (`Focused`), the graph beside all three regions at once (`Dashboard`), or the
 /// graph alone, full width (`Graph`).
@@ -871,7 +879,7 @@ impl App {
         crate::theme::ALL[self.theme_idx % crate::theme::ALL.len()]
     }
 
-    /// Advance to the next palette (wraps): shadow -> ember -> mono.
+    /// Advance to the next palette (wraps): night -> mist -> mono.
     pub fn cycle_theme(&mut self) {
         self.theme_idx = (self.theme_idx + 1) % crate::theme::ALL.len();
     }

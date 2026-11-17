@@ -31,7 +31,7 @@ pub(super) fn reward_heatmap(f: &mut Frame, app: &App, area: Rect) {
         &t,
         Span::styled(
             " reward landscape · shadows × steps ",
-            Style::default().fg(t.ink),
+            Style::default().fg(t.ink2),
         ),
     );
     let inner = block.inner(area);
@@ -42,7 +42,7 @@ pub(super) fn reward_heatmap(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "(no shadows, the penumbra is quiet)",
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             ))),
             inner,
         );
@@ -55,7 +55,7 @@ pub(super) fn reward_heatmap(f: &mut Frame, app: &App, area: Rect) {
         if curve.is_empty() {
             lines.push(Line::from(Span::styled(
                 "·".repeat(w),
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             )));
             continue;
         }

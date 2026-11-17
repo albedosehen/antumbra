@@ -34,7 +34,7 @@ use antumbra_core::{FailureBoundary, Shadow};
 
 use crate::app::{App, Focus, LayoutMode, Mode, Page};
 use crate::overlay;
-use crate::theme::Theme;
+use crate::theme::{Theme, Tone};
 
 pub use overlays::overlay_area;
 
@@ -45,6 +45,11 @@ pub fn render(f: &mut Frame, app: &App) {
     if f.area().width < 8 || f.area().height < 3 {
         return;
     }
+    // The page first: the theme's ground behind every cell, and its ink for
+    // whatever a widget draws without a colour of its own. A theme that leaves
+    // the ground to the terminal paints nothing here.
+    let t = app.theme();
+    f.render_widget(Block::default().style(t.page()), f.area());
     let rows = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(1),
@@ -64,7 +69,7 @@ pub fn render(f: &mut Frame, app: &App) {
         overlays::first_run_hint(f, app);
     }
     if app.mode != Mode::Normal {
-        overlay::dim_backdrop(f, f.area());
+        overlay::dim_backdrop(f, &t, f.area());
         match app.mode {
             Mode::Help => overlays::help_overlay(f, app),
             Mode::Palette => overlays::palette_overlay(f, app),
@@ -138,45 +143,61 @@ pub(super) fn visible_window(len: usize, selected: usize, rows: usize) -> (usize
     (offset, sel - offset)
 }
 
-/// A rounded, dim-bordered panel block with a titled, inked header.
+/// A rounded panel block, its border in the line colour and its title in the
+/// secondary ink.
 fn panel<'a>(t: &Theme, title: impl Into<Line<'a>>) -> Block<'a> {
     Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(t.dim))
+        .border_style(Style::default().fg(t.line))
         .title(title.into())
 }
 
-/// A panel whose border and title brighten to the accent when it holds focus:
-/// the dashboard's active-panel indicator.
+/// A panel whose border and title take the accent when it holds focus, so the
+/// one panel the keys drive is the one that is lit.
 fn panel_focused<'a>(t: &Theme, title: &str, focused: bool) -> Block<'a> {
-    let (border, marker) = if focused {
-        (t.accent, "◆ ")
+    let (border, name, marker) = if focused {
+        (t.accent, t.accent, "◆ ")
     } else {
-        (t.dim, "")
+        (t.line, t.ink2, "")
     };
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border))
-        .title(Line::from(format!(" {marker}{title} ")).style(Style::default().fg(border)))
+        .title(Line::from(format!(" {marker}{title} ")).style(Style::default().fg(name)))
 }
 
-/// A bold, accent-colored panel heading (selected item's name).
+/// A panel's heading, the selected item's name: bold, at full strength. The
+/// accent is kept for the selection and for what is in force.
 fn heading<'a>(t: &Theme, text: String) -> Line<'a> {
     Line::from(Span::styled(
         text,
-        Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
     ))
 }
 
+/// A `label  value` row: the label in the secondary ink, the value at full
+/// strength.
 fn kv<'a>(t: &Theme, k: &str, v: &str) -> Line<'a> {
     Line::from(vec![
-        Span::styled(format!("{k:<11}"), Style::default().fg(t.dim)),
-        Span::styled(v.to_string(), Style::default().fg(t.value)),
+        Span::styled(format!("{k:<11}"), Style::default().fg(t.ink2)),
+        Span::styled(v.to_string(), Style::default().fg(t.ink)),
+    ])
+}
+
+/// A `label  ● word` row for a state: its shape and its word, in the state's
+/// colour.
+fn state_row<'a>(t: &Theme, k: &str, tone: Tone, word: &str) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(format!("{k:<11}"), Style::default().fg(t.ink2)),
+        Span::styled(
+            format!("{} {word}", tone.glyph()),
+            Style::default().fg(t.tone(tone)),
+        ),
     ])
 }
 
 /// A horizontal gauge for a `[0,1]` value: `width` cells filled to eighth-of-a-
-/// cell resolution in `color`, the remaining track dim.
+/// cell resolution in `color`, the rest of its track in the line colour.
 fn gauge_spans<'a>(t: &Theme, value: f32, width: u16, color: Color) -> Vec<Span<'a>> {
     const EIGHTHS: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
     let v = (value.clamp(0.0, 1.0) as f64) * width as f64;
@@ -194,17 +215,20 @@ fn gauge_spans<'a>(t: &Theme, value: f32, width: u16, color: Color) -> Vec<Span<
     let track = "─".repeat((width as usize).saturating_sub(cells));
     vec![
         Span::styled(filled, Style::default().fg(color)),
-        Span::styled(track, Style::default().fg(t.dim)),
+        Span::styled(track, Style::default().fg(t.line)),
     ]
 }
 
 /// A `key  ▆▆▆▍──  0.62` row: a labeled gauge with its numeric value.
 fn gauge_row<'a>(t: &Theme, k: &'a str, value: f32, color: Color) -> Line<'a> {
-    let mut spans = vec![Span::styled(format!("{k:<11}"), Style::default().fg(t.dim))];
+    let mut spans = vec![Span::styled(
+        format!("{k:<11}"),
+        Style::default().fg(t.ink2),
+    )];
     spans.extend(gauge_spans(t, value, 12, color));
     spans.push(Span::styled(
         format!(" {value:.2}"),
-        Style::default().fg(t.value),
+        Style::default().fg(t.ink),
     ));
     Line::from(spans)
 }
@@ -213,7 +237,10 @@ fn gauge_row<'a>(t: &Theme, k: &'a str, value: f32, color: Color) -> Line<'a> {
 /// its own value, so a rising (or collapsing) trajectory reads at a glance.
 fn sparkline_row<'a>(t: &Theme, k: &'a str, curve: &[f32]) -> Line<'a> {
     const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-    let mut spans = vec![Span::styled(format!("{k:<11}"), Style::default().fg(t.dim))];
+    let mut spans = vec![Span::styled(
+        format!("{k:<11}"),
+        Style::default().fg(t.ink2),
+    )];
     for &v in curve {
         let level = (v.clamp(0.0, 1.0) * 7.0).round() as usize;
         spans.push(Span::styled(
@@ -224,12 +251,23 @@ fn sparkline_row<'a>(t: &Theme, k: &'a str, curve: &[f32]) -> Line<'a> {
     Line::from(spans)
 }
 
-/// Status color: graduated = success, pruned = dim, in-flight = warning.
-fn shadow_color(t: &Theme, status: &str) -> Color {
+/// What a shadow's status is to the eye: graduated is settled, pruned is
+/// ended, and any other is still under way.
+fn shadow_tone(status: &str) -> Tone {
     match status {
-        "graduated" => t.success,
-        "pruned" => t.dim,
-        _ => t.warning,
+        "graduated" => Tone::Settled,
+        "pruned" => Tone::Ended,
+        _ => Tone::Open,
+    }
+}
+
+/// A boundary in force (actionable: it gates routing) is settled; one that is
+/// only recorded is open.
+fn boundary_tone(b: &FailureBoundary) -> Tone {
+    if b.is_actionable() {
+        Tone::Settled
+    } else {
+        Tone::Open
     }
 }
 
@@ -273,41 +311,53 @@ fn short_scope(scope: &str) -> &str {
         .unwrap_or(scope)
 }
 
-/// A shadow's list row: its status glyph (graduated ✦, pruned ×, in flight
-/// ◌), what it trained and where its reward went. The glyph and the row's
-/// color carry the status, which the training panel spells out; the list is
-/// narrow, and the trained reading at the row's end is what it is read for.
-/// A standing expert's training is named by its scope, shortened; the loop's
-/// by its id and generation.
-fn shadow_row(s: &Shadow) -> String {
-    let glyph = match s.status.as_str() {
-        "graduated" => "✦",
-        "pruned" => "×",
-        _ => "◌",
+/// A list row for something with a state: its shape in the state's colour,
+/// then its text at a strength that follows the state. A list reads by shape
+/// first, and a long one is not painted by the states in it.
+fn state_line<'a>(t: &Theme, tone: Tone, text: String) -> Line<'a> {
+    let strength = match tone {
+        Tone::Settled | Tone::Failed => t.ink,
+        Tone::Open => t.ink2,
+        Tone::Ended => t.ink3,
     };
-    let name = match behavior::shadow_scope(&s.id) {
+    Line::from(vec![
+        Span::styled(
+            format!("{} ", tone.glyph()),
+            Style::default().fg(t.tone(tone)),
+        ),
+        Span::styled(text, Style::default().fg(strength)),
+    ])
+}
+
+/// A shadow's list row: its status shape (graduated ●, pruned ×, under way
+/// ○), what it trained and where its reward went. The shape carries the
+/// status, which the training panel spells out; the list is narrow, and the
+/// trained reading at the row's end is what it is read for. A standing
+/// expert's training is named by its scope, shortened; the loop's by its id
+/// and generation.
+fn shadow_row<'a>(t: &Theme, s: &Shadow) -> Line<'a> {
+    let mut row = match behavior::shadow_scope(&s.id) {
         Some(scope) => short_scope(scope).to_string(),
         None => shadow_name(s),
     };
-    let mut row = format!("{glyph} {name}");
     if let Some(r) = reward_span(&s.reward_curve) {
         row.push_str(" · ");
         row.push_str(&r);
     }
-    row
+    state_line(t, shadow_tone(s.status.as_str()), row)
 }
 
-/// A boundary's list row: actionable ⛔ or open ○, the behavior, then the
+/// A boundary's list row: in force ● or open ○, the behavior, then the
 /// scope its context names, shortened, when it names one (a training's
 /// does). The behavior leads: a standing expert misses several behaviors in
 /// one scope, and with the scope first a narrow list shows the same words on
 /// each of their rows.
-fn boundary_row(b: &FailureBoundary) -> String {
-    let glyph = if b.is_actionable() { "⛔" } else { "○" };
-    match b.fail_context.get("scope").and_then(|s| s.as_str()) {
-        Some(scope) => format!("{glyph} {} · {}", b.behavior, short_scope(scope)),
-        None => format!("{glyph} {}", b.behavior),
-    }
+fn boundary_row<'a>(t: &Theme, b: &FailureBoundary) -> Line<'a> {
+    let row = match b.fail_context.get("scope").and_then(|s| s.as_str()) {
+        Some(scope) => format!("{} · {}", b.behavior, short_scope(scope)),
+        None => b.behavior.clone(),
+    };
+    state_line(t, boundary_tone(b), row)
 }
 
 /// A boundary context's fields as `(key, value)` rows, a string value as it

@@ -55,7 +55,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let block = panel(
         &t,
-        Span::styled(" generational loop ", Style::default().fg(t.ink)),
+        Span::styled(" generational loop ", Style::default().fg(t.ink2)),
     );
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -64,7 +64,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "loop not started; no checkpoint yet",
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             ))),
             inner,
         );
@@ -83,15 +83,9 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
             let idx = offset + i;
             let selected = idx == app.selected_loop;
             let (marker, style) = if selected {
-                (
-                    "▌ ",
-                    Style::default()
-                        .bg(t.sel)
-                        .fg(t.text)
-                        .add_modifier(Modifier::BOLD),
-                )
+                ("▸ ", t.selected().fg(t.ink))
             } else {
-                ("  ", Style::default().fg(t.dim))
+                ("  ", Style::default().fg(t.ink2))
             };
             lines.push(Line::from(vec![
                 Span::styled(marker, Style::default().fg(t.accent)),
@@ -109,21 +103,21 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         if end < app.loop_heads.len() {
             lines.push(Line::from(Span::styled(
                 format!("  + {} more run(s)", app.loop_heads.len() - end),
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             )));
         }
         lines.push(Line::from(""));
     }
 
     lines.push(Line::from(vec![
-        Span::styled("  generation ", Style::default().fg(t.dim)),
+        Span::styled("  generation ", Style::default().fg(t.ink2)),
         Span::styled(
             head.generation.0.to_string(),
-            Style::default().fg(t.value).add_modifier(Modifier::BOLD),
+            Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("    ·    {}    ·    state ", head.run_id.as_str()),
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink2),
         ),
         Span::styled(
             stage_label(head.state),
@@ -137,52 +131,55 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     for (i, &s) in STAGES.iter().enumerate() {
         let current = s == head.state;
         let glyph = if current { "◉" } else { "○" };
-        let color = if current { t.accent } else { t.dim };
+        let color = if current { t.accent } else { t.ink3 };
         let mut style = Style::default().fg(color);
         if current {
             style = style.add_modifier(Modifier::BOLD);
         }
         spans.push(Span::styled(format!("{glyph} {}", stage_label(s)), style));
         if i < STAGES.len() - 1 {
-            spans.push(Span::styled("  →  ", Style::default().fg(t.dim)));
+            spans.push(Span::styled("  →  ", Style::default().fg(t.line)));
         }
     }
-    spans.push(Span::styled("  ↺", Style::default().fg(t.dim)));
+    spans.push(Span::styled("  ↺", Style::default().fg(t.line)));
     lines.push(Line::from(spans));
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("  → ", Style::default().fg(t.accent)),
-        Span::styled(stage_blurb(head.state), Style::default().fg(t.ink)),
+        Span::styled(stage_blurb(head.state), Style::default().fg(t.ink2)),
     ]));
 
     if head.state == LoopState::Paused {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  ‖ paused; resumes into grow",
-            Style::default().fg(t.warning),
+            Style::default().fg(t.ink2),
         )));
     }
 
     lines.push(Line::from(""));
     if app.loop_halt_pending {
+        // A halt asked for is in force until it is reached or canceled: the
+        // accent, which marks what is in force, and not the danger colour,
+        // which is kept for what failed.
         lines.push(Line::from(Span::styled(
-            "  ⚠ halt requested; the loop will stop at the next generation",
-            Style::default().fg(t.warning).add_modifier(Modifier::BOLD),
+            "  ● halt requested; the loop will stop at the next generation",
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             "    cancel via the palette (loop · cancel a pending halt)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     } else {
         lines.push(Line::from(Span::styled(
             "  x · request a graceful halt (stops at the next generation)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     }
     lines.push(Line::from(Span::styled(
         "  enter · inspect this run",
-        Style::default().fg(t.dim),
+        Style::default().fg(t.ink3),
     )));
 
     f.render_widget(Paragraph::new(lines), inner);

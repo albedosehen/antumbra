@@ -11,7 +11,7 @@
 │                                                                                                                      │
 │  → verifiers + critic produce reward signals                                                                         │
 │                                                                                                                      │
-│  ⚠ halt requested; the loop will stop at the next generation                                                         │
+│  ● halt requested; the loop will stop at the next generation                                                         │
 │    cancel via the palette (loop · cancel a pending halt)                                                             │
 │  enter · inspect this run                                                                                            │
 │                                                                                                                      │
@@ -33,4 +33,4 @@
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:loop   t  theme:shadow   ±  cap:144   r  reload   ?  help   :  palet
+ q  quit   ↑↓  select   tab  focus:umbra   []  page:loop   t  theme:night   ±  cap:144   r  reload   ?  help   :  palett

@@ -11,7 +11,7 @@ use crate::app::{App, Focus, Mode, Page};
 use crate::events::EventKind;
 use crate::overlay;
 use crate::scroll;
-use crate::theme::Theme;
+use crate::theme::{Theme, Tone};
 
 use super::{gauge_spans, heading, kv};
 
@@ -59,13 +59,13 @@ pub(super) fn first_run_hint(f: &mut Frame, app: &App) {
     let t = app.theme();
     let area = overlay::centered(f.area(), 64, 11);
     let inner = overlay::modal(f, &t, area, "antumbra");
-    let dim = Style::default().fg(t.dim);
-    let key = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
-    let chip = Style::default().fg(Color::Black).bg(t.ink);
+    let dim = Style::default().fg(t.ink2);
+    let key = Style::default().fg(t.ink).add_modifier(Modifier::BOLD);
+    let chip = t.chip();
     let lines = vec![
         Line::from(Span::styled(
             "  The store is empty: no experts, memory, or loop runs yet.",
-            Style::default().fg(t.value),
+            Style::default().fg(t.ink),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -108,9 +108,9 @@ pub(super) fn connect_overlay(f: &mut Frame, app: &App) {
         return;
     };
     let inner = overlay::modal(f, &t, area, "connect · wire your agent");
-    let dim = Style::default().fg(t.dim);
-    let val = Style::default().fg(t.value);
-    let cmd = Style::default().fg(t.accent);
+    let dim = Style::default().fg(t.ink2);
+    let val = Style::default().fg(t.ink);
+    let cmd = Style::default().fg(t.ink);
     let step = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
     let role = if app.demo {
         "the demo acts on its own store".to_string()
@@ -195,20 +195,25 @@ pub(super) fn confirm_overlay(f: &mut Frame, app: &App) {
     };
     let inner = overlay::modal(f, &t, area, "confirm");
     let prompt = app.pending_prompt().unwrap_or_default();
+    // Going ahead with something that removes is the one chip in the danger
+    // colour; going ahead with anything else is the accent.
+    let removes = app.pending.as_ref().is_some_and(|p| p.removes());
     let lines = vec![
         Line::from(Span::styled(
             format!("  {prompt}"),
-            Style::default().fg(t.alert),
+            Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled(" y ", Style::default().fg(Color::Black).bg(t.alert)),
-            Span::styled("  confirm     ", Style::default().fg(t.ink)),
-            Span::styled(" n ", Style::default().fg(Color::Black).bg(t.ink)),
-            Span::styled("  cancel", Style::default().fg(t.ink)),
+            Span::raw("  "),
+            Span::styled(" y ", t.chip_primary(removes)),
+            Span::styled("  confirm     ", Style::default().fg(t.ink2)),
+            Span::styled(" n ", t.chip()),
+            Span::styled("  cancel", Style::default().fg(t.ink2)),
         ]),
     ];
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+    // Untrimmed, so the prompt keeps its indent and a chip its padding.
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 /// The route-ask (`ask` command): a task query embedded and run through the
@@ -228,13 +233,13 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
 
     let mut head = vec![Line::from(vec![
         Span::styled("ask › ", Style::default().fg(t.accent)),
-        Span::styled(app.ask_query.clone(), Style::default().fg(t.text)),
+        Span::styled(app.ask_query.clone(), Style::default().fg(t.ink)),
         Span::styled("▏", Style::default().fg(t.accent)),
     ])];
     if !app.real_embedder {
         head.push(Line::from(Span::styled(
             "  byte-histogram stand-in · through a server, the server embeds with its model",
-            Style::default().fg(t.warning),
+            Style::default().fg(t.ink2),
         )));
     }
     f.render_widget(Paragraph::new(head), rows[0]);
@@ -242,11 +247,11 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
     let lines: Vec<Line> = match &app.ask_result {
         None => vec![Line::from(Span::styled(
             "  type a task, Enter to route it through the gate",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         ))],
         Some(r) if r.is_empty() => vec![Line::from(Span::styled(
             "  escalates · out of distribution",
-            Style::default().fg(t.warning),
+            Style::default().fg(t.ink2),
         ))],
         Some(r) => r
             .iter()
@@ -254,12 +259,12 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
             .map(|(name, p)| {
                 let mut spans = vec![Span::styled(
                     format!("  {name:<20}"),
-                    Style::default().fg(t.ink),
+                    Style::default().fg(t.ink2),
                 )];
                 spans.extend(gauge_spans(&t, *p, 10, t.accent));
                 spans.push(Span::styled(
                     format!(" {:>3.0}%", p * 100.0),
-                    Style::default().fg(t.value),
+                    Style::default().fg(t.ink),
                 ));
                 Line::from(spans)
             })
@@ -272,7 +277,7 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
 pub(super) fn section<'a>(t: &Theme, label: &str) -> Line<'a> {
     Line::from(Span::styled(
         label.to_string(),
-        Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+        Style::default().fg(t.ink2).add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -281,7 +286,7 @@ pub(super) fn json_lines<'a>(t: &Theme, value: &serde_json::Value) -> Vec<Line<'
     serde_json::to_string_pretty(value)
         .unwrap_or_else(|_| value.to_string())
         .lines()
-        .map(|s| Line::from(Span::styled(format!("  {s}"), Style::default().fg(t.value))))
+        .map(|s| Line::from(Span::styled(format!("  {s}"), Style::default().fg(t.ink))))
         .collect()
 }
 
@@ -301,12 +306,12 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
             Paragraph::new(vec![
                 Line::from(Span::styled(
                     "gate untrained",
-                    Style::default().fg(t.warning).add_modifier(Modifier::BOLD),
+                    Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
                     "routing falls back to heuristic KNN; no learned metric yet",
-                    Style::default().fg(t.dim),
+                    Style::default().fg(t.ink3),
                 )),
             ])
             .wrap(Wrap { trim: true }),
@@ -321,10 +326,10 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
             format!("learned gate · {} experts", router.experts.len()),
         ),
         Line::from(vec![
-            Span::styled("temperature ", Style::default().fg(t.dim)),
+            Span::styled("temperature ", Style::default().fg(t.ink2)),
             Span::styled(
                 format!("{:.2}", router.temperature),
-                Style::default().fg(t.value),
+                Style::default().fg(t.ink),
             ),
         ]),
         kv(&t, "floor", &format!("{:.2}", router.floor)),
@@ -336,7 +341,7 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
     if router.weights.is_empty() {
         l.push(Line::from(Span::styled(
             "  (uniform, no reweighting)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     } else {
         let n = router.weights.len();
@@ -374,7 +379,7 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
     if router.experts.is_empty() {
         l.push(Line::from(Span::styled(
             "  (no experts in the gate)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     }
     for e in &router.experts {
@@ -389,17 +394,15 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
                 .strip_prefix("expert:")
                 .unwrap_or(e.id.as_str());
         let top = top_id.strip_prefix("expert:").unwrap_or(&top_id);
-        let (mark, color) = if healthy {
-            ("✓", t.success)
-        } else {
-            ("✗", t.alert)
-        };
+        // Routed back to itself is settled; routed to another, failed.
+        let tone = if healthy { Tone::Settled } else { Tone::Failed };
+        let (mark, color) = (tone.glyph(), t.tone(tone));
         l.push(Line::from(vec![
-            Span::styled(format!("  {name:<22}→ "), Style::default().fg(t.dim)),
-            Span::styled(format!("{top:<22}"), Style::default().fg(t.value)),
+            Span::styled(format!("  {name:<22}→ "), Style::default().fg(t.ink2)),
+            Span::styled(format!("{top:<22}"), Style::default().fg(t.ink)),
             Span::styled(
                 format!("{:>3.0}%  ", prob * 100.0),
-                Style::default().fg(t.value),
+                Style::default().fg(t.ink),
             ),
             Span::styled(
                 mark,
@@ -441,15 +444,14 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
     );
 }
 
-/// The theme color an event renders in, by kind.
+/// The theme color an event's glyph renders in, by kind: the accent for what
+/// joined the population, strengths of the ink for the rest. The glyph is
+/// what tells the kinds apart.
 fn event_color(t: &Theme, kind: EventKind) -> Color {
     match kind {
-        EventKind::Spawn => t.accent,
-        EventKind::Graduate => t.success,
-        EventKind::Prune => t.alert,
-        EventKind::Freeze => t.value,
-        EventKind::Boundary => t.warning,
-        EventKind::System => t.dim,
+        EventKind::Graduate => t.accent,
+        EventKind::Spawn | EventKind::Freeze | EventKind::Boundary => t.ink2,
+        EventKind::Prune | EventKind::System => t.ink3,
     }
 }
 
@@ -465,7 +467,7 @@ pub(super) fn events_overlay(f: &mut Frame, app: &App) {
         f.render_widget(
             Paragraph::new(Span::styled(
                 "  (no changes yet; training elsewhere will show here)",
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             )),
             inner,
         );
@@ -480,8 +482,8 @@ pub(super) fn events_overlay(f: &mut Frame, app: &App) {
             let ago = (((now - e.at_ms) / 1000.0).max(0.0)) as u64;
             Line::from(vec![
                 Span::styled(format!("{} ", e.kind.glyph()), Style::default().fg(color)),
-                Span::styled(e.text.clone(), Style::default().fg(t.ink)),
-                Span::styled(format!("  {ago}s ago"), Style::default().fg(t.dim)),
+                Span::styled(e.text.clone(), Style::default().fg(t.ink2)),
+                Span::styled(format!("  {ago}s ago"), Style::default().fg(t.ink3)),
             ])
         })
         .collect();
@@ -506,16 +508,16 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
     let group = |label: &str| {
         Line::from(Span::styled(
             label.to_string(),
-            Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+            Style::default().fg(t.ink2).add_modifier(Modifier::BOLD),
         ))
     };
     let bind = |keys: &str, desc: &str| {
         Line::from(vec![
             Span::styled(
                 format!("  {keys:<8}"),
-                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+                Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(desc.to_string(), Style::default().fg(t.ink)),
+            Span::styled(desc.to_string(), Style::default().fg(t.ink2)),
         ])
     };
     let lines = vec![
@@ -530,7 +532,7 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
         bind("[ ] 1-4", "switch page: population/memory/loop/evals"),
         bind("l", "cycle layout: focused/dashboard/graph/table"),
         bind("s", "sort the population table (fitness/name/gen)"),
-        bind("t", "cycle theme: shadow / ember / mono"),
+        bind("t", "cycle theme: night / mist / mono"),
         Line::from(""),
         group("frame rate"),
         bind("+ -", "pin the cap to a refresh rate"),
@@ -564,7 +566,7 @@ pub(super) fn palette_overlay(f: &mut Frame, app: &App) {
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("› ", Style::default().fg(t.accent)),
-            Span::styled(app.palette.query.clone(), Style::default().fg(t.text)),
+            Span::styled(app.palette.query.clone(), Style::default().fg(t.ink)),
             Span::styled("▏", Style::default().fg(t.accent)),
         ])),
         rows[0],
@@ -575,14 +577,14 @@ pub(super) fn palette_overlay(f: &mut Frame, app: &App) {
         f.render_widget(
             Paragraph::new(Span::styled(
                 "  (no matching command)",
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             )),
             rows[1],
         );
     } else {
         let lines: Vec<Line> = matches
             .iter()
-            .map(|c| Line::from(Span::styled(c.label, Style::default().fg(t.ink))))
+            .map(|c| Line::from(Span::styled(c.label, Style::default().fg(t.ink2))))
             .collect();
         scroll::list(
             f,
@@ -613,7 +615,7 @@ pub(super) fn filter_overlay(f: &mut Frame, app: &App) {
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("/ ", Style::default().fg(t.accent)),
-            Span::styled(app.filter.clone(), Style::default().fg(t.text)),
+            Span::styled(app.filter.clone(), Style::default().fg(t.ink)),
             Span::styled("▏", Style::default().fg(t.accent)),
         ])),
         rows[0],
@@ -622,13 +624,13 @@ pub(super) fn filter_overlay(f: &mut Frame, app: &App) {
     let matches = app.filtered();
     if matches.is_empty() {
         f.render_widget(
-            Paragraph::new(Span::styled("  (no match)", Style::default().fg(t.dim))),
+            Paragraph::new(Span::styled("  (no match)", Style::default().fg(t.ink3))),
             rows[1],
         );
     } else {
         let lines: Vec<Line> = matches
             .iter()
-            .map(|(_, label)| Line::from(Span::styled(label.clone(), Style::default().fg(t.ink))))
+            .map(|(_, label)| Line::from(Span::styled(label.clone(), Style::default().fg(t.ink2))))
             .collect();
         scroll::list(
             f,

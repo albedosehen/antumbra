@@ -6,11 +6,11 @@
 ╭ rules · 3 ─────────────────────────────────────────╮╭ skill use · 3 · stalest first ─────────────────────────────────╮
 │The claude-code rules in this compartment were      ││  skill                        workspace        uses  last used │
 │checked against Claude Code 2.1.278 on 2026-09-19.  ││  code-review                  ws:demo          3     2026-09-03│
-│                                                    ││▌ deploy                       ws:demo          1     2026-09-09│
+│                                                    ││▸ deploy                       ws:demo          1     2026-09-09│
 │rule                       workspaces               ││  elegant-design               ws:demo          12    2026-09-18│
-│advisor                    retired                  ││                                                                │
-│agents-md                  current in 1             ││                                                                │
-│mcp-schemas                current in 1             ││                                                                │
+│advisor                    × retired                ││                                                                │
+│agents-md                  ● current in 1           ││                                                                │
+│mcp-schemas                ● current in 1           ││                                                                │
 │                                                    ││                                                                │
 │                                                    ││                                                                │
 │                                                    ││                                                                │
@@ -33,4 +33,4 @@
 │                                                    ││                                                                │
 │                                                    ││                                                                │
 ╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:sovereign   t  theme:shadow   ±  cap:144   r  reload   ?  help   :
+ q  quit   ↑↓  select   tab  focus:umbra   []  page:sovereign   t  theme:night   ±  cap:144   r  reload   ?  help   :  p

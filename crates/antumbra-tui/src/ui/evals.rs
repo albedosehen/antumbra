@@ -1,9 +1,10 @@
 //! The Evals page: the evaluation runs as a table of subject, corpus
 //! task, status, and the regression fingerprint. A `FAIL` on a frozen expert is
-//! the no-forgetting tripwire firing, so failures are alert-colored.
+//! the no-forgetting tripwire firing, so a failure is the one status drawn in
+//! the danger colour, under a shape of its own.
 
 use ratatui::layout::{Constraint, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
@@ -11,17 +12,23 @@ use ratatui::Frame;
 use antumbra_core::EvalStatus;
 
 use crate::app::App;
-use crate::theme::Theme;
+use crate::theme::Tone;
 
 use super::panel;
 
-pub(super) fn status_color(t: &Theme, s: EvalStatus) -> Color {
+/// What a run's status is to the eye: a pass is settled, a failure or an
+/// error failed, and one running or waiting still open.
+pub(super) fn status_tone(s: EvalStatus) -> Tone {
     match s {
-        EvalStatus::Success => t.success,
-        EvalStatus::Failure | EvalStatus::Error => t.alert,
-        EvalStatus::Running => t.warning,
-        EvalStatus::Pending => t.dim,
+        EvalStatus::Success => Tone::Settled,
+        EvalStatus::Failure | EvalStatus::Error => Tone::Failed,
+        EvalStatus::Running | EvalStatus::Pending => Tone::Open,
     }
+}
+
+/// A run's status as its shape and its word: `● pass`, `▲ FAIL`.
+pub(super) fn status_text(s: EvalStatus) -> String {
+    format!("{} {}", status_tone(s).glyph(), status_label(s))
 }
 
 pub(super) fn status_label(s: EvalStatus) -> &'static str {
@@ -46,7 +53,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         app.evals.len(),
         failures
     );
-    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink)));
+    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
 
     if app.evals.is_empty() {
         let inner = block.inner(area);
@@ -54,7 +61,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "no evaluation runs yet; the tripwire is quiet",
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             ))),
             inner,
         );
@@ -68,7 +75,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         Cell::from("status"),
         Cell::from("fingerprint"),
     ])
-    .style(Style::default().fg(t.dim).add_modifier(Modifier::BOLD));
+    .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD));
 
     // Build only on-screen rows so the table scales to long eval histories.
     let visible = (area.height as usize).saturating_sub(3); // borders + header
@@ -83,23 +90,23 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         Row::new(vec![
             Cell::from(Span::styled(
                 e.subject_id.clone(),
-                Style::default().fg(t.text),
+                Style::default().fg(t.ink),
             )),
             Cell::from(Span::styled(
                 e.subject_kind.as_str(),
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink2),
             )),
             Cell::from(Span::styled(
                 e.corpus_task_id.clone(),
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink2),
             )),
             Cell::from(Span::styled(
-                status_label(e.status),
+                status_text(e.status),
                 Style::default()
-                    .fg(status_color(&t, e.status))
+                    .fg(t.tone(status_tone(e.status)))
                     .add_modifier(Modifier::BOLD),
             )),
-            Cell::from(Span::styled(fp, Style::default().fg(t.value))),
+            Cell::from(Span::styled(fp, Style::default().fg(t.ink2))),
         ])
     });
 
@@ -107,19 +114,14 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Min(18),
         Constraint::Length(8),
         Constraint::Length(14),
-        Constraint::Length(8),
+        Constraint::Length(10),
         Constraint::Min(10),
     ];
     let table = Table::new(rows, widths)
         .header(header)
         .block(block)
-        .row_highlight_style(
-            Style::default()
-                .bg(t.sel)
-                .fg(t.text)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▌ ");
+        .row_highlight_style(t.selected())
+        .highlight_symbol("▸ ");
 
     let mut state = TableState::default();
     state.select(Some(rel_sel));

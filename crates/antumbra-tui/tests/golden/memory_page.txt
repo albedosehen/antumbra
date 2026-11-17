@@ -33,4 +33,4 @@
 │                                                                        ││                                            │
 │                                                                        ││                                            │
 ╰────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:memory   t  theme:shadow   ±  cap:144   r  reload   ?  help   :  pal
+ q  quit   ↑↓  select   tab  focus:umbra   []  page:memory   t  theme:night   ±  cap:144   r  reload   ?  help   :  pale
