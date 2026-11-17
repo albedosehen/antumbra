@@ -175,7 +175,7 @@ pub async fn knn_by_capability(store: &Store, query: &[f32], k: usize) -> Result
 /// Whether the record id `at` is the one `key` names: the id's part after
 /// the table, with the brackets or backticks the engine writes around one
 /// that is not a plain word taken off.
-fn is_home(at: &str, key: &str) -> bool {
+pub(crate) fn is_home(at: &str, key: &str) -> bool {
     at.split_once(':').is_some_and(|(_, id)| {
         let id = id.strip_prefix('⟨').unwrap_or(id);
         let id = id.strip_suffix('⟩').unwrap_or(id);

@@ -360,3 +360,170 @@ async fn a_pass_signed_in_as_the_user_has_their_expert_refused_and_counts_it() -
     assert!(held(&remote).await?.is_empty(), "nothing landed");
     Ok(())
 }
+
+fn operator() -> antumbra_core::TransitionCause {
+    antumbra_core::TransitionCause::Operator { note: None }
+}
+
+/// The specs the collector carries an expert under: its row, then its moves.
+fn expert_and_moves() -> Result<&'static [TableSpec]> {
+    let both = PENUMBRA_TABLES
+        .iter()
+        .position(|spec| spec.name == tables::EXPERT)
+        .and_then(|at| PENUMBRA_TABLES.get(at..at + 2))
+        .filter(|both| {
+            both.last()
+                .is_some_and(|spec| spec.name == tables::EXPERT_TRANSITION)
+        });
+    both.ok_or_else(|| AntumbraError::other("an expert's moves are not carried after its row"))
+}
+
+/// What the moves are carried for. Status is not on the expert's row: a
+/// store that had the row alone read the expert as active whatever the store
+/// that trained it had decided since, and went on routing to it.
+#[tokio::test]
+async fn a_demotion_crosses_and_the_expert_is_routed_to_no_more() -> Result<()> {
+    use antumbra_core::ExpertStatus;
+    use antumbra_store::repo::lifecycle;
+    let (laptop, rig) = (mem_store().await?, mem_store().await?);
+    let e = standing(
+        "expert:ws:org:user:lily:behavior:owner/repo",
+        "user:lily",
+        "comp:hers",
+    );
+    expert::insert(&rig, &e).await?;
+    reconcile_all(&laptop, &rig, PENUMBRA_TABLES).await?;
+    assert_eq!(lifecycle::routable(&laptop).await?.len(), 1);
+
+    lifecycle::transition(&rig, &e.id, ExpertStatus::Dormant, operator(), None).await?;
+    let stats = reconcile_all(&laptop, &rig, PENUMBRA_TABLES).await?;
+    assert_eq!((stats.pulled, stats.pushed, stats.refused), (1, 0, 0));
+
+    assert_eq!(
+        lifecycle::status_of(&laptop, &e.id).await?,
+        ExpertStatus::Dormant
+    );
+    assert!(lifecycle::routable(&laptop).await?.is_empty());
+    assert_eq!(
+        lifecycle::servable(&laptop).await?.len(),
+        1,
+        "dormant is still served when named"
+    );
+    // And the next move made on the store it landed on takes the next number,
+    // and crosses back.
+    lifecycle::transition(&laptop, &e.id, ExpertStatus::Active, operator(), None).await?;
+    reconcile_all(&laptop, &rig, PENUMBRA_TABLES).await?;
+    assert_eq!(
+        lifecycle::status_of(&rig, &e.id).await?,
+        ExpertStatus::Active
+    );
+    assert_eq!(lifecycle::history(&rig, &e.id).await?.len(), 2);
+    Ok(())
+}
+
+/// Two stores, apart, each make a different move of one expert: the same
+/// number in its history, so the same record. The later one wins on both,
+/// and both read the same status however many passes run.
+#[tokio::test]
+async fn two_moves_made_apart_under_one_number_settle_on_the_later() -> Result<()> {
+    use antumbra_core::ExpertStatus;
+    use antumbra_store::repo::lifecycle;
+    let (laptop, rig) = (mem_store().await?, mem_store().await?);
+    let e = shared("expert:both");
+    expert::insert(&rig, &e).await?;
+    reconcile_all(&laptop, &rig, PENUMBRA_TABLES).await?;
+
+    lifecycle::transition(&laptop, &e.id, ExpertStatus::Dormant, operator(), None).await?;
+    lifecycle::transition(&rig, &e.id, ExpertStatus::Archived, operator(), None).await?;
+    for _ in 0..3 {
+        reconcile_all(&laptop, &rig, PENUMBRA_TABLES).await?;
+    }
+
+    for (name, store) in [("laptop", &laptop), ("rig", &rig)] {
+        assert_eq!(
+            lifecycle::status_of(store, &e.id).await?,
+            ExpertStatus::Archived,
+            "{name}"
+        );
+        assert_eq!(lifecycle::history(store, &e.id).await?.len(), 1, "{name}");
+    }
+    Ok(())
+}
+
+/// A move from before records were named for their move is a different
+/// record on every store. It is left where it is until its store is opened
+/// again, and carried after.
+#[tokio::test]
+async fn a_move_under_an_engine_assigned_id_is_not_carried_until_its_store_is_opened() -> Result<()>
+{
+    use antumbra_core::ExpertStatus;
+    use antumbra_store::repo::lifecycle;
+    let (laptop, rig) = (mem_store().await?, mem_store().await?);
+    let e = shared("expert:old");
+    expert::insert(&rig, &e).await?;
+    // The move as a server from before wrote it: made on a scratch store,
+    // then put on the rig under an id the engine would assign.
+    let scratch = mem_store().await?;
+    expert::insert(&scratch, &e).await?;
+    lifecycle::transition(&scratch, &e.id, ExpertStatus::Dormant, operator(), None).await?;
+    let mut row = row_repo::list_rows(&scratch, tables::EXPERT_TRANSITION)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| AntumbraError::other("the scratch store kept no move"))?;
+    let Value::Object(fields) = &mut row else {
+        return Err(AntumbraError::other("a stored row is not an object"));
+    };
+    fields.insert(
+        "id".into(),
+        json!(format!("{}:8k2jq0xw1v5n", tables::EXPERT_TRANSITION)),
+    );
+    row_repo::put_row(&rig, &row).await?;
+    assert_eq!(
+        lifecycle::status_of(&rig, &e.id).await?,
+        ExpertStatus::Dormant
+    );
+
+    reconcile_all(&laptop, &rig, PENUMBRA_TABLES).await?;
+    assert_eq!(
+        lifecycle::status_of(&laptop, &e.id).await?,
+        ExpertStatus::Active,
+        "the expert's row crossed and the move did not"
+    );
+
+    rig.ensure_schema().await?;
+    reconcile_all(&laptop, &rig, PENUMBRA_TABLES).await?;
+    assert_eq!(
+        lifecycle::status_of(&laptop, &e.id).await?,
+        ExpertStatus::Dormant
+    );
+    Ok(())
+}
+
+/// Under a scope a pass carries the moves of the user's own experts, with
+/// the experts they are about, and no one else's.
+#[tokio::test]
+async fn a_scoped_pass_carries_the_moves_of_a_user_s_expert_and_no_one_else_s() -> Result<()> {
+    use antumbra_core::ExpertStatus;
+    use antumbra_store::repo::lifecycle;
+    let (local, remote) = org().await?;
+    for id in ["expert:hers", "expert:his", "expert:shared"] {
+        let id = ExpertId::new(id);
+        lifecycle::transition(&local, &id, ExpertStatus::Dormant, operator(), None).await?;
+    }
+    let scope = Scope::resolve(&local, &Fabric::new("ws:org", "user:lily")).await?;
+
+    let stats = reconcile_all_scoped(&local, &remote, expert_and_moves()?, Some(&scope)).await?;
+    assert_eq!(
+        (stats.pushed, stats.refused),
+        (2, 0),
+        "her expert and its move"
+    );
+    let moved = lifecycle::statuses(&remote).await?;
+    assert_eq!(moved.len(), 1);
+    assert_eq!(
+        moved.get(&ExpertId::new("expert:hers")),
+        Some(&ExpertStatus::Dormant)
+    );
+    Ok(())
+}

@@ -95,6 +95,14 @@ impl Scope {
     pub fn holds_expert(&self, row: &Value) -> bool {
         Self::compartment_of(row).is_some_and(|c| self.owned.contains(c))
     }
+
+    /// A move of one of this user's own experts. A move names no compartment;
+    /// it carries its expert's owner, as the engine's read rule for it asks.
+    /// A shared expert's moves name no owner, and like the expert they are
+    /// not a user's to carry.
+    pub fn owns_move(&self, row: &Value) -> bool {
+        Self::field(row, "owner").is_some_and(|owner| owner == self.user)
+    }
 }
 
 /// How a table's rows are narrowed when a collector is scoped to one user.
@@ -185,6 +193,11 @@ mod tests {
         assert!(!scope.holds_expert(&json!({ "compartment": "comp:his" })));
         assert!(!scope.holds_expert(&json!({ "key": "expert:shared" })));
         assert!(!scope.holds_expert(&json!({ "compartment": null })));
+
+        // An expert's moves follow its owner. A shared expert's name none.
+        assert!(scope.owns_move(&json!({ "owner": "user:lily" })));
+        assert!(!scope.owns_move(&json!({ "owner": "user:oslo" })));
+        assert!(!scope.owns_move(&json!({ "expert": "expert:shared", "seq": 0 })));
         Ok(())
     }
 

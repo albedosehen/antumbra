@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use antumbra_store::repo::expert;
+use antumbra_store::repo::{expert, lifecycle};
 use antumbra_store::tables;
 
 use crate::scope::{Replicate, Scope};
@@ -122,9 +122,9 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
     // store and would land as a second one for an expert the other has.
     // Opening a store moves such rows, so the next connection carries them.
     //
-    // Last, though it needs only `compartment` before it: nothing resolves
-    // against an expert's row, and a fault in the newest table then leaves
-    // every table above it reconciled.
+    // After every table that was carried before it, though it needs only
+    // `compartment`: nothing above resolves against an expert's row, and a
+    // fault in a newer table then leaves the older ones reconciled.
     //
     // Under a scope a pass offers the user's standing experts, and the engine
     // refuses them: only an owner connection writes this table. That is
@@ -135,6 +135,30 @@ pub const PENUMBRA_TABLES: &[TableSpec] = &[
         Replicate::Owned(|scope: &Scope, row| scope.holds_expert(row)),
     )
     .carrying(expert::is_own_record),
+    // An expert's moves: where it stands. Status is not on the expert's row;
+    // it is the last of these. A store that had the row and not the moves
+    // read every expert as active, whatever the store that trained it had
+    // decided since: it routed to a demoted expert and served an archived one.
+    //
+    // A move is written once and never rewritten or deleted, so the time it
+    // was made, `at`, is its version, and it needs no tombstone. Its record is
+    // named for its expert and its number in that expert's history, so two
+    // stores that each made a move under one number while apart hold the
+    // same record, and the later of the two wins on both.
+    //
+    // Only a move in its own record is carried, as with the expert: one still
+    // under an engine-assigned id is left where it is until its store is
+    // opened again, which moves it.
+    //
+    // After `expert`, whose row a move is about. Under a scope a pass offers
+    // the moves of the user's own experts, and the engine refuses them as it
+    // refuses the expert: only an owner connection writes either table.
+    TableSpec::new(
+        tables::EXPERT_TRANSITION,
+        "at",
+        Replicate::Owned(|scope: &Scope, row| scope.owns_move(row)),
+    )
+    .carrying(lifecycle::is_own_record),
 ];
 
 #[cfg(test)]
@@ -158,23 +182,28 @@ mod tests {
                 spec.name
             );
         }
-        assert!(PENUMBRA_TABLES.len() >= 7);
+        assert!(PENUMBRA_TABLES.len() >= 8);
         Ok(())
     }
 
-    /// The expert table is the one whose rows are not all carried, and it
-    /// comes after the compartment a standing expert names.
+    /// The expert's two tables are the ones whose rows are not all carried.
+    /// The expert comes after the compartment a standing expert names, and
+    /// its moves after the expert they are about.
     #[test]
-    fn only_the_expert_table_names_the_rows_it_carries() -> Result<()> {
+    fn only_the_experts_tables_name_the_rows_they_carry() -> Result<()> {
         let position = |name: &str| PENUMBRA_TABLES.iter().position(|spec| spec.name == name);
         let narrowed: Vec<&str> = PENUMBRA_TABLES
             .iter()
             .filter(|spec| spec.carried.is_some())
             .map(|spec| spec.name)
             .collect();
-        assert_eq!(narrowed, vec![tables::EXPERT]);
+        assert_eq!(narrowed, vec![tables::EXPERT, tables::EXPERT_TRANSITION]);
         assert!(position(tables::COMPARTMENT) < position(tables::EXPERT));
-        assert_eq!(position(tables::EXPERT), Some(PENUMBRA_TABLES.len() - 1));
+        assert!(position(tables::EXPERT) < position(tables::EXPERT_TRANSITION));
+        assert_eq!(
+            position(tables::EXPERT_TRANSITION),
+            Some(PENUMBRA_TABLES.len() - 1)
+        );
 
         // A table that names none carries any row.
         let memory = PENUMBRA_TABLES
