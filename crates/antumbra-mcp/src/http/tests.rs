@@ -50,12 +50,36 @@ pub(super) async fn state_per_identity(
     state_serving(store, embedder, copal, None, true).await
 }
 
+/// A server state over a fresh store, under `limits` instead of the defaults.
+async fn state_limited(limits: Limits) -> anyhow::Result<Arc<HttpState>> {
+    Ok(state_bounded(
+        mem_store().await?,
+        Arc::new(FixedEmbedder::new(EMBED_DIM)),
+        None,
+        None,
+        false,
+        limits,
+    )
+    .await)
+}
+
 async fn state_serving(
     store: Store,
     embedder: Arc<dyn Embedder>,
     copal: Option<Arc<antumbra_copal::CopalArchive>>,
     pdf: Option<Arc<crate::pdf::PdfRenderer>>,
     per_identity: bool,
+) -> Arc<HttpState> {
+    state_bounded(store, embedder, copal, pdf, per_identity, Limits::default()).await
+}
+
+async fn state_bounded(
+    store: Store,
+    embedder: Arc<dyn Embedder>,
+    copal: Option<Arc<antumbra_copal::CopalArchive>>,
+    pdf: Option<Arc<crate::pdf::PdfRenderer>>,
+    per_identity: bool,
+    limits: Limits,
 ) -> Arc<HttpState> {
     let serving = if per_identity {
         Serving::PerIdentity {
@@ -87,6 +111,7 @@ async fn state_serving(
         profile: None,
         github: None,
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        limits,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
@@ -707,6 +732,7 @@ async fn live_notification_reaches_a_grantees_stream() -> anyhow::Result<()> {
 }
 
 mod experts;
+mod limits;
 mod relics;
 mod shutdown;
 mod telemetry;

@@ -43,6 +43,14 @@ rmcp = { version = "3", features = ["server", "macros", "transport-io", "transpo
 # HTTP surface. axum hosts the streamable-HTTP service; jsonwebtoken verifies the
 # bearer token whose claims become $auth (tenant, user).
 axum = "0.8"
+# The connections are accepted here rather than by `axum::serve`, so each can be
+# given a bound on reading its request headers: hyper's http1 server with
+# hyper-util's tokio glue and tower adapter; tower-http bounds how long a
+# request has to begin its response; tower's `oneshot` drives the router in tests.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["timeout"] }
 jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # The relic viewer's PDF download is printed by a Gotenberg service; the same
 # blocking client the copal archive uses.
@@ -72,8 +80,6 @@ axum-tracing-opentelemetry = { version = "0.42", features = ["tracing_level_info
 antumbra-store = { path = "../antumbra-store", features = ["clap", "testing"] }
 # The canned GitHub transport and the throwaway App key the receiver's tests drive.
 antumbra-github = { path = "../antumbra-github", features = ["testing"] }
-# `oneshot` to drive the axum router in tests without binding a socket.
-tower = { version = "0.5", features = ["util"] }
 # The in-memory span exporter the telemetry tests read the exported spans from,
 # and the level the request spans are opened at.
 opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "testing"] }
