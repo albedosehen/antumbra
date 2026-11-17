@@ -375,6 +375,9 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
             .with_permissions(EXPERT_PERMS)
             .with_indexes([
                 unique_index("expert_key_uq", ["key"]),
+                // What changed since: a pass that carries experts between
+                // stores reads `updated_at > since` as a range scan.
+                index("expert_updated_at_idx", ["updated_at"]),
                 hnsw_index(
                     "expert_cap_hnsw",
                     "capability_vec",
