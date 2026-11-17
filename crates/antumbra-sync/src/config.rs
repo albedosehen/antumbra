@@ -109,7 +109,10 @@ pub struct SyncConfig {
     /// compartments and the shared pool, which is both the privacy answer and
     /// exactly what their session can write back. `ReconcileStats::refused`
     /// should stay at zero -- a refusal on a narrowed table means the
-    /// replication policy and the engine ACL disagree.
+    /// replication policy and the engine ACL disagree. The one table where
+    /// they are known to disagree is `expert`: a user's session reads their
+    /// standing experts and writes none, so each one such a collector offers
+    /// is refused and counted.
     pub fabric: Option<Fabric>,
     /// Delay between reconcile cycles once connected.
     pub interval: Duration,

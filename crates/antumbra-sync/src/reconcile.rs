@@ -207,18 +207,14 @@ async fn reconcile_table_since(
     // Narrow before comparing, not after: a row outside this user's scope is
     // not a row that is missing from the other side, so it must not look like
     // one. Filtering afterwards would leave the pair logic deciding to push
-    // rows it had already agreed not to carry.
+    // rows it had already agreed not to carry. The same holds for a row the
+    // table cannot pair at all, which is left out as owner too.
     //
     // The watermark is taken from the UNNARROWED rows below, on purpose. The
     // cursor tracks how far this pass read, not how much it carried; advancing
     // it only past rows in scope would re-read everything else forever.
-    let (local_kept, remote_kept) = match scope {
-        Some(scope) => (
-            narrow(&local_rows, spec, scope),
-            narrow(&remote_rows, spec, scope),
-        ),
-        None => (local_rows.clone(), remote_rows.clone()),
-    };
+    let local_kept = narrow(&local_rows, spec, scope);
+    let remote_kept = narrow(&remote_rows, spec, scope);
     let stats = reconcile_indexed(local, remote, spec, &local_kept, &remote_kept).await?;
 
     let mut hwm = cursor.to_string();
@@ -234,14 +230,16 @@ async fn reconcile_table_since(
     Ok((stats, hwm))
 }
 
-/// The rows a scoped collector carries from `spec`'s table.
+/// The rows a collector carries from `spec`'s table: those the table can pair
+/// across two stores, and under a `scope` only those in it.
 fn narrow(
     rows: &BTreeMap<String, Value>,
     spec: &TableSpec,
-    scope: &Scope,
+    scope: Option<&Scope>,
 ) -> BTreeMap<String, Value> {
     rows.iter()
-        .filter(|(_, row)| spec.replicate.admits(scope, row))
+        .filter(|(_, row)| spec.carries(row))
+        .filter(|(_, row)| scope.is_none_or(|scope| spec.replicate.admits(scope, row)))
         .map(|(id, row)| (id.clone(), row.clone()))
         .collect()
 }
@@ -331,6 +329,9 @@ fn index_by_id(rows: Vec<Value>) -> BTreeMap<String, Value> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod expert_tests;
 
 #[cfg(test)]
 mod fabric_tests;

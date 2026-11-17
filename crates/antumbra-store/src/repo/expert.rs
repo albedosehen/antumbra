@@ -183,6 +183,19 @@ fn is_home(at: &str, key: &str) -> bool {
     })
 }
 
+/// Whether a raw `expert` row, as [`sync::list_rows`] returns it, sits in the
+/// record its own id names. Only such a row is the same record on every
+/// store that holds the expert, so only such a row can be copied between
+/// two: one still under an engine-assigned id, or one [`adopt_ids`] is partway
+/// through moving, would land as a second record for an expert the other
+/// store has. A row with no record id or no `key` is not one either.
+pub fn is_own_record(row: &Value) -> bool {
+    match (sync::row_id(row), row.get("key").and_then(Value::as_str)) {
+        (Some(at), Some(key)) => is_home(&at, key),
+        _ => false,
+    }
+}
+
 /// Move every expert still under an engine-assigned record id to the record
 /// its own id names, keeping every field: how many were moved. Run when a
 /// store's schema is ensured, as the owner. A store never holds both forms
@@ -604,5 +617,34 @@ mod tests {
         assert!(is_home("expert:plain", "plain"));
         assert!(!is_home("expert:8k2jq0xw1v5n", key));
         assert!(!is_home("expert", key));
+    }
+
+    /// What a pass between two stores asks of a row before it copies it.
+    #[tokio::test]
+    async fn only_a_row_in_its_expert_s_own_record_is_one_to_copy() -> antumbra_core::Result<()> {
+        let s = crate::testing::mem_store().await?;
+        let own = "expert:ws:a:user:b:behavior:owner/repo";
+        insert(&s, &expert(own, unit())).await?;
+        insert(&s, &expert("expert:gone", unit())).await?;
+        delete(&s, &ExpertId::new("expert:gone")).await?;
+        // One from before, and one a move was cut short on.
+        insert_as_before(&s, &expert("expert:old", unit())).await?;
+        let mut marked = expert("expert:cut", unit());
+        marked.id = ExpertId::new(format!("expert:cut{MOVING}"));
+        insert_as_before(&s, &marked).await?;
+
+        let mut copied: Vec<String> = sync::list_rows(&s, TABLE)
+            .await?
+            .iter()
+            .filter(|row| is_own_record(row))
+            .filter_map(|row| row.get("key").and_then(Value::as_str).map(str::to_string))
+            .collect();
+        copied.sort();
+        // The tombstone with it: a delete is carried as its expert's record.
+        assert_eq!(copied, vec!["expert:gone".to_string(), own.to_string()]);
+
+        assert!(!is_own_record(&serde_json::json!({ "key": "expert:a" })));
+        assert!(!is_own_record(&serde_json::json!({ "id": "expert:a" })));
+        Ok(())
     }
 }

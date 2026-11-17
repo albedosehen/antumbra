@@ -1,8 +1,9 @@
 //! Getting an adapter this server does not hold, and keeping a second copy
 //! of the ones it trains.
 //!
-//! An expert's row reaches every server on its database; its weights stay on
-//! the machine that trained it. A server told where that machine's Antumbra
+//! An expert's row reaches every server on its database, and every store
+//! that syncs with it; its weights stay on the machine that trained it. A
+//! server told where that machine's Antumbra
 //! is ([`ExpertSource`]) pulls the adapter the first time it routes to the
 //! expert, checks it against the sha256 on the expert's card, keeps it under
 //! its own adapter directory and serves it from then on without the source.

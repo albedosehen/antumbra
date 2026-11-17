@@ -484,18 +484,20 @@ pub(crate) async fn build_serve(
         quant.map_or("dense", ServeQuant::name)
     );
     let mut engine = MultiAdapterServe::new(base, cfg);
-    // Only the adapters this machine can actually open. The row travels and
-    // the weights do not, so once a user's nodes reconcile, every node learns
-    // about every expert while exactly one holds each file. Registering them
-    // all would route to an adapter that is not here and fail at serve time,
-    // on a path that looks perfectly valid in the row.
+    // Only the adapters this machine trained. An expert's row reaches every
+    // server on its database and every store that syncs with it, and the
+    // adapter does not come with it: it is a file on the node that trained
+    // the expert. Registering them all would route to an adapter that is not
+    // here and fail at serve time, on a path that looks perfectly valid in
+    // the row. One trained elsewhere is pulled and registered when it is
+    // first served, where this server has a source or an archive for it.
     let (mine, elsewhere): (Vec<_>, Vec<_>) = experts.iter().partition(|e| e.is_placed_on(host));
     for e in &mine {
         engine.register(e.id.clone(), e.artifact_uri.clone());
     }
     if !elsewhere.is_empty() {
         eprintln!(
-            "antumbra-mcp: {} of {} experts live on another node and are not served here",
+            "antumbra-mcp: {} of {} experts were trained on another node; each is pulled when it is first served, where this server has a source or an archive for it",
             elsewhere.len(),
             experts.len()
         );
