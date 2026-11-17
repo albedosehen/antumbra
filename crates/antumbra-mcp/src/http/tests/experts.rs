@@ -125,7 +125,7 @@ async fn the_owner_is_given_the_adapter_its_row_names() -> anyhow::Result<()> {
     )?;
     let app = router(holding(&[&mine]).await?);
 
-    let response = ask(&app, Some(&valid_token()), &mine.id).await?;
+    let response = ask(&app, Some(&valid_token()?), &mine.id).await?;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -162,13 +162,13 @@ async fn nobody_is_given_what_is_not_theirs_or_not_what_was_admitted() -> anyhow
 
     let unknown = ExpertId::new("expert:ws:t:user:t:behavior:never-trained");
     let refused = [
-        ("another user", token(TENANT, "user:other"), &mine.id),
-        ("another workspace", token("ws:o", "user:o"), &mine.id),
-        ("an unknown expert", valid_token(), &unknown),
-        ("an expert placed elsewhere", valid_token(), &elsewhere.id),
-        ("a file written over", valid_token(), &changed.id),
-        ("a row naming another file", valid_token(), &misnamed.id),
-        ("an expert with no seal", valid_token(), &unsealed.id),
+        ("another user", token(TENANT, "user:other")?, &mine.id),
+        ("another workspace", token("ws:o", "user:o")?, &mine.id),
+        ("an unknown expert", valid_token()?, &unknown),
+        ("an expert placed elsewhere", valid_token()?, &elsewhere.id),
+        ("a file written over", valid_token()?, &changed.id),
+        ("a row naming another file", valid_token()?, &misnamed.id),
+        ("an expert with no seal", valid_token()?, &unsealed.id),
     ];
     let mut answers = Vec::new();
     for (what, token, id) in &refused {
@@ -179,7 +179,7 @@ async fn nobody_is_given_what_is_not_theirs_or_not_what_was_admitted() -> anyhow
     // One answer for all of them: it does not say which it was.
     assert!(answers.iter().all(|a| a == &answers[0]));
     // And the owner is still given their own.
-    let response = ask(&app, Some(&valid_token()), &mine.id).await?;
+    let response = ask(&app, Some(&valid_token()?), &mine.id).await?;
     assert_eq!(bytes_of(response).await?, b"mine");
     Ok(())
 }
@@ -214,7 +214,7 @@ async fn pulls_past_a_client_s_budget_are_turned_away() -> anyhow::Result<()> {
         b"mine",
     )?;
     let app = router(holding(&[&mine]).await?);
-    let token = valid_token();
+    let token = valid_token()?;
 
     for n in 0..crate::http::experts::PULLS_PER_CLIENT.burst {
         let response = ask(&app, Some(&token), &mine.id).await?;
