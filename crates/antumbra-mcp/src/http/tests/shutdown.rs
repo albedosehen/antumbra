@@ -8,10 +8,24 @@ use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio::sync::{oneshot, Notify};
 
-/// Serves `app` on a free port until the returned sender fires, with `drain`.
+/// Serves `app` on a free port until the returned sender fires, with `drain`,
+/// and the default time for a connection to send its headers.
 async fn start(
     app: Router,
     drain: Duration,
+) -> anyhow::Result<(
+    std::net::SocketAddr,
+    oneshot::Sender<()>,
+    tokio::task::JoinHandle<Result<()>>,
+)> {
+    start_reading_headers_within(app, drain, Limits::default().header_read).await
+}
+
+/// [`start`], giving each connection `header_read` to send its headers.
+async fn start_reading_headers_within(
+    app: Router,
+    drain: Duration,
+    header_read: Duration,
 ) -> anyhow::Result<(
     std::net::SocketAddr,
     oneshot::Sender<()>,
@@ -23,7 +37,7 @@ async fn start(
     let stop_future = async move {
         let _ = stopped.await;
     };
-    let server = tokio::spawn(serve_until(listener, app, stop_future, drain));
+    let server = tokio::spawn(serve_until(listener, app, stop_future, drain, header_read));
     Ok((addr, stop, server))
 }
 
@@ -143,5 +157,38 @@ async fn a_stream_that_never_ends_does_not_hold_the_stop_open() -> anyhow::Resul
         "the open stream had its drain first ({:?})",
         asked.elapsed()
     );
+    Ok(())
+}
+
+/// A connection that opens and never sends its request is closed by the
+/// server once its time to send the headers is up, so a quiet connection does
+/// not stay open for as long as the peer likes.
+#[tokio::test]
+async fn a_connection_that_never_sends_its_request_is_closed_in_time() -> anyhow::Result<()> {
+    let header_read = Duration::from_millis(300);
+    let (addr, stop, server) =
+        start_reading_headers_within(Router::new(), Duration::from_secs(60), header_read).await?;
+    let opened = Instant::now();
+    let conn = TcpStream::connect(addr).await?;
+    // Nothing is sent; the read ends when the server closes the connection.
+    let got = tokio::time::timeout(Duration::from_secs(5), read_until(&conn, |_| false))
+        .await
+        .context("the server closed the quiet connection")??;
+    let held = opened.elapsed();
+    assert!(got.is_empty(), "nothing was answered: {got}");
+    assert!(
+        held >= header_read,
+        "closed no sooner than the bound: {held:?}"
+    );
+    assert!(
+        held < Duration::from_secs(5),
+        "closed about when the bound was up: {held:?}"
+    );
+    let Ok(()) = stop.send(()) else {
+        anyhow::bail!("the server had already gone");
+    };
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .context("returned")???;
     Ok(())
 }

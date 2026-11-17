@@ -47,6 +47,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use axum::body::Body;
@@ -87,6 +88,47 @@ type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
 const MAX_SESSIONS: usize = 4096;
 /// Cap on cached per-tenant resolved embedders.
 const MAX_EMBEDDERS: usize = 1024;
+
+/// The header a request names its session in.
+const SESSION_HEADER: &str = "mcp-session-id";
+
+/// What one identity, one session and one connection may hold open. Fixed
+/// numbers for now; a deployment that needs others changes them here.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Limits {
+    /// Open MCP sessions one identity may hold at once. An `initialize` past
+    /// it is answered `429` until a session closes or goes idle.
+    pub(crate) sessions_per_identity: usize,
+    /// A session that has carried no message for this long is closed, its
+    /// worker with it (rmcp's `keep_alive`).
+    pub(crate) session_idle: Duration,
+    /// How long a request has to begin its response. A body already streaming
+    /// is not bounded by it; a GET /mcp stream begins its response at once.
+    pub(crate) request: Duration,
+    /// How long a connection has to send its request headers.
+    pub(crate) header_read: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            sessions_per_identity: 16,
+            session_idle: Duration::from_secs(5 * 60),
+            request: Duration::from_secs(120),
+            header_read: Duration::from_secs(30),
+        }
+    }
+}
+
+/// An identity's MCP service with the manager of its sessions beside it, so
+/// the sessions open for the identity can be counted, and an admission lock,
+/// so two `initialize`s arriving at the bound cannot both pass the count.
+#[derive(Clone)]
+struct IdentitySessions {
+    service: IdentityService,
+    manager: Arc<LocalSessionManager>,
+    admission: Arc<Mutex<()>>,
+}
 
 /// A bounded, insertion-ordered map: at capacity it evicts the oldest entry
 /// before adding a new key. Bounds the per-identity caches so a long-running
@@ -215,13 +257,16 @@ struct HttpState {
     /// The GitHub App webhook receiver (`POST /github/webhook`), when the
     /// operator configured its secret and the repository-to-workspace map.
     github: Option<Arc<GithubConfig>>,
-    /// One MCP service per identity (provisioned once), all sharing `store`.
-    /// Bounded so a host that sees many distinct identities cannot grow it without
-    /// limit; an evicted identity rebuilds its service on the next request.
     /// The ids of the tokens revoked before their expiry, as the store's
     /// `revoked_token` table had them at the last refresh ([`revocation`]).
     revoked: std::sync::RwLock<std::collections::HashSet<String>>,
-    sessions: Mutex<Bounded<Identity, IdentityService>>,
+    /// What one identity, one session and one connection may hold open.
+    limits: Limits,
+    /// One MCP service per identity (provisioned once), all sharing `store`,
+    /// with the manager of its sessions beside it. Bounded so a host that sees
+    /// many distinct identities cannot grow it without limit; an evicted
+    /// identity rebuilds its service on the next request.
+    sessions: Mutex<Bounded<Identity, IdentitySessions>>,
     /// One server per identity for the REST shim (`/mcp/call`), provisioned once
     /// like `sessions`. Built per request, every hook call and dashboard load
     /// signed in as root, provisioned the identity and re-registered this node
@@ -309,6 +354,7 @@ pub async fn serve(
         profile,
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
@@ -326,7 +372,15 @@ pub async fn serve(
     behaviors::spawn(state.clone());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
-    serve_until(listener, router(state), shutdown_signal(), DRAIN).await
+    let header_read = state.limits.header_read;
+    serve_until(
+        listener,
+        router(state),
+        shutdown_signal(),
+        DRAIN,
+        header_read,
+    )
+    .await
 }
 
 /// How long a stop waits for the requests still open before it returns
@@ -340,35 +394,91 @@ const DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
 /// Serve `app` on `listener` until `stop` resolves, then take no new
 /// connections and give the open ones `drain` to finish before returning
 /// anyway: a request that ends in time ends cleanly, and a stream that never
-/// ends does not hold the stop open.
+/// ends does not hold the stop open. Each connection has `header_read` to
+/// send its request headers. The connections are accepted here rather than by
+/// `axum::serve` for that bound: hyper applies it only once its connection
+/// builder has a timer, and axum's never sets one.
 async fn serve_until(
     listener: tokio::net::TcpListener,
     app: Router,
     stop: impl std::future::Future<Output = ()> + Send + 'static,
-    drain: std::time::Duration,
+    drain: Duration,
+    header_read: Duration,
 ) -> Result<()> {
-    let (stopping, stopped) = tokio::sync::oneshot::channel::<()>();
+    use futures::FutureExt as _;
+    use hyper_util::rt::{TokioIo, TokioTimer};
+    use hyper_util::service::TowerToHyperService;
+    use tower::{Service as _, ServiceExt as _};
+
     // With the peer's address on each request, so the routes that answer
     // without a token can budget each client ([`limit`]).
-    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
-    let serving = axum::serve(listener, app).with_graceful_shutdown(async move {
-        stop.await;
-        eprintln!(
-            "antumbra-mcp: stopping; open requests have {}s to finish",
-            drain.as_secs()
+    let mut make = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+    let mut http = hyper::server::conn::http1::Builder::new();
+    http.timer(TokioTimer::new())
+        .header_read_timeout(header_read);
+    let http = Arc::new(http);
+    // Every connection task waits on `stop_tx.closed()`, which resolves once
+    // the one receiver, held here, is dropped at the stop. Every task holds a
+    // clone of `open_rx`, so `open_tx.closed()` resolves once the last
+    // connection has ended.
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(());
+    let stop_tx = Arc::new(stop_tx);
+    let (open_tx, open_rx) = tokio::sync::watch::channel(());
+    let mut stop = std::pin::pin!(stop);
+    loop {
+        let (io, peer) = tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok(accepted) => accepted,
+                Err(e) => {
+                    // An accept that fails (descriptors run out, a peer reset
+                    // before it was taken) is not the end of serving.
+                    eprintln!("antumbra-mcp: accept failed: {e}");
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    continue;
+                }
+            },
+            () = &mut stop => break,
+        };
+        let app = match tower::ServiceExt::<std::net::SocketAddr>::ready(&mut make).await {
+            Ok(ready) => match ready.call(peer).await {
+                Ok(app) => app,
+                Err(never) => match never {},
+            },
+            Err(never) => match never {},
+        };
+        let app = TowerToHyperService::new(
+            app.map_request(|req: Request<hyper::body::Incoming>| req.map(Body::new)),
         );
-        let _ = stopping.send(());
-    });
-    let drained = async move {
-        // Serving ended and dropped its end without a stop: nothing to drain.
-        if stopped.await.is_err() {
-            std::future::pending::<()>().await;
-        }
-        tokio::time::sleep(drain).await;
-    };
+        let http = http.clone();
+        let stop_tx = stop_tx.clone();
+        let open_rx = open_rx.clone();
+        tokio::spawn(async move {
+            let mut conn = std::pin::pin!(http.serve_connection(TokioIo::new(io), app));
+            // Fused: once the stop has been seen, it is not seen again.
+            let mut stopped = std::pin::pin!(stop_tx.closed().fuse());
+            loop {
+                tokio::select! {
+                    ended = conn.as_mut() => {
+                        if let Err(e) = ended {
+                            tracing::debug!("connection from {peer} ended: {e}");
+                        }
+                        break;
+                    }
+                    () = &mut stopped => conn.as_mut().graceful_shutdown(),
+                }
+            }
+            drop(open_rx);
+        });
+    }
+    drop(stop_rx);
+    drop(open_rx);
+    eprintln!(
+        "antumbra-mcp: stopping; open requests have {}s to finish",
+        drain.as_secs()
+    );
     tokio::select! {
-        served = std::future::IntoFuture::into_future(serving) => served?,
-        () = drained => eprintln!("antumbra-mcp: stopped with requests still open"),
+        () = open_tx.closed() => {}
+        () = tokio::time::sleep(drain) => eprintln!("antumbra-mcp: stopped with requests still open"),
     }
     Ok(())
 }
@@ -470,7 +580,8 @@ async fn propagate(
 /// Every request it serves opens a span, exported when the trace export is on
 /// ([`crate::telemetry`]), except those [`traced`] leaves out.
 fn router(state: Arc<HttpState>) -> Router {
-    Router::new()
+    let request = state.limits.request;
+    let app = Router::new()
         .route("/mcp", any(handle))
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
@@ -478,8 +589,19 @@ fn router(state: Arc<HttpState>) -> Router {
         .merge(dashboard::routes())
         .merge(relics::routes())
         .merge(experts::routes())
-        .with_state(state)
-        .layer(OtelAxumLayer::default().filter(traced))
+        .with_state(state);
+    bounded(app, request).layer(OtelAxumLayer::default().filter(traced))
+}
+
+/// `app` with every request given `request` to begin its response, and `408`
+/// when it has not: the bound on a handler waiting on something that never
+/// answers and on a body that arrives too slowly to be read. A response that
+/// has begun is not cut: a stream's body runs for as long as it runs.
+fn bounded(app: Router, request: Duration) -> Router {
+    app.layer(tower_http::timeout::TimeoutLayer::with_status_code(
+        StatusCode::REQUEST_TIMEOUT,
+        request,
+    ))
 }
 
 /// Whether a request gets a span: everything but what sits under the
@@ -505,7 +627,7 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
         }
     };
 
-    let service = match state.service_for(&identity).await {
+    let sessions = match state.service_for(&identity).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
@@ -523,8 +645,30 @@ async fn handle(State(state): State<Arc<HttpState>>, mut req: Request<Body>) -> 
     // this request's.
     req.extensions_mut()
         .insert(crate::telemetry::RequestTrace::current());
+
+    // A POST that names no session opens one: the one request the identity's
+    // bound applies to. The admission lock is held from the count to the
+    // open, so two arriving at the bound cannot both pass it; rmcp answers an
+    // open as soon as the session exists, so it is held briefly.
+    let opens =
+        req.method() == axum::http::Method::POST && !req.headers().contains_key(SESSION_HEADER);
+    let _admitted = if opens {
+        Some(sessions.admission.lock().await)
+    } else {
+        None
+    };
+    if opens {
+        let open = sessions.manager.sessions.read().await.len();
+        if open >= state.limits.sessions_per_identity {
+            eprintln!(
+                "antumbra-mcp: {}/{} has {open} sessions open; another refused",
+                identity.tenant, identity.user
+            );
+            return too_many_sessions(req, open, &state.limits).await;
+        }
+    }
     // rmcp returns its own boxed body; rewrap it as an axum body.
-    let (parts, body) = service.handle(req).await.into_parts();
+    let (parts, body) = sessions.service.handle(req).await.into_parts();
     Response::from_parts(parts, Body::new(body))
 }
 
@@ -554,9 +698,10 @@ impl HttpState {
         self.access_of(header).map(|a| a.identity)
     }
 
-    /// Get (or first-time provision) the MCP service for an identity. All
-    /// services share the one `store`; only their provenance fields differ.
-    async fn service_for(&self, identity: &Identity) -> Result<IdentityService> {
+    /// Get (or first-time provision) the MCP service for an identity, with the
+    /// manager of its sessions. All services share the one `store`; only
+    /// their provenance fields differ.
+    async fn service_for(&self, identity: &Identity) -> Result<IdentitySessions> {
         if let Some(s) = self.sessions.lock().await.get(identity) {
             return Ok(s.clone());
         }
@@ -566,17 +711,25 @@ impl HttpState {
             .instrument(crate::telemetry::session_stage("session build"))
             .await?
             .with_registry(self.registry.clone());
+        // A session that carries no message for `session_idle` is closed by
+        // its own worker, and rmcp drops it from the manager when the worker
+        // ends, so the manager holds the identity's live sessions and no others.
+        let mut manager = LocalSessionManager::default();
+        manager.session_config.keep_alive = Some(self.limits.session_idle);
+        let manager = Arc::new(manager);
         // The factory clones the (store-sharing) server for each MCP exchange.
-        let service = StreamableHttpService::new(
-            move || Ok(mcp.clone()),
-            Arc::new(LocalSessionManager::default()),
-            server_config(),
-        );
+        let service =
+            StreamableHttpService::new(move || Ok(mcp.clone()), manager.clone(), server_config());
+        let sessions = IdentitySessions {
+            service,
+            manager,
+            admission: Arc::new(Mutex::new(())),
+        };
         self.sessions
             .lock()
             .await
-            .insert(identity.clone(), service.clone());
-        Ok(service)
+            .insert(identity.clone(), sessions.clone());
+        Ok(sessions)
     }
 
     /// The REST shim's server for an identity, built (and the identity
@@ -800,6 +953,37 @@ fn server_config() -> StreamableHttpServerConfig {
 
 fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, "invalid or missing bearer token").into_response()
+}
+
+/// The answer to an `initialize` past its identity's bound: `429` carrying
+/// the JSON-RPC error a client shows, which names the bound and the two ways
+/// past it. The request's own id rides back on it when the body is a request.
+async fn too_many_sessions(req: Request<Body>, open: usize, limits: &Limits) -> Response {
+    let id = axum::body::to_bytes(req.into_body(), 64 * 1024)
+        .await
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|body| body.get("id").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let idle = limits.session_idle.as_secs();
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(header::RETRY_AFTER, idle.to_string())],
+        Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32000,
+                "message": format!(
+                    "{open} sessions are open for this identity, the most it may hold ({}): \
+                     close one with DELETE /mcp and its Mcp-Session-Id, or wait for an idle \
+                     one to close ({idle} s without a message)",
+                    limits.sessions_per_identity
+                ),
+            }
+        })),
+    )
+        .into_response()
 }
 
 fn internal_error() -> Response {
