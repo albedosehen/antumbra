@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use antumbra_core::adapter::EXTENSION;
-pub use antumbra_core::adapter::{Seal, CARD_ADAPTER};
+pub use antumbra_core::adapter::{Seal, CARD_ADAPTER, CARD_COPAL_FILE};
 use antumbra_core::{AntumbraError, Result};
 
 /// The directory a training of a standing expert saves into: under

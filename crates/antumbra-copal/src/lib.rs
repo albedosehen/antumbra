@@ -111,6 +111,25 @@ pub trait CopalTransport: Send + Sync {
             "this copal transport cannot read files",
         ))
     }
+    /// [`Self::put_bytes`] for a file that may be large, such as an adapter. A
+    /// transport that bounds how long a call may take gives this one a budget
+    /// of its own, so the bound that makes a dead copal fail fast does not cut
+    /// off a large upload on a slow link. By default, the same call.
+    fn put_file(
+        &self,
+        url: &str,
+        credential: &CopalCredential,
+        content_type: &str,
+        digest: &str,
+        body: &[u8],
+    ) -> Result<Value> {
+        self.put_bytes(url, credential, content_type, digest, body)
+    }
+    /// [`Self::get_bytes`] for a file that may be large, on the budget
+    /// [`Self::put_file`] has. By default, the same call.
+    fn get_file(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
+        self.get_bytes(url, credential, limit)
+    }
 }
 
 /// The sha256 of `bytes` as copal writes a content digest: 64 lowercase hex
@@ -309,6 +328,7 @@ impl CopalArchive {
                 &body,
                 RELIC_CONTENT_TYPE,
                 html.as_bytes(),
+                Budget::Call,
             )
         })
         .await
@@ -378,6 +398,103 @@ impl CopalArchive {
             .map_err(|e| AntumbraError::other(format!("copal read task panicked: {e}")))?
     }
 
+    /// Archive one admitted adapter: a private copal file at
+    /// `adapters/<the adapter's own file name>`, uploaded as bytes with
+    /// `sha256`, the digest on the adapter's seal, as the one copal verifies.
+    /// The create is idempotent per (workspace, expert, sha256), so a mint
+    /// retried after a failure replays the same file, and an adapter copal
+    /// already holds is not uploaded again.
+    ///
+    /// Refused before any call when `bytes` are not `sha256`, and after it when
+    /// copal's digest of what it holds is not: an archive that is not the
+    /// adapter is worse than none.
+    pub async fn put_adapter(
+        &self,
+        workspace: &str,
+        expert: &antumbra_core::ExpertId,
+        sha256: &str,
+        bytes: Vec<u8>,
+    ) -> Result<ArchivedDocument> {
+        if content_digest(&bytes) != sha256 {
+            return Err(AntumbraError::other(format!(
+                "the adapter of {} is not the sha256 its seal names; nothing was archived",
+                expert.as_str()
+            )));
+        }
+        let credential = self.credential(workspace)?;
+        let base = self.base.clone();
+        let transport = self.transport.clone();
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in workspace
+            .bytes()
+            .chain([0u8])
+            .chain(expert.as_str().bytes())
+            .chain([0u8])
+            .chain(sha256.bytes())
+        {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        let body = json!({
+            "path": format!("adapters/{}", antumbra_core::adapter::file_name(expert, sha256)),
+            "content_type": ADAPTER_CONTENT_TYPE,
+            "access": "private",
+            "idempotency_key": format!("antumbra-adapter-{hash:016x}"),
+            "metadata": {
+                "workspace": workspace,
+                "expert": expert.as_str(),
+                "sha256": sha256,
+                "bytes": bytes.len(),
+            },
+        });
+        let stored = tokio::task::spawn_blocking(move || {
+            create_and_upload(
+                transport.as_ref(),
+                &base,
+                &credential,
+                &body,
+                ADAPTER_CONTENT_TYPE,
+                &bytes,
+                Budget::Transfer,
+            )
+        })
+        .await
+        .map_err(|e| AntumbraError::other(format!("copal adapter task panicked: {e}")))??;
+        if stored.digest != sha256 {
+            return Err(AntumbraError::other(format!(
+                "copal holds sha256 {} for the adapter of {}, whose seal names {sha256}",
+                stored.digest,
+                expert.as_str()
+            )));
+        }
+        Ok(stored)
+    }
+
+    /// The bytes of an archived adapter, read as `workspace` and refused past
+    /// `limit`, which the caller takes from the size on the adapter's seal. On
+    /// the transfer budget, since an adapter is tens of megabytes.
+    ///
+    /// `file_id` comes from an expert's card and becomes part of a URL, so
+    /// only what a copal file id is made of is let through.
+    pub async fn read_adapter(
+        &self,
+        workspace: &str,
+        file_id: &str,
+        limit: u64,
+    ) -> Result<Vec<u8>> {
+        if !is_file_id(file_id) {
+            return Err(AntumbraError::other(format!(
+                "{file_id:?} is not a copal file id"
+            )));
+        }
+        let credential = self.credential(workspace)?;
+        let url = format!("{}/v1/files/{file_id}/content", self.base);
+        let transport = self.transport.clone();
+        tokio::task::spawn_blocking(move || transport.get_file(&url, &credential, limit))
+            .await
+            .map_err(|e| AntumbraError::other(format!("copal adapter task panicked: {e}")))?
+    }
+
     /// The permanent address of a public relic file, which needs no call:
     /// copal's render listener serves public files at `/v1/public/<id>`.
     pub fn public_url(&self, file_id: &str) -> Option<String> {
@@ -438,6 +555,7 @@ impl CopalArchive {
                 &body,
                 "text/plain",
                 content.as_bytes(),
+                Budget::Call,
             )
         })
         .await
@@ -452,6 +570,28 @@ const RELIC_CONTENT_TYPE: &str = "text/html; charset=utf-8";
 /// agent writes, with its images inlined.
 pub const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
 
+/// The content type adapter files are stored with: their bytes, as they are.
+const ADAPTER_CONTENT_TYPE: &str = "application/octet-stream";
+
+/// Whether `text` is what a copal file id is made of: letters, digits, `-`
+/// and `_`, and no more of them than an id has.
+fn is_file_id(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= 64
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Which of the transport's budgets an upload is on.
+#[derive(Clone, Copy)]
+enum Budget {
+    /// A page or a document: the bound every other call has.
+    Call,
+    /// A file that may be large: [`CopalTransport::put_file`].
+    Transfer,
+}
+
 /// Create a file record from `body`, then upload `bytes` to it, declaring
 /// their sha256. A replayed record that already holds exactly these bytes is
 /// not uploaded again, since copal would add a version for identical content.
@@ -463,6 +603,7 @@ fn create_and_upload(
     body: &Value,
     content_type: &str,
     bytes: &[u8],
+    budget: Budget,
 ) -> Result<ArchivedDocument> {
     let created = transport.post_json(&format!("{base}/v1/files"), credential, body)?;
     let file_id = created
@@ -476,13 +617,11 @@ fn create_and_upload(
             digest,
         });
     }
-    let uploaded = transport.put_bytes(
-        &format!("{base}/v1/files/{file_id}/content"),
-        credential,
-        content_type,
-        &digest,
-        bytes,
-    )?;
+    let url = format!("{base}/v1/files/{file_id}/content");
+    let uploaded = match budget {
+        Budget::Call => transport.put_bytes(&url, credential, content_type, &digest, bytes),
+        Budget::Transfer => transport.put_file(&url, credential, content_type, &digest, bytes),
+    }?;
     let digest = uploaded
         .get("digest")
         .and_then(Value::as_str)
