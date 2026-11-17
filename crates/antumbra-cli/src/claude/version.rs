@@ -63,6 +63,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
+    use anyhow::Context;
+
     use super::super::bridge::Instructions;
     use super::super::brief::brief;
     use super::super::{examine, rules, Origin, Os, Standing, Variable};
@@ -99,17 +101,18 @@ mod tests {
     }
 
     #[test]
-    fn versions_compare_by_number_not_by_text() {
+    fn versions_compare_by_number_not_by_text() -> anyhow::Result<()> {
         assert!(at_least("2.1.283", "2.1.281"));
         assert!(at_least("2.1.283", "2.1.283"));
         assert!(!at_least("2.1.278", "2.1.281"));
         assert!(at_least("2.10.0", "2.9.9"));
         assert!(at_least("3", "2.1.283"));
         assert!(!at_least("2.1", "2.1.1"));
+        Ok(())
     }
 
     #[test]
-    fn a_loss_that_ended_is_not_reported_for_releases_after_it() {
+    fn a_loss_that_ended_is_not_reported_for_releases_after_it() -> anyhow::Result<()> {
         let telemetry = [("DISABLE_TELEMETRY", "1")];
         let current = inputs(None, &telemetry);
         for id in ["agents-md", "auto-mode-default", "vscode-starting-mode"] {
@@ -122,10 +125,11 @@ mod tests {
         assert_eq!(examine(&older).findings.len(), rules().len());
         assert_eq!(rules_for("2.1.278").len(), rules().len());
         assert_eq!(rules_for(VERIFIED_AGAINST).len(), rules().len() - 3);
+        Ok(())
     }
 
     #[test]
-    fn remote_control_survives_the_telemetry_switches_alone() {
+    fn remote_control_survives_the_telemetry_switches_alone() -> anyhow::Result<()> {
         let spared = inputs(None, &[("DISABLE_TELEMETRY", "1"), ("DO_NOT_TRACK", "1")]);
         assert!(matches!(
             standing(&spared, "remote-control"),
@@ -156,21 +160,22 @@ mod tests {
                 "{why}"
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn the_brief_tells_the_agent_only_what_is_gone() -> Result<(), String> {
+    fn the_brief_tells_the_agent_only_what_is_gone() -> anyhow::Result<()> {
         let unread = Instructions::Unread(PathBuf::from("/work/AGENTS.md"));
         let mut current = inputs(None, &[("DISABLE_TELEMETRY", "1")]);
         current.instructions = unread.clone();
         let text = brief(&examine(&current), &current.instructions, current.os)
-            .ok_or("sovereign mode said nothing")?;
+            .context("sovereign mode said nothing")?;
         assert!(!text.contains("Remote Control"), "{text}");
         assert!(!text.contains("Read it now"), "{text}");
         let mut older = inputs(Some("2.1.278"), &[("DISABLE_TELEMETRY", "1")]);
         older.instructions = unread;
         let text = brief(&examine(&older), &older.instructions, older.os)
-            .ok_or("sovereign mode said nothing")?;
+            .context("sovereign mode said nothing")?;
         assert!(text.contains("Remote Control"), "{text}");
         assert!(text.contains("Read it now"), "{text}");
         Ok(())

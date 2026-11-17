@@ -204,7 +204,7 @@ pub async fn watch_table(store: &Store, table: &str) -> Result<mpsc::Receiver<Ch
 mod tests {
     use super::*;
     use crate::repo::memory;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::{Memory, MemoryNetwork, TenantId};
 
     // A raw row read from one store and put into another must recreate the same
@@ -212,9 +212,9 @@ mod tests {
     // far side. This is the whole generic-replication contract the collector
     // depends on, and it exercises whatever shape the driver renders `id` in.
     #[tokio::test]
-    async fn a_raw_row_round_trips_between_two_stores() {
-        let src = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let dst = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_raw_row_round_trips_between_two_stores() -> anyhow::Result<()> {
+        let src = mem_store().await?;
+        let dst = mem_store().await?;
         let now = chrono::Utc::now();
         let tenant = TenantId::new("tenant-x");
         let m = Memory::new(
@@ -225,17 +225,19 @@ mod tests {
             0.9,
             now,
         );
-        memory::upsert(&src, &m).await.unwrap();
+        memory::upsert(&src, &m).await?;
 
-        let rows = list_rows(&src, "memory").await.unwrap();
+        let rows = list_rows(&src, "memory").await?;
         assert_eq!(rows.len(), 1, "source has the one memory");
         let row = &rows[0];
-        let id = row_id(row).expect("row carries a record id");
+        let Some(id) = row_id(row) else {
+            anyhow::bail!("the row carries no record id: {row}");
+        };
         assert!(id.starts_with("memory:"), "id is a memory record: {id}");
 
-        assert!(put_row(&dst, row).await.unwrap().landed(), "row replicated");
+        assert!(put_row(&dst, row).await?.landed(), "row replicated");
 
-        let dst_rows = list_rows(&dst, "memory").await.unwrap();
+        let dst_rows = list_rows(&dst, "memory").await?;
         assert_eq!(dst_rows.len(), 1, "destination got exactly one row");
         assert_eq!(
             row_id(&dst_rows[0]).as_deref(),
@@ -244,17 +246,19 @@ mod tests {
         );
 
         // The far side's typed repo can read the replicated row back.
-        let got = memory::get(&dst, &tenant, &m.id).await.unwrap();
-        let got = got.expect("replicated memory is readable by the typed repo");
+        let Some(got) = memory::get(&dst, &tenant, &m.id).await? else {
+            anyhow::bail!("the replicated memory is not readable by the typed repo");
+        };
         assert_eq!(got.content, "deno install lodash");
         assert_eq!(got.confidence, 0.9);
+        Ok(())
     }
 
     // A row's id is data: one carrying a statement names a record, and the
     // statement never runs on the store it is written to.
     #[tokio::test]
-    async fn a_row_id_carrying_a_statement_does_not_run_it() {
-        let dst = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_row_id_carrying_a_statement_does_not_run_it() -> Result<()> {
+        let dst = mem_store().await?;
         let tenant = TenantId::new("tenant-x");
         let kept = Memory::new(
             "11111111-2222-3333-4444-555555555555",
@@ -264,7 +268,7 @@ mod tests {
             0.9,
             chrono::Utc::now(),
         );
-        memory::upsert(&dst, &kept).await.unwrap();
+        memory::upsert(&dst, &kept).await?;
         let row = serde_json::json!({
             "id": "memory:x CONTENT {}; DELETE memory; --",
             "content": "odd",
@@ -272,36 +276,34 @@ mod tests {
         // Written as a record of that name, or refused: either way the
         // DELETE inside the id never runs.
         let _ = put_row(&dst, &row).await;
-        let got = memory::get(&dst, &tenant, &kept.id).await.unwrap();
+        let got = memory::get(&dst, &tenant, &kept.id).await?;
         assert!(got.is_some(), "the statement inside the id did not run");
+        Ok(())
     }
 
     // The incremental cursor fetch returns only rows newer than the watermark
     // (string `>` on the RFC3339 version field), and an empty watermark returns
     // everything -- the full-scan bootstrap path.
     #[tokio::test]
-    async fn list_rows_since_filters_by_version() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn list_rows_since_filters_by_version() -> Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("t");
         let t0 = chrono::Utc::now();
         let t1 = t0 + chrono::Duration::seconds(10);
         let older = mem("00000000-0000-0000-0000-0000000000a1", &tenant, "older", t0);
         let newer = mem("00000000-0000-0000-0000-0000000000a2", &tenant, "newer", t1);
-        memory::upsert(&store, &older).await.unwrap();
-        memory::upsert(&store, &newer).await.unwrap();
+        memory::upsert(&store, &older).await?;
+        memory::upsert(&store, &newer).await?;
 
         // Empty watermark: a full scan returns both.
         assert_eq!(
             list_rows_since(&store, "memory", "updated_at", "")
-                .await
-                .unwrap()
+                .await?
                 .len(),
             2
         );
         // Watermark at the older row's timestamp: only the strictly-newer row.
-        let rows = list_rows_since(&store, "memory", "updated_at", &t0.to_rfc3339())
-            .await
-            .unwrap();
+        let rows = list_rows_since(&store, "memory", "updated_at", &t0.to_rfc3339()).await?;
         assert_eq!(rows.len(), 1, "only the row newer than the watermark");
         assert_eq!(
             rows[0].get("content").and_then(Value::as_str),
@@ -310,10 +312,10 @@ mod tests {
         // Watermark at or past the newest: nothing changed.
         assert!(
             list_rows_since(&store, "memory", "updated_at", &t1.to_rfc3339())
-                .await
-                .unwrap()
+                .await?
                 .is_empty()
         );
+        Ok(())
     }
 
     fn mem(
@@ -329,10 +331,10 @@ mod tests {
     // registered -- proving LIVE SELECT works on the embedded engine (live
     // propagation's foundation), and that the event carries the row.
     #[tokio::test]
-    async fn watch_table_delivers_a_create() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn watch_table_delivers_a_create() -> anyhow::Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("tenant-x");
-        let mut rx = watch_table(&store, "memory").await.unwrap();
+        let mut rx = watch_table(&store, "memory").await?;
 
         let now = chrono::Utc::now();
         let m = Memory::new(
@@ -343,18 +345,23 @@ mod tests {
             0.8,
             now,
         );
-        memory::upsert(&store, &m).await.unwrap();
+        memory::upsert(&store, &m).await?;
 
-        let event = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
-            .await
-            .expect("a change is delivered before the timeout")
-            .expect("the watch channel stays open");
+        let Ok(delivered) =
+            tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv()).await
+        else {
+            anyhow::bail!("no change was delivered before the timeout");
+        };
+        let Some(event) = delivered else {
+            anyhow::bail!("the watch channel closed");
+        };
         assert_eq!(event.action, ChangeAction::Create);
         assert_eq!(
             event.row.get("content").and_then(Value::as_str),
             Some("watched write"),
             "the event carries the written row"
         );
+        Ok(())
     }
 
     // SurrealDB drops a session's LIVE queries when the session signs in as
@@ -365,17 +372,19 @@ mod tests {
     // which the networked server's per-identity mode keeps and its embedded
     // mode, signing its one connection in per request, cannot.
     #[tokio::test]
-    async fn a_tenant_signin_ends_the_owner_watch_on_that_connection() {
+    async fn a_tenant_signin_ends_the_owner_watch_on_that_connection() -> Result<()> {
         use crate::repo::principal;
         use antumbra_core::UserId;
 
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+        // The watch is registered between provisioning and signing in, under
+        // the owner, so the signed-in fixture does not fit here.
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:u");
-        principal::provision(&store, &tenant, &user).await.unwrap();
-        let mut rx = watch_table(&store, "memory").await.unwrap();
+        principal::provision(&store, &tenant, &user).await?;
+        let mut rx = watch_table(&store, "memory").await?;
 
-        store.signin(&tenant, &user).await.unwrap();
+        store.signin(&tenant, &user).await?;
         let m = Memory::new(
             "bbbbbbbb-0000-0000-0000-00000000000b",
             tenant.clone(),
@@ -384,12 +393,13 @@ mod tests {
             0.7,
             chrono::Utc::now(),
         );
-        memory::upsert(&store, &m).await.unwrap();
+        memory::upsert(&store, &m).await?;
 
         let delivered = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await;
         assert!(
             !matches!(delivered, Ok(Some(_))),
             "a LIVE query outlived its connection's change of principal"
         );
+        Ok(())
     }
 }

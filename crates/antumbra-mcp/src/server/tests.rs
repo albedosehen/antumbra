@@ -7,20 +7,23 @@ use antumbra_core::router::{LearnedRouter, RouterExpert};
 use antumbra_core::testing::FixedEmbedder;
 use antumbra_core::{BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Grain};
 use antumbra_store::repo::{expert, router};
+use antumbra_store::testing::mem_store;
 use antumbra_store::EMBED_DIM;
+use anyhow::Context as _;
 use chrono::Utc;
 
 // Ids stay unique even minted back-to-back (potentially within one
 // nanosecond, where the timestamp portion collides): the process-global
 // counter disambiguates, so two sessions cannot mint the same id.
 #[test]
-fn next_id_is_unique_under_a_burst() {
+fn next_id_is_unique_under_a_burst() -> anyhow::Result<()> {
     let ids: std::collections::HashSet<String> = (0..1000).map(|_| next_id("m")).collect();
     assert_eq!(
         ids.len(),
         1000,
         "the process-global counter keeps ids unique"
     );
+    Ok(())
 }
 
 /// An embedder that counts what it was asked to embed.
@@ -45,7 +48,7 @@ impl antumbra_core::ports::Embedder for Counting {
 // embedded or stored; one at the cap goes through, inside the chunk bound.
 #[tokio::test]
 async fn ingest_refuses_a_document_past_the_cap_before_embedding_anything() -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = mem_store().await?;
     let embedder = Arc::new(Counting {
         inner: FixedEmbedder::new(EMBED_DIM),
         calls: std::sync::atomic::AtomicUsize::new(0),
@@ -86,22 +89,13 @@ async fn ingest_refuses_a_document_past_the_cap_before_embedding_anything() -> a
     Ok(())
 }
 
-async fn server() -> McpServer {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-    McpServer::new(
-        store,
-        Arc::new(FixedEmbedder::new(EMBED_DIM)),
-        TenantId::new("ws:test"),
-        UserId::new("user:test"),
-        "test-host".into(),
-        CompartmentId::new("comp:test:default"),
-        None,
-    )
+async fn server() -> anyhow::Result<McpServer> {
+    Ok(McpServer::for_tests(mem_store().await?))
 }
 
 #[tokio::test]
-async fn store_recall_reinforce_list_forget_roundtrip() {
-    let s = server().await;
+async fn store_recall_reinforce_list_forget_roundtrip() -> anyhow::Result<()> {
+    let s = server().await?;
 
     let stored = s
         .store_memory(Parameters(StoreParams {
@@ -113,8 +107,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
             volatile: None,
             compartment: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     let id = stored.0.id.clone();
     assert!(id.starts_with("memory:"));
 
@@ -130,8 +123,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
             floor: None,
             session: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(recalled.0.memories.len(), 1);
     assert!(recalled.0.memories[0].content.contains("deno"));
 
@@ -139,8 +131,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
         .reinforce_memory(Parameters(IdParams {
             memory_id: id.clone(),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(r.0.found);
     assert_eq!(r.0.reinforcement, 1);
 
@@ -151,13 +142,11 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
             limit: None,
             offset: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(listed.0.memories.len(), 1);
 
     s.forget_memory(Parameters(IdParams { memory_id: id }))
-        .await
-        .unwrap();
+        .await?;
     assert!(s
         .list_memories(Parameters(ListParams {
             host: None,
@@ -165,11 +154,11 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
             limit: None,
             offset: None
         }))
-        .await
-        .unwrap()
+        .await?
         .0
         .memories
         .is_empty());
+    Ok(())
 }
 
 /// A memory's view says when it was last written, and reinforcing it moves that
@@ -178,7 +167,7 @@ async fn store_recall_reinforce_list_forget_roundtrip() {
 #[tokio::test]
 async fn a_view_says_when_a_memory_was_last_written_and_reinforcing_moves_it() -> anyhow::Result<()>
 {
-    let s = server().await;
+    let s = server().await?;
     let said = |e: ErrorData| anyhow::anyhow!("{e:?}");
     let stored = s
         .store_memory(Parameters(StoreParams {
@@ -234,7 +223,7 @@ async fn a_view_says_when_a_memory_was_last_written_and_reinforcing_moves_it() -
 #[tokio::test]
 async fn a_recall_scores_each_memory_and_the_score_follows_it_through_the_demotion(
 ) -> anyhow::Result<()> {
-    let s = server().await;
+    let s = server().await?;
     let said = |e: ErrorData| anyhow::anyhow!("{e:?}");
     let store = |content: &str, repo: &str| {
         s.store_memory(Parameters(StoreParams {
@@ -309,7 +298,7 @@ async fn a_recall_scores_each_memory_and_the_score_follows_it_through_the_demoti
 /// Seed several memories then recall: returns the recalled content list in
 /// order. Shared by the rerank tests so the control and reranked runs are
 /// over identical data.
-async fn seed_and_recall(s: &McpServer, query: &str) -> Vec<String> {
+async fn seed_and_recall(s: &McpServer, query: &str) -> anyhow::Result<Vec<String>> {
     for content in [
         "the first ordinary note about scheduling",
         "a second unrelated note on logging config",
@@ -325,10 +314,9 @@ async fn seed_and_recall(s: &McpServer, query: &str) -> Vec<String> {
             volatile: None,
             compartment: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     }
-    s.recall_memories(Parameters(RecallParams {
+    Ok(s.recall_memories(Parameters(RecallParams {
         host: None,
         repo: None,
         branch: None,
@@ -339,94 +327,67 @@ async fn seed_and_recall(s: &McpServer, query: &str) -> Vec<String> {
         floor: None,
         session: None,
     }))
-    .await
-    .unwrap()
+    .await?
     .0
     .memories
     .into_iter()
     .map(|m| m.content)
-    .collect()
+    .collect())
 }
 
 #[tokio::test]
-async fn rerank_promotes_the_cross_encoder_winner_to_top1() {
+async fn rerank_promotes_the_cross_encoder_winner_to_top1() -> anyhow::Result<()> {
     use antumbra_core::testing::ScriptedReranker;
 
     // With a reranker that promotes the "PROMOTE" candidate, it leads.
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-    let reranked = McpServer::new(
-        store,
-        Arc::new(FixedEmbedder::new(EMBED_DIM)),
-        TenantId::new("ws:test"),
-        UserId::new("user:test"),
-        "test-host".into(),
-        CompartmentId::new("comp:test:default"),
-        None,
-    )
-    .with_reranker(Arc::new(ScriptedReranker::promoting_content_substring(
-        "PROMOTE",
-    )));
-    let out = seed_and_recall(&reranked, "how do I install a dependency").await;
+    let reranked = McpServer::for_tests(mem_store().await?).with_reranker(Arc::new(
+        ScriptedReranker::promoting_content_substring("PROMOTE"),
+    ));
+    let out = seed_and_recall(&reranked, "how do I install a dependency").await?;
     assert!(
         out[0].contains("PROMOTE"),
         "the cross-encoder winner is reranked to top-1: {out:?}"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn without_reranker_rrf_order_is_unchanged_control() {
+async fn without_reranker_rrf_order_is_unchanged_control() -> anyhow::Result<()> {
     // The control: the SAME data with no reranker need not put PROMOTE first
     // (the embedding/RRF order stands). This proves the reorder above is the
     // reranker's doing, not an artifact of the data.
-    let plain = server().await;
-    let out = seed_and_recall(&plain, "how do I install a dependency").await;
+    let plain = server().await?;
+    let out = seed_and_recall(&plain, "how do I install a dependency").await?;
     // PROMOTE is not guaranteed top-1 without the cross-encoder; at minimum the
     // ordering is allowed to differ from the reranked run. Assert the control
     // simply returns all four, in some order, without rerank applied.
     assert_eq!(out.len(), 4, "control returns the recalled set: {out:?}");
+    Ok(())
 }
 
 #[tokio::test]
-async fn reranker_error_degrades_to_rrf_order_without_failing() {
+async fn reranker_error_degrades_to_rrf_order_without_failing() -> anyhow::Result<()> {
     use antumbra_core::testing::ScriptedReranker;
 
     // A failing reranker must NOT turn a successful recall into an error.
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-    let s = McpServer::new(
-        store,
-        Arc::new(FixedEmbedder::new(EMBED_DIM)),
-        TenantId::new("ws:test"),
-        UserId::new("user:test"),
-        "test-host".into(),
-        CompartmentId::new("comp:test:default"),
-        None,
-    )
-    .with_reranker(Arc::new(ScriptedReranker::failing()));
-    let out = seed_and_recall(&s, "how do I install a dependency").await;
+    let s = McpServer::for_tests(mem_store().await?)
+        .with_reranker(Arc::new(ScriptedReranker::failing()));
+    let out = seed_and_recall(&s, "how do I install a dependency").await?;
     assert_eq!(
         out.len(),
         4,
         "recall still returns its results when rerank errors: {out:?}"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn rerank_reorders_document_chunks_too() {
+async fn rerank_reorders_document_chunks_too() -> anyhow::Result<()> {
     use antumbra_core::testing::ScriptedReranker;
 
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-    let s = McpServer::new(
-        store,
-        Arc::new(FixedEmbedder::new(EMBED_DIM)),
-        TenantId::new("ws:test"),
-        UserId::new("user:test"),
-        "test-host".into(),
-        CompartmentId::new("comp:test:default"),
-        None,
-    )
-    .with_reranker(Arc::new(ScriptedReranker::promoting_content_substring(
-        "PROMOTE",
-    )));
+    let s = McpServer::for_tests(mem_store().await?).with_reranker(Arc::new(
+        ScriptedReranker::promoting_content_substring("PROMOTE"),
+    ));
     // Two short docs so each is a single chunk; one carries the token.
     s.ingest_document(Parameters(IngestDocumentParams {
         compartment: None,
@@ -435,8 +396,7 @@ async fn rerank_reorders_document_chunks_too() {
         source: None,
         content: "an ordinary chunk about scheduling and logging".into(),
     }))
-    .await
-    .unwrap();
+    .await?;
     s.ingest_document(Parameters(IngestDocumentParams {
         compartment: None,
         provenance: None,
@@ -444,25 +404,24 @@ async fn rerank_reorders_document_chunks_too() {
         source: None,
         content: "PROMOTE: the exact chunk answering the dependency question".into(),
     }))
-    .await
-    .unwrap();
+    .await?;
     let out = s
         .recall_documents(Parameters(RecallDocumentsParams {
             query: "how do I install a dependency".into(),
             top_k: Some(2),
         }))
-        .await
-        .unwrap();
+        .await?;
     let contents: Vec<String> = out.0.chunks.into_iter().map(|c| c.content).collect();
     assert!(
         contents[0].contains("PROMOTE"),
         "reranked chunk leads: {contents:?}"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn relate_and_get_neighbors() {
-    let s = server().await;
+async fn relate_and_get_neighbors() -> anyhow::Result<()> {
+    let s = server().await?;
     let store = |content: &str| StoreParams {
         provenance: None,
         content: content.into(),
@@ -474,14 +433,12 @@ async fn relate_and_get_neighbors() {
     };
     let a = s
         .store_memory(Parameters(store("a deno project")))
-        .await
-        .unwrap()
+        .await?
         .0
         .id;
     let b = s
         .store_memory(Parameters(store("use deno install")))
-        .await
-        .unwrap()
+        .await?
         .0
         .id;
 
@@ -491,24 +448,23 @@ async fn relate_and_get_neighbors() {
         edge_type: "supersedes".into(),
         weight: Some(0.8),
     }))
-    .await
-    .unwrap();
+    .await?;
 
     let neighbors = s
         .get_neighbors(Parameters(NeighborsParams {
             memory_id: a,
             edge_type: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(neighbors.0.neighbors.len(), 1);
     assert_eq!(neighbors.0.neighbors[0].edge_type, "supersedes");
     assert_eq!(neighbors.0.neighbors[0].memory.id, b);
+    Ok(())
 }
 
 #[tokio::test]
-async fn route_escalates_without_router_then_routes_with_one() {
-    let s = server().await;
+async fn route_escalates_without_router_then_routes_with_one() -> anyhow::Result<()> {
+    let s = server().await?;
 
     // No router trained yet -> escalate (out of distribution).
     let r = s
@@ -516,8 +472,7 @@ async fn route_escalates_without_router_then_routes_with_one() {
             task: "add two numbers".into(),
             top_k: None,
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(r.0.escalate && !r.0.covered && r.0.routes.is_empty());
     assert_eq!(
         r.0.reason.as_deref(),
@@ -537,16 +492,14 @@ async fn route_escalates_without_router_then_routes_with_one() {
             floor: -1.0,
         },
     )
-    .await
-    .unwrap();
+    .await?;
 
     let r = s
         .route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: Some(3),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(r.0.covered && !r.0.escalate);
     assert_eq!(r.0.routes.len(), 1);
     assert_eq!(r.0.routes[0].expert_id, "expert:adder");
@@ -555,8 +508,7 @@ async fn route_escalates_without_router_then_routes_with_one() {
     // and offered alongside the shared route (flagged private).
     let cap = FixedEmbedder::new(EMBED_DIM)
         .embed("my private skill")
-        .await
-        .unwrap();
+        .await?;
     let now = Utc::now();
     expert::insert(
         &s.store,
@@ -576,26 +528,25 @@ async fn route_escalates_without_router_then_routes_with_one() {
             created_at: now,
         },
     )
-    .await
-    .unwrap();
+    .await?;
     let r = s
         .route(Parameters(RouteParams {
             task: "my private skill".into(),
             top_k: Some(5),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(
         r.0.routes
             .iter()
             .any(|h| h.private && h.expert_id == "expert:mine"),
         "the user's private expert must be routable"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn route_escalates_when_a_boundary_inhibits_the_task() {
-    let s = server().await;
+async fn route_escalates_when_a_boundary_inhibits_the_task() -> anyhow::Result<()> {
+    let s = server().await?;
     // A permissive router that would otherwise route the task.
     router::save(
         &s.store,
@@ -609,8 +560,7 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() {
             floor: -1.0,
         },
     )
-    .await
-    .unwrap();
+    .await?;
 
     // Without a boundary, the task routes.
     let r = s
@@ -618,8 +568,7 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() {
             task: "add two numbers".into(),
             top_k: Some(3),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(r.0.covered && !r.0.escalate);
 
     // An actionable boundary whose failure context IS this task region: the
@@ -628,8 +577,8 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() {
     // C embeds to the task region itself (sim_fail = 1), C' to a far context,
     // so the relative margin clears the escalate threshold.
     let emb = FixedEmbedder::new(EMBED_DIM);
-    let fail_vec = emb.embed("add two numbers").await.unwrap();
-    let ok_vec = emb.embed("a poem about gardening").await.unwrap();
+    let fail_vec = emb.embed("add two numbers").await?;
+    let ok_vec = emb.embed("a poem about gardening").await?;
     boundary::upsert(
         &s.store,
         &FailureBoundary {
@@ -647,16 +596,14 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() {
             created_at: Utc::now(),
         },
     )
-    .await
-    .unwrap();
+    .await?;
 
     let r = s
         .route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: Some(3),
         }))
-        .await
-        .unwrap();
+        .await?;
     assert!(
         r.0.escalate && r.0.routes.is_empty(),
         "a task inside a known failure scope escalates"
@@ -669,24 +616,21 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() {
         "{:?}",
         r.0.reason
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn call_tool_dispatches_a_named_tool() {
-    let s = server().await;
+async fn call_tool_dispatches_a_named_tool() -> anyhow::Result<()> {
+    let s = server().await?;
     // Store, then list, both through the by-name dispatcher (the REST path).
     let stored = s
         .call_tool(
             "store_memory",
             serde_json::json!({ "content": "the deno runtime" }),
         )
-        .await
-        .unwrap();
+        .await?;
     assert!(stored.is_object());
-    let listed = s
-        .call_tool("list_memories", serde_json::json!({}))
-        .await
-        .unwrap();
+    let listed = s.call_tool("list_memories", serde_json::json!({})).await?;
     assert!(listed.to_string().contains("deno"));
     // Unknown tool and malformed arguments are errors, not panics.
     assert!(s.call_tool("nope", serde_json::json!({})).await.is_err());
@@ -694,52 +638,51 @@ async fn call_tool_dispatches_a_named_tool() {
         .call_tool("store_memory", serde_json::json!({ "missing": "content" }))
         .await
         .is_err());
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_memory_is_named_by_the_id_its_results_carry() {
+async fn a_memory_is_named_by_the_id_its_results_carry() -> anyhow::Result<()> {
     // Every result names a memory `id`, so an agent passes `id` back. Telemetry
     // caught penalize_memory refusing that ("missing field `memory_id`") and
     // the agent spending a retry on it.
-    let s = server().await;
+    let s = server().await?;
     let stored = s
         .call_tool(
             "store_memory",
             serde_json::json!({ "content": "the deno runtime" }),
         )
-        .await
-        .unwrap();
-    let id = stored["id"].as_str().unwrap().to_string();
+        .await?;
+    let Some(id) = stored["id"].as_str() else {
+        anyhow::bail!("the stored memory carries no id: {stored}");
+    };
+    let id = id.to_string();
 
     let penalized = s
         .call_tool(
             "penalize_memory",
             serde_json::json!({ "id": id, "reason": "an agent's extra field is ignored" }),
         )
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(penalized["found"], true);
     let reinforced = s
         .call_tool("reinforce_memory", serde_json::json!({ "id": id }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(reinforced["found"], true);
     s.call_tool("get_neighbors", serde_json::json!({ "id": id }))
-        .await
-        .unwrap();
+        .await?;
     // The documented name still works, and naming nothing is still refused.
     s.call_tool("reinforce_memory", serde_json::json!({ "memory_id": id }))
-        .await
-        .unwrap();
+        .await?;
     assert!(s
         .call_tool("forget_memory", serde_json::json!({}))
         .await
         .is_err());
     let forgotten = s
         .call_tool("forget_memory", serde_json::json!({ "id": id }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(forgotten["forgotten"], true);
+    Ok(())
 }
 
 mod behavior;
@@ -772,14 +715,18 @@ mod standing;
 /// `required` is present. A field skipped when empty has to carry
 /// `#[serde(default)]` as well, or the schema requires what the server omits
 /// and a client that validates results refuses them.
-fn assert_required_keys_present<T: serde::Serialize + schemars::JsonSchema>(value: &T) {
+fn assert_required_keys_present<T: serde::Serialize + schemars::JsonSchema>(
+    value: &T,
+) -> anyhow::Result<()> {
     let schema = schemars::schema_for!(T);
     let required = schema.as_value()["required"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let json = serde_json::to_value(value).expect("serialize");
-    let object = json.as_object().expect("an object");
+    let json = serde_json::to_value(value)?;
+    let Some(object) = json.as_object() else {
+        anyhow::bail!("the result serialized to something other than an object: {json}");
+    };
     let missing: Vec<&str> = required
         .iter()
         .filter_map(|k| k.as_str())
@@ -789,6 +736,7 @@ fn assert_required_keys_present<T: serde::Serialize + schemars::JsonSchema>(valu
         missing.is_empty(),
         "the schema requires {missing:?}, which the result leaves out: {json}"
     );
+    Ok(())
 }
 
 /// Takes the `tools/list` capture the MCP schema lint is pointed at, without
@@ -807,17 +755,15 @@ fn assert_required_keys_present<T: serde::Serialize + schemars::JsonSchema>(valu
 ///   cargo test -p antumbra-cli -- --ignored --nocapture report_what_a_live_server_returns
 #[test]
 #[ignore = "writes a capture; set ANTUMBRA_TOOLS_LIST_OUT"]
-fn capture_the_tool_list() {
+fn capture_the_tool_list() -> anyhow::Result<()> {
     let Ok(out) = std::env::var("ANTUMBRA_TOOLS_LIST_OUT") else {
         println!("ANTUMBRA_TOOLS_LIST_OUT unset -- skipped");
-        return;
+        return Ok(());
     };
     let tools = McpServer::tool_router().list_all();
     let body = serde_json::json!({ "tools": tools });
-    std::fs::write(
-        &out,
-        serde_json::to_string_pretty(&body).expect("serialize"),
-    )
-    .expect("write the capture");
+    std::fs::write(&out, serde_json::to_string_pretty(&body)?)
+        .with_context(|| format!("write the capture to {out}"))?;
     println!("wrote {} tool(s) to {out}", tools.len());
+    Ok(())
 }

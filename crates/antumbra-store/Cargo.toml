@@ -30,8 +30,14 @@ clap = { workspace = true, optional = true, features = ["env"] }
 
 [features]
 clap = ["dep:clap"]
+# An embedded store, provisioned members and a signed-in session, for the
+# tests of the crates that drive a store.
+testing = []
 
 [dev-dependencies]
+# The crate's own integration tests build the library without cfg(test), so
+# they take the `testing` module through the feature, as a dependant would.
+antumbra-store = { path = ".", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 anyhow.workspace = true
 serde_json.workspace = true

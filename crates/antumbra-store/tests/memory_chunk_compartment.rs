@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! The chunk index keeps its memory's privacy: a piece of a memory
 //! in a private compartment is invisible to another member of the workspace,
 //! by the chunk search and by the recall it feeds, until the memory moves to
@@ -8,8 +6,8 @@
 use chrono::Utc;
 
 use antumbra_core::{Compartment, CompartmentId, Memory, MemoryNetwork, Result, TenantId, UserId};
-use antumbra_store::repo::{compartment, memory, memory_chunk, principal};
-use antumbra_store::Store;
+use antumbra_store::repo::{compartment, memory, memory_chunk};
+use antumbra_store::{testing, Store};
 
 const DIM: usize = 8;
 
@@ -45,13 +43,12 @@ async fn found_by(
 
 #[tokio::test]
 async fn a_private_memorys_pieces_are_found_only_by_its_audience() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = testing::mem_store_of(DIM).await?;
     let tenant = TenantId::new("ws:org");
     let lily = UserId::new("user:lily");
     let oslo = UserId::new("user:oslo");
     let lilys = CompartmentId::new("comp:lily-private");
-    principal::provision(&store, &tenant, &lily).await?;
-    principal::provision(&store, &tenant, &oslo).await?;
+    testing::members(&store, &tenant, &[&lily, &oslo]).await?;
     compartment::create(
         &store,
         &Compartment::new(

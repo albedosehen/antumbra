@@ -27,16 +27,24 @@ Ask: **"Should Antumbra run on this machine, or connect to a hosted workspace yo
 antumbra --version
 ```
 
-If it is missing, install it from the latest release with the installer for their OS. It downloads a prebuilt `antumbra` (no Rust needed) into `~/.cargo/bin` and adds that to the PATH, so a new shell may be needed before the command is found. Ask before running it.
+If it is missing, install it from a release with the installer for their OS. The command names a release tag rather than `latest`, so what it runs is a published, unchanging asset; the installer downloads a prebuilt `antumbra` (no Rust needed) into `~/.cargo/bin`, checks it against the sha256 built into the script, and adds that directory to the PATH, so a new shell may be needed before the command is found. Ask before running it.
 
 ```sh
 # macOS and Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.2.7/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.2.7/antumbra-cli-installer.ps1 | iex
+```
+
+To check the archive before anything runs before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
+
+```bash
+v=v0.2.7; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
+shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
 
 A setup on this machine does not need the repository. Outside a clone, setup pulls the server image published for the CLI's version. Inside one, it builds the server from the source instead. Only the GPU build (`--gpu`) needs a clone, and so git (ask before installing it).

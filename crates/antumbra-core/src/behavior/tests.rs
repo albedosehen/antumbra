@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context as _;
 
 fn ssh() -> Spec {
     Spec {
@@ -35,7 +36,7 @@ fn ssh() -> Spec {
 }
 
 #[test]
-fn a_training_shadow_names_the_scope_it_trained() {
+fn a_training_shadow_names_the_scope_it_trained() -> anyhow::Result<()> {
     let id = shadow_id(
         &TenantId::new("ws:default"),
         &UserId::new("user:default"),
@@ -59,17 +60,19 @@ fn a_training_shadow_names_the_scope_it_trained() {
     for other in ["shadow:g3", "shadow:run-1:g3:7", "behavior:code:ab"] {
         assert_eq!(shadow_scope(&ShadowId::new(other)), None, "{other}");
     }
+    Ok(())
 }
 
 #[test]
-fn a_behavior_with_a_discriminating_check_has_no_problems() {
+fn a_behavior_with_a_discriminating_check_has_no_problems() -> anyhow::Result<()> {
     assert_eq!(ssh().problems(), Vec::<String>::new());
     assert_eq!(ssh().follows("ssh em0 nvidia-smi"), Some(true));
     assert_eq!(ssh().follows("ssh nano@10.0.0.51 nvidia-smi"), Some(false));
+    Ok(())
 }
 
 #[test]
-fn a_check_that_only_refuses_is_not_enough() {
+fn a_check_that_only_refuses_is_not_enough() -> anyhow::Result<()> {
     let mut spec = ssh();
     spec.must.clear();
     let problems = spec.problems();
@@ -77,10 +80,11 @@ fn a_check_that_only_refuses_is_not_enough() {
         problems.iter().any(|p| p.contains("`must` pattern")),
         "{problems:?}"
     );
+    Ok(())
 }
 
 #[test]
-fn the_check_is_shown_to_discriminate_before_it_is_trusted() {
+fn the_check_is_shown_to_discriminate_before_it_is_trusted() -> anyhow::Result<()> {
     let mut spec = ssh();
     spec.violations.push("ssh kuskokwim uptime".into());
     spec.examples[1].answer = "ssh nyx@10.0.0.130 uptime".into();
@@ -97,10 +101,11 @@ fn the_check_is_shown_to_discriminate_before_it_is_trusted() {
             .any(|p| p.contains("refuses the example answer")),
         "{problems:?}"
     );
+    Ok(())
 }
 
 #[test]
-fn too_few_examples_no_violations_and_bad_patterns_are_named() {
+fn too_few_examples_no_violations_and_bad_patterns_are_named() -> anyhow::Result<()> {
     let mut spec = ssh();
     spec.examples.truncate(1);
     spec.violations.clear();
@@ -127,27 +132,30 @@ fn too_few_examples_no_violations_and_bad_patterns_are_named() {
         .iter()
         .any(|p| p.contains("does not compile")));
     assert_eq!(spec.follows("ssh kuskokwim"), None);
+    Ok(())
 }
 
 #[test]
-fn lookarounds_work_as_the_trainers_checks_allow() {
+fn lookarounds_work_as_the_trainers_checks_allow() -> anyhow::Result<()> {
     let mut spec = ssh();
     spec.must = vec![r"\bFILE_TYPE(?!_ID)\b".into()];
     assert_eq!(spec.follows("ORDER BY FILE_TYPE"), Some(true));
     assert_eq!(spec.follows("ORDER BY FILE_TYPE_ID"), Some(false));
+    Ok(())
 }
 
 #[test]
-fn the_content_leads_with_the_rule_and_round_trips() {
+fn the_content_leads_with_the_rule_and_round_trips() -> anyhow::Result<()> {
     let spec = ssh();
     let text = content(&spec);
     assert!(text.starts_with("Reach a host by its SSH alias"));
     assert_eq!(spec_of(&text), Some(spec));
     assert_eq!(spec_of("a memory with no behavior block"), None);
+    Ok(())
 }
 
 #[test]
-fn status_scope_and_supersession_ride_in_evidence() {
+fn status_scope_and_supersession_ride_in_evidence() -> anyhow::Result<()> {
     let mut evidence = vec![
         "git:github.com/a/b@abc1234".to_string(),
         status_evidence(Status::Proposed),
@@ -155,7 +163,7 @@ fn status_scope_and_supersession_ride_in_evidence() {
     ];
     set_status(&mut evidence, Status::Accepted);
     evidence.push(supersedes_evidence("memory:old"));
-    let state = State::of(&evidence).expect("a behavior");
+    let state = State::of(&evidence).context("a behavior")?;
     assert_eq!(state.status, Status::Accepted);
     assert_eq!(state.scope, "github.com/a/b");
     assert_eq!(state.supersedes.as_deref(), Some("memory:old"));
@@ -177,7 +185,7 @@ fn status_scope_and_supersession_ride_in_evidence() {
 
     mark_trained(&mut evidence, "expert:user:a:behavior:everywhere");
     mark_trained(&mut evidence, "expert:user:a:behavior:everywhere");
-    let trained = State::of(&evidence).expect("a behavior");
+    let trained = State::of(&evidence).context("a behavior")?;
     assert_eq!(trained.status, Status::Trained);
     assert_eq!(
         trained.expert.as_deref(),
@@ -191,10 +199,11 @@ fn status_scope_and_supersession_ride_in_evidence() {
         1,
         "one expert at a time"
     );
+    Ok(())
 }
 
 #[test]
-fn behaviors_stored_before_the_us_spelling_are_still_read() {
+fn behaviors_stored_before_the_us_spelling_are_still_read() -> anyhow::Result<()> {
     // Content, evidence and expert cards written with `behaviour`.
     let legacy_content = content(&ssh()).replace("```behavior", "```behaviour");
     assert_eq!(spec_of(&legacy_content), Some(ssh()));
@@ -203,14 +212,17 @@ fn behaviors_stored_before_the_us_spelling_are_still_read() {
         "behaviour-scope:github.com/a/b".to_string(),
         "behaviour-supersedes:memory:old".to_string(),
     ];
-    let state = State::of(&evidence).expect("a behavior");
+    let state = State::of(&evidence).context("a behavior")?;
     assert_eq!(state.status, Status::Accepted);
     assert_eq!(state.scope, "github.com/a/b");
     assert_eq!(state.supersedes.as_deref(), Some("memory:old"));
     // A status set now replaces the old-spelled one rather than sitting beside it.
     set_status(&mut evidence, Status::Retired);
     assert!(evidence.iter().all(|e| !e.starts_with("behaviour-status:")));
-    assert_eq!(State::of(&evidence).unwrap().status, Status::Retired);
+    assert_eq!(
+        State::of(&evidence).context("a behavior")?.status,
+        Status::Retired
+    );
 
     let mut card = standing_expert(EVERYWHERE, &[]);
     card.capability_card = serde_json::json!({ "behaviours": ["memory:t"], "standing": true });
@@ -220,6 +232,7 @@ fn behaviors_stored_before_the_us_spelling_are_still_read() {
         "comp:ws:a:user:a:behaviour",
         "the compartment keeps the id it is stored under"
     );
+    Ok(())
 }
 
 fn recorded(id: &str, status: Status, scope: &str) -> Memory {
@@ -256,7 +269,7 @@ fn standing_expert(scope: &str, behaviors: &[&str]) -> Expert {
 }
 
 #[test]
-fn a_standing_expert_is_a_user_s_in_one_workspace_only() {
+fn a_standing_expert_is_a_user_s_in_one_workspace_only() -> anyhow::Result<()> {
     let (a, b) = (TenantId::new("ws:a"), TenantId::new("ws:b"));
     let user = UserId::new("user:a");
     let mut e = standing_expert(EVERYWHERE, &[]);
@@ -273,10 +286,12 @@ fn a_standing_expert_is_a_user_s_in_one_workspace_only() {
     assert!(!is_standing_for(&e, &a, &UserId::new("user:b")));
     e.capability_card = serde_json::json!({ "scope": EVERYWHERE });
     assert!(!is_standing_for(&e, &a, &user), "not standing");
+    Ok(())
 }
 
 #[test]
-fn a_standing_expert_learns_the_accepted_and_trained_behaviors_of_its_scope() {
+fn a_standing_expert_learns_the_accepted_and_trained_behaviors_of_its_scope() -> anyhow::Result<()>
+{
     let all = vec![
         recorded("memory:accepted", Status::Accepted, EVERYWHERE),
         recorded("memory:trained", Status::Trained, EVERYWHERE),
@@ -301,10 +316,11 @@ fn a_standing_expert_learns_the_accepted_and_trained_behaviors_of_its_scope() {
         scopes(&all, &experts),
         [EVERYWHERE, "github.com/a/b", "github.com/c/d"]
     );
+    Ok(())
 }
 
 #[test]
-fn an_expert_is_stale_when_its_behaviors_moved_on() {
+fn an_expert_is_stale_when_its_behaviors_moved_on() -> anyhow::Result<()> {
     let trained = vec![recorded("memory:t", Status::Trained, EVERYWHERE)];
     let both = standing_expert(EVERYWHERE, &["memory:t"]);
     let t = learnable(&trained, EVERYWHERE);
@@ -330,10 +346,11 @@ fn an_expert_is_stale_when_its_behaviors_moved_on() {
         stale(&learnable(&again, EVERYWHERE), Some(&both)),
         "recorded again since it was trained"
     );
+    Ok(())
 }
 
 #[test]
-fn a_set_is_known_by_its_behaviors_and_their_content_in_any_order() {
+fn a_set_is_known_by_its_behaviors_and_their_content_in_any_order() -> anyhow::Result<()> {
     let a = recorded("memory:a", Status::Accepted, EVERYWHERE);
     let b = recorded("memory:b", Status::Accepted, EVERYWHERE);
     let ab = learnable(&[a.clone(), b.clone()], EVERYWHERE);
@@ -351,6 +368,7 @@ fn a_set_is_known_by_its_behaviors_and_their_content_in_any_order() {
         fingerprint(&learnable(&[a, changed], EVERYWHERE)),
         "a behavior recorded again with a changed rule makes a different set"
     );
+    Ok(())
 }
 
 fn trained_in(set: &str, expert: f32, learned: bool, admitted: bool) -> Training {
@@ -366,7 +384,8 @@ fn trained_in(set: &str, expert: f32, learned: bool, admitted: bool) -> Training
 }
 
 #[test]
-fn a_training_note_keeps_the_counts_behind_its_verdict_and_reads_older_notes() {
+fn a_training_note_keeps_the_counts_behind_its_verdict_and_reads_older_notes() -> anyhow::Result<()>
+{
     let mut evidence = Vec::new();
     let slipped = Training {
         set: "00112233aabbccdd".into(),
@@ -396,16 +415,17 @@ fn a_training_note_keeps_the_counts_behind_its_verdict_and_reads_older_notes() {
         "behavior-training:ffeeddcc00112233 base=0.00 expert=1.00 learned=true admitted=true"
             .to_string(),
     ];
-    let read = training(&older).unwrap();
+    let read = training(&older).context("an older note still reads")?;
     assert_eq!((read.held, read.worse), (0, 0.5));
     assert_eq!(
         read.describe(),
         "learned (held-out 1.00 against the base model's 0.00); its scope's expert serves it"
     );
+    Ok(())
 }
 
 #[test]
-fn an_audit_is_noted_beside_the_others_and_read_back_in_order() {
+fn an_audit_is_noted_beside_the_others_and_read_back_in_order() -> anyhow::Result<()> {
     let mut m = recorded("memory:a", Status::Accepted, EVERYWHERE);
     mark_training(
         &mut m.evidence,
@@ -461,16 +481,18 @@ fn an_audit_is_noted_beside_the_others_and_read_back_in_order() {
             .count(),
         2
     );
-    let state = State::of(&m.evidence).unwrap();
+    let state = State::of(&m.evidence).context("a behavior")?;
     assert_eq!(state.status, Status::Accepted, "a note leaves the status");
     assert!(
         training(&m.evidence).is_some(),
         "and the training note it checks"
     );
+    Ok(())
 }
 
 #[test]
-fn the_fresh_examples_are_the_ones_a_card_was_neither_trained_nor_audited_on() {
+fn the_fresh_examples_are_the_ones_a_card_was_neither_trained_nor_audited_on() -> anyhow::Result<()>
+{
     let a = recorded("memory:a", Status::Trained, EVERYWHERE);
     let b = recorded("memory:b", Status::Accepted, EVERYWHERE);
     let taught = learnable(&[a.clone(), b.clone()], EVERYWHERE);
@@ -509,10 +531,11 @@ fn the_fresh_examples_are_the_ones_a_card_was_neither_trained_nor_audited_on() {
     // A card from before examples were kept audits nothing.
     let card = serde_json::json!({ "standing": true, "scope": EVERYWHERE, "set": "x" });
     assert!(fresh_examples(&taught, &card).is_empty());
+    Ok(())
 }
 
 #[test]
-fn the_bet_an_audit_checks_is_read_off_the_card_under_either_id() {
+fn the_bet_an_audit_checks_is_read_off_the_card_under_either_id() -> anyhow::Result<()> {
     let card = serde_json::json!({
         "standing": true, "scope": EVERYWHERE, "set": "x",
         CARD_SCORES: {
@@ -530,12 +553,13 @@ fn the_bet_an_audit_checks_is_read_off_the_card_under_either_id() {
     assert_eq!(card_worse(&card, &["memory:c"]), None);
     let older = serde_json::json!({ "standing": true, "scope": EVERYWHERE, "set": "x" });
     assert_eq!(card_worse(&older, &["memory:a"]), None);
+    Ok(())
 }
 
 /// Recording a behavior again is how it gains examples: the new one carries
 /// the old one's id, and the card is read under both.
 #[test]
-fn a_behavior_recorded_again_is_audited_as_the_one_it_supersedes() {
+fn a_behavior_recorded_again_is_audited_as_the_one_it_supersedes() -> anyhow::Result<()> {
     let mut more = ssh();
     more.examples.push(Example {
         task: "Tail the journal on aur0.".into(),
@@ -587,10 +611,11 @@ fn a_behavior_recorded_again_is_audited_as_the_one_it_supersedes() {
         CARD_EXAMPLES: { "memory:other": prints },
     });
     assert!(fresh_examples(&taught, &card).is_empty());
+    Ok(())
 }
 
 #[test]
-fn a_training_is_noted_on_each_behavior_and_read_back() {
+fn a_training_is_noted_on_each_behavior_and_read_back() -> anyhow::Result<()> {
     let mut m = recorded("memory:a", Status::Accepted, EVERYWHERE);
     // A refusal noted under the earlier rule goes with the next note.
     m.evidence
@@ -618,7 +643,7 @@ fn a_training_is_noted_on_each_behavior_and_read_back() {
         "learned (held-out 1.00 against the base model's 0.00); its scope's expert serves it"
     );
     assert_eq!(
-        State::of(&m.evidence).unwrap().status,
+        State::of(&m.evidence).context("a behavior")?.status,
         Status::Accepted,
         "a note leaves the status as it was"
     );
@@ -630,12 +655,14 @@ fn a_training_is_noted_on_each_behavior_and_read_back() {
         "and so does training it"
     );
     mark_untrained(&mut m.evidence);
-    let state = State::of(&m.evidence).unwrap();
+    let state = State::of(&m.evidence).context("a behavior")?;
     assert_eq!((state.status, state.expert), (Status::Accepted, None));
+    Ok(())
 }
 
 #[test]
-fn a_set_is_refused_only_when_every_behavior_in_it_notes_its_expert_refused() {
+fn a_set_is_refused_only_when_every_behavior_in_it_notes_its_expert_refused() -> anyhow::Result<()>
+{
     let mut a = recorded("memory:a", Status::Accepted, EVERYWHERE);
     let mut b = recorded("memory:b", Status::Accepted, EVERYWHERE);
     let set = fingerprint(&learnable(&[a.clone(), b.clone()], EVERYWHERE));
@@ -661,10 +688,11 @@ fn a_set_is_refused_only_when_every_behavior_in_it_notes_its_expert_refused() {
         !refused(&learnable(&[a, b], EVERYWHERE)),
         "an admitted expert is no refusal"
     );
+    Ok(())
 }
 
 #[test]
-fn an_expert_that_records_its_set_is_in_step_until_the_set_changes() {
+fn an_expert_that_records_its_set_is_in_step_until_the_set_changes() -> anyhow::Result<()> {
     let memories = vec![
         recorded("memory:l", Status::Trained, EVERYWHERE),
         recorded("memory:m", Status::Accepted, EVERYWHERE),
@@ -684,26 +712,28 @@ fn an_expert_that_records_its_set_is_in_step_until_the_set_changes() {
     ];
     assert!(stale(&learnable(&retired, EVERYWHERE), Some(&expert)));
     assert!(stale(&[], Some(&expert)), "nothing left to hold");
+    Ok(())
 }
 
 #[test]
-fn a_behavior_cites_the_memories_it_was_drawn_from_in_its_evidence() {
+fn a_behavior_cites_the_memories_it_was_drawn_from_in_its_evidence() -> anyhow::Result<()> {
     let evidence = vec![
         status_evidence(Status::Proposed),
         scope_evidence(EVERYWHERE),
         source_evidence("memory:a"),
         source_evidence("memory:b"),
     ];
-    let state = State::of(&evidence).expect("a behavior");
+    let state = State::of(&evidence).context("a behavior")?;
     assert_eq!(state.sources, ["memory:a", "memory:b"]);
     assert_eq!(sources(&evidence), ["memory:a", "memory:b"]);
     assert!(
         State::of(&[status_evidence(Status::Accepted)])
-            .unwrap()
+            .context("a behavior")?
             .sources
             .is_empty(),
         "one the user stated cites nothing"
     );
+    Ok(())
 }
 
 /// An example answer may be a fenced code block of its own: a Mermaid
@@ -711,7 +741,7 @@ fn a_behavior_cites_the_memories_it_was_drawn_from_in_its_evidence() {
 /// spec still reads back whole. Three behaviors recorded on a live store were
 /// stored and never listed or trained before this held.
 #[test]
-fn a_spec_whose_examples_hold_code_fences_reads_back_whole() {
+fn a_spec_whose_examples_hold_code_fences_reads_back_whole() -> anyhow::Result<()> {
     let mut spec = ssh();
     spec.examples.push(Example {
         task: "Draw the load, pose and render flow.".into(),
@@ -725,17 +755,21 @@ fn a_spec_whose_examples_hold_code_fences_reads_back_whole() {
         .push("```\nload -> pose -> render\n```".into());
     let text = content(&spec);
     assert_eq!(spec_of(&text), Some(spec));
+    Ok(())
 }
 
 #[test]
-fn a_recipe_defaults_to_what_nine_behaviors_were_learned_with_and_refuses_nonsense() {
+fn a_recipe_defaults_to_what_nine_behaviors_were_learned_with_and_refuses_nonsense(
+) -> anyhow::Result<()> {
     let d = Recipe::default();
     assert_eq!((d.rank, d.rounds), (16, 3));
     assert!((d.learning_rate - 1.5e-4).abs() < 1e-12);
     assert!((d.regression_confidence - 0.9).abs() < 1e-12);
     assert_eq!(d.describe(), "rank 16, 3 rounds, 1.5e-4, refusing at 0.90");
     assert_eq!(
-        Recipe::new(32, 1, 1e-4, 0.95).unwrap().describe(),
+        Recipe::new(32, 1, 1e-4, 0.95)
+            .map_err(anyhow::Error::msg)?
+            .describe(),
         "rank 32, 1 round, 1e-4, refusing at 0.95"
     );
     assert!(
@@ -757,13 +791,14 @@ fn a_recipe_defaults_to_what_nine_behaviors_were_learned_with_and_refuses_nonsen
         Recipe::new(16, 3, 1.5e-4, 1.0).is_err(),
         "nothing would ever refuse"
     );
+    Ok(())
 }
 
 /// A training's seed follows what it teaches: the same behavior under another
 /// id seeds the same, the set's order does not matter, and a behavior changed
 /// seeds another. The set's print keeps the ids; the seed does not.
 #[test]
-fn a_training_is_seeded_from_what_it_teaches_not_where_it_is_stored() {
+fn a_training_is_seeded_from_what_it_teaches_not_where_it_is_stored() -> anyhow::Result<()> {
     let taught = |id: &str| (recorded(id, Status::Accepted, EVERYWHERE), ssh());
     let here = vec![taught("memory:a")];
     let elsewhere = vec![taught("memory:elsewhere")];
@@ -776,4 +811,5 @@ fn a_training_is_seeded_from_what_it_teaches_not_where_it_is_stored() {
     let swapped = vec![changed, here[0].clone()];
     assert_eq!(seed(&two), seed(&swapped), "order does not matter");
     assert_ne!(seed(&two), seed(&here));
+    Ok(())
 }

@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The hosted-onboarding control plane: the **issuer** side of the
 //! `antumbra-auth` token contract. It gates signup behind invite codes,
 //! provisions a fresh tenant for each new account, and issues the RS256 JWT the
@@ -168,9 +166,11 @@ pub async fn authenticate(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
     use antumbra_auth::JwtVerifier;
-    use antumbra_store::EMBED_DIM;
+    use antumbra_store::testing::mem_store;
 
     // The throwaway RSA-2048 keypair: the control plane signs with the private
     // key; the MCP-side verifier uses the public key. Test-only.
@@ -185,120 +185,140 @@ mod tests {
 
     /// Verify an issued token the same way the MCP server would, returning
     /// `(tenant, user)`.
-    fn verify(token: &str) -> (String, String) {
+    fn verify(token: &str) -> Result<(String, String)> {
         let id = JwtVerifier::rs256_pem(RS_PUB)
-            .unwrap()
+            .map_err(|e| AntumbraError::other(format!("read the public key: {e}")))?
             .with_audience(AUD)
             .verify(token)
-            .unwrap();
-        (id.tenant, id.user)
+            .map_err(|e| AntumbraError::other(format!("verify the issued token: {e}")))?;
+        Ok((id.tenant, id.user))
+    }
+
+    /// Captures the links it would have sent, so a test can follow them.
+    struct Capture(Mutex<Vec<String>>);
+
+    impl Capture {
+        /// Every link sent, in order. The fake only ever pushes to the list, so
+        /// a poisoned lock holds a whole list and is read as is.
+        fn links(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+    }
+
+    impl Mailer for Capture {
+        fn send_link(&self, _to: &str, link: &str) -> Result<()> {
+            // Read as `links` is: a push cannot leave the list half-written.
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(link.to_string());
+            Ok(())
+        }
+    }
+
+    /// The one-time token a sent link carries.
+    fn token_in(link: &str) -> Result<String> {
+        link.split("token=")
+            .nth(1)
+            .map(str::to_string)
+            .ok_or_else(|| AntumbraError::other("the link carries no token"))
     }
 
     #[tokio::test]
-    async fn invite_signup_provisions_a_tenant_and_issues_a_verifiable_token() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        invite::mint(&store, "good-code", None).await.unwrap();
+    async fn invite_signup_provisions_a_tenant_and_issues_a_verifiable_token() -> Result<()> {
+        let store = mem_store().await?;
+        invite::mint(&store, "good-code", None).await?;
         let id = VerifiedIdentity::new("github:42").with(Some("a@b.com".into()), None);
 
-        let token = signup(&store, &id, "good-code", &issuer()).await.unwrap();
-        let (tenant, user) = verify(&token);
+        let token = signup(&store, &id, "good-code", &issuer()).await?;
+        let (tenant, user) = verify(&token)?;
         assert!(tenant.starts_with("ws:"), "a fresh workspace");
         assert!(user.starts_with("user:") && user != "user:owner", "{user}");
 
         // Login returns a token for the SAME tenant/user.
-        let login_token = login(&store, &id, &issuer()).await.unwrap();
-        assert_eq!(verify(&login_token), (tenant.clone(), user.clone()));
+        let login_token = login(&store, &id, &issuer()).await?;
+        assert_eq!(verify(&login_token)?, (tenant.clone(), user.clone()));
 
         // Another signup is another workspace and another user id: a user id
         // names one user in one workspace.
-        invite::mint(&store, "second", None).await.unwrap();
+        invite::mint(&store, "second", None).await?;
         let other = VerifiedIdentity::new("github:43");
-        let (tenant2, user2) = verify(&signup(&store, &other, "second", &issuer()).await.unwrap());
+        let (tenant2, user2) = verify(&signup(&store, &other, "second", &issuer()).await?)?;
         assert_ne!(tenant2, tenant);
         assert_ne!(user2, user, "every signup's first user had been user:owner");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn signup_requires_a_valid_unused_invite() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn signup_requires_a_valid_unused_invite() -> Result<()> {
+        let store = mem_store().await?;
         let id = VerifiedIdentity::new("github:1");
         // No invite minted → rejected.
         assert!(signup(&store, &id, "nope", &issuer()).await.is_err());
 
         // A code is single-use: the second signup on it fails.
-        invite::mint(&store, "one-shot", None).await.unwrap();
-        signup(&store, &id, "one-shot", &issuer()).await.unwrap();
+        invite::mint(&store, "one-shot", None).await?;
+        signup(&store, &id, "one-shot", &issuer()).await?;
         let other = VerifiedIdentity::new("github:2");
         assert!(signup(&store, &other, "one-shot", &issuer()).await.is_err());
+        Ok(())
     }
 
     // The whole passwordless path, offline: request a magic link → follow it →
     // verify → invite-signup → an RS256 token the server would accept.
     #[tokio::test]
-    async fn magic_link_then_invite_signup_issues_a_verifiable_token() {
-        use std::sync::Mutex;
-        struct Capture(Mutex<Vec<String>>);
-        impl Mailer for Capture {
-            fn send_link(&self, _to: &str, link: &str) -> Result<()> {
-                self.0.lock().unwrap().push(link.to_string());
-                Ok(())
-            }
-        }
-
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        invite::mint(&store, "inv", None).await.unwrap();
+    async fn magic_link_then_invite_signup_issues_a_verifiable_token() -> Result<()> {
+        let store = mem_store().await?;
+        invite::mint(&store, "inv", None).await?;
 
         let mailer = Capture(Mutex::new(Vec::new()));
         let ml = MagicLink::new(b"magic", Duration::from_secs(600), "https://app", &mailer);
         // A signup link carries the invite; `authenticate` then provisions.
-        ml.request_signup("ada@x.com", "inv").unwrap();
-        let token = {
-            let links = mailer.0.lock().unwrap();
-            links[0].split("token=").nth(1).unwrap().to_string()
-        };
-        let jwt = authenticate(&store, &ml, &token, &issuer()).await.unwrap();
-        let (tenant, user) = verify(&jwt);
+        ml.request_signup("ada@x.com", "inv")?;
+        let token = token_in(&mailer.links()[0])?;
+        let jwt = authenticate(&store, &ml, &token, &issuer()).await?;
+        let (tenant, user) = verify(&jwt)?;
         assert!(tenant.starts_with("ws:"));
         assert!(user.starts_with("user:") && user != "user:owner", "{user}");
 
         // A second click of a *login* link for the same email logs in (no invite,
         // no second invite needed) to the SAME workspace.
-        ml.request("ada@x.com").unwrap();
-        let login_token = {
-            let links = mailer.0.lock().unwrap();
-            links[1].split("token=").nth(1).unwrap().to_string()
-        };
-        let jwt2 = authenticate(&store, &ml, &login_token, &issuer())
-            .await
-            .unwrap();
-        assert_eq!(verify(&jwt2), (tenant, user));
+        ml.request("ada@x.com")?;
+        let login_token = token_in(&mailer.links()[1])?;
+        let jwt2 = authenticate(&store, &ml, &login_token, &issuer()).await?;
+        assert_eq!(verify(&jwt2)?, (tenant, user));
 
         // Every link is single-use: replaying either consumed token is refused
         // as a deliberate rejection, not an internal fault.
         for replayed in [&token, &login_token] {
-            let err = authenticate(&store, &ml, replayed, &issuer())
-                .await
-                .unwrap_err();
+            let Err(err) = authenticate(&store, &ml, replayed, &issuer()).await else {
+                return Err(AntumbraError::other("a replayed link was accepted"));
+            };
             assert!(err.is_rejection(), "replay must be a rejection: {err}");
             assert!(err.to_string().contains("already used"));
         }
         // The pure verify still passes (signature + expiry are intact); it is
         // the ledger that kills the replay.
         assert!(ml.verify(&token).is_ok());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn duplicate_signup_and_loginless_identity_are_rejected() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn duplicate_signup_and_loginless_identity_are_rejected() -> Result<()> {
+        let store = mem_store().await?;
         let id = VerifiedIdentity::new("github:7");
         // Login before signup → no account.
         assert!(login(&store, &id, &issuer()).await.is_err());
 
-        invite::mint(&store, "c1", None).await.unwrap();
-        invite::mint(&store, "c2", None).await.unwrap();
-        signup(&store, &id, "c1", &issuer()).await.unwrap();
+        invite::mint(&store, "c1", None).await?;
+        invite::mint(&store, "c2", None).await?;
+        signup(&store, &id, "c1", &issuer()).await?;
         // Same identity signing up again → already registered (and c2 untouched).
         assert!(signup(&store, &id, "c2", &issuer()).await.is_err());
-        assert!(invite::get(&store, "c2").await.unwrap().is_some());
+        assert!(invite::get(&store, "c2").await?.is_some());
+        Ok(())
     }
 }

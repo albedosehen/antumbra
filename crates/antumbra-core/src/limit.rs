@@ -168,7 +168,7 @@ mod tests {
     };
 
     #[test]
-    fn a_client_has_its_burst_then_waits_for_the_refill() {
+    fn a_client_has_its_burst_then_waits_for_the_refill() -> anyhow::Result<()> {
         let limiter = Limiter::new(
             Rate {
                 burst: 3,
@@ -188,10 +188,11 @@ mod tests {
         // One token flows back a second, at sixty a minute.
         assert!(limiter.allow_at("one", now + Duration::from_millis(1_100)));
         assert!(!limiter.allow_at("one", now + Duration::from_millis(1_100)));
+        Ok(())
     }
 
     #[test]
-    fn everyone_shares_a_ceiling_a_flood_of_names_cannot_pass() {
+    fn everyone_shares_a_ceiling_a_flood_of_names_cannot_pass() -> anyhow::Result<()> {
         let limiter = Limiter::new(
             ROOMY,
             Rate {
@@ -208,10 +209,11 @@ mod tests {
             limiter.allow_at("c", now + Duration::from_secs(1)),
             "a token flowed back for everyone, and c still has its own"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_client_refused_at_its_own_bucket_costs_the_others_nothing() {
+    fn a_client_refused_at_its_own_bucket_costs_the_others_nothing() -> anyhow::Result<()> {
         let limiter = Limiter::new(
             Rate {
                 burst: 1,
@@ -231,10 +233,11 @@ mod tests {
             limiter.allow_at("quiet", now),
             "everyone's second token is still there"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_flood_of_names_evicts_the_oldest_bucket() {
+    fn a_flood_of_names_evicts_the_oldest_bucket() -> anyhow::Result<()> {
         let limiter = Limiter::new(
             Rate {
                 burst: 1,
@@ -256,5 +259,6 @@ mod tests {
             limiter.allow_at("first", now),
             "evicted, first comes back with a full bucket; everyone's ceiling bounds that"
         );
+        Ok(())
     }
 }

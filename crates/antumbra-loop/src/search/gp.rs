@@ -168,6 +168,7 @@ fn solve_upper(l: &[Vec<f64>], z: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::{AntumbraError, Result};
 
     const KERNEL: Kernel = Kernel {
         lengthscale: 0.3,
@@ -184,9 +185,9 @@ mod tests {
     }
 
     #[test]
-    fn it_passes_close_to_what_it_saw_and_is_sure_of_it() {
+    fn it_passes_close_to_what_it_saw_and_is_sure_of_it() -> Result<()> {
         let seen = [at(&[0.2, 0.2], 0.0, 0.3), at(&[0.8, 0.7], 0.0, 0.9)];
-        let gp = fit(KERNEL, &seen).expect("fits");
+        let gp = fit(KERNEL, &seen).ok_or_else(|| AntumbraError::other("the model did not fit"))?;
         for s in &seen {
             let (mean, sd) = gp.predict(&s.x, s.t);
             assert!((mean - s.y).abs() < 0.01, "{mean} vs {}", s.y);
@@ -194,49 +195,56 @@ mod tests {
         }
         let (_, far) = gp.predict(&[0.5, 0.95], 0.0);
         assert!(far > 0.1, "unsure away from the data: {far}");
+        Ok(())
     }
 
     /// The same run informs a prediction less the further away in generations
     /// it is asked about, so an old fitness fades rather than lasting forever.
     #[test]
-    fn an_old_generation_counts_for_less() {
+    fn an_old_generation_counts_for_less() -> Result<()> {
         let seen = [at(&[0.5, 0.5], 0.0, 0.9), at(&[0.1, 0.1], 0.0, 0.1)];
-        let gp = fit(KERNEL, &seen).expect("fits");
+        let gp = fit(KERNEL, &seen).ok_or_else(|| AntumbraError::other("the model did not fit"))?;
         let (_, near) = gp.predict(&[0.5, 0.5], 1.0);
         let (_, far) = gp.predict(&[0.5, 0.5], 20.0);
         assert!(far > near, "{far} should exceed {near}");
+        Ok(())
     }
 
     #[test]
-    fn equal_fitnesses_predict_that_fitness() {
+    fn equal_fitnesses_predict_that_fitness() -> Result<()> {
         let seen = [at(&[0.1], 0.0, 0.5), at(&[0.9], 0.0, 0.5)];
-        let gp = fit(KERNEL, &seen).expect("fits");
+        let gp = fit(KERNEL, &seen).ok_or_else(|| AntumbraError::other("the model did not fit"))?;
         let (mean, _) = gp.predict(&[0.5], 0.0);
         assert!((mean - 0.5).abs() < 1e-9);
+        Ok(())
     }
 
     #[test]
-    fn nothing_to_fit_is_no_model() {
+    fn nothing_to_fit_is_no_model() -> Result<()> {
         assert!(fit(KERNEL, &[]).is_none());
+        Ok(())
     }
 
     #[test]
-    fn duplicate_points_still_factor() {
+    fn duplicate_points_still_factor() -> Result<()> {
         let seen = [at(&[0.4], 0.0, 0.2), at(&[0.4], 0.0, 0.4)];
-        let gp = fit(KERNEL, &seen).expect("jitter makes it factor");
+        let gp = fit(KERNEL, &seen)
+            .ok_or_else(|| AntumbraError::other("the duplicate points did not factor"))?;
         let (mean, _) = gp.predict(&[0.4], 0.0);
         assert!((mean - 0.3).abs() < 0.05, "{mean}");
+        Ok(())
     }
 
     #[test]
-    fn the_triangular_solves_invert_the_factor() {
+    fn the_triangular_solves_invert_the_factor() -> Result<()> {
         let a = vec![vec![4.0, 2.0], vec![2.0, 3.0]];
-        let l = cholesky(&a).expect("positive definite");
+        let l = cholesky(&a).ok_or_else(|| AntumbraError::other("the matrix did not factor"))?;
         let x = solve_upper(&l, &solve_lower(&l, &[2.0, 5.0]));
         // a · x = b
         let b0 = a[0][0] * x[0] + a[0][1] * x[1];
         let b1 = a[1][0] * x[0] + a[1][1] * x[1];
         assert!((b0 - 2.0).abs() < 1e-12 && (b1 - 5.0).abs() < 1e-12);
         assert!(cholesky(&[vec![1.0, 2.0], vec![2.0, 1.0]]).is_none());
+        Ok(())
     }
 }

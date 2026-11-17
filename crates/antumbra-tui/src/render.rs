@@ -121,32 +121,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_modes_resolve_without_probing() {
+    fn explicit_modes_resolve_without_probing() -> anyhow::Result<()> {
         assert_eq!(resolve_tier(RenderMode::Canvas), RenderTier::Canvas);
         assert_eq!(resolve_tier(RenderMode::Ascii), RenderTier::Ascii);
+        Ok(())
     }
 
     #[test]
-    fn auto_without_a_tty_is_canvas() {
+    fn auto_without_a_tty_is_canvas() -> anyhow::Result<()> {
         // The test harness captures stdout (not a TTY), so `auto` short-circuits
         // to the universal vector path rather than probing.
         assert_eq!(resolve_tier(RenderMode::Auto), RenderTier::Canvas);
         assert_eq!(resolve_tier(RenderMode::Raster), RenderTier::Canvas);
+        Ok(())
     }
 
     #[test]
-    fn markers_degrade_with_the_tier() {
+    fn markers_degrade_with_the_tier() -> anyhow::Result<()> {
         assert_eq!(RenderTier::Canvas.marker(), Marker::Braille);
         assert_eq!(RenderTier::HalfBlock.marker(), Marker::Braille);
         assert_eq!(RenderTier::Raster.marker(), Marker::Braille);
         assert_eq!(RenderTier::Ascii.marker(), Marker::Dot);
+        Ok(())
     }
 
     #[test]
-    fn only_the_raster_tier_allows_images() {
+    fn only_the_raster_tier_allows_images() -> anyhow::Result<()> {
         assert!(RenderTier::Raster.allows_raster());
         assert!(!RenderTier::HalfBlock.allows_raster());
         assert!(!RenderTier::Canvas.allows_raster());
         assert!(!RenderTier::Ascii.allows_raster());
+        Ok(())
     }
 }

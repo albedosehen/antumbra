@@ -126,17 +126,18 @@ mod tests {
     }
 
     #[test]
-    fn impossible_tasks_do_not_count_as_something_to_learn() {
+    fn impossible_tasks_do_not_count_as_something_to_learn() -> Result<()> {
         // Held-out tasks plus impossible ones, and nothing visible: still refused.
         let refused = split(
             vec![task("add"), task("multiply"), task("x").impossible()],
             Some(&holdout(true)),
         );
         assert!(refused.is_err());
+        Ok(())
     }
 
     #[test]
-    fn a_corpus_that_hashes_entirely_out_of_view_is_refused() {
+    fn a_corpus_that_hashes_entirely_out_of_view_is_refused() -> Result<()> {
         // The shipped arithmetic corpus: both ids fall in the held-out slice.
         let refused = split(vec![task("add"), task("multiply")], Some(&holdout(true)));
         assert!(
@@ -145,5 +146,6 @@ mod tests {
         );
         // An empty corpus is not refused: there was nothing to withhold.
         assert!(split(Vec::new(), Some(&holdout(true))).is_ok());
+        Ok(())
     }
 }

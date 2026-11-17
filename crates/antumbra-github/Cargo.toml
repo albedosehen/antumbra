@@ -33,6 +33,7 @@ tokio = { workspace = true }
 testing = []
 
 [dev-dependencies]
+anyhow.workspace = true
 antumbra-http = { path = "../antumbra-http", features = ["testing"] }
 
 [lints]

@@ -64,16 +64,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_miss_is_noted_and_read_back() {
+    fn a_miss_is_noted_and_read_back() -> anyhow::Result<()> {
         let mut evidence = vec!["behavior-status:accepted".to_string()];
         let m = Missed::new("Push the branch.", "git push --force");
         mark(&mut evidence, Some(&m));
         assert_eq!(of(&evidence), Some(m));
         assert_eq!(evidence[0], "behavior-status:accepted", "the rest is kept");
+        Ok(())
     }
 
     #[test]
-    fn a_new_miss_replaces_the_last_and_a_learned_training_clears_it() {
+    fn a_new_miss_replaces_the_last_and_a_learned_training_clears_it() -> anyhow::Result<()> {
         let mut evidence = Vec::new();
         mark(&mut evidence, Some(&Missed::new("a", "first")));
         mark(&mut evidence, Some(&Missed::new("b", "second")));
@@ -82,33 +83,37 @@ mod tests {
         mark(&mut evidence, None);
         assert!(evidence.is_empty());
         assert_eq!(of(&evidence), None);
+        Ok(())
     }
 
     /// An answer that runs on is cut at a character, never inside one, and
     /// says it was cut; a short one is kept as it was, trimmed.
     #[test]
-    fn a_long_answer_is_cut_at_a_character_boundary() {
+    fn a_long_answer_is_cut_at_a_character_boundary() -> anyhow::Result<()> {
         let long = "é".repeat(MISSED_CHARS + 50);
         let m = Missed::new("t", &long);
         assert_eq!(m.answer.chars().count(), MISSED_CHARS + 1);
         assert!(m.answer.ends_with('…'));
         assert_eq!(Missed::new(" t ", "  short \n").answer, "short");
         assert_eq!(Missed::new(" t ", "x").task, "t");
+        Ok(())
     }
 
     /// An answer's newlines and quotes stay inside the one evidence line.
     #[test]
-    fn an_answer_with_newlines_and_quotes_stays_one_line() {
+    fn an_answer_with_newlines_and_quotes_stays_one_line() -> anyhow::Result<()> {
         let mut evidence = Vec::new();
         let m = Missed::new("t", "line one\n\"quoted\" line two");
         mark(&mut evidence, Some(&m));
         assert!(!evidence[0].contains('\n'));
         assert_eq!(of(&evidence), Some(m));
+        Ok(())
     }
 
     #[test]
-    fn evidence_without_a_miss_reads_none() {
+    fn evidence_without_a_miss_reads_none() -> anyhow::Result<()> {
         assert_eq!(of(&["behavior-status:trained".to_string()]), None);
         assert_eq!(of(&["behavior-missed:not json".to_string()]), None);
+        Ok(())
     }
 }

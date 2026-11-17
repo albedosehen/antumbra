@@ -435,6 +435,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // rows self-expire out at the next sweep. Owner-only, like the rest of
         // the control-plane tables.
         table_schema(tables::MAGIC_LINK_USE).with_mode(TableMode::Schemaless),
+        // Revoked token ids (keyed by `jti`), each kept until the token it
+        // names would have expired: the denylist every networked server reads
+        // in the owner view. Owner-only, like the rest of the control-plane
+        // tables.
+        table_schema(tables::REVOKED_TOKEN).with_mode(TableMode::Schemaless),
         // Expert lifecycle: every status change, appended and
         // numbered per expert. Readable where its expert is, through the same
         // owner rule, so no session sees an expert without its moves.
@@ -806,9 +811,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_tenant_access_renders_its_session_duration() {
-        let rendered = tenant_access().to_surql_overwrite().unwrap();
+    fn the_tenant_access_renders_its_session_duration() -> Result<()> {
+        let rendered = tenant_access().to_surql_overwrite().map_err(map)?;
         assert!(rendered.contains("FOR SESSION 3600s"), "{rendered}");
+        Ok(())
     }
 
     /// The access method is re-asserted with every schema apply, like the
@@ -844,7 +850,7 @@ mod tests {
             };
             Ok(definition.to_string())
         }
-        let store = crate::Store::connect_memory(4).await?;
+        let store = crate::testing::mem_store_of(4).await?;
         let first = defined(&store).await?;
         assert!(first.contains("SIGNIN"), "{first}");
 
@@ -872,7 +878,7 @@ mod tests {
     /// The read rule is built from the subqueries the readable-compartment
     /// lists share with it, and reads exactly as it did written out whole.
     #[test]
-    fn the_read_rule_is_unchanged_by_sharing_its_subqueries() {
+    fn the_read_rule_is_unchanged_by_sharing_its_subqueries() -> Result<()> {
         let before = r"tenant_id = $auth.tenant AND (compartment = NONE OR (type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).owner = $auth.user AND type::record('compartment', string::replace(compartment, /[:\/\\| ]/, '_')).deleted_at IS NONE) OR compartment IN (SELECT VALUE compartment FROM grant WHERE tenant_id = $auth.tenant AND grantee = $auth.user AND deleted_at IS NONE) OR compartment IN (SELECT VALUE subject_id FROM hive_offer WHERE tenant_id = $auth.tenant AND subject_kind = 'compartment' AND status = 'accepted' AND offered_by IN (SELECT VALUE user FROM hive_membership WHERE tenant_id = $auth.tenant AND opted_in = true) AND $auth.tenant IN (SELECT VALUE tenant_id FROM hive WHERE enabled = true)))";
         assert_eq!(memory_select_rule(), before);
         assert!(before.contains(&granted_compartments("$auth.tenant", "$auth.user")));
@@ -881,13 +887,14 @@ mod tests {
             owned_compartments("$t", "$u"),
             "SELECT VALUE key FROM compartment WHERE tenant_id = $t AND owner = $u AND deleted_at IS NONE"
         );
+        Ok(())
     }
 
     /// Every subquery a rule asks of the grant, compartment or memory table
     /// names the tenant itself, so no rule leans on the inner table's own
     /// permission to keep another tenant's rows out of the answer.
     #[test]
-    fn every_rule_subquery_names_the_tenant() {
+    fn every_rule_subquery_names_the_tenant() -> Result<()> {
         let rules = [
             memory_select_rule(),
             MEMORY_WRITE_RULE.to_string(),
@@ -903,6 +910,7 @@ mod tests {
                 );
             }
         }
+        Ok(())
     }
 
     /// The edge delete rule is the edge write rule: a member may unlink only
@@ -910,17 +918,16 @@ mod tests {
     /// private memory survives their `DELETE` and goes under its owner's.
     #[tokio::test]
     async fn a_member_cannot_delete_an_edge_into_a_memory_they_cannot_write() -> Result<()> {
-        use crate::repo::{compartment, edge, memory, principal};
+        use crate::repo::{compartment, edge, memory};
         use antumbra_core::{
             Compartment, CompartmentId, EdgeType, Memory, MemoryEdge, MemoryNetwork, TenantId,
             UserId,
         };
 
-        let store = crate::Store::connect_memory(4).await?;
+        let store = crate::testing::mem_store_of(4).await?;
         let tenant = TenantId::new("ws:org");
         let (lily, oslo) = (UserId::new("user:lily"), UserId::new("user:oslo"));
-        principal::provision(&store, &tenant, &lily).await?;
-        principal::provision(&store, &tenant, &oslo).await?;
+        crate::testing::members(&store, &tenant, &[&lily, &oslo]).await?;
         let now = chrono::Utc::now();
         let private = CompartmentId::new("comp:lily-private");
         compartment::create(
@@ -988,12 +995,16 @@ mod tests {
     }
 
     #[test]
-    fn memory_table_carries_engine_enforced_tenant_permissions() {
-        let stmts = schema_statements(EMBED_DIM as u32).unwrap();
-        let define = stmts
+    fn memory_table_carries_engine_enforced_tenant_permissions() -> Result<()> {
+        let stmts = schema_statements(EMBED_DIM as u32)?;
+        let Some(define) = stmts
             .iter()
             .find(|s| s.starts_with("DEFINE TABLE") && s.contains(" memory "))
-            .expect("memory DEFINE TABLE statement");
+        else {
+            return Err(antumbra_core::AntumbraError::other(
+                "no memory DEFINE TABLE statement",
+            ));
+        };
         // The clause renders inline on DEFINE TABLE (valid SurrealQL), not as a
         // malformed `DEFINE FIELD PERMISSIONS ...` statement. (Actions are
         // emitted in BTreeMap order, so don't assume select is first.)
@@ -1003,5 +1014,6 @@ mod tests {
         assert!(define.contains("FOR update WHERE tenant_id = $auth.tenant"));
         assert!(define.contains("FOR delete WHERE tenant_id = $auth.tenant"));
         assert!(!stmts.iter().any(|s| s.contains("DEFINE FIELD PERMISSIONS")));
+        Ok(())
     }
 }

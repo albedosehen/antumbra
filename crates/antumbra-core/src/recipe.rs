@@ -97,6 +97,7 @@ pub struct RecipeRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     fn recipe() -> TrainingRecipe {
         TrainingRecipe {
@@ -107,12 +108,13 @@ mod tests {
     }
 
     #[test]
-    fn a_trainable_recipe_validates() {
+    fn a_trainable_recipe_validates() -> anyhow::Result<()> {
         assert!(recipe().validate().is_ok());
+        Ok(())
     }
 
     #[test]
-    fn an_untrainable_recipe_is_refused() {
+    fn an_untrainable_recipe_is_refused() -> anyhow::Result<()> {
         let bad = [
             TrainingRecipe {
                 learning_rate: 0.0,
@@ -138,10 +140,12 @@ mod tests {
         for r in bad {
             assert!(r.validate().is_err(), "{r:?}");
         }
+        Ok(())
     }
 
     #[test]
-    fn a_record_round_trips_and_older_rows_read_without_the_optional_fields() {
+    fn a_record_round_trips_and_older_rows_read_without_the_optional_fields() -> anyhow::Result<()>
+    {
         let record = RecipeRecord {
             shadow: ShadowId::new("run:g1"),
             run_id: RunId::new("run"),
@@ -154,14 +158,17 @@ mod tests {
             evaluations: 1,
             created_at: Utc::now(),
         };
-        let wire = serde_json::to_value(&record).unwrap();
-        let back: RecipeRecord = serde_json::from_value(wire.clone()).unwrap();
+        let wire = serde_json::to_value(&record)?;
+        let back: RecipeRecord = serde_json::from_value(wire.clone())?;
         assert_eq!(back, record);
         let mut bare = wire;
         for field in ["parent", "partition_seed", "fitness_variance"] {
-            bare.as_object_mut().unwrap().remove(field);
+            bare.as_object_mut()
+                .context("a record is an object")?
+                .remove(field);
         }
-        let read: RecipeRecord = serde_json::from_value(bare).unwrap();
+        let read: RecipeRecord = serde_json::from_value(bare)?;
         assert_eq!((read.parent, read.partition_seed), (None, None));
+        Ok(())
     }
 }

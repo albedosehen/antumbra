@@ -23,7 +23,17 @@ session_id=$(printf '%s' "$input" | jq -r '.session_id // "default"')
 event=$(printf '%s' "$input" | jq -r '.hook_event_name // "Stop"')
 workspace="${ANTUMBRA_WORKSPACE_ID:-<workspace>}"
 
-SENTINEL="${TMPDIR:-/tmp}/antumbra-capture-${event}-${session_id}"
+# The sentinel's name is built from two fields of the hook's input, so both are
+# cut to [A-Za-z0-9_-] before they name a file: a value carrying `../` or a
+# space is used as given otherwise. It lives under a directory only this user
+# writes (the session runtime directory, else one under the home), not a
+# world-writable temp directory where another user could plant the name.
+name_of() { printf '%s' "$1" | tr -cd 'A-Za-z0-9_-'; }
+safe_session="$(name_of "$session_id")"; [ -n "$safe_session" ] || safe_session=default
+safe_event="$(name_of "$event")"; [ -n "$safe_event" ] || safe_event=Stop
+run_dir="${XDG_RUNTIME_DIR:-$HOME/.antumbra/run}"
+mkdir -p "$run_dir" 2>/dev/null && chmod 700 "$run_dir" 2>/dev/null
+SENTINEL="$run_dir/antumbra-capture-${safe_event}-${safe_session}"
 if [ -f "$SENTINEL" ]; then rm -f "$SENTINEL"; exit 0; fi
 touch "$SENTINEL"
 

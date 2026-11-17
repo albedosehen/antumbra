@@ -129,7 +129,7 @@ mod tests {
     /// A metric that zeroes the shared first dimension and keeps the
     /// discriminative second/third separates two otherwise-similar experts.
     #[test]
-    fn reweighting_separates_near_identical_centroids() {
+    fn reweighting_separates_near_identical_centroids() -> anyhow::Result<()> {
         let router = LearnedRouter {
             // Down-weight the shared dim (0), keep the discriminative dims.
             weights: vec![0.0, 1.0, 1.0],
@@ -151,10 +151,11 @@ mod tests {
         let ranked = router.route(&[0.95, 0.1, 0.3]);
         assert_eq!(ranked[0].0, ExpertId::new("specific"));
         assert!(ranked[0].1 > 0.5);
+        Ok(())
     }
 
     #[test]
-    fn covers_in_distribution_and_abstains_out_of_distribution() {
+    fn covers_in_distribution_and_abstains_out_of_distribution() -> anyhow::Result<()> {
         let router = LearnedRouter {
             weights: vec![0.0, 1.0, 1.0],
             experts: vec![RouterExpert {
@@ -169,10 +170,11 @@ mod tests {
         // The metric zeroes dim 0, so a task only on dim 0 projects to ~nothing
         // -> top similarity below the floor -> not covered (out of distribution).
         assert!(!router.covers(&[1.0, 0.0, 0.0]));
+        Ok(())
     }
 
     #[test]
-    fn a_router_knows_the_population_it_was_trained_over() {
+    fn a_router_knows_the_population_it_was_trained_over() -> anyhow::Result<()> {
         let router = LearnedRouter {
             weights: vec![1.0],
             experts: ["a", "b"]
@@ -189,12 +191,13 @@ mod tests {
         assert!(router.trained_over(&ids(&["b", "a"])));
         assert!(!router.trained_over(&ids(&["a"])));
         assert!(!router.trained_over(&ids(&["a", "b", "c"])));
+        Ok(())
     }
 
     /// A masked expert is neither routed to nor what makes a task covered, and
     /// the experts kept keep their scores relative to each other.
     #[test]
-    fn a_masked_expert_is_out_of_routing_and_coverage() {
+    fn a_masked_expert_is_out_of_routing_and_coverage() -> anyhow::Result<()> {
         let router = LearnedRouter {
             weights: vec![1.0, 1.0, 1.0],
             experts: vec![
@@ -221,12 +224,13 @@ mod tests {
         let ranked = masked.route(&task);
         assert_eq!(ranked.len(), 2);
         assert_eq!(ranked[0].0, ExpertId::new("a"));
+        Ok(())
     }
 
     // A task embedded at the wrong width must abstain (escalate), not route on a
     // silently truncated dot product.
     #[test]
-    fn a_dimension_mismatch_abstains_instead_of_routing() {
+    fn a_dimension_mismatch_abstains_instead_of_routing() -> anyhow::Result<()> {
         let router = LearnedRouter {
             weights: vec![1.0, 1.0, 1.0],
             experts: vec![RouterExpert {
@@ -241,5 +245,6 @@ mod tests {
         assert!(router.route(&[1.0, 1.0]).is_empty());
         // Correct width still routes.
         assert_eq!(router.route(&[0.0, 1.0, 0.0]).len(), 1);
+        Ok(())
     }
 }

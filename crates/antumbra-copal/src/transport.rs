@@ -98,6 +98,7 @@ fn authed<B>(
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context;
     use serde_json::json;
 
     use antumbra_http::testing::serve;
@@ -107,37 +108,35 @@ mod tests {
     /// Copal's refusal reaches the ingest in copal's words, through the shared
     /// reader.
     #[test]
-    fn a_refusals_body_is_surfaced() -> std::result::Result<(), String> {
+    fn a_refusals_body_is_surfaced() -> anyhow::Result<()> {
         let (url, served) = serve(
             1,
             409,
             r#"{"error":{"kind":"conflict","message":"idempotency key consumed by a deleted file"}}"#,
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         let answer = UreqTransport::new().post_json(
             &url,
             &CopalCredential::Tenant("ws:test".into()),
             &json!({ "title": "t" }),
         );
         let Err(e) = answer else {
-            return Err("a 409 was accepted".into());
+            anyhow::bail!("a 409 was accepted");
         };
         let shown = e.to_string();
         if !(shown.starts_with("copal POST http://")
             && shown
                 .contains("answered 409: idempotency key consumed by a deleted file (conflict)"))
         {
-            return Err(shown);
+            anyhow::bail!("{shown}");
         }
         let head = served
-            .requests()
-            .map_err(|e| e.to_string())?
+            .requests()?
             .into_iter()
             .next()
-            .ok_or("one request")?
+            .context("one request")?
             .to_lowercase();
         if !head.contains("x-copal-tenant: ws:test") {
-            return Err(head);
+            anyhow::bail!("{head}");
         }
         Ok(())
     }

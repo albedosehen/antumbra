@@ -29,6 +29,14 @@ pub fn tenant(token: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The token's own id (`jti`), which a revocation names.
+pub fn jti(token: &str) -> Option<String> {
+    claims(token)?
+        .get("jti")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 /// When the token expires, as seconds since the epoch.
 pub fn expires(token: &str) -> Option<i64> {
     claims(token)?.get("exp").and_then(Value::as_i64)
@@ -46,6 +54,7 @@ pub fn is_operator(token: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     fn token(claims: &str) -> String {
         let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -58,22 +67,22 @@ mod tests {
     }
 
     #[test]
-    fn the_claims_are_the_second_segment_decoded() -> Result<(), String> {
+    fn the_claims_are_the_second_segment_decoded() -> Result<()> {
         let t = token(r#"{"tenant":"ws:acme","user":"user:dana","exp":1893456000}"#);
         let Some(read) = claims(&t) else {
-            return Err("a well-formed token has claims".into());
+            anyhow::bail!("a well-formed token has claims");
         };
         if read["user"] != "user:dana" {
-            return Err(format!("the claims were misread: {read}"));
+            anyhow::bail!("the claims were misread: {read}");
         }
         if tenant(&t).as_deref() != Some("ws:acme") || expires(&t) != Some(1_893_456_000) {
-            return Err("the tenant and expiry come from their claims".into());
+            anyhow::bail!("the tenant and expiry come from their claims");
         }
         Ok(())
     }
 
     #[test]
-    fn only_a_token_that_says_so_is_an_operators() {
+    fn only_a_token_that_says_so_is_an_operators() -> Result<()> {
         assert!(is_operator(&token(
             r#"{"tenant":"ws:acme","user":"user:dana","operator":true}"#
         )));
@@ -83,10 +92,11 @@ mod tests {
         assert!(!is_operator(&token(
             r#"{"tenant":"ws:acme","user":"user:dana"}"#
         )));
+        Ok(())
     }
 
     #[test]
-    fn what_is_not_a_token_has_no_claims() {
+    fn what_is_not_a_token_has_no_claims() -> Result<()> {
         for not_a_token in ["", "a.b.c", "one-part", "a..c", &token("not json")] {
             assert!(claims(not_a_token).is_none(), "{not_a_token:?}");
             assert!(tenant(not_a_token).is_none(), "{not_a_token:?}");
@@ -96,5 +106,6 @@ mod tests {
         // Padding, which some encoders add, is tolerated.
         let padded = format!("{}==", token(r#"{"tenant":"ws:p"}"#));
         assert_eq!(tenant(&padded).as_deref(), Some("ws:p"));
+        Ok(())
     }
 }

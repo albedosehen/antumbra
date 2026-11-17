@@ -1,5 +1,3 @@
-// Test code may unwrap until its sweep lands (#295 to #302); production code may not.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 //! The hosted **control plane** HTTP server: invite-gated signup, magic-link
 //! login, and RS256 token issuance, run as its own service (separate from the
 //! data-plane MCP server, which only *verifies* the tokens this server signs).
@@ -104,13 +102,25 @@ struct ServeArgs {
     #[arg(long, env = "ANTUMBRA_SIGNING_KEY")]
     signing_key: String,
     /// Secret signing the short-lived magic-link tokens (distinct from the RS256 key).
-    #[arg(long, env = "ANTUMBRA_MAGIC_SECRET")]
-    magic_secret: String,
+    #[arg(long, env = "ANTUMBRA_MAGIC_SECRET", hide_env_values = true)]
+    magic_secret: Option<String>,
+    /// Read the magic-link secret from this file instead (a Docker secret, a
+    /// Kubernetes secret, a Key Vault mount): it then appears in neither the
+    /// process arguments nor the environment.
+    #[arg(
+        long,
+        env = "ANTUMBRA_MAGIC_SECRET_FILE",
+        conflicts_with = "magic_secret"
+    )]
+    magic_secret_file: Option<std::path::PathBuf>,
     /// Audience claim on issued tokens (must match the MCP server's verifier).
     #[arg(long, env = "ANTUMBRA_AUDIENCE", default_value = "antumbra")]
     audience: String,
-    /// Issued bearer-token lifetime, in days.
-    #[arg(long, default_value_t = 30)]
+    /// Issued bearer-token lifetime, in days. A week: a token saved on a lost
+    /// machine stays valid at most that long, and `antumbra revoke-token`
+    /// ends one sooner; `antumbra setup check` says when a token is about to
+    /// expire.
+    #[arg(long, default_value_t = 7)]
     token_ttl_days: u64,
     /// Magic-link lifetime, in minutes.
     #[arg(long, default_value_t = 15)]
@@ -211,8 +221,21 @@ fn probe(addr: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The magic-link secret, from the flag or its file, checked: a server
+/// without one cannot sign a link and does not start.
+fn magic_secret_of(
+    inline: Option<String>,
+    file: Option<&std::path::Path>,
+) -> anyhow::Result<Vec<u8>> {
+    let Some(secret) = antumbra_core::secrets::resolve(inline, file, "magic secret")? else {
+        anyhow::bail!("--magic-secret or --magic-secret-file is required");
+    };
+    validate_magic_secret(&secret)?;
+    Ok(secret.into_bytes())
+}
+
 async fn serve(a: ServeArgs) -> anyhow::Result<()> {
-    validate_magic_secret(&a.magic_secret)?;
+    let magic_secret = magic_secret_of(a.magic_secret, a.magic_secret_file.as_deref())?;
     let store = connect(&a.store).await?;
     let private_pem = std::fs::read(&a.signing_key)
         .map_err(|e| anyhow::anyhow!("read signing key {}: {e}", a.signing_key))?;
@@ -224,7 +247,7 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
     let state = AppState {
         store,
         issuer: Arc::new(issuer),
-        magic_secret: Arc::new(a.magic_secret.into_bytes()),
+        magic_secret: Arc::new(magic_secret),
         base_url: Arc::new(a.base_url),
         magic_ttl: Duration::from_secs(a.magic_ttl_mins * 60),
         mailer: build_mailer(a.dev_mailer)?,
@@ -427,24 +450,77 @@ mod tests {
         Ok(())
     }
 
+    /// The secret comes from its flag or its file, never both, and a server
+    /// given neither does not start; the flag's environment value stays out
+    /// of --help, as every secret's does.
     #[test]
-    fn the_placeholder_and_short_magic_secrets_are_refused() {
+    fn the_magic_secret_may_come_from_a_file_and_hides_its_value() -> anyhow::Result<()> {
+        use clap::CommandFactory;
+        let path = std::env::temp_dir().join(format!("antumbra-magic-{}", std::process::id()));
+        std::fs::write(&path, "oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l\n")?;
+        let from_file = magic_secret_of(None, Some(&path));
+        let _ = std::fs::remove_file(&path);
+        anyhow::ensure!(
+            from_file? == b"oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l".to_vec(),
+            "the secret is read from its file and trimmed"
+        );
+        anyhow::ensure!(
+            magic_secret_of(None, None).is_err(),
+            "a server without a secret does not start"
+        );
+        anyhow::ensure!(
+            Cli::try_parse_from([
+                "antumbra-control-server",
+                "serve",
+                "--base-url",
+                "https://control.example",
+                "--signing-key",
+                "key.pem",
+                "--magic-secret",
+                "oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l",
+                "--magic-secret-file",
+                "secret.txt",
+            ])
+            .is_err(),
+            "the flag and its file are refused together"
+        );
+        let cmd = Cli::command();
+        let serve = cmd
+            .find_subcommand("serve")
+            .ok_or_else(|| anyhow::anyhow!("no serve"))?;
+        for id in ["magic_secret", "db_pass"] {
+            let arg = serve
+                .get_arguments()
+                .find(|a| a.get_id() == id)
+                .ok_or_else(|| anyhow::anyhow!("no --{id}"))?;
+            anyhow::ensure!(arg.is_hide_env_values_set(), "--{id} shows its value");
+        }
+        for id in ["magic_secret_file", "db_pass_file"] {
+            anyhow::ensure!(
+                serve.get_arguments().any(|a| a.get_id() == id),
+                "serve has no --{id}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_placeholder_and_short_magic_secrets_are_refused() -> anyhow::Result<()> {
         assert!(validate_magic_secret(PLACEHOLDER_SECRET).is_err());
         assert!(validate_magic_secret("short").is_err());
         assert!(validate_magic_secret("oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l").is_ok());
+        Ok(())
     }
 
     // The probe round-trip against a real listener: healthy store -> exit Ok,
     // and a refused connection -> Err.
     #[tokio::test]
-    async fn probe_round_trips_against_a_live_server() {
+    async fn probe_round_trips_against_a_live_server() -> anyhow::Result<()> {
         use crate::http::{router, AppState, Cooldown};
         use std::sync::Arc;
 
         const RS_PRIV: &[u8] = include_bytes!("../../antumbra-control/tests/test_jwt_priv.pem");
-        let store = antumbra_store::Store::connect_memory(EMBED_DIM)
-            .await
-            .unwrap();
+        let store = antumbra_store::testing::mem_store().await?;
         let state = AppState {
             store,
             issuer: Arc::new(Issuer::new(
@@ -462,21 +538,22 @@ mod tests {
                 crate::http::LINKS_EVERYONE,
             )),
         };
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap().to_string();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?.to_string();
         tokio::spawn(async move {
-            axum::serve(listener, router(state)).await.unwrap();
+            // The server outlives the test, so a failure to serve is only
+            // said here; it shows as a probe that does not round-trip.
+            if let Err(e) = axum::serve(listener, router(state)).await {
+                eprintln!("test server: {e}");
+            }
         });
 
-        let probed = tokio::task::spawn_blocking(move || probe(&addr))
-            .await
-            .unwrap();
+        let probed = tokio::task::spawn_blocking(move || probe(&addr)).await?;
         assert!(probed.is_ok(), "healthy server probes ok: {probed:?}");
 
         // Nothing listens on this port: the probe must fail, not hang.
-        let dead = tokio::task::spawn_blocking(|| probe("127.0.0.1:9"))
-            .await
-            .unwrap();
+        let dead = tokio::task::spawn_blocking(|| probe("127.0.0.1:9")).await?;
         assert!(dead.is_err());
+        Ok(())
     }
 }

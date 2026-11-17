@@ -128,24 +128,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_system_identity_may_belong_to_many_workspaces() {
+    fn only_a_system_identity_may_belong_to_many_workspaces() -> anyhow::Result<()> {
         assert!(UserId::new(GITHUB_SYSTEM_USER).is_system());
         assert!(!UserId::new("user:owner").is_system());
         assert!(!UserId::new("user:github-fan").is_system());
+        Ok(())
     }
 
     #[test]
-    fn ids_roundtrip_as_transparent_strings() {
+    fn ids_roundtrip_as_transparent_strings() -> anyhow::Result<()> {
         let id = ExpertId::new("expert:deno-conv");
-        let json = serde_json::to_string(&id).unwrap();
+        let json = serde_json::to_string(&id)?;
         assert_eq!(json, "\"expert:deno-conv\"");
-        let back: ExpertId = serde_json::from_str(&json).unwrap();
+        let back: ExpertId = serde_json::from_str(&json)?;
         assert_eq!(back, id);
+        Ok(())
     }
 
     #[test]
-    fn generation_advances() {
+    fn generation_advances() -> anyhow::Result<()> {
         assert_eq!(Generation::ZERO.next(), Generation(1));
         assert!(Generation(2) > Generation(1));
+        Ok(())
     }
 }

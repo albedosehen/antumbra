@@ -454,6 +454,7 @@ impl GithubTransport for UreqTransport {
 mod tests {
     use super::*;
     use crate::testing::{FakeTransport, APP_PRIVATE_KEY_PEM};
+    use anyhow::{bail, ensure, Context};
     use serde_json::json;
 
     const FULL: &str = "Acme/Orders";
@@ -461,27 +462,26 @@ mod tests {
     /// A failing status keeps its body, so a caller can read GitHub's words
     /// (and tell a 404 "absent" from a refusal).
     #[test]
-    fn a_refusals_body_is_surfaced() -> Result<(), String> {
-        let (url, served) = antumbra_http::testing::serve(1, 404, r#"{"message":"Not Found"}"#)
-            .map_err(|e| e.to_string())?;
-        let answer = UreqTransport::new()
-            .get(&url, "t0ken", ACCEPT_JSON)
-            .map_err(|e| e.to_string())?;
-        if answer.status != 404 || !String::from_utf8_lossy(&answer.body).contains("Not Found") {
-            return Err(format!("{} {:?}", answer.status, answer.body));
-        }
+    fn a_refusals_body_is_surfaced() -> anyhow::Result<()> {
+        let (url, served) = antumbra_http::testing::serve(1, 404, r#"{"message":"Not Found"}"#)?;
+        let answer = UreqTransport::new().get(&url, "t0ken", ACCEPT_JSON)?;
+        ensure!(
+            answer.status == 404 && String::from_utf8_lossy(&answer.body).contains("Not Found"),
+            "{} {:?}",
+            answer.status,
+            answer.body
+        );
         let head = served
-            .requests()
-            .map_err(|e| e.to_string())?
+            .requests()?
             .into_iter()
             .next()
-            .ok_or("one request")?
+            .context("one request")?
             .to_lowercase();
-        if !(head.contains("authorization: bearer t0ken")
-            && head.contains("user-agent: antumbra-github"))
-        {
-            return Err(head);
-        }
+        ensure!(
+            head.contains("authorization: bearer t0ken")
+                && head.contains("user-agent: antumbra-github"),
+            "{head}"
+        );
         Ok(())
     }
 
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn hosts_slugs_and_paths_are_derived_from_the_base() {
+    fn hosts_slugs_and_paths_are_derived_from_the_base() -> anyhow::Result<()> {
         let public = GithubApi::with_transport(DEFAULT_API_URL, Arc::new(FakeTransport::new()));
         assert_eq!(public.base(), "https://api.github.com");
         assert_eq!(public.web_host(), "github.com");
@@ -514,18 +514,19 @@ mod tests {
         );
         assert_eq!(encode_path("docs/a b#c.md"), "docs/a%20b%23c.md");
         assert_eq!(encode_path("feat/x-y_z.1"), "feat/x-y_z.1");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_installation_token_is_minted_with_the_app_jwt() {
+    async fn an_installation_token_is_minted_with_the_app_jwt() -> anyhow::Result<()> {
         let (api, fake) = api(FakeTransport::new().json(
             "POST",
             "https://api.github.com/app/installations/77/access_tokens",
             201,
             &json!({"token": "ghs_x", "expires_at": "2099-01-01T00:00:00Z"}),
         ));
-        let app = AppCredentials::new("1", APP_PRIVATE_KEY_PEM).unwrap();
-        let tok = api.installation_token(&app, 77, Utc::now()).await.unwrap();
+        let app = AppCredentials::new("1", APP_PRIVATE_KEY_PEM)?;
+        let tok = api.installation_token(&app, 77, Utc::now()).await?;
         assert_eq!(tok.token, "ghs_x");
         assert!(tok.is_fresh(Utc::now()));
         assert!(
@@ -537,10 +538,11 @@ mod tests {
         assert!(calls[0].starts_with("POST https://api.github.com/app/installations/77"));
         // The bearer on that call was the App JWT, not an installation token.
         assert!(fake.bearers()[0].starts_with("eyJ"), "{:?}", fake.bearers());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_check_run_is_posted_with_the_installation_token() {
+    async fn a_check_run_is_posted_with_the_installation_token() -> anyhow::Result<()> {
         let url = format!("https://api.github.com/repos/{FULL}/check-runs");
         let output = CheckOutput {
             title: "t".into(),
@@ -550,8 +552,7 @@ mod tests {
         let (posting, fake) = api(FakeTransport::new().json("POST", &url, 201, &json!({"id": 1})));
         posting
             .create_check_run("ghs_x", FULL, "abc", "Antumbra knowledge diff", &output)
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(fake.calls(), vec![format!("POST {url}")]);
         assert_eq!(fake.bearers(), vec!["ghs_x".to_string()]);
 
@@ -562,10 +563,11 @@ mod tests {
             .create_check_run("ghs_x", FULL, "abc", "Antumbra knowledge diff", &output)
             .await;
         assert!(matches!(refused, Err(ApiError::Status { status: 403, .. })));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn pull_request_files_page_until_a_short_page() {
+    async fn pull_request_files_page_until_a_short_page() -> anyhow::Result<()> {
         let full_page: Vec<Value> = (0..FILES_PER_PAGE)
             .map(|i| json!({"filename": format!("f{i}.md"), "status": "modified"}))
             .collect();
@@ -582,14 +584,15 @@ mod tests {
                 200,
                 &json!([{"filename": "last.md", "status": "removed"}]),
             ));
-        let files = api.pull_request_files("t", FULL, 9).await.unwrap();
+        let files = api.pull_request_files("t", FULL, 9).await?;
         assert_eq!(files.len(), FILES_PER_PAGE + 1);
         assert!(files[0].is_present());
         assert!(!files[FILES_PER_PAGE].is_present());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn file_text_reads_raw_and_treats_404_and_binary_as_absent() {
+    async fn file_text_reads_raw_and_treats_404_and_binary_as_absent() -> anyhow::Result<()> {
         let (api, _) = api(FakeTransport::new()
             .route(
                 "GET",
@@ -611,28 +614,21 @@ mod tests {
             ));
         assert_eq!(
             api.file_text("t", FULL, "docs/a b.md", "abc")
-                .await
-                .unwrap()
+                .await?
                 .as_deref(),
             Some("# A B\n")
         );
-        assert_eq!(
-            api.file_text("t", FULL, "logo.png", "abc").await.unwrap(),
-            None
-        );
-        assert_eq!(
-            api.file_text("t", FULL, "gone.md", "abc").await.unwrap(),
-            None
-        );
-        let err = api
-            .file_text("t", FULL, "secret.md", "abc")
-            .await
-            .unwrap_err();
+        assert_eq!(api.file_text("t", FULL, "logo.png", "abc").await?, None);
+        assert_eq!(api.file_text("t", FULL, "gone.md", "abc").await?, None);
+        let Err(err) = api.file_text("t", FULL, "secret.md", "abc").await else {
+            bail!("a 403 was read as a file");
+        };
         assert!(matches!(err, ApiError::Status { status: 403, .. }), "{err}");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn default_branch_head_and_tree_are_read() {
+    async fn default_branch_head_and_tree_are_read() -> anyhow::Result<()> {
         let (api, _) = api(FakeTransport::new()
             .json(
                 "GET",
@@ -656,18 +652,18 @@ mod tests {
                         {"path": "docs/x.md", "type": "blob"}
                     ], "truncated": true}),
             ));
-        assert_eq!(api.default_branch("t", FULL).await.unwrap(), "main");
-        assert_eq!(
-            api.branch_head("t", FULL, "release/1.2").await.unwrap(),
-            "1111111"
-        );
-        let tree = api.tree_paths("t", FULL, "1111111").await.unwrap();
+        assert_eq!(api.default_branch("t", FULL).await?, "main");
+        assert_eq!(api.branch_head("t", FULL, "release/1.2").await?, "1111111");
+        let tree = api.tree_paths("t", FULL, "1111111").await?;
         assert_eq!(
             tree.paths,
             vec!["README.md".to_string(), "docs/x.md".to_string()]
         );
         assert!(tree.truncated);
-        let err = api.default_branch("t", "Acme/Missing").await.unwrap_err();
+        let Err(err) = api.default_branch("t", "Acme/Missing").await else {
+            bail!("a repository with no route was read");
+        };
         assert!(matches!(err, ApiError::Status { status: 404, .. }), "{err}");
+        Ok(())
     }
 }

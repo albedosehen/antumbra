@@ -35,26 +35,27 @@ pub async fn all_heads(store: &Store) -> Result<Vec<GenerationHead>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::generational::LoopState;
     use chrono::Utc;
 
     #[tokio::test]
-    async fn save_then_all_heads_reads_every_run() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn save_then_all_heads_reads_every_run() -> Result<()> {
+        let s = mem_store().await?;
         let now = Utc::now();
         let mut a = GenerationHead::new(RunId::new("run:a"), now);
-        a.advance_to(LoopState::Explore, now).unwrap();
-        save_head(&s, &a).await.unwrap();
-        save_head(&s, &GenerationHead::new(RunId::new("run:b"), now))
-            .await
-            .unwrap();
+        a.advance_to(LoopState::Explore, now)?;
+        save_head(&s, &a).await?;
+        save_head(&s, &GenerationHead::new(RunId::new("run:b"), now)).await?;
 
-        let heads = all_heads(&s).await.unwrap();
+        let heads = all_heads(&s).await?;
         assert_eq!(heads.len(), 2, "both run heads");
         // The single-run load still resolves a specific checkpoint.
-        let loaded = load_head(&s, &RunId::new("run:a")).await.unwrap().unwrap();
+        let Some(loaded) = load_head(&s, &RunId::new("run:a")).await? else {
+            return Err(antumbra_core::AntumbraError::other("run:a has no head"));
+        };
         assert_eq!(loaded.state, LoopState::Explore);
+        Ok(())
     }
 
     /// The point write and point read every repository is built on: a row
@@ -62,7 +63,7 @@ mod tests {
     /// `None` rather than an error.
     #[tokio::test]
     async fn put_then_get_row_round_trips_and_an_absent_key_is_none() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let now = Utc::now();
         let head = GenerationHead::new(RunId::new("run:a"), now);
         s.put(TABLE, "run:a", &head).await?;

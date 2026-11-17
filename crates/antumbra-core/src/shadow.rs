@@ -131,20 +131,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lifecycle_follows_adr0002() {
+    fn lifecycle_follows_adr0002() -> anyhow::Result<()> {
         let s = ShadowStatus::Spawning;
-        let s = s.transition(ShadowStatus::Exploring).unwrap();
-        let s = s.transition(ShadowStatus::Scoring).unwrap();
+        let s = s.transition(ShadowStatus::Exploring)?;
+        let s = s.transition(ShadowStatus::Scoring)?;
         // can loop back to keep training
-        let s2 = s.transition(ShadowStatus::Exploring).unwrap();
+        let s2 = s.transition(ShadowStatus::Exploring)?;
         assert_eq!(s2, ShadowStatus::Exploring);
         // or graduate
-        let g = s.transition(ShadowStatus::Graduated).unwrap();
+        let g = s.transition(ShadowStatus::Graduated)?;
         assert!(g.is_terminal());
+        Ok(())
     }
 
     #[test]
-    fn illegal_transitions_are_rejected() {
+    fn illegal_transitions_are_rejected() -> anyhow::Result<()> {
         assert!(ShadowStatus::Spawning
             .transition(ShadowStatus::Graduated)
             .is_err());
@@ -154,10 +155,11 @@ mod tests {
         assert!(ShadowStatus::Graduated
             .transition(ShadowStatus::Scoring)
             .is_err());
+        Ok(())
     }
 
     #[test]
-    fn collapse_detection() {
+    fn collapse_detection() -> anyhow::Result<()> {
         let mut s = Shadow::spawn(
             ShadowId::new("shadow:1"),
             Generation::ZERO,
@@ -170,5 +172,6 @@ mod tests {
         s.reward_curve = vec![0.0, 0.2, 0.5];
         assert!(!s.has_collapsed(0.01));
         assert_eq!(s.current_fitness(), 0.5);
+        Ok(())
     }
 }

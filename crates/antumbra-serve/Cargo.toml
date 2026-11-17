@@ -59,6 +59,8 @@ metal = ["models", "candle-core/metal", "candle-nn/metal", "candle-transformers/
 
 [dev-dependencies]
 anyhow.workspace = true
+# The embedded store the consolidation tests stand up.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 # Counterfactual search drives the real probe in tests (depends only on core).
 antumbra-boundary = { path = "../antumbra-boundary" }

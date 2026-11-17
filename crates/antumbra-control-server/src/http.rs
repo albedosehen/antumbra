@@ -266,19 +266,37 @@ pub fn router(state: AppState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{Context, Result};
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
 
-    use antumbra_store::EMBED_DIM;
+    use antumbra_store::testing::mem_store;
 
     // The control crate's throwaway RS256 private key (test-only).
     const RS_PRIV: &[u8] = include_bytes!("../../antumbra-control/tests/test_jwt_priv.pem");
 
+    /// Captures the links it would have sent, so a test can follow them.
     struct Capture(Mutex<Vec<String>>);
+
+    impl Capture {
+        /// Every link sent, in order. The fake only ever pushes to the list, so
+        /// a poisoned lock holds a whole list and is read as is.
+        fn sent(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+    }
+
     impl Mailer for Capture {
         fn send_link(&self, _to: &str, link: &str) -> antumbra_core::Result<()> {
-            self.0.lock().unwrap().push(link.to_string());
+            // Read as `sent` is: a push cannot leave the list half-written.
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(link.to_string());
             Ok(())
         }
     }
@@ -300,26 +318,21 @@ mod tests {
         }
     }
 
-    fn post_json(uri: &str, body: &str) -> Request<Body> {
-        Request::post(uri)
+    fn post_json(uri: &str, body: &str) -> Result<Request<Body>> {
+        Ok(Request::post(uri)
             .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .unwrap()
+            .body(Body::from(body.to_string()))?)
     }
 
-    async fn body_json(resp: Response) -> serde_json::Value {
-        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024)
-            .await
-            .unwrap();
-        serde_json::from_slice(&body).unwrap()
+    async fn body_json(resp: Response) -> Result<serde_json::Value> {
+        let body = axum::body::to_bytes(resp.into_body(), 64 * 1024).await?;
+        Ok(serde_json::from_slice(&body)?)
     }
 
     #[tokio::test]
-    async fn signup_then_verify_issues_a_token_and_the_link_is_single_use() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        antumbra_store::repo::invite::mint(&store, "inv-1", None)
-            .await
-            .unwrap();
+    async fn signup_then_verify_issues_a_token_and_the_link_is_single_use() -> Result<()> {
+        let store = mem_store().await?;
+        antumbra_store::repo::invite::mint(&store, "inv-1", None).await?;
         let capture = Arc::new(Capture(Mutex::new(Vec::new())));
         let app = router(state_with(store, capture.clone(), Duration::ZERO));
 
@@ -329,23 +342,25 @@ mod tests {
             .oneshot(post_json(
                 "/signup",
                 r#"{"email":"a@b.com","invite":"inv-1"}"#,
-            ))
-            .await
-            .unwrap();
+            )?)
+            .await?;
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let link = capture.0.lock().unwrap()[0].clone();
-        let token = link.split("token=").nth(1).unwrap().to_string();
+        let link = capture.sent()[0].clone();
+        let token = link
+            .split("token=")
+            .nth(1)
+            .context("the link carries no token")?
+            .to_string();
 
         // GET /magic/verify -> an issued bearer token.
         let verify_uri = format!("/magic/verify?token={token}");
         let resp = app
             .clone()
-            .oneshot(Request::get(&verify_uri).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+            .oneshot(Request::get(&verify_uri).body(Body::empty())?)
+            .await?;
         assert_eq!(resp.status(), StatusCode::OK);
-        let v = body_json(resp).await;
+        let v = body_json(resp).await?;
         assert!(
             v["token"].as_str().unwrap_or_default().starts_with("ey"),
             "an issued JWT"
@@ -354,83 +369,82 @@ mod tests {
         // Replaying the same link is refused as a caller error, with the
         // reason on the wire (a rejection, not an internal fault).
         let resp = app
-            .oneshot(Request::get(&verify_uri).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+            .oneshot(Request::get(&verify_uri).body(Body::empty())?)
+            .await?;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        let v = body_json(resp).await;
-        assert!(v["error"].as_str().unwrap().contains("already used"));
+        let v = body_json(resp).await?;
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("already used")),
+            "{v}"
+        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn signup_with_unknown_or_expired_invite_is_rejected_before_emailing() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn signup_with_unknown_or_expired_invite_is_rejected_before_emailing() -> Result<()> {
+        let store = mem_store().await?;
         antumbra_store::repo::invite::mint(
             &store,
             "stale",
             Some(Utc::now() - chrono::Duration::minutes(1)),
         )
-        .await
-        .unwrap();
+        .await?;
         let capture = Arc::new(Capture(Mutex::new(Vec::new())));
         let app = router(state_with(store, capture.clone(), Duration::ZERO));
         for body in [
             r#"{"email":"a@b.com","invite":"nope"}"#,
             r#"{"email":"a@b.com","invite":"stale"}"#,
         ] {
-            let resp = app
-                .clone()
-                .oneshot(post_json("/signup", body))
-                .await
-                .unwrap();
+            let resp = app.clone().oneshot(post_json("/signup", body)?).await?;
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
         }
         assert!(
-            capture.0.lock().unwrap().is_empty(),
+            capture.sent().is_empty(),
             "no link emailed for a dead invite"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn link_requests_cool_down_per_email() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn link_requests_cool_down_per_email() -> Result<()> {
+        let store = mem_store().await?;
         let capture = Arc::new(Capture(Mutex::new(Vec::new())));
         // A long window: the second request for the same address must wait.
         let app = router(state_with(store, capture.clone(), Duration::from_secs(600)));
 
         let login = |email: &str| post_json("/login", &format!(r#"{{"email":"{email}"}}"#));
-        let first = app.clone().oneshot(login("hot@x.com")).await.unwrap();
+        let first = app.clone().oneshot(login("hot@x.com")?).await?;
         assert_eq!(first.status(), StatusCode::OK);
-        let second = app.clone().oneshot(login("hot@x.com")).await.unwrap();
+        let second = app.clone().oneshot(login("hot@x.com")?).await?;
         assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
         // A different address is unaffected.
-        let other = app.oneshot(login("cool@x.com")).await.unwrap();
+        let other = app.oneshot(login("cool@x.com")?).await?;
         assert_eq!(other.status(), StatusCode::OK);
-        assert_eq!(capture.0.lock().unwrap().len(), 2);
+        assert_eq!(capture.sent().len(), 2);
+        Ok(())
     }
 
     // The cooldown keys on the address, not its spelling: case, surrounding
     // space and a `+tag` are one window.
     #[tokio::test]
-    async fn link_requests_cool_down_across_an_addresss_spellings() -> anyhow::Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+    async fn link_requests_cool_down_across_an_addresss_spellings() -> Result<()> {
+        let store = mem_store().await?;
         let capture = Arc::new(Capture(Mutex::new(Vec::new())));
         let app = router(state_with(store, capture.clone(), Duration::from_secs(600)));
         let login = |email: &str| post_json("/login", &format!(r#"{{"email":"{email}"}}"#));
-        let first = app.clone().oneshot(login("Hot@X.com")).await?;
+        let first = app.clone().oneshot(login("Hot@X.com")?).await?;
         anyhow::ensure!(first.status() == StatusCode::OK);
         for spelling in ["hot@x.com", "HOT@x.com", "hot+promo@x.com", " hot@x.com "] {
-            let again = app.clone().oneshot(login(spelling)).await?;
+            let again = app.clone().oneshot(login(spelling)?).await?;
             anyhow::ensure!(
                 again.status() == StatusCode::TOO_MANY_REQUESTS,
                 "{spelling:?} was not the same address"
             );
             anyhow::ensure!(again.headers().get(header::RETRY_AFTER).is_some());
         }
-        let sent = match capture.0.lock() {
-            Ok(sent) => sent.len(),
-            Err(poisoned) => poisoned.into_inner().len(),
-        };
+        let sent = capture.sent().len();
         anyhow::ensure!(sent == 1, "{sent} links sent for one address");
         Ok(())
     }
@@ -438,34 +452,31 @@ mod tests {
     // Distinct addresses pass the cooldown, so the client's bucket is what
     // stops a client cycling through them: its burst, then a refusal.
     #[tokio::test]
-    async fn link_requests_past_a_clients_burst_are_refused() -> anyhow::Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+    async fn link_requests_past_a_clients_burst_are_refused() -> Result<()> {
+        let store = mem_store().await?;
         let capture = Arc::new(Capture(Mutex::new(Vec::new())));
         let app = router(state_with(store, capture.clone(), Duration::ZERO));
         let login = |n: u32| post_json("/login", &format!(r#"{{"email":"person{n}@x.com"}}"#));
         for n in 0..LINKS_PER_CLIENT.burst {
-            let resp = app.clone().oneshot(login(n)).await?;
+            let resp = app.clone().oneshot(login(n)?).await?;
             anyhow::ensure!(resp.status() == StatusCode::OK, "request {n}");
         }
-        let refused = app.clone().oneshot(login(LINKS_PER_CLIENT.burst)).await?;
+        let refused = app.clone().oneshot(login(LINKS_PER_CLIENT.burst)?).await?;
         anyhow::ensure!(refused.status() == StatusCode::TOO_MANY_REQUESTS);
-        let said = body_json(refused).await;
+        let said = body_json(refused).await?;
         anyhow::ensure!(
             said["error"]
                 .as_str()
                 .is_some_and(|s| s.contains("from here")),
             "{said}"
         );
-        let sent = match capture.0.lock() {
-            Ok(sent) => sent.len(),
-            Err(poisoned) => poisoned.into_inner().len(),
-        };
+        let sent = capture.sent().len();
         anyhow::ensure!(sent as u32 == LINKS_PER_CLIENT.burst, "{sent} links sent");
         Ok(())
     }
 
     #[test]
-    fn an_address_normalizes_to_one_spelling() {
+    fn an_address_normalizes_to_one_spelling() -> Result<()> {
         for spelling in [
             " Hot@X.com ",
             "hot@x.com",
@@ -475,36 +486,42 @@ mod tests {
             assert_eq!(normalized(spelling), "hot@x.com", "{spelling:?}");
         }
         assert_eq!(normalized("no-at-sign"), "no-at-sign");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_malformed_email_is_a_rejection_not_an_internal_error() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_malformed_email_is_a_rejection_not_an_internal_error() -> Result<()> {
+        let store = mem_store().await?;
         let capture = Arc::new(Capture(Mutex::new(Vec::new())));
         let app = router(state_with(store, capture, Duration::ZERO));
         let resp = app
-            .oneshot(post_json("/login", r#"{"email":"not-an-email"}"#))
-            .await
-            .unwrap();
+            .oneshot(post_json("/login", r#"{"email":"not-an-email"}"#)?)
+            .await?;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        let v = body_json(resp).await;
-        assert!(v["error"].as_str().unwrap().contains("valid email"));
+        let v = body_json(resp).await?;
+        assert!(
+            v["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("valid email")),
+            "{v}"
+        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn healthz_reports_the_store_round_trip() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn healthz_reports_the_store_round_trip() -> Result<()> {
+        let store = mem_store().await?;
         let capture = Arc::new(Capture(Mutex::new(Vec::new())));
         let app = router(state_with(store, capture, Duration::ZERO));
         let resp = app
-            .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+            .oneshot(Request::get("/healthz").body(Body::empty())?)
+            .await?;
         assert_eq!(resp.status(), StatusCode::OK);
+        Ok(())
     }
 
     #[test]
-    fn the_cooldown_cap_evicts_stale_entries_first() {
+    fn the_cooldown_cap_evicts_stale_entries_first() -> Result<()> {
         let cd = Cooldown {
             window: Duration::from_secs(600),
             max_entries: 2,
@@ -517,5 +534,6 @@ mod tests {
         assert!(cd.try_acquire("c@x.com"));
         // ...and an address inside its window stays refused.
         assert!(!cd.try_acquire("c@x.com"));
+        Ok(())
     }
 }

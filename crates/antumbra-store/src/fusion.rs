@@ -58,31 +58,34 @@ mod tests {
     }
 
     #[test]
-    fn empty_input_is_empty() {
+    fn empty_input_is_empty() -> antumbra_core::Result<()> {
         assert!(rrf_fuse(&[], DEFAULT_RRF_K).is_empty());
         assert!(rrf_fuse(&[v(&[])], DEFAULT_RRF_K).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn single_ranking_preserves_order() {
+    fn single_ranking_preserves_order() -> antumbra_core::Result<()> {
         assert_eq!(
             rrf_fuse(&[v(&["a", "b", "c"])], DEFAULT_RRF_K),
             v(&["a", "b", "c"])
         );
+        Ok(())
     }
 
     #[test]
-    fn item_in_both_lists_outranks_single_list_item() {
+    fn item_in_both_lists_outranks_single_list_item() -> antumbra_core::Result<()> {
         // `x` is found by both retrievers; `y` only by the second. Even though
         // `y` is rank 1 in its list, `x` (rank 1 + rank 2) accumulates more.
         let dense = v(&["x"]);
         let sparse = v(&["y", "x"]);
         let fused = rrf_fuse(&[dense, sparse], DEFAULT_RRF_K);
         assert_eq!(fused, v(&["x", "y"]));
+        Ok(())
     }
 
     #[test]
-    fn ties_break_lexicographically_for_determinism() {
+    fn ties_break_lexicographically_for_determinism() -> antumbra_core::Result<()> {
         // `a` and `b` swap ranks across the two lists -> identical fused score.
         // The tie-break orders them by id, so the output is stable.
         let a = v(&["a", "b", "c"]);
@@ -90,21 +93,24 @@ mod tests {
         let fused = rrf_fuse(&[a, b], DEFAULT_RRF_K);
         assert_eq!(&fused[..2], &v(&["a", "b"])[..], "tied top pair, id order");
         assert_eq!(&fused[2..], &v(&["c", "d"])[..], "tied tail, id order");
+        Ok(())
     }
 
     #[test]
-    fn union_includes_every_id() {
+    fn union_includes_every_id() -> antumbra_core::Result<()> {
         let fused = rrf_fuse(&[v(&["a", "b"]), v(&["c", "b"])], DEFAULT_RRF_K);
         assert_eq!(fused.len(), 3, "a, b, c -- b deduped: {fused:?}");
         assert_eq!(fused[0], "b", "b is the only item in both lists");
+        Ok(())
     }
 
     #[test]
-    fn smaller_k_sharpens_top_rank_advantage() {
+    fn smaller_k_sharpens_top_rank_advantage() -> antumbra_core::Result<()> {
         // The fused score of a rank-1 item is 1/(k+1); a smaller k makes that
         // larger, widening the gap to lower ranks. Sanity-check the formula.
         let top_small = 1.0 / (1.0 + 1.0);
         let top_default = 1.0 / (DEFAULT_RRF_K + 1.0);
         assert!(top_small > top_default);
+        Ok(())
     }
 }

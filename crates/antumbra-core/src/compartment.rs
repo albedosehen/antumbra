@@ -186,30 +186,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn capability_implications() {
+    fn capability_implications() -> anyhow::Result<()> {
         assert!(Capability::Reference.allows_reference());
         assert!(!Capability::Reference.allows_link());
         assert!(Capability::Link.allows_reference());
         assert!(Capability::Link.allows_link());
+        Ok(())
     }
 
     #[test]
-    fn capability_serializes_lowercase() {
-        assert_eq!(
-            serde_json::to_string(&Capability::Link).unwrap(),
-            "\"link\""
-        );
+    fn capability_serializes_lowercase() -> anyhow::Result<()> {
+        assert_eq!(serde_json::to_string(&Capability::Link)?, "\"link\"");
+        Ok(())
     }
 
     #[test]
-    fn compartment_origin_defaults_user_and_can_be_proposed() {
+    fn compartment_origin_defaults_user_and_can_be_proposed() -> anyhow::Result<()> {
         let c = Compartment::new("c:1", "ws:1", "user:a", "deno work", Utc::now());
         assert_eq!(c.origin, Origin::User);
         assert_eq!(c.proposed().origin, Origin::Proposed);
+        Ok(())
     }
 
     #[test]
-    fn grant_round_trips_fields() {
+    fn grant_round_trips_fields() -> anyhow::Result<()> {
         let g = Grant::new(
             "ws:1",
             "c:1",
@@ -221,5 +221,6 @@ mod tests {
         assert_eq!(g.grantee, UserId::new("user:b"));
         assert_eq!(g.granted_by, UserId::new("user:a"));
         assert!(g.capability.allows_reference());
+        Ok(())
     }
 }

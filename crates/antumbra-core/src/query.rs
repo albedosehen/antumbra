@@ -143,7 +143,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_lexical_terms_are_the_words_that_say_what_is_asked() {
+    fn the_lexical_terms_are_the_words_that_say_what_is_asked() -> anyhow::Result<()> {
         assert_eq!(
             lexical_terms("What is the dependency graph of my MCP servers?"),
             "dependency graph MCP servers?"
@@ -169,10 +169,11 @@ mod tests {
         assert_eq!(lexical_terms(&page).split(' ').count(), MAX_TERMS);
         let sorted = STOPWORDS.windows(2).all(|w| w[0] < w[1]);
         assert!(sorted, "kept sorted, so a duplicate shows");
+        Ok(())
     }
 
     #[test]
-    fn a_prompt_that_asks_for_two_things_is_two_parts() {
+    fn a_prompt_that_asks_for_two_things_is_two_parts() -> anyhow::Result<()> {
         assert_eq!(
             parts("move the tokens out of ~/.claude.json and record the 23 dependency edges on kushkokwim"),
             [
@@ -180,10 +181,11 @@ mod tests {
                 "record the 23 dependency edges on kushkokwim"
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_prompt_that_asks_for_one_thing_has_no_parts() {
+    fn a_prompt_that_asks_for_one_thing_has_no_parts() -> anyhow::Result<()> {
         for one in [
             "Proceed on antumbra work",
             "ok what do you need from me exactly",
@@ -192,12 +194,13 @@ mod tests {
         ] {
             assert!(parts(one).is_empty(), "{one}: {:?}", parts(one));
         }
+        Ok(())
     }
 
     /// Sentences and lines are parts; a dot inside a name or a version is not
     /// the end of a sentence.
     #[test]
-    fn sentences_and_lines_are_parts() {
+    fn sentences_and_lines_are_parts() -> anyhow::Result<()> {
         assert_eq!(
             parts(
                 "Check the deploy on kuskokwim. Then roll the shaman pin\nand tell me what changed"
@@ -215,13 +218,15 @@ mod tests {
                 "the config is ~/.claude.json there"
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_long_paste_is_cut_to_a_few_distinct_parts() {
+    fn a_long_paste_is_cut_to_a_few_distinct_parts() -> anyhow::Result<()> {
         let text = "one two three. four five six. one two three. seven eight nine. ten eleven twelve. thirteen fourteen fifteen.";
         let got = parts(text);
         assert_eq!(got.len(), MAX_PARTS);
         assert_eq!(got[2], "seven eight nine", "a repeated part counts once");
+        Ok(())
     }
 }

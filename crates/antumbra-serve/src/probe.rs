@@ -96,6 +96,7 @@ mod tests {
     use super::*;
     use antumbra_boundary::find_scope;
     use antumbra_core::ports::{ActOutput, StepOutput, VerifierVerdict};
+    use antumbra_core::AntumbraError;
 
     /// Serves the celsius->fahrenheit formula only when the prompt asks for that
     /// direction; otherwise the inverse. Stands in for `CandleServe`.
@@ -140,32 +141,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn acceptability_is_decided_by_generate_then_verify() {
+    async fn acceptability_is_decided_by_generate_then_verify() -> Result<()> {
         let probe = GenerateVerifyProbe::new(ConvertServe, C2fVerifier);
         let verify = json!({});
         let f2c = json!({ "target": "fahrenheit_to_celsius", "verify": verify });
         let c2f = json!({ "target": "celsius_to_fahrenheit", "verify": verify });
         // The behavior is acceptable only in the context that makes the served
         // code pass the environment check.
-        assert!(!probe.acceptable("Write convert(x)", &f2c).await.unwrap());
-        assert!(probe.acceptable("Write convert(x)", &c2f).await.unwrap());
+        assert!(!probe.acceptable("Write convert(x)", &f2c).await?);
+        assert!(probe.acceptable("Write convert(x)", &c2f).await?);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn antumbra_search_recovers_c_prime_with_the_real_probe() {
+    async fn antumbra_search_recovers_c_prime_with_the_real_probe() -> Result<()> {
         // find_scope drives the real probe: hold the behavior fixed, vary the
         // governing feature, and recover the context where serving passes.
         let probe = GenerateVerifyProbe::new(ConvertServe, C2fVerifier);
         let fail = json!({ "target": "fahrenheit_to_celsius", "verify": json!({}) });
         let candidates = vec![("target".to_string(), vec![json!("celsius_to_fahrenheit")])];
-        let finding = find_scope("Write convert(x)", &fail, &candidates, &probe)
-            .await
-            .unwrap()
-            .expect("a context change flips acceptability");
+        let Some(finding) = find_scope("Write convert(x)", &fail, &candidates, &probe).await?
+        else {
+            return Err(AntumbraError::other(
+                "no context change flips acceptability",
+            ));
+        };
         assert_eq!(finding.governing_feature, "target");
         assert_eq!(
             finding.near_ok_context["target"],
             json!("celsius_to_fahrenheit")
         );
+        Ok(())
     }
 }
