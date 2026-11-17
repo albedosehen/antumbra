@@ -903,6 +903,10 @@ pub async fn mint(
 
 /// Train `user`'s behaviors in `scope` into their standing expert: [`plan`],
 /// [`train`] and [`mint`] in one. `None` when there is nothing to teach.
+// The store and the embedder it reads from, whose expert it is (workspace,
+// user, scope) and how it is trained (configuration, confidence, the forms to
+// measure): each is one of `plan`, `train` and `mint`'s own arguments.
+#[allow(clippy::too_many_arguments)]
 pub async fn train_behaviors(
     store: &Store,
     embedder: &dyn Embedder,
