@@ -73,6 +73,7 @@ mod behaviors;
 mod chunker;
 mod console;
 mod dashboard;
+mod experts;
 mod github;
 mod relics;
 mod revocation;
@@ -203,6 +204,13 @@ struct HttpState {
     /// lookup's and the export's budgets, and the printed PDFs kept for a
     /// repeat request of the same version.
     relics: relics::Guards,
+    /// What bounds the route that gives an expert's adapter to another of its
+    /// user's servers.
+    experts: experts::Guards,
+    /// The server this one pulls the adapters it does not hold from, applied
+    /// to every per-identity server. `None` = an expert placed on another
+    /// machine is not served here.
+    source: Option<Arc<crate::server::pull::ExpertSource>>,
     profile: Option<Arc<crate::profile::ToolProfile>>,
     /// The GitHub App webhook receiver (`POST /github/webhook`), when the
     /// operator configured its secret and the repository-to-workspace map.
@@ -250,6 +258,7 @@ pub async fn serve(
     github: Option<GithubConfig>,
     recipe: antumbra_core::behavior::Recipe,
     tune_confidence: bool,
+    source: Option<Arc<crate::server::pull::ExpertSource>>,
     serve_quant: &str,
 ) -> Result<()> {
     let mut store = crate::connect(&url, &db).await?;
@@ -295,6 +304,8 @@ pub async fn serve(
         copal,
         pdf,
         relics: relics::Guards::new(),
+        experts: experts::Guards::new(),
+        source,
         profile,
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
@@ -466,6 +477,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .merge(console::routes())
         .merge(dashboard::routes())
         .merge(relics::routes())
+        .merge(experts::routes())
         .with_state(state)
         .layer(OtelAxumLayer::default().filter(traced))
 }
@@ -662,6 +674,9 @@ impl HttpState {
         }
         if let Some(archive) = self.copal.clone() {
             mcp = mcp.with_copal_archive(archive);
+        }
+        if let Some(source) = self.source.clone() {
+            mcp = mcp.with_expert_source(source);
         }
         if let Some(profile) = self.profile.clone() {
             mcp = mcp.with_tool_profile(profile);
