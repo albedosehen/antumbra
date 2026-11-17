@@ -341,9 +341,70 @@ async fn run() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    const DEV_MAILER: &str = "ANTUMBRA_DEV_MAILER";
+
+    /// Held by every test that reads or writes [`DEV_MAILER`]. The variable is
+    /// the process's and tests run on threads of one process, so a test that
+    /// set it was read by another parsing a command line at that moment.
+    static DEV_MAILER_HELD: Mutex<()> = Mutex::new(());
+
+    /// [`DEV_MAILER`] to this test alone for as long as this lives: set as the
+    /// test asks on the way in, and what the environment held put back on the
+    /// way out.
+    struct DevMailerEnv {
+        before: Option<OsString>,
+        _held: MutexGuard<'static, ()>,
+    }
+
+    impl DevMailerEnv {
+        fn holding(value: Option<&str>) -> Self {
+            // A test that failed while it held the lock still put the
+            // variable back as it was dropped, so the lock is good to take.
+            let held = DEV_MAILER_HELD
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let env = Self {
+                before: std::env::var_os(DEV_MAILER),
+                _held: held,
+            };
+            env.set(value);
+            env
+        }
+
+        fn set(&self, value: Option<&str>) {
+            match value {
+                Some(value) => std::env::set_var(DEV_MAILER, value),
+                None => std::env::remove_var(DEV_MAILER),
+            }
+        }
+    }
+
+    impl Drop for DevMailerEnv {
+        // Runs before the lock is let go: the fields are dropped after this.
+        fn drop(&mut self) {
+            match self.before.take() {
+                Some(before) => std::env::set_var(DEV_MAILER, before),
+                None => std::env::remove_var(DEV_MAILER),
+            }
+        }
+    }
+
+    /// Whether a `serve` command line with nothing but its required arguments
+    /// reads the dev mailer as on.
+    fn serve_reads_the_dev_mailer_on() -> anyhow::Result<bool> {
+        let Command::Serve(serve) = Cli::try_parse_from(SERVE)?.cmd else {
+            anyhow::bail!("not the serve command");
+        };
+        Ok(serve.dev_mailer)
+    }
 
     #[test]
     fn the_dev_mailer_is_a_flag_that_is_off_unless_given() -> anyhow::Result<()> {
+        // Off whatever the environment the tests were started in holds.
+        let _env = DevMailerEnv::holding(None);
         let Command::Serve(off) = Cli::try_parse_from(SERVE)?.cmd else {
             anyhow::bail!("not the serve command");
         };
@@ -370,9 +431,10 @@ mod tests {
 
     // The compose file passes ANTUMBRA_DEV_MAILER through unset, as an empty
     // string, so the variable has to read as a switch rather than as a strict
-    // `true`/`false`. The one test that touches the variable; it restores it.
+    // `true`/`false`.
     #[test]
     fn the_dev_mailer_variable_reads_like_a_switch() -> anyhow::Result<()> {
+        let env = DevMailerEnv::holding(None);
         for (value, expected) in [
             ("", false),
             ("0", false),
@@ -382,18 +444,60 @@ mod tests {
             ("true", true),
             ("yes", true),
         ] {
-            std::env::set_var("ANTUMBRA_DEV_MAILER", value);
-            let parsed = Cli::try_parse_from(SERVE);
-            std::env::remove_var("ANTUMBRA_DEV_MAILER");
-            let Command::Serve(serve) = parsed?.cmd else {
-                anyhow::bail!("not the serve command");
-            };
-            anyhow::ensure!(
-                serve.dev_mailer == expected,
-                "ANTUMBRA_DEV_MAILER={value:?} read as {}",
-                serve.dev_mailer
-            );
+            env.set(Some(value));
+            let on = serve_reads_the_dev_mailer_on()?;
+            anyhow::ensure!(on == expected, "ANTUMBRA_DEV_MAILER={value:?} read as {on}");
         }
+        Ok(())
+    }
+
+    /// What the two tests above did to each other, made certain. One test
+    /// holds the variable on; another that needs it off waits for it, and
+    /// then reads it off. Before, the second parsed its command line while
+    /// the first had the variable set and read the dev mailer on, now and
+    /// then.
+    #[test]
+    fn a_test_that_holds_the_variable_keeps_the_others_out() -> anyhow::Result<()> {
+        let on = DevMailerEnv::holding(Some("1"));
+        let other = std::thread::spawn(|| {
+            let _off = DevMailerEnv::holding(None);
+            serve_reads_the_dev_mailer_on()
+        });
+        // Long enough for the other to have parsed, were it not kept out. A
+        // thread slow to start only makes this pass sooner, never fail.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        anyhow::ensure!(
+            !other.is_finished(),
+            "the other test read the variable while this one held it"
+        );
+        anyhow::ensure!(serve_reads_the_dev_mailer_on()?, "still on for this one");
+        drop(on);
+        let read_on = other
+            .join()
+            .map_err(|_| anyhow::anyhow!("the other test panicked"))??;
+        anyhow::ensure!(!read_on, "the other test read the dev mailer on");
+        Ok(())
+    }
+
+    /// A test leaves the variable as the environment had it, set or not.
+    #[test]
+    fn the_variable_is_put_back_as_it_was() -> anyhow::Result<()> {
+        // A lock of this test's own for the guard inside: the shared one is
+        // already held here, by `outer`, and is not taken twice.
+        static UNSHARED: Mutex<()> = Mutex::new(());
+        let outer = DevMailerEnv::holding(Some("as it was"));
+        let inner = DevMailerEnv {
+            before: std::env::var_os(DEV_MAILER),
+            _held: UNSHARED.lock().unwrap_or_else(PoisonError::into_inner),
+        };
+        inner.set(None);
+        anyhow::ensure!(std::env::var_os(DEV_MAILER).is_none());
+        drop(inner);
+        anyhow::ensure!(
+            std::env::var_os(DEV_MAILER) == Some(OsString::from("as it was")),
+            "the variable was not put back"
+        );
+        drop(outer);
         Ok(())
     }
 
