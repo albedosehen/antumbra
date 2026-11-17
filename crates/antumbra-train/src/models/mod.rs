@@ -2,4 +2,4 @@
 
 pub mod qwen;
 
-pub use qwen::QwenCausalLm;
+pub use qwen::{GenTiming, QwenCausalLm};
