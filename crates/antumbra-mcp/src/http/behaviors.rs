@@ -404,7 +404,7 @@ mod keeper {
                     .await
                     .map_err(anyhow::Error::from)
                     .and_then(|r| r.map_err(anyhow::Error::from));
-                    let trained = match trained {
+                    let mut trained = match trained {
                         Ok(t) => t,
                         Err(e) => {
                             let _guard = state.auth.lock().await;
@@ -413,6 +413,19 @@ mod keeper {
                             return Err(e);
                         }
                     };
+                    // A second copy of an admitted adapter, where this server
+                    // keeps an archive: before the mint, so the row is written
+                    // once, naming it.
+                    if let (Some(archive), Some(seal)) = (&state.copal, &trained.seal) {
+                        trained.archived = crate::server::pull::archive_adapter(
+                            archive,
+                            tenant,
+                            &behave::expert_id(&plan.tenant, &plan.user, &plan.scope),
+                            seal,
+                            &trained.adapter_uri,
+                        )
+                        .await;
+                    }
                     let report = {
                         let _guard = state.auth.lock().await;
                         state.store.signin_root().await?;

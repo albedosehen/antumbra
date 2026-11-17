@@ -60,6 +60,7 @@ fn admitted(ids: &[&str], adapter: &str) -> Trained {
         replay: 0,
         adapter_uri: adapter.into(),
         seal: None,
+        archived: None,
         drift: Vec::new(),
         base_model: "base".into(),
         fitness: 1.0,
@@ -300,6 +301,7 @@ async fn mint_marks_only_the_behaviors_still_as_they_were_taught() -> anyhow::Re
         replay: 0,
         adapter_uri: "adapters/x.safetensors".into(),
         seal: None,
+        archived: None,
         drift: Vec::new(),
         base_model: "base".into(),
         fitness: 1.0,
@@ -395,6 +397,7 @@ async fn learned_and_missed(admitted: bool) -> anyhow::Result<(Store, Plan, Trai
         replay: 0,
         adapter_uri: "adapters/x.safetensors".into(),
         seal: None,
+        archived: None,
         drift: Vec::new(),
         base_model: "base".into(),
         fitness: 0.5,
@@ -1271,5 +1274,26 @@ async fn an_expert_measured_on_nothing_has_no_drift_on_its_card() -> anyhow::Res
         anyhow::bail!("the expert was not minted");
     };
     assert_eq!(e.capability_card.get(drift::CARD_DRIFT), None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_archived_adapter_s_card_names_the_copal_file_beside_its_seal() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+    let trained = Trained {
+        archived: Some("01file".into()),
+        ..sealed(&["memory:rule"], "adapters/e.aa.safetensors", "aa")
+    };
+
+    mint(&store, &plan, trained, "rig").await?;
+
+    assert_eq!(
+        served(&store, &plan).await?,
+        (
+            "adapters/e.aa.safetensors".to_string(),
+            serde_json::json!({ "sha256": "aa", "bytes": 3, "copal_file": "01file" })
+        )
+    );
     Ok(())
 }

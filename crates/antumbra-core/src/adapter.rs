@@ -22,6 +22,15 @@ pub const EXTENSION: &str = "safetensors";
 /// The directory adapters are kept in, under a server's working directory.
 pub const DIR: &str = "adapters";
 
+/// The key, beside the seal on an expert's card, of the copal file the
+/// adapter is archived in.
+pub const CARD_COPAL_FILE: &str = "copal_file";
+
+/// The copal file `card`'s adapter is archived in, when it was archived.
+pub fn archived_in(card: &serde_json::Value) -> Option<&str> {
+    card.get(CARD_ADAPTER)?.get(CARD_COPAL_FILE)?.as_str()
+}
+
 /// How many hex digits a sha256 is written in.
 const SHA256_HEX: usize = 64;
 
@@ -190,6 +199,22 @@ mod tests {
         let seal = Seal::of_bytes(b"abc");
         let card = serde_json::json!({ CARD_ADAPTER: seal.to_card(), "scope": "everywhere" });
         assert_eq!(Seal::of_card(&card), Some(seal));
+    }
+
+    #[test]
+    fn a_card_names_the_archived_copy_beside_its_seal() {
+        let seal = Seal::of_bytes(b"abc");
+        let mut held = seal.to_card();
+        assert_eq!(
+            archived_in(&serde_json::json!({ CARD_ADAPTER: held.clone() })),
+            None
+        );
+        held[CARD_COPAL_FILE] = serde_json::json!("01file");
+        let card = serde_json::json!({ CARD_ADAPTER: held });
+        assert_eq!(archived_in(&card), Some("01file"));
+        // And the seal reads as it did: the copy is beside it, not in it.
+        assert_eq!(Seal::of_card(&card), Some(seal));
+        assert_eq!(archived_in(&serde_json::json!({})), None);
     }
 
     #[test]

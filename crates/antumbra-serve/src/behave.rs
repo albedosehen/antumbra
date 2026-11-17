@@ -156,6 +156,9 @@ pub struct Trained {
     pub adapter_uri: String,
     /// The admitted adapter's sha256 and size. `None` when refused.
     pub seal: Option<adapter::Seal>,
+    /// The copal file the admitted adapter is archived in. A training does
+    /// not archive: whoever mints it and keeps an archive sets this first.
+    pub archived: Option<String>,
     /// What each quantized form of the base measured does to the admitted
     /// expert. Empty when refused, and when none was measured.
     pub drift: drift::Measured,
@@ -280,6 +283,7 @@ pub async fn train(
         replay: replayed,
         adapter_uri,
         seal,
+        archived: None,
         drift,
         base_model: cfg.base_model.clone(),
         fitness: scores.pass_rate,
@@ -753,7 +757,8 @@ fn card_section<'a>(
 /// before. It holds the behaviors it learned, and its card records the set it
 /// was trained on, so the keeper leaves it be until that set changes. It is
 /// placed on `host`, the machine whose disk holds its adapter, and its card
-/// records that adapter's sha256 and size. The file the expert before it was
+/// records that adapter's sha256 and size, with the copal file it is
+/// archived in when it was. The file the expert before it was
 /// served from is reported, not removed.
 ///
 /// Either way each behavior notes how the training went for it: its held-out
@@ -843,7 +848,11 @@ pub async fn mint(
         .collect();
     card[behavior::CARD_SCORES] = serde_json::Value::Object(scores);
     if let Some(seal) = &trained.seal {
-        card[adapter::CARD_ADAPTER] = seal.to_card();
+        let mut held = seal.to_card();
+        if let Some(file) = &trained.archived {
+            held[adapter::CARD_COPAL_FILE] = serde_json::json!(file);
+        }
+        card[adapter::CARD_ADAPTER] = held;
     }
     if !trained.drift.is_empty() {
         card[drift::CARD_DRIFT] = drift::to_card(&trained.drift);
