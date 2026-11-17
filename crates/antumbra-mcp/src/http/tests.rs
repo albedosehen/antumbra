@@ -82,6 +82,8 @@ async fn state_serving(
         copal,
         pdf,
         relics: crate::http::relics::Guards::new(),
+        experts: crate::http::experts::Guards::new(),
+        source: None,
         profile: None,
         github: None,
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
@@ -704,6 +706,7 @@ async fn live_notification_reaches_a_grantees_stream() -> anyhow::Result<()> {
     Ok(())
 }
 
+mod experts;
 mod relics;
 mod shutdown;
 mod telemetry;

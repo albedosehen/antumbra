@@ -28,8 +28,6 @@ antumbra-train = { path = "../antumbra-train", optional = true }
 antumbra-store = { path = "../antumbra-store", optional = true }
 antumbra-critic = { path = "../antumbra-critic", optional = true }
 chrono = { workspace = true, optional = true }
-# An admitted adapter is named by the sha256 of its bytes.
-sha2 = { version = "0.11", optional = true }
 # Await-safe mutex (cached model) + block_in_place (don't park the runtime
 # worker during synchronous generation, a v1 serving-throughput concern).
 tokio = { workspace = true, features = ["sync", "rt-multi-thread"], optional = true }
@@ -48,7 +46,6 @@ models = [
     "dep:antumbra-store",
     "dep:antumbra-critic",
     "dep:chrono",
-    "dep:sha2",
     "dep:tokio",
 ]
 # A GPU backend only matters for the candle model path, so it implies `models`

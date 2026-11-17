@@ -135,6 +135,12 @@ services:
       # profile's service, ANTUMBRA_PDF_RENDERER=http://pdf:3000. Unset, a
       # relic still downloads as HTML and Markdown.
       - ANTUMBRA_PDF_RENDERER=${ANTUMBRA_PDF_RENDERER:-}
+      # The Antumbra server that trains this user's experts, for a server that
+      # does not hold their adapters (one with no GPU): it pulls each adapter
+      # once, checks it against the expert's row and serves it from then on.
+      # Both servers need the same ANTUMBRA_JWT_SECRET. Unset, an expert
+      # placed on another machine is not served here.
+      - ANTUMBRA_EXPERT_SOURCE=${ANTUMBRA_EXPERT_SOURCE:-}
       # Trace export over OTLP/HTTP, all optional. Empty counts as unset, so the
       # export stays off unless docker/.env sets the endpoint, and the service
       # is named antumbra-mcp unless it names one. The headers can carry the
