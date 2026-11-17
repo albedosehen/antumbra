@@ -101,6 +101,13 @@ services:
       # where capacity stops. The serving engine is built at the rank, so
       # lowering it below an expert already minted here means retraining it.
       - ANTUMBRA_BEHAVE_RANK=${ANTUMBRA_BEHAVE_RANK:-16}
+      # How the base model is held to serve experts: auto, off, q8_0 or q4_k.
+      # auto serves from a Q8_0 base on an image with no GPU backend (the dense
+      # base reads about 6 GB a token on a CPU) and from the dense base on a
+      # GPU image. Both quantized forms reword an expert's answers: q8_0
+      # moves them least, q4_k is smaller and moves them about four times as
+      # much. off keeps the base dense anywhere.
+      - ANTUMBRA_SERVE_QUANT=${ANTUMBRA_SERVE_QUANT:-auto}
       - ANTUMBRA_BEHAVE_ROUNDS=${ANTUMBRA_BEHAVE_ROUNDS:-3}
       - ANTUMBRA_BEHAVE_LR=${ANTUMBRA_BEHAVE_LR:-1.5e-4}
       # How sure admission has to be, from a behavior's held-out counts, that

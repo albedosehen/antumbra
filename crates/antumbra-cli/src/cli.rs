@@ -304,7 +304,8 @@ pub enum Command {
     /// a model per call. Reads prompts from stdin (one per line) or a single
     /// --task, routes each via the learned router, and serves the answer from the
     /// resident engine, so a stream of prompts pays the base load only once.
-    /// Needs --features models + a GPU.
+    /// Needs --features models. A build with no GPU backend serves on the CPU,
+    /// from a Q8_0 base.
     Serve(crate::commands::ServeArgs),
     /// Collector/sync: bidirectionally reconcile this local store (the
     /// global `--url`, an embedded penumbra) with a remote authoritative
